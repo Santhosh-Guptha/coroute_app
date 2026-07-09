@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.travelsafetyapp.ui.component.OpenStreetMap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -513,100 +514,118 @@ fun DashboardScreen(
     ) { innerPadding ->
         when (selectedTab) {
             0 -> {
-                // TAB 0: RIDERS LIST
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 12.dp)
+                // TAB 0: RIDERS LIST WITH EMBEDDED OPENSTREETMAP
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(innerPadding)
                 ) {
-                    items(memberLocations.entries.toList()) { (userId, loc) ->
-                        val isSelf = userId == viewModel.currentUserId
-                        val distText = if (isSelf) {
-                            "You"
-                        } else if (myLoc != null && loc.lat != 0.0 && loc.lng != 0.0) {
-                            val dist = calculateDistanceKm(loc.lat, loc.lng, myLoc.lat, myLoc.lng)
-                            if (dist < 1.0) String.format("%.0f m", dist * 1000) else String.format("%.1f km", dist)
-                        } else "..."
+                    OpenStreetMap(
+                        memberLocations = memberLocations,
+                        myLoc = myLoc,
+                        onMarkerClick = { clickedLoc ->
+                            selectedMember = clickedLoc
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(0.4f)
+                    )
+                    
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(0.6f)
+                            .padding(horizontal = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp)
+                    ) {
+                        items(memberLocations.entries.toList()) { (userId, loc) ->
+                            val isSelf = userId == viewModel.currentUserId
+                            val distText = if (isSelf) {
+                                "You"
+                            } else if (myLoc != null && loc.lat != 0.0 && loc.lng != 0.0) {
+                                val dist = calculateDistanceKm(loc.lat, loc.lng, myLoc.lat, myLoc.lng)
+                                if (dist < 1.0) String.format("%.0f m", dist * 1000) else String.format("%.1f km", dist)
+                            } else "..."
 
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = if (isSelf) selfCardColor else cardColor),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.fillMaxWidth().clickable { selectedMember = loc }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = if (isSelf) selfCardColor else cardColor),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth().clickable { selectedMember = loc }
                             ) {
-                                Surface(
-                                    color = when (loc.ridingRole) { "Lead" -> Color(0xFFEF4444); "Sweep" -> Color(0xFF10B981); else -> Color(0xFF6366F1) },
-                                    shape = CircleShape,
-                                    modifier = Modifier.size(44.dp)
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(loc.userName.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(loc.userName, color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                        if (isSelf) {
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Surface(color = Color(0xFF818CF8).copy(alpha = 0.3f), shape = RoundedCornerShape(4.dp)) {
-                                                Text("YOU", modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp), color = Color(0xFF818CF8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                        if (loc.isCoRiding) {
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Surface(color = Color(0xFF3B82F6).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
-                                                val companion = if (loc.ridingWithUserName.isNotBlank()) loc.ridingWithUserName else "Rider"
-                                                Text("Co-riding with $companion", modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp), color = Color(0xFF93C5FD), fontSize = 9.sp)
-                                            }
-                                        }
-                                        if (loc.isPaused) {
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Surface(color = Color(0xFFF59E0B).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
-                                                Text("PAUSED", modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp), color = Color(0xFFF59E0B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                            }
+                                    Surface(
+                                        color = when (loc.ridingRole) { "Lead" -> Color(0xFFEF4444); "Sweep" -> Color(0xFF10B981); else -> Color(0xFF6366F1) },
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(44.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(loc.userName.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                         }
                                     }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        val speedDisplay = if (loc.isPaused) "Paused" else "${String.format("%.1f", loc.speed)} km/h"
-                                        Text(speedDisplay, color = textSecondary, fontSize = 12.sp)
-                                        Text(" · ", color = dividerColor, fontSize = 12.sp)
-                                        Icon(
-                                            imageVector = if (loc.battery > 50) Icons.Default.BatteryFull else if (loc.battery > 20) Icons.Default.BatteryChargingFull else Icons.Default.BatteryAlert,
-                                            contentDescription = null,
-                                            tint = if (loc.battery > 50) Color(0xFF10B981) else if (loc.battery > 20) Color(0xFFF59E0B) else Color(0xFFEF4444),
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Text("${loc.battery}%", color = textSecondary, fontSize = 12.sp)
-                                        if (!loc.isCoRiding && loc.vehicleNo.isNotBlank()) {
-                                            Text(" · ", color = dividerColor, fontSize = 12.sp)
-                                            Text(loc.vehicleNo, color = textSecondary, fontSize = 12.sp)
-                                        }
-                                    }
-                                }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(distText, color = if (isSelf) Color(0xFF818CF8) else Color(0xFF10B981), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    if (!isSelf && loc.lat != 0.0 && loc.lng != 0.0) {
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Surface(
-                                            color = Color(0xFF3B82F6).copy(alpha = 0.2f),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier.clickable {
-                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${loc.lat},${loc.lng}"))
-                                                intent.setPackage("com.google.android.apps.maps")
-                                                try { context.startActivity(intent) } catch (e: Exception) {
-                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps?q=${loc.lat},${loc.lng}")))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(loc.userName, color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                            if (isSelf) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(color = Color(0xFF818CF8).copy(alpha = 0.3f), shape = RoundedCornerShape(4.dp)) {
+                                                    Text("YOU", modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp), color = Color(0xFF818CF8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                                 }
                                             }
-                                        ) {
-                                            Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.Navigation, null, tint = Color(0xFF3B82F6), modifier = Modifier.size(12.dp))
-                                                Spacer(modifier = Modifier.width(3.dp))
-                                                Text("Map", color = Color(0xFF3B82F6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            if (loc.isCoRiding) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(color = Color(0xFF3B82F6).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                                                    val companion = if (loc.ridingWithUserName.isNotBlank()) loc.ridingWithUserName else "Rider"
+                                                    Text("Co-riding with $companion", modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp), color = Color(0xFF93C5FD), fontSize = 9.sp)
+                                                }
+                                            }
+                                            if (loc.isPaused) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(color = Color(0xFFF59E0B).copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                                                    Text("PAUSED", modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp), color = Color(0xFFF59E0B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            val speedDisplay = if (loc.isPaused) "Paused" else "${String.format("%.1f", loc.speed)} km/h"
+                                            Text(speedDisplay, color = textSecondary, fontSize = 12.sp)
+                                            Text(" · ", color = dividerColor, fontSize = 12.sp)
+                                            Icon(
+                                                imageVector = if (loc.battery > 50) Icons.Default.BatteryFull else if (loc.battery > 20) Icons.Default.BatteryChargingFull else Icons.Default.BatteryAlert,
+                                                contentDescription = null,
+                                                tint = if (loc.battery > 50) Color(0xFF10B981) else if (loc.battery > 20) Color(0xFFF59E0B) else Color(0xFFEF4444),
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Text("${loc.battery}%", color = textSecondary, fontSize = 12.sp)
+                                            if (!loc.isCoRiding && loc.vehicleNo.isNotBlank()) {
+                                                Text(" · ", color = dividerColor, fontSize = 12.sp)
+                                                Text(loc.vehicleNo, color = textSecondary, fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(distText, color = if (isSelf) Color(0xFF818CF8) else Color(0xFF10B981), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        if (!isSelf && loc.lat != 0.0 && loc.lng != 0.0) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Surface(
+                                                color = Color(0xFF3B82F6).copy(alpha = 0.2f),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.clickable {
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${loc.lat},${loc.lng}"))
+                                                    intent.setPackage("com.google.android.apps.maps")
+                                                    try { context.startActivity(intent) } catch (e: Exception) {
+                                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps?q=${loc.lat},${loc.lng}")))
+                                                    }
+                                                }
+                                            ) {
+                                                Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(Icons.Default.Navigation, null, tint = Color(0xFF3B82F6), modifier = Modifier.size(12.dp))
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text("Map", color = Color(0xFF3B82F6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
                                         }
                                     }
