@@ -825,6 +825,7 @@ fun DashboardScreen(
                         memberLocations = memberLocations,
                         myLoc = myLoc,
                         activeSosUserIds = activeSosUserIds,
+                        activeGroup = activeGroup,
                         onMarkerClick = { clickedLoc ->
                             selectedMember = clickedLoc
                         },
