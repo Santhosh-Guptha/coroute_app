@@ -23,9 +23,11 @@ import androidx.core.app.NotificationCompat
 import com.example.travelsafetyapp.MainActivity
 import com.example.travelsafetyapp.R
 import com.example.travelsafetyapp.data.RepositoryProvider
+import com.example.travelsafetyapp.domain.model.DistanceAlert
 import com.example.travelsafetyapp.domain.model.MemberLocation
 import com.google.android.gms.location.*
 import com.google.firebase.database.*
+import java.util.UUID
 import kotlinx.coroutines.*
 
 class TrackingService : Service() {
@@ -50,6 +52,9 @@ class TrackingService : Service() {
     private var knownMessageIds = mutableSetOf<String>()
     private var lastKnownNextStop = ""
     private var knownWaitUserIds = mutableSetOf<String>()
+    private var distanceAlertListener: ValueEventListener? = null
+    private var knownDistanceAlertIds = mutableSetOf<String>()
+    private val lastDistanceAlertTimes = mutableMapOf<String, Long>()
     private var notificationIdCounter = 300
     private val waitJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
 
@@ -206,17 +211,13 @@ class TrackingService : Service() {
                 // If low battery (<20%): 60 seconds interval, balanced power accuracy!
                 60L to Priority.PRIORITY_BALANCED_POWER_ACCURACY
             }
-            speedKmh < 1.0f && stationaryDurationSecs > 60L -> {
-                // If stationary for over 1 minute: 60 seconds interval, balanced power accuracy!
-                60L to Priority.PRIORITY_BALANCED_POWER_ACCURACY
-            }
-            speedKmh > 10f -> {
-                // Moving fast: 5 seconds high accuracy
-                5L to Priority.PRIORITY_HIGH_ACCURACY
+            speedKmh < 1.0f -> {
+                // Idle: 20 seconds interval
+                20L to Priority.PRIORITY_BALANCED_POWER_ACCURACY
             }
             else -> {
-                // Normal tracking: 15 seconds high accuracy
-                15L to Priority.PRIORITY_HIGH_ACCURACY
+                // Moving: 5 seconds high accuracy
+                5L to Priority.PRIORITY_HIGH_ACCURACY
             }
         }
         
@@ -254,6 +255,141 @@ class TrackingService : Service() {
                     ridingRole = currentLoc?.ridingRole ?: ""
                 )
                 repo.updateLocation(memberLoc)
+
+                // Calculate distance alerts
+                val allLocs = repo.memberLocations.value
+                val leadLoc = allLocs.values.firstOrNull { it.ridingRole.uppercase() == "LEAD" }
+                val refPoint: Pair<Double, Double>? = when {
+                    leadLoc != null && leadLoc.lat != 0.0 && leadLoc.lng != 0.0 -> {
+                        leadLoc.lat to leadLoc.lng
+                    }
+                    allLocs.size > 1 -> {
+                        val otherLocs = allLocs.filter { it.key != currentUserId && it.value.lat != 0.0 && it.value.lng != 0.0 }
+                        if (otherLocs.isNotEmpty()) {
+                            val avgLat = otherLocs.map { it.value.lat }.average()
+                            val avgLng = otherLocs.map { it.value.lng }.average()
+                            avgLat to avgLng
+                        } else null
+                    }
+                    else -> null
+                }
+
+                if (refPoint != null && location.latitude != 0.0 && location.longitude != 0.0) {
+                    val distance = calculateHaversineDistanceKm(location.latitude, location.longitude, refPoint.first, refPoint.second)
+                    val alertLevel = when {
+                        distance > 2.0 -> "CRITICAL"
+                        distance > 1.0 -> "WARNING"
+                        else -> null
+                    }
+
+                    if (alertLevel != null) {
+                        val key = "${currentUserId}_${alertLevel}"
+                        val lastTime = lastDistanceAlertTimes[key] ?: 0L
+                        val now = System.currentTimeMillis()
+                        
+                        if (now - lastTime > 120_000L) {
+                            lastDistanceAlertTimes[key] = now
+                            val alertId = UUID.randomUUID().toString()
+                            val alert = DistanceAlert(
+                                alertId = alertId,
+                                userId = currentUserId,
+                                userName = currentLoc?.userName ?: prefs.getString("saved_user_display_name", "You") ?: "Rider",
+                                distance = distance,
+                                level = alertLevel,
+                                timestamp = now,
+                                resolved = false
+                            )
+                            repo.triggerDistanceAlert(alert)
+                        }
+                    } else {
+                        // Catching up: Resolve any active alerts for this user
+                        val activeAlerts = repo.activeDistanceAlerts.value
+                        activeAlerts.forEach { alert ->
+                            if (alert.userId == currentUserId && !alert.resolved) {
+                                repo.resolveDistanceAlert(alert.alertId)
+                            }
+                        }
+                    }
+                }
+
+                // Check Lead Behind Alert
+                if (leadLoc != null && leadLoc.lat != 0.0 && leadLoc.lng != 0.0) {
+                    val nextStopLat = repo.activeGroup.value?.nextStopLat ?: 0.0
+                    val nextStopLng = repo.activeGroup.value?.nextStopLng ?: 0.0
+                    if (nextStopLat != 0.0 && nextStopLng != 0.0) {
+                        val leadDist = calculateHaversineDistanceKm(leadLoc.lat, leadLoc.lng, nextStopLat, nextStopLng)
+                        val middleLocs = allLocs.values.filter { it.ridingRole.uppercase() == "MIDDLE" && it.lat != 0.0 && it.lng != 0.0 }
+                        var isLeadBehind = false
+                        for (mid in middleLocs) {
+                            val midDist = calculateHaversineDistanceKm(mid.lat, mid.lng, nextStopLat, nextStopLng)
+                            if (leadDist > midDist) {
+                                isLeadBehind = true
+                                break
+                            }
+                        }
+                        if (isLeadBehind) {
+                            val key = "lead_behind_group"
+                            val lastTime = lastDistanceAlertTimes[key] ?: 0L
+                            val now = System.currentTimeMillis()
+                            if (now - lastTime > 120_000L) {
+                                lastDistanceAlertTimes[key] = now
+                                val alert = DistanceAlert(
+                                    alertId = "lead_behind_alert",
+                                    userId = leadLoc.userName,
+                                    userName = "Lead Rider",
+                                    distance = 0.0,
+                                    level = "LEAD_BEHIND",
+                                    timestamp = now,
+                                    resolved = false
+                                )
+                                repo.triggerDistanceAlert(alert)
+                            }
+                        } else {
+                            val activeAlerts = repo.activeDistanceAlerts.value
+                            if (activeAlerts.any { it.alertId == "lead_behind_alert" && !it.resolved }) {
+                                repo.resolveDistanceAlert("lead_behind_alert")
+                            }
+                        }
+                    }
+                }
+
+                // Check Sweep Out of Position Alert (not last)
+                val sweepLoc = allLocs.values.firstOrNull { it.ridingRole.uppercase() == "SWEEP" }
+                if (leadLoc != null && sweepLoc != null && leadLoc.lat != 0.0 && leadLoc.lng != 0.0 && sweepLoc.lat != 0.0 && sweepLoc.lng != 0.0) {
+                    val sweepDist = calculateHaversineDistanceKm(sweepLoc.lat, sweepLoc.lng, leadLoc.lat, leadLoc.lng)
+                    val middleLocs = allLocs.values.filter { it.ridingRole.uppercase() == "MIDDLE" && it.lat != 0.0 && it.lng != 0.0 }
+                    var isSweepNotLast = false
+                    for (mid in middleLocs) {
+                        val midDist = calculateHaversineDistanceKm(mid.lat, mid.lng, leadLoc.lat, leadLoc.lng)
+                        if (midDist > sweepDist) {
+                            isSweepNotLast = true
+                            break
+                        }
+                    }
+                    if (isSweepNotLast) {
+                        val key = "sweep_not_last"
+                        val lastTime = lastDistanceAlertTimes[key] ?: 0L
+                        val now = System.currentTimeMillis()
+                        if (now - lastTime > 120_000L) {
+                            lastDistanceAlertTimes[key] = now
+                            val alert = DistanceAlert(
+                                alertId = "sweep_not_last_alert",
+                                userId = sweepLoc.userName,
+                                userName = "Sweep Rider",
+                                distance = 0.0,
+                                level = "SWEEP_NOT_LAST",
+                                timestamp = now,
+                                resolved = false
+                            )
+                            repo.triggerDistanceAlert(alert)
+                        }
+                    } else {
+                        val activeAlerts = repo.activeDistanceAlerts.value
+                        if (activeAlerts.any { it.alertId == "sweep_not_last_alert" && !it.resolved }) {
+                            repo.resolveDistanceAlert("sweep_not_last_alert")
+                        }
+                    }
+                }
             }
         }
 
@@ -268,23 +404,42 @@ class TrackingService : Service() {
             val ref = database.getReference("groups").child(groupId)
             groupRef = ref
 
+            val listenerStartTime = System.currentTimeMillis()
+
             alertListener = ref.child("alerts").addValueEventListener(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     for (child in snapshot.children) {
                         val alertId = child.child("alertId").getValue(String::class.java) ?: continue
+                        val timestamp = child.child("timestamp").getValue(Long::class.java) ?: 0L
+                        if (timestamp < listenerStartTime) continue
+
                         val resolved = child.child("resolved").getValue(Boolean::class.java) ?: false
                         val senderId = child.child("userId").getValue(String::class.java) ?: ""
                         val senderName = child.child("userName").getValue(String::class.java) ?: "Someone"
                         val lat = child.child("latitude").getValue(Double::class.java) ?: 0.0
                         val lng = child.child("longitude").getValue(Double::class.java) ?: 0.0
+                        val type = child.child("type").getValue(String::class.java) ?: "SOS"
+                        val targetUserId = child.child("targetUserId").getValue(String::class.java) ?: ""
                         
                         if (!resolved && senderId != currentUserId && !knownAlertIds.contains(alertId)) {
                             knownAlertIds.add(alertId)
-                            postHighPriorityNotification(
-                                "\uD83D\uDEA8 SOS ALERT: $senderName",
-                                "$senderName needs immediate help! Tap to open their location.",
-                                lat, lng, isAlarm = true
-                            )
+                            if (type == "INDIVIDUAL_SOS") {
+                                val targetName = if (targetUserId == currentUserId) "You" else {
+                                    val locs = RepositoryProvider.getGroupRepository().memberLocations.value
+                                    locs[targetUserId]?.userName ?: "Someone"
+                                }
+                                postHighPriorityNotification(
+                                    "🚨 SOS ALERT",
+                                    "SOS triggered for $targetName",
+                                    lat, lng, isAlarm = true
+                                )
+                            } else {
+                                postHighPriorityNotification(
+                                    "🚨 SOS ALERT: $senderName",
+                                    "$senderName needs immediate help! Tap to open their location.",
+                                    lat, lng, isAlarm = true
+                                )
+                            }
                         }
                     }
                 }
@@ -295,6 +450,9 @@ class TrackingService : Service() {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     for (child in snapshot.children) {
                         val msgId = child.child("messageId").getValue(String::class.java) ?: continue
+                        val timestamp = child.child("timestamp").getValue(Long::class.java) ?: 0L
+                        if (timestamp < listenerStartTime) continue
+
                         val senderId = child.child("senderId").getValue(String::class.java) ?: ""
                         val senderName = child.child("senderName").getValue(String::class.java) ?: "Someone"
                         val content = child.child("content").getValue(String::class.java) ?: ""
@@ -304,9 +462,9 @@ class TrackingService : Service() {
                             knownMessageIds.add(msgId)
                             val isAlarm = priority == "High"
                             val title = when (priority) {
-                                "High" -> "\uD83D\uDD14 URGENT from $senderName"
-                                "Medium" -> "\uD83D\uDCE2 Message from $senderName"
-                                else -> "\uD83D\uDCAC $senderName says"
+                                "High" -> "🔔 URGENT from $senderName"
+                                "Medium" -> "📢 Message from $senderName"
+                                else -> "💬 $senderName says"
                             }
                             postHighPriorityNotification(title, content, 0.0, 0.0, isAlarm = isAlarm)
                         }
@@ -320,7 +478,7 @@ class TrackingService : Service() {
                     val nextStop = snapshot.getValue(String::class.java) ?: ""
                     if (nextStop.isNotBlank() && nextStop != lastKnownNextStop && lastKnownNextStop.isNotEmpty()) {
                         postHighPriorityNotification(
-                            "\uD83D\uDCCD Next Stop Updated",
+                            "📍 Next Stop Updated",
                             "New destination: $nextStop",
                             0.0, 0.0, isAlarm = false
                         )
@@ -337,6 +495,9 @@ class TrackingService : Service() {
                     // Process active wait requests
                     for (child in snapshot.children) {
                         val userId = child.key ?: continue
+                        val timestamp = child.child("timestamp").getValue(Long::class.java) ?: 0L
+                        if (timestamp < listenerStartTime) continue
+
                         activeUserIds.add(userId)
                         val userName = child.child("userName").getValue(String::class.java) ?: "Someone"
                         val waitMins = child.child("waitMinutes").getValue(Int::class.java) ?: 0
@@ -379,6 +540,40 @@ class TrackingService : Service() {
                 override fun onCancelled(error: DatabaseError) {}
             })
 
+            distanceAlertListener = ref.child("distanceAlerts").addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    for (child in snapshot.children) {
+                        val alertId = child.child("alertId").getValue(String::class.java) ?: continue
+                        val resolved = child.child("resolved").getValue(Boolean::class.java) ?: false
+                        val senderId = child.child("userId").getValue(String::class.java) ?: ""
+                        val senderName = child.child("userName").getValue(String::class.java) ?: "Someone"
+                        val distance = child.child("distance").getValue(Double::class.java) ?: 0.0
+                        val level = child.child("level").getValue(String::class.java) ?: "WARNING"
+                        
+                        if (!resolved && senderId != currentUserId && !knownDistanceAlertIds.contains(alertId)) {
+                            knownDistanceAlertIds.add(alertId)
+                            val isCritical = level == "CRITICAL"
+                            val title = when (level) {
+                                "LEAD_BEHIND" -> "🚨 Lead Rider Behind"
+                                "SWEEP_NOT_LAST" -> "⚠️ Sweep Not Last"
+                                "CRITICAL" -> "🚨 CRITICAL: Rider Falling Behind"
+                                else -> "⚠️ Warning: Rider Falling Behind"
+                            }
+                            val body = when (level) {
+                                "LEAD_BEHIND" -> "Lead rider is behind the group"
+                                "SWEEP_NOT_LAST" -> "Sweep rider is out of position (not last)"
+                                else -> {
+                                    val distText = String.format("%.1f", distance)
+                                    "$senderName is falling behind by $distText km!"
+                                }
+                            }
+                            postHighPriorityNotification(title, body, 0.0, 0.0, isAlarm = isCritical || level == "LEAD_BEHIND")
+                        }
+                    }
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            })
+
             Log.d(TAG, "Firebase background listeners registered for group: $groupId")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to setup Firebase listeners: ${e.message}")
@@ -391,6 +586,7 @@ class TrackingService : Service() {
             messageListener?.let { ref.child("messages").removeEventListener(it) }
             nextStopListener?.let { ref.child("nextStopPoint").removeEventListener(it) }
             waitListener?.let { ref.child("waitRequests").removeEventListener(it) }
+            distanceAlertListener?.let { ref.child("distanceAlerts").removeEventListener(it) }
         }
         waitJobs.values.forEach { it.cancel() }
         waitJobs.clear()
@@ -398,6 +594,7 @@ class TrackingService : Service() {
         messageListener = null
         nextStopListener = null
         waitListener = null
+        distanceAlertListener = null
         groupRef = null
     }
 
@@ -534,6 +731,17 @@ class TrackingService : Service() {
             }
             notificationManager.createNotificationChannel(messageChannel)
         }
+    }
+
+    private fun calculateHaversineDistanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371.0 // Earth radius in km
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2)
+        val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        return r * c
     }
 
     override fun onDestroy() {

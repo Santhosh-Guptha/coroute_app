@@ -2,6 +2,7 @@ package com.example.travelsafetyapp.data.repository
 
 import com.example.travelsafetyapp.domain.model.Group
 import com.example.travelsafetyapp.domain.model.MemberLocation
+import com.example.travelsafetyapp.domain.model.DistanceAlert
 import com.example.travelsafetyapp.domain.model.GroupMessage
 import com.example.travelsafetyapp.domain.model.SOSAlert
 import com.example.travelsafetyapp.domain.model.WaitRequest
@@ -29,6 +30,9 @@ class MockGroupRepository : GroupRepository {
 
     private val _activeMessages = MutableStateFlow<List<GroupMessage>>(emptyList())
     override val activeMessages: StateFlow<List<GroupMessage>> = _activeMessages.asStateFlow()
+
+    private val _activeDistanceAlerts = MutableStateFlow<List<DistanceAlert>>(emptyList())
+    override val activeDistanceAlerts: StateFlow<List<DistanceAlert>> = _activeDistanceAlerts.asStateFlow()
 
     override val currentUserId: String = "user_me"
     private var currentUserName: String = "You"
@@ -82,6 +86,7 @@ class MockGroupRepository : GroupRepository {
         _memberLocations.value = emptyMap()
         _activeSOSAlerts.value = emptyList()
         _activeMessages.value = emptyList()
+        _activeDistanceAlerts.value = emptyList()
         return Result.success(true)
     }
 
@@ -117,15 +122,17 @@ class MockGroupRepository : GroupRepository {
         return Result.success(true)
     }
 
-    override suspend fun triggerSOS(latitude: Double, longitude: Double, targetUserId: String): Result<Boolean> {
+    override suspend fun triggerSOS(latitude: Double, longitude: Double, targetUserId: String, type: String, triggeredBy: String): Result<Boolean> {
         val alert = SOSAlert(
-            alertId = UUID.randomUUID().toString(),
+            alertId = java.util.UUID.randomUUID().toString(),
             userId = currentUserId,
             userName = currentUserName,
             timestamp = System.currentTimeMillis(),
             latitude = latitude,
             longitude = longitude,
-            targetUserId = targetUserId
+            targetUserId = targetUserId,
+            type = type,
+            triggeredBy = triggeredBy.ifBlank { currentUserId }
         )
         val updatedAlerts = _activeSOSAlerts.value.toMutableList()
         updatedAlerts.add(alert)
@@ -236,7 +243,9 @@ class MockGroupRepository : GroupRepository {
         emergencyContact: String,
         isCoRiding: Boolean,
         ridingWithUserId: String,
-        ridingWithUserName: String
+        ridingWithUserName: String,
+        vehicleModel: String,
+        emergencyContactName: String
     ): Result<Boolean> {
         val currentLoc = _memberLocations.value[currentUserId] ?: MemberLocation(userName = currentUserName)
         val updatedLoc = currentLoc.copy(
@@ -248,6 +257,8 @@ class MockGroupRepository : GroupRepository {
             isCoRiding = isCoRiding,
             ridingWithUserId = ridingWithUserId,
             ridingWithUserName = ridingWithUserName,
+            vehicleModel = vehicleModel,
+            emergencyContactName = emergencyContactName,
             isPaused = currentLoc.isPaused
         )
         val updatedLocs = _memberLocations.value.toMutableMap()
@@ -303,11 +314,31 @@ class MockGroupRepository : GroupRepository {
     }
 
     override suspend fun assignRidingRole(userId: String, role: String): Result<Boolean> {
-        val currentLoc = _memberLocations.value[userId] ?: return Result.failure(Exception("Member location not found"))
-        val updatedLoc = currentLoc.copy(ridingRole = role)
+        val targetRole = role.uppercase()
+        
+        // Enforce unique LEAD/SWEEP roles
         val updatedLocs = _memberLocations.value.toMutableMap()
-        updatedLocs[userId] = updatedLoc
+        if (targetRole == "LEAD" || targetRole == "SWEEP") {
+            updatedLocs.forEach { (uid, loc) ->
+                if (uid != userId && loc.ridingRole.uppercase() == targetRole) {
+                    updatedLocs[uid] = loc.copy(ridingRole = "MIDDLE")
+                }
+            }
+        }
+        
+        val currentLoc = updatedLocs[userId] ?: return Result.failure(Exception("Member location not found"))
+        updatedLocs[userId] = currentLoc.copy(ridingRole = targetRole)
         _memberLocations.value = updatedLocs
+        return Result.success(true)
+    }
+
+    override suspend fun triggerDistanceAlert(alert: DistanceAlert): Result<Boolean> {
+        _activeDistanceAlerts.value = _activeDistanceAlerts.value + alert
+        return Result.success(true)
+    }
+
+    override suspend fun resolveDistanceAlert(alertId: String): Result<Boolean> {
+        _activeDistanceAlerts.value = _activeDistanceAlerts.value.filter { it.alertId != alertId }
         return Result.success(true)
     }
 
@@ -325,12 +356,17 @@ class MockGroupRepository : GroupRepository {
         return Result.success(true)
     }
 
+    override suspend fun updateGroupTripState(state: String): Result<Boolean> = Result.success(true)
+    override suspend fun approveMember(userId: String): Result<Boolean> = Result.success(true)
+    override suspend fun rejectMember(userId: String): Result<Boolean> = Result.success(true)
+
     override suspend fun endTrip(): Result<Boolean> {
         stopSimulation()
         _activeGroup.value = null
         _memberLocations.value = emptyMap()
         _activeSOSAlerts.value = emptyList()
         _activeMessages.value = emptyList()
+        _activeDistanceAlerts.value = emptyList()
         return Result.success(true)
     }
 

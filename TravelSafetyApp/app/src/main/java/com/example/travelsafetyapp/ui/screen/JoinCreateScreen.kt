@@ -63,7 +63,9 @@ fun JoinCreateScreen(
     var profileType by remember { mutableStateOf("") }
     var profileNo by remember { mutableStateOf("") }
     var profileColor by remember { mutableStateOf("") }
+    var profileModel by remember { mutableStateOf("") }
     var profileContact by remember { mutableStateOf("") }
+    var profileContactName by remember { mutableStateOf("") }
     var profileCoRiding by remember { mutableStateOf(false) }
 
     // Screen input states
@@ -468,10 +470,12 @@ fun JoinCreateScreen(
         if (showProfileDialogHome) {
             val myLoc = memberLocations[viewModel.currentUserId]
             profilePhone = viewModel.getSavedPhone() ?: ""
-            profileType = myLoc?.vehicleType ?: viewModel.getSavedVehicleType() ?: ""
+            profileType = myLoc?.vehicleType ?: viewModel.getSavedVehicleType() ?: "Motorcycle"
             profileNo = myLoc?.vehicleNo ?: viewModel.getSavedVehicleNo() ?: ""
             profileColor = myLoc?.vehicleColor ?: viewModel.getSavedVehicleColor() ?: ""
+            profileModel = myLoc?.vehicleModel ?: viewModel.getSavedVehicleModel() ?: ""
             profileContact = myLoc?.emergencyContact ?: viewModel.getSavedEmergencyContact() ?: ""
+            profileContactName = myLoc?.emergencyContactName ?: viewModel.getSavedEmergencyContactName() ?: ""
             profileCoRiding = myLoc?.isCoRiding ?: viewModel.getSavedCoRiding()
         }
     }
@@ -486,7 +490,7 @@ fun JoinCreateScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "To ensure group tracking, specify your vehicle or pillion details. All fields are mandatory.",
+                        text = "To ensure group tracking, specify your Rider details. Vehicle Number is mandatory.",
                         color = textSecondary,
                         fontSize = 13.sp
                     )
@@ -494,7 +498,7 @@ fun JoinCreateScreen(
                     OutlinedTextField(
                         value = userName,
                         onValueChange = { userName = it },
-                        label = { Text("Your Display Name", color = textSecondary) },
+                        label = { Text("Your Display Name (Mandatory)", color = textSecondary) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF818CF8),
@@ -508,7 +512,7 @@ fun JoinCreateScreen(
                     OutlinedTextField(
                         value = profilePhone,
                         onValueChange = { profilePhone = it },
-                        label = { Text("Your Phone Number", color = textSecondary) },
+                        label = { Text("Personal Mobile Number (Mandatory)", color = textSecondary) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF818CF8),
@@ -518,79 +522,11 @@ fun JoinCreateScreen(
                         ),
                         singleLine = true
                     )
-
-                    // Co-riding Switch toggle card
-                    Surface(
-                        color = dividerColor.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Co-Riding (Pillion)", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("Riding with another rider", color = textSecondary, fontSize = 11.sp)
-                            }
-                            Switch(
-                                checked = profileCoRiding,
-                                onCheckedChange = { profileCoRiding = it },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color(0xFF818CF8),
-                                    checkedTrackColor = Color(0xFF312E81)
-                                )
-                            )
-                        }
-                    }
-
-                    if (!profileCoRiding) {
-                        OutlinedTextField(
-                            value = profileType,
-                            onValueChange = { profileType = it },
-                            label = { Text("Vehicle Type (e.g. KTM 390)", color = textSecondary) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF818CF8),
-                                unfocusedBorderColor = dividerColor,
-                                focusedTextColor = textPrimary,
-                                unfocusedTextColor = textPrimary
-                            ),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = profileNo,
-                            onValueChange = { profileNo = it },
-                            label = { Text("Vehicle Number", color = textSecondary) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF818CF8),
-                                unfocusedBorderColor = dividerColor,
-                                focusedTextColor = textPrimary,
-                                unfocusedTextColor = textPrimary
-                            ),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = profileColor,
-                            onValueChange = { profileColor = it },
-                            label = { Text("Vehicle Color", color = textSecondary) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF818CF8),
-                                unfocusedBorderColor = dividerColor,
-                                focusedTextColor = textPrimary,
-                                unfocusedTextColor = textPrimary
-                            ),
-                            singleLine = true
-                        )
-                    }
 
                     OutlinedTextField(
                         value = profileContact,
                         onValueChange = { profileContact = it },
-                        label = { Text("Emergency Contact Number", color = textSecondary) },
+                        label = { Text("Emergency Contact Number (Mandatory)", color = textSecondary) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF818CF8),
@@ -601,39 +537,82 @@ fun JoinCreateScreen(
                         singleLine = true
                     )
 
-                    HorizontalDivider(color = dividerColor, modifier = Modifier.padding(vertical = 4.dp))
-                    Text(
-                        text = "Theme Settings",
-                        color = textPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Row(
+                    OutlinedTextField(
+                        value = profileContactName,
+                        onValueChange = { profileContactName = it },
+                        label = { Text("Emergency Contact Name & Relationship (Mandatory)", color = textSecondary) },
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val modes = listOf("Time" to "Auto", "Light" to "Light", "Dark" to "Dark")
-                        modes.forEach { (modeVal, label) ->
-                            FilterChip(
-                                selected = themeModeVal == modeVal,
-                                onClick = { viewModel.setThemeMode(modeVal) },
-                                label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color(0xFF818CF8).copy(alpha = 0.3f),
-                                    selectedLabelColor = Color(0xFF818CF8),
-                                    containerColor = dividerColor.copy(alpha = 0.3f),
-                                    labelColor = textSecondary
-                                ),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = profileType,
+                        onValueChange = { profileType = it },
+                        label = { Text("Vehicle Type (e.g., Bike, Car) (Mandatory)", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = profileNo,
+                        onValueChange = { profileNo = it },
+                        label = { Text("Vehicle Number (Mandatory)", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = profileModel,
+                        onValueChange = { profileModel = it },
+                        label = { Text("Vehicle Model (e.g., Yamaha R15) (Mandatory)", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = profileColor,
+                        onValueChange = { profileColor = it },
+                        label = { Text("Vehicle Color (Optional)", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
                 }
             },
             confirmButton = {
-                val isValid = userName.isNotBlank() && profilePhone.isNotBlank() && profileContact.isNotBlank() && (
-                    profileCoRiding || (profileType.isNotBlank() && profileNo.isNotBlank() && profileColor.isNotBlank())
-                )
+                val isValid = userName.isNotBlank() && profilePhone.isNotBlank() &&
+                        profileNo.isNotBlank() && profileContact.isNotBlank() &&
+                        profileContactName.isNotBlank() && profileType.isNotBlank() &&
+                        profileModel.isNotBlank()
                 
                 Button(
                     onClick = {
@@ -642,14 +621,16 @@ fun JoinCreateScreen(
                             viewModel.saveUserDisplayName(trimmedName)
                             userName = trimmedName
                             viewModel.updateVehicleProfile(
-                                vehicleType = if (profileCoRiding) "Pillion Rider" else profileType.trim(),
-                                vehicleNo = if (profileCoRiding) "Co-Rider" else profileNo.trim(),
-                                vehicleColor = if (profileCoRiding) "N/A" else profileColor.trim(),
+                                vehicleType = profileType.trim(),
+                                vehicleNo = profileNo.trim(),
+                                vehicleColor = profileColor.trim(),
                                 phoneNumber = profilePhone.trim(),
                                 emergencyContact = profileContact.trim(),
-                                isCoRiding = profileCoRiding,
+                                isCoRiding = false,
                                 ridingWithUserId = "",
-                                ridingWithUserName = ""
+                                ridingWithUserName = "",
+                                vehicleModel = profileModel.trim(),
+                                emergencyContactName = profileContactName.trim()
                             ) { success ->
                                 if (success) {
                                     showProfileDialogHome = false

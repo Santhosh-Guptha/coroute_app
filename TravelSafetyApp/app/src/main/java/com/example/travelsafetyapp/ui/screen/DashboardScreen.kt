@@ -62,6 +62,7 @@ fun DashboardScreen(
     val myLoc = memberLocations[viewModel.currentUserId]
     val activeSOSAlerts by viewModel.activeSOSAlerts.collectAsState()
     val activeMessages by viewModel.activeMessages.collectAsState()
+    val activeDistanceAlerts by viewModel.activeDistanceAlerts.collectAsState()
     val otherSOSAlerts = remember(activeSOSAlerts) {
         activeSOSAlerts.filter { alert ->
             val isFromSelf = alert.userId == viewModel.currentUserId
@@ -72,6 +73,7 @@ fun DashboardScreen(
     }
     val isServiceRunning by viewModel.isServiceRunning.collectAsState()
     val isSimulationMode by viewModel.isSimulationMode.collectAsState()
+    val isGroupAdmin = activeGroup?.createdBy == viewModel.currentUserId
 
     val isDark by viewModel.isDarkTheme.collectAsState()
     val themeModeVal by viewModel.themeMode.collectAsState()
@@ -98,6 +100,7 @@ fun DashboardScreen(
 
     // Selected member details state
     var selectedMember by remember { mutableStateOf<MemberLocation?>(null) }
+    var showRoleDialogForMember by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     // Alarm states
     var activeTimerText by remember { mutableStateOf<String?>(null) }
@@ -112,17 +115,21 @@ fun DashboardScreen(
     var profileType by remember { mutableStateOf("") }
     var profileNo by remember { mutableStateOf("") }
     var profileColor by remember { mutableStateOf("") }
+    var profileModel by remember { mutableStateOf("") }
     var profileContact by remember { mutableStateOf("") }
+    var profileContactName by remember { mutableStateOf("") }
     var profileCoRiding by remember { mutableStateOf(false) }
 
     LaunchedEffect(showProfileDialogDashboard) {
         if (showProfileDialogDashboard) {
             profileName = viewModel.getSavedDisplayName() ?: ""
             profilePhone = viewModel.getSavedPhone() ?: ""
-            profileType = myLoc?.vehicleType ?: viewModel.getSavedVehicleType() ?: ""
+            profileType = myLoc?.vehicleType ?: viewModel.getSavedVehicleType() ?: "Motorcycle"
             profileNo = myLoc?.vehicleNo ?: viewModel.getSavedVehicleNo() ?: ""
             profileColor = myLoc?.vehicleColor ?: viewModel.getSavedVehicleColor() ?: ""
+            profileModel = myLoc?.vehicleModel ?: viewModel.getSavedVehicleModel() ?: ""
             profileContact = myLoc?.emergencyContact ?: viewModel.getSavedEmergencyContact() ?: ""
+            profileContactName = myLoc?.emergencyContactName ?: viewModel.getSavedEmergencyContactName() ?: ""
             profileCoRiding = myLoc?.isCoRiding ?: viewModel.getSavedCoRiding()
         }
     }
@@ -523,166 +530,91 @@ fun DashboardScreen(
                 Column(
                     modifier = Modifier.fillMaxSize().padding(innerPadding)
                 ) {
-                    // TRIP LIFECYCLE PANEL
-                    var tripState by remember { mutableStateOf(viewModel.getTripState()) }
+                    // TRIP LIFECYCLE BUTTONS ROW (synced from Firebase)
+                    val groupTripState = activeGroup?.groupTripState ?: "NOT_STARTED"
+                    val isPendingMember = activeGroup?.pendingMembers?.containsKey(viewModel.currentUserId) == true
+                    val isApprovedMember = activeGroup?.members?.containsKey(viewModel.currentUserId) == true
                     val isProfileCompleted by viewModel.isProfileCompleted.collectAsState()
-                    
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = cardColor),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column {
-                                    Text("Rider Status", color = textSecondary, fontSize = 12.sp)
-                                    Text(
-                                        text = when (tripState) {
-                                            "STARTED" -> "Active (Tracking)"
-                                            "PAUSED" -> "Paused (Not Tracking)"
-                                            else -> "Stopped (Inactive)"
-                                        },
-                                        color = textPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
-                                    )
+
+                    // Auto-start/stop tracking service based on group trip state
+                    LaunchedEffect(groupTripState) {
+                        when (groupTripState) {
+                            "STARTED" -> {
+                                viewModel.saveTripState("STARTED")
+                                val intent = Intent(context, TrackingService::class.java).apply {
+                                    action = TrackingService.ACTION_START
+                                    putExtra(TrackingService.EXTRA_GROUP_ID, viewModel.getSavedGroupId())
+                                    putExtra(TrackingService.EXTRA_USER_ID, viewModel.currentUserId)
                                 }
-                                
-                                // Status indicator light
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(12.dp)
-                                            .background(
-                                                color = when (tripState) {
-                                                    "STARTED" -> Color(0xFF10B981) // Green
-                                                    "PAUSED" -> Color(0xFFF59E0B)  // Yellow
-                                                    else -> Color(0xFFEF4444)      // Red
-                                                },
-                                                shape = CircleShape
-                                            )
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = when (tripState) {
-                                            "STARTED" -> "Online"
-                                            "PAUSED" -> "Paused"
-                                            else -> "Offline"
-                                        },
-                                        color = textSecondary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
+                                context.startService(intent)
+                            }
+                            "PAUSED" -> {
+                                viewModel.saveTripState("PAUSED")
+                            }
+                            "STOPPED" -> {
+                                viewModel.saveTripState("STOPPED")
+                                val intent = Intent(context, TrackingService::class.java).apply {
+                                    action = TrackingService.ACTION_STOP
+                                }
+                                context.startService(intent)
+                            }
+                        }
+                    }
+
+                    // Pending member approval overlay
+                    if (isPendingMember && !isApprovedMember) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = Color(0xFF6366F1))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("Waiting for admin approval...", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("The group admin will approve your request shortly.", color = textSecondary, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.height(24.dp))
+                                OutlinedButton(onClick = {
+                                    viewModel.leaveGroup()
+                                    onNavigateBack()
+                                }) {
+                                    Text("Cancel & Leave")
                                 }
                             }
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                when (tripState) {
-                                    "STARTED" -> {
-                                        Button(
-                                            onClick = {
-                                                tripState = "PAUSED"
-                                                viewModel.saveTripState("PAUSED")
-                                                val intent = Intent(context, TrackingService::class.java).apply {
-                                                    action = TrackingService.ACTION_START
-                                                    putExtra(TrackingService.EXTRA_GROUP_ID, viewModel.getSavedGroupId())
-                                                    putExtra(TrackingService.EXTRA_USER_ID, viewModel.currentUserId)
-                                                }
-                                                context.startService(intent)
-                                                Toast.makeText(context, "Tracking Paused.", Toast.LENGTH_SHORT).show()
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text("Pause Trip", color = Color.White)
+                        }
+                        return@Scaffold
+                    }
+
+                    // Admin: Pending members approval banner
+                    val pendingMembers = activeGroup?.pendingMembers ?: emptyMap()
+                    if (isGroupAdmin && pendingMembers.isNotEmpty()) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF312E81)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text("📋 Pending Join Requests (${pendingMembers.size})", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                pendingMembers.forEach { (userId, memberName) ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(color = Color(0xFF6366F1), shape = CircleShape, modifier = Modifier.size(32.dp)) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(memberName.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            }
                                         }
-                                        
-                                        Button(
-                                            onClick = {
-                                                tripState = "STOPPED"
-                                                viewModel.saveTripState("STOPPED")
-                                                val intent = Intent(context, TrackingService::class.java).apply {
-                                                    action = TrackingService.ACTION_STOP
-                                                }
-                                                context.startService(intent)
-                                                Toast.makeText(context, "Trip Stopped.", Toast.LENGTH_SHORT).show()
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text("Stop Trip", color = Color.White)
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(memberName, color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                        IconButton(onClick = { viewModel.approveMember(userId) }, modifier = Modifier.size(36.dp)) {
+                                            Icon(Icons.Default.CheckCircle, "Approve", tint = Color(0xFF10B981))
                                         }
-                                    }
-                                    "PAUSED" -> {
-                                        Button(
-                                            onClick = {
-                                                tripState = "STARTED"
-                                                viewModel.saveTripState("STARTED")
-                                                val intent = Intent(context, TrackingService::class.java).apply {
-                                                    action = TrackingService.ACTION_START
-                                                    putExtra(TrackingService.EXTRA_GROUP_ID, viewModel.getSavedGroupId())
-                                                    putExtra(TrackingService.EXTRA_USER_ID, viewModel.currentUserId)
-                                                }
-                                                context.startService(intent)
-                                                Toast.makeText(context, "Trip Resumed.", Toast.LENGTH_SHORT).show()
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text("Resume Trip", color = Color.White)
-                                        }
-                                        
-                                        Button(
-                                            onClick = {
-                                                tripState = "STOPPED"
-                                                viewModel.saveTripState("STOPPED")
-                                                val intent = Intent(context, TrackingService::class.java).apply {
-                                                    action = TrackingService.ACTION_STOP
-                                                }
-                                                context.startService(intent)
-                                                Toast.makeText(context, "Trip Stopped.", Toast.LENGTH_SHORT).show()
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text("Stop Trip", color = Color.White)
-                                        }
-                                    }
-                                    else -> { // "NOT_STARTED" or "STOPPED"
-                                        Button(
-                                            onClick = {
-                                                if (!isProfileCompleted) {
-                                                    Toast.makeText(context, "Please complete your Safety Profile first!", Toast.LENGTH_LONG).show()
-                                                    showProfileDialogDashboard = true
-                                                } else {
-                                                    tripState = "STARTED"
-                                                    viewModel.saveTripState("STARTED")
-                                                    val intent = Intent(context, TrackingService::class.java).apply {
-                                                        action = TrackingService.ACTION_START
-                                                        putExtra(TrackingService.EXTRA_GROUP_ID, viewModel.getSavedGroupId())
-                                                        putExtra(TrackingService.EXTRA_USER_ID, viewModel.currentUserId)
-                                                    }
-                                                    context.startService(intent)
-                                                    Toast.makeText(context, "Trip Started. Tracking location...", Toast.LENGTH_SHORT).show()
-                                                }
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Text("Start Trip", color = Color.White)
+                                        IconButton(onClick = { viewModel.rejectMember(userId) }, modifier = Modifier.size(36.dp)) {
+                                            Icon(Icons.Default.Cancel, "Reject", tint = Color(0xFFEF4444))
                                         }
                                     }
                                 }
@@ -690,9 +622,209 @@ fun DashboardScreen(
                         }
                     }
 
+                    // Trip control row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isGroupAdmin) {
+                            // Admin controls
+                            when (groupTripState) {
+                                "STARTED" -> {
+                                    Button(
+                                        onClick = {
+                                            viewModel.saveTripState("PAUSED")
+                                            Toast.makeText(context, "Trip Paused for all.", Toast.LENGTH_SHORT).show()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Pause Trip", color = Color.White)
+                                    }
+                                    
+                                    Button(
+                                        onClick = {
+                                            viewModel.saveTripState("STOPPED")
+                                            val intent = Intent(context, TrackingService::class.java).apply {
+                                                action = TrackingService.ACTION_STOP
+                                            }
+                                            context.startService(intent)
+                                            Toast.makeText(context, "Trip Stopped for all.", Toast.LENGTH_SHORT).show()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Stop Trip", color = Color.White)
+                                    }
+                                }
+                                "PAUSED" -> {
+                                    Button(
+                                        onClick = {
+                                            viewModel.saveTripState("STARTED")
+                                            val intent = Intent(context, TrackingService::class.java).apply {
+                                                action = TrackingService.ACTION_START
+                                                putExtra(TrackingService.EXTRA_GROUP_ID, viewModel.getSavedGroupId())
+                                                putExtra(TrackingService.EXTRA_USER_ID, viewModel.currentUserId)
+                                            }
+                                            context.startService(intent)
+                                            Toast.makeText(context, "Trip Resumed for all.", Toast.LENGTH_SHORT).show()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Resume Trip", color = Color.White)
+                                    }
+                                    
+                                    Button(
+                                        onClick = {
+                                            viewModel.saveTripState("STOPPED")
+                                            val intent = Intent(context, TrackingService::class.java).apply {
+                                                action = TrackingService.ACTION_STOP
+                                            }
+                                            context.startService(intent)
+                                            Toast.makeText(context, "Trip Stopped for all.", Toast.LENGTH_SHORT).show()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Stop Trip", color = Color.White)
+                                    }
+                                }
+                                else -> { // "NOT_STARTED" or "STOPPED"
+                                    Button(
+                                        onClick = {
+                                            if (!isProfileCompleted) {
+                                                Toast.makeText(context, "Please complete your Safety Profile first!", Toast.LENGTH_LONG).show()
+                                                showProfileDialogDashboard = true
+                                            } else {
+                                                viewModel.saveTripState("STARTED")
+                                                val intent = Intent(context, TrackingService::class.java).apply {
+                                                    action = TrackingService.ACTION_START
+                                                    putExtra(TrackingService.EXTRA_GROUP_ID, viewModel.getSavedGroupId())
+                                                    putExtra(TrackingService.EXTRA_USER_ID, viewModel.currentUserId)
+                                                }
+                                                context.startService(intent)
+                                                Toast.makeText(context, "Trip Started for all. Tracking location...", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Start Trip", color = Color.White)
+                                    }
+                                }
+                            }
+                        } else {
+                            // Non-admin: read-only status chip
+                            val (statusText, statusColor, statusIcon) = when (groupTripState) {
+                                "STARTED" -> Triple("🟢 Trip Active", Color(0xFF10B981), Icons.Default.PlayArrow)
+                                "PAUSED" -> Triple("⏸ Trip Paused", Color(0xFFF59E0B), Icons.Default.Pause)
+                                "STOPPED" -> Triple("🔴 Trip Stopped", Color(0xFFEF4444), Icons.Default.Stop)
+                                else -> Triple("⏳ Waiting to Start", Color(0xFF6366F1), Icons.Default.Schedule)
+                            }
+                            Surface(
+                                color = statusColor.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(statusIcon, null, tint = statusColor, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(statusText, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    // Distance Alert Warning Banner
+                    activeDistanceAlerts.firstOrNull { !it.resolved }?.let { alert ->
+                        val bannerBgColor = if (alert.level == "CRITICAL") Color(0xFFFEE2E2) else Color(0xFFFEF3C7)
+                        val bannerTextColor = if (alert.level == "CRITICAL") Color(0xFF991B1B) else Color(0xFF92400E)
+                        val bannerIcon = if (alert.level == "CRITICAL") Icons.Default.Warning else Icons.Default.Info
+                        
+                        Surface(
+                            color = bannerBgColor,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(bannerIcon, contentDescription = null, tint = bannerTextColor, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${alert.userName} is falling behind! (Distance: ${String.format("%.1f", alert.distance)} km)",
+                                    color = bannerTextColor,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+
+                    // Sort riders list by distance from lead
+                    val sortedRiders = remember(memberLocations) {
+                        val list = memberLocations.entries.toList()
+                        val leadEntry = list.firstOrNull { it.value.ridingRole.uppercase() == "LEAD" }
+                        if (leadEntry != null) {
+                            val leadLoc = leadEntry.value
+                            list.sortedWith(Comparator { o1, o2 ->
+                                val r1 = o1.value.ridingRole.uppercase()
+                                val r2 = o2.value.ridingRole.uppercase()
+                                
+                                when {
+                                    r1 == "LEAD" && r2 != "LEAD" -> -1
+                                    r2 == "LEAD" && r1 != "LEAD" -> 1
+                                    r1 == "SWEEP" && r2 != "SWEEP" -> 1
+                                    r2 == "SWEEP" && r1 != "SWEEP" -> -1
+                                    else -> {
+                                        // Both are MIDDLE: sort by distance from Lead
+                                        val d1 = calculateDistanceKm(leadLoc.lat, leadLoc.lng, o1.value.lat, o1.value.lng)
+                                        val d2 = calculateDistanceKm(leadLoc.lat, leadLoc.lng, o2.value.lat, o2.value.lng)
+                                        d1.compareTo(d2)
+                                    }
+                                }
+                            })
+                        } else {
+                            // Sort by distance from current user
+                            val myEntry = list.firstOrNull { it.key == viewModel.currentUserId }
+                            if (myEntry != null && myEntry.value.lat != 0.0 && myEntry.value.lng != 0.0) {
+                                val myLocVal = myEntry.value
+                                list.sortedWith(Comparator { o1, o2 ->
+                                    when {
+                                        o1.key == viewModel.currentUserId && o2.key != viewModel.currentUserId -> -1
+                                        o2.key == viewModel.currentUserId && o1.key != viewModel.currentUserId -> 1
+                                        else -> {
+                                            val d1 = calculateDistanceKm(myLocVal.lat, myLocVal.lng, o1.value.lat, o1.value.lng)
+                                            val d2 = calculateDistanceKm(myLocVal.lat, myLocVal.lng, o2.value.lat, o2.value.lng)
+                                            d1.compareTo(d2)
+                                        }
+                                    }
+                                })
+                            } else {
+                                list
+                            }
+                        }
+                    }
+
+                    val activeSosUserIds = remember(activeSOSAlerts) {
+                        activeSOSAlerts.filter { !it.resolved }.map { it.targetUserId }.toSet()
+                    }
+
                     OpenStreetMap(
                         memberLocations = memberLocations,
                         myLoc = myLoc,
+                        activeSosUserIds = activeSosUserIds,
                         onMarkerClick = { clickedLoc ->
                             selectedMember = clickedLoc
                         },
@@ -709,7 +841,7 @@ fun DashboardScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(vertical = 12.dp)
                     ) {
-                        items(memberLocations.entries.toList()) { (userId, loc) ->
+                        items(sortedRiders) { (userId, loc) ->
                             val isSelf = userId == viewModel.currentUserId
                             val distText = if (isSelf) {
                                 "You"
@@ -721,14 +853,23 @@ fun DashboardScreen(
                             Card(
                                 colors = CardDefaults.cardColors(containerColor = if (isSelf) selfCardColor else cardColor),
                                 shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier.fillMaxWidth().clickable { selectedMember = loc }
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedMember = loc
+                                    }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(14.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    val badgeColor = when (loc.ridingRole.uppercase()) {
+                                        "LEAD" -> Color(0xFFEF4444)
+                                        "SWEEP" -> Color(0xFF10B981)
+                                        else -> Color(0xFF6366F1)
+                                    }
                                     Surface(
-                                        color = when (loc.ridingRole) { "Lead" -> Color(0xFFEF4444); "Sweep" -> Color(0xFF10B981); else -> Color(0xFF6366F1) },
+                                        color = badgeColor,
                                         shape = CircleShape,
                                         modifier = Modifier.size(44.dp)
                                     ) {
@@ -740,6 +881,32 @@ fun DashboardScreen(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(loc.userName, color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                            
+                                            // Role Badge
+                                            if (loc.ridingRole.isNotBlank()) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(
+                                                    color = when (loc.ridingRole.uppercase()) {
+                                                        "LEAD" -> Color(0xFFEF4444).copy(alpha = 0.2f)
+                                                        "SWEEP" -> Color(0xFF10B981).copy(alpha = 0.2f)
+                                                        else -> Color(0xFF6366F1).copy(alpha = 0.2f)
+                                                    },
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = loc.ridingRole.uppercase(),
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                                        color = when (loc.ridingRole.uppercase()) {
+                                                            "LEAD" -> Color(0xFFEF4444)
+                                                            "SWEEP" -> Color(0xFF10B981)
+                                                            else -> Color(0xFF818CF8)
+                                                        },
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+
                                             if (isSelf) {
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Surface(color = Color(0xFF818CF8).copy(alpha = 0.3f), shape = RoundedCornerShape(4.dp)) {
@@ -780,18 +947,52 @@ fun DashboardScreen(
                                     }
                                     Column(horizontalAlignment = Alignment.End) {
                                         Text(distText, color = if (isSelf) Color(0xFF818CF8) else Color(0xFF10B981), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        // Phone number row
+                                        if (loc.phoneNumber.isNotBlank()) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .padding(top = 2.dp)
+                                                    .clickable {
+                                                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${loc.phoneNumber}"))
+                                                        context.startActivity(intent)
+                                                    }
+                                            ) {
+                                                Icon(Icons.Default.Phone, null, tint = Color(0xFF10B981), modifier = Modifier.size(12.dp))
+                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Text(loc.phoneNumber, color = Color(0xFF10B981), fontSize = 11.sp)
+                                            }
+                                        }
+                                        // Emergency contact row
+                                        if (loc.emergencyContact.isNotBlank()) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .padding(top = 2.dp)
+                                                    .clickable {
+                                                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${loc.emergencyContact}"))
+                                                        context.startActivity(intent)
+                                                    }
+                                            ) {
+                                                Icon(Icons.Default.LocalHospital, null, tint = Color(0xFFEF4444), modifier = Modifier.size(12.dp))
+                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Text(loc.emergencyContact, color = Color(0xFFEF4444), fontSize = 11.sp)
+                                            }
+                                        }
+                                        // Navigate button
                                         if (!isSelf && loc.lat != 0.0 && loc.lng != 0.0) {
-                                            Spacer(modifier = Modifier.height(4.dp))
                                             Surface(
                                                 color = Color(0xFF3B82F6).copy(alpha = 0.2f),
                                                 shape = RoundedCornerShape(8.dp),
-                                                modifier = Modifier.clickable {
-                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${loc.lat},${loc.lng}"))
-                                                    intent.setPackage("com.google.android.apps.maps")
-                                                    try { context.startActivity(intent) } catch (e: Exception) {
-                                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps?q=${loc.lat},${loc.lng}")))
+                                                modifier = Modifier
+                                                    .padding(top = 4.dp)
+                                                    .clickable {
+                                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${loc.lat},${loc.lng}"))
+                                                        intent.setPackage("com.google.android.apps.maps")
+                                                        try { context.startActivity(intent) } catch (e: Exception) {
+                                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps?q=${loc.lat},${loc.lng}")))
+                                                        }
                                                     }
-                                                }
                                             ) {
                                                 Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                                     Icon(Icons.Default.Navigation, null, tint = Color(0xFF3B82F6), modifier = Modifier.size(12.dp))
@@ -1295,7 +1496,44 @@ fun DashboardScreen(
             onDismissRequest = { selectedMember = null },
             title = { Text(member.userName, color = textPrimary, fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("CONTACT DETAILS", color = Color(0xFF818CF8), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    if (member.phoneNumber.isNotBlank()) {
+                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().clickable {
+                            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${member.phoneNumber}"))
+                            context.startActivity(intent)
+                        }) {
+                            Text("Mobile Number:", color = textSecondary)
+                            Text(member.phoneNumber, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    if (member.emergencyContactName.isNotBlank() || member.emergencyContact.isNotBlank()) {
+                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().clickable {
+                            if (member.emergencyContact.isNotBlank()) {
+                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${member.emergencyContact}"))
+                                context.startActivity(intent)
+                            }
+                        }) {
+                            Text("Emergency Contact:", color = textSecondary)
+                            val nameText = if (member.emergencyContactName.isNotBlank()) "${member.emergencyContactName} " else ""
+                            Text("$nameText(${member.emergencyContact.ifBlank { "N/A" }})", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    HorizontalDivider(color = dividerColor, modifier = Modifier.padding(vertical = 4.dp))
+                    Text("VEHICLE INFORMATION", color = Color(0xFF818CF8), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    if (member.isCoRiding) {
+                        Text("Co-riding with: ${member.ridingWithUserName.ifBlank { "Rider" }}", color = textPrimary, fontWeight = FontWeight.Bold)
+                    } else if (member.vehicleType.isNotBlank() || member.vehicleNo.isNotBlank() || member.vehicleModel.isNotBlank()) {
+                        if (member.vehicleType.isNotBlank()) Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) { Text("Type:", color = textSecondary); Text(member.vehicleType, color = textPrimary) }
+                        if (member.vehicleModel.isNotBlank()) Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) { Text("Model:", color = textSecondary); Text(member.vehicleModel, color = textPrimary) }
+                        if (member.vehicleNo.isNotBlank()) Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) { Text("Number:", color = textSecondary); Text(member.vehicleNo, color = textPrimary) }
+                        if (member.vehicleColor.isNotBlank()) Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) { Text("Color:", color = textSecondary); Text(member.vehicleColor, color = textPrimary) }
+                    } else {
+                        Text("Not configured", color = textSecondary, fontSize = 13.sp)
+                    }
+
+                    HorizontalDivider(color = dividerColor, modifier = Modifier.padding(vertical = 4.dp))
                     Text("METRICS", color = Color(0xFF818CF8), fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                         Text("Speed:", color = textSecondary); Text(if (member.isPaused) "Paused" else "${String.format("%.1f", member.speed)} km/h", color = textPrimary)
@@ -1313,41 +1551,91 @@ fun DashboardScreen(
                             Text("Role:", color = textSecondary); Text(member.ridingRole, color = textPrimary)
                         }
                     }
-                    HorizontalDivider(color = dividerColor, modifier = Modifier.padding(vertical = 4.dp))
-                    Text("VEHICLE", color = Color(0xFF818CF8), fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    if (member.isCoRiding) {
-                        Text("Co-riding with: ${member.ridingWithUserName.ifBlank { "Rider" }}", color = textPrimary, fontWeight = FontWeight.Bold)
-                    } else if (member.vehicleType.isNotBlank() || member.vehicleNo.isNotBlank()) {
-                        if (member.vehicleType.isNotBlank()) Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) { Text("Type:", color = textSecondary); Text(member.vehicleType, color = textPrimary) }
-                        if (member.vehicleNo.isNotBlank()) Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) { Text("Number:", color = textSecondary); Text(member.vehicleNo, color = textPrimary) }
-                        if (member.vehicleColor.isNotBlank()) Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) { Text("Color:", color = textSecondary); Text(member.vehicleColor, color = textPrimary) }
-                    } else {
-                        Text("Not configured", color = textSecondary, fontSize = 13.sp)
-                    }
-                    if (member.emergencyContact.isNotBlank()) {
-                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) { Text("Emergency Contact:", color = textSecondary); Text(member.emergencyContact, color = textPrimary) }
-                    }
                 }
             },
             confirmButton = {
-                if (!isSelf && member.lat != 0.0 && member.lng != 0.0) {
-                    Button(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${member.lat},${member.lng}"))
-                            intent.setPackage("com.google.android.apps.maps")
-                            try { context.startActivity(intent) } catch (e: Exception) {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps?q=${member.lat},${member.lng}")))
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
-                    ) {
-                        Icon(Icons.Default.Navigation, null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Open in Maps")
+                val memberUserId = memberLocations.entries.firstOrNull { it.value == member }?.key
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (isGroupAdmin && memberUserId != null) {
+                        Button(
+                            onClick = {
+                                showRoleDialogForMember = memberUserId to member.userName
+                                selectedMember = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+                        ) {
+                            Text("Manage Role")
+                        }
+                    }
+                    if (!isSelf && member.lat != 0.0 && member.lng != 0.0) {
+                        Button(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${member.lat},${member.lng}"))
+                                intent.setPackage("com.google.android.apps.maps")
+                                try { context.startActivity(intent) } catch (e: Exception) {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps?q=${member.lat},${member.lng}")))
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
+                        ) {
+                            Icon(Icons.Default.Navigation, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Open in Maps")
+                        }
                     }
                 }
             },
             dismissButton = { TextButton(onClick = { selectedMember = null }) { Text("Close", color = textSecondary) } },
+            containerColor = cardColor
+        )
+    }
+
+    showRoleDialogForMember?.let { (userId, userName) ->
+        var selectedRole by remember { mutableStateOf("") }
+        val currentRole = memberLocations[userId]?.ridingRole ?: "MIDDLE"
+        
+        AlertDialog(
+            onDismissRequest = { showRoleDialogForMember = null },
+            title = { Text("Change Riding Role", color = textPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Select role for $userName:", color = textSecondary)
+                    listOf("LEAD", "MIDDLE", "SWEEP").forEach { role ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedRole = role }
+                                .padding(vertical = 8.dp)
+                        ) {
+                            RadioButton(
+                                selected = (selectedRole == role || (selectedRole == "" && currentRole.uppercase() == role)),
+                                onClick = { selectedRole = role },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF818CF8))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(role, color = textPrimary)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val roleToSet = if (selectedRole != "") selectedRole else currentRole
+                        viewModel.assignRidingRole(userId, roleToSet.uppercase())
+                        showRoleDialogForMember = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+                ) {
+                    Text("Apply Role Change")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRoleDialogForMember = null }) {
+                    Text("Cancel", color = textSecondary)
+                }
+            },
             containerColor = cardColor
         )
     }
@@ -1362,7 +1650,7 @@ fun DashboardScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "To ensure group tracking, specify your vehicle or pillion details. All fields are mandatory.",
+                        text = "To ensure group tracking, specify your Rider details. Vehicle Number is mandatory.",
                         color = textSecondary,
                         fontSize = 13.sp
                     )
@@ -1384,7 +1672,7 @@ fun DashboardScreen(
                     OutlinedTextField(
                         value = profilePhone,
                         onValueChange = { profilePhone = it },
-                        label = { Text("Your Phone Number (Mandatory)", color = textSecondary) },
+                        label = { Text("Personal Mobile Number (Mandatory)", color = textSecondary) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF818CF8),
@@ -1394,79 +1682,11 @@ fun DashboardScreen(
                         ),
                         singleLine = true
                     )
-
-                    // Co-riding Switch toggle card
-                    Surface(
-                        color = dividerColor.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Co-Riding (Pillion)", color = textPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("Riding with another rider", color = textSecondary, fontSize = 11.sp)
-                            }
-                            Switch(
-                                checked = profileCoRiding,
-                                onCheckedChange = { profileCoRiding = it },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color(0xFF818CF8),
-                                    checkedTrackColor = Color(0xFF312E81)
-                                )
-                            )
-                        }
-                    }
-
-                    if (!profileCoRiding) {
-                        OutlinedTextField(
-                            value = profileType,
-                            onValueChange = { profileType = it },
-                            label = { Text("Vehicle Type (e.g. KTM 390)", color = textSecondary) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF818CF8),
-                                unfocusedBorderColor = dividerColor,
-                                focusedTextColor = textPrimary,
-                                unfocusedTextColor = textPrimary
-                            ),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = profileNo,
-                            onValueChange = { profileNo = it },
-                            label = { Text("Vehicle Number", color = textSecondary) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF818CF8),
-                                unfocusedBorderColor = dividerColor,
-                                focusedTextColor = textPrimary,
-                                unfocusedTextColor = textPrimary
-                            ),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = profileColor,
-                            onValueChange = { profileColor = it },
-                            label = { Text("Vehicle Color", color = textSecondary) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF818CF8),
-                                unfocusedBorderColor = dividerColor,
-                                focusedTextColor = textPrimary,
-                                unfocusedTextColor = textPrimary
-                            ),
-                            singleLine = true
-                        )
-                    }
 
                     OutlinedTextField(
                         value = profileContact,
                         onValueChange = { profileContact = it },
-                        label = { Text("Emergency Contact Number", color = textSecondary) },
+                        label = { Text("Emergency Contact Number (Mandatory)", color = textSecondary) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF818CF8),
@@ -1477,60 +1697,102 @@ fun DashboardScreen(
                         singleLine = true
                     )
 
-                    HorizontalDivider(color = dividerColor, modifier = Modifier.padding(vertical = 4.dp))
-                    Text(
-                        text = "Theme Settings",
-                        color = textPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Row(
+                    OutlinedTextField(
+                        value = profileContactName,
+                        onValueChange = { profileContactName = it },
+                        label = { Text("Emergency Contact Name & Relationship (Mandatory)", color = textSecondary) },
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val modes = listOf("Time" to "Auto", "Light" to "Light", "Dark" to "Dark")
-                        modes.forEach { (modeVal, label) ->
-                            FilterChip(
-                                selected = themeModeVal == modeVal,
-                                onClick = { viewModel.setThemeMode(modeVal) },
-                                label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color(0xFF818CF8).copy(alpha = 0.3f),
-                                    selectedLabelColor = Color(0xFF818CF8),
-                                    containerColor = dividerColor.copy(alpha = 0.3f),
-                                    labelColor = textSecondary
-                                ),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = profileType,
+                        onValueChange = { profileType = it },
+                        label = { Text("Vehicle Type (e.g., Bike, Car) (Mandatory)", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = profileNo,
+                        onValueChange = { profileNo = it },
+                        label = { Text("Vehicle Number (Mandatory)", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = profileModel,
+                        onValueChange = { profileModel = it },
+                        label = { Text("Vehicle Model (e.g., Yamaha R15) (Mandatory)", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = profileColor,
+                        onValueChange = { profileColor = it },
+                        label = { Text("Vehicle Color (Optional)", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
                 }
             },
             confirmButton = {
-                val isValid = profileName.isNotBlank() && profilePhone.isNotBlank() && profileContact.isNotBlank() && (
-                    profileCoRiding || (profileType.isNotBlank() && profileNo.isNotBlank() && profileColor.isNotBlank())
-                )
+                val isValid = profileName.isNotBlank() && profilePhone.isNotBlank() &&
+                        profileNo.isNotBlank() && profileContact.isNotBlank() &&
+                        profileContactName.isNotBlank() && profileType.isNotBlank() &&
+                        profileModel.isNotBlank()
                 
                 Button(
                     onClick = {
                         if (isValid) {
                             viewModel.saveUserDisplayName(profileName.trim())
                             viewModel.updateVehicleProfile(
-                                vehicleType = if (profileCoRiding) "Pillion Rider" else profileType.trim(),
-                                vehicleNo = if (profileCoRiding) "Co-Rider" else profileNo.trim(),
-                                vehicleColor = if (profileCoRiding) "N/A" else profileColor.trim(),
+                                vehicleType = profileType.trim(),
+                                vehicleNo = profileNo.trim(),
+                                vehicleColor = profileColor.trim(),
                                 phoneNumber = profilePhone.trim(),
                                 emergencyContact = profileContact.trim(),
-                                isCoRiding = profileCoRiding,
-                                ridingWithUserId = myLoc?.ridingWithUserId ?: "",
-                                ridingWithUserName = myLoc?.ridingWithUserName ?: ""
+                                isCoRiding = false,
+                                ridingWithUserId = "",
+                                ridingWithUserName = "",
+                                vehicleModel = profileModel.trim(),
+                                emergencyContactName = profileContactName.trim()
                             ) { success ->
                                 if (success) {
                                     showProfileDialogDashboard = false
                                     Toast.makeText(context, "Safety profile saved successfully!", Toast.LENGTH_SHORT).show()
-                                    if (profileCoRiding) {
-                                        showCoRiderSelectionDialog = true
-                                    }
                                 } else {
                                     Toast.makeText(context, "Failed to save safety profile.", Toast.LENGTH_LONG).show()
                                 }

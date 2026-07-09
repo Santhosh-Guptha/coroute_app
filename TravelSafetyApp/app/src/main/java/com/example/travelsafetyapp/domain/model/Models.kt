@@ -21,7 +21,9 @@ data class MemberLocation(
     val ridingWithUserName: String = "",
     val isPaused: Boolean = false,
     val tripState: String = "NOT_STARTED",
-    val phoneNumber: String = ""
+    val phoneNumber: String = "",
+    val vehicleModel: String = "",
+    val emergencyContactName: String = ""
 )
 
 @Serializable
@@ -39,7 +41,9 @@ data class SOSAlert(
     val resolved: Boolean = false,
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
-    val targetUserId: String = ""
+    val targetUserId: String = "",
+    val type: String = "SOS",
+    val triggeredBy: String = ""
 )
 
 @Serializable
@@ -61,6 +65,17 @@ data class GroupMessage(
 )
 
 @Serializable
+data class DistanceAlert(
+    val alertId: String = "",
+    val userId: String = "",
+    val userName: String = "",
+    val distance: Double = 0.0,
+    val level: String = "WARNING", // "WARNING" or "CRITICAL"
+    val timestamp: Long = 0L,
+    val resolved: Boolean = false
+)
+
+@Serializable
 data class Group(
     val groupId: String = "",
     val name: String = "",
@@ -70,11 +85,14 @@ data class Group(
     val nextStopPoint: String = "",
     val nextStopLat: Double = 0.0,
     val nextStopLng: Double = 0.0,
+    val groupTripState: String = "NOT_STARTED",
     val members: Map<String, Boolean> = emptyMap(),
+    val pendingMembers: Map<String, String> = emptyMap(),
     val locations: Map<String, MemberLocation> = emptyMap(),
     val alerts: Map<String, SOSAlert> = emptyMap(),
     val waitRequests: Map<String, WaitRequest> = emptyMap(),
     val messages: Map<String, GroupMessage> = emptyMap(),
+    val distanceAlerts: Map<String, DistanceAlert> = emptyMap(),
     val stopPoints: List<String> = emptyList()
 )
 

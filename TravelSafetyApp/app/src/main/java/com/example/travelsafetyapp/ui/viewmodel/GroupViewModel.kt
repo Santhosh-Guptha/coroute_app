@@ -6,6 +6,7 @@ import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.travelsafetyapp.data.RepositoryProvider
+import com.example.travelsafetyapp.domain.model.DistanceAlert
 import com.example.travelsafetyapp.domain.model.Group
 import com.example.travelsafetyapp.domain.model.GroupMessage
 import com.example.travelsafetyapp.domain.model.MemberLocation
@@ -25,6 +26,7 @@ class GroupViewModel(application: Application) : AndroidViewModel(application) {
     val memberLocations: StateFlow<Map<String, MemberLocation>> = groupRepository.memberLocations
     val activeSOSAlerts: StateFlow<List<SOSAlert>> = groupRepository.activeSOSAlerts
     val activeMessages: StateFlow<List<GroupMessage>> = groupRepository.activeMessages
+    val activeDistanceAlerts: StateFlow<List<DistanceAlert>> = groupRepository.activeDistanceAlerts
     val currentUserId: String get() = groupRepository.currentUserId
 
     private val _isServiceRunning = MutableStateFlow(false)
@@ -196,14 +198,16 @@ class GroupViewModel(application: Application) : AndroidViewModel(application) {
     fun getSavedVehicleType(): String? = prefs.getString("vehicle_type", null)
     fun getSavedVehicleNo(): String? = prefs.getString("vehicle_no", null)
     fun getSavedVehicleColor(): String? = prefs.getString("vehicle_color", null)
+    fun getSavedVehicleModel(): String? = prefs.getString("vehicle_model", null)
     fun getSavedEmergencyContact(): String? = prefs.getString("emergency_contact", null)
+    fun getSavedEmergencyContactName(): String? = prefs.getString("emergency_contact_name", null)
     fun getSavedCoRiding(): Boolean = prefs.getBoolean("is_co_riding", false)
     
     fun getTripState(): String = prefs.getString("trip_state", "NOT_STARTED") ?: "NOT_STARTED"
     
     fun saveTripState(state: String) {
         prefs.edit().putString("trip_state", state).apply()
-        // Force location update with new tripState
+        // Force location update with new tripState + sync group-level trip state
         viewModelScope.launch {
             val repo = RepositoryProvider.getGroupRepository()
             val myLoc = memberLocations.value[currentUserId]
@@ -215,6 +219,20 @@ class GroupViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 repo.updateLocation(updatedLoc)
             }
+            // Replicate trip state to all group members via Firebase
+            repo.updateGroupTripState(state)
+        }
+    }
+
+    fun approveMember(userId: String) {
+        viewModelScope.launch {
+            RepositoryProvider.getGroupRepository().approveMember(userId)
+        }
+    }
+
+    fun rejectMember(userId: String) {
+        viewModelScope.launch {
+            RepositoryProvider.getGroupRepository().rejectMember(userId)
         }
     }
 
@@ -312,14 +330,14 @@ class GroupViewModel(application: Application) : AndroidViewModel(application) {
         _isServiceRunning.value = false
     }
 
-    fun triggerSOS(targetUserId: String = "") {
+    fun triggerSOS(targetUserId: String = "", type: String = "SOS", triggeredBy: String = "") {
         viewModelScope.launch {
             val group = activeGroup.value ?: return@launch
             val myLoc = memberLocations.value[currentUserId] ?: memberLocations.value.values.firstOrNull()
             val lat = myLoc?.lat ?: 15.4909
             val lng = myLoc?.lng ?: 73.8278
             
-            RepositoryProvider.getGroupRepository().triggerSOS(lat, lng, targetUserId)
+            RepositoryProvider.getGroupRepository().triggerSOS(lat, lng, targetUserId, type, triggeredBy)
         }
     }
 
@@ -338,11 +356,22 @@ class GroupViewModel(application: Application) : AndroidViewModel(application) {
         isCoRiding: Boolean = false,
         ridingWithUserId: String = "",
         ridingWithUserName: String = "",
+        vehicleModel: String = "",
+        emergencyContactName: String = "",
         onComplete: (Boolean) -> Unit = {}
     ) {
         viewModelScope.launch {
             val result = RepositoryProvider.getGroupRepository().updateVehicleProfile(
-                vehicleType, vehicleNo, vehicleColor, phoneNumber, emergencyContact, isCoRiding, ridingWithUserId, ridingWithUserName
+                vehicleType = vehicleType,
+                vehicleNo = vehicleNo,
+                vehicleColor = vehicleColor,
+                phoneNumber = phoneNumber,
+                emergencyContact = emergencyContact,
+                isCoRiding = isCoRiding,
+                ridingWithUserId = ridingWithUserId,
+                ridingWithUserName = ridingWithUserName,
+                vehicleModel = vehicleModel,
+                emergencyContactName = emergencyContactName
             )
             if (result.isSuccess) {
                 prefs.edit()
@@ -351,7 +380,9 @@ class GroupViewModel(application: Application) : AndroidViewModel(application) {
                     .putString("vehicle_type", vehicleType)
                     .putString("vehicle_no", vehicleNo)
                     .putString("vehicle_color", vehicleColor)
+                    .putString("vehicle_model", vehicleModel)
                     .putString("emergency_contact", emergencyContact)
+                    .putString("emergency_contact_name", emergencyContactName)
                     .putBoolean("is_co_riding", isCoRiding)
                     .apply()
                 isProfileCompleted.value = true
@@ -420,6 +451,18 @@ class GroupViewModel(application: Application) : AndroidViewModel(application) {
     fun assignRidingRole(userId: String, role: String) {
         viewModelScope.launch {
             RepositoryProvider.getGroupRepository().assignRidingRole(userId, role)
+        }
+    }
+
+    fun triggerDistanceAlert(alert: DistanceAlert) {
+        viewModelScope.launch {
+            RepositoryProvider.getGroupRepository().triggerDistanceAlert(alert)
+        }
+    }
+
+    fun resolveDistanceAlert(alertId: String) {
+        viewModelScope.launch {
+            RepositoryProvider.getGroupRepository().resolveDistanceAlert(alertId)
         }
     }
 

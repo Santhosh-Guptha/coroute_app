@@ -14,13 +14,26 @@ import com.example.travelsafetyapp.domain.model.MemberLocation
 fun OpenStreetMap(
     memberLocations: Map<String, MemberLocation>,
     myLoc: MemberLocation?,
+    activeSosUserIds: Set<String> = emptySet(),
     onMarkerClick: (MemberLocation) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     
+    fun calculateDistanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val theta = lon1 - lon2
+        var dist = Math.sin(Math.toRadians(lat1)) * Math.sin(Math.toRadians(lat2)) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.cos(Math.toRadians(theta))
+        dist = Math.acos(dist)
+        dist = Math.toDegrees(dist)
+        dist = dist * 60 * 1.1515 * 1.609344
+        return if (dist.isNaN()) 0.0 else dist
+    }
+
     fun serializeLocationsToJson(): String {
         val jsonObj = org.json.JSONObject()
+        val leadLoc = memberLocations.values.firstOrNull { it.ridingRole.uppercase() == "LEAD" }
+        
         memberLocations.forEach { (id, loc) ->
             if (loc.tripState == "STARTED") { // Only show members with tripState == STARTED
                 val mObj = org.json.JSONObject().apply {
@@ -30,6 +43,19 @@ fun OpenStreetMap(
                     put("speed", loc.speed.toDouble())
                     put("ridingRole", loc.ridingRole)
                     put("isPaused", loc.isPaused)
+                    put("isSosActive", activeSosUserIds.contains(id))
+                    
+                    var dist = 0.0
+                    var isFallingBehind = false
+                    if (leadLoc != null && leadLoc != loc && loc.lat != 0.0 && loc.lng != 0.0 && leadLoc.lat != 0.0 && leadLoc.lng != 0.0) {
+                        dist = calculateDistanceKm(loc.lat, loc.lng, leadLoc.lat, leadLoc.lng)
+                        if (dist > 1.0) {
+                            isFallingBehind = true
+                        }
+                    }
+                    put("distanceToLead", dist)
+                    put("isFallingBehind", isFallingBehind)
+                    
                     put("routeHistory", org.json.JSONObject().apply {
                         loc.routeHistory.forEach { (hid, pt) ->
                             put(hid, org.json.JSONObject().apply {
@@ -73,7 +99,7 @@ fun OpenStreetMap(
         }
     }
 
-    LaunchedEffect(memberLocations) {
+    LaunchedEffect(memberLocations, activeSosUserIds) {
         val js = "javascript:updateLocations('${serializeLocationsToJson()}')"
         webView.evaluateJavascript(js, null)
     }
@@ -109,6 +135,14 @@ private fun getLeafletHtml(startLat: Double, startLng: Double): String {
                     z-index: 1000;
                     display: none;
                     box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+                }
+                @keyframes pulse-red {
+                    0% { opacity: 1.0; }
+                    50% { opacity: 0.3; }
+                    100% { opacity: 1.0; }
+                }
+                .blinking-marker {
+                    animation: pulse-red 1s infinite;
                 }
             </style>
         </head>
@@ -148,22 +182,56 @@ private fun getLeafletHtml(startLat: Double, startLng: Double): String {
 
                 var markers = {};
                 var polylines = {};
+                var previousCoords = {};
 
-                function getMarkerIcon(ridingRole, isPaused) {
-                    var color = '#818cf8'; // default
-                    if (ridingRole === 'Lead') color = '#ef4444';
-                    else if (ridingRole === 'Sweep') color = '#10b981';
-                    if (isPaused) color = '#f59e0b';
+                function calculateBearing(lat1, lng1, lat2, lng2) {
+                    var dLon = (lng2 - lng1) * Math.PI / 180;
+                    var lat1Rad = lat1 * Math.PI / 180;
+                    var lat2Rad = lat2 * Math.PI / 180;
+                    var y = Math.sin(dLon) * Math.cos(lat2Rad);
+                    var x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+                    var bearing = Math.atan2(y, x) * 180 / Math.PI;
+                    return (bearing + 360) % 360;
+                }
+
+                function getMarkerIcon(ridingRole, isPaused, bearing, isFallingBehind, isSosActive) {
+                    var color = '#818cf8'; // default MIDDLE (indigo)
+                    var roleUpper = (ridingRole || '').toUpperCase();
+                    if (roleUpper === 'LEAD') color = '#ef4444'; // LEAD is Red
+                    else if (roleUpper === 'SWEEP') color = '#10b981'; // SWEEP is Green
+                    if (isPaused) color = '#f59e0b'; // PAUSED is Orange
+                    
+                    if (isFallingBehind || isSosActive) color = '#ef4444'; // Red blinking for falling behind / SOS
+
+                    // Draw a pin with a small heading arrow on top if moving
+                    var arrowSvg = '';
+                    if (bearing !== null && bearing !== undefined) {
+                        arrowSvg = '<path d="M12 2L16 8H8L12 2Z" fill="#ffffff" transform="rotate(' + bearing + ' 12 12) translate(0 -10)"/>';
+                    }
+
+                    var shapeSvg = '';
+                    if (roleUpper === 'LEAD') {
+                        // Star shape
+                        shapeSvg = '<polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9" fill="' + color + '" stroke="white" stroke-width="1.5"/>';
+                    } else if (roleUpper === 'SWEEP') {
+                        // Diamond shape
+                        shapeSvg = '<polygon points="12,2 22,12 12,22 2,12" fill="' + color + '" stroke="white" stroke-width="1.5"/>';
+                    } else {
+                        // Standard Pin shape
+                        shapeSvg = '<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="' + color + '" stroke="white" stroke-width="1.5"/>';
+                    }
 
                     var svg = '<svg width="30" height="30" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">' +
-                        '<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="' + color + '" stroke="white" stroke-width="1.5"/>' +
+                        shapeSvg +
+                        arrowSvg +
                         '</svg>';
                     return L.icon({
                         iconUrl: 'data:image/svg+xml;base64,' + btoa(svg),
                         iconSize: [30, 30],
                         iconAnchor: [15, 30],
                         popupAnchor: [0, -30],
-                        tooltipAnchor: [0, -30]
+                        tooltipAnchor: [0, -30],
+                        className: (isFallingBehind || isSosActive) ? 'blinking-marker' : ''
                     });
                 }
 
@@ -200,6 +268,7 @@ private fun getLeafletHtml(startLat: Double, startLng: Double): String {
                         if (!data[id]) {
                             map.removeLayer(markers[id]);
                             delete markers[id];
+                            delete previousCoords[id];
                         }
                     }
                     // Remove old polylines
@@ -219,11 +288,24 @@ private fun getLeafletHtml(startLat: Double, startLng: Double): String {
                         var latlng = [loc.lat, loc.lng];
                         bounds.push(latlng);
 
+                        // Calculate bearing
+                        var bearing = null;
+                        if (previousCoords[id] && (previousCoords[id].lat !== loc.lat || previousCoords[id].lng !== loc.lng)) {
+                            bearing = calculateBearing(previousCoords[id].lat, previousCoords[id].lng, loc.lat, loc.lng);
+                            if (markers[id]) markers[id].bearing = bearing;
+                        } else if (markers[id] && markers[id].bearing !== undefined) {
+                            bearing = markers[id].bearing;
+                        }
+                        previousCoords[id] = { lat: loc.lat, lng: loc.lng };
+
+                        var icon = getMarkerIcon(loc.ridingRole, loc.isPaused, bearing, loc.isFallingBehind, loc.isSosActive);
+
                         if (markers[id]) {
-                            markers[id].setIcon(getMarkerIcon(loc.ridingRole, loc.isPaused));
+                            markers[id].setIcon(icon);
                             animateMarkerTo(markers[id], latlng, 1000);
                         } else {
-                            var marker = L.marker(latlng, { icon: getMarkerIcon(loc.ridingRole, loc.isPaused) }).addTo(map);
+                            var marker = L.marker(latlng, { icon: icon }).addTo(map);
+                            marker.bearing = bearing;
                             marker.on('click', (function(mName) {
                                 return function() {
                                     Android.onMarkerClicked(mName);
@@ -232,7 +314,11 @@ private fun getLeafletHtml(startLat: Double, startLng: Double): String {
                             markers[id] = marker;
                         }
 
-                        var tooltipContent = loc.userName + " (" + (loc.ridingRole || "Rider") + ")<br>Speed: " + loc.speed.toFixed(1) + " km/h";
+                        var distLabel = "";
+                        if (loc.distanceToLead > 0) {
+                            distLabel = "<br>Distance to Lead: " + loc.distanceToLead.toFixed(2) + " km";
+                        }
+                        var tooltipContent = loc.userName + " (" + (loc.ridingRole || "Rider") + ")<br>Speed: " + loc.speed.toFixed(1) + " km/h" + distLabel;
                         if (markers[id].getTooltip()) {
                             markers[id].setTooltipContent(tooltipContent);
                         } else {

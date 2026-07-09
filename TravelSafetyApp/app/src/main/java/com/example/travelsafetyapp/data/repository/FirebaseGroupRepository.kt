@@ -2,6 +2,7 @@ package com.example.travelsafetyapp.data.repository
 
 import com.example.travelsafetyapp.domain.model.Group
 import com.example.travelsafetyapp.domain.model.MemberLocation
+import com.example.travelsafetyapp.domain.model.DistanceAlert
 import com.example.travelsafetyapp.domain.model.GroupMessage
 import com.example.travelsafetyapp.domain.model.SOSAlert
 import com.example.travelsafetyapp.domain.model.WaitRequest
@@ -33,7 +34,10 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
     private var locationListener: ValueEventListener? = null
     private var alertListener: ValueEventListener? = null
     private var messageListener: ValueEventListener? = null
+    private var distanceAlertListener: ValueEventListener? = null
     private var groupListener: ValueEventListener? = null
+    private val repositoryScope = CoroutineScope(Dispatchers.IO)
+    private var sessionJoinTime: Long = 0L
     
     private val _activeGroup = MutableStateFlow<Group?>(null)
     override val activeGroup: StateFlow<Group?> = _activeGroup.asStateFlow()
@@ -46,6 +50,9 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
 
     private val _activeMessages = MutableStateFlow<List<GroupMessage>>(emptyList())
     override val activeMessages: StateFlow<List<GroupMessage>> = _activeMessages.asStateFlow()
+
+    private val _activeDistanceAlerts = MutableStateFlow<List<DistanceAlert>>(emptyList())
+    override val activeDistanceAlerts: StateFlow<List<DistanceAlert>> = _activeDistanceAlerts.asStateFlow()
 
     override val currentUserId: String = getOrGeneratePersistentUserId(context)
     private var currentUserName: String = "User"
@@ -110,10 +117,18 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
                 return Result.failure(Exception("Group not found"))
             }
             
-            // Add member to group
-            database.getReference("groups").child(groupId)
-                .child("members").child(currentUserId).setValue(true).await()
-            uploadSavedVehicleProfile(groupId)
+            // Check if user is the group creator (auto-approve)
+            val createdBy = groupSnapshot.child("createdBy").getValue(String::class.java) ?: ""
+            if (createdBy == currentUserId) {
+                // Creator rejoining - add directly to members
+                database.getReference("groups").child(groupId)
+                    .child("members").child(currentUserId).setValue(true).await()
+                uploadSavedVehicleProfile(groupId)
+            } else {
+                // Add to pendingMembers for admin approval
+                database.getReference("groups").child(groupId)
+                    .child("pendingMembers").child(currentUserId).setValue(memberName).await()
+            }
             
             listenToGroup(groupId)
             Result.success(true)
@@ -138,6 +153,7 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
             _memberLocations.value = emptyMap()
             _activeSOSAlerts.value = emptyList()
             _activeMessages.value = emptyList()
+            _activeDistanceAlerts.value = emptyList()
             
             Result.success(true)
         } catch (e: Exception) {
@@ -212,7 +228,7 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
         }
     }
 
-    override suspend fun triggerSOS(latitude: Double, longitude: Double, targetUserId: String): Result<Boolean> {
+    override suspend fun triggerSOS(latitude: Double, longitude: Double, targetUserId: String, type: String, triggeredBy: String): Result<Boolean> {
         return try {
             val groupId = _activeGroup.value?.groupId ?: return Result.failure(Exception("No active group"))
             val alertId = UUID.randomUUID().toString()
@@ -223,7 +239,9 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
                 timestamp = System.currentTimeMillis(),
                 latitude = latitude,
                 longitude = longitude,
-                targetUserId = targetUserId
+                targetUserId = targetUserId,
+                type = type,
+                triggeredBy = triggeredBy.ifBlank { currentUserId }
             )
             database.getReference("groups").child(groupId)
                 .child("alerts").child(alertId).setValue(alert).await()
@@ -252,7 +270,9 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
         emergencyContact: String,
         isCoRiding: Boolean,
         ridingWithUserId: String,
-        ridingWithUserName: String
+        ridingWithUserName: String,
+        vehicleModel: String,
+        emergencyContactName: String
     ): Result<Boolean> {
         return try {
             // 1. Write to users/{userId}/profile
@@ -266,7 +286,9 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
                 "emergencyContact" to emergencyContact,
                 "isCoRiding" to isCoRiding,
                 "ridingWithUserId" to ridingWithUserId,
-                "ridingWithUserName" to ridingWithUserName
+                "ridingWithUserName" to ridingWithUserName,
+                "vehicleModel" to vehicleModel,
+                "emergencyContactName" to emergencyContactName
             )
             profileRef.setValue(profileData).await()
 
@@ -284,7 +306,9 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
                     emergencyContact = emergencyContact,
                     isCoRiding = isCoRiding,
                     ridingWithUserId = ridingWithUserId,
-                    ridingWithUserName = ridingWithUserName
+                    ridingWithUserName = ridingWithUserName,
+                    vehicleModel = vehicleModel,
+                    emergencyContactName = emergencyContactName
                 )
                 ref.setValue(updatedLoc).await()
 
@@ -371,7 +395,50 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
     override suspend fun assignRidingRole(userId: String, role: String): Result<Boolean> {
         return try {
             val groupId = _activeGroup.value?.groupId ?: return Result.failure(Exception("No active group"))
-            database.getReference("groups").child(groupId).child("locations").child(userId).child("ridingRole").setValue(role).await()
+            val targetRole = role.uppercase() // Normalize to LEAD, MIDDLE, SWEEP
+            
+            // Enforce only one LEAD and only one SWEEP
+            if (targetRole == "LEAD" || targetRole == "SWEEP") {
+                _memberLocations.value.forEach { (otherUid, loc) ->
+                    val otherRole = loc.ridingRole.uppercase()
+                    if (otherUid != userId && otherRole == targetRole) {
+                        // Demote existing holder to MIDDLE
+                        database.getReference("groups").child(groupId)
+                            .child("members").child(otherUid).child("role").setValue("MIDDLE")
+                        database.getReference("groups").child(groupId)
+                            .child("locations").child(otherUid).child("ridingRole").setValue("MIDDLE")
+                    }
+                }
+            }
+            
+            // Assign role to target member
+            database.getReference("groups").child(groupId)
+                .child("members").child(userId).child("role").setValue(targetRole).await()
+            database.getReference("groups").child(groupId)
+                .child("locations").child(userId).child("ridingRole").setValue(targetRole).await()
+                
+            Result.success(true)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun triggerDistanceAlert(alert: DistanceAlert): Result<Boolean> {
+        return try {
+            val groupId = _activeGroup.value?.groupId ?: return Result.failure(Exception("No active group"))
+            database.getReference("groups").child(groupId)
+                .child("distanceAlerts").child(alert.alertId).setValue(alert).await()
+            Result.success(true)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun resolveDistanceAlert(alertId: String): Result<Boolean> {
+        return try {
+            val groupId = _activeGroup.value?.groupId ?: return Result.failure(Exception("No active group"))
+            database.getReference("groups").child(groupId)
+                .child("distanceAlerts").child(alertId).child("resolved").setValue(true).await()
             Result.success(true)
         } catch (e: Exception) {
             Result.failure(e)
@@ -398,6 +465,55 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
         }
     }
 
+    override suspend fun updateGroupTripState(state: String): Result<Boolean> {
+        return try {
+            val groupId = _activeGroup.value?.groupId ?: return Result.failure(Exception("No active group"))
+            database.getReference("groups").child(groupId)
+                .child("groupTripState").setValue(state).await()
+            Result.success(true)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun approveMember(userId: String): Result<Boolean> {
+        return try {
+            val groupId = _activeGroup.value?.groupId ?: return Result.failure(Exception("No active group"))
+            val ref = database.getReference("groups").child(groupId)
+            // Fetch name from pendingMembers first
+            val pendingNameSnapshot = ref.child("pendingMembers").child(userId).get().await()
+            val memberName = pendingNameSnapshot.getValue(String::class.java) ?: "User"
+
+            // Move from pendingMembers to members
+            ref.child("pendingMembers").child(userId).removeValue().await()
+            ref.child("members").child(userId).setValue(true).await()
+
+            // Write initial placeholder location
+            ref.child("locations").child(userId).setValue(
+                MemberLocation(
+                    userName = memberName,
+                    tripState = "NOT_STARTED",
+                    lastUpdated = System.currentTimeMillis()
+                )
+            ).await()
+
+            Result.success(true)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun rejectMember(userId: String): Result<Boolean> {
+        return try {
+            val groupId = _activeGroup.value?.groupId ?: return Result.failure(Exception("No active group"))
+            database.getReference("groups").child(groupId)
+                .child("pendingMembers").child(userId).removeValue().await()
+            Result.success(true)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun endTrip(): Result<Boolean> {
         return try {
             val groupId = _activeGroup.value?.groupId ?: return Result.success(true)
@@ -407,6 +523,7 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
             _memberLocations.value = emptyMap()
             _activeSOSAlerts.value = emptyList()
             _activeMessages.value = emptyList()
+            _activeDistanceAlerts.value = emptyList()
             Result.success(true)
         } catch (e: Exception) {
             Result.failure(e)
@@ -415,6 +532,7 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
 
     private fun listenToGroup(groupId: String) {
         stopListening()
+        sessionJoinTime = System.currentTimeMillis()
         
         val ref = database.getReference("groups").child(groupId)
         groupRef = ref
@@ -450,15 +568,33 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
             override fun onCancelled(error: DatabaseError) {}
         })
 
-        // Listen to messages
+        // Listen to messages (only show live messages)
         messageListener = ref.child("messages").addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val msgList = mutableListOf<GroupMessage>()
                 for (child in snapshot.children) {
                     val msg = child.getValue(GroupMessage::class.java) ?: continue
-                    msgList.add(msg)
+                    if (msg.timestamp >= sessionJoinTime) {
+                        msgList.add(msg)
+                    }
                 }
                 _activeMessages.value = msgList.sortedBy { it.timestamp }
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
+
+        // Listen to distance alerts
+        distanceAlertListener = ref.child("distanceAlerts").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val alertsList = mutableListOf<DistanceAlert>()
+                for (child in snapshot.children) {
+                    val alert = child.getValue(DistanceAlert::class.java) ?: continue
+                    if (!alert.resolved) {
+                        alertsList.add(alert)
+                    }
+                }
+                _activeDistanceAlerts.value = alertsList
             }
 
             override fun onCancelled(error: DatabaseError) {}
@@ -496,6 +632,23 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
                     stops.add(stop)
                 }
 
+                val groupTripState = snapshot.child("groupTripState").getValue(String::class.java) ?: "NOT_STARTED"
+
+                val members = mutableMapOf<String, Boolean>()
+                val membersSnapshot = snapshot.child("members")
+                for (child in membersSnapshot.children) {
+                    val key = child.key ?: continue
+                    members[key] = true
+                }
+
+                val pending = mutableMapOf<String, String>()
+                val pendingSnapshot = snapshot.child("pendingMembers")
+                for (child in pendingSnapshot.children) {
+                    val key = child.key ?: continue
+                    val memberName = child.getValue(String::class.java) ?: "User"
+                    pending[key] = memberName
+                }
+
                 _activeGroup.value = Group(
                     groupId = groupId,
                     name = name,
@@ -503,9 +656,20 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
                     startPoint = startPoint,
                     destination = destination,
                     nextStopPoint = nextStopPoint,
+                    groupTripState = groupTripState,
+                    members = members,
+                    pendingMembers = pending,
                     waitRequests = waitReqs,
                     stopPoints = stops
                 )
+
+                // If this user is approved but hasn't uploaded their details yet, trigger uploadSavedVehicleProfile
+                val myLoc = _memberLocations.value[currentUserId]
+                if (members.containsKey(currentUserId) && (myLoc == null || myLoc.phoneNumber.isBlank())) {
+                    repositoryScope.launch {
+                        uploadSavedVehicleProfile(groupId)
+                    }
+                }
             }
 
             override fun onCancelled(error: DatabaseError) {}
@@ -522,6 +686,8 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
             val isCoRiding = prefs.getBoolean("is_co_riding", false)
             val ridingWithUserId = prefs.getString("riding_with_user_id", "") ?: ""
             val ridingWithUserName = prefs.getString("riding_with_user_name", "") ?: ""
+            val vehicleModel = prefs.getString("vehicle_model", "") ?: ""
+            val emergencyContactName = prefs.getString("emergency_contact_name", "") ?: ""
             val userPhone = prefs.getString("user_phone", "") ?: ""
             val currentTripState = prefs.getString("trip_state", "NOT_STARTED") ?: "NOT_STARTED"
 
@@ -536,7 +702,9 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
                 "vehicleColor" to vehicleColor,
                 "emergencyContact" to emergencyContact,
                 "phoneNumber" to userPhone,
-                "tripState" to currentTripState
+                "tripState" to currentTripState,
+                "vehicleModel" to vehicleModel,
+                "emergencyContactName" to emergencyContactName
             )
             ref.updateChildren(updates).await()
 
@@ -558,11 +726,13 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
             locationListener?.let { ref.child("locations").removeEventListener(it) }
             alertListener?.let { ref.child("alerts").removeEventListener(it) }
             messageListener?.let { ref.child("messages").removeEventListener(it) }
+            distanceAlertListener?.let { ref.child("distanceAlerts").removeEventListener(it) }
             groupListener?.let { ref.removeEventListener(it) }
         }
         locationListener = null
         alertListener = null
         messageListener = null
+        distanceAlertListener = null
         groupListener = null
         groupRef = null
     }
