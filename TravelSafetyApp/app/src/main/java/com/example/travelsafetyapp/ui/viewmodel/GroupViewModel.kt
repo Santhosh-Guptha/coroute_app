@@ -192,6 +192,32 @@ class GroupViewModel(application: Application) : AndroidViewModel(application) {
         return prefs.getString("saved_user_display_name", null)
     }
 
+    fun getSavedPhone(): String? = prefs.getString("user_phone", null)
+    fun getSavedVehicleType(): String? = prefs.getString("vehicle_type", null)
+    fun getSavedVehicleNo(): String? = prefs.getString("vehicle_no", null)
+    fun getSavedVehicleColor(): String? = prefs.getString("vehicle_color", null)
+    fun getSavedEmergencyContact(): String? = prefs.getString("emergency_contact", null)
+    fun getSavedCoRiding(): Boolean = prefs.getBoolean("is_co_riding", false)
+    
+    fun getTripState(): String = prefs.getString("trip_state", "NOT_STARTED") ?: "NOT_STARTED"
+    
+    fun saveTripState(state: String) {
+        prefs.edit().putString("trip_state", state).apply()
+        // Force location update with new tripState
+        viewModelScope.launch {
+            val repo = RepositoryProvider.getGroupRepository()
+            val myLoc = memberLocations.value[currentUserId]
+            if (myLoc != null) {
+                // If starting/resuming, make sure isPaused is false. If pausing, set isPaused to true.
+                val updatedLoc = myLoc.copy(
+                    isPaused = (state == "PAUSED"),
+                    tripState = state
+                )
+                repo.updateLocation(updatedLoc)
+            }
+        }
+    }
+
     fun toggleSimulationMode(enabled: Boolean) {
         viewModelScope.launch {
             if (activeGroup.value != null) {
@@ -307,6 +333,7 @@ class GroupViewModel(application: Application) : AndroidViewModel(application) {
         vehicleType: String,
         vehicleNo: String,
         vehicleColor: String,
+        phoneNumber: String,
         emergencyContact: String,
         isCoRiding: Boolean = false,
         ridingWithUserId: String = "",
@@ -315,10 +342,18 @@ class GroupViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         viewModelScope.launch {
             val result = RepositoryProvider.getGroupRepository().updateVehicleProfile(
-                vehicleType, vehicleNo, vehicleColor, emergencyContact, isCoRiding, ridingWithUserId, ridingWithUserName
+                vehicleType, vehicleNo, vehicleColor, phoneNumber, emergencyContact, isCoRiding, ridingWithUserId, ridingWithUserName
             )
             if (result.isSuccess) {
-                prefs.edit().putBoolean("profile_completed", true).apply()
+                prefs.edit()
+                    .putBoolean("profile_completed", true)
+                    .putString("user_phone", phoneNumber)
+                    .putString("vehicle_type", vehicleType)
+                    .putString("vehicle_no", vehicleNo)
+                    .putString("vehicle_color", vehicleColor)
+                    .putString("emergency_contact", emergencyContact)
+                    .putBoolean("is_co_riding", isCoRiding)
+                    .apply()
                 isProfileCompleted.value = true
             }
             onComplete(result.isSuccess)

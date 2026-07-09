@@ -59,6 +59,7 @@ fun JoinCreateScreen(
     var selectedMenu by remember { mutableStateOf<String?>(null) }
     var showProfileDialogHome by remember { mutableStateOf(false) }
 
+    var profilePhone by remember { mutableStateOf("") }
     var profileType by remember { mutableStateOf("") }
     var profileNo by remember { mutableStateOf("") }
     var profileColor by remember { mutableStateOf("") }
@@ -466,11 +467,12 @@ fun JoinCreateScreen(
     LaunchedEffect(showProfileDialogHome) {
         if (showProfileDialogHome) {
             val myLoc = memberLocations[viewModel.currentUserId]
-            profileType = myLoc?.vehicleType ?: ""
-            profileNo = myLoc?.vehicleNo ?: ""
-            profileColor = myLoc?.vehicleColor ?: ""
-            profileContact = myLoc?.emergencyContact ?: ""
-            profileCoRiding = myLoc?.isCoRiding ?: false
+            profilePhone = viewModel.getSavedPhone() ?: ""
+            profileType = myLoc?.vehicleType ?: viewModel.getSavedVehicleType() ?: ""
+            profileNo = myLoc?.vehicleNo ?: viewModel.getSavedVehicleNo() ?: ""
+            profileColor = myLoc?.vehicleColor ?: viewModel.getSavedVehicleColor() ?: ""
+            profileContact = myLoc?.emergencyContact ?: viewModel.getSavedEmergencyContact() ?: ""
+            profileCoRiding = myLoc?.isCoRiding ?: viewModel.getSavedCoRiding()
         }
     }
 
@@ -493,6 +495,20 @@ fun JoinCreateScreen(
                         value = userName,
                         onValueChange = { userName = it },
                         label = { Text("Your Display Name", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = profilePhone,
+                        onValueChange = { profilePhone = it },
+                        label = { Text("Your Phone Number", color = textSecondary) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF818CF8),
@@ -615,11 +631,9 @@ fun JoinCreateScreen(
                 }
             },
             confirmButton = {
-                val isValid = userName.isNotBlank() && if (profileCoRiding) {
-                    profileContact.isNotBlank()
-                } else {
-                    profileType.isNotBlank() && profileNo.isNotBlank() && profileColor.isNotBlank() && profileContact.isNotBlank()
-                }
+                val isValid = userName.isNotBlank() && profilePhone.isNotBlank() && profileContact.isNotBlank() && (
+                    profileCoRiding || (profileType.isNotBlank() && profileNo.isNotBlank() && profileColor.isNotBlank())
+                )
                 
                 Button(
                     onClick = {
@@ -631,6 +645,7 @@ fun JoinCreateScreen(
                                 vehicleType = if (profileCoRiding) "Pillion Rider" else profileType.trim(),
                                 vehicleNo = if (profileCoRiding) "Co-Rider" else profileNo.trim(),
                                 vehicleColor = if (profileCoRiding) "N/A" else profileColor.trim(),
+                                phoneNumber = profilePhone.trim(),
                                 emergencyContact = profileContact.trim(),
                                 isCoRiding = profileCoRiding,
                                 ridingWithUserId = "",

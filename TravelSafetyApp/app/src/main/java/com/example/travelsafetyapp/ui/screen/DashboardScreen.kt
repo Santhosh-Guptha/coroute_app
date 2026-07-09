@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.example.travelsafetyapp.ui.component.OpenStreetMap
+import com.example.travelsafetyapp.service.TrackingService
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -106,6 +107,8 @@ fun DashboardScreen(
 
     // Safety profile edit states
     var showProfileDialogDashboard by remember { mutableStateOf(false) }
+    var profileName by remember { mutableStateOf("") }
+    var profilePhone by remember { mutableStateOf("") }
     var profileType by remember { mutableStateOf("") }
     var profileNo by remember { mutableStateOf("") }
     var profileColor by remember { mutableStateOf("") }
@@ -114,11 +117,13 @@ fun DashboardScreen(
 
     LaunchedEffect(showProfileDialogDashboard) {
         if (showProfileDialogDashboard) {
-            profileType = myLoc?.vehicleType ?: ""
-            profileNo = myLoc?.vehicleNo ?: ""
-            profileColor = myLoc?.vehicleColor ?: ""
-            profileContact = myLoc?.emergencyContact ?: ""
-            profileCoRiding = myLoc?.isCoRiding ?: false
+            profileName = viewModel.getSavedDisplayName() ?: ""
+            profilePhone = viewModel.getSavedPhone() ?: ""
+            profileType = myLoc?.vehicleType ?: viewModel.getSavedVehicleType() ?: ""
+            profileNo = myLoc?.vehicleNo ?: viewModel.getSavedVehicleNo() ?: ""
+            profileColor = myLoc?.vehicleColor ?: viewModel.getSavedVehicleColor() ?: ""
+            profileContact = myLoc?.emergencyContact ?: viewModel.getSavedEmergencyContact() ?: ""
+            profileCoRiding = myLoc?.isCoRiding ?: viewModel.getSavedCoRiding()
         }
     }
 
@@ -518,6 +523,173 @@ fun DashboardScreen(
                 Column(
                     modifier = Modifier.fillMaxSize().padding(innerPadding)
                 ) {
+                    // TRIP LIFECYCLE PANEL
+                    var tripState by remember { mutableStateOf(viewModel.getTripState()) }
+                    val isProfileCompleted by viewModel.isProfileCompleted.collectAsState()
+                    
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = cardColor),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text("Rider Status", color = textSecondary, fontSize = 12.sp)
+                                    Text(
+                                        text = when (tripState) {
+                                            "STARTED" -> "Active (Tracking)"
+                                            "PAUSED" -> "Paused (Not Tracking)"
+                                            else -> "Stopped (Inactive)"
+                                        },
+                                        color = textPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
+                                    )
+                                }
+                                
+                                // Status indicator light
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .background(
+                                                color = when (tripState) {
+                                                    "STARTED" -> Color(0xFF10B981) // Green
+                                                    "PAUSED" -> Color(0xFFF59E0B)  // Yellow
+                                                    else -> Color(0xFFEF4444)      // Red
+                                                },
+                                                shape = CircleShape
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = when (tripState) {
+                                            "STARTED" -> "Online"
+                                            "PAUSED" -> "Paused"
+                                            else -> "Offline"
+                                        },
+                                        color = textSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                when (tripState) {
+                                    "STARTED" -> {
+                                        Button(
+                                            onClick = {
+                                                tripState = "PAUSED"
+                                                viewModel.saveTripState("PAUSED")
+                                                val intent = Intent(context, TrackingService::class.java).apply {
+                                                    action = TrackingService.ACTION_START
+                                                    putExtra(TrackingService.EXTRA_GROUP_ID, viewModel.getSavedGroupId())
+                                                    putExtra(TrackingService.EXTRA_USER_ID, viewModel.currentUserId)
+                                                }
+                                                context.startService(intent)
+                                                Toast.makeText(context, "Tracking Paused.", Toast.LENGTH_SHORT).show()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Pause Trip", color = Color.White)
+                                        }
+                                        
+                                        Button(
+                                            onClick = {
+                                                tripState = "STOPPED"
+                                                viewModel.saveTripState("STOPPED")
+                                                val intent = Intent(context, TrackingService::class.java).apply {
+                                                    action = TrackingService.ACTION_STOP
+                                                }
+                                                context.startService(intent)
+                                                Toast.makeText(context, "Trip Stopped.", Toast.LENGTH_SHORT).show()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Stop Trip", color = Color.White)
+                                        }
+                                    }
+                                    "PAUSED" -> {
+                                        Button(
+                                            onClick = {
+                                                tripState = "STARTED"
+                                                viewModel.saveTripState("STARTED")
+                                                val intent = Intent(context, TrackingService::class.java).apply {
+                                                    action = TrackingService.ACTION_START
+                                                    putExtra(TrackingService.EXTRA_GROUP_ID, viewModel.getSavedGroupId())
+                                                    putExtra(TrackingService.EXTRA_USER_ID, viewModel.currentUserId)
+                                                }
+                                                context.startService(intent)
+                                                Toast.makeText(context, "Trip Resumed.", Toast.LENGTH_SHORT).show()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Resume Trip", color = Color.White)
+                                        }
+                                        
+                                        Button(
+                                            onClick = {
+                                                tripState = "STOPPED"
+                                                viewModel.saveTripState("STOPPED")
+                                                val intent = Intent(context, TrackingService::class.java).apply {
+                                                    action = TrackingService.ACTION_STOP
+                                                }
+                                                context.startService(intent)
+                                                Toast.makeText(context, "Trip Stopped.", Toast.LENGTH_SHORT).show()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Stop Trip", color = Color.White)
+                                        }
+                                    }
+                                    else -> { // "NOT_STARTED" or "STOPPED"
+                                        Button(
+                                            onClick = {
+                                                if (!isProfileCompleted) {
+                                                    Toast.makeText(context, "Please complete your Safety Profile first!", Toast.LENGTH_LONG).show()
+                                                    showProfileDialogDashboard = true
+                                                } else {
+                                                    tripState = "STARTED"
+                                                    viewModel.saveTripState("STARTED")
+                                                    val intent = Intent(context, TrackingService::class.java).apply {
+                                                        action = TrackingService.ACTION_START
+                                                        putExtra(TrackingService.EXTRA_GROUP_ID, viewModel.getSavedGroupId())
+                                                        putExtra(TrackingService.EXTRA_USER_ID, viewModel.currentUserId)
+                                                    }
+                                                    context.startService(intent)
+                                                    Toast.makeText(context, "Trip Started. Tracking location...", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text("Start Trip", color = Color.White)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     OpenStreetMap(
                         memberLocations = memberLocations,
                         myLoc = myLoc,
@@ -921,6 +1093,7 @@ fun DashboardScreen(
                                             vehicleType = "Pillion Rider",
                                             vehicleNo = "Riding with ${rider.userName}",
                                             vehicleColor = "N/A",
+                                            phoneNumber = viewModel.getSavedPhone() ?: "",
                                             emergencyContact = myLoc?.emergencyContact ?: "",
                                             isCoRiding = true,
                                             ridingWithUserId = riderId,
@@ -1194,6 +1367,34 @@ fun DashboardScreen(
                         fontSize = 13.sp
                     )
 
+                    OutlinedTextField(
+                        value = profileName,
+                        onValueChange = { profileName = it },
+                        label = { Text("Your Display Name (Mandatory)", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = profilePhone,
+                        onValueChange = { profilePhone = it },
+                        label = { Text("Your Phone Number (Mandatory)", color = textSecondary) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF818CF8),
+                            unfocusedBorderColor = dividerColor,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        singleLine = true
+                    )
+
                     // Co-riding Switch toggle card
                     Surface(
                         color = dividerColor.copy(alpha = 0.5f),
@@ -1306,19 +1507,19 @@ fun DashboardScreen(
                 }
             },
             confirmButton = {
-                val isValid = if (profileCoRiding) {
-                    profileContact.isNotBlank()
-                } else {
-                    profileType.isNotBlank() && profileNo.isNotBlank() && profileColor.isNotBlank() && profileContact.isNotBlank()
-                }
+                val isValid = profileName.isNotBlank() && profilePhone.isNotBlank() && profileContact.isNotBlank() && (
+                    profileCoRiding || (profileType.isNotBlank() && profileNo.isNotBlank() && profileColor.isNotBlank())
+                )
                 
                 Button(
                     onClick = {
                         if (isValid) {
+                            viewModel.saveUserDisplayName(profileName.trim())
                             viewModel.updateVehicleProfile(
                                 vehicleType = if (profileCoRiding) "Pillion Rider" else profileType.trim(),
                                 vehicleNo = if (profileCoRiding) "Co-Rider" else profileNo.trim(),
                                 vehicleColor = if (profileCoRiding) "N/A" else profileColor.trim(),
+                                phoneNumber = profilePhone.trim(),
                                 emergencyContact = profileContact.trim(),
                                 isCoRiding = profileCoRiding,
                                 ridingWithUserId = myLoc?.ridingWithUserId ?: "",

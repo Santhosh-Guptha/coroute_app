@@ -23,7 +23,11 @@ import java.util.UUID
 
 class FirebaseGroupRepository(private val context: android.content.Context) : GroupRepository {
     private val database: FirebaseDatabase by lazy { 
-        FirebaseDatabase.getInstance("https://smart-kirana-shop-5bb2b-default-rtdb.asia-southeast1.firebasedatabase.app") 
+        val db = FirebaseDatabase.getInstance("https://smart-kirana-shop-5bb2b-default-rtdb.asia-southeast1.firebasedatabase.app") 
+        try {
+            db.setPersistenceEnabled(true)
+        } catch (_: Exception) {}
+        db
     }
     private var groupRef: DatabaseReference? = null
     private var locationListener: ValueEventListener? = null
@@ -147,6 +151,10 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
             val ref = database.getReference("groups").child(groupId)
                 .child("locations").child(currentUserId)
             
+            val prefs = context.getSharedPreferences("coroute_prefs", android.content.Context.MODE_PRIVATE)
+            val currentTripState = prefs.getString("trip_state", "NOT_STARTED") ?: "NOT_STARTED"
+            val userPhone = prefs.getString("user_phone", "") ?: ""
+            
             val updates = mapOf(
                 "lat" to location.lat,
                 "lng" to location.lng,
@@ -162,12 +170,34 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
                 "vehicleNo" to location.vehicleNo,
                 "vehicleColor" to location.vehicleColor,
                 "emergencyContact" to location.emergencyContact,
-                "ridingRole" to location.ridingRole
+                "ridingRole" to location.ridingRole,
+                "tripState" to currentTripState,
+                "phoneNumber" to userPhone
             )
             ref.updateChildren(updates).await()
 
-            // Save to route history trace if position changed and NOT paused
-            if (!location.isPaused) {
+            // Update groups/{groupId}/members/{userId}
+            val memberRef = database.getReference("groups").child(groupId)
+                .child("members").child(currentUserId)
+            val memberUpdates = mapOf(
+                "tripState" to currentTripState,
+                "vehicleNumber" to location.vehicleNo,
+                "lastUpdated" to location.lastUpdated
+            )
+            memberRef.updateChildren(memberUpdates).await()
+
+            // Update locations/{userId}
+            val globalLocRef = database.getReference("locations").child(currentUserId)
+            val globalLocUpdates = mapOf(
+                "lat" to location.lat,
+                "lng" to location.lng,
+                "speed" to location.speed,
+                "tripState" to currentTripState
+            )
+            globalLocRef.updateChildren(globalLocUpdates).await()
+
+            // Save to route history trace if position changed and NOT paused and trip is STARTED
+            if (!location.isPaused && currentTripState == "STARTED") {
                 val currentMemberLoc = _memberLocations.value[currentUserId]
                 val lastPoint = currentMemberLoc?.routeHistory?.values?.lastOrNull()
                 if (lastPoint == null || lastPoint.lat != location.lat || lastPoint.lng != location.lng) {
@@ -218,26 +248,57 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
         vehicleType: String,
         vehicleNo: String,
         vehicleColor: String,
+        phoneNumber: String,
         emergencyContact: String,
         isCoRiding: Boolean,
         ridingWithUserId: String,
         ridingWithUserName: String
     ): Result<Boolean> {
         return try {
-            val groupId = _activeGroup.value?.groupId ?: return Result.failure(Exception("No active group"))
-            val ref = database.getReference("groups").child(groupId).child("locations").child(currentUserId)
-            val snapshot = ref.get().await()
-            val currentLoc = snapshot.getValue(MemberLocation::class.java) ?: MemberLocation(userName = currentUserName)
-            val updatedLoc = currentLoc.copy(
-                vehicleType = vehicleType,
-                vehicleNo = vehicleNo,
-                vehicleColor = vehicleColor,
-                emergencyContact = emergencyContact,
-                isCoRiding = isCoRiding,
-                ridingWithUserId = ridingWithUserId,
-                ridingWithUserName = ridingWithUserName
+            // 1. Write to users/{userId}/profile
+            val profileRef = database.getReference("users").child(currentUserId).child("profile")
+            val profileData = mapOf(
+                "userName" to currentUserName,
+                "vehicleType" to vehicleType,
+                "vehicleNo" to vehicleNo,
+                "vehicleColor" to vehicleColor,
+                "phoneNumber" to phoneNumber,
+                "emergencyContact" to emergencyContact,
+                "isCoRiding" to isCoRiding,
+                "ridingWithUserId" to ridingWithUserId,
+                "ridingWithUserName" to ridingWithUserName
             )
-            ref.setValue(updatedLoc).await()
+            profileRef.setValue(profileData).await()
+
+            // 2. Write to groups/{groupId}/locations/{userId} if active group exists
+            val groupId = _activeGroup.value?.groupId
+            if (groupId != null) {
+                val ref = database.getReference("groups").child(groupId).child("locations").child(currentUserId)
+                val snapshot = ref.get().await()
+                val currentLoc = snapshot.getValue(MemberLocation::class.java) ?: MemberLocation(userName = currentUserName)
+                val updatedLoc = currentLoc.copy(
+                    vehicleType = vehicleType,
+                    vehicleNo = vehicleNo,
+                    vehicleColor = vehicleColor,
+                    phoneNumber = phoneNumber,
+                    emergencyContact = emergencyContact,
+                    isCoRiding = isCoRiding,
+                    ridingWithUserId = ridingWithUserId,
+                    ridingWithUserName = ridingWithUserName
+                )
+                ref.setValue(updatedLoc).await()
+
+                // 3. Write to groups/{groupId}/members/{userId}
+                val memberRef = database.getReference("groups").child(groupId).child("members").child(currentUserId)
+                val prefs = context.getSharedPreferences("coroute_prefs", android.content.Context.MODE_PRIVATE)
+                val currentTripState = prefs.getString("trip_state", "NOT_STARTED") ?: "NOT_STARTED"
+                val memberUpdates = mapOf(
+                    "tripState" to currentTripState,
+                    "vehicleNumber" to vehicleNo,
+                    "lastUpdated" to System.currentTimeMillis()
+                )
+                memberRef.updateChildren(memberUpdates).await()
+            }
             Result.success(true)
         } catch (e: Exception) {
             Result.failure(e)
@@ -461,6 +522,8 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
             val isCoRiding = prefs.getBoolean("is_co_riding", false)
             val ridingWithUserId = prefs.getString("riding_with_user_id", "") ?: ""
             val ridingWithUserName = prefs.getString("riding_with_user_name", "") ?: ""
+            val userPhone = prefs.getString("user_phone", "") ?: ""
+            val currentTripState = prefs.getString("trip_state", "NOT_STARTED") ?: "NOT_STARTED"
 
             val ref = database.getReference("groups").child(groupId).child("locations").child(currentUserId)
             val updates = mapOf(
@@ -471,9 +534,20 @@ class FirebaseGroupRepository(private val context: android.content.Context) : Gr
                 "vehicleType" to vehicleType,
                 "vehicleNo" to vehicleNo,
                 "vehicleColor" to vehicleColor,
-                "emergencyContact" to emergencyContact
+                "emergencyContact" to emergencyContact,
+                "phoneNumber" to userPhone,
+                "tripState" to currentTripState
             )
             ref.updateChildren(updates).await()
+
+            // Update groups/{groupId}/members/{userId}
+            val memberRef = database.getReference("groups").child(groupId).child("members").child(currentUserId)
+            val memberUpdates = mapOf(
+                "tripState" to currentTripState,
+                "vehicleNumber" to vehicleNo,
+                "lastUpdated" to System.currentTimeMillis()
+            )
+            memberRef.updateChildren(memberUpdates).await()
         } catch (e: Exception) {
             e.printStackTrace()
         }

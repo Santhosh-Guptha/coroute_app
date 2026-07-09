@@ -23,6 +23,7 @@ interface GroupRepository {
         vehicleType: String,
         vehicleNo: String,
         vehicleColor: String,
+        phoneNumber: String,
         emergencyContact: String,
         isCoRiding: Boolean = false,
         ridingWithUserId: String = "",

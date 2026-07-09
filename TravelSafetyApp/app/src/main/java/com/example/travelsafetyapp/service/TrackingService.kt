@@ -85,9 +85,22 @@ class TrackingService : Service() {
                 val groupId = intent.getStringExtra(EXTRA_GROUP_ID)
                 val userId = intent.getStringExtra(EXTRA_USER_ID) ?: ""
                 currentUserId = userId
+                
+                val prefs = getSharedPreferences("coroute_prefs", Context.MODE_PRIVATE)
+                val tripState = prefs.getString("trip_state", "NOT_STARTED") ?: "NOT_STARTED"
+                if (tripState == "PAUSED") {
+                    currentIntervalSeconds = 300L
+                    currentPriority = Priority.PRIORITY_LOW_POWER
+                } else {
+                    currentIntervalSeconds = 15L
+                    currentPriority = Priority.PRIORITY_HIGH_ACCURACY
+                }
+
                 if (!isTracking) {
                     startForeground(NOTIFICATION_ID, buildNotification())
                     startTracking()
+                } else {
+                    restartTracking()
                 }
                 if (groupId != null && !RepositoryProvider.isSimulationMode()) {
                     setupFirebaseListeners(groupId)
@@ -180,7 +193,9 @@ class TrackingService : Service() {
         
         val repo = RepositoryProvider.getGroupRepository()
         val currentLoc = repo.memberLocations.value[currentUserId]
-        val isPaused = currentLoc?.isPaused ?: false
+        val prefs = getSharedPreferences("coroute_prefs", Context.MODE_PRIVATE)
+        val tripState = prefs.getString("trip_state", "NOT_STARTED") ?: "NOT_STARTED"
+        val isPaused = tripState == "PAUSED"
 
         val (targetInterval, targetPriority) = when {
             isPaused -> {
@@ -205,7 +220,7 @@ class TrackingService : Service() {
             }
         }
         
-        Log.d(TAG, "Location: lat=${location.latitude}, lng=${location.longitude}, speed=$speedKmh km/h, battery=$batteryPct%, isPaused=$isPaused, target=${targetInterval}s")
+        Log.d(TAG, "Location: lat=${location.latitude}, lng=${location.longitude}, speed=$speedKmh km/h, battery=$batteryPct%, tripState=$tripState, target=${targetInterval}s")
 
         if (targetInterval != currentIntervalSeconds || targetPriority != currentPriority) {
             serviceScope.launch {
@@ -219,24 +234,16 @@ class TrackingService : Service() {
         }
 
         serviceScope.launch {
-            val repo = RepositoryProvider.getGroupRepository()
-            val currentLoc = repo.memberLocations.value[currentUserId]
-            val isPaused = currentLoc?.isPaused ?: false
-            val memberLoc = if (isPaused) {
-                currentLoc?.copy(
-                    speed = 0f,
-                    battery = batteryPct,
-                    lastUpdated = System.currentTimeMillis(),
-                    isPaused = true
-                )
-            } else {
-                MemberLocation(
+            if (tripState == "STARTED") {
+                val memberLoc = MemberLocation(
                     lat = location.latitude,
                     lng = location.longitude,
                     speed = speedKmh,
                     battery = batteryPct,
                     lastUpdated = System.currentTimeMillis(),
                     isPaused = false,
+                    tripState = tripState,
+                    phoneNumber = prefs.getString("user_phone", "") ?: "",
                     isCoRiding = currentLoc?.isCoRiding ?: false,
                     ridingWithUserId = currentLoc?.ridingWithUserId ?: "",
                     ridingWithUserName = currentLoc?.ridingWithUserName ?: "",
@@ -246,8 +253,6 @@ class TrackingService : Service() {
                     emergencyContact = currentLoc?.emergencyContact ?: "",
                     ridingRole = currentLoc?.ridingRole ?: ""
                 )
-            }
-            if (memberLoc != null) {
                 repo.updateLocation(memberLoc)
             }
         }
@@ -471,13 +476,22 @@ class TrackingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val prefs = getSharedPreferences("coroute_prefs", android.content.Context.MODE_PRIVATE)
+        val tripState = prefs.getString("trip_state", "NOT_STARTED") ?: "NOT_STARTED"
+
         val speedText = String.format("%.1f", speedKmh)
         val isSimulated = RepositoryProvider.isSimulationMode()
         val modeTag = if (isSimulated) "[SIMULATION] " else ""
+        
+        val contentText = when (tripState) {
+            "STARTED" -> "Sharing live location. Speed: $speedText km/h | Battery: $batteryPct%"
+            "PAUSED" -> "Trip Paused. Location sharing is inactive. Battery: $batteryPct%"
+            else -> "Trip Inactive. Battery: $batteryPct%"
+        }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("${modeTag}Group Live Tracking Active")
-            .setContentText("Sharing live location. Speed: $speedText km/h | Battery: $batteryPct%")
+            .setContentTitle("${modeTag}Group Live Tracking ($tripState)")
+            .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

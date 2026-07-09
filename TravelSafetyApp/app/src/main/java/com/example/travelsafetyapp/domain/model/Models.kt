@@ -19,7 +19,9 @@ data class MemberLocation(
     val isCoRiding: Boolean = false,
     val ridingWithUserId: String = "",
     val ridingWithUserName: String = "",
-    val isPaused: Boolean = false
+    val isPaused: Boolean = false,
+    val tripState: String = "NOT_STARTED",
+    val phoneNumber: String = ""
 )
 
 @Serializable
