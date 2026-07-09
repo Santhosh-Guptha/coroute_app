@@ -24,6 +24,7 @@ fun OpenStreetMap(
     var startCoords by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var destCoords by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var stopCoordsList by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
+    var isMapReady by remember { mutableStateOf(false) }
 
     // Geocode group route destinations on change
     LaunchedEffect(activeGroup?.startPoint, activeGroup?.destination, activeGroup?.stopPoints) {
@@ -165,6 +166,19 @@ fun OpenStreetMap(
         WebView(context).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.databaseEnabled = true
+            settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36 CoRouteTravelSafetyApp/1.0"
+            
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            }
+            
+            webChromeClient = object : android.webkit.WebChromeClient() {
+                override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                    android.util.Log.e("WebViewConsole", "${consoleMessage?.messageLevel()}: ${consoleMessage?.message()} -- From line ${consoleMessage?.lineNumber()} of ${consoleMessage?.sourceId()}")
+                    return true
+                }
+            }
             
             addJavascriptInterface(object {
                 @android.webkit.JavascriptInterface
@@ -174,21 +188,36 @@ fun OpenStreetMap(
                         onMarkerClick(clickedLoc)
                     }
                 }
+
+                @android.webkit.JavascriptInterface
+                fun onMapReady() {
+                    post {
+                        isMapReady = true
+                        val js = "javascript:updateLocations('${serializeLocationsToJson()}', '${serializeRouteJson()}')"
+                        evaluateJavascript(js, null)
+                    }
+                }
             }, "Android")
 
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
-                    val js = "javascript:updateLocations('${serializeLocationsToJson()}', '${serializeRouteJson()}')"
-                    view?.evaluateJavascript(js, null)
+                    val checkJs = """
+                        if (typeof updateLocations === 'function') {
+                            Android.onMapReady();
+                        }
+                    """.trimIndent()
+                    view?.evaluateJavascript(checkJs, null)
                 }
             }
-            loadDataWithBaseURL("https://openstreetmap.org", getLeafletHtml(initialLat, initialLng), "text/html", "UTF-8", null)
+            loadDataWithBaseURL(null, getLeafletHtml(initialLat, initialLng), "text/html", "UTF-8", null)
         }
     }
 
-    LaunchedEffect(memberLocations, activeSosUserIds, startCoords, destCoords, stopCoordsList) {
-        val js = "javascript:updateLocations('${serializeLocationsToJson()}', '${serializeRouteJson()}')"
-        webView.evaluateJavascript(js, null)
+    LaunchedEffect(memberLocations, activeSosUserIds, startCoords, destCoords, stopCoordsList, isMapReady) {
+        if (isMapReady) {
+            val js = "javascript:updateLocations('${serializeLocationsToJson()}', '${serializeRouteJson()}')"
+            webView.evaluateJavascript(js, null)
+        }
     }
 
     AndroidView(
@@ -238,6 +267,7 @@ private fun getLeafletHtml(startLat: Double, startLng: Double): String {
             <div id="map"></div>
             <script>
                 var map = L.map('map').setView([$startLat, $startLng], 14);
+                setTimeout(function() { map.invalidateSize(); }, 200);
                 
                 var tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     maxZoom: 19,
@@ -364,6 +394,7 @@ private fun getLeafletHtml(startLat: Double, startLng: Double): String {
                 }
 
                 function updateLocations(locationsJson, routeJson) {
+                    map.invalidateSize();
                     var data = JSON.parse(locationsJson);
                     var bounds = [];
 
@@ -506,6 +537,15 @@ private fun getLeafletHtml(startLat: Double, startLng: Double): String {
                         map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
                     }
                 }
+
+                function checkAndroidReady() {
+                    if (window.Android && typeof window.Android.onMapReady === 'function') {
+                        window.Android.onMapReady();
+                    } else {
+                        setTimeout(checkAndroidReady, 100);
+                    }
+                }
+                checkAndroidReady();
             </script>
         </body>
         </html>
