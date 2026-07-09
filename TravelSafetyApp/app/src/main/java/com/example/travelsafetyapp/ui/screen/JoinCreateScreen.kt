@@ -115,7 +115,14 @@ fun JoinCreateScreen(
         ) {
             // Header / App Logo
             Spacer(modifier = Modifier.height(16.dp))
-            CoRouteLogo(modifier = Modifier.padding(bottom = 12.dp))
+            Icon(
+                imageVector = Icons.Default.ShareLocation,
+                contentDescription = "App Logo",
+                tint = Color(0xFF818CF8),
+                modifier = Modifier
+                    .size(56.dp)
+                    .padding(bottom = 8.dp)
+            )
             Text(
                 text = "CoRoute",
                 color = textPrimary,
@@ -939,36 +946,5 @@ fun TripHistoryScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-fun CoRouteLogo(modifier: Modifier = Modifier) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = modifier
-            .size(72.dp)
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(Color(0xFF6366F1), Color(0xFF818CF8), Color(0xFF4F46E5))
-                ),
-                shape = RoundedCornerShape(20.dp)
-            )
-            .padding(14.dp)
-    ) {
-        Icon(
-            imageVector = Icons.Default.Shield,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(36.dp)
-        )
-        Icon(
-            imageVector = Icons.Default.Navigation,
-            contentDescription = null,
-            tint = Color(0xFFE0E7FF),
-            modifier = Modifier
-                .size(20.dp)
-                .align(Alignment.BottomEnd)
-        )
     }
 }
