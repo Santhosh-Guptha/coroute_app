@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Permissions for Location Tracking -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    
+    <!-- Permissions for Emergency Wake and Screen Controls -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:windowSoftInputMode="adjustResize"
+        android:theme="@style/Theme.TravelSafetyApp">
+
+        <!-- Google Maps API Key Meta-Data -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyAudugWZHDd7GecmejXMztjq88-rIu25sk" />
+
+        <activity
+            android:name=".MainActivity"
+            android:launchMode="singleTask"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            
+            <!-- Deep Link handler for coroute://join?groupId=XXXXXX -->
+            <intent-filter android:label="Join CoRoute Group">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="coroute" android:host="join" />
+            </intent-filter>
+        </activity>
+
+        <!-- SOS Activity Overlay for Lock Screen -->
+        <activity
+            android:name=".SOSActivity"
+            android:showOnLockScreen="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:launchMode="singleTop"
+            android:exported="false" />
+
+        <!-- Foreground tracking service -->
+        <service
+            android:name=".service.TrackingService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
+            
+    </application>
+
+</manifest>

@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "1099375379334",
+    "firebase_url": "https://smart-kirana-shop-5bb2b-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "smart-kirana-shop-5bb2b",
+    "storage_bucket": "smart-kirana-shop-5bb2b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1099375379334:android:579ecc0756616afd532207",
+        "android_client_info": {
+          "package_name": "com.example.travelsafetyapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1099375379334-g4qrc83sdnqe7omi3iomvhiv3lucs9it.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAudugWZHDd7GecmejXMztjq88-rIu25sk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1099375379334-g4qrc83sdnqe7omi3iomvhiv3lucs9it.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
