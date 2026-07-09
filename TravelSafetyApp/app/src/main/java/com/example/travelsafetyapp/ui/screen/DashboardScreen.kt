@@ -817,27 +817,10 @@ fun DashboardScreen(
                         }
                     }
 
-                    val activeSosUserIds = remember(activeSOSAlerts) {
-                        activeSOSAlerts.filter { !it.resolved }.map { it.targetUserId }.toSet()
-                    }
-
-                    OpenStreetMap(
-                        memberLocations = memberLocations,
-                        myLoc = myLoc,
-                        activeSosUserIds = activeSosUserIds,
-                        activeGroup = activeGroup,
-                        onMarkerClick = { clickedLoc ->
-                            selectedMember = clickedLoc
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(0.4f)
-                    )
-                    
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(0.6f)
+                            .weight(1f)
                             .padding(horizontal = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(vertical = 12.dp)
