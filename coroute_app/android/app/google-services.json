@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "87798956679",
+    "project_id": "corout-uat",
+    "storage_bucket": "corout-uat.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:87798956679:android:3c80773227ff3cee24ee22",
+        "android_client_info": {
+          "package_name": "space.devmonks.coroute_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "87798956679-9ql46ficq534ad0k3ralhnu65mnmfmls.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "space.devmonks.coroute_app",
+            "certificate_hash": "d5949354973affcbd6399963f6b268e01bf42fac"
+          }
+        },
+        {
+          "client_id": "87798956679-ivggpbpote5cf2cvi8mtg8gja3r1sfve.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4I236fJa1mLuuRCmyB5d1jqUbpj8SjC8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "87798956679-ivggpbpote5cf2cvi8mtg8gja3r1sfve.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

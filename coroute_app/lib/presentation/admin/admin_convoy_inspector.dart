@@ -1,0 +1,259 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:provider/provider.dart';
+import '../../core/constants/app_constants.dart';
+import '../../core/constants/telemetry_utils.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/widgets/glass_card.dart';
+import '../../data/models/convoy_model.dart';
+import '../../data/services/convoy_service.dart';
+
+class AdminConvoyInspector extends StatelessWidget {
+  final ConvoyModel convoy;
+
+  const AdminConvoyInspector({super.key, required this.convoy});
+
+  void _confirmDissolveConvoy(BuildContext context, ConvoyService convoyService) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: AppTheme.slateCard,
+          title: const Text('Dissolve Convoy?', style: TextStyle(color: AppTheme.laserRed)),
+          content: Text(
+            'Are you sure you want to forcibly terminate "${convoy.name}" (Code: ${convoy.joinCode})? All active riders will be dismissed.',
+            style: const TextStyle(color: AppTheme.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.laserRed),
+              onPressed: () {
+                convoyService.adminDissolveConvoy(convoy.groupId);
+                Navigator.pop(ctx); // pop dialog
+                Navigator.pop(context); // pop inspector
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Convoy ${convoy.name} terminated.')),
+                );
+              },
+              child: const Text('Force Terminate', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final convoyService = context.watch<ConvoyService>();
+    final currentConvoy = convoyService.allConvoys[convoy.groupId] ?? convoy;
+    final riders = currentConvoy.riders.values.toList();
+    final metrics = TelemetryUtils.calculateConvoyMetrics(riders);
+
+    final centerLat = riders.isNotEmpty ? riders.first.lat : (currentConvoy.destinationLat != 0.0 ? currentConvoy.destinationLat : 0.0);
+    final centerLng = riders.isNotEmpty ? riders.first.lng : (currentConvoy.destinationLng != 0.0 ? currentConvoy.destinationLng : 0.0);
+
+    return Scaffold(
+      backgroundColor: AppTheme.obsidianVoid,
+      appBar: AppBar(
+        title: Text(currentConvoy.name),
+        actions: [
+          IconButton(
+            tooltip: 'Dissolve Convoy',
+            icon: const Icon(Icons.delete_forever, color: AppTheme.laserRed),
+            onPressed: () => _confirmDissolveConvoy(context, convoyService),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Convoy Metric Banner
+            GlassCard(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildMetricPill('Spread', '${metrics.spreadKm.toStringAsFixed(1)} km', AppTheme.neonCyan),
+                  _buildMetricPill('Avg Speed', '${metrics.averageSpeedKmh.toStringAsFixed(0)} km/h', AppTheme.hyperAmber),
+                  _buildMetricPill('Status', metrics.status, Color(metrics.statusColor)),
+                  _buildMetricPill('Riders', '${riders.length}', AppTheme.emeraldSafe),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Live Inspector Map
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                height: 280,
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppTheme.subtleBorder),
+                ),
+                child: FlutterMap(
+                  options: MapOptions(
+                    initialCenter: LatLng(centerLat, centerLng),
+                    initialZoom: 14.5,
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: AppConstants.osmTileUrl,
+                      userAgentPackageName: AppConstants.osmUserAgent,
+                    ),
+                    MarkerLayer(
+                      markers: riders.map((r) {
+                        return Marker(
+                          point: LatLng(r.lat, r.lng),
+                          width: 44,
+                          height: 44,
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.8),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  r.name,
+                                  style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Transform.rotate(
+                                angle: r.heading * (3.14159 / 180.0),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: r.role == 'LEAD' ? AppTheme.hyperAmber : AppTheme.neonCyan,
+                                    border: Border.all(color: Colors.black, width: 2),
+                                  ),
+                                  child: const Icon(
+                                    Icons.navigation,
+                                    size: 14,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // Riders List
+            const Text(
+              'Roster & Telemetry Breakdown',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+
+            ...riders.map((r) {
+              final cardinal = TelemetryUtils.getCardinalDirection(r.heading);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: GlassCard(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: r.role == 'LEAD' ? AppTheme.hyperAmber.withOpacity(0.2) : AppTheme.neonCyan.withOpacity(0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.two_wheeler,
+                          color: r.role == 'LEAD' ? AppTheme.hyperAmber : AppTheme.neonCyan,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  r.name,
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: r.role == 'LEAD' ? AppTheme.hyperAmber : AppTheme.slateCard,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    r.role,
+                                    style: TextStyle(
+                                      color: r.role == 'LEAD' ? Colors.black : AppTheme.textSecondary,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${r.vehicleType} · ${r.vehicleColor}',
+                              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '${r.speedKmh.toStringAsFixed(0)} km/h',
+                            style: const TextStyle(color: AppTheme.neonCyan, fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            '🧭 ${r.heading.round()}° $cardinal',
+                            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMetricPill(String title, String value, Color color) {
+    return Column(
+      children: [
+        Text(title, style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13),
+        ),
+      ],
+    );
+  }
+}

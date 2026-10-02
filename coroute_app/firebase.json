@@ -1,0 +1,14 @@
+{
+  "database": {
+    "rules": "database.rules.json"
+  },
+  "auth": {
+    "providers": {
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "CoRoute UAT",
+        "supportEmail": "santhoshbukka5@gmail.com"
+      }
+    }
+  }
+}
