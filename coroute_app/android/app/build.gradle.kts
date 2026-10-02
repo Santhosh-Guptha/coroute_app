@@ -22,8 +22,8 @@ fun signingValue(key: String, env: String): String? =
 
 android {
     namespace = "space.devmonks.coroute_app"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    compileSdk = 37
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
