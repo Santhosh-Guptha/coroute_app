@@ -28,7 +28,9 @@ class IntercomService extends ChangeNotifier {
   }
 
   final RealtimeService _rt;
-  final AudioRecorder _recorder = AudioRecorder();
+  AudioRecorder? _recorderInstance;
+  // Created on first use so constructing the service never touches the platform (keeps tests and web safe).
+  AudioRecorder get _recorder => _recorderInstance ??= AudioRecorder();
   StreamSubscription<VoicePacket>? _voiceSub;
   StreamSubscription<Map<String, dynamic>>? _eventSub;
   StreamSubscription<Uint8List>? _micSub;
@@ -392,7 +394,7 @@ class IntercomService extends ChangeNotifier {
     _voxSilenceTimer?.cancel();
     _rxIdleTimer?.cancel();
     _busyTimer?.cancel();
-    _recorder.dispose();
+    _recorderInstance?.dispose();
     if (_playerReady) FlutterPcmSound.release();
     super.dispose();
   }

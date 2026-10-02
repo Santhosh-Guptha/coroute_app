@@ -4,6 +4,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/devmonks_branding.dart';
 import '../../data/services/auth_service.dart';
+import '../account/change_password_screen.dart';
 import '../admin/master_admin_dashboard.dart';
 import '../auth/access_gate_screen.dart';
 import '../rider/rider_home_screen.dart';
@@ -51,6 +52,17 @@ class _SplashScreenState extends State<SplashScreen>
     }
 
     if (!mounted) return;
+
+    if (auth.isAuthenticated && auth.mustChangePassword) {
+      final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen(forced: true)));
+      if (!mounted) return;
+      if (changed != true) {
+        await auth.logout();
+        if (!mounted) return;
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AccessGateScreen()));
+        return;
+      }
+    }
 
     if (auth.isAuthenticated && auth.isMasterAdmin) {
       Navigator.pushReplacement(

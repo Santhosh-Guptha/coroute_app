@@ -12,7 +12,8 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../data/services/routing_service.dart';
-import '../auth/access_gate_screen.dart';
+import '../account/account_screen.dart';
+import '../onboarding/permissions_screen.dart';
 import 'convoy_dashboard_screen.dart';
 import 'trip_history_screen.dart';
 
@@ -27,9 +28,33 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   final _joinCodeController = TextEditingController();
   final _createNameController = TextEditingController();
   final _destinationController = TextEditingController();
+  ConvoyService? _convoyService;
+  bool _joinDialogOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _convoyService = context.read<ConvoyService>();
+      _convoyService!.addListener(_onConvoyChanged);
+      _onConvoyChanged();
+    });
+  }
+
+  /// A join link (coroute://join/CODE) opens the join dialog with the code filled in.
+  void _onConvoyChanged() {
+    final code = _convoyService?.pendingJoinCode;
+    if (code == null || _joinDialogOpen || !mounted) return;
+    if (_convoyService?.activeGroupId != null) return; // already riding; ignore the link
+    _joinCodeController.text = code;
+    _convoyService?.setPendingJoinCode(null);
+    _showJoinConvoyDialog(context);
+  }
 
   @override
   void dispose() {
+    _convoyService?.removeListener(_onConvoyChanged);
     _joinCodeController.dispose();
     _createNameController.dispose();
     _destinationController.dispose();
@@ -216,6 +241,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                     if (_createNameController.text.trim().isEmpty) return;
                     final auth = context.read<AuthService>();
                     final convoyService = context.read<ConvoyService>();
+                    if (!await PermissionsScreen.ensure(context)) return;
+                    if (!ctx.mounted) return;
 
                     final breadcrumbs = routeDetails?.polyline
                             .map((p) => {'lat': p.latitude, 'lng': p.longitude})
@@ -263,6 +290,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   }
 
   void _showJoinConvoyDialog(BuildContext context) {
+    _joinDialogOpen = true;
     showDialog(
       context: context,
       builder: (ctx) {
@@ -306,6 +334,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                 final code = _joinCodeController.text.trim();
                 final auth = context.read<AuthService>();
                 final convoyService = context.read<ConvoyService>();
+                if (!await PermissionsScreen.ensure(context)) return;
+                if (!ctx.mounted) return;
 
                 // Get real GPS position before joining (fast 1s max)
                 double joinLat = 0.0;
@@ -356,7 +386,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
           ],
         );
       },
-    );
+    ).whenComplete(() => _joinDialogOpen = false);
   }
 
   void _showEditProfileDialog(BuildContext context, AuthService auth) {
@@ -551,17 +581,9 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
             },
           ),
           IconButton(
-            tooltip: 'Logout',
-            icon: const Icon(Icons.logout, color: AppTheme.textMuted),
-            onPressed: () async {
-              await auth.logout();
-              if (context.mounted) {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AccessGateScreen()),
-                );
-              }
-            },
+            tooltip: 'Account & security',
+            icon: const Icon(Icons.manage_accounts_rounded, color: AppTheme.textMuted),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountScreen())),
           ),
         ],
       ),

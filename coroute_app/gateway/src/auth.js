@@ -38,6 +38,7 @@ function publicUser(u) {
     emergencyContact: u.emergencyContact || '',
     emergencyContactName: u.emergencyContactName || '',
     provider: u.provider || 'password',
+    mustChangePassword: !!u.mustChangePassword,
   };
 }
 
@@ -142,6 +143,39 @@ class AuthService {
       user = await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role: bootstrapRoleFor(email, user.role), googleSub: payload.sub }) || user;
     }
     return { token: signToken(user), user: publicUser(user) };
+  }
+
+  async changePassword(userId, { currentPassword, newPassword }) {
+    const user = await this.repo.findUserById(userId);
+    if (!user) throw new AuthError('User not found.', 404);
+    if (!newPassword || newPassword.length < 8) throw new AuthError('New password must be at least 8 characters.');
+    if (user.passwordHash) {
+      const ok = currentPassword && await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!ok && !user.mustChangePassword) throw new AuthError('Current password is incorrect.', 401);
+    }
+    await this.repo.updateUser(user.key, { passwordHash: await bcrypt.hash(newPassword, 10), mustChangePassword: false, passwordChangedAt: Date.now() });
+    return { ok: true };
+  }
+
+  /** Admin-assisted reset (no e-mail infrastructure needed): returns a one-time temporary password. */
+  async adminResetPassword(actor, targetUserId) {
+    const target = await this.repo.findUserById(targetUserId);
+    if (!target) throw new AuthError('User not found.', 404);
+    const temp = crypto.randomBytes(9).toString('base64url').replace(/[-_]/g, 'x').slice(0, 12);
+    await this.repo.updateUser(target.key, {
+      passwordHash: await bcrypt.hash(temp, 10), mustChangePassword: true, passwordResetBy: actor.userId, passwordResetAt: Date.now(),
+    });
+    return { temporaryPassword: temp, userId: target.userId, name: target.name };
+  }
+
+  async deleteAccount(userId) {
+    const user = await this.repo.findUserById(userId);
+    if (!user) throw new AuthError('User not found.', 404);
+    if (user.role === ROLE_ADMIN && (await this.repo.countAdmins()) <= 1) {
+      throw new AuthError('Promote another administrator before deleting the last admin account.', 409);
+    }
+    await this.repo.deleteUserCascade(user);
+    return { ok: true };
   }
 
   async updateProfile(userId, patch) {

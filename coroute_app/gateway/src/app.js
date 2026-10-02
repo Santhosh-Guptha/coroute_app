@@ -61,6 +61,15 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       .map(([u, pr]) => `  <url><loc>${o}${u}</loc><lastmod>${today}</lastmod><priority>${pr}</priority></url>`).join('\n');
     res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
   });
+  // Join link shared from the app: opens the app via its custom scheme, with the download as fallback.
+  app.get('/join/:code', (req, res) => {
+    const code = String(req.params.code || '').toUpperCase();
+    if (!/^[A-Z0-9]{4,10}$/.test(code)) return res.redirect(302, '/');
+    const html = fs.readFileSync(pub('join.html'), 'utf8').replaceAll('__CODE__', code).replaceAll('__ORIGIN__', originOf(req));
+    res.type('html').set('Cache-Control', 'no-store').send(html);
+  });
+  // Android App Links verification (express.static ignores dot-directories, so serve it explicitly).
+  app.get('/.well-known/assetlinks.json', (req, res) => res.type('application/json').set('Cache-Control', 'public, max-age=86400').sendFile(pub('.well-known/assetlinks.json')));
   app.get('/status', (req, res) => res.json({ service: 'CoRoute Gateway', version: require('../package.json').version, status: 'ONLINE' }));
   app.use(express.static(pub(''), { index: false, maxAge: '7d', extensions: false, setHeaders: (res, p) => { if (p.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); } }));
   app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt }));

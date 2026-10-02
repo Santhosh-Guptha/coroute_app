@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Join convoy __CODE__</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root{color-scheme:dark;--bg:#0b0f14;--panel:#151d27;--line:#24303d;--fg:#e9eef4;--muted:#93a1b1;--accent:#3ee0ec;--accent-ink:#06282c}
+  @media (prefers-color-scheme:light){:root{color-scheme:light;--bg:#f4f6f8;--panel:#fff;--line:#d9e0e7;--fg:#121a22;--muted:#4f5f73;--accent:#087680;--accent-ink:#fff}}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box}
+  main{max-width:420px;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px;text-align:center}
+  h1{font-size:22px;margin:12px 0 4px}p{color:var(--muted);margin:0 0 18px}
+  .code{font:600 28px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.25em;margin:8px 0 20px}
+  a.btn{display:block;padding:13px 18px;border-radius:8px;font-weight:600;text-decoration:none;margin-top:10px;border:1px solid var(--line);color:var(--fg)}
+  a.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  svg{width:64px;height:64px}
+</style>
+</head>
+<body>
+<main>
+  <svg viewBox="0 0 100 100" role="img" aria-label="CoRoute logo"><rect width="100" height="100" rx="22" fill="#0b0f14"/><path d="M20 82 C20 36 80 64 80 18" fill="none" stroke="#3ee0ec" stroke-width="15" stroke-linecap="round"/><path d="M20 82 C20 36 80 64 80 18" fill="none" stroke="#0b0f14" stroke-width="2.2" stroke-dasharray="4.5 4.5"/></svg>
+  <h1>You are invited to a convoy</h1>
+  <p>Open CoRoute and the code is entered for you.</p>
+  <div class="code">__CODE__</div>
+  <a class="btn primary" href="coroute://join/__CODE__">Open in CoRoute</a>
+  <a class="btn" href="/download">Get the app for Android</a>
+</main>
+</body>
+</html>

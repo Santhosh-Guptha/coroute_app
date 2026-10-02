@@ -15,6 +15,7 @@ import '../models/sos_alert_model.dart';
 import '../models/stop_point_model.dart';
 import '../models/trip_history_model.dart';
 import 'api_client.dart';
+import 'background_service.dart';
 import 'realtime_service.dart';
 import 'trip_storage_service.dart';
 
@@ -26,6 +27,7 @@ import 'trip_storage_service.dart';
 class ConvoyService extends ChangeNotifier {
   ConvoyService(this._api, this._rt, this._trips) {
     _eventSub = _rt.events.listen(_onEvent);
+    BackgroundService.addButtonListener(_onNotificationButton);
     _rt.addListener(_onConnectionChanged);
     _initBatteryTracking();
   }
@@ -52,6 +54,8 @@ class ConvoyService extends ChangeNotifier {
   DateTime _lastTelemetryPush = DateTime.fromMillisecondsSinceEpoch(0);
   String? _systemBroadcastMessage;
   String? _lastError;
+  String? _pendingJoinCode;
+  bool _sosRequestedFromNotification = false;
   int _currentBatteryLevel = 100;
   bool _isCharging = false;
   double? _deviceCompassHeading;
@@ -63,6 +67,21 @@ class ConvoyService extends ChangeNotifier {
   ConvoyModel? get activeConvoy => _activeGroupId != null ? _allConvoys[_activeGroupId] : null;
   String? get systemBroadcastMessage => _systemBroadcastMessage;
   String? get lastError => _lastError;
+
+  /// A join code received through a `coroute://join/CODE` or `/join/CODE` link, waiting for the UI.
+  String? get pendingJoinCode => _pendingJoinCode;
+  void setPendingJoinCode(String? code) {
+    final clean = code?.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+    _pendingJoinCode = (clean == null || clean.isEmpty) ? null : clean;
+    notifyListeners();
+  }
+
+  /// Set when the rider pressed SOS on the lock-screen notification; the UI confirms it.
+  bool get sosRequestedFromNotification => _sosRequestedFromNotification;
+  void clearSosRequest() {
+    _sosRequestedFromNotification = false;
+    notifyListeners();
+  }
   bool get isRealGpsActive => _isRealGpsActive;
   bool get isOnline => _rt.isConnected;
   int get currentBatteryLevel => _currentBatteryLevel;
@@ -80,6 +99,7 @@ class ConvoyService extends ChangeNotifier {
 
   /// Call on sign-out.
   Future<void> endSession() async {
+    BackgroundService.stop().ignore();
     stopRealGpsTracking();
     _rt.disconnect();
     _allConvoys.clear();
@@ -113,7 +133,31 @@ class ConvoyService extends ChangeNotifier {
     SharedPreferences.getInstance().then((p) => p.setString(AppConstants.keyActiveGroupId, convoy.groupId)).ignore();
     _initCompassTracking();
     if (_myUserId != null) startRealGpsTracking(_myUserId!).ignore();
+    // Foreground service: keeps GPS, intercom and the connection alive with the screen locked.
+    BackgroundService.start(convoyName: convoy.name, riderCount: convoy.riders.length).ignore();
     notifyListeners();
+  }
+
+  void _refreshNotification() {
+    final c = activeConvoy;
+    if (c == null) return;
+    BackgroundService.start(convoyName: c.name, riderCount: c.riders.length).ignore();
+  }
+
+  /// Buttons on the persistent notification (usable from the lock screen).
+  void _onNotificationButton(String id) {
+    if (_activeGroupId == null) return;
+    if (id == BackgroundService.buttonLeave && _myUserId != null) {
+      leaveActiveConvoy(_myUserId!).ignore();
+    } else if (id == BackgroundService.buttonSos) {
+      final me = activeConvoy?.riders[_myUserId];
+      if (me != null) {
+        // Raise immediately (speed matters in an emergency); the UI shows it and can resolve it.
+        triggerSosAlert(userId: me.userId, userName: me.name, lat: me.lat, lng: me.lng, type: 'CRASH_OR_EMERGENCY');
+      }
+      _sosRequestedFromNotification = true;
+      notifyListeners();
+    }
   }
 
   void _onConnectionChanged() => notifyListeners();
@@ -158,11 +202,13 @@ class ConvoyService extends ChangeNotifier {
         final rider = RiderModel.fromJson(Map<String, dynamic>.from(e['rider'] as Map));
         final riders = Map<String, RiderModel>.from(convoy.riders)..[rider.userId] = rider;
         _allConvoys[gid] = convoy.copyWith(riders: riders);
+        if (e['joined'] == true) _refreshNotification();
         break;
       case 'RIDER_LEFT':
         if (convoy == null) return;
         final riders = Map<String, RiderModel>.from(convoy.riders)..remove(e['userId']?.toString());
         _allConvoys[gid] = convoy.copyWith(riders: riders);
+        _refreshNotification();
         break;
       case 'MESSAGE':
         if (convoy == null || e['message'] is! Map) return;
@@ -232,6 +278,7 @@ class ConvoyService extends ChangeNotifier {
 
   void _dropActiveConvoyLocally() {
     final gid = _activeGroupId;
+    BackgroundService.stop().ignore();
     stopRealGpsTracking();
     _compassSub?.cancel();
     _rt.leaveRoom();
@@ -245,6 +292,7 @@ class ConvoyService extends ChangeNotifier {
     if (_myUserId != null && convoy.riders.containsKey(_myUserId)) {
       _trips.saveTrip(buildTripHistory(convoy, userId: _myUserId), userId: _myUserId).ignore();
     }
+    BackgroundService.stop().ignore();
     stopRealGpsTracking();
     _compassSub?.cancel();
     _rt.leaveRoom();
@@ -336,6 +384,7 @@ class ConvoyService extends ChangeNotifier {
     if (convoy != null && convoy.riders.isNotEmpty) {
       _trips.saveTrip(buildTripHistory(convoy, userId: userId), userId: userId).ignore();
     }
+    BackgroundService.stop().ignore();
     stopRealGpsTracking();
     _compassSub?.cancel();
     _rt.leaveRoom();
@@ -372,16 +421,12 @@ class ConvoyService extends ChangeNotifier {
     final filter = idle ? AppConfig.gpsDistanceFilterIdle : AppConfig.gpsDistanceFilterMoving;
     final accuracy = idle ? LocationAccuracy.medium : LocationAccuracy.high;
     if (!kIsWeb && Platform.isAndroid) {
+      // Background access is granted by the app's foreground service (BackgroundService), so
+      // geolocator does not need its own notification here.
       return AndroidSettings(
         accuracy: accuracy,
         distanceFilter: filter,
         intervalDuration: idle ? const Duration(seconds: 20) : const Duration(seconds: 2),
-        foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationTitle: 'CoRoute convoy active',
-          notificationText: 'Sharing your position with your convoy.',
-          enableWakeLock: false,
-          setOngoing: true,
-        ),
       );
     }
     return LocationSettings(accuracy: accuracy, distanceFilter: filter);

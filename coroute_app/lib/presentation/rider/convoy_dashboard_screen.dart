@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
+import '../../core/config/app_config.dart';
 import '../../core/constants/telemetry_utils.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/glass_card.dart';
@@ -10,6 +12,7 @@ import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
+import '../widgets/connection_banner.dart';
 import '../widgets/intercom_dock.dart';
 import 'live_cockpit_map_screen.dart';
 
@@ -368,6 +371,17 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
     }
 
     _checkWaitRequests(convoy);
+    if (convoyService.sosRequestedFromNotification) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        convoyService.clearSosRequest();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('SOS sent to your convoy from the notification. Resolve it below when you are safe.'),
+          backgroundColor: AppTheme.laserRed,
+          duration: Duration(seconds: 5),
+        ));
+      });
+    }
 
     final currentUserId = authService.currentUserId ?? convoyService.myUserId ?? '';
     final currentRider = convoy.riders[currentUserId] ??
@@ -456,6 +470,19 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                     );
                   },
                 ),
+                IconButton(
+                  tooltip: 'Share invite link',
+                  icon: const Icon(Icons.share_rounded, color: AppTheme.neonCyan, size: 13),
+                  padding: const EdgeInsets.only(left: 6),
+                  constraints: const BoxConstraints(),
+                  onPressed: () {
+                    final link = '${AppConfig.apiBaseUrl}/join/${convoy.joinCode}';
+                    SharePlus.instance.share(ShareParams(
+                      text: 'Join my CoRoute convoy "${convoy.name}". Code ${convoy.joinCode}. Tap to open: $link',
+                      subject: 'CoRoute convoy: ${convoy.name}',
+                    ));
+                  },
+                ),
               ],
             ),
           ],
@@ -520,6 +547,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
       ),
       body: Column(
         children: [
+          const ConnectionBanner(),
           // 1. 2-Minute Pull-Over Wait Timer Alert Banner
           if (_waitRemainingSeconds > 0)
             Container(

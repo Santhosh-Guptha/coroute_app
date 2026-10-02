@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/telemetry_utils.dart';
 import '../../core/theme/app_theme.dart';
@@ -30,6 +31,7 @@ class LiveCockpitMapScreen extends StatefulWidget {
 class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   final MapController _mapController = MapController();
   bool _autoFollow = true;
+  bool _keepScreenOn = false;
   final Set<String> _dismissedAlertIds = {};
   StreamSubscription<CompassEvent>? _compassSub;
   double? _deviceCompassHeading;
@@ -59,7 +61,22 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   @override
   void dispose() {
     _compassSub?.cancel();
+    if (_keepScreenOn) WakelockPlus.disable();
     super.dispose();
+  }
+
+  Future<void> _toggleKeepScreenOn() async {
+    final next = !_keepScreenOn;
+    try {
+      if (next) {
+        await WakelockPlus.enable();
+      } else {
+        await WakelockPlus.disable();
+      }
+    } catch (e) {
+      debugPrint('wakelock note: $e');
+    }
+    if (mounted) setState(() => _keepScreenOn = next);
   }
 
   /// 1. Riders List Modal: Details + Pan/Navigate to Rider on Map
@@ -1090,11 +1107,26 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             ),
           ),
 
+          // 4a. Keep screen on (for a phone mounted on the handlebar)
+          Positioned(
+            right: 14,
+            bottom: 172,
+            child: FloatingActionButton.small(
+              heroTag: 'screen_on_btn',
+              tooltip: _keepScreenOn ? 'Screen stays on. Tap to allow sleep.' : 'Keep screen on while riding',
+              backgroundColor: AppTheme.slateCard,
+              foregroundColor: _keepScreenOn ? AppTheme.hyperAmber : AppTheme.textMuted,
+              onPressed: _toggleKeepScreenOn,
+              child: Icon(_keepScreenOn ? Icons.light_mode_rounded : Icons.light_mode_outlined),
+            ),
+          ),
+
           // 4. Recenter FAB
           Positioned(
             right: 14,
             bottom: 120,
             child: FloatingActionButton.small(
+              heroTag: 'recenter_btn',
               backgroundColor: AppTheme.slateCard,
               foregroundColor: _autoFollow ? AppTheme.neonCyan : AppTheme.textMuted,
               onPressed: () {

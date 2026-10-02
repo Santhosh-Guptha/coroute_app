@@ -10,6 +10,7 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../auth/access_gate_screen.dart';
 import 'admin_convoy_inspector.dart';
+import 'admin_insights_screen.dart';
 import 'admin_users_screen.dart';
 
 class MasterAdminDashboard extends StatefulWidget {
@@ -149,6 +150,11 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             tooltip: 'Safety Broadcast',
             icon: const Icon(Icons.campaign, color: AppTheme.hyperAmber),
             onPressed: () => _showBroadcastDialog(context, convoyService),
+          ),
+          IconButton(
+            tooltip: 'Feedback & analytics',
+            icon: const Icon(Icons.insights_rounded, color: AppTheme.neonCyan),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminInsightsScreen())),
           ),
           IconButton(
             tooltip: 'Users & roles',

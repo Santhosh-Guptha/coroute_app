@@ -47,6 +47,9 @@ test('privacy, terms, 404 page, robots, sitemap, static assets, download redirec
   for (const p of ['/og-image.png', '/favicon.svg', '/favicon-32.png', '/apple-touch-icon.png', '/site.webmanifest']) {
     assert.equal((await fetch(base + p)).status, 200, p);
   }
+  const al = await fetch(base + '/.well-known/assetlinks.json');
+  assert.equal(al.status, 200);
+  assert.equal((await al.json())[0].target.package_name, 'space.devmonks.coroute_app');
   const dl = await fetch(base + '/download', { redirect: 'manual' });
   assert.equal(dl.status, 302);
   assert.match(dl.headers.get('location'), /github\.com\/.*releases/);
@@ -93,4 +96,46 @@ test('page-view beacon counts per day/path with no identifiers; admin can read a
   assert.equal((await a.json()).pageviews.length, 2);
   const fb = await fetch(base + '/api/admin/feedback', { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(fb.status, 200);
+});
+
+test('meta endpoint, join link page, account deletion and admin password reset', async () => {
+  const meta = await (await fetch(base + '/api/meta')).json();
+  assert.equal(meta.minBuild, 60);
+  assert.ok(meta.privacyUrl.endsWith('/privacy') && meta.termsUrl.endsWith('/terms'));
+
+  const join = await fetch(base + '/join/483921');
+  assert.equal(join.status, 200);
+  const jh = await join.text();
+  assert.ok(jh.includes('coroute://join/483921') && jh.includes('483921'));
+  assert.equal((await fetch(base + '/join/<script>', { redirect: 'manual' })).status, 302);
+
+  const reg = async (name, email) => (await (await fetch(base + '/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password: 'Password#123', phone: '1' }) })).json());
+  const admin = (await (await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: 'admin@coroute.test', password: 'Password#123' }) })).json());
+  const u = await reg('Delete Me', 'deleteme@coroute.test');
+  const H = (t) => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${t}` });
+
+  // change password: wrong current → 401, right → ok, then login with new one
+  assert.equal((await fetch(base + '/api/me/password', { method: 'POST', headers: H(u.token), body: JSON.stringify({ currentPassword: 'nope', newPassword: 'NewPassword#456' }) })).status, 401);
+  assert.equal((await fetch(base + '/api/me/password', { method: 'POST', headers: H(u.token), body: JSON.stringify({ currentPassword: 'Password#123', newPassword: 'NewPassword#456' }) })).status, 200);
+  const relog = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: 'deleteme@coroute.test', password: 'NewPassword#456' }) });
+  assert.equal(relog.status, 200);
+
+  // admin reset → temporary password, mustChangePassword flag, user can set a new one without the current
+  const reset = await (await fetch(base + `/api/admin/users/${u.user.userId}/reset-password`, { method: 'POST', headers: H(admin.token) })).json();
+  assert.ok(reset.temporaryPassword.length >= 10);
+  const tmpLogin = await (await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: 'deleteme@coroute.test', password: reset.temporaryPassword }) })).json();
+  assert.equal(tmpLogin.user.mustChangePassword, true);
+  assert.equal((await fetch(base + '/api/me/password', { method: 'POST', headers: H(tmpLogin.token), body: JSON.stringify({ newPassword: 'Fresh#Password9' }) })).status, 200);
+
+  // delete account: user, memberships and trips are gone; token stops working
+  await fetch(base + '/api/convoys', { method: 'POST', headers: H(tmpLogin.token), body: JSON.stringify({ name: 'Doomed convoy' }) });
+  await fetch(base + '/api/trips', { method: 'POST', headers: H(tmpLogin.token), body: JSON.stringify({ tripId: 'TRIP-DEL', endTimeEpochMs: Date.now() }) });
+  const del = await fetch(base + '/api/me', { method: 'DELETE', headers: H(tmpLogin.token) });
+  assert.equal(del.status, 200);
+  assert.equal(await gw.repo.findUserByEmail('deleteme@coroute.test'), null);
+  assert.equal((await gw.repo.listTripsForUser(u.user.userId)).length, 0);
+  assert.ok([401, 404].includes((await fetch(base + '/api/me', { headers: H(tmpLogin.token) })).status));
+
+  // the last admin cannot delete themselves
+  assert.equal((await fetch(base + '/api/me', { method: 'DELETE', headers: H(admin.token) })).status, 409);
 });

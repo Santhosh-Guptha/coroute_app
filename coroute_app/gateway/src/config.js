@@ -63,6 +63,10 @@ const config = {
   playStoreUrl: (process.env.PLAY_STORE_URL || '').trim(),
   apkUrl: (process.env.APK_URL || 'https://github.com/Santhosh-Guptha/coroute_app/releases/latest').trim(),
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
+  // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
+  minAppBuild: int('MIN_APP_BUILD', 60),
+  latestAppBuild: int('LATEST_APP_BUILD', 60),
+  supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
 
   // CORS: comma separated origins or empty for same-origin/mobile only
   corsOrigins: list('CORS_ORIGINS'),

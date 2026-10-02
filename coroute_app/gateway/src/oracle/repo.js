@@ -76,6 +76,13 @@ class Repo {
     const key = await this.soda.insert(C.users, doc);
     return { key, ...doc };
   }
+  /** Removes the account and everything tied to it. Trip records are personal data, so they go too. */
+  async deleteUserCascade(user) {
+    await this.soda.removeWhere(C.riders, { userId: user.userId });
+    await this.soda.removeWhere(C.trips, { userId: user.userId });
+    if (user.email) await this.soda.removeWhere(C.feedback, { email: user.email });
+    await this.soda.removeWhere(C.users, { userId: user.userId });
+  }
   async listUsers(limit = 500) {
     const rows = await this.soda.query(C.users, {}, { orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }], limit });
     return rows.map((r) => ({ ...r.value, key: r.key }));

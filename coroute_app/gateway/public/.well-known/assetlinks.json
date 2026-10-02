@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "space.devmonks.coroute_app",
+    "sha256_cert_fingerprints": ["EC:87:7C:44:CD:5C:DA:E0:00:F3:E4:F0:B8:C4:D9:07:35:07:5C:09:29:B3:71:10:73:E9:21:12:2B:3B:B1:F8"]
+  }
+}]

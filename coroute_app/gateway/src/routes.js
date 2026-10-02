@@ -3,6 +3,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { requireAuth, requireAdmin, AuthError } = require('./auth');
 const { ConvoyError } = require('./convoys');
+const config = require('./config');
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -28,6 +29,20 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt }) {
       version: require('../package.json').version,
     });
   }));
+
+  // App metadata: version gate + links. Public, cacheable.
+  r.get('/meta', (req, res) => {
+    const origin = config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+    res.set('Cache-Control', 'public, max-age=300').json({
+      minBuild: config.minAppBuild,
+      latestBuild: config.latestAppBuild,
+      downloadUrl: `${origin}/download`,
+      privacyUrl: `${origin}/privacy`,
+      termsUrl: `${origin}/terms`,
+      supportEmail: config.supportEmail,
+      googleSignIn: config.googleClientIds.length > 0,
+    });
+  });
 
   r.post('/auth/register', authLimiter, wrap(async (req, res) => res.status(201).json(await auth.register(req.body || {}))));
   r.post('/auth/login', authLimiter, wrap(async (req, res) => res.json(await auth.login(req.body || {}))));
@@ -64,7 +79,13 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt }) {
     if (message.length > 2000) errors.message = 'Please keep it under 2000 characters.';
     if (/https?:\/\/\S+/gi.test(message) && (message.match(/https?:\/\//gi) || []).length > 2) errors.message = 'Too many links.';
     if (Object.keys(errors).length) return res.status(422).json({ error: 'Please correct the highlighted fields.', fields: errors });
-    await repo.addFeedback({ name, email, message, createdAt: Date.now(), userAgent: String(req.headers['user-agent'] || '').slice(0, 160) });
+    await repo.addFeedback({
+      name, email, message, createdAt: Date.now(),
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 160),
+      appVersion: String(b.appVersion || '').slice(0, 40),
+      device: String(b.device || '').slice(0, 80),
+      source: b.appVersion ? 'app' : 'web',
+    });
     res.status(201).json({ ok: true });
   }));
 
@@ -73,6 +94,11 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt }) {
 
   r.get('/me', wrap(async (req, res) => res.json(await auth.me(req.user.userId))));
   r.patch('/me', wrap(async (req, res) => res.json(await auth.updateProfile(req.user.userId, req.body || {}))));
+  r.post('/me/password', wrap(async (req, res) => res.json(await auth.changePassword(req.user.userId, req.body || {}))));
+  r.delete('/me', wrap(async (req, res) => {
+    await convoys.leaveAll(req.user.userId);
+    res.json(await auth.deleteAccount(req.user.userId));
+  }));
 
   // Convoys
   r.post('/convoys', wrap(async (req, res) => res.status(201).json(await convoys.createConvoy(req.user, req.body || {}))));
@@ -121,6 +147,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt }) {
   }));
   r.get('/admin/feedback', requireAdmin, wrap(async (req, res) => res.json({ feedback: await repo.listFeedback() })));
   r.get('/admin/users', requireAdmin, wrap(async (req, res) => res.json({ users: await auth.listUsers() })));
+  r.post('/admin/users/:userId/reset-password', requireAdmin, wrap(async (req, res) => res.json(await auth.adminResetPassword(req.user, req.params.userId))));
   r.patch('/admin/users/:userId/role', requireAdmin, wrap(async (req, res) => res.json(await auth.setRole(req.user, req.params.userId, String(req.body?.role || '')))));
   r.delete('/admin/convoys/:groupId', requireAdmin, wrap(async (req, res) => { await convoys.adminDissolve(req.params.groupId); res.json({ ok: true }); }));
 

@@ -28,6 +28,7 @@ class AuthService extends ChangeNotifier {
   String? _emergencyContactName;
   String? _vehicleNo;
   bool _isLoading = true;
+  bool _mustChangePassword = false;
 
   String? get currentUserId => _userId;
   String? get currentUserRole => _role;
@@ -64,7 +65,7 @@ class AuthService extends ChangeNotifier {
         final me = await _api.get('/me');
         if (me is Map) await _applyUser(Map<String, dynamic>.from(me));
       } on ApiException catch (e) {
-        if (e.isUnauthorized) await _clearSession();
+        if (e.isUnauthorized || e.statusCode == 404) await _clearSession(); // revoked or deleted account
       } catch (_) {}
     }
   }
@@ -79,6 +80,7 @@ class AuthService extends ChangeNotifier {
     _vehicleNo = u['vehicleNo']?.toString() ?? '';
     _emergencyContact = u['emergencyContact']?.toString() ?? '';
     _emergencyContactName = u['emergencyContactName']?.toString() ?? '';
+    _mustChangePassword = u['mustChangePassword'] == true;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(AppConstants.keyUserId, _userId ?? '');
@@ -93,7 +95,9 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Map<String, dynamic> _ok() => {'success': true, 'isAdmin': isMasterAdmin, 'userId': _userId, 'name': _name};
+  bool get mustChangePassword => _mustChangePassword;
+
+  Map<String, dynamic> _ok() => {'success': true, 'isAdmin': isMasterAdmin, 'userId': _userId, 'name': _name, 'mustChangePassword': _mustChangePassword};
   Map<String, dynamic> _fail(Object e) =>
       {'success': false, 'error': e is ApiException ? e.message : 'Something went wrong. Please try again.'};
 
@@ -189,6 +193,29 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  /// Change password. [currentPassword] may be empty when the server issued a temporary one.
+  Future<Map<String, dynamic>> changePassword({required String currentPassword, required String newPassword}) async {
+    try {
+      await _api.post('/me/password', {'currentPassword': currentPassword, 'newPassword': newPassword});
+      _mustChangePassword = false;
+      notifyListeners();
+      return {'success': true};
+    } catch (e) {
+      return _fail(e);
+    }
+  }
+
+  /// Permanently deletes the account and all data tied to it, then signs out.
+  Future<Map<String, dynamic>> deleteAccount() async {
+    try {
+      await _api.delete('/me');
+      await _clearSession();
+      return {'success': true};
+    } catch (e) {
+      return _fail(e);
+    }
+  }
+
   Future<void> logout() async {
     try {
       await _googleSignIn.signOut();
@@ -207,6 +234,7 @@ class AuthService extends ChangeNotifier {
     _emergencyContact = null;
     _emergencyContactName = null;
     _vehicleNo = null;
+    _mustChangePassword = false;
     final prefs = await SharedPreferences.getInstance();
     for (final k in [
       AppConstants.keyUserId, AppConstants.keyUserRole, AppConstants.keyUserEmail, AppConstants.keyUserName,

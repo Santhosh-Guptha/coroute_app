@@ -26,9 +26,7 @@ class ApiException implements Exception {
 class ApiClient extends ChangeNotifier {
   ApiClient({http.Client? httpClient, FlutterSecureStorage? storage})
       : _http = httpClient ?? http.Client(),
-        _storage = storage ?? const FlutterSecureStorage(
-          aOptions: AndroidOptions(encryptedSharedPreferences: true),
-        );
+        _storage = storage ?? const FlutterSecureStorage();
 
   static const _tokenKey = 'coroute_jwt';
   final http.Client _http;

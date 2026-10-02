@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../core/config/app_config.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/devmonks_branding.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/services/auth_service.dart';
+import '../../data/services/meta_service.dart';
+import '../account/change_password_screen.dart';
 import '../admin/master_admin_dashboard.dart';
 import '../rider/rider_home_screen.dart';
 
@@ -39,6 +43,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
   String? _errorMessage;
 
   String _selectedVehicle = 'Motorcycle (Adv)';
+  bool _acceptedTerms = false;
 
   final List<String> _vehicleTypes = [
     'Motorcycle (Adv)',
@@ -72,10 +77,42 @@ class _AccessGateScreenState extends State<AccessGateScreen>
   }
 
   /// Routes to the right home screen. The role comes from the server (database), never from the app.
-  void _enter(bool isAdmin) {
+  Future<void> _enter(bool isAdmin) async {
+    final auth = context.read<AuthService>();
+    if (auth.mustChangePassword) {
+      // Temporary password issued by an admin: a new one must be set before anything else.
+      final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen(forced: true)));
+      if (changed != true || !mounted) return;
+    }
+    if (!mounted) return;
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (_) => isAdmin ? const MasterAdminDashboard() : const RiderHomeScreen()),
+    );
+  }
+
+  String get _privacyUrl => context.read<MetaService>().meta?.privacyUrl.isNotEmpty == true ? context.read<MetaService>().meta!.privacyUrl : '${AppConfig.apiBaseUrl}/privacy';
+  String get _termsUrl => context.read<MetaService>().meta?.termsUrl.isNotEmpty == true ? context.read<MetaService>().meta!.termsUrl : '${AppConfig.apiBaseUrl}/terms';
+
+  Future<void> _openUrl(String url) async {
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  void _showForgotPassword() {
+    final support = context.read<MetaService>().meta?.supportEmail ?? '';
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.slateCard,
+        title: const Text('Forgot your password?', style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: Text(
+          'If you registered with Google, use "Sign In with Google".\n\n'
+          'Otherwise e-mail ${support.isNotEmpty ? support : 'the CoRoute team'} from the address you registered with. '
+          'An administrator will give you a temporary password, and the app will ask you to set a new one when you sign in.',
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK', style: TextStyle(color: AppTheme.neonCyan)))],
+      ),
     );
   }
 
@@ -142,6 +179,10 @@ class _AccessGateScreenState extends State<AccessGateScreen>
     }
     if (phone.isEmpty) {
       setState(() => _errorMessage = 'Please provide your mobile phone number for ride coordination.');
+      return;
+    }
+    if (!_acceptedTerms) {
+      setState(() => _errorMessage = 'Please accept the Terms of Use and Privacy Policy to register.');
       return;
     }
 
@@ -406,8 +447,15 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                   ),
           ),
         ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: _showForgotPassword,
+            child: const Text('Forgot password?', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+          ),
+        ),
 
-        const SizedBox(height: 14),
+        const SizedBox(height: 6),
 
         // Google Sign-In Button
         Row(
@@ -436,6 +484,14 @@ class _AccessGateScreenState extends State<AccessGateScreen>
               side: const BorderSide(color: AppTheme.glassBorder),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            'By continuing with Google you accept the Terms of Use and Privacy Policy.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
           ),
         ),
 
@@ -706,7 +762,36 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           ],
         ),
 
-        const SizedBox(height: 20),
+        const SizedBox(height: 14),
+
+        // Legal acceptance (required to create an account)
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Checkbox(
+              value: _acceptedTerms,
+              activeColor: AppTheme.emeraldSafe,
+              onChanged: (v) => setState(() => _acceptedTerms = v ?? false),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const Text('I accept the ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                    InkWell(onTap: () => _openUrl(_termsUrl), child: const Text('Terms of Use', style: TextStyle(color: AppTheme.neonCyan, fontSize: 12, decoration: TextDecoration.underline))),
+                    const Text(' and the ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                    InkWell(onTap: () => _openUrl(_privacyUrl), child: const Text('Privacy Policy', style: TextStyle(color: AppTheme.neonCyan, fontSize: 12, decoration: TextDecoration.underline))),
+                    const Text('.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 10),
 
         SizedBox(
           width: double.infinity,
@@ -760,6 +845,14 @@ class _AccessGateScreenState extends State<AccessGateScreen>
               side: const BorderSide(color: AppTheme.glassBorder),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            'By continuing with Google you accept the Terms of Use and Privacy Policy.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
           ),
         ),
 

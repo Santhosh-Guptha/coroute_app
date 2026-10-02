@@ -1,19 +1,29 @@
+import 'dart:async';
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'core/constants/app_constants.dart';
 import 'core/theme/app_theme.dart';
 import 'data/services/api_client.dart';
 import 'data/services/auth_service.dart';
+import 'data/services/background_service.dart';
 import 'data/services/convoy_service.dart';
 import 'data/services/intercom_service.dart';
+import 'data/services/meta_service.dart';
 import 'data/services/realtime_service.dart';
 import 'data/services/trip_storage_service.dart';
+import 'presentation/auth/access_gate_screen.dart';
 import 'presentation/splash/splash_screen.dart';
+
+/// Lets services navigate (sign-out on session expiry, deep links) without a BuildContext.
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Portrait + landscape are both supported; layouts adapt via LayoutBuilder/OrientationBuilder.
+  BackgroundService.initCommunicationPort();
+  // Portrait + landscape are both supported; layouts adapt to width.
   await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -34,6 +44,7 @@ class CoRouteApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ApiClient()),
         ChangeNotifierProvider(create: (_) => RealtimeService()),
         ChangeNotifierProvider(create: (ctx) => AuthService(ctx.read<ApiClient>())),
+        ChangeNotifierProvider(create: (ctx) => MetaService(ctx.read<ApiClient>())..load()),
         ChangeNotifierProvider(create: (ctx) => TripStorageService(ctx.read<ApiClient>())),
         ChangeNotifierProvider(
           create: (ctx) => ConvoyService(ctx.read<ApiClient>(), ctx.read<RealtimeService>(), ctx.read<TripStorageService>()),
@@ -41,7 +52,9 @@ class CoRouteApp extends StatelessWidget {
         ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>())),
       ],
       child: const _SessionBinder(
-        child: _App(),
+        child: _DeepLinkListener(
+          child: _App(),
+        ),
       ),
     );
   }
@@ -53,6 +66,7 @@ class _App extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: appNavigatorKey,
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
@@ -62,14 +76,59 @@ class _App extends StatelessWidget {
         final mq = MediaQuery.of(context);
         return MediaQuery(
           data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1.0).clamp(0.85, 1.2).toDouble())),
-          child: child ?? const SizedBox.shrink(),
+          child: _UpdateGate(child: child ?? const SizedBox.shrink()),
         );
       },
     );
   }
 }
 
-/// Opens/closes the realtime session whenever authentication changes.
+/// Blocks the app when the server says this build is too old to be safe.
+class _UpdateGate extends StatelessWidget {
+  final Widget child;
+  const _UpdateGate({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final meta = context.watch<MetaService>();
+    if (!meta.updateRequired) return child;
+    final url = meta.meta?.downloadUrl ?? '';
+    return Material(
+      color: AppTheme.obsidianVoid,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset('assets/branding/coroute_icon.png', width: 72, height: 72),
+                const SizedBox(height: 18),
+                const Text('Update required', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                const Text(
+                  'This version of CoRoute no longer works with the convoy service. Install the latest version to keep riding with your group.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: url.isEmpty ? null : () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan, foregroundColor: Colors.black, minimumSize: const Size(200, 48)),
+                  child: const Text('Get the update'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Opens/closes the realtime session whenever authentication changes, and
+/// returns to the sign-in screen when a session ends while the app is open.
 class _SessionBinder extends StatefulWidget {
   final Widget child;
   const _SessionBinder({required this.child});
@@ -101,8 +160,54 @@ class _SessionBinderState extends State<_SessionBinder> {
         intercom.reset();
         convoys.endSession();
         trips.clearLocal();
+        // Session expired, was revoked, or the account was deleted: back to sign-in.
+        final nav = appNavigatorKey.currentState;
+        if (nav != null) {
+          nav.pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const AccessGateScreen()), (_) => false);
+        }
       });
     }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// Handles `coroute://join/CODE` and `https://<host>/join/CODE` links.
+class _DeepLinkListener extends StatefulWidget {
+  final Widget child;
+  const _DeepLinkListener({required this.child});
+
+  @override
+  State<_DeepLinkListener> createState() => _DeepLinkListenerState();
+}
+
+class _DeepLinkListenerState extends State<_DeepLinkListener> {
+  final AppLinks _appLinks = AppLinks();
+  StreamSubscription<Uri>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _appLinks.getInitialLink().then((uri) {
+      if (uri != null) _handle(uri);
+    }).catchError((_) {});
+    _sub = _appLinks.uriLinkStream.listen(_handle, onError: (_) {});
+  }
+
+  void _handle(Uri uri) {
+    final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+    String? code;
+    if (uri.scheme == 'coroute' && uri.host == 'join' && segs.isNotEmpty) code = segs.first;
+    if (segs.length >= 2 && segs[segs.length - 2] == 'join') code = segs.last;
+    if (code == null) return;
+    context.read<ConvoyService>().setPendingJoinCode(code);
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
   }
 
   @override
