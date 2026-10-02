@@ -1,18 +1,24 @@
-# CoRoute Project Context & Technical Guide
+# CoRoute — Project Context
 
-See root documentation: [PROJECT_CONTEXT.md](../PROJECT_CONTEXT.md)
+Free, non-profit group-ride companion (Flutter) with a Node.js gateway and Oracle Autonomous DB.
+Full architecture, audit and rollout plan: [PRODUCTION_PLAN.md](PRODUCTION_PLAN.md). Server deployment: [gateway/deploy/RUNBOOK.md](gateway/deploy/RUNBOOK.md).
 
-### Quick Reference:
-- **Active App Package**: `space.devmonks.coroute_app`
-- **Active Firebase Project**: `corout-uat` (`87798956679`)
-- **App ID**: `1:87798956679:android:3c80773227ff3cee24ee22`
-- **Primary Database**: Oracle 26ai Autonomous Cloud Database SODA REST API (`coroutedb.adb.ap-hyderabad-1.oraclecloudapps.com`)
-- **Gateway VM**: `152.67.181.198`
-- **Master Admin**: `santhoshbukka5@gmail.com`
-- **Web OAuth Client ID**: `87798956679-ivggpbpote5cf2cvi8mtg8gja3r1sfve.apps.googleusercontent.com`
-- **Current Version**: `2.0.0 (Build 46)` / `1.0.0+46`
-- **Build Command**: `flutter build apk --release`
-- **Distribution Command**:
-  ```powershell
-  firebase appdistribution:distribute "build\app\outputs\flutter-apk\app-release.apk" --app "1:87798956679:android:3c80773227ff3cee24ee22" --project "corout-uat" --testers "santhoshbukka5@gmail.com"
-  ```
+## Quick reference
+- **App package**: `space.devmonks.coroute_app`
+- **Version**: `3.0.0+60`
+- **Backend**: `gateway/` (Node 22, Express + ws) on the OCI Always Free VM, behind Caddy (TLS).
+- **Database**: Oracle Autonomous DB (Always Free) via ORDS SODA, **only from the gateway**, using the dedicated `COROUTE` schema (never ADMIN).
+- **API base URL**: build-time `--dart-define=COROUTE_API=https://api.coroute.devmonks.space` (default in `lib/core/config/app_config.dart`).
+- **Admin accounts**: stored in the `users` collection (`role = MASTER_ADMIN`); first admin seeded by `BOOTSTRAP_ADMIN_EMAILS` on the server, then managed via `PATCH /api/admin/users/:id/role`.
+- **Secrets**: none in this repository. Server secrets live in `/etc/coroute/gateway.env`; Android signing in `android/key.properties` (git-ignored).
+
+## Commands
+```bash
+# app
+flutter pub get && flutter analyze && flutter test
+flutter build apk --release --dart-define=COROUTE_API=https://api.coroute.devmonks.space
+
+# gateway
+cd gateway && npm ci && npm test
+ORACLE_SODA_URL=memory ORACLE_USER=x ORACLE_PASSWORD=x JWT_SECRET=$(openssl rand -base64 48) npm start   # local, no DB
+```

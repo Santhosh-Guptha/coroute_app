@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/core/constants/app_constants.dart';
@@ -6,6 +10,7 @@ import 'package:coroute_app/core/constants/telemetry_utils.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/models/sos_alert_model.dart';
 import 'package:coroute_app/data/models/trip_history_model.dart';
+import 'package:coroute_app/data/services/api_client.dart';
 import 'package:coroute_app/data/services/auth_service.dart';
 
 void main() {
@@ -178,62 +183,89 @@ void main() {
     });
   });
 
-  group('AuthService Tests', () {
+  group('AuthService (gateway-backed) Tests', () {
     setUp(() {
       SharedPreferences.setMockInitialValues({});
+      FlutterSecureStorage.setMockInitialValues({});
     });
 
-    test('Master Admin authentication succeeds for santhoshbukka5@gmail.com', () async {
-      final auth = AuthService();
+    MockClient fakeGateway({bool adminRole = false}) {
+      return MockClient((request) async {
+        final path = request.url.path;
+        if (path.endsWith('/auth/login') || path.endsWith('/auth/register') || path.endsWith('/auth/google')) {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          if (path.endsWith('/auth/login') && body['password'] != 'Password#123') {
+            return http.Response(jsonEncode({'error': 'Invalid credentials.'}), 401);
+          }
+          return http.Response(jsonEncode({
+            'token': 'jwt-token',
+            'user': {
+              'userId': 'usr_ghostrider',
+              'name': body['name'] ?? 'GhostRider',
+              'email': body['email'] ?? 'ghost@coroute.test',
+              'role': adminRole ? AppConstants.adminRole : AppConstants.riderRole,
+              'phone': body['phone'] ?? '+91 9876543210',
+              'vehicleType': body['vehicleType'] ?? 'Adventure Bike',
+              'vehicleNo': body['vehicleNo'] ?? 'KA-01-AB-1234',
+              'emergencyContact': body['emergencyContact'] ?? '',
+              'emergencyContactName': body['emergencyContactName'] ?? '',
+            },
+          }), 200);
+        }
+        if (path.endsWith('/me')) {
+          if (request.headers['Authorization'] != 'Bearer jwt-token') {
+            return http.Response(jsonEncode({'error': 'Unauthorized'}), 401);
+          }
+          return http.Response(jsonEncode({'userId': 'usr_ghostrider', 'name': 'GhostRider', 'email': 'ghost@coroute.test', 'role': 'RIDER'}), 200);
+        }
+        return http.Response(jsonEncode({'error': 'Not found'}), 404);
+      });
+    }
+
+    test('Role is taken from the server, never decided in the app', () async {
+      final api = ApiClient(httpClient: fakeGateway(adminRole: true), storage: const FlutterSecureStorage());
+      final auth = AuthService(api);
       await Future.delayed(const Duration(milliseconds: 50));
 
-      final success = await auth.loginMasterAdmin(
-        email: AppConstants.masterAdminEmail,
-        password: 'secure_admin_pass',
-      );
-
-      expect(success, true);
+      final res = await auth.loginRiderWithPassword(identifier: 'admin@coroute.test', password: 'Password#123');
+      expect(res['success'], true);
+      expect(res['isAdmin'], true);
       expect(auth.isMasterAdmin, true);
       expect(auth.currentUserRole, AppConstants.adminRole);
-      expect(auth.currentUserEmail, AppConstants.masterAdminEmail);
+      expect(api.token, 'jwt-token');
     });
 
-    test('Master Admin rejects invalid email or empty password', () async {
-      final auth = AuthService();
+    test('Wrong password is rejected and no session is created', () async {
+      final api = ApiClient(httpClient: fakeGateway(), storage: const FlutterSecureStorage());
+      final auth = AuthService(api);
       await Future.delayed(const Duration(milliseconds: 50));
 
-      final failureWrongEmail = await auth.loginMasterAdmin(
-        email: 'attacker@example.com',
-        password: 'password123',
-      );
-
-      expect(failureWrongEmail, false);
-      expect(auth.isMasterAdmin, false);
-
-      final failureEmptyPass = await auth.loginMasterAdmin(
-        email: AppConstants.masterAdminEmail,
-        password: '',
-      );
-
-      expect(failureEmptyPass, false);
-      expect(auth.isMasterAdmin, false);
+      final res = await auth.loginRiderWithPassword(identifier: 'ghost@coroute.test', password: 'nope');
+      expect(res['success'], false);
+      expect(res['error'], 'Invalid credentials.');
+      expect(auth.isAuthenticated, false);
+      expect(api.hasToken, false);
     });
 
-    test('Rider authentication and logout', () async {
-      final auth = AuthService();
+    test('Registration stores profile, logout clears everything', () async {
+      final api = ApiClient(httpClient: fakeGateway(), storage: const FlutterSecureStorage());
+      final auth = AuthService(api);
       await Future.delayed(const Duration(milliseconds: 50));
 
-      await auth.loginRider(
-        riderName: 'GhostRider',
-        vehicleType: 'Adventure Bike',
+      final res = await auth.registerRider(
+        name: 'GhostRider',
+        email: 'ghost@coroute.test',
+        password: 'Password#123',
         phone: '+91 9876543210',
+        vehicleType: 'Adventure Bike',
+        vehicleNo: 'KA-01-AB-1234',
         emergencyContact: '+91 9123456780',
         emergencyContactName: 'Captain Safe',
-        vehicleNo: 'KA-01-AB-1234',
       );
-
+      expect(res['success'], true);
       expect(auth.isMasterAdmin, false);
       expect(auth.isAuthenticated, true);
+      expect(auth.currentUserId, 'usr_ghostrider');
       expect(auth.currentUserName, 'GhostRider');
       expect(auth.vehicleType, 'Adventure Bike');
       expect(auth.phone, '+91 9876543210');
@@ -245,6 +277,15 @@ void main() {
       expect(auth.isAuthenticated, false);
       expect(auth.currentUserName, null);
       expect(auth.phone, null);
+      expect(api.hasToken, false);
+    });
+
+    test('Expired token drops the session on 401', () async {
+      final api = ApiClient(httpClient: fakeGateway(), storage: const FlutterSecureStorage());
+      await api.setToken('stale-token');
+      expect(() => api.get('/me'), throwsA(isA<ApiException>()));
+      await Future.delayed(const Duration(milliseconds: 50));
+      expect(api.hasToken, false);
     });
 
     test('Rider profile registration serialization test', () {

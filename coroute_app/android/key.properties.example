@@ -1,0 +1,5 @@
+# Copy to android/key.properties (git-ignored). Never commit real values.
+storeFile=coroute.jks
+storePassword=CHANGE_ME
+keyAlias=coroute_key
+keyPassword=CHANGE_ME

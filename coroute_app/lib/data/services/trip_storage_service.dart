@@ -1,35 +1,38 @@
 import 'dart:convert';
-import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
 import '../models/trip_history_model.dart';
-import 'oracle_ai_service.dart';
+import 'api_client.dart';
 
+/// Journey history: a local cache for instant display + the gateway as the
+/// durable store. Trip summaries (name, members, dates, statistics) are kept
+/// forever on the server; only GPS trails are trimmed by server-side retention.
 class TripStorageService extends ChangeNotifier {
+  TripStorageService(this._api) {
+    loadSavedTrips();
+  }
+
+  final ApiClient _api;
   List<TripHistoryModel> _trips = [];
   bool _isLoading = true;
-  final OracleAiService _oracleAiService = OracleAiService();
+  final List<TripHistoryModel> _pendingUpload = [];
 
   List<TripHistoryModel> get trips => List.unmodifiable(_trips);
   bool get isLoading => _isLoading;
 
-  TripStorageService() {
-    loadSavedTrips();
-  }
-
-  /// Initial load from local persistent storage, followed by cloud synchronization
   Future<void> loadSavedTrips({String? userId}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(AppConstants.keyTripHistory);
       if (raw != null && raw.isNotEmpty) {
         final decoded = jsonDecode(raw) as List<dynamic>;
-        _trips = decoded
-            .whereType<Map<String, dynamic>>()
-            .map((e) => TripHistoryModel.fromJson(e))
-            .toList();
+        _trips = decoded.whereType<Map>().map((e) => TripHistoryModel.fromJson(Map<String, dynamic>.from(e))).toList();
         _trips.sort((a, b) => b.endTimeEpochMs.compareTo(a.endTimeEpochMs));
+      }
+      final pending = prefs.getString('${AppConstants.keyTripHistory}_pending');
+      if (pending != null && pending.isNotEmpty) {
+        _pendingUpload.addAll((jsonDecode(pending) as List).whereType<Map>().map((e) => TripHistoryModel.fromJson(Map<String, dynamic>.from(e))));
       }
     } catch (e) {
       debugPrint('Error loading local trip history: $e');
@@ -37,90 +40,37 @@ class TripStorageService extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
-
-    // Background sync with Firebase and Oracle Cloud to fetch any remote trips
     syncWithCloud(userId: userId).ignore();
   }
 
-  /// Synchronize trip records between Local Storage, Firebase RTDB, and Oracle 26ai Cloud
+  /// Pulls the signed-in rider's trips from the gateway and merges them in.
+  /// Returns the number of trips that were new on this device.
   Future<int> syncWithCloud({String? userId}) async {
-    int newTripsCount = 0;
-    final Map<String, TripHistoryModel> mergedMap = {
-      for (final t in _trips) t.tripId: t,
-    };
-
-    // 1. Fetch from Oracle 26ai Autonomous Database
+    if (!_api.hasToken) return 0;
+    await _flushPending();
+    int added = 0;
     try {
-      final oracleTrips = await _oracleAiService.fetchTripsFromOracle();
-      for (final t in oracleTrips) {
-        if (!mergedMap.containsKey(t.tripId)) {
-          mergedMap[t.tripId] = t;
-          newTripsCount++;
+      final res = await _api.get('/trips');
+      final list = (res is Map ? res['trips'] : null);
+      if (list is List) {
+        final merged = {for (final t in _trips) t.tripId: t};
+        for (final raw in list.whereType<Map>()) {
+          final t = TripHistoryModel.fromJson(Map<String, dynamic>.from(raw));
+          if (!merged.containsKey(t.tripId)) added++;
+          merged[t.tripId] = t; // server copy wins
         }
+        _trips = merged.values.toList()..sort((a, b) => b.endTimeEpochMs.compareTo(a.endTimeEpochMs));
+        notifyListeners();
+        await _persist();
       }
     } catch (e) {
-      debugPrint('Oracle cloud trips sync note: $e');
+      debugPrint('Trip sync note: $e');
     }
-
-    // 2. Fetch from Firebase Realtime Database
-    try {
-      final db = FirebaseDatabase.instance;
-      final cleanUid = (userId != null && userId.isNotEmpty)
-          ? 'usr_${userId.toLowerCase().replaceAll(' ', '_')}'
-          : null;
-
-      // Query user-specific trips
-      if (cleanUid != null) {
-        final userTripsSnap = await db.ref('users/$cleanUid/trips').get().timeout(const Duration(seconds: 3));
-        if (userTripsSnap.exists && userTripsSnap.value is Map) {
-          final m = Map<String, dynamic>.from(userTripsSnap.value as Map);
-          m.forEach((_, v) {
-            if (v is Map) {
-              try {
-                final t = TripHistoryModel.fromJson(Map<String, dynamic>.from(v));
-                if (!mergedMap.containsKey(t.tripId)) {
-                  mergedMap[t.tripId] = t;
-                  newTripsCount++;
-                }
-              } catch (_) {}
-            }
-          });
-        }
-      }
-
-      // Query global trips collection (recent 30)
-      final globalTripsSnap = await db.ref('trips').limitToLast(30).get().timeout(const Duration(seconds: 3));
-      if (globalTripsSnap.exists && globalTripsSnap.value is Map) {
-        final m = Map<String, dynamic>.from(globalTripsSnap.value as Map);
-        m.forEach((_, v) {
-          if (v is Map) {
-            try {
-              final t = TripHistoryModel.fromJson(Map<String, dynamic>.from(v));
-              if (!mergedMap.containsKey(t.tripId)) {
-                mergedMap[t.tripId] = t;
-                newTripsCount++;
-              }
-            } catch (_) {}
-          }
-        });
-      }
-    } catch (e) {
-      debugPrint('Firebase cloud trips sync note: $e');
-    }
-
-    if (newTripsCount > 0 || mergedMap.length != _trips.length) {
-      _trips = mergedMap.values.toList()
-        ..sort((a, b) => b.endTimeEpochMs.compareTo(a.endTimeEpochMs));
-      notifyListeners();
-      await _persist();
-    }
-
-    return newTripsCount;
+    return added;
   }
 
-  /// Save trip locally and distribute across Firebase RTDB and Oracle 26ai Cloud
+  /// Saves locally at once and uploads; retries later if offline.
   Future<void> saveTrip(TripHistoryModel trip, {String? userId}) async {
-    // 1. Local memory & SharedPreferences
     final index = _trips.indexWhere((t) => t.tripId == trip.tripId);
     if (index >= 0) {
       _trips[index] = trip;
@@ -130,53 +80,64 @@ class TripStorageService extends ChangeNotifier {
     notifyListeners();
     await _persist();
 
-    final tripData = trip.toJson();
-
-    // 2. Persist to Firebase Realtime Database
     try {
-      final db = FirebaseDatabase.instance;
-      final targetUserId = (userId != null && userId.isNotEmpty)
-          ? userId
-          : (trip.userId.isNotEmpty ? trip.userId : 'usr_rider');
-      final cleanUid = 'usr_${targetUserId.toLowerCase().replaceAll('usr_', '').replaceAll(' ', '_')}';
-
-      // Save under user's private collection
-      db.ref('users/$cleanUid/trips/${trip.tripId}').set(tripData).timeout(const Duration(seconds: 2)).catchError((_) {});
-
-      // Save under global fleet trips collection
-      db.ref('trips/${trip.tripId}').set(tripData).timeout(const Duration(seconds: 2)).catchError((_) {});
+      await _api.post('/trips', trip.toJson());
     } catch (e) {
-      debugPrint('Firebase save trip note: $e');
-    }
-
-    // 3. Persist to Oracle 26ai Autonomous Database SODA
-    try {
-      _oracleAiService.saveTripToOracle(trip).catchError((e) {
-        debugPrint('Oracle save trip note: $e');
-        return false;
-      });
-    } catch (e) {
-      debugPrint('Oracle trip persist exception: $e');
+      debugPrint('Trip upload deferred: $e');
+      _pendingUpload.removeWhere((t) => t.tripId == trip.tripId);
+      _pendingUpload.add(trip);
+      await _persistPending();
     }
   }
 
   Future<void> deleteTrip(String tripId) async {
     _trips.removeWhere((t) => t.tripId == tripId);
+    _pendingUpload.removeWhere((t) => t.tripId == tripId);
     notifyListeners();
     await _persist();
-
+    await _persistPending();
     try {
-      FirebaseDatabase.instance.ref('trips/$tripId').remove().timeout(const Duration(milliseconds: 500)).catchError((_) {});
-    } catch (_) {}
+      await _api.delete('/trips/$tripId');
+    } catch (e) {
+      debugPrint('Trip delete note: $e');
+    }
+  }
+
+  Future<void> clearLocal() async {
+    _trips = [];
+    _pendingUpload.clear();
+    notifyListeners();
+    await _persist();
+    await _persistPending();
+  }
+
+  Future<void> _flushPending() async {
+    if (_pendingUpload.isEmpty) return;
+    final copy = List<TripHistoryModel>.from(_pendingUpload);
+    for (final t in copy) {
+      try {
+        await _api.post('/trips', t.toJson());
+        _pendingUpload.remove(t);
+      } catch (_) {
+        break; // still offline
+      }
+    }
+    await _persistPending();
   }
 
   Future<void> _persist() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jsonList = _trips.map((e) => e.toJson()).toList();
-      await prefs.setString(AppConstants.keyTripHistory, jsonEncode(jsonList));
+      await prefs.setString(AppConstants.keyTripHistory, jsonEncode(_trips.map((e) => e.toJson()).toList()));
     } catch (e) {
-      debugPrint('Failed to persist trips to preferences: $e');
+      debugPrint('Failed to persist trips: $e');
     }
+  }
+
+  Future<void> _persistPending() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('${AppConstants.keyTripHistory}_pending', jsonEncode(_pendingUpload.map((e) => e.toJson()).toList()));
+    } catch (_) {}
   }
 }

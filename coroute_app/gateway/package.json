@@ -1,0 +1,25 @@
+{
+  "name": "coroute-gateway",
+  "version": "3.0.0",
+  "description": "CoRoute real-time gateway: JWT auth, Oracle Autonomous DB (SODA) persistence, room-scoped WebSocket telemetry and low-latency voice relay.",
+  "main": "src/server.js",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js",
+    "init-db": "node scripts/init_db.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "google-auth-library": "^9.15.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "ws": "^8.18.0"
+  }
+}

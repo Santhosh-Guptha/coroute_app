@@ -52,7 +52,7 @@ class _SplashScreenState extends State<SplashScreen>
 
     if (!mounted) return;
 
-    if (auth.isMasterAdmin) {
+    if (auth.isAuthenticated && auth.isMasterAdmin) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const MasterAdminDashboard()),

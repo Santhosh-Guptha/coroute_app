@@ -1,296 +1,258 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'package:battery_plus/battery_plus.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
+import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
 import '../models/convoy_model.dart';
+import '../models/group_message_model.dart';
 import '../models/rider_model.dart';
 import '../models/sos_alert_model.dart';
-import '../models/group_message_model.dart';
 import '../models/stop_point_model.dart';
 import '../models/trip_history_model.dart';
-import 'oracle_ai_service.dart';
+import 'api_client.dart';
+import 'realtime_service.dart';
+import 'trip_storage_service.dart';
 
+/// Convoy state for the signed-in rider.
+///
+/// The gateway is the single source of truth: this class holds a mirror of the
+/// active convoy that is updated by push events over one WebSocket (no polling),
+/// and sends the rider's own telemetry with battery-aware throttling.
 class ConvoyService extends ChangeNotifier {
-  final OracleAiService _oracleService = OracleAiService();
+  ConvoyService(this._api, this._rt, this._trips) {
+    _eventSub = _rt.events.listen(_onEvent);
+    _rt.addListener(_onConnectionChanged);
+    _initBatteryTracking();
+  }
+
+  final ApiClient _api;
+  final RealtimeService _rt;
+  final TripStorageService _trips;
   final Battery _battery = Battery();
-  int _currentBatteryLevel = 100;
-  bool _isCharging = false;
+
+  StreamSubscription<Map<String, dynamic>>? _eventSub;
   StreamSubscription<BatteryState>? _batteryStateSub;
   StreamSubscription<CompassEvent>? _compassSub;
-  double? _deviceCompassHeading;
+  StreamSubscription<Position>? _gpsSub;
+  Timer? _idleHeartbeat;
+  Timer? _batteryRefresh;
+  Timer? _broadcastClear;
 
   final Map<String, ConvoyModel> _allConvoys = {};
   String? _activeGroupId;
+  String? _myUserId;
   bool _isRealGpsActive = false;
+  bool _gpsIdleProfile = false;
+  DateTime? _stationarySince;
+  DateTime _lastTelemetryPush = DateTime.fromMillisecondsSinceEpoch(0);
   String? _systemBroadcastMessage;
+  String? _lastError;
+  int _currentBatteryLevel = 100;
+  bool _isCharging = false;
+  double? _deviceCompassHeading;
+  bool _adminWatching = false;
 
-  Timer? _oracleSyncTimer;
-  bool _isSyncingWithOracle = false;
-  final Set<String> _resolvedAlertIds = {};
-  Timer? _voicePollTimer;
-  int _lastVoiceBurstTimestamp = DateTime.now().millisecondsSinceEpoch - 5000;
-  final Set<String> _processedVoiceBurstKeys = {};
-
-  StreamSubscription? _locationsSub;
-  StreamSubscription? _alertsSub;
-  StreamSubscription? _messagesSub;
-  StreamSubscription? _stopsSub;
-  StreamSubscription? _waitRequestsSub;
-  StreamSubscription? _adminFleetSub;
-  StreamSubscription<Position>? _gpsPositionSub;
-  StreamSubscription? _tripStatusSub;
-  StreamSubscription? _configSub;
-  StreamSubscription? _voiceBurstSub;
-
-  final StreamController<Map<String, dynamic>> _voiceBurstController =
-      StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get voiceBurstStream => _voiceBurstController.stream;
-
+  // ------------------------------------------------------------- getters
   Map<String, ConvoyModel> get allConvoys => Map.unmodifiable(_allConvoys);
   String? get activeGroupId => _activeGroupId;
+  ConvoyModel? get activeConvoy => _activeGroupId != null ? _allConvoys[_activeGroupId] : null;
   String? get systemBroadcastMessage => _systemBroadcastMessage;
+  String? get lastError => _lastError;
   bool get isRealGpsActive => _isRealGpsActive;
+  bool get isOnline => _rt.isConnected;
   int get currentBatteryLevel => _currentBatteryLevel;
   bool get isCharging => _isCharging;
+  String? get myUserId => _myUserId;
 
-  ConvoyModel? get activeConvoy =>
-      _activeGroupId != null ? _allConvoys[_activeGroupId] : null;
+  // ---------------------------------------------------------- lifecycle
+  /// Call after sign-in. Opens the socket and restores an active convoy if any.
+  Future<void> startSession({required String token, required String userId, bool admin = false}) async {
+    _myUserId = userId;
+    _rt.connect(token, adminMode: admin);
+    _adminWatching = admin;
+    await _restoreActiveConvoy();
+  }
 
-  ConvoyService() {
-    _initFirebaseAndSync();
-    _initOracleSync();
-    _initBatteryTracking();
+  /// Call on sign-out.
+  Future<void> endSession() async {
+    stopRealGpsTracking();
+    _rt.disconnect();
+    _allConvoys.clear();
+    _activeGroupId = null;
+    _myUserId = null;
+    notifyListeners();
+  }
+
+  Future<void> _restoreActiveConvoy() async {
+    try {
+      final res = await _api.get('/convoys/active');
+      final c = (res is Map) ? res['convoy'] : null;
+      if (c is Map) {
+        final convoy = ConvoyModel.fromJson(Map<String, dynamic>.from(c));
+        _activate(convoy);
+        return;
+      }
+    } on ApiException catch (e) {
+      debugPrint('restore active convoy note: ${e.message}');
+    } catch (e) {
+      debugPrint('restore active convoy note: $e');
+    }
+    // Nothing active on the server → clear any stale local pointer.
+    SharedPreferences.getInstance().then((p) => p.remove(AppConstants.keyActiveGroupId)).ignore();
+  }
+
+  void _activate(ConvoyModel convoy) {
+    _allConvoys[convoy.groupId] = convoy;
+    _activeGroupId = convoy.groupId;
+    _rt.joinRoom(convoy.groupId);
+    SharedPreferences.getInstance().then((p) => p.setString(AppConstants.keyActiveGroupId, convoy.groupId)).ignore();
     _initCompassTracking();
-    _restoreActiveConvoySession();
+    if (_myUserId != null) startRealGpsTracking(_myUserId!).ignore();
+    notifyListeners();
   }
 
-  /// Real-time Hardware Magnetometer Compass Tracking (Mobile facing direction)
-  void _initCompassTracking() {
+  void _onConnectionChanged() => notifyListeners();
+
+  // --------------------------------------------------------- push events
+  void _onEvent(Map<String, dynamic> e) {
+    final type = e['type']?.toString();
+    if (type == 'BROADCAST') {
+      _systemBroadcastMessage = e['message']?.toString();
+      _broadcastClear?.cancel();
+      _broadcastClear = Timer(const Duration(seconds: 12), () {
+        _systemBroadcastMessage = null;
+        notifyListeners();
+      });
+      notifyListeners();
+      return;
+    }
+    if (type == 'FLEET') {
+      _applyFleet(e['convoys']);
+      return;
+    }
+    if (type == 'ERROR') {
+      _lastError = e['message']?.toString();
+      debugPrint('gateway error ${e['code']}: ${e['message']}');
+      if (e['code'] == 403 || e['code'] == 404) _dropActiveConvoyLocally();
+      notifyListeners();
+      return;
+    }
+
+    final gid = _activeGroupId;
+    if (gid == null) return;
+    final convoy = _allConvoys[gid];
+
+    switch (type) {
+      case 'SNAPSHOT':
+        if (e['convoy'] is Map) {
+          _allConvoys[gid] = ConvoyModel.fromJson(Map<String, dynamic>.from(e['convoy'] as Map));
+        }
+        break;
+      case 'RIDER_UPDATE':
+        if (convoy == null || e['rider'] is! Map) return;
+        final rider = RiderModel.fromJson(Map<String, dynamic>.from(e['rider'] as Map));
+        final riders = Map<String, RiderModel>.from(convoy.riders)..[rider.userId] = rider;
+        _allConvoys[gid] = convoy.copyWith(riders: riders);
+        break;
+      case 'RIDER_LEFT':
+        if (convoy == null) return;
+        final riders = Map<String, RiderModel>.from(convoy.riders)..remove(e['userId']?.toString());
+        _allConvoys[gid] = convoy.copyWith(riders: riders);
+        break;
+      case 'MESSAGE':
+        if (convoy == null || e['message'] is! Map) return;
+        final msg = GroupMessageModel.fromJson(Map<String, dynamic>.from(e['message'] as Map));
+        if (convoy.messages.any((m) => m.messageId == msg.messageId)) return;
+        final msgs = List<GroupMessageModel>.from(convoy.messages)..add(msg);
+        if (msgs.length > 300) msgs.removeRange(0, msgs.length - 300);
+        _allConvoys[gid] = convoy.copyWith(messages: msgs);
+        break;
+      case 'ALERT':
+        if (convoy == null || e['alert'] is! Map) return;
+        final alert = SosAlertModel.fromJson(Map<String, dynamic>.from(e['alert'] as Map));
+        final alerts = List<SosAlertModel>.from(convoy.activeAlerts.where((a) => a.alertId != alert.alertId))..add(alert);
+        _allConvoys[gid] = convoy.copyWith(activeAlerts: alerts);
+        break;
+      case 'ALERT_RESOLVED':
+        if (convoy == null) return;
+        _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != e['alertId']).toList());
+        break;
+      case 'STOPS':
+        if (convoy == null || e['stopPoints'] is! List) return;
+        final stops = (e['stopPoints'] as List).whereType<Map>().map((s) => StopPointModel.fromJson(Map<String, dynamic>.from(s))).toList();
+        _allConvoys[gid] = convoy.copyWith(stopPoints: stops);
+        break;
+      case 'WAIT_REQUESTS':
+        if (convoy == null || e['waitRequests'] is! Map) return;
+        final w = <String, int>{};
+        (e['waitRequests'] as Map).forEach((k, v) {
+          if (v is num) w[k.toString()] = v.toInt();
+        });
+        _allConvoys[gid] = convoy.copyWith(waitRequests: w);
+        break;
+      case 'CONFIG':
+        if (convoy == null) return;
+        _allConvoys[gid] = convoy.copyWith(
+          distanceThresholdMeters: (e['distanceThresholdMeters'] as num?)?.toDouble(),
+          stopThresholdSeconds: (e['stopThresholdSeconds'] as num?)?.toInt(),
+          voiceGuidanceEnabled: e['voiceGuidanceEnabled'] as bool?,
+        );
+        break;
+      case 'TRIP_STATUS':
+        if (convoy == null) return;
+        final status = e['tripStatus']?.toString() ?? convoy.tripStatus;
+        _allConvoys[gid] = convoy.copyWith(tripStatus: status);
+        if (status == 'ENDED') _onTripEnded(_allConvoys[gid]!);
+        break;
+      case 'DISSOLVED':
+        _dropActiveConvoyLocally();
+        break;
+      default:
+        return;
+    }
+    notifyListeners();
+  }
+
+  void _applyFleet(dynamic list) {
+    if (list is! List) return;
+    final seen = <String>{};
+    for (final c in list.whereType<Map>()) {
+      final convoy = ConvoyModel.fromJson(Map<String, dynamic>.from(c));
+      _allConvoys[convoy.groupId] = convoy;
+      seen.add(convoy.groupId);
+    }
+    _allConvoys.removeWhere((k, _) => !seen.contains(k) && k != _activeGroupId);
+    notifyListeners();
+  }
+
+  void _dropActiveConvoyLocally() {
+    final gid = _activeGroupId;
+    stopRealGpsTracking();
     _compassSub?.cancel();
-    try {
-      _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
-        if (event.heading != null) {
-          double h = event.heading!;
-          if (h < 0) h += 360.0;
-          _deviceCompassHeading = h;
-        }
-      });
-    } catch (e) {
-      debugPrint('Compass tracking note: $e');
+    _rt.leaveRoom();
+    if (gid != null) _allConvoys.remove(gid);
+    _activeGroupId = null;
+    SharedPreferences.getInstance().then((p) => p.remove(AppConstants.keyActiveGroupId)).ignore();
+    notifyListeners();
+  }
+
+  void _onTripEnded(ConvoyModel convoy) {
+    if (_myUserId != null && convoy.riders.containsKey(_myUserId)) {
+      _trips.saveTrip(buildTripHistory(convoy, userId: _myUserId), userId: _myUserId).ignore();
     }
+    stopRealGpsTracking();
+    _compassSub?.cancel();
+    _rt.leaveRoom();
+    _activeGroupId = null;
+    SharedPreferences.getInstance().then((p) => p.remove(AppConstants.keyActiveGroupId)).ignore();
   }
 
-  /// Automatically restore active convoy session and resume GPS tracking on launch
-  Future<void> _restoreActiveConvoySession() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedGroupId = prefs.getString(AppConstants.keyActiveGroupId);
-      final savedUserName = prefs.getString(AppConstants.keyUserName);
-      if (savedGroupId == null || savedGroupId.isEmpty) return;
-
-      _activeGroupId = savedGroupId;
-      _attachGroupListeners(savedGroupId);
-
-      final myUserId = savedUserName != null && savedUserName.isNotEmpty
-          ? 'usr_${savedUserName.toLowerCase().replaceAll(' ', '_')}'
-          : null;
-
-      // 1. Fetch group from Firebase Realtime Database
-      try {
-        final snap = await FirebaseDatabase.instance
-            .ref('groups/$savedGroupId')
-            .get()
-            .timeout(const Duration(seconds: 3));
-        if (snap.exists && snap.value is Map) {
-          final groupMap = Map<String, dynamic>.from(snap.value as Map);
-          final convoy = ConvoyModel.fromJson(groupMap);
-          if (convoy.tripStatus != 'ENDED') {
-            _allConvoys[savedGroupId] = convoy;
-            if (myUserId != null) {
-              startRealGpsTracking(myUserId).ignore();
-              _startOracleSync(savedGroupId, myUserId);
-              _startVoicePolling(savedGroupId);
-            }
-            notifyListeners();
-            return;
-          } else {
-            await prefs.remove(AppConstants.keyActiveGroupId);
-            _activeGroupId = null;
-            return;
-          }
-        }
-      } catch (e) {
-        debugPrint('Firebase restore session note: $e');
-      }
-
-      // 2. Fallback to Oracle Autonomous Database
-      try {
-        final oracleConvoy = await _oracleService.fetchConvoyByGroupId(savedGroupId);
-        if (oracleConvoy != null && oracleConvoy.tripStatus != 'ENDED') {
-          _allConvoys[savedGroupId] = oracleConvoy;
-          if (myUserId != null) {
-            startRealGpsTracking(myUserId).ignore();
-            _startOracleSync(savedGroupId, myUserId);
-            _startVoicePolling(savedGroupId);
-          }
-          notifyListeners();
-        } else if (oracleConvoy != null && oracleConvoy.tripStatus == 'ENDED') {
-          await prefs.remove(AppConstants.keyActiveGroupId);
-          _activeGroupId = null;
-        }
-      } catch (e) {
-        debugPrint('Oracle restore session note: $e');
-      }
-    } catch (e) {
-      debugPrint('Restore active convoy session error: $e');
-    }
-  }
-
-  /// Real-time Device Battery Telemetry Tracking
-  Future<void> _initBatteryTracking() async {
-    await _refreshBatteryLevel();
-    _batteryStateSub?.cancel();
-    _batteryStateSub = _battery.onBatteryStateChanged.listen((BatteryState state) async {
-      _isCharging = (state == BatteryState.charging || state == BatteryState.full);
-      try {
-        _currentBatteryLevel = await _battery.batteryLevel;
-      } catch (_) {}
-
-      if (_activeGroupId != null) {
-        final convoy = _allConvoys[_activeGroupId];
-        if (convoy != null) {
-          for (final entry in convoy.riders.entries) {
-            if (entry.value.role == 'LEAD' || convoy.riders.length == 1) {
-              updateRiderLocation(entry.value.copyWith(
-                batteryLevel: _currentBatteryLevel,
-                isCharging: _isCharging,
-              ));
-              break;
-            }
-          }
-        }
-      }
-      notifyListeners();
-    });
-  }
-
-  /// Refresh current device battery percentage and state
-  Future<void> _refreshBatteryLevel() async {
-    try {
-      _currentBatteryLevel = await _battery.batteryLevel;
-      final state = await _battery.batteryState;
-      _isCharging = (state == BatteryState.charging || state == BatteryState.full);
-    } catch (e) {
-      debugPrint('Battery query note: $e');
-    }
-  }
-
-  /// Initial load of active convoys from Oracle 26ai Autonomous Database
-  void _initOracleSync() {
-    _oracleService.fetchActiveConvoysFromOracle().then((list) {
-      for (final c in list) {
-        _allConvoys[c.groupId] = c;
-      }
-      notifyListeners();
-    }).catchError((e) {
-      debugPrint('Oracle initial convoys fetch note: $e');
-    });
-  }
-
-  /// Real-time Firebase Sync for all active groups (Admin Fleet Overview)
-  void _initFirebaseAndSync() {
-    try {
-      final db = FirebaseDatabase.instance;
-      _adminFleetSub = db.ref('groups').onValue.listen((event) {
-        final val = event.snapshot.value;
-        if (val is Map) {
-          val.forEach((k, v) {
-            if (v is Map) {
-              try {
-                final groupMap = Map<String, dynamic>.from(v);
-                final convoy = ConvoyModel.fromJson(groupMap);
-                final existing = _allConvoys[convoy.groupId];
-                if (existing != null) {
-                  final mergedRiders = Map<String, RiderModel>.from(existing.riders);
-                  for (final r in convoy.riders.entries) {
-                    if (!mergedRiders.containsKey(r.key) ||
-                        r.value.lastSeenEpochMs >= mergedRiders[r.key]!.lastSeenEpochMs) {
-                      mergedRiders[r.key] = r.value;
-                    }
-                  }
-                  _allConvoys[convoy.groupId] = convoy.copyWith(
-                    riders: mergedRiders,
-                    activeAlerts: existing.activeAlerts.isNotEmpty ? existing.activeAlerts : convoy.activeAlerts,
-                    messages: existing.messages.length >= convoy.messages.length ? existing.messages : convoy.messages,
-                  );
-                } else {
-                  _allConvoys[convoy.groupId] = convoy;
-                }
-              } catch (e) {
-                debugPrint('Error parsing group $k: $e');
-              }
-            }
-          });
-          notifyListeners();
-        }
-      });
-
-      // Listen for system-wide admin broadcast
-      db.ref('system_broadcast').onValue.listen((event) {
-        final val = event.snapshot.value;
-        if (val is Map) {
-          final msg = val['message']?.toString();
-          if (msg != null && msg.isNotEmpty) {
-            _systemBroadcastMessage = msg;
-            notifyListeners();
-            Future.delayed(const Duration(seconds: 12), () {
-              _systemBroadcastMessage = null;
-              notifyListeners();
-            });
-          }
-        }
-      });
-    } catch (e) {
-      debugPrint('Firebase Realtime Database init error: $e');
-    }
-  }
-
-  /// Get the current device GPS position (returns null if unavailable)
-  Future<Position?> _getCurrentPosition() async {
-    try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) return null;
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) return null;
-      }
-      if (permission == LocationPermission.deniedForever) return null;
-
-      // Try last known first (instant), fall back to current position
-      final lastKnown = await Geolocator.getLastKnownPosition();
-      if (lastKnown != null) return lastKnown;
-
-      return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.medium,
-          timeLimit: Duration(seconds: 2),
-        ),
-      );
-    } catch (e) {
-      debugPrint('GPS position error: $e');
-      return null;
-    }
-  }
-
-  /// Create a brand-new dynamic convoy with real GPS
+  // ------------------------------------------------------- create / join
   Future<ConvoyModel> createConvoy({
     required String name,
     required String creatorId,
@@ -307,110 +269,410 @@ class ConvoyService extends ChangeNotifier {
     int stopThresholdSeconds = 180,
     bool voiceGuidanceEnabled = true,
   }) async {
-    final uuid = const Uuid().v4().substring(0, 8).toUpperCase();
-    final joinCode = (100000 + math.Random().nextInt(900000)).toString();
-    final now = DateTime.now().millisecondsSinceEpoch;
-
-    // Get real GPS position from device
     final pos = await _getCurrentPosition();
-    final initialLat = pos?.latitude ?? 0.0;
-    final initialLng = pos?.longitude ?? 0.0;
-
     await _refreshBatteryLevel();
-    final newConvoy = ConvoyModel(
-      groupId: 'GRP-$uuid',
-      name: name.trim(),
-      joinCode: joinCode,
-      createdByUserId: creatorId,
-      createdByUserName: creatorName,
-      startLocationName: startPoint,
-      destinationName: destination,
-      destinationLat: destLat,
-      destinationLng: destLng,
-      tripStatus: 'STARTED',
-      createdAtEpochMs: now,
-      distanceThresholdMeters: distanceThresholdMeters,
-      stopThresholdSeconds: stopThresholdSeconds,
-      voiceGuidanceEnabled: voiceGuidanceEnabled,
-      routeBreadcrumbs: routeBreadcrumbs,
-      riders: {
-        creatorId: RiderModel(
-          userId: creatorId,
-          name: creatorName,
-          vehicleType: vehicleType,
-          lat: initialLat,
-          lng: initialLng,
-          speedKmh: 0.0,
-          heading: 0.0,
-          batteryLevel: _currentBatteryLevel,
-          isCharging: _isCharging,
-          role: 'LEAD',
-          lastSeenEpochMs: now,
-          phone: phone,
-          vehicleNo: vehicleNo,
-        ),
+    final res = await _api.post('/convoys', {
+      'name': name.trim(),
+      'startPoint': startPoint,
+      'destination': destination,
+      'destLat': destLat,
+      'destLng': destLng,
+      'distanceThresholdMeters': distanceThresholdMeters,
+      'stopThresholdSeconds': stopThresholdSeconds,
+      'voiceGuidanceEnabled': voiceGuidanceEnabled,
+      'routeBreadcrumbs': routeBreadcrumbs,
+      'rider': {
+        'lat': pos?.latitude ?? 0.0,
+        'lng': pos?.longitude ?? 0.0,
+        'vehicleType': vehicleType,
+        'vehicleNo': vehicleNo,
+        'phone': phone,
+        'batteryLevel': _currentBatteryLevel,
+        'isCharging': _isCharging,
       },
+    });
+    final convoy = ConvoyModel.fromJson(Map<String, dynamic>.from(res as Map));
+    _myUserId ??= creatorId;
+    _activate(convoy);
+    return convoy;
+  }
+
+  Future<ConvoyModel?> joinConvoyByCode({required String code, required RiderModel rider}) async {
+    _lastError = null;
+    try {
+      await _refreshBatteryLevel();
+      final res = await _api.post('/convoys/join', {
+        'code': code.trim().toUpperCase(),
+        'rider': {
+          'lat': rider.lat,
+          'lng': rider.lng,
+          'vehicleType': rider.vehicleType,
+          'vehicleNo': rider.vehicleNo,
+          'phone': rider.phone,
+          'batteryLevel': _currentBatteryLevel,
+          'isCharging': _isCharging,
+        },
+      });
+      final convoy = ConvoyModel.fromJson(Map<String, dynamic>.from(res as Map));
+      _myUserId ??= rider.userId;
+      _activate(convoy);
+      return convoy;
+    } on ApiException catch (e) {
+      _lastError = e.message;
+      notifyListeners();
+      return null;
+    } catch (e) {
+      _lastError = 'Could not join the convoy.';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// Leave the active convoy (saves the journey summary first).
+  Future<void> leaveActiveConvoy(String userId) async {
+    final gid = _activeGroupId;
+    if (gid == null) return;
+    final convoy = _allConvoys[gid];
+    if (convoy != null && convoy.riders.isNotEmpty) {
+      _trips.saveTrip(buildTripHistory(convoy, userId: userId), userId: userId).ignore();
+    }
+    stopRealGpsTracking();
+    _compassSub?.cancel();
+    _rt.leaveRoom();
+    _activeGroupId = null;
+    _allConvoys.remove(gid);
+    SharedPreferences.getInstance().then((p) => p.remove(AppConstants.keyActiveGroupId)).ignore();
+    notifyListeners();
+    try {
+      await _api.post('/convoys/$gid/leave');
+    } catch (e) {
+      debugPrint('leave note: $e');
+    }
+  }
+
+  // ---------------------------------------------------------- telemetry
+  Future<Position?> _getCurrentPosition() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return null;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return null;
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null && DateTime.now().difference(last.timestamp).inMinutes < 2) return last;
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 4)),
+      );
+    } catch (e) {
+      debugPrint('GPS position note: $e');
+      return null;
+    }
+  }
+
+  LocationSettings _settingsFor({required bool idle}) {
+    final filter = idle ? AppConfig.gpsDistanceFilterIdle : AppConfig.gpsDistanceFilterMoving;
+    final accuracy = idle ? LocationAccuracy.medium : LocationAccuracy.high;
+    if (!kIsWeb && Platform.isAndroid) {
+      return AndroidSettings(
+        accuracy: accuracy,
+        distanceFilter: filter,
+        intervalDuration: idle ? const Duration(seconds: 20) : const Duration(seconds: 2),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'CoRoute convoy active',
+          notificationText: 'Sharing your position with your convoy.',
+          enableWakeLock: false,
+          setOngoing: true,
+        ),
+      );
+    }
+    return LocationSettings(accuracy: accuracy, distanceFilter: filter);
+  }
+
+  /// Starts adaptive GPS tracking: fine + frequent while moving, coarse + sparse when stopped.
+  Future<bool> startRealGpsTracking(String userId) async {
+    _myUserId = userId;
+    if (!await Geolocator.isLocationServiceEnabled()) return false;
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
+    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return false;
+
+    _gpsIdleProfile = false;
+    _stationarySince = null;
+    _subscribeGps();
+    _isRealGpsActive = true;
+
+    _idleHeartbeat?.cancel();
+    _idleHeartbeat = Timer.periodic(AppConfig.telemetryIdleInterval, (_) {
+      // While stopped the position stream is silent; a light heartbeat keeps "last seen" fresh.
+      final me = activeConvoy?.riders[_myUserId];
+      if (me != null && DateTime.now().difference(_lastTelemetryPush) >= AppConfig.telemetryIdleInterval) {
+        _pushTelemetry(me.copyWith(speedKmh: 0));
+      }
+    });
+    notifyListeners();
+    return true;
+  }
+
+  void _subscribeGps() {
+    _gpsSub?.cancel();
+    _gpsSub = Geolocator.getPositionStream(locationSettings: _settingsFor(idle: _gpsIdleProfile)).listen(_onPosition, onError: (e) {
+      debugPrint('GPS stream note: $e');
+    });
+  }
+
+  void _onPosition(Position position) {
+    final userId = _myUserId;
+    final convoy = activeConvoy;
+    if (userId == null || convoy == null) return;
+    final current = convoy.riders[userId];
+
+    final speedKmh = (position.speed.isFinite ? position.speed * 3.6 : 0.0).clamp(0.0, 300.0).toDouble();
+    final gpsHeading = position.heading.isFinite ? position.heading.clamp(0.0, 360.0).toDouble() : 0.0;
+    final isMoving = speedKmh >= 3.0;
+
+    // Adaptive power profile.
+    if (isMoving) {
+      _stationarySince = null;
+      if (_gpsIdleProfile) {
+        _gpsIdleProfile = false;
+        _subscribeGps();
+      }
+    } else {
+      _stationarySince ??= DateTime.now();
+      if (!_gpsIdleProfile && DateTime.now().difference(_stationarySince!).inMinutes >= 3) {
+        _gpsIdleProfile = true;
+        _subscribeGps();
+      }
+    }
+
+    // Sensor fusion: GPS course when moving, magnetometer when (nearly) stopped.
+    double fusedHeading = current?.heading ?? 0.0;
+    if (speedKmh >= 10.0 && gpsHeading > 0) {
+      fusedHeading = gpsHeading;
+    } else if (_deviceCompassHeading != null) {
+      fusedHeading = _deviceCompassHeading!;
+    } else if (gpsHeading > 0) {
+      fusedHeading = gpsHeading;
+    }
+
+    final wasStopped = current?.statusReason.isNotEmpty == true;
+    final base = current ??
+        RiderModel(userId: userId, name: 'Rider', lat: position.latitude, lng: position.longitude, lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch);
+    final updated = base.copyWith(
+      lat: position.latitude,
+      lng: position.longitude,
+      speedKmh: speedKmh,
+      heading: fusedHeading,
+      batteryLevel: _currentBatteryLevel,
+      isCharging: _isCharging,
+      lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
+      statusReason: (isMoving && wasStopped) ? '' : base.statusReason,
+      statusMessage: (isMoving && wasStopped) ? '' : base.statusMessage,
+      stoppedSince: isMoving ? 0 : (base.stoppedSince != 0 ? base.stoppedSince : DateTime.now().millisecondsSinceEpoch),
     );
 
-    _allConvoys[newConvoy.groupId] = newConvoy;
-    _activeGroupId = newConvoy.groupId;
+    // Local UI updates immediately; the network push is throttled.
+    _setMyRiderLocally(updated);
+    final since = DateTime.now().difference(_lastTelemetryPush);
+    final movedFar = current == null ||
+        Geolocator.distanceBetween(current.lat, current.lng, position.latitude, position.longitude) > 40;
+    if (since >= AppConfig.telemetryMinInterval || movedFar || (isMoving && wasStopped)) {
+      _pushTelemetry(updated);
+    }
+  }
 
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(AppConstants.keyActiveGroupId, newConvoy.groupId);
-      await prefs.setString(AppConstants.keyUserName, creatorName);
-    } catch (_) {}
-
-    // Push to Oracle 26ai Autonomous Database
-    await _oracleService.saveOrUpdateConvoy(newConvoy);
-
-    // Push to Firebase Realtime Database
-    _syncConvoyToFirebase(newConvoy);
-    _attachGroupListeners(newConvoy.groupId);
-
-    // Auto-start real GPS tracking for creator
-    await startRealGpsTracking(creatorId);
-
-    // Start background Oracle cloud sync
-    _startOracleSync(newConvoy.groupId, creatorId);
-
-    // Start high-cadence Intercom voice polling via Oracle 26ai Cloud SODA
-    _startVoicePolling(newConvoy.groupId);
-
+  void _setMyRiderLocally(RiderModel rider) {
+    final gid = _activeGroupId;
+    final convoy = gid != null ? _allConvoys[gid] : null;
+    if (convoy == null) return;
+    _allConvoys[gid!] = convoy.copyWith(riders: Map<String, RiderModel>.from(convoy.riders)..[rider.userId] = rider);
     notifyListeners();
-    return newConvoy;
   }
 
-  Future<void> _persistActiveSession(String groupId, String userName) async {
+  void _pushTelemetry(RiderModel r) {
+    _lastTelemetryPush = DateTime.now();
+    _rt.send({
+      'type': 'TELEMETRY',
+      'lat': r.lat,
+      'lng': r.lng,
+      'speedKmh': double.parse(r.speedKmh.toStringAsFixed(1)),
+      'heading': double.parse(r.heading.toStringAsFixed(0)),
+      'batteryLevel': _currentBatteryLevel,
+      'isCharging': _isCharging,
+      'statusReason': r.statusReason,
+      'statusMessage': r.statusMessage,
+      'stoppedSince': r.stoppedSince,
+    });
+  }
+
+  void stopRealGpsTracking() {
+    _gpsSub?.cancel();
+    _gpsSub = null;
+    _idleHeartbeat?.cancel();
+    _isRealGpsActive = false;
+    notifyListeners();
+  }
+
+  /// Kept for callers that patch the local rider (status, co-rider…); pushes the change.
+  void updateRiderLocation(RiderModel updatedRider) {
+    _setMyRiderLocally(updatedRider);
+    if (updatedRider.userId == _myUserId) _pushTelemetry(updatedRider);
+  }
+
+  // ------------------------------------------------------------ compass
+  void _initCompassTracking() {
+    _compassSub?.cancel();
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(AppConstants.keyActiveGroupId, groupId);
-      if (userName.isNotEmpty) {
-        await prefs.setString(AppConstants.keyUserName, userName);
-      }
+      _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
+        if (event.heading == null) return;
+        var h = event.heading!;
+        if (h < 0) h += 360.0;
+        _deviceCompassHeading = h;
+      });
+    } catch (e) {
+      debugPrint('Compass note: $e');
+    }
+  }
+
+  // ------------------------------------------------------------ battery
+  Future<void> _initBatteryTracking() async {
+    await _refreshBatteryLevel();
+    _batteryStateSub?.cancel();
+    _batteryStateSub = _battery.onBatteryStateChanged.listen((state) async {
+      _isCharging = state == BatteryState.charging || state == BatteryState.full;
+      await _refreshBatteryLevel();
+      notifyListeners();
+    });
+    _batteryRefresh?.cancel();
+    _batteryRefresh = Timer.periodic(const Duration(seconds: 60), (_) => _refreshBatteryLevel());
+  }
+
+  Future<void> _refreshBatteryLevel() async {
+    try {
+      _currentBatteryLevel = await _battery.batteryLevel;
+      final state = await _battery.batteryState;
+      _isCharging = state == BatteryState.charging || state == BatteryState.full;
     } catch (_) {}
   }
 
-  /// Construct comprehensive TripHistoryModel from current convoy telemetry
+  // --------------------------------------------------------------- actions
+  void sendGroupMessage({
+    required String senderId,
+    required String senderName,
+    required String text,
+    bool isQuickCard = false,
+    String cardType = 'CUSTOM',
+  }) {
+    if (_activeGroupId == null || text.trim().isEmpty) return;
+    _rt.send({'type': 'CHAT', 'text': text.trim(), 'isQuickCard': isQuickCard, 'cardType': cardType});
+  }
+
+  void requestWait(String requesterName) {
+    if (_activeGroupId == null) return;
+    _rt.send({'type': 'WAIT'});
+  }
+
+  void addStopPoint({required String name, required double lat, required double lng, String category = 'REST'}) {
+    if (_activeGroupId == null) return;
+    _rt.send({'type': 'STOP_ADD', 'name': name, 'lat': lat, 'lng': lng, 'category': category});
+  }
+
+  void toggleStopVisited(String stopId, bool isVisited) {
+    if (_activeGroupId == null) return;
+    _rt.send({'type': 'STOP_VISITED', 'stopId': stopId, 'isVisited': isVisited});
+  }
+
+  void updateTripState(String state) {
+    if (_activeGroupId == null) return;
+    _rt.send({'type': 'TRIP_STATUS', 'status': state});
+  }
+
+  void updateStatusReason({required String userId, required String reason, String message = ''}) {
+    final convoy = activeConvoy;
+    final rider = convoy?.riders[userId];
+    if (rider == null) return;
+    final stoppedSince = reason.isEmpty ? 0 : DateTime.now().millisecondsSinceEpoch;
+    _setMyRiderLocally(rider.copyWith(statusReason: reason, statusMessage: message, stoppedSince: stoppedSince));
+    _rt.send({'type': 'STATUS', 'statusReason': reason, 'statusMessage': message, 'stoppedSince': stoppedSince});
+  }
+
+  void setCoRiderDriver(String riderId, String driverId) {
+    final convoy = activeConvoy;
+    final rider = convoy?.riders[riderId];
+    if (rider == null) return;
+    _setMyRiderLocally(rider.copyWith(isCoRiding: driverId.isNotEmpty, ridingWithUserId: driverId));
+    _rt.send({'type': 'CORIDER', 'ridingWithUserId': driverId});
+  }
+
+  void updateGroupConfig({double? distanceThresholdMeters, int? stopThresholdSeconds, bool? voiceGuidanceEnabled}) {
+    final payload = <String, dynamic>{'type': 'CONFIG'};
+    if (distanceThresholdMeters != null) payload['distanceThresholdMeters'] = distanceThresholdMeters;
+    if (stopThresholdSeconds != null) payload['stopThresholdSeconds'] = stopThresholdSeconds;
+    if (voiceGuidanceEnabled != null) payload['voiceGuidanceEnabled'] = voiceGuidanceEnabled;
+    _rt.send(payload);
+  }
+
+  void triggerSosAlert({required String userId, required String userName, required double lat, required double lng, String type = 'EMERGENCY'}) {
+    if (_activeGroupId == null) return;
+    _rt.send({'type': 'SOS', 'lat': lat, 'lng': lng, 'alertType': type});
+  }
+
+  void resolveSosAlert(String alertId) {
+    final gid = _activeGroupId;
+    if (gid == null) return;
+    final convoy = _allConvoys[gid];
+    if (convoy != null) {
+      _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != alertId).toList());
+      notifyListeners();
+    }
+    _rt.send({'type': 'SOS_RESOLVE', 'alertId': alertId});
+  }
+
+  // ------------------------------------------------------------------ admin
+  /// Master admin: live fleet overview over the same socket (read-only, no audio).
+  void startAdminFleetWatch() {
+    _adminWatching = true;
+    _rt.send({'type': 'ADMIN_SUBSCRIBE'});
+    _api.get('/admin/fleet').then((res) {
+      if (res is Map) _applyFleet(res['convoys']);
+    }).catchError((e) => debugPrint('fleet note: $e'));
+  }
+
+  bool get isAdminWatching => _adminWatching;
+
+  Future<void> adminDissolveConvoy(String groupId) async {
+    _allConvoys.remove(groupId);
+    if (_activeGroupId == groupId) _dropActiveConvoyLocally();
+    notifyListeners();
+    try {
+      await _api.delete('/admin/convoys/$groupId');
+    } catch (e) {
+      debugPrint('dissolve note: $e');
+    }
+  }
+
+  Future<void> adminBroadcastSafetyAlert(String message) async {
+    try {
+      await _api.post('/admin/broadcast', {'message': message});
+    } catch (e) {
+      debugPrint('broadcast note: $e');
+    }
+  }
+
+  // ----------------------------------------------------------- trip summary
   TripHistoryModel buildTripHistory(ConvoyModel convoy, {String? userId}) {
     final now = DateTime.now().millisecondsSinceEpoch;
-    final allRiders = convoy.riders.values.toList();
-    double topSpeed = 0.0;
-    double totalSpeed = 0.0;
-    int speedCount = 0;
-    for (final r in allRiders) {
+    final riders = convoy.riders.values.toList();
+    double topSpeed = 0.0, totalSpeed = 0.0;
+    for (final r in riders) {
       if (r.speedKmh > topSpeed) topSpeed = r.speedKmh;
       totalSpeed += r.speedKmh;
-      speedCount++;
     }
-    final avgSpeed = speedCount > 0 ? totalSpeed / speedCount : 0.0;
+    final avgSpeed = riders.isNotEmpty ? totalSpeed / riders.length : 0.0;
     final durationMs = math.max(60000, now - convoy.createdAtEpochMs);
-    final durationHours = durationMs / 3600000.0;
-    final estimatedDistanceKm = avgSpeed * durationHours;
-    final visitedStops = convoy.stopPoints.where((s) => s.isVisited).length;
+    final estimatedDistanceKm = avgSpeed * (durationMs / 3600000.0);
 
     return TripHistoryModel(
-      tripId: 'TRIP-${convoy.groupId.replaceAll('GRP-', '')}-$now',
+      tripId: 'TRIP-${convoy.groupId.replaceAll('GRP-', '')}-${userId ?? convoy.createdByUserId}',
       tripName: convoy.name,
       startLocationName: convoy.startLocationName.isNotEmpty ? convoy.startLocationName : 'Convoy Start',
       destinationName: convoy.destinationName.isNotEmpty ? convoy.destinationName : 'Final Waypoint',
@@ -420,957 +682,25 @@ class ConvoyService extends ChangeNotifier {
       topSpeedKmh: double.parse(topSpeed.toStringAsFixed(1)),
       avgSpeedKmh: double.parse(avgSpeed.toStringAsFixed(1)),
       riderCount: convoy.riders.length,
-      stopCount: visitedStops,
-      breadcrumbTrail: allRiders.map((r) => TripBreadcrumbPoint(
-        lat: r.lat,
-        lng: r.lng,
-        speedKmh: r.speedKmh,
-        heading: r.heading,
-        timestamp: r.lastSeenEpochMs,
-      )).toList(),
+      stopCount: convoy.stopPoints.where((s) => s.isVisited).length,
+      breadcrumbTrail: riders
+          .map((r) => TripBreadcrumbPoint(lat: r.lat, lng: r.lng, speedKmh: r.speedKmh, heading: r.heading, timestamp: r.lastSeenEpochMs))
+          .toList(),
       userId: userId ?? convoy.createdByUserId,
       createdByUserName: convoy.createdByUserName,
     );
   }
 
-  void _persistTripHistoryToCloud(TripHistoryModel trip, String userId) {
-    try {
-      final cleanUid = 'usr_${userId.toLowerCase().replaceAll('usr_', '').replaceAll(' ', '_')}';
-      final tripData = trip.toJson();
-      FirebaseDatabase.instance.ref('users/$cleanUid/trips/${trip.tripId}').set(tripData).timeout(const Duration(seconds: 2)).catchError((_) {});
-      FirebaseDatabase.instance.ref('trips/${trip.tripId}').set(tripData).timeout(const Duration(seconds: 2)).catchError((_) {});
-      _oracleService.saveTripToOracle(trip).catchError((_) => false);
-    } catch (e) {
-      debugPrint('Cloud trip persist note: $e');
-    }
-  }
-
-  /// Join an existing convoy using its 6-digit room code dynamically
-  Future<ConvoyModel?> joinConvoyByCode({
-    required String code,
-    required RiderModel rider,
-  }) async {
-    final clean = code.trim().toUpperCase();
-    await _refreshBatteryLevel();
-    final riderWithBattery = rider.copyWith(
-      batteryLevel: _currentBatteryLevel,
-      isCharging: _isCharging,
-    );
-
-    // 1. Check local in-memory convoys (already synced from Oracle or memory)
-    for (final c in _allConvoys.values) {
-      if (c.joinCode.trim().toUpperCase() == clean) {
-        final updatedRiders = Map<String, RiderModel>.from(c.riders);
-        updatedRiders[riderWithBattery.userId] = riderWithBattery;
-        final updated = c.copyWith(riders: updatedRiders);
-        _allConvoys[c.groupId] = updated;
-        _activeGroupId = c.groupId;
-        _persistActiveSession(c.groupId, rider.name).ignore();
-
-        // Persist joiner into Oracle 26ai Autonomous Database
-        await _oracleService.saveOrUpdateConvoy(updated);
-
-        _syncRiderLocationToFirebase(c.groupId, riderWithBattery);
-        _attachGroupListeners(c.groupId);
-
-        // Auto-start real GPS tracking for joining rider
-        await startRealGpsTracking(riderWithBattery.userId);
-
-        // Start bidirectional Oracle cloud sync
-        _startOracleSync(c.groupId, riderWithBattery.userId);
-
-        // Start high-cadence Intercom voice polling via Oracle 26ai Cloud SODA
-        _startVoicePolling(c.groupId);
-
-        notifyListeners();
-        return updated;
-      }
-    }
-
-    // 2. Query Oracle 26ai Autonomous Database directly
-    try {
-      final oracleConvoy = await _oracleService.fetchConvoyByCode(clean);
-      if (oracleConvoy != null) {
-        final updatedRiders = Map<String, RiderModel>.from(oracleConvoy.riders);
-        updatedRiders[riderWithBattery.userId] = riderWithBattery;
-        final updated = oracleConvoy.copyWith(riders: updatedRiders);
-
-        _allConvoys[updated.groupId] = updated;
-        _activeGroupId = updated.groupId;
-        _persistActiveSession(updated.groupId, rider.name).ignore();
-
-        // Persist joiner into Oracle 26ai Autonomous Database
-        await _oracleService.saveOrUpdateConvoy(updated);
-
-        _syncRiderLocationToFirebase(updated.groupId, riderWithBattery);
-        _attachGroupListeners(updated.groupId);
-
-        // Auto-start real GPS tracking for joining rider
-        await startRealGpsTracking(riderWithBattery.userId);
-
-        // Start bidirectional Oracle cloud sync
-        _startOracleSync(updated.groupId, riderWithBattery.userId);
-
-        // Start high-cadence Intercom voice polling via Oracle 26ai Cloud SODA
-        _startVoicePolling(updated.groupId);
-
-        notifyListeners();
-        return updated;
-      }
-    } catch (e) {
-      debugPrint('Oracle remote join query error: $e');
-    }
-
-    // 3. Fallback to Firebase Realtime Database if available
-    try {
-      final db = FirebaseDatabase.instance;
-      final joinSnapshot = await db.ref('joinCodes/$clean').get().timeout(const Duration(milliseconds: 600));
-      if (joinSnapshot.exists && joinSnapshot.value != null) {
-        final targetGroupId = joinSnapshot.value.toString();
-        final groupSnapshot = await db.ref('groups/$targetGroupId').get().timeout(const Duration(milliseconds: 600));
-        if (groupSnapshot.exists && groupSnapshot.value != null) {
-          final groupMap = Map<String, dynamic>.from(groupSnapshot.value as Map);
-          final loadedConvoy = ConvoyModel.fromJson(groupMap);
-
-          final updatedRiders = Map<String, RiderModel>.from(loadedConvoy.riders);
-          updatedRiders[riderWithBattery.userId] = riderWithBattery;
-          final updated = loadedConvoy.copyWith(riders: updatedRiders);
-
-          _allConvoys[updated.groupId] = updated;
-          _activeGroupId = updated.groupId;
-          _persistActiveSession(updated.groupId, rider.name).ignore();
-
-          await _oracleService.saveOrUpdateConvoy(updated);
-          _syncRiderLocationToFirebase(updated.groupId, riderWithBattery);
-          _attachGroupListeners(updated.groupId);
-
-          // Auto-start real GPS tracking for joining rider
-          await startRealGpsTracking(riderWithBattery.userId);
-
-          // Start bidirectional Oracle cloud sync
-          _startOracleSync(updated.groupId, riderWithBattery.userId);
-
-          // Start high-cadence Intercom voice polling via Oracle 26ai Cloud SODA
-          _startVoicePolling(updated.groupId);
-
-          notifyListeners();
-          return updated;
-        }
-      }
-    } catch (e) {
-      debugPrint('Firebase remote join query error: $e');
-    }
-
-    return null;
-  }
-
-  /// Start bidirectional background sync with Oracle 26ai Cloud (3-second cadence)
-  void _startOracleSync(String groupId, String userId) {
-    _oracleSyncTimer?.cancel();
-    _oracleSyncTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
-      if (_activeGroupId != groupId) {
-        timer.cancel();
-        return;
-      }
-      if (_isSyncingWithOracle) return;
-      _isSyncingWithOracle = true;
-
-      try {
-        final currentConvoy = _allConvoys[groupId];
-        if (currentConvoy == null) return;
-
-        await _refreshBatteryLevel();
-
-        // 1. Fetch remote convoy from Oracle Autonomous Database
-        final remote = await _oracleService.fetchConvoyByGroupId(groupId);
-        if (remote != null) {
-          // Keep all existing known riders to prevent disappearance / flicker
-          final mergedRiders = Map<String, RiderModel>.from(currentConvoy.riders);
-          for (final entry in remote.riders.entries) {
-            if (!mergedRiders.containsKey(entry.key)) {
-              mergedRiders[entry.key] = entry.value;
-            } else {
-              final localR = mergedRiders[entry.key]!;
-              if (entry.value.lastSeenEpochMs > localR.lastSeenEpochMs) {
-                mergedRiders[entry.key] = entry.value;
-              }
-            }
-          }
-          // Preserve local user's most recent sensor telemetry & battery
-          final localRider = currentConvoy.riders[userId];
-          if (localRider != null) {
-            mergedRiders[userId] = localRider.copyWith(
-              batteryLevel: _currentBatteryLevel,
-              isCharging: _isCharging,
-            );
-          }
-
-          // Filter remote alerts: ignore any alert marked resolved or in local resolved set
-          final validRemoteAlerts = remote.activeAlerts
-              .where((a) => !a.resolved && !_resolvedAlertIds.contains(a.alertId))
-              .toList();
-
-          // Also keep any active alert raised locally by this user if not yet on remote
-          final localUnsyncedAlerts = currentConvoy.activeAlerts
-              .where((a) => a.userId == userId && !a.resolved && !_resolvedAlertIds.contains(a.alertId))
-              .toList();
-
-          final alertMap = <String, SosAlertModel>{};
-          for (final a in validRemoteAlerts) {
-            alertMap[a.alertId] = a;
-          }
-          for (final a in localUnsyncedAlerts) {
-            alertMap[a.alertId] = a;
-          }
-
-          final updated = currentConvoy.copyWith(
-            riders: mergedRiders,
-            activeAlerts: alertMap.values.toList(),
-            messages: remote.messages.length > currentConvoy.messages.length ? remote.messages : currentConvoy.messages,
-            stopPoints: remote.stopPoints.isNotEmpty ? remote.stopPoints : currentConvoy.stopPoints,
-          );
-
-          _allConvoys[groupId] = updated;
-
-          // Push merged convoy state to Oracle
-          await _oracleService.saveOrUpdateConvoy(updated);
-
-          notifyListeners();
-        } else {
-          // If remote not found yet, push local convoy
-          await _oracleService.saveOrUpdateConvoy(currentConvoy);
-        }
-      } catch (e) {
-        debugPrint('Oracle sync loop error: $e');
-      } finally {
-        _isSyncingWithOracle = false;
-      }
-    });
-  }
-
-  /// Leave or Conclude active group session
-  void leaveActiveConvoy(String userId) {
-    if (_activeGroupId == null) return;
-    final gid = _activeGroupId!;
-    _oracleSyncTimer?.cancel();
-    _voicePollTimer?.cancel();
-    stopRealGpsTracking();
-
-    final convoy = _allConvoys[gid];
-    if (convoy != null) {
-      // Save journey history for the leaving rider before departing
-      if (convoy.riders.isNotEmpty) {
-        final tripHistory = buildTripHistory(convoy, userId: userId);
-        _persistTripHistoryToCloud(tripHistory, userId);
-      }
-
-      final updatedRiders = Map<String, RiderModel>.from(convoy.riders)..remove(userId);
-      final updated = convoy.copyWith(riders: updatedRiders);
-      _allConvoys[gid] = updated;
-      _oracleService.saveOrUpdateConvoy(updated);
-    }
-
-    // Clear active session from preferences
-    SharedPreferences.getInstance().then((p) => p.remove(AppConstants.keyActiveGroupId)).ignore();
-
-    try {
-      FirebaseDatabase.instance
-          .ref('groups/$gid/riders/$userId')
-          .remove()
-          .timeout(const Duration(milliseconds: 500))
-          .catchError((_) {});
-      // Note: We deliberately do NOT remove 'locations/$userId' so last captured coordinates remain accessible
-    } catch (_) {}
-    _detachGroupListeners();
-    _activeGroupId = null;
-    notifyListeners();
-  }
-
-  /// Start Real GPS Tracking from device sensors
-  Future<bool> startRealGpsTracking(String userId) async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      return false;
-    }
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        return false;
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      return false;
-    }
-
-    _gpsPositionSub?.cancel();
-    _isRealGpsActive = true;
-
-    _gpsPositionSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 3, // Update every 3 meters of movement
-      ),
-    ).listen((Position position) {
-      if (_activeGroupId == null) return;
-      final convoy = _allConvoys[_activeGroupId];
-      if (convoy == null) return;
-      final currentRider = convoy.riders[userId];
-
-      final speedKmh = (position.speed * 3.6).clamp(0.0, 200.0);
-      final heading = position.heading.clamp(0.0, 360.0);
-
-      final wasStopped = (currentRider?.statusReason.isNotEmpty == true);
-      final isNowMoving = speedKmh >= 3.0;
-
-      // Sensor fusion: If moving >= 10 km/h, use GPS trajectory heading.
-      // If stationary or moving slowly, use mobile physical facing direction from compass.
-      double fusedHeading = currentRider?.heading ?? 0.0;
-      if (speedKmh >= 10.0 && heading > 0) {
-        fusedHeading = heading;
-      } else if (_deviceCompassHeading != null) {
-        fusedHeading = _deviceCompassHeading!;
-      } else if (heading > 0) {
-        fusedHeading = heading;
-      }
-
-      final updated = (currentRider ??
-              RiderModel(
-                userId: userId,
-                name: 'Rider',
-                lat: position.latitude,
-                lng: position.longitude,
-                batteryLevel: _currentBatteryLevel,
-                isCharging: _isCharging,
-                lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
-              ))
-          .copyWith(
-        lat: position.latitude,
-        lng: position.longitude,
-        speedKmh: speedKmh,
-        heading: fusedHeading,
-        batteryLevel: _currentBatteryLevel,
-        isCharging: _isCharging,
-        lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
-        statusReason: (isNowMoving && wasStopped) ? '' : (currentRider?.statusReason ?? ''),
-        statusMessage: (isNowMoving && wasStopped) ? '' : (currentRider?.statusMessage ?? ''),
-        stoppedSince: isNowMoving
-            ? 0
-            : ((currentRider?.stoppedSince ?? 0) != 0
-                ? currentRider!.stoppedSince
-                : DateTime.now().millisecondsSinceEpoch),
-      );
-
-      updateRiderLocation(updated);
-    });
-
-    notifyListeners();
-    return true;
-  }
-
-  void stopRealGpsTracking() {
-    _gpsPositionSub?.cancel();
-    _isRealGpsActive = false;
-    notifyListeners();
-  }
-
-  /// Send chat message or quick status broadcast card
-  void sendGroupMessage({
-    required String senderId,
-    required String senderName,
-    required String text,
-    bool isQuickCard = false,
-    String cardType = 'CUSTOM',
-  }) {
-    if (_activeGroupId == null) return;
-    final convoy = _allConvoys[_activeGroupId]!;
-    final msg = GroupMessageModel(
-      messageId: 'MSG-${const Uuid().v4().substring(0, 8)}',
-      senderId: senderId,
-      senderName: senderName,
-      text: text,
-      timestamp: DateTime.now().millisecondsSinceEpoch,
-      isQuickCard: isQuickCard,
-      cardType: cardType,
-    );
-
-    final updatedMessages = List<GroupMessageModel>.from(convoy.messages)..add(msg);
-    _allConvoys[_activeGroupId!] = convoy.copyWith(messages: updatedMessages);
-    _oracleService.saveOrUpdateConvoy(_allConvoys[_activeGroupId!]!);
-
-    try {
-      FirebaseDatabase.instance
-          .ref('groups/$_activeGroupId/messages/${msg.messageId}')
-          .set(msg.toJson())
-          .timeout(const Duration(milliseconds: 500))
-          .catchError((_) {});
-    } catch (_) {}
-
-    notifyListeners();
-  }
-
-  /// Request 2-Minute Pull-Over Wait Timer across convoy
-  void requestWait(String requesterName) {
-    if (_activeGroupId == null) return;
-    final convoy = _allConvoys[_activeGroupId]!;
-    final now = DateTime.now().millisecondsSinceEpoch;
-
-    final updatedWait = Map<String, int>.from(convoy.waitRequests);
-    updatedWait[requesterName] = now;
-    _allConvoys[_activeGroupId!] = convoy.copyWith(waitRequests: updatedWait);
-
-    try {
-      FirebaseDatabase.instance
-          .ref('groups/$_activeGroupId/waitRequests/$requesterName')
-          .set(now)
-          .timeout(const Duration(milliseconds: 500))
-          .catchError((_) {});
-    } catch (_) {}
-
-    sendGroupMessage(
-      senderId: 'SYSTEM',
-      senderName: requesterName,
-      text: '⏱️ Requested a 2-minute pull-over stop. Please regroup safely.',
-      isQuickCard: true,
-      cardType: 'WAIT_2MIN',
-    );
-
-    notifyListeners();
-  }
-
-  /// Add a planned route stop / POI checkpoint
-  void addStopPoint({
-    required String name,
-    required double lat,
-    required double lng,
-    String category = 'REST',
-  }) {
-    if (_activeGroupId == null) return;
-    final convoy = _allConvoys[_activeGroupId]!;
-    final stop = StopPointModel(
-      stopId: 'STOP-${const Uuid().v4().substring(0, 6)}',
-      name: name,
-      lat: lat,
-      lng: lng,
-      orderIndex: convoy.stopPoints.length + 1,
-      category: category,
-    );
-
-    final updatedStops = List<StopPointModel>.from(convoy.stopPoints)..add(stop);
-    _allConvoys[_activeGroupId!] = convoy.copyWith(stopPoints: updatedStops);
-
-    try {
-      FirebaseDatabase.instance
-          .ref('groups/$_activeGroupId/stopPoints/${stop.stopId}')
-          .set(stop.toJson())
-          .timeout(const Duration(milliseconds: 500))
-          .catchError((_) {});
-    } catch (_) {}
-
-    notifyListeners();
-  }
-
-  /// Toggle stop point visited state
-  void toggleStopVisited(String stopId, bool isVisited) {
-    if (_activeGroupId == null) return;
-    final convoy = _allConvoys[_activeGroupId]!;
-    final updatedStops = convoy.stopPoints.map((s) {
-      if (s.stopId == stopId) {
-        return s.copyWith(isVisited: isVisited);
-      }
-      return s;
-    }).toList();
-
-    _allConvoys[_activeGroupId!] = convoy.copyWith(stopPoints: updatedStops);
-
-    try {
-      FirebaseDatabase.instance
-          .ref('groups/$_activeGroupId/stopPoints/$stopId/isVisited')
-          .set(isVisited)
-          .timeout(const Duration(milliseconds: 500))
-          .catchError((_) {});
-    } catch (_) {}
-
-    notifyListeners();
-  }
-
-  /// Update trip lifecycle state ('STARTED', 'PAUSED', 'ENDED')
-  void updateTripState(String state) {
-    if (_activeGroupId == null) return;
-    final convoy = _allConvoys[_activeGroupId]!;
-    _allConvoys[_activeGroupId!] = convoy.copyWith(tripStatus: state);
-    _oracleService.saveOrUpdateConvoy(_allConvoys[_activeGroupId!]!);
-
-    try {
-      FirebaseDatabase.instance
-          .ref('groups/$_activeGroupId/tripStatus')
-          .set(state)
-          .timeout(const Duration(milliseconds: 500))
-          .catchError((_) {});
-    } catch (_) {}
-
-    // Stop GPS tracking and save journey when trip ends
-    if (state == 'ENDED') {
-      final tripHistory = buildTripHistory(convoy);
-      _persistTripHistoryToCloud(tripHistory, convoy.createdByUserId);
-      SharedPreferences.getInstance().then((p) => p.remove(AppConstants.keyActiveGroupId)).ignore();
-      stopRealGpsTracking();
-    }
-
-    notifyListeners();
-  }
-
-  /// Set rider stopped status reason (Fuel, Rest, Mechanical, etc.)
-  void updateStatusReason({
-    required String userId,
-    required String reason,
-    String message = '',
-  }) {
-    if (_activeGroupId == null) return;
-    final convoy = _allConvoys[_activeGroupId]!;
-    final rider = convoy.riders[userId];
-    if (rider == null) return;
-
-    final updated = rider.copyWith(
-      statusReason: reason,
-      statusMessage: message,
-      stoppedSince: reason.isEmpty ? 0 : DateTime.now().millisecondsSinceEpoch,
-    );
-
-    updateRiderLocation(updated);
-  }
-
-  /// Assign Co-rider / Pillion to a driver
-  void setCoRiderDriver(String riderId, String driverId) {
-    if (_activeGroupId == null) return;
-    final convoy = _allConvoys[_activeGroupId]!;
-    final rider = convoy.riders[riderId];
-    if (rider == null) return;
-
-    final updated = rider.copyWith(
-      isCoRiding: driverId.isNotEmpty,
-      ridingWithUserId: driverId,
-    );
-
-    updateRiderLocation(updated);
-  }
-
-  /// Update Group Configuration Thresholds
-  void updateGroupConfig({
-    double? distanceThresholdMeters,
-    int? stopThresholdSeconds,
-    bool? voiceGuidanceEnabled,
-  }) {
-    if (_activeGroupId == null) return;
-    final convoy = _allConvoys[_activeGroupId]!;
-    final updated = convoy.copyWith(
-      distanceThresholdMeters: distanceThresholdMeters,
-      stopThresholdSeconds: stopThresholdSeconds,
-      voiceGuidanceEnabled: voiceGuidanceEnabled,
-    );
-
-    _allConvoys[_activeGroupId!] = updated;
-    _oracleService.saveOrUpdateConvoy(updated);
-
-    try {
-      final db = FirebaseDatabase.instance;
-      if (distanceThresholdMeters != null) {
-        db.ref('groups/$_activeGroupId/distanceThresholdMeters').set(distanceThresholdMeters).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-      }
-      if (stopThresholdSeconds != null) {
-        db.ref('groups/$_activeGroupId/stopThresholdSeconds').set(stopThresholdSeconds).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-      }
-      if (voiceGuidanceEnabled != null) {
-        db.ref('groups/$_activeGroupId/voiceGuidanceEnabled').set(voiceGuidanceEnabled).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-      }
-    } catch (_) {}
-
-    notifyListeners();
-  }
-
-  /// Broadcast SOS Emergency Alert
-  void triggerSosAlert({
-    required String userId,
-    required String userName,
-    required double lat,
-    required double lng,
-    String type = 'EMERGENCY',
-  }) {
-    if (_activeGroupId == null) return;
-    final convoy = _allConvoys[_activeGroupId]!;
-    final alert = SosAlertModel(
-      alertId: 'SOS-${const Uuid().v4()}',
-      userId: userId,
-      userName: userName,
-      lat: lat,
-      lng: lng,
-      alertType: type,
-      timestamp: DateTime.now().millisecondsSinceEpoch,
-    );
-
-    final updatedAlerts = List<SosAlertModel>.from(
-      convoy.activeAlerts.where((a) => !a.resolved && !_resolvedAlertIds.contains(a.alertId)),
-    )..add(alert);
-    final updated = convoy.copyWith(activeAlerts: updatedAlerts);
-    _allConvoys[_activeGroupId!] = updated;
-    _oracleService.saveOrUpdateConvoy(updated);
-    _syncAlertToFirebase(_activeGroupId!, alert);
-    notifyListeners();
-  }
-
-  /// Resolve SOS Alert
-  void resolveSosAlert(String alertId) {
-    if (_activeGroupId == null) return;
-    _resolvedAlertIds.add(alertId);
-    final convoy = _allConvoys[_activeGroupId]!;
-    final updatedAlerts = convoy.activeAlerts.where((a) => a.alertId != alertId).toList();
-    final updated = convoy.copyWith(activeAlerts: updatedAlerts);
-    _allConvoys[_activeGroupId!] = updated;
-    _oracleService.saveOrUpdateConvoy(updated);
-    _resolveAlertInFirebase(_activeGroupId!, alertId);
-    notifyListeners();
-  }
-
-  /// Master Admin: Dissolve / Force End Convoy
-  void adminDissolveConvoy(String groupId) {
-    _allConvoys.remove(groupId);
-    if (_activeGroupId == groupId) {
-      stopRealGpsTracking();
-      _activeGroupId = null;
-    }
-    _deleteConvoyInFirebase(groupId);
-    notifyListeners();
-  }
-
-  /// Master Admin: Send Fleet-wide Safety Announcement
-  void adminBroadcastSafetyAlert(String message) {
-    _systemBroadcastMessage = message;
-    _broadcastAdminAlertToFirebase(message);
-    notifyListeners();
-    Future.delayed(const Duration(seconds: 12), () {
-      _systemBroadcastMessage = null;
-      notifyListeners();
-    });
-  }
-
-  /// Update current user's location (syncs to local state + Firebase)
-  void updateRiderLocation(RiderModel updatedRider) {
-    if (_activeGroupId == null) return;
-    final convoy = _allConvoys[_activeGroupId];
-    if (convoy == null) return;
-    final updatedRiders = Map<String, RiderModel>.from(convoy.riders);
-    updatedRiders[updatedRider.userId] = updatedRider;
-    _allConvoys[_activeGroupId!] = convoy.copyWith(riders: updatedRiders);
-    _syncRiderLocationToFirebase(_activeGroupId!, updatedRider);
-    notifyListeners();
-  }
-
-  // --- FIREBASE SYNC HELPERS ---
-
-  void _syncConvoyToFirebase(ConvoyModel convoy) {
-    try {
-      final db = FirebaseDatabase.instance;
-      db.ref('groups/${convoy.groupId}').set(convoy.toJson()).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-      db.ref('joinCodes/${convoy.joinCode}').set(convoy.groupId).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-    } catch (e) {
-      debugPrint('Firebase Convoy Sync Note: $e');
-    }
-  }
-
-  void _syncRiderLocationToFirebase(String groupId, RiderModel rider) {
-    try {
-      final db = FirebaseDatabase.instance;
-      db.ref('groups/$groupId/riders/${rider.userId}').set(rider.toJson()).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-      db.ref('locations/${rider.userId}').set(rider.toJson()).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-      db.ref('users/${rider.userId}/lastLocation').set({
-        ...rider.toJson(),
-        'groupId': groupId,
-        'updatedAt': DateTime.now().millisecondsSinceEpoch,
-      }).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-    } catch (e) {
-      debugPrint('Firebase Location Sync Note: $e');
-    }
-  }
-
-  void _syncAlertToFirebase(String groupId, SosAlertModel alert) {
-    try {
-      final db = FirebaseDatabase.instance;
-      db.ref('groups/$groupId/alerts/${alert.alertId}').set(alert.toJson()).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-      db.ref('alerts/${alert.alertId}').set(alert.toJson()).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-    } catch (e) {
-      debugPrint('Firebase Alert Sync Note: $e');
-    }
-  }
-
-  void _resolveAlertInFirebase(String groupId, String alertId) {
-    try {
-      final db = FirebaseDatabase.instance;
-      db.ref('groups/$groupId/alerts/$alertId/resolved').set(true).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-    } catch (e) {
-      debugPrint('Firebase Alert Resolve Note: $e');
-    }
-  }
-
-  void _deleteConvoyInFirebase(String groupId) {
-    try {
-      final db = FirebaseDatabase.instance;
-      db.ref('groups/$groupId').remove().timeout(const Duration(milliseconds: 500)).catchError((_) {});
-    } catch (e) {
-      debugPrint('Firebase Convoy Delete Note: $e');
-    }
-  }
-
-  void _broadcastAdminAlertToFirebase(String message) {
-    try {
-      final db = FirebaseDatabase.instance;
-      db.ref('system_broadcast').set({
-        'message': message,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      }).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-    } catch (e) {
-      debugPrint('Firebase Broadcast Note: $e');
-    }
-  }
-
-  void _attachGroupListeners(String groupId) {
-    _locationsSub?.cancel();
-    _alertsSub?.cancel();
-    _messagesSub?.cancel();
-    _stopsSub?.cancel();
-    _waitRequestsSub?.cancel();
-    _tripStatusSub?.cancel();
-    _configSub?.cancel();
-
-    try {
-      final db = FirebaseDatabase.instance;
-
-      // Realtime Riders Listener
-      _locationsSub = db.ref('groups/$groupId/riders').onValue.listen((event) {
-        final val = event.snapshot.value;
-        if (val is Map) {
-          final updatedRiders = <String, RiderModel>{};
-          val.forEach((k, v) {
-            if (v is Map) {
-              final m = Map<String, dynamic>.from(v);
-              updatedRiders[k.toString()] = RiderModel.fromJson(m);
-            }
-          });
-          if (_allConvoys.containsKey(groupId)) {
-            final merged = Map<String, RiderModel>.from(_allConvoys[groupId]!.riders);
-            updatedRiders.forEach((userId, incomingRider) {
-              final existing = merged[userId];
-              if (existing == null || incomingRider.lastSeenEpochMs >= existing.lastSeenEpochMs) {
-                merged[userId] = incomingRider;
-              }
-            });
-            _allConvoys[groupId] = _allConvoys[groupId]!.copyWith(riders: merged);
-            notifyListeners();
-          }
-        }
-      });
-
-      // Realtime Alerts Listener
-      _alertsSub = db.ref('groups/$groupId/alerts').onValue.listen((event) {
-        final val = event.snapshot.value;
-        if (val is Map) {
-          final alertsList = <SosAlertModel>[];
-          val.forEach((k, v) {
-            if (v is Map) {
-              final m = Map<String, dynamic>.from(v);
-              final alert = SosAlertModel.fromJson(m);
-              if (!alert.resolved && !_resolvedAlertIds.contains(alert.alertId)) {
-                alertsList.add(alert);
-              }
-            }
-          });
-          if (_allConvoys.containsKey(groupId)) {
-            _allConvoys[groupId] = _allConvoys[groupId]!.copyWith(activeAlerts: alertsList);
-            notifyListeners();
-          }
-        } else {
-          // No alerts exist — clear any stale local alerts
-          if (_allConvoys.containsKey(groupId)) {
-            _allConvoys[groupId] = _allConvoys[groupId]!.copyWith(activeAlerts: []);
-            notifyListeners();
-          }
-        }
-      });
-
-      // Realtime Messages Listener
-      _messagesSub = db.ref('groups/$groupId/messages').onValue.listen((event) {
-        final val = event.snapshot.value;
-        if (val is Map) {
-          final msgList = <GroupMessageModel>[];
-          val.forEach((k, v) {
-            if (v is Map) {
-              final m = Map<String, dynamic>.from(v);
-              msgList.add(GroupMessageModel.fromJson(m));
-            }
-          });
-          msgList.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-          if (_allConvoys.containsKey(groupId)) {
-            _allConvoys[groupId] = _allConvoys[groupId]!.copyWith(messages: msgList);
-            notifyListeners();
-          }
-        }
-      });
-
-      // Realtime Stops Listener
-      _stopsSub = db.ref('groups/$groupId/stopPoints').onValue.listen((event) {
-        final val = event.snapshot.value;
-        if (val is Map) {
-          final stopsList = <StopPointModel>[];
-          val.forEach((k, v) {
-            if (v is Map) {
-              final m = Map<String, dynamic>.from(v);
-              stopsList.add(StopPointModel.fromJson(m));
-            }
-          });
-          stopsList.sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
-          if (_allConvoys.containsKey(groupId)) {
-            _allConvoys[groupId] = _allConvoys[groupId]!.copyWith(stopPoints: stopsList);
-            notifyListeners();
-          }
-        }
-      });
-
-      // Realtime Wait Requests Listener
-      _waitRequestsSub = db.ref('groups/$groupId/waitRequests').onValue.listen((event) {
-        final val = event.snapshot.value;
-        if (val is Map) {
-          final waitMap = <String, int>{};
-          val.forEach((k, v) {
-            if (v is num) {
-              waitMap[k.toString()] = v.toInt();
-            }
-          });
-          if (_allConvoys.containsKey(groupId)) {
-            _allConvoys[groupId] = _allConvoys[groupId]!.copyWith(waitRequests: waitMap);
-            notifyListeners();
-          }
-        }
-      });
-
-      // Realtime Trip Status Listener
-      _tripStatusSub = db.ref('groups/$groupId/tripStatus').onValue.listen((event) {
-        final val = event.snapshot.value;
-        if (val is String && _allConvoys.containsKey(groupId)) {
-          _allConvoys[groupId] = _allConvoys[groupId]!.copyWith(tripStatus: val);
-          notifyListeners();
-        }
-      });
-
-      // Realtime Config Listener (distance threshold, stop threshold, voice)
-      _configSub = db.ref('groups/$groupId').onValue.listen((event) {
-        final val = event.snapshot.value;
-        if (val is Map && _allConvoys.containsKey(groupId)) {
-          final data = Map<String, dynamic>.from(val);
-          final current = _allConvoys[groupId]!;
-          _allConvoys[groupId] = current.copyWith(
-            distanceThresholdMeters: (data['distanceThresholdMeters'] as num?)?.toDouble(),
-            stopThresholdSeconds: (data['stopThresholdSeconds'] as num?)?.toInt(),
-            voiceGuidanceEnabled: data['voiceGuidanceEnabled'] as bool?,
-          );
-          // Don't notify here — other listeners already cover sub-paths
-        }
-      });
-
-      // Realtime Voice Bursts Listener (Intercom)
-      _voiceBurstSub = db.ref('groups/$groupId/voiceBursts').limitToLast(1).onChildAdded.listen((event) {
-        final val = event.snapshot.value;
-        if (val is Map) {
-          final burst = Map<String, dynamic>.from(val);
-          _voiceBurstController.add(burst);
-        }
-      });
-    } catch (e) {
-      debugPrint('Firebase Listener Attach Note: $e');
-    }
-  }
-
-  /// Start high-cadence Intercom voice polling via Oracle 26ai Cloud SODA (1.2s cadence)
-  void _startVoicePolling(String groupId) {
-    _voicePollTimer?.cancel();
-    _lastVoiceBurstTimestamp = DateTime.now().millisecondsSinceEpoch - 5000;
-    _voicePollTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) async {
-      if (_activeGroupId != groupId) return;
-      try {
-        final bursts = await _oracleService.fetchRecentVoiceBursts(groupId, _lastVoiceBurstTimestamp);
-        for (final burst in bursts) {
-          final burstTs = (burst['timestamp'] as num?)?.toInt() ?? 0;
-          final burstKey = '${burst['senderId']}_$burstTs';
-          if (!_processedVoiceBurstKeys.contains(burstKey)) {
-            _processedVoiceBurstKeys.add(burstKey);
-            if (burstTs > _lastVoiceBurstTimestamp) {
-              _lastVoiceBurstTimestamp = burstTs;
-            }
-            _voiceBurstController.add(burst);
-          }
-        }
-        if (_processedVoiceBurstKeys.length > 500) {
-          _processedVoiceBurstKeys.clear();
-        }
-      } catch (e) {
-        // Silent catch for background audio polling
-      }
-    });
-  }
-
-  /// Broadcast a voice burst packet over Oracle 26ai Cloud SODA + Firebase
-  Future<void> sendVoiceBurst({
-    required String senderId,
-    required String senderName,
-    required String audioBase64,
-    required int durationMs,
-  }) async {
-    if (_activeGroupId == null) return;
-    try {
-      // 1. Post to Oracle 26ai Autonomous Database SODA collection 'voice_bursts'
-      await _oracleService.sendVoiceBurst(
-        groupId: _activeGroupId!,
-        senderId: senderId,
-        senderName: senderName,
-        audioBase64: audioBase64,
-        durationMs: durationMs,
-      );
-
-      // 2. Also push to Firebase Realtime Database if available
-      final burstId = 'VB-${const Uuid().v4().substring(0, 8)}';
-      FirebaseDatabase.instance.ref('groups/$_activeGroupId/voiceBursts/$burstId').set({
-        'burstId': burstId,
-        'senderId': senderId,
-        'senderName': senderName,
-        'audioBase64': audioBase64,
-        'durationMs': durationMs,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      }).timeout(const Duration(milliseconds: 500)).catchError((_) {});
-    } catch (e) {
-      debugPrint('sendVoiceBurst Note: $e');
-    }
-  }
-
-  void _detachGroupListeners() {
-    _voicePollTimer?.cancel();
-    _locationsSub?.cancel();
-    _alertsSub?.cancel();
-    _messagesSub?.cancel();
-    _stopsSub?.cancel();
-    _waitRequestsSub?.cancel();
-    _tripStatusSub?.cancel();
-    _configSub?.cancel();
-    _voiceBurstSub?.cancel();
-  }
-
   @override
   void dispose() {
-    _gpsPositionSub?.cancel();
+    _eventSub?.cancel();
+    _rt.removeListener(_onConnectionChanged);
+    _batteryStateSub?.cancel();
+    _batteryRefresh?.cancel();
     _compassSub?.cancel();
-    _voicePollTimer?.cancel();
-    _detachGroupListeners();
-    _voiceBurstController.close();
-    _adminFleetSub?.cancel();
+    _gpsSub?.cancel();
+    _idleHeartbeat?.cancel();
+    _broadcastClear?.cancel();
     super.dispose();
   }
 }

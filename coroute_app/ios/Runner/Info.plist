@@ -2,6 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>CoRoute uses the microphone for the live convoy intercom while you hold Talk or arm VOX.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>CoRoute shares your position with your convoy so riders can stay together.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>CoRoute keeps sharing your position with your convoy while the screen is off during a ride.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>location</string>
+	</array>
+	<key>CFBundleDisplayName</key>
+	<string>CoRoute</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

@@ -1,0 +1,20 @@
+# /etc/caddy/Caddyfile — automatic HTTPS (Let's Encrypt), auto-renewal, HTTP->HTTPS redirect.
+# Replace the hostname with the DNS name you point at 152.67.181.198 (e.g. api.coroute.devmonks.space).
+api.coroute.example.com {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		-Server
+	}
+	# WebSocket + REST share the same upstream; Caddy handles the Upgrade automatically.
+	reverse_proxy 127.0.0.1:3000 {
+		flush_interval -1
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+}

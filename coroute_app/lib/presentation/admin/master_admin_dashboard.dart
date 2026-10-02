@@ -8,7 +8,6 @@ import '../../core/widgets/devmonks_branding.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
-import '../../data/services/oracle_ai_service.dart';
 import '../auth/access_gate_screen.dart';
 import 'admin_convoy_inspector.dart';
 
@@ -21,6 +20,13 @@ class MasterAdminDashboard extends StatefulWidget {
 
 class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
   final _broadcastController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Live fleet overview is pushed by the gateway (read-only, no audio).
+    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<ConvoyService>().startAdminFleetWatch());
+  }
 
   LatLng _computeFleetCenter(List<dynamic> convoys) {
     double totalLat = 0;
@@ -107,7 +113,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final convoyService = context.watch<ConvoyService>();
-    final oracleService = context.watch<OracleAiService>();
+    final isOnline = convoyService.isOnline;
     final convoys = convoyService.allConvoys.values.toList();
 
     int totalRiders = 0;
@@ -160,7 +166,10 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Admin Identity & devmonks.space banner
@@ -192,14 +201,14 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
 
             const SizedBox(height: 10),
 
-            // Oracle 26ai Autonomous Cloud Status Card
+            // Gateway / Oracle Autonomous Database status card
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: AppTheme.slateCard,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: oracleService.isOnline
+                  color: isOnline
                       ? AppTheme.emeraldSafe.withOpacity(0.6)
                       : AppTheme.hyperAmber.withOpacity(0.4),
                 ),
@@ -211,10 +220,10 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                     height: 10,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: oracleService.isOnline ? AppTheme.emeraldSafe : AppTheme.hyperAmber,
+                      color: isOnline ? AppTheme.emeraldSafe : AppTheme.hyperAmber,
                       boxShadow: [
                         BoxShadow(
-                          color: (oracleService.isOnline ? AppTheme.emeraldSafe : AppTheme.hyperAmber)
+                          color: (isOnline ? AppTheme.emeraldSafe : AppTheme.hyperAmber)
                               .withOpacity(0.6),
                           blurRadius: 6,
                           spreadRadius: 1,
@@ -228,13 +237,13 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Oracle 26ai Autonomous Database',
+                          'CoRoute Gateway · Oracle Autonomous DB',
                           style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                         ),
                         Text(
-                          oracleService.isOnline
-                              ? 'Live & Synced (ap-hyderabad-1) · SODA JSON Store Active'
-                              : 'Connecting to ap-hyderabad-1...',
+                          isOnline
+                              ? 'Realtime link up · fleet updates pushed live'
+                              : 'Reconnecting to gateway…',
                           style: const TextStyle(color: AppTheme.textMuted, fontSize: 10),
                         ),
                       ],
@@ -246,7 +255,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                       color: AppTheme.devmonksPurple.withOpacity(0.3),
                       borderRadius: BorderRadius.circular(6),
                     ),
-                    child: const Text('26ai SODA', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    child: const Text('LIVE', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -476,6 +485,8 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                 );
               }),
           ],
+        ),
+          ),
         ),
       ),
     );

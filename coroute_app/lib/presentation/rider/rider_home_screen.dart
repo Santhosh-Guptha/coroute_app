@@ -5,12 +5,13 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/devmonks_branding.dart';
 import '../../core/widgets/glass_card.dart';
+import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
+import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../data/services/routing_service.dart';
-import '../../data/services/oracle_ai_service.dart';
 import '../auth/access_gate_screen.dart';
 import 'convoy_dashboard_screen.dart';
 import 'trip_history_screen.dart';
@@ -215,28 +216,34 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                     if (_createNameController.text.trim().isEmpty) return;
                     final auth = context.read<AuthService>();
                     final convoyService = context.read<ConvoyService>();
-                    final oracleService = context.read<OracleAiService>();
 
                     final breadcrumbs = routeDetails?.polyline
                             .map((p) => {'lat': p.latitude, 'lng': p.longitude})
                             .toList() ??
                         [];
 
-                    final newConvoy = await convoyService.createConvoy(
-                      name: _createNameController.text,
-                      creatorId: 'usr_${auth.currentUserName?.toLowerCase().replaceAll(' ', '_') ?? 'me'}',
-                      creatorName: auth.currentUserName ?? 'Lead Rider',
-                      destination: _destinationController.text,
-                      destLat: selectedLat,
-                      destLng: selectedLng,
-                      vehicleType: auth.vehicleType ?? 'Motorcycle',
-                      vehicleNo: auth.vehicleNo ?? '',
-                      phone: auth.phone ?? '',
-                      routeBreadcrumbs: breadcrumbs,
-                    );
-
-                    // Sync convoy to Oracle 26ai Cloud
-                    oracleService.saveConvoyToOracle(newConvoy);
+                    final ConvoyModel newConvoy;
+                    try {
+                      newConvoy = await convoyService.createConvoy(
+                        name: _createNameController.text,
+                        creatorId: auth.currentUserId ?? '',
+                        creatorName: auth.currentUserName ?? 'Lead Rider',
+                        destination: _destinationController.text,
+                        destLat: selectedLat,
+                        destLng: selectedLng,
+                        vehicleType: auth.vehicleType ?? 'Motorcycle',
+                        vehicleNo: auth.vehicleNo ?? '',
+                        phone: auth.phone ?? '',
+                        routeBreadcrumbs: breadcrumbs,
+                      );
+                    } catch (e) {
+                      if (!ctx.mounted) return;
+                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                        content: Text(e is ApiException ? e.message : 'Could not create the convoy. Check your connection.'),
+                        backgroundColor: AppTheme.laserRed,
+                      ));
+                      return;
+                    }
 
                     if (!ctx.mounted) return;
                     Navigator.pop(ctx);
@@ -316,7 +323,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                 } catch (_) {}
 
                 final rider = RiderModel(
-                  userId: 'usr_${auth.currentUserName?.toLowerCase().replaceAll(' ', '_') ?? 'rider'}',
+                  userId: auth.currentUserId ?? '',
                   name: auth.currentUserName ?? 'Rider',
                   vehicleType: auth.vehicleType ?? 'Motorcycle',
                   lat: joinLat,
@@ -340,7 +347,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                   );
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Invalid code. No active convoy found.')),
+                    SnackBar(content: Text(convoyService.lastError ?? 'Invalid code. No active convoy found.')),
                   );
                 }
               },
@@ -560,7 +567,10 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: Column(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Rider Profile & Callsign Header
@@ -582,12 +592,15 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                         children: [
                           Row(
                             children: [
-                              Text(
-                                auth.currentUserName ?? 'Rider',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
+                              Flexible(
+                                child: Text(
+                                  auth.currentUserName ?? 'Rider',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 6),
@@ -846,6 +859,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
             const SizedBox(height: 30),
             const Center(child: DevMonksBadge()),
           ],
+        ),
+          ),
         ),
       ),
     );

@@ -1,0 +1,29 @@
+[Unit]
+Description=CoRoute real-time gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=coroute
+Group=coroute
+WorkingDirectory=/opt/coroute/gateway
+EnvironmentFile=/etc/coroute/gateway.env
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=20
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/coroute/gateway
+LimitNOFILE=65536
+# Logs go to journald; journald rotates them for you (zero maintenance)
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

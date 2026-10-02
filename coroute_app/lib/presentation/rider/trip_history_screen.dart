@@ -34,7 +34,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
     setState(() => _isSyncing = true);
     final auth = context.read<AuthService>();
     final tripStorage = context.read<TripStorageService>();
-    final count = await tripStorage.syncWithCloud(userId: auth.currentUserName);
+    final count = await tripStorage.syncWithCloud(userId: auth.currentUserId);
     if (mounted) {
       setState(() => _isSyncing = false);
       if (count > 0) {
@@ -69,7 +69,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
             )
           else
             IconButton(
-              tooltip: 'Sync with Cloud (Firebase & Oracle)',
+              tooltip: 'Sync with cloud',
               icon: const Icon(Icons.cloud_sync, color: AppTheme.neonCyan),
               onPressed: _triggerSync,
             ),

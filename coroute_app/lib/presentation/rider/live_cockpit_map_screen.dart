@@ -1,17 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
-import 'package:record/record.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/telemetry_utils.dart';
 import '../../core/theme/app_theme.dart';
@@ -19,11 +13,10 @@ import '../../core/widgets/cockpit_hud.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
-import '../../data/models/trip_history_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/trip_storage_service.dart';
-import '../../data/services/oracle_ai_service.dart';
+import '../widgets/intercom_dock.dart';
 
 class LiveCockpitMapScreen extends StatefulWidget {
   final String convoyId;
@@ -36,219 +29,37 @@ class LiveCockpitMapScreen extends StatefulWidget {
 
 class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   final MapController _mapController = MapController();
-  bool _isPttPressed = false;
-  bool _isMuted = false;
-  bool _isDeafened = false;
   bool _autoFollow = true;
-  bool _isVoxMode = false;
-  bool _isVoxActive = false;
-
-  final AudioRecorder _audioRecorder = AudioRecorder();
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  StreamSubscription? _voiceBurstSub;
-  String? _currentRecordingPath;
-  DateTime? _pttStartTime;
-  String? _incomingSpeakerName;
-  Timer? _incomingSpeakerTimer;
   final Set<String> _dismissedAlertIds = {};
   StreamSubscription<CompassEvent>? _compassSub;
   double? _deviceCompassHeading;
+  DateTime _lastCompassPaint = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void initState() {
     super.initState();
-    // Hardware compass orientation tracking (Mobile facing direction)
+    // Hardware compass (device facing). Repaint at most ~4×/s and only on a real change,
+    // so the map is not rebuilt on every magnetometer sample.
     _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
-      if (event.heading != null && mounted) {
-        double h = event.heading!;
-        if (h < 0) h += 360.0;
-        setState(() {
-          _deviceCompassHeading = h;
-        });
+      if (event.heading == null || !mounted) return;
+      double h = event.heading!;
+      if (h < 0) h += 360.0;
+      final prev = _deviceCompassHeading;
+      final now = DateTime.now();
+      final delta = prev == null ? 999.0 : ((h - prev).abs() % 360);
+      if (delta >= 2.0 && now.difference(_lastCompassPaint).inMilliseconds >= 250) {
+        _lastCompassPaint = now;
+        setState(() => _deviceCompassHeading = h);
+      } else {
+        _deviceCompassHeading = h;
       }
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final convoyService = context.read<ConvoyService>();
-      final authService = context.read<AuthService>();
-      final myUserId = 'usr_${(authService.currentUserName ?? 'rider').toLowerCase().replaceAll(' ', '_')}';
-
-      _voiceBurstSub = convoyService.voiceBurstStream.listen((burst) async {
-        final senderId = burst['senderId']?.toString();
-        final audioBase64 = burst['audioBase64']?.toString();
-        final senderName = burst['senderName']?.toString() ?? 'Rider';
-
-        if (senderId != myUserId && audioBase64 != null && audioBase64.isNotEmpty && !_isDeafened) {
-          if (mounted) {
-            setState(() {
-              _incomingSpeakerName = senderName;
-            });
-            _incomingSpeakerTimer?.cancel();
-            _incomingSpeakerTimer = Timer(const Duration(seconds: 4), () {
-              if (mounted) setState(() => _incomingSpeakerName = null);
-            });
-          }
-          try {
-            final bytes = base64Decode(audioBase64);
-            await _audioPlayer.stop();
-            await _audioPlayer.play(BytesSource(bytes));
-          } catch (e) {
-            debugPrint('Cockpit playback error: $e');
-          }
-        }
-      });
     });
   }
 
   @override
   void dispose() {
-    _incomingSpeakerTimer?.cancel();
-    _voiceBurstSub?.cancel();
     _compassSub?.cancel();
-    _stopVoxLoop();
-    _audioRecorder.dispose();
-    _audioPlayer.dispose();
     super.dispose();
-  }
-
-  Future<void> _startRecording() async {
-    if (_isMuted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mic is muted. Unmute to transmit.'), duration: Duration(seconds: 1)),
-      );
-      return;
-    }
-    try {
-      final hasPermission = await _audioRecorder.hasPermission();
-      if (!hasPermission) return;
-
-      HapticFeedback.heavyImpact();
-      final tempDir = await getTemporaryDirectory();
-      _currentRecordingPath = '${tempDir.path}/cockpit_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      _pttStartTime = DateTime.now();
-
-      await _audioRecorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          bitRate: 32000,
-          sampleRate: 16000,
-        ),
-        path: _currentRecordingPath!,
-      );
-
-      if (mounted) setState(() => _isPttPressed = true);
-    } catch (e) {
-      debugPrint('Cockpit recording error: $e');
-    }
-  }
-
-  Future<void> _stopRecordingAndBroadcast(RiderModel myRider, ConvoyService convoyService) async {
-    if (!_isPttPressed && _currentRecordingPath == null) return;
-    if (mounted) setState(() => _isPttPressed = false);
-
-    try {
-      if (await _audioRecorder.isRecording()) {
-        final path = await _audioRecorder.stop();
-        if (path != null && _pttStartTime != null) {
-          final durationMs = DateTime.now().difference(_pttStartTime!).inMilliseconds;
-          if (durationMs >= 300) {
-            final file = File(path);
-            if (await file.exists()) {
-              final bytes = await file.readAsBytes();
-              final base64Audio = base64Encode(bytes);
-              convoyService.sendVoiceBurst(
-                senderId: myRider.userId,
-                senderName: myRider.name,
-                audioBase64: base64Audio,
-                durationMs: durationMs,
-              ).ignore();
-              file.delete().ignore();
-            }
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('Cockpit audio stop error: $e');
-    }
-  }
-
-  Future<void> _startVoxLoop(RiderModel myRider, ConvoyService convoyService) async {
-    if (_isVoxActive || _isMuted) return;
-    if (mounted) setState(() => _isVoxActive = true);
-    _runVoxCycle(myRider, convoyService);
-  }
-
-  Future<void> _runVoxCycle(RiderModel myRider, ConvoyService convoyService) async {
-    if (!_isVoxActive || _isMuted || !mounted) return;
-
-    try {
-      final hasPermission = await _audioRecorder.hasPermission();
-      if (!hasPermission) {
-        if (mounted) setState(() => _isVoxActive = false);
-        return;
-      }
-
-      final tempDir = await getTemporaryDirectory();
-      final path = '${tempDir.path}/vox_cockpit_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      _currentRecordingPath = path;
-      final startTime = DateTime.now();
-
-      await _audioRecorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          bitRate: 32000,
-          sampleRate: 16000,
-        ),
-        path: path,
-      );
-
-      await Future.delayed(const Duration(milliseconds: 3200));
-
-      if (!_isVoxActive || !mounted) {
-        if (await _audioRecorder.isRecording()) {
-          await _audioRecorder.stop();
-        }
-        return;
-      }
-
-      if (await _audioRecorder.isRecording()) {
-        final savedPath = await _audioRecorder.stop();
-        if (savedPath != null) {
-          final file = File(savedPath);
-          if (await file.exists()) {
-            final durationMs = DateTime.now().difference(startTime).inMilliseconds;
-            final bytes = await file.readAsBytes();
-            if (bytes.length > 500) {
-              final base64Audio = base64Encode(bytes);
-              convoyService.sendVoiceBurst(
-                senderId: myRider.userId,
-                senderName: myRider.name,
-                audioBase64: base64Audio,
-                durationMs: durationMs,
-              ).ignore();
-            }
-            file.delete().ignore();
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('Cockpit VOX note: $e');
-    }
-
-    if (_isVoxActive && !_isMuted && mounted) {
-      Future.delayed(const Duration(milliseconds: 150), () {
-        if (_isVoxActive && !_isMuted && mounted) {
-          _runVoxCycle(myRider, convoyService);
-        }
-      });
-    }
-  }
-
-  void _stopVoxLoop() {
-    _isVoxActive = false;
-    _audioRecorder.isRecording().then((rec) {
-      if (rec) _audioRecorder.stop();
-    }).catchError((_) {});
   }
 
   /// 1. Riders List Modal: Details + Pan/Navigate to Rider on Map
@@ -799,60 +610,18 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.hyperAmber),
               onPressed: () async {
                 final tripStorage = context.read<TripStorageService>();
-                final now = DateTime.now().millisecondsSinceEpoch;
-
-                // Compute real trip stats from actual rider telemetry
-                final allRiders = convoy.riders.values.toList();
-                double topSpeed = 0.0;
-                double totalSpeed = 0.0;
-                int speedCount = 0;
-                for (final r in allRiders) {
-                  if (r.speedKmh > topSpeed) topSpeed = r.speedKmh;
-                  totalSpeed += r.speedKmh;
-                  speedCount++;
-                }
-                final avgSpeed = speedCount > 0 ? totalSpeed / speedCount : 0.0;
-
-                // Estimate distance from ride duration and average speed
-                final durationMs = now - convoy.createdAtEpochMs;
-                final durationHours = durationMs / 3600000.0;
-                final estimatedDistanceKm = avgSpeed * durationHours;
-
-                final visitedStops = convoy.stopPoints.where((s) => s.isVisited).length;
-
-                final history = TripHistoryModel(
-                  tripId: 'TRIP-${DateTime.now().millisecondsSinceEpoch}',
-                  tripName: convoy.name,
-                  startLocationName: convoy.startLocationName.isNotEmpty ? convoy.startLocationName : 'Convoy Start',
-                  destinationName: convoy.destinationName.isNotEmpty ? convoy.destinationName : 'Final Waypoint',
-                  startTimeEpochMs: convoy.createdAtEpochMs,
-                  endTimeEpochMs: now,
-                  totalDistanceKm: double.parse(estimatedDistanceKm.toStringAsFixed(1)),
-                  topSpeedKmh: double.parse(topSpeed.toStringAsFixed(1)),
-                  avgSpeedKmh: double.parse(avgSpeed.toStringAsFixed(1)),
-                  riderCount: convoy.riders.length,
-                  stopCount: visitedStops,
-                  breadcrumbTrail: allRiders.map((r) {
-                    return TripBreadcrumbPoint(
-                      lat: r.lat,
-                      lng: r.lng,
-                      speedKmh: r.speedKmh,
-                      heading: r.heading,
-                      timestamp: r.lastSeenEpochMs,
-                    );
-                  }).toList(),
-                );
-
-                final oracleService = context.read<OracleAiService>();
-                await tripStorage.saveTrip(history);
-                oracleService.saveTripToOracle(history);
+                final convoyService = context.read<ConvoyService>();
+                final auth = context.read<AuthService>();
+                final history = convoyService.buildTripHistory(convoy, userId: auth.currentUserId);
+                await tripStorage.saveTrip(history, userId: auth.currentUserId);
+                convoyService.updateTripState('ENDED');
 
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (context.mounted) Navigator.pop(context);
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Journey saved locally & synced to Oracle 26ai Cloud!'),
+                      content: Text('Journey saved to your trip history.'),
                       backgroundColor: AppTheme.emeraldSafe,
                     ),
                   );
@@ -868,9 +637,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
   void _triggerSos(BuildContext context, ConvoyService convoyService, AuthService auth) async {
     final currentUserName = auth.currentUserName ?? 'Rider';
-    final myRider = convoyService.activeConvoy?.riders.values
-        .where((r) => r.name.toLowerCase() == currentUserName.toLowerCase())
-        .firstOrNull;
+    final myRider = convoyService.activeConvoy?.riders[auth.currentUserId ?? ''];
 
     double lat = myRider?.lat ?? 0.0;
     double lng = myRider?.lng ?? 0.0;
@@ -889,7 +656,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       } catch (_) {}
     }
 
-    final myUserId = myRider?.userId ?? 'usr_${currentUserName.toLowerCase().replaceAll(' ', '_')}';
+    final myUserId = myRider?.userId ?? auth.currentUserId ?? '';
 
     convoyService.triggerSosAlert(
       userId: myUserId,
@@ -934,10 +701,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     final metrics = TelemetryUtils.calculateConvoyMetrics(riders);
 
     // Current user rider reference
-    final myRider = riders.firstWhere(
-      (r) => r.name.toLowerCase() == (auth.currentUserName ?? '').toLowerCase(),
-      orElse: () => riders.isNotEmpty ? riders.first : RiderModel(userId: '0', name: 'Rider', lat: 0.0, lng: 0.0, lastSeenEpochMs: 0),
-    );
+    final myRider = convoy.riders[auth.currentUserId ?? ''] ??
+        RiderModel(userId: auth.currentUserId ?? '0', name: auth.currentUserName ?? 'Rider', lat: 0.0, lng: 0.0, lastSeenEpochMs: 0);
 
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
@@ -1077,22 +842,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
                 // Active SOS Emergency Alert Banner
                 ...(() {
-                  final currentUserName = auth.currentUserName ?? 'Rider';
-                  final myUserId = 'usr_${currentUserName.toLowerCase().replaceAll(' ', '_')}';
+                  final myUserId = auth.currentUserId ?? myRider.userId;
 
                   // Active SOS alerts from current user (Self SOS - show status + cancel option, NO loud alarm)
-                  final mySos = convoy.activeAlerts
-                      .where((a) => !a.resolved &&
-                          ((a.userId.isNotEmpty && (a.userId.toLowerCase() == myUserId.toLowerCase() || a.userId.toLowerCase() == (myRider.userId).toLowerCase())) ||
-                           (a.userName.isNotEmpty && (a.userName.toLowerCase() == currentUserName.toLowerCase() || a.userName.toLowerCase() == myRider.name.toLowerCase()))))
-                      .toList();
+                  final mySos = convoy.activeAlerts.where((a) => !a.resolved && a.userId == myUserId).toList();
 
                   // Active SOS alerts from OTHER riders
                   final otherSos = convoy.activeAlerts
-                      .where((a) => !a.resolved &&
-                          !((a.userId.isNotEmpty && (a.userId.toLowerCase() == myUserId.toLowerCase() || a.userId.toLowerCase() == (myRider.userId).toLowerCase())) ||
-                            (a.userName.isNotEmpty && (a.userName.toLowerCase() == currentUserName.toLowerCase() || a.userName.toLowerCase() == myRider.name.toLowerCase()))) &&
-                          !_dismissedAlertIds.contains(a.alertId))
+                      .where((a) => !a.resolved && a.userId != myUserId && !_dismissedAlertIds.contains(a.alertId))
                       .toList();
 
                   final widgets = <Widget>[];
@@ -1222,30 +979,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
                   return widgets;
                 })(),
-
-                // Live Audio Speaker HUD Toast
-                if (_incomingSpeakerName != null) ...[
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: AppTheme.neonCyan.withOpacity(0.25),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.neonCyan),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.volume_up_rounded, color: AppTheme.neonCyan, size: 16),
-                        const SizedBox(width: 8),
-                        Text(
-                          '🔊 $_incomingSpeakerName is speaking...',
-                          style: const TextStyle(color: AppTheme.neonCyan, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
 
                 // Convoy Header Card
                 GlassCard(
@@ -1385,241 +1118,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             ),
           ),
 
-          // 6. Dual-Mode Voice Intercom Bottom Bar (PTT & Open-Mic VOX)
+          // 6. Voice Intercom Bottom Bar (group / private, PTT / VOX)
           Positioned(
-            bottom: 20,
-            left: 14,
-            right: 14,
-            child: GlassCard(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              backgroundColor: AppTheme.obsidianVoid.withOpacity(0.92),
-              borderColor: (_isPttPressed || (_isVoxMode && !_isMuted))
-                  ? AppTheme.neonCyan
-                  : AppTheme.glassBorder,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Intercom Mode Toggle Bar: PTT vs VOX
-                  Row(
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(8),
-                          onTap: () {
-                            setState(() {
-                              _isVoxMode = false;
-                              _stopVoxLoop();
-                            });
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 5),
-                            decoration: BoxDecoration(
-                              color: !_isVoxMode
-                                  ? AppTheme.neonCyan.withOpacity(0.2)
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                              border: !_isVoxMode
-                                  ? Border.all(color: AppTheme.neonCyan, width: 1.2)
-                                  : null,
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.touch_app,
-                                  size: 13,
-                                  color: !_isVoxMode ? AppTheme.neonCyan : AppTheme.textMuted,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'PTT (Hold to Talk)',
-                                  style: TextStyle(
-                                    color: !_isVoxMode ? AppTheme.neonCyan : AppTheme.textMuted,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(8),
-                          onTap: () {
-                            setState(() {
-                              _isVoxMode = true;
-                            });
-                            if (!_isMuted) {
-                              _startVoxLoop(myRider, convoyService);
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 5),
-                            decoration: BoxDecoration(
-                              color: _isVoxMode
-                                  ? AppTheme.hyperAmber.withOpacity(0.2)
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                              border: _isVoxMode
-                                  ? Border.all(color: AppTheme.hyperAmber, width: 1.2)
-                                  : null,
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.record_voice_over,
-                                  size: 13,
-                                  color: _isVoxMode ? AppTheme.hyperAmber : AppTheme.textMuted,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'Open-Mic VOX (Hands-Free)',
-                                  style: TextStyle(
-                                    color: _isVoxMode ? AppTheme.hyperAmber : AppTheme.textMuted,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Bottom Controls Row
-                  Row(
-                    children: [
-                      // Mic Mute Button
-                      IconButton(
-                        icon: Icon(
-                          _isMuted ? Icons.mic_off : Icons.mic,
-                          color: _isMuted ? AppTheme.laserRed : AppTheme.neonCyan,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _isMuted = !_isMuted;
-                            if (_isMuted) {
-                              _stopVoxLoop();
-                            } else if (_isVoxMode) {
-                              _startVoxLoop(myRider, convoyService);
-                            }
-                          });
-                        },
-                      ),
-
-                      // Deafen Headset Button
-                      IconButton(
-                        icon: Icon(
-                          _isDeafened ? Icons.volume_off : Icons.volume_up,
-                          color: _isDeafened ? AppTheme.laserRed : Colors.white,
-                        ),
-                        onPressed: () => setState(() => _isDeafened = !_isDeafened),
-                      ),
-
-                      // Dual-Mode Action: PTT vs Open-Mic VOX
-                      if (!_isVoxMode)
-                        Expanded(
-                          child: GestureDetector(
-                            onTapDown: (_) => _startRecording(),
-                            onTapUp: (_) => _stopRecordingAndBroadcast(myRider, convoyService),
-                            onTapCancel: () => _stopRecordingAndBroadcast(myRider, convoyService),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: _isPttPressed
-                                      ? [AppTheme.emeraldSafe, AppTheme.neonCyan]
-                                      : [AppTheme.slateCard, AppTheme.elevatedCard],
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: _isPttPressed ? AppTheme.emeraldSafe : AppTheme.subtleBorder,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.mic,
-                                    size: 16,
-                                    color: _isPttPressed ? Colors.black : AppTheme.neonCyan,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    _isPttPressed ? 'TRANSMITTING...' : 'HOLD TO TALK (PTT)',
-                                    style: TextStyle(
-                                      color: _isPttPressed ? Colors.black : Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        )
-                      else
-                        Expanded(
-                          child: InkWell(
-                            onTap: () {
-                              setState(() {
-                                _isMuted = !_isMuted;
-                                if (_isMuted) {
-                                  _stopVoxLoop();
-                                } else {
-                                  _startVoxLoop(myRider, convoyService);
-                                }
-                              });
-                            },
-                            borderRadius: BorderRadius.circular(12),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: _isMuted
-                                    ? AppTheme.hyperAmber.withOpacity(0.2)
-                                    : AppTheme.emeraldSafe.withOpacity(0.25),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: _isMuted ? AppTheme.hyperAmber : AppTheme.emeraldSafe,
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    _isMuted ? Icons.mic_off : Icons.graphic_eq,
-                                    size: 16,
-                                    color: _isMuted ? AppTheme.hyperAmber : AppTheme.emeraldSafe,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    _isMuted
-                                        ? 'VOX MUTED (Tap to Stream)'
-                                        : '🗣️ OPEN-MIC ACTIVE (Hands-Free)',
-                                    style: TextStyle(
-                                      color: _isMuted ? AppTheme.hyperAmber : Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: IntercomDock(convoy: convoy, me: myRider, compact: true),
           ),
         ],
       ),

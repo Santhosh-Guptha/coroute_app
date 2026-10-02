@@ -3,9 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/devmonks_branding.dart';
 import '../../core/widgets/glass_card.dart';
-import '../../data/models/rider_model.dart';
 import '../../data/services/auth_service.dart';
-import '../../data/services/oracle_ai_service.dart';
 import '../admin/master_admin_dashboard.dart';
 import '../rider/rider_home_screen.dart';
 
@@ -73,6 +71,14 @@ class _AccessGateScreenState extends State<AccessGateScreen>
     super.dispose();
   }
 
+  /// Routes to the right home screen. The role comes from the server (database), never from the app.
+  void _enter(bool isAdmin) {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => isAdmin ? const MasterAdminDashboard() : const RiderHomeScreen()),
+    );
+  }
+
   // --- SIGN IN ACTION ---
   Future<void> _handleSignIn() async {
     final identifier = _loginIdentifierController.text.trim();
@@ -89,47 +95,17 @@ class _AccessGateScreenState extends State<AccessGateScreen>
     });
 
     final auth = context.read<AuthService>();
-    final oracle = context.read<OracleAiService>();
 
     final res = await auth.loginRiderWithPassword(
       identifier: identifier,
       password: password,
     );
 
+    if (!mounted) return;
     setState(() => _isLoading = false);
 
-    if (!mounted) return;
-
     if (res['success'] == true) {
-      if (res['isAdmin'] == true) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const MasterAdminDashboard()),
-        );
-      } else {
-        // Sync profile to Oracle 26ai Cloud
-        try {
-          oracle.saveRiderProfileToOracle(
-            RiderModel(
-              userId: 'usr_${auth.currentUserName!.toLowerCase().replaceAll(' ', '_')}',
-              name: auth.currentUserName!,
-              vehicleType: auth.vehicleType ?? 'Motorcycle',
-              lat: 0.0,
-              lng: 0.0,
-              lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
-              phone: auth.phone ?? '',
-              emergencyContact: auth.emergencyContact ?? '',
-              emergencyContactName: auth.emergencyContactName ?? '',
-              vehicleNo: auth.vehicleNo ?? '',
-            ),
-          );
-        } catch (_) {}
-
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const RiderHomeScreen()),
-        );
-      }
+      _enter(res['isAdmin'] == true);
     } else {
       setState(() {
         _errorMessage = res['error']?.toString() ?? 'Invalid credentials.';
@@ -156,8 +132,8 @@ class _AccessGateScreenState extends State<AccessGateScreen>
       setState(() => _errorMessage = 'Please provide a valid email address.');
       return;
     }
-    if (password.length < 6) {
-      setState(() => _errorMessage = 'Password must be at least 6 characters long.');
+    if (password.length < 8) {
+      setState(() => _errorMessage = 'Password must be at least 8 characters long.');
       return;
     }
     if (password != confirmPassword) {
@@ -175,7 +151,6 @@ class _AccessGateScreenState extends State<AccessGateScreen>
     });
 
     final auth = context.read<AuthService>();
-    final oracle = context.read<OracleAiService>();
 
     final res = await auth.registerRider(
       name: name,
@@ -188,42 +163,17 @@ class _AccessGateScreenState extends State<AccessGateScreen>
       emergencyContactName: emergencyName,
     );
 
+    if (!mounted) return;
     setState(() => _isLoading = false);
 
-    if (!mounted) return;
-
     if (res['success'] == true) {
-      final userId = res['userId'] as String;
-
-      // Sync new registered rider to Oracle 26ai Autonomous Cloud
-      try {
-        oracle.saveRiderProfileToOracle(
-          RiderModel(
-            userId: userId,
-            name: name,
-            vehicleType: _selectedVehicle,
-            lat: 0.0,
-            lng: 0.0,
-            lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
-            phone: phone,
-            emergencyContact: emergencyPhone,
-            emergencyContactName: emergencyName,
-            vehicleNo: vehicleNo,
-          ),
-        );
-      } catch (_) {}
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('🎉 Welcome to CoRoute, $name! Account registered.'),
           backgroundColor: AppTheme.emeraldSafe,
         ),
       );
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const RiderHomeScreen()),
-      );
+      _enter(res['isAdmin'] == true);
     } else {
       setState(() {
         _errorMessage = res['error']?.toString() ?? 'Registration failed.';
@@ -238,43 +188,14 @@ class _AccessGateScreenState extends State<AccessGateScreen>
     });
 
     final auth = context.read<AuthService>();
-    final oracle = context.read<OracleAiService>();
 
     final res = await auth.signInWithGoogle();
 
+    if (!mounted) return;
     setState(() => _isLoading = false);
 
-    if (!mounted) return;
-
     if (res['success'] == true) {
-      if (res['isAdmin'] == true) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const MasterAdminDashboard()),
-        );
-      } else {
-        try {
-          oracle.saveRiderProfileToOracle(
-            RiderModel(
-              userId: 'usr_${auth.currentUserName!.toLowerCase().replaceAll(' ', '_')}',
-              name: auth.currentUserName!,
-              vehicleType: auth.vehicleType ?? 'Motorcycle (Adv)',
-              lat: 0.0,
-              lng: 0.0,
-              lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
-              phone: auth.phone ?? '',
-              emergencyContact: auth.emergencyContact ?? '',
-              emergencyContactName: auth.emergencyContactName ?? '',
-              vehicleNo: auth.vehicleNo ?? '',
-            ),
-          );
-        } catch (_) {}
-
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const RiderHomeScreen()),
-        );
-      }
+      _enter(res['isAdmin'] == true);
     } else {
       setState(() {
         _errorMessage = res['error']?.toString();
@@ -289,7 +210,10 @@ class _AccessGateScreenState extends State<AccessGateScreen>
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          child: Column(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 10),
@@ -361,6 +285,8 @@ class _AccessGateScreenState extends State<AccessGateScreen>
               const DevMonksBadge(),
               const SizedBox(height: 16),
             ],
+          ),
+            ),
           ),
         ),
       ),
@@ -634,7 +560,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                         icon: Icon(_obscureRegPassword ? Icons.visibility_off : Icons.visibility, color: AppTheme.textSecondary, size: 16),
                         onPressed: () => setState(() => _obscureRegPassword = !_obscureRegPassword),
                       ),
-                      hintText: 'Min 6 chars',
+                      hintText: 'Min 8 chars',
                       hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
                       filled: true,
                       fillColor: AppTheme.elevatedCard,

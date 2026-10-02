@@ -17,3 +17,5 @@ Thumbs.db
 **/coverage/
 **/.gradle/
 **/local.properties
+**/node_modules/
+**/key.properties

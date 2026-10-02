@@ -1,13 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
-import 'package:record/record.dart';
 import '../../core/constants/telemetry_utils.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/glass_card.dart';
@@ -15,6 +10,7 @@ import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
+import '../widgets/intercom_dock.dart';
 import 'live_cockpit_map_screen.dart';
 
 class ConvoyDashboardScreen extends StatefulWidget {
@@ -26,8 +22,6 @@ class ConvoyDashboardScreen extends StatefulWidget {
   State<ConvoyDashboardScreen> createState() => _ConvoyDashboardScreenState();
 }
 
-enum IntercomType { ptt, vox }
-
 class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
@@ -35,20 +29,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
   final _scrollController = ScrollController();
 
   bool _isFocusMode = false;
-  bool _isMicMuted = false;
-  bool _isDeafened = false;
-  bool _isPttPressed = false;
-  IntercomType _intercomType = IntercomType.ptt;
-  bool _isVoxActive = false;
   final Set<String> _dismissedAlertIds = {};
-
-  final AudioRecorder _audioRecorder = AudioRecorder();
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  StreamSubscription? _voiceBurstSub;
-  String? _currentRecordingPath;
-  DateTime? _pttStartTime;
-  String? _incomingSpeakerName;
-  Timer? _incomingSpeakerTimer;
 
   Timer? _waitCountdownTimer;
   int _waitRemainingSeconds = 0;
@@ -122,209 +103,15 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final convoyService = context.read<ConvoyService>();
-      final authService = context.read<AuthService>();
-      final myUserId = 'usr_${(authService.currentUserName ?? 'rider').toLowerCase().replaceAll(' ', '_')}';
-
-      _voiceBurstSub = convoyService.voiceBurstStream.listen((burst) async {
-        final senderId = burst['senderId']?.toString();
-        final audioBase64 = burst['audioBase64']?.toString();
-        final senderName = burst['senderName']?.toString() ?? 'Rider';
-
-        if (senderId != myUserId && audioBase64 != null && audioBase64.isNotEmpty && !_isDeafened) {
-          if (mounted) {
-            setState(() {
-              _incomingSpeakerName = senderName;
-            });
-            _incomingSpeakerTimer?.cancel();
-            _incomingSpeakerTimer = Timer(const Duration(seconds: 4), () {
-              if (mounted) setState(() => _incomingSpeakerName = null);
-            });
-          }
-          try {
-            final bytes = base64Decode(audioBase64);
-            await _audioPlayer.stop();
-            await _audioPlayer.play(BytesSource(bytes));
-          } catch (e) {
-            debugPrint('Playback error: $e');
-          }
-        }
-      });
-    });
   }
 
   @override
   void dispose() {
     _waitCountdownTimer?.cancel();
-    _incomingSpeakerTimer?.cancel();
-    _voiceBurstSub?.cancel();
-    _stopVoxLoop();
-    _audioRecorder.dispose();
-    _audioPlayer.dispose();
     _tabController.dispose();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
-  }
-
-  Future<void> _startRecording() async {
-    if (_isMicMuted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Microphone is muted. Unmute to speak.'),
-          duration: Duration(seconds: 1),
-        ),
-      );
-      return;
-    }
-
-    try {
-      final hasPermission = await _audioRecorder.hasPermission();
-      if (!hasPermission) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Microphone permission denied.')),
-          );
-        }
-        return;
-      }
-
-      HapticFeedback.heavyImpact();
-      final tempDir = await getTemporaryDirectory();
-      _currentRecordingPath = '${tempDir.path}/intercom_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      _pttStartTime = DateTime.now();
-
-      await _audioRecorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          bitRate: 32000,
-          sampleRate: 16000,
-        ),
-        path: _currentRecordingPath!,
-      );
-
-      if (mounted) {
-        setState(() => _isPttPressed = true);
-      }
-    } catch (e) {
-      debugPrint('Error starting audio recording: $e');
-    }
-  }
-
-  Future<void> _stopRecordingAndBroadcast(RiderModel myLoc, ConvoyService convoyService) async {
-    if (!_isPttPressed && _currentRecordingPath == null) return;
-
-    if (mounted) {
-      setState(() => _isPttPressed = false);
-    }
-
-    try {
-      final isRecording = await _audioRecorder.isRecording();
-      if (isRecording) {
-        final path = await _audioRecorder.stop();
-        if (path != null && _pttStartTime != null) {
-          final durationMs = DateTime.now().difference(_pttStartTime!).inMilliseconds;
-          if (durationMs >= 300) {
-            final file = File(path);
-            if (await file.exists()) {
-              final bytes = await file.readAsBytes();
-              final base64Audio = base64Encode(bytes);
-              await convoyService.sendVoiceBurst(
-                senderId: myLoc.userId,
-                senderName: myLoc.name,
-                audioBase64: base64Audio,
-                durationMs: durationMs,
-              );
-              file.delete().ignore();
-            }
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('Error stopping audio recording: $e');
-    }
-  }
-
-  Future<void> _startVoxLoop(RiderModel myLoc, ConvoyService convoyService) async {
-    if (_isVoxActive || _isMicMuted) return;
-    if (mounted) setState(() => _isVoxActive = true);
-    _runVoxCycle(myLoc, convoyService);
-  }
-
-  Future<void> _runVoxCycle(RiderModel myLoc, ConvoyService convoyService) async {
-    if (!_isVoxActive || _isMicMuted || !mounted) return;
-
-    try {
-      final hasPermission = await _audioRecorder.hasPermission();
-      if (!hasPermission) {
-        if (mounted) setState(() => _isVoxActive = false);
-        return;
-      }
-
-      final tempDir = await getTemporaryDirectory();
-      final path = '${tempDir.path}/vox_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      _currentRecordingPath = path;
-      final startTime = DateTime.now();
-
-      await _audioRecorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          bitRate: 32000,
-          sampleRate: 16000,
-        ),
-        path: path,
-      );
-
-      // Record for 3.2 seconds chunks
-      await Future.delayed(const Duration(milliseconds: 3200));
-
-      if (!_isVoxActive || !mounted) {
-        if (await _audioRecorder.isRecording()) {
-          await _audioRecorder.stop();
-        }
-        return;
-      }
-
-      if (await _audioRecorder.isRecording()) {
-        final savedPath = await _audioRecorder.stop();
-        if (savedPath != null) {
-          final file = File(savedPath);
-          if (await file.exists()) {
-            final durationMs = DateTime.now().difference(startTime).inMilliseconds;
-            final bytes = await file.readAsBytes();
-            if (bytes.length > 500) {
-              final base64Audio = base64Encode(bytes);
-              convoyService.sendVoiceBurst(
-                senderId: myLoc.userId,
-                senderName: myLoc.name,
-                audioBase64: base64Audio,
-                durationMs: durationMs,
-              ).ignore();
-            }
-            file.delete().ignore();
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('VOX cycle note: $e');
-    }
-
-    if (_isVoxActive && !_isMicMuted && mounted) {
-      Future.delayed(const Duration(milliseconds: 150), () {
-        if (_isVoxActive && !_isMicMuted && mounted) {
-          _runVoxCycle(myLoc, convoyService);
-        }
-      });
-    }
-  }
-
-  void _stopVoxLoop() {
-    _isVoxActive = false;
-    _audioRecorder.isRecording().then((recording) {
-      if (recording) _audioRecorder.stop();
-    }).catchError((_) {});
   }
 
   void _checkWaitRequests(ConvoyModel convoy) {
@@ -582,33 +369,26 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
 
     _checkWaitRequests(convoy);
 
-    final currentUserId = 'usr_${(authService.currentUserName ?? 'rider').toLowerCase().replaceAll(' ', '_')}';
+    final currentUserId = authService.currentUserId ?? convoyService.myUserId ?? '';
     final currentRider = convoy.riders[currentUserId] ??
-        convoy.riders.values.firstWhere(
-          (r) => r.name == authService.currentUserName,
-          orElse: () => convoy.riders.values.first,
+        RiderModel(
+          userId: currentUserId,
+          name: authService.currentUserName ?? 'You',
+          vehicleType: authService.vehicleType ?? 'Motorcycle',
+          lat: 0.0,
+          lng: 0.0,
+          lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
         );
 
-    final isCreator = convoy.createdByUserId == currentUserId ||
-        convoy.createdByUserName == authService.currentUserName;
+    final isCreator = convoy.createdByUserId == currentUserId;
 
     // Check active SOS alerts from other members (excluding self, resolved, and locally dismissed alerts)
-    final otherSosAlerts = convoy.activeAlerts.where((a) {
-      final isMe = (a.userId.isNotEmpty && a.userId.toLowerCase() == currentUserId.toLowerCase()) ||
-                   (a.userName.isNotEmpty && a.userName.toLowerCase() == (authService.currentUserName ?? '').toLowerCase()) ||
-                   (a.userId.isNotEmpty && a.userId.toLowerCase() == currentRider.userId.toLowerCase()) ||
-                   (a.userName.isNotEmpty && a.userName.toLowerCase() == currentRider.name.toLowerCase());
-      return !isMe && !a.resolved && !_dismissedAlertIds.contains(a.alertId);
-    }).toList();
+    final otherSosAlerts = convoy.activeAlerts
+        .where((a) => a.userId != currentUserId && !a.resolved && !_dismissedAlertIds.contains(a.alertId))
+        .toList();
 
     // Check if the current user themselves has an active broadcasted SOS
-    final myActiveSosAlerts = convoy.activeAlerts.where((a) {
-      final isMe = (a.userId.isNotEmpty && a.userId.toLowerCase() == currentUserId.toLowerCase()) ||
-                   (a.userName.isNotEmpty && a.userName.toLowerCase() == (authService.currentUserName ?? '').toLowerCase()) ||
-                   (a.userId.isNotEmpty && a.userId.toLowerCase() == currentRider.userId.toLowerCase()) ||
-                   (a.userName.isNotEmpty && a.userName.toLowerCase() == currentRider.name.toLowerCase());
-      return isMe && !a.resolved;
-    }).toList();
+    final myActiveSosAlerts = convoy.activeAlerts.where((a) => a.userId == currentUserId && !a.resolved).toList();
 
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
@@ -1017,7 +797,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                       backgroundColor: AppTheme.slateCard,
                       title: const Text('🛑 End Convoy Ride?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                       content: const Text(
-                        'This will conclude the active ride for all members and save the journey history to local storage, Firebase, and Oracle 26ai Cloud.',
+                        'This will conclude the active ride for all members and save the journey to everyone\'s trip history.',
                         style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
                       ),
                       actions: [
@@ -1581,320 +1361,24 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
 
   // --- BOTTOM DOCK: INTERCOM & SOS ---
   Widget _buildIntercomAndSosDock(ConvoyModel convoy, RiderModel myLoc, ConvoyService service) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: const BoxDecoration(
-        color: AppTheme.slateCard,
-        border: Border(top: BorderSide(color: AppTheme.glassBorder)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_incomingSpeakerName != null) ...[
-              Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppTheme.neonCyan.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppTheme.neonCyan.withOpacity(0.6)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.volume_up_rounded, color: AppTheme.neonCyan, size: 16),
-                    const SizedBox(width: 8),
-                    Text(
-                      '🔊 $_incomingSpeakerName is broadcasting...',
-                      style: const TextStyle(
-                        color: AppTheme.neonCyan,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            // Intercom Mode Selector: PTT vs Open-Mic (VOX)
-            Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                color: AppTheme.elevatedCard,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppTheme.glassBorder),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(8),
-                      onTap: () {
-                        setState(() {
-                          _intercomType = IntercomType.ptt;
-                          _stopVoxLoop();
-                        });
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        decoration: BoxDecoration(
-                          color: _intercomType == IntercomType.ptt
-                              ? AppTheme.neonCyan.withOpacity(0.2)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                          border: _intercomType == IntercomType.ptt
-                              ? Border.all(color: AppTheme.neonCyan)
-                              : null,
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.touch_app_rounded,
-                              size: 13,
-                              color: _intercomType == IntercomType.ptt ? AppTheme.neonCyan : AppTheme.textMuted,
-                            ),
-                            const SizedBox(width: 5),
-                            Text(
-                              'PTT (Hold to Talk)',
-                              style: TextStyle(
-                                color: _intercomType == IntercomType.ptt ? AppTheme.neonCyan : AppTheme.textMuted,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(8),
-                      onTap: () {
-                        setState(() {
-                          _intercomType = IntercomType.vox;
-                        });
-                        if (!_isMicMuted) {
-                          _startVoxLoop(myLoc, service);
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        decoration: BoxDecoration(
-                          color: _intercomType == IntercomType.vox
-                              ? AppTheme.hyperAmber.withOpacity(0.2)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                          border: _intercomType == IntercomType.vox
-                              ? Border.all(color: AppTheme.hyperAmber)
-                              : null,
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.record_voice_over_rounded,
-                              size: 13,
-                              color: _intercomType == IntercomType.vox ? AppTheme.hyperAmber : AppTheme.textMuted,
-                            ),
-                            const SizedBox(width: 5),
-                            Text(
-                              'Open-Mic VOX (Hands-Free)',
-                              style: TextStyle(
-                                color: _intercomType == IntercomType.vox ? AppTheme.hyperAmber : AppTheme.textMuted,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Row(
-              children: [
-                // Mic mute
-                IconButton(
-                  icon: Icon(
-                    _isMicMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
-                    color: _isMicMuted ? AppTheme.laserRed : AppTheme.neonCyan,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _isMicMuted = !_isMicMuted;
-                      if (_isMicMuted) {
-                        _stopVoxLoop();
-                      } else if (_intercomType == IntercomType.vox) {
-                        _startVoxLoop(myLoc, service);
-                      }
-                    });
-                  },
-                ),
-
-                // Deafen
-                IconButton(
-                  icon: Icon(
-                    _isDeafened ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                    color: _isDeafened ? AppTheme.laserRed : Colors.white,
-                  ),
-                  onPressed: () => setState(() => _isDeafened = !_isDeafened),
-                ),
-
-                // Dual Intercom Action: PTT vs Open-Mic VOX
-                if (_intercomType == IntercomType.ptt)
-                  Expanded(
-                    child: GestureDetector(
-                      onTapDown: (_) => _startRecording(),
-                      onTapUp: (_) => _stopRecordingAndBroadcast(myLoc, service),
-                      onTapCancel: () => _stopRecordingAndBroadcast(myLoc, service),
-                      child: Container(
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: _isPttPressed
-                              ? AppTheme.emeraldSafe
-                              : AppTheme.devmonksPurple.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: _isPttPressed ? AppTheme.emeraldSafe : AppTheme.devmonksPurple,
-                            width: _isPttPressed ? 2.0 : 1.0,
-                          ),
-                          boxShadow: _isPttPressed
-                              ? [
-                                  BoxShadow(
-                                    color: AppTheme.emeraldSafe.withOpacity(0.4),
-                                    blurRadius: 10,
-                                    spreadRadius: 2,
-                                  ),
-                                ]
-                              : null,
-                        ),
-                        child: Center(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                _isPttPressed ? Icons.mic_rounded : Icons.radio_button_checked_rounded,
-                                size: 16,
-                                color: _isPttPressed ? Colors.black : Colors.white,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                _isPttPressed ? 'TRANSMITTING VOICE...' : 'HOLD TO TALK (PTT)',
-                                style: TextStyle(
-                                  color: _isPttPressed ? Colors.black : Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  )
-                else
-                  Expanded(
-                    child: InkWell(
-                      onTap: () {
-                        setState(() {
-                          _isMicMuted = !_isMicMuted;
-                          if (_isMicMuted) {
-                            _stopVoxLoop();
-                          } else {
-                            _startVoxLoop(myLoc, service);
-                          }
-                        });
-                      },
-                      borderRadius: BorderRadius.circular(10),
-                      child: Container(
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: _isMicMuted
-                              ? AppTheme.hyperAmber.withOpacity(0.2)
-                              : AppTheme.emeraldSafe.withOpacity(0.25),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: _isMicMuted ? AppTheme.hyperAmber : AppTheme.emeraldSafe,
-                            width: 1.5,
-                          ),
-                          boxShadow: !_isMicMuted
-                              ? [
-                                  BoxShadow(
-                                    color: AppTheme.emeraldSafe.withOpacity(0.3),
-                                    blurRadius: 8,
-                                    spreadRadius: 1,
-                                  ),
-                                ]
-                              : null,
-                        ),
-                        child: Center(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                _isMicMuted ? Icons.mic_off_rounded : Icons.graphic_eq_rounded,
-                                size: 18,
-                                color: _isMicMuted ? AppTheme.hyperAmber : AppTheme.emeraldSafe,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                _isMicMuted
-                                    ? 'VOX MUTED (Tap to Unmute)'
-                                    : '🗣️ OPEN-MIC ACTIVE (Hands-Free)',
-                                style: TextStyle(
-                                  color: _isMicMuted ? AppTheme.hyperAmber : Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                const SizedBox(width: 8),
-
-                // Emergency SOS Panic Button
-                ElevatedButton(
-                  onPressed: () {
-                    service.triggerSosAlert(
-                      userId: myLoc.userId,
-                      userName: myLoc.name,
-                      lat: myLoc.lat,
-                      lng: myLoc.lng,
-                      type: 'CRASH_OR_EMERGENCY',
-                    );
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('🚨 SOS EMERGENCY BROADCAST TO CONVOY!'),
-                        backgroundColor: AppTheme.laserRed,
-                      ),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.laserRed,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  ),
-                  child: const Text('SOS', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+    return IntercomDock(
+      convoy: convoy,
+      me: myLoc,
+      onSos: () {
+        service.triggerSosAlert(
+          userId: myLoc.userId,
+          userName: myLoc.name,
+          lat: myLoc.lat,
+          lng: myLoc.lng,
+          type: 'CRASH_OR_EMERGENCY',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🚨 SOS EMERGENCY BROADCAST TO CONVOY!'),
+            backgroundColor: AppTheme.laserRed,
+          ),
+        );
+      },
     );
   }
 }
