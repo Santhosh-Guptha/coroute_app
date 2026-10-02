@@ -1,5 +1,5 @@
 # /etc/caddy/Caddyfile — automatic HTTPS (Let's Encrypt), auto-renewal, HTTP->HTTPS redirect.
-# Replace the hostname with the DNS name you point at 152.67.181.198 (e.g. api.coroute.devmonks.space).
+# Hostname that resolves to this VM (152.67.181.198). Free option: a DuckDNS name (see RUNBOOK §0).
 api.coroute.example.com {
 	encode zstd gzip
 	header {

@@ -9,8 +9,11 @@ its own data.
 
 ## 0. Prerequisites (10 min)
 
-1. A DNS name for the API, e.g. `api.coroute.devmonks.space` → **A record → 152.67.181.198**.
-   (Let's Encrypt needs a hostname; the app is configured with this URL.)
+1. A hostname for the API. **Free option (used by default): DuckDNS.** Go to https://www.duckdns.org, sign in
+   (GitHub/Google), create the subdomain **`coroute`** (→ `coroute.duckdns.org`) and set its IP to `152.67.181.198`.
+   Copy your DuckDNS *token*; the installer can re-point the record for you (`DUCKDNS_TOKEN=…`).
+   If `coroute` is taken, pick another name and build the app with `--dart-define=COROUTE_API=https://<name>.duckdns.org`.
+   (Let's Encrypt needs a hostname; the OCI public IP is static, so the record never needs updating.)
 2. OCI → Networking → the VM's subnet **Security List**: allow ingress TCP **80** and **443** from `0.0.0.0/0`.
    On the VM itself: `sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT && sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT && sudo netfilter-persistent save`
 3. Google Cloud Console → the OAuth client used by the app (`87798956679-…apps.googleusercontent.com`) — keep its **Web client ID**; it goes into `GOOGLE_CLIENT_IDS`. (Google Sign-In in the app must request an ID token with that web client as `serverClientId`; see the Flutter section of PRODUCTION_PLAN.md.)
@@ -23,6 +26,14 @@ Then **rotate the ADMIN password** — the old APK shipped it — and disable RE
 Resulting SODA URL: `https://<adb-host>.adb.ap-hyderabad-1.oraclecloudapps.com/ords/coroute/soda/latest`
 
 ## 2. Install the gateway (10 min)
+
+**Fast path — one command.** Copy the repo to the VM (`scp -r coroute_app ubuntu@152.67.181.198:~/` or `git clone`), then:
+```bash
+cd ~/coroute_app && sudo API_HOST=coroute.duckdns.org DUCKDNS_TOKEN=<your-token> bash gateway/deploy/install.sh
+```
+It installs Node 22 + Caddy, creates the service user, asks once for the Oracle schema URL/password, Google client ID(s)
+and bootstrap admin e-mail, generates the JWT secret, creates the DB collections, enables TLS and opens the firewall.
+Re-run the same command later to upgrade. The manual equivalent follows.
 
 ```bash
 # on the VM
@@ -57,26 +68,26 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo 
 sudo apt-get update && sudo apt-get install -y caddy
 sudo systemctl disable --now nginx 2>/dev/null || true     # the old nginx on :80 must go
 sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
-sudo sed -i 's/api.coroute.example.com/api.coroute.devmonks.space/' /etc/caddy/Caddyfile   # your hostname
+sudo sed -i 's/api.coroute.example.com/coroute.duckdns.org/' /etc/caddy/Caddyfile   # your hostname
 sudo systemctl reload caddy
-curl -s https://api.coroute.devmonks.space/api/health
-./deploy/smoke_test.sh https://api.coroute.devmonks.space
+curl -s https://coroute.duckdns.org/api/health
+./deploy/smoke_test.sh https://coroute.duckdns.org
 ```
 
 ## 4. Build the app against it
 
 ```bash
 flutter pub get
-flutter build apk --release --dart-define=COROUTE_API=https://api.coroute.devmonks.space
+flutter build apk --release --dart-define=COROUTE_API=https://coroute.duckdns.org
 ```
-(`COROUTE_API` defaults to `https://api.coroute.devmonks.space` in `lib/core/config/app_config.dart`; change the default there if you use another hostname.)
+(`COROUTE_API` defaults to `https://coroute.duckdns.org` in `lib/core/config/app_config.dart`, so the flag is optional unless you chose another hostname.)
 
 ## 5. First admin
 
 Sign in (password or Google) with an address listed in `BOOTSTRAP_ADMIN_EMAILS` → that account is stored as `MASTER_ADMIN` in the database.
-From then on, promote/demote from the admin API (or a future admin screen):
+From then on, promote/demote from the **Users & roles** screen in the admin dashboard, or via the API:
 ```bash
-curl -X PATCH https://api…/api/admin/users/usr_someone/role -H "Authorization: Bearer <admin JWT>" -H 'Content-Type: application/json' -d '{"role":"MASTER_ADMIN"}'
+curl -X PATCH https://coroute.duckdns.org/api/admin/users/usr_someone/role -H "Authorization: Bearer <admin JWT>" -H 'Content-Type: application/json' -d '{"role":"MASTER_ADMIN"}'
 ```
 You can then remove `BOOTSTRAP_ADMIN_EMAILS` from the env file; roles live in the DB.
 

@@ -12,7 +12,7 @@ class AppConfig {
 
   static const String apiBaseUrl = String.fromEnvironment(
     'COROUTE_API',
-    defaultValue: 'https://api.coroute.devmonks.space',
+    defaultValue: 'https://coroute.duckdns.org',
   );
 
   /// REST prefix, e.g. https://host/api

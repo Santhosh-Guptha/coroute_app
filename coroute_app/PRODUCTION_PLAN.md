@@ -77,10 +77,10 @@ at zero running cost, and what remains before store release.
 ## 4. Rollout checklist
 
 1. **Secrets hygiene (do first)** — rotate the Oracle ADMIN password; create the `COROUTE` schema (`gateway/deploy/oracle_setup.sql`); generate a new release keystore or at least change its password and keep it in `android/key.properties` (git-ignored). Treat the old APK's credentials as compromised.
-2. **Deploy the gateway** — follow `gateway/deploy/RUNBOOK.md` (DNS → schema → systemd → Caddy → smoke test).
+2. **Deploy the gateway** — `sudo API_HOST=coroute.duckdns.org DUCKDNS_TOKEN=… bash gateway/deploy/install.sh` on the VM (details in `gateway/deploy/RUNBOOK.md`).
 3. **Build the app** — `flutter pub get && flutter analyze && flutter test`, then `flutter build apk --release --dart-define=COROUTE_API=https://<your-host>`.
 4. **Device test matrix** — two phones in one convoy + a third phone in a second convoy: verify PTT and VOX latency, 1:1 privacy, no cross-group chat/audio, reconnect after airplane-mode toggle, screen-off tracking for 10 min, rotation on every screen.
-5. **Store readiness** — privacy policy URL (location, microphone, account data; retention policy above), data-safety form, background-location declaration video (Play requires it for `ACCESS_BACKGROUND_LOCATION`), app icon/screenshots, `android:label` = CoRoute.
+5. **Store readiness** — privacy policy is served at `https://<host>/privacy`; data-safety answers and the background-location declaration script are in `gateway/deploy/PLAY_STORE_CHECKLIST.md`; still needed: the declaration video, icon and screenshots.
 6. **Observability (free)** — UptimeRobot (or similar) on `GET /api/health`; `journalctl -u coroute-gateway` for logs.
 
 ---
@@ -90,7 +90,7 @@ at zero running cost, and what remains before store release.
 | Priority | Feature | Notes |
 |---|---|---|
 | P1 | Opus codec for voice | ~6× less data than PCM16 on mobile networks; needs an FFI Opus package. Protocol already carries `codec`. |
-| P1 | Admin screen for user roles | API exists (`/api/admin/users`); add UI to the admin dashboard. |
+| done | Admin screen for user roles | `admin_users_screen.dart`, reachable from the admin dashboard toolbar. |
 | P1 | Offline map tile cache | Cache OSM tiles for the planned route before departure (flutter_map tile provider with disk cache). |
 | P2 | Crash detection | Accelerometer spike + stop → auto-SOS countdown. |
 | P2 | Bluetooth helmet PTT | Map media-button events to PTT. |

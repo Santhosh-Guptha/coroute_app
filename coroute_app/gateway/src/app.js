@@ -39,7 +39,9 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const server = http.createServer(app);
   const startedAt = Date.now();
   const hub = new Hub({ server, convoys, repo, logger });
-  app.get('/', (req, res) => res.json({ service: 'CoRoute Gateway', version: require('../package.json').version, status: 'ONLINE' }));
+  app.get('/', (req, res) => res.json({ service: 'CoRoute Gateway', version: require('../package.json').version, status: 'ONLINE', privacy: '/privacy' }));
+  // Public privacy policy (required by the Play Store) — served from here so no extra hosting is needed.
+  app.get(['/privacy', '/privacy.html'], (req, res) => res.sendFile(require('path').join(__dirname, '..', 'public', 'privacy.html')));
   app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt }));
   app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
