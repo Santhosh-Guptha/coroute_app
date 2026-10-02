@@ -22,6 +22,8 @@ const C = {
   trips: 'trips',
   voiceLog: 'voice_log',
   broadcasts: 'broadcasts',
+  pageviews: 'pageviews',
+  feedback: 'feedback',
 };
 
 const ACTIVE_STATUSES = ['PLANNING', 'STARTED', 'PAUSED'];
@@ -52,6 +54,8 @@ class Repo {
     await idx(C.trips, 'trips_id_ux', ['tripId'], true);
     await idx(C.voiceLog, 'voice_started_ix', [{ path: 'startedAt', datatype: 'number' }]);
     await idx(C.broadcasts, 'broadcasts_ts_ix', [{ path: 'timestamp', datatype: 'number' }]);
+    await idx(C.pageviews, 'pageviews_day_path_ux', ['day', 'path'], true);
+    await idx(C.feedback, 'feedback_ts_ix', [{ path: 'createdAt', datatype: 'number' }]);
   }
 
   // ---------- users ----------
@@ -211,6 +215,28 @@ class Repo {
   }
   async addBroadcast(entry) {
     await this.soda.insert(C.broadcasts, entry);
+  }
+
+  // ---------- website: first-party analytics (no cookies, no personal data) ----------
+  async countPageview(day, path, referrerHost) {
+    const existing = await this.soda.findOne(C.pageviews, { day, path });
+    if (existing) {
+      const v = existing.value;
+      const refs = { ...(v.referrers || {}) };
+      if (referrerHost) refs[referrerHost] = (refs[referrerHost] || 0) + 1;
+      await this.soda.replace(C.pageviews, existing.key, { ...v, count: (v.count || 0) + 1, referrers: refs });
+    } else {
+      await this.soda.insert(C.pageviews, { day, path, count: 1, referrers: referrerHost ? { [referrerHost]: 1 } : {} });
+    }
+  }
+  async listPageviews(sinceDay) {
+    const rows = await this.soda.query(C.pageviews, { day: { $gte: sinceDay } }, { orderBy: [{ path: 'day', order: 'desc' }], limit: 1000 });
+    return rows.map((r) => r.value);
+  }
+  async addFeedback(entry) { await this.soda.insert(C.feedback, entry); }
+  async listFeedback(limit = 200) {
+    const rows = await this.soda.query(C.feedback, {}, { orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }], limit });
+    return rows.map((r) => ({ ...r.value, key: r.key }));
   }
 
   // ---------- housekeeping ----------

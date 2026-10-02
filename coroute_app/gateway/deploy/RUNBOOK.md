@@ -18,6 +18,17 @@ its own data.
    On the VM itself: `sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT && sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT && sudo netfilter-persistent save`
 3. Google Cloud Console → the OAuth client used by the app (`87798956679-…apps.googleusercontent.com`) — keep its **Web client ID**; it goes into `GOOGLE_CLIENT_IDS`. (Google Sign-In in the app must request an ID token with that web client as `serverClientId`; see the Flutter section of PRODUCTION_PLAN.md.)
 
+## 0b. Custom domain (launch requirement)
+
+The DuckDNS name is for testing. Before launch, point your own domain at the VM and let Caddy issue its certificate:
+
+1. At your DNS provider (for devmonks.space, or whichever domain you choose) add **A record** `coroute` → `152.67.181.198` (giving `coroute.devmonks.space`).
+2. On the VM, re-run the installer with both hostnames so existing test builds keep working while the new one takes over:
+   `sudo API_HOST="coroute.devmonks.space, coroute.duckdns.org" bash gateway/deploy/install.sh`
+   (Caddy accepts a comma-separated list of site addresses; certificates are issued for each.)
+3. Make the custom domain the app's default: in `lib/core/config/app_config.dart` set `defaultValue: 'https://coroute.devmonks.space'`, and in `gateway/public/index.html`, `store/LISTING.md` and `PLAY_STORE_CHECKLIST.md` replace `coroute.duckdns.org`. Rebuild the app.
+4. Check `https://coroute.devmonks.space/`, `/privacy`, `/terms` and `/api/health`.
+
 ## 1. Database: dedicated low-privilege schema (5 min)
 
 Database Actions → SQL (as ADMIN) → run `deploy/oracle_setup.sql` after replacing `<strong-password>`.

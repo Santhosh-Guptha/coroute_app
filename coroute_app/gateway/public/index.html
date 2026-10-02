@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CoRoute: convoy app for group motorcycle rides</title>
+<meta name="description" content="CoRoute is a free, ad-free convoy app for group motorcycle rides: live map of every rider, voice intercom, one-tap SOS and ride history.">
+<link rel="canonical" href="__ORIGIN__/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CoRoute">
+<meta property="og:title" content="CoRoute: keep your group together on every ride">
+<meta property="og:description" content="CoRoute is a free, ad-free convoy app for group motorcycle rides: live map of every rider, voice intercom, one-tap SOS and ride history.">
+<meta property="og:url" content="__ORIGIN__/">
+<meta property="og:image" content="__ORIGIN__/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="CoRoute: keep your group together on every ride">
+<meta name="twitter:description" content="CoRoute is a free, ad-free convoy app for group motorcycle rides: live map of every rider, voice intercom, one-tap SOS and ride history.">
+<meta name="twitter:image" content="__ORIGIN__/og-image.png">
+<meta name="theme-color" content="#0b0f14">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+  html{color-scheme:dark}
+  /* Layout: dark instrument-panel ground, one cyan signal colour, amber for warnings. Compact hero, feature grid,
+     the real three-step flow, free/privacy panels, download block. No animation, no decorative gradients. */
+  :root{
+    --bg:#0b0f14; --bg-2:#111820; --panel:#151d27; --line:#24303d;
+    --fg:#e9eef4; --muted:#93a1b1; --accent:#3ee0ec; --accent-ink:#06282c; --warn:#ffb347; --danger:#ff5d5d;
+    --display:"Barlow Condensed","Arial Narrow",Impact,sans-serif; --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    color-scheme:dark;
+  }
+  @media (prefers-color-scheme: light){ :root:not([data-theme="dark"]){
+    --bg:#f4f6f8; --bg-2:#ffffff; --panel:#ffffff; --line:#d9e0e7; --fg:#121a22; --muted:#4f5f73; --accent:#087680; --accent-ink:#ffffff; --warn:#9a5700; --danger:#b42626; color-scheme:light } }
+  :root[data-theme="light"]{
+    --bg:#f4f6f8; --bg-2:#ffffff; --panel:#ffffff; --line:#d9e0e7; --fg:#121a22; --muted:#4f5f73; --accent:#087680; --accent-ink:#ffffff; --warn:#9a5700; --danger:#b42626; color-scheme:light }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 var(--body);-webkit-font-smoothing:antialiased}
+  a{color:var(--accent)}
+  .wrap{max-width:1080px;margin:0 auto;padding-inline:20px}
+  h1,h2,h3{font-family:var(--display);line-height:1.02;letter-spacing:.005em;text-wrap:balance;margin:0}
+  h1{font-size:clamp(32px,4.6vw,50px);font-weight:700}
+  h3{font-family:var(--body);font-size:19px;font-weight:600}
+  h2{font-size:clamp(24px,3.2vw,34px);font-weight:700}
+  p{margin:0}
+  .eyebrow{font:500 12px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+  .muted{color:var(--muted)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+
+  /* top bar */
+  .bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:color-mix(in srgb,var(--bg) 86%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .bar .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:60px}
+  .logo{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:800;font-size:24px;text-transform:uppercase;color:var(--fg);text-decoration:none}
+  .logo svg{width:30px;height:30px;background:var(--bg);border-radius:8px;padding:2px}
+  .nav{display:flex;gap:22px;font-size:14px}
+  .nav a{color:var(--muted);text-decoration:none}
+  .nav a:hover{color:var(--fg)}
+  @media (max-width:640px){.nav{display:none}}
+  .bar .short{display:none}
+  @media (max-width:420px){.bar .long{display:none}.bar .short{display:inline}}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:8px;font-weight:600;line-height:1.2;text-decoration:none;border:1px solid var(--line);color:var(--fg);background:var(--panel);font-size:15px}
+  .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .btn.small{padding:8px 14px;font-size:14px}
+
+  /* hero */
+  .hero{padding-block:clamp(48px,8vw,96px) clamp(32px,6vw,72px);display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
+  @media (max-width:860px){.hero{grid-template-columns:1fr}}
+  .hero p.lead{font-size:clamp(17px,2vw,20px);max-width:34em;margin-top:18px;color:var(--muted)}
+  .hero .cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
+  .hero .fine{margin-top:14px;font-size:13px;color:var(--muted)}
+  .cluster{position:relative;background:var(--bg-2);border:1px solid var(--line);border-radius:18px;padding:18px;min-width:0}
+  .cluster svg{display:block;width:100%;height:auto;max-width:100%}
+  .cluster .tag{position:absolute;font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:6px 8px;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
+  .tag.speak{top:14px;left:14px;color:var(--accent);border-color:var(--accent)}
+  .tag.sos{bottom:14px;right:14px;color:var(--danger);border-color:var(--danger)}
+
+  /* stats strip */
+  .strip{border-block:1px solid var(--line);background:var(--bg-2)}
+  .strip .wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+  .strip div{padding:18px 16px;border-left:1px solid var(--line)}
+  .strip div:first-child{border-left:0;padding-left:0}
+  .strip b{display:block;font:700 24px/1.1 var(--display)}
+  .strip span{font-size:13px;color:var(--muted)}
+  @media (max-width:720px){.strip .wrap{grid-template-columns:repeat(2,1fr)}.strip div:nth-child(3){border-left:0;padding-left:0}.strip div{border-top:1px solid var(--line)}.strip div:nth-child(-n+2){border-top:0}}
+
+  section{padding-block:clamp(48px,7vw,88px)}
+  .sect-head{max-width:40em;margin-bottom:34px}
+  .sect-head p{margin-top:12px;color:var(--muted)}
+
+  /* features */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media (max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:560px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;min-width:0;display:flex;flex-direction:column;gap:10px}
+  .card .ic{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+  .card .ic svg{width:22px;height:22px}
+  .card p{color:var(--muted);font-size:15px}
+  .card .spec{margin-top:auto;padding-top:8px;font:500 12px/1.4 var(--mono);color:var(--muted);border-top:1px dashed var(--line)}
+
+  /* steps */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;counter-reset:step}
+  @media (max-width:760px){.steps{grid-template-columns:1fr}}
+  .step{position:relative;padding:22px 22px 22px 70px;background:var(--bg-2);border:1px solid var(--line);border-radius:14px;min-width:0}
+  .step::before{counter-increment:step;content:counter(step);position:absolute;left:20px;top:18px;font:800 34px/1 var(--display);color:var(--accent)}
+  .step p{color:var(--muted);font-size:15px;margin-top:6px}
+  .code{display:inline-block;font:500 14px/1 var(--mono);letter-spacing:.2em;padding:6px 10px;border-radius:6px;background:var(--panel);border:1px solid var(--line);color:var(--fg)}
+
+  /* free + privacy */
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:760px){.two{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px;min-width:0}
+  .panel ul{margin:14px 0 0;padding-left:18px;color:var(--muted);font-size:15px}
+  .panel li{margin-top:6px}
+  .panel li b{color:var(--fg);font-weight:600}
+
+  /* download */
+  .dl{background:var(--bg-2);border-block:1px solid var(--line)}
+  .dl .wrap{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:center}
+  @media (max-width:760px){.dl .wrap{grid-template-columns:1fr}}
+  .dl .cta{display:flex;flex-wrap:wrap;gap:12px}
+
+  /* feedback form */
+  .form{display:grid;gap:12px;max-width:560px}
+  .form label{display:grid;gap:6px;font-size:14px;font-weight:600}
+  .form input,.form textarea{font:inherit;color:var(--fg);background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:11px 12px;width:100%;box-sizing:border-box}
+  .form textarea{min-height:120px;resize:vertical}
+  .form input:focus,.form textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+  .form .err{color:var(--danger);font-size:13px;font-weight:400;min-height:1.2em}
+  .form input[aria-invalid="true"],.form textarea[aria-invalid="true"]{border-color:var(--danger)}
+  .form .hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
+  .form .status{font-size:14px;min-height:1.4em}
+  .form .status.ok{color:var(--accent)}.form .status.bad{color:var(--danger)}
+  .form button{justify-self:start}
+  footer{padding-block:28px;font-size:13px;color:var(--muted)}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:12px 24px;justify-content:space-between}
+  footer a{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="CoRoute home">
+      <svg viewBox="0 0 100 100"  aria-hidden="true"><path d="M20 82 C20 36 80 64 80 18" fill="none" stroke="var(--accent)" stroke-width="15" stroke-linecap="round"/><path d="M20 82 C20 36 80 64 80 18" fill="none" stroke="var(--bg)" stroke-width="2.2" stroke-dasharray="4.5 4.5"/><circle cx="21.1" cy="72.3" r="9.4" fill="var(--bg)"/><circle cx="21.1" cy="72.3" r="7.2" fill="#ecf1f6"/><circle cx="50.0" cy="50.0" r="9.4" fill="var(--bg)"/><circle cx="50.0" cy="50.0" r="7.2" fill="#ecf1f6"/><circle cx="78.9" cy="27.7" r="9.4" fill="var(--bg)"/><circle cx="78.9" cy="27.7" r="7.2" fill="#ffb347"/></svg>
+      CoRoute
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#features">Features</a><a href="#how">How it works</a><a href="#free">Free and non-profit</a><a href="#privacy">Privacy</a>
+    </nav>
+    <a class="btn primary small" href="/download"><span class="long">Download for Android</span><span class="short">Download</span></a>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap hero">
+    <div>
+      <p class="eyebrow">Convoy app for group motorcycle rides</p>
+      <h1>Keep your group together on every ride</h1>
+      <p class="lead">CoRoute shows every rider of your group on one live map, gives you a push-to-talk intercom, and a one-tap SOS that reaches the whole convoy. It is free, has no ads, and is run as a non-profit project.</p>
+      <div class="cta">
+        <a class="btn primary" href="/download">Download for Android</a>
+      </div>
+      <p class="fine">No subscription, no ads, no sale of data.</p>
+    </div>
+    <div class="cluster">
+      <span class="tag speak">Intercom: rider 2 speaking</span>
+      <svg viewBox="0 0 520 360" role="img" aria-labelledby="illu-title"><title id="illu-title">Illustration of the convoy map: four riders on a route, one speaking on the intercom, the lead rider with an SOS alert</title>
+        <defs><pattern id="g" width="26" height="26" patternUnits="userSpaceOnUse"><path d="M26 0H0v26" fill="none" stroke="var(--line)" stroke-width="1"/></pattern></defs>
+        <rect width="520" height="360" fill="url(#g)"/>
+        <path d="M30 300 C 120 280, 150 160, 240 170 S 400 230, 490 60" fill="none" stroke="var(--line)" stroke-width="14" stroke-linecap="round"/>
+        <path d="M30 300 C 120 280, 150 160, 240 170 S 400 230, 490 60" fill="none" stroke="var(--accent)" stroke-width="3" stroke-dasharray="10 10" stroke-linecap="round" opacity=".7"/>
+        <g class="rider"><circle cx="86" cy="286" r="11" fill="var(--accent)"/><text x="104" y="291" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--muted)">Sweep rider</text></g>
+        <g class="rider"><circle cx="210" cy="178" r="11" fill="var(--accent)"/><text x="228" y="183" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--muted)">Rider 2</text></g>
+        <g class="rider"><circle cx="330" cy="208" r="11" fill="var(--warn)"/><text x="348" y="213" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--muted)">Rider 3, fuel stop</text></g>
+        <g><circle cx="462" cy="96" r="15" fill="none" stroke="var(--danger)" stroke-width="2"/><circle cx="462" cy="96" r="11" fill="var(--danger)"/><text x="382" y="78" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--danger)">Lead rider, SOS</text></g>
+        <text x="30" y="40" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--muted)">Illustration of the convoy map</text>
+      </svg>
+      <span class="tag sos">SOS alert from lead rider</span>
+    </div>
+  </div>
+
+  <div class="strip">
+    <div class="wrap">
+      <div><b>Free</b><span>no subscription, no paid tier</span></div>
+      <div><b>No ads</b><span>no trackers, no analytics SDKs</span></div>
+      <div><b>No recordings</b><span>intercom audio is relayed live and discarded</span></div>
+      <div><b>Non-profit</b><span>run by volunteers, no investors</span></div>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="sect-head">
+        <p class="eyebrow">Features</p>
+        <h2>What CoRoute does</h2>
+        <p>Made for a phone mounted on a motorcycle: large touch targets, high contrast, and voice for anything that cannot wait for a stop.</p>
+      </div>
+      <div class="grid">
+        <article class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l6-3 6 3 6-3v13l-6 3-6-3-6 3z"/><path d="M9 4v13M15 7v13"/></svg></div>
+          <h3>Live convoy map</h3>
+          <p>Every rider's position, speed and heading on an OpenStreetMap view, together with the planned route and the distance between first and last rider.</p>
+          <div class="spec">Position updates while moving; heading from GPS and the phone compass.</div>
+        </article>
+        <article class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+          <h3>Voice intercom</h3>
+          <p>Hold to talk to everyone, or pick one rider for a private channel. The hands-free mode transmits only while you speak.</p>
+          <div class="spec">Live stream, no recordings. One speaker at a time on the group channel.</div>
+        </article>
+        <article class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 18h.01"/></svg></div>
+          <h3>SOS that reaches everyone</h3>
+          <p>One tap sends an alert with your position to the whole convoy and keeps it on every screen until someone marks it resolved.</p>
+          <div class="spec">Medical, breakdown, crash or a custom reason.</div>
+        </article>
+        <article class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+          <h3>Stops and status cards</h3>
+          <p>Quick cards for fuel, rest, photo stop or a two-minute regroup. Planned stops appear on the route and can be ticked off as you pass them.</p>
+          <div class="spec">Status cards, wait timer, planned waypoints.</div>
+        </article>
+        <article class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 10v4M5 10v4M9 10v4"/></svg></div>
+          <h3>Battery use</h3>
+          <p>GPS updates slow down when you stop, audio is only sent while someone is talking, and the app keeps one connection open instead of polling.</p>
+          <div class="spec">Adaptive GPS, one connection, tracking continues with the screen off.</div>
+        </article>
+        <article class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16M8 15l4-6 4 4 4-7"/></svg></div>
+          <h3>Ride history</h3>
+          <p>Every convoy becomes a trip record: who rode, how far, how fast, and where you stopped. The route trace is kept for 90 days.</p>
+          <div class="spec">Summaries are kept; GPS trails are deleted after 90 days.</div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" style="background:var(--bg-2);border-block:1px solid var(--line)">
+    <div class="wrap">
+      <div class="sect-head">
+        <p class="eyebrow">How it works</p>
+        <h2>How a ride works</h2>
+      </div>
+      <div class="steps">
+        <div class="step"><h3>Create a convoy</h3><p>The lead rider names the ride, sets the destination and receives a six-digit code such as <span class="code">483 921</span> to share with the group.</p></div>
+        <div class="step"><h3>Everyone joins with the code</h3><p>Riders enter the code and appear on the map. Each rider sees the others, the route and the planned stops.</p></div>
+        <div class="step"><h3>Ride, talk, regroup</h3><p>Hold to talk or use the hands-free mode, send a fuel card when you stop, press SOS if something goes wrong. Ending the ride saves it for everyone.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="free">
+    <div class="wrap two">
+      <div class="panel">
+        <p class="eyebrow">Free and non-profit</p>
+        <h2 style="font-size:clamp(22px,3vw,28px);margin-top:10px">Run as a public service for riders</h2>
+        <p class="muted" style="margin-top:12px">CoRoute is made by riders at devmonks.space and runs on free-tier cloud infrastructure, so it costs nothing to use. There is no premium tier and no advertising.</p>
+        <ul>
+          <li><b>Free forever</b> for every rider and every group size.</li>
+          <li><b>No account selling, no analytics SDKs</b>, no third-party trackers.</li>
+          <li><b>Feedback is welcome</b> by e-mail; the address is in the footer.</li>
+        </ul>
+      </div>
+      <div class="panel" id="privacy">
+        <p class="eyebrow">Privacy, in plain words</p>
+        <h2 style="font-size:clamp(22px,3vw,28px);margin-top:10px">Only your convoy sees you</h2>
+        <ul>
+          <li><b>Location</b> is shared only with the convoy you are in, and only while you are in it. It stops when you leave.</li>
+          <li><b>Voice is not recorded.</b> It is relayed live and discarded.</li>
+          <li><b>GPS traces are deleted after 90 days.</b> Your account and ride summaries stay until you delete them.</li>
+          <li><b>Passwords</b> are hashed; connections are encrypted; the app holds no database credentials.</li>
+        </ul>
+        <p style="margin-top:14px;font-size:14px"><a href="/privacy">Read the full privacy policy</a> · <a href="/terms">Terms of use</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="feedback">
+    <div class="wrap two">
+      <div>
+        <p class="eyebrow">Feedback</p>
+        <h2>Tell us what to improve</h2>
+        <p class="muted" style="margin-top:12px;max-width:34em">Bug reports, feature requests and ride stories all help. We reply by e-mail; nothing you write here is published.</p>
+      </div>
+      <form class="form" id="feedback-form" method="post" action="/api/feedback" novalidate>
+        <label>Name (optional)
+          <input id="fb-name" name="name" type="text" maxlength="80" autocomplete="name">
+          <span class="err" id="fb-name-err"></span>
+        </label>
+        <label>E-mail
+          <input id="fb-email" name="email" type="email" required maxlength="120" autocomplete="email" aria-describedby="fb-email-err">
+          <span class="err" id="fb-email-err"></span>
+        </label>
+        <label>Message
+          <textarea id="fb-message" name="message" required minlength="20" maxlength="2000" aria-describedby="fb-message-err"></textarea>
+          <span class="err" id="fb-message-err"></span>
+        </label>
+        <label class="hp" aria-hidden="true">Website<input name="website" type="text" tabindex="-1" autocomplete="off"></label>
+        <input type="hidden" name="t" id="fb-t">
+        <button class="btn" type="submit" id="fb-submit">Send message</button>
+        <p class="status" id="fb-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </section>
+
+  <section class="dl" id="download">
+    <div class="wrap">
+      <div>
+        <p class="eyebrow">Get CoRoute</p>
+        <h2>Available for Android</h2>
+        <p class="muted" style="margin-top:12px;max-width:38em">Requires Android 6.0 or newer, location and microphone permissions, and an e-mail address or Google account to register. An iOS version is planned.</p>
+      </div>
+      <div class="cta">
+        <a class="btn primary" href="/download">Download for Android</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 CoRoute, a devmonks.space project. Map data © OpenStreetMap contributors. This site sets no cookies.</span>
+    <span><a href="/privacy">Privacy policy</a> · <a href="/terms">Terms of use</a> · <a href="https://github.com/Santhosh-Guptha/coroute_app">Source on GitHub</a> · <span>santhoshbukka5@gmail.com</span></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // Client-side validation (the server validates again). No cookies, no third-party scripts.
+  var form = document.getElementById('feedback-form');
+  if (!form) return;
+  var t = document.getElementById('fb-t'); t.value = String(Date.now());
+  var email = document.getElementById('fb-email'), msg = document.getElementById('fb-message'), status = document.getElementById('fb-status');
+  function setErr(el, id, text) { document.getElementById(id).textContent = text || ''; el.setAttribute('aria-invalid', text ? 'true' : 'false'); }
+  function validate() {
+    var ok = true;
+    var e = email.value.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { setErr(email, 'fb-email-err', 'Enter a valid e-mail address.'); ok = false; } else setErr(email, 'fb-email-err', '');
+    var m = msg.value.trim();
+    if (m.length < 20) { setErr(msg, 'fb-message-err', 'Please write at least 20 characters.'); ok = false; }
+    else if (m.length > 2000) { setErr(msg, 'fb-message-err', 'Please keep it under 2000 characters.'); ok = false; }
+    else setErr(msg, 'fb-message-err', '');
+    return ok;
+  }
+  email.addEventListener('blur', validate); msg.addEventListener('blur', validate);
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    status.className = 'status'; status.textContent = '';
+    if (!validate()) { status.className = 'status bad'; status.textContent = 'Please correct the highlighted fields.'; return; }
+    var btn = document.getElementById('fb-submit'); btn.disabled = true; btn.textContent = 'Sending…';
+    var data = {}; new FormData(form).forEach(function (v, k) { data[k] = v; });
+    fetch(form.action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.status === 201, j: j }; }); })
+      .then(function (res) {
+        if (res.ok) { form.reset(); t.value = String(Date.now()); status.className = 'status ok'; status.textContent = 'Thanks. Your message was sent.'; }
+        else {
+          status.className = 'status bad'; status.textContent = (res.j && res.j.error) || 'Could not send right now. Please try again later.';
+          var f = res.j && res.j.fields; if (f) { if (f.email) setErr(email, 'fb-email-err', f.email); if (f.message) setErr(msg, 'fb-message-err', f.message); }
+        }
+      })
+      .catch(function () { status.className = 'status bad'; status.textContent = 'Could not reach the server. Please try again later.'; })
+      .then(function () { btn.disabled = false; btn.textContent = 'Send message'; });
+  });
+
+  // First-party page-view count: path and referrer host only. No cookies, no identifiers.
+  try {
+    var payload = JSON.stringify({ path: location.pathname, ref: document.referrer || '' });
+    if (navigator.sendBeacon) navigator.sendBeacon('/api/pv', new Blob([payload], { type: 'text/plain' }));
+    else fetch('/api/pv', { method: 'POST', body: payload, keepalive: true }).catch(function () {});
+  } catch (e) {}
+})();
+</script>
+
+</body>
+</html>

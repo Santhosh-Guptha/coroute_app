@@ -72,13 +72,16 @@ systemctl enable --now coroute-gateway
 systemctl restart coroute-gateway
 
 if [[ -n "${DUCKDNS_TOKEN:-}" ]]; then
-  echo "==> DuckDNS: pointing $API_HOST at this VM's public IP"
-  curl -fsS "https://www.duckdns.org/update?domains=${API_HOST%%.duckdns.org}&token=${DUCKDNS_TOKEN}&ip=" && echo
+  DUCK_HOST=$(tr ',' '\n' <<<"$API_HOST" | tr -d ' ' | grep '\.duckdns\.org$' | head -1 || true)
+  if [[ -n "$DUCK_HOST" ]]; then
+    echo "==> DuckDNS: pointing $DUCK_HOST at this VM's public IP"
+    curl -fsS "https://www.duckdns.org/update?domains=${DUCK_HOST%%.duckdns.org}&token=${DUCKDNS_TOKEN}&ip=" && echo
+  fi
 fi
 
 echo "==> Caddy (TLS for $API_HOST)"
 systemctl disable --now nginx 2>/dev/null || true
-sed "s/api.coroute.example.com/$API_HOST/" "$SRC_DIR/deploy/Caddyfile" > /etc/caddy/Caddyfile
+sed "s|api.coroute.example.com|$API_HOST|" "$SRC_DIR/deploy/Caddyfile" > /etc/caddy/Caddyfile
 systemctl enable --now caddy
 systemctl reload caddy
 
@@ -89,5 +92,6 @@ command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/nu
 sleep 2
 echo "==> Health"
 curl -fsS http://127.0.0.1:3000/api/health && echo
-echo "Done. Public URL: https://$API_HOST/api/health  (TLS certificate is issued on first request; allow ~30 s)"
-echo "Privacy policy:  https://$API_HOST/privacy"
+FIRST_HOST="${API_HOST%%,*}"; FIRST_HOST="${FIRST_HOST// /}"
+echo "Done. Website: https://$FIRST_HOST/   API: https://$FIRST_HOST/api/health   (TLS certificate is issued on first request; allow ~30 s)"
+echo "Privacy: https://$FIRST_HOST/privacy   Terms: https://$FIRST_HOST/terms"

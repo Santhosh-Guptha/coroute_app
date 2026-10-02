@@ -33,6 +33,41 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt }) {
   r.post('/auth/login', authLimiter, wrap(async (req, res) => res.json(await auth.login(req.body || {}))));
   r.post('/auth/google', authLimiter, wrap(async (req, res) => res.json(await auth.loginWithGoogle(req.body || {}))));
 
+  // ---- website endpoints (public, rate-limited, no cookies, no personal data stored for analytics) ----
+  const siteLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false });
+  const feedbackLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many messages from this network. Please try again later.' } });
+
+  r.post('/pv', siteLimiter, express.text({ type: '*/*', limit: '2kb' }), wrap(async (req, res) => {
+    let body = {};
+    try { body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {}); } catch { body = {}; }
+    const path = String(body.path || '/').slice(0, 120);
+    if (!/^\/[A-Za-z0-9/_.-]*$/.test(path)) return res.status(204).end();
+    let refHost = '';
+    try { if (body.ref) refHost = new URL(String(body.ref)).hostname.slice(0, 80); } catch { /* ignore */ }
+    const day = new Date().toISOString().slice(0, 10);
+    repo.countPageview(day, path, refHost).catch(() => {});
+    res.status(204).end();
+  }));
+
+  r.post('/feedback', feedbackLimiter, wrap(async (req, res) => {
+    const b = req.body || {};
+    // Honeypot: real users never fill the hidden "website" field. Timing: humans take > 3 s.
+    if (b.website) return res.status(204).end();
+    const started = Number(b.t);
+    if (!Number.isFinite(started) || Date.now() - started < 3000) return res.status(400).json({ error: 'Please take a moment and try again.' });
+    const name = String(b.name || '').trim().slice(0, 80);
+    const email = String(b.email || '').trim().toLowerCase();
+    const message = String(b.message || '').trim();
+    const errors = {};
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) errors.email = 'Enter a valid e-mail address.';
+    if (message.length < 20) errors.message = 'Please write at least 20 characters.';
+    if (message.length > 2000) errors.message = 'Please keep it under 2000 characters.';
+    if (/https?:\/\/\S+/gi.test(message) && (message.match(/https?:\/\//gi) || []).length > 2) errors.message = 'Too many links.';
+    if (Object.keys(errors).length) return res.status(422).json({ error: 'Please correct the highlighted fields.', fields: errors });
+    await repo.addFeedback({ name, email, message, createdAt: Date.now(), userAgent: String(req.headers['user-agent'] || '').slice(0, 160) });
+    res.status(201).json({ ok: true });
+  }));
+
   // ---- authenticated ----
   r.use(requireAuth, apiLimiter);
 
@@ -79,6 +114,12 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt }) {
   // Admin
   r.get('/admin/fleet', requireAdmin, wrap(async (req, res) => res.json({ convoys: await convoys.fleet() })));
   r.post('/admin/broadcast', requireAdmin, wrap(async (req, res) => res.json(await convoys.adminBroadcast(req.user, req.body?.message))));
+  r.get('/admin/analytics', requireAdmin, wrap(async (req, res) => {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+    const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    res.json({ since, pageviews: await repo.listPageviews(since) });
+  }));
+  r.get('/admin/feedback', requireAdmin, wrap(async (req, res) => res.json({ feedback: await repo.listFeedback() })));
   r.get('/admin/users', requireAdmin, wrap(async (req, res) => res.json({ users: await auth.listUsers() })));
   r.patch('/admin/users/:userId/role', requireAdmin, wrap(async (req, res) => res.json(await auth.setRole(req.user, req.params.userId, String(req.body?.role || '')))));
   r.delete('/admin/convoys/:groupId', requireAdmin, wrap(async (req, res) => { await convoys.adminDissolve(req.params.groupId); res.json({ ok: true }); }));

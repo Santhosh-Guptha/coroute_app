@@ -58,6 +58,12 @@ const config = {
   voiceStreamIdleMs: int('VOICE_STREAM_IDLE_MS', 1500),
   voiceMaxStreamMs: int('VOICE_MAX_STREAM_MS', 60000),
 
+  // Website: where the "Download" button sends people. Play Store URL once the listing is live,
+  // otherwise the GitHub release page. Changing these needs no rebuild of the site.
+  playStoreUrl: (process.env.PLAY_STORE_URL || '').trim(),
+  apkUrl: (process.env.APK_URL || 'https://github.com/Santhosh-Guptha/coroute_app/releases/latest').trim(),
+  publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
+
   // CORS: comma separated origins or empty for same-origin/mobile only
   corsOrigins: list('CORS_ORIGINS'),
 };

@@ -39,11 +39,36 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const server = http.createServer(app);
   const startedAt = Date.now();
   const hub = new Hub({ server, convoys, repo, logger });
-  app.get('/', (req, res) => res.json({ service: 'CoRoute Gateway', version: require('../package.json').version, status: 'ONLINE', privacy: '/privacy' }));
-  // Public privacy policy (required by the Play Store) — served from here so no extra hosting is needed.
-  app.get(['/privacy', '/privacy.html'], (req, res) => res.sendFile(require('path').join(__dirname, '..', 'public', 'privacy.html')));
+  // ---- Public website, served from here so no extra hosting is needed ----
+  const path = require('path');
+  const fs = require('fs');
+  const pub = (f) => path.join(__dirname, '..', 'public', f);
+  const originOf = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+  // index.html carries __ORIGIN__ placeholders so canonical/og:image/sitemap are right for any domain.
+  const indexTemplate = fs.readFileSync(pub('index.html'), 'utf8');
+  const sendPage = (res, html) => res.type('html').set('Cache-Control', 'public, max-age=300').send(html);
+
+  app.get(['/', '/index.html'], (req, res) => sendPage(res, indexTemplate.replaceAll('__ORIGIN__', originOf(req))));
+  app.get(['/privacy', '/privacy.html'], (req, res) => res.sendFile(pub('privacy.html')));
+  app.get(['/terms', '/terms.html'], (req, res) => res.sendFile(pub('terms.html')));
+  // One download link that never breaks: Play Store when configured, otherwise the latest GitHub release.
+  app.get('/download', (req, res) => res.redirect(302, config.playStoreUrl || config.apkUrl));
+  app.get('/robots.txt', (req, res) => res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${originOf(req)}/sitemap.xml\n`));
+  app.get('/sitemap.xml', (req, res) => {
+    const o = originOf(req);
+    const today = new Date().toISOString().slice(0, 10);
+    const urls = [['/', '1.0'], ['/privacy', '0.3'], ['/terms', '0.3']]
+      .map(([u, pr]) => `  <url><loc>${o}${u}</loc><lastmod>${today}</lastmod><priority>${pr}</priority></url>`).join('\n');
+    res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
+  });
+  app.get('/status', (req, res) => res.json({ service: 'CoRoute Gateway', version: require('../package.json').version, status: 'ONLINE' }));
+  app.use(express.static(pub(''), { index: false, maxAge: '7d', extensions: false, setHeaders: (res, p) => { if (p.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); } }));
   app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt }));
-  app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+  // 404: JSON for the API, a real page for everything else.
+  app.use((req, res) => {
+    if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
+    res.status(404).type('html').send(fs.readFileSync(pub('404.html'), 'utf8'));
+  });
 
   const retention = new Retention({ repo, soda, convoys, logger });
 

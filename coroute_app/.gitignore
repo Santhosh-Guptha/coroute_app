@@ -49,7 +49,8 @@ app.*.map.json
 
 # CoRoute: never commit secrets
 android/key.properties
-android/app/*.jks
-android/app/*.keystore
+android/app/*.jks*
+android/app/*.keystore*
 gateway/.env
 gateway/node_modules/
+Claude outputs/

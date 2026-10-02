@@ -101,26 +101,26 @@ class CoRouteHeaderLogo extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: EdgeInsets.all(8 * scale),
+              width: 44 * scale,
+              height: 44 * scale,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [AppTheme.neonCyan, AppTheme.electricBlue],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(12 * scale),
+                borderRadius: BorderRadius.circular(11 * scale),
                 boxShadow: [
                   BoxShadow(
-                    color: AppTheme.neonCyan.withOpacity(0.35),
-                    blurRadius: 14 * scale,
-                    spreadRadius: 2 * scale,
+                    color: AppTheme.neonCyan.withOpacity(0.28),
+                    blurRadius: 16 * scale,
+                    spreadRadius: 1 * scale,
                   ),
                 ],
               ),
-              child: Icon(
-                Icons.navigation_rounded,
-                color: Colors.black,
-                size: 24 * scale,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(11 * scale),
+                child: Image.asset(
+                  'assets/branding/coroute_icon.png',
+                  width: 44 * scale,
+                  height: 44 * scale,
+                  filterQuality: FilterQuality.medium,
+                ),
               ),
             ),
             SizedBox(width: 10 * scale),
