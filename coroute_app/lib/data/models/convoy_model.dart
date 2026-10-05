@@ -1,6 +1,7 @@
 import 'rider_model.dart';
 import 'sos_alert_model.dart';
 import 'group_message_model.dart';
+import 'route_model.dart';
 import 'stop_point_model.dart';
 
 class ConvoyModel {
@@ -25,6 +26,22 @@ class ConvoyModel {
   final int stopThresholdSeconds;
   final bool voiceGuidanceEnabled;
   final List<Map<String, double>> routeBreadcrumbs;
+  final RouteModel? route;
+  final double? startLat;
+  final double? startLng;
+
+  /// The route line to draw and measure against: the planned route when there is one.
+  List<(double, double)> get routeLine {
+    final r = route;
+    if (r != null && r.points.length >= 2) return r.points;
+    return routeBreadcrumbs.where((p) => p['lat'] != null && p['lng'] != null).map((p) => (p['lat']!, p['lng']!)).toList();
+  }
+
+  /// Stops still on the plan (not suggested, not skipped), in order.
+  List<StopPointModel> get plannedStops => (stopPoints.where((s) => s.isPlanned).toList()..sort((a, b) => a.orderIndex.compareTo(b.orderIndex)));
+
+  /// Suggestions waiting for the lead.
+  List<StopPointModel> get suggestedStops => stopPoints.where((s) => s.isSuggested).toList();
 
   ConvoyModel({
     required this.groupId,
@@ -48,6 +65,9 @@ class ConvoyModel {
     this.stopThresholdSeconds = 180,
     this.voiceGuidanceEnabled = true,
     this.routeBreadcrumbs = const [],
+    this.route,
+    this.startLat,
+    this.startLng,
   });
 
   ConvoyModel copyWith({
@@ -72,6 +92,10 @@ class ConvoyModel {
     int? stopThresholdSeconds,
     bool? voiceGuidanceEnabled,
     List<Map<String, double>>? routeBreadcrumbs,
+    RouteModel? route,
+    bool clearRoute = false,
+    double? startLat,
+    double? startLng,
   }) {
     return ConvoyModel(
       groupId: groupId ?? this.groupId,
@@ -95,6 +119,9 @@ class ConvoyModel {
       stopThresholdSeconds: stopThresholdSeconds ?? this.stopThresholdSeconds,
       voiceGuidanceEnabled: voiceGuidanceEnabled ?? this.voiceGuidanceEnabled,
       routeBreadcrumbs: routeBreadcrumbs ?? this.routeBreadcrumbs,
+      route: clearRoute ? null : (route ?? this.route),
+      startLat: startLat ?? this.startLat,
+      startLng: startLng ?? this.startLng,
     );
   }
 
@@ -121,6 +148,8 @@ class ConvoyModel {
       'stopThresholdSeconds': stopThresholdSeconds,
       'voiceGuidanceEnabled': voiceGuidanceEnabled,
       'routeBreadcrumbs': routeBreadcrumbs,
+      if (route != null) 'route': route!.toJson(),
+      if (startLat != null && startLng != null) 'start': {'lat': startLat, 'lng': startLng, 'name': startLocationName},
     };
   }
 
@@ -190,6 +219,9 @@ class ConvoyModel {
       stopThresholdSeconds: (json['stopThresholdSeconds'] as num?)?.toInt() ?? 180,
       voiceGuidanceEnabled: json['voiceGuidanceEnabled'] ?? true,
       routeBreadcrumbs: breadcrumbsList,
+      route: json['route'] is Map ? RouteModel.fromJson(Map<String, dynamic>.from(json['route'] as Map)) : null,
+      startLat: json['start'] is Map ? ((json['start'] as Map)['lat'] as num?)?.toDouble() : null,
+      startLng: json['start'] is Map ? ((json['start'] as Map)['lng'] as num?)?.toDouble() : null,
     );
   }
 }

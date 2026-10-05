@@ -33,6 +33,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const convoys = new ConvoyManager(repo, { logger });
   const tracks = new TrackStore(repo);
   const geo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
+  convoys.router = (wp) => geo.route(wp);
   const timeline = new TimelineEngine({ convoys, repo, tracks, geo, logger, ...(clock ? { clock } : {}) });
 
   const app = express();

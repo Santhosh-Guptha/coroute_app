@@ -18,6 +18,10 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../widgets/intercom_dock.dart';
+import '../../data/services/geo_service.dart';
+import '../map_picker/map_picker_screen.dart';
+import '../trip_planner/route_stops_panel.dart';
+import '../../data/models/stop_point_model.dart';
 
 class LiveCockpitMapScreen extends StatefulWidget {
   final String convoyId;
@@ -424,126 +428,77 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     );
   }
 
-  /// 3. In-Map Route Checkpoints Modal: View & Add Stops
+  /// 3. Route and stops sheet: same panel as the convoy screen.
   void _showStopsModal(BuildContext context, ConvoyModel convoy, ConvoyService convoyService) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final currentConvoy = convoyService.allConvoys[convoy.groupId] ?? convoy;
-            final stops = currentConvoy.stopPoints;
-
-            return Container(
-              constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-              decoration: const BoxDecoration(
-                color: AppTheme.obsidianVoid,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                border: Border(top: BorderSide(color: AppTheme.hyperAmber, width: 1.5)),
+        return Container(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.75),
+          decoration: const BoxDecoration(
+            color: AppTheme.obsidianVoid,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            border: Border(top: BorderSide(color: AppTheme.hyperAmber, width: 1.5)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 10, bottom: 4),
+                decoration: BoxDecoration(color: AppTheme.textMuted, borderRadius: BorderRadius.circular(2)),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              Row(
                 children: [
-                  Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.textMuted,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '🛑 Route Checkpoints (${stops.length})',
-                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: AppTheme.textMuted, size: 20),
-                        onPressed: () => Navigator.pop(ctx),
-                      ),
-                    ],
-                  ),
-                  const Divider(color: AppTheme.glassBorder),
-                  Expanded(
-                    child: stops.isEmpty
-                        ? const Center(
-                            child: Text('No planned stops added yet.', style: TextStyle(color: AppTheme.textMuted)),
-                          )
-                        : ListView.separated(
-                            itemCount: stops.length,
-                            separatorBuilder: (context, index) => const Divider(color: AppTheme.glassBorder, height: 1),
-                            itemBuilder: (context, i) {
-                              final s = stops[i];
-                              return ListTile(
-                                leading: Icon(
-                                  s.isVisited ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                                  color: s.isVisited ? AppTheme.emeraldSafe : AppTheme.hyperAmber,
-                                ),
-                                title: Text(
-                                  s.name,
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    decoration: s.isVisited ? TextDecoration.lineThrough : null,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  'Category: ${s.category}',
-                                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
-                                ),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.near_me_rounded, color: AppTheme.neonCyan),
-                                  onPressed: () {
-                                    if (s.lat != 0.0 && s.lng != 0.0) {
-                                      setState(() => _autoFollow = false);
-                                      _mapController.move(LatLng(s.lat, s.lng), 16.0);
-                                      Navigator.pop(ctx);
-                                    }
-                                  },
-                                ),
-                                onTap: () {
-                                  convoyService.toggleStopVisited(s.stopId, !s.isVisited);
-                                  setModalState(() {});
-                                },
-                              );
-                            },
-                          ),
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.neonCyan,
-                      foregroundColor: Colors.black,
-                      minimumSize: const Size.fromHeight(44),
-                    ),
-                    icon: const Icon(Icons.add_location_alt_rounded),
-                    label: const Text('Add Current GPS Location as Stop', style: TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: () async {
-                      try {
-                        final pos = await Geolocator.getCurrentPosition();
-                        convoyService.addStopPoint(
-                          name: 'Checkpoint ${stops.length + 1}',
-                          lat: pos.latitude,
-                          lng: pos.longitude,
-                          category: 'REST',
-                        );
-                        setModalState(() {});
-                      } catch (_) {}
-                    },
-                  ),
+                  const SizedBox(width: 16),
+                  const Expanded(child: Text('Route and stops', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))),
+                  IconButton(icon: const Icon(Icons.close, color: AppTheme.textMuted, size: 20), onPressed: () => Navigator.pop(ctx)),
                 ],
               ),
-            );
-          },
+              Flexible(
+                child: Consumer<ConvoyService>(
+                  builder: (_, svc, _) => RouteStopsPanel(convoy: svc.allConvoys[convoy.groupId] ?? convoy),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
+  }
+
+  Marker _stopMarker(StopPointModel st, int i) => Marker(
+        point: LatLng(st.lat, st.lng),
+        width: 28,
+        height: 28,
+        child: Container(
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: st.isVisited ? AppTheme.emeraldSafe : AppTheme.hyperAmber,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.black, width: 1.5),
+          ),
+          child: Text('${i + 1}', style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold)),
+        ),
+      );
+
+  Future<void> _addStopAt(BuildContext context, ConvoyService service, LatLng point) async {
+    final lead = service.canEditRoute;
+    final p = await MapPickerScreen.pick(
+      context,
+      title: lead ? 'Add a stop' : 'Suggest a stop',
+      forStop: true,
+      confirmLabel: lead ? 'Add stop' : 'Send suggestion',
+      initial: PickedPlace(lat: point.latitude, lng: point.longitude),
+    );
+    if (p == null) return;
+    final ok = lead ? service.addStop(p) : service.suggestStop(p);
+    if (ok && !lead && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suggestion sent to the lead.')));
+    }
   }
 
   /// Map Floating Quick-Button Widget
@@ -736,12 +691,44 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   setState(() => _autoFollow = false);
                 }
               },
+              // Long-press anywhere: the lead adds a stop there, anyone else suggests one.
+              onLongPress: (_, point) => _addStopAt(context, convoyService, point),
             ),
             children: [
               TileLayer(
                 urlTemplate: AppConstants.osmTileUrl,
                 userAgentPackageName: AppConstants.osmUserAgent,
               ),
+
+              // Planned route through every stop.
+              if (convoy.routeLine.length >= 2)
+                PolylineLayer(polylines: [
+                  Polyline(
+                    points: [for (final (lat, lng) in convoy.routeLine) LatLng(lat, lng)],
+                    strokeWidth: 5,
+                    color: (convoy.route?.approximate ?? false) ? AppTheme.neonCyan.withOpacity(0.45) : AppTheme.neonCyan.withOpacity(0.75),
+                  ),
+                ]),
+
+              // Stops (numbered; suggestions dimmed) and destination.
+              MarkerLayer(markers: [
+                for (var i = 0; i < convoy.plannedStops.length; i++)
+                  _stopMarker(convoy.plannedStops[i], i),
+                for (final st in convoy.suggestedStops)
+                  Marker(
+                    point: LatLng(st.lat, st.lng),
+                    width: 26,
+                    height: 26,
+                    child: const Icon(Icons.add_location_rounded, color: AppTheme.hyperAmber, size: 24),
+                  ),
+                if (convoy.destinationLat != 0 || convoy.destinationLng != 0)
+                  Marker(
+                    point: LatLng(convoy.destinationLat, convoy.destinationLng),
+                    width: 34,
+                    height: 34,
+                    child: const Icon(Icons.sports_score_rounded, color: AppTheme.laserRed, size: 30),
+                  ),
+              ]),
 
               // Rider Markers with Directional Rotating Chevrons
               MarkerLayer(

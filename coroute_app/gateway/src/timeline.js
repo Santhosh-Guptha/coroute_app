@@ -211,7 +211,7 @@ class TimelineEngine {
     // Planned stops and destination reached.
     const m = room.meta;
     for (const s of m.stopPoints || []) {
-      if (rs.reached.has(s.stopId) || !s.lat) continue;
+      if (rs.reached.has(s.stopId) || !s.lat || s.status === 'SUGGESTED' || s.status === 'SKIPPED') continue;
       if (haversine(s.lat, s.lng, p.lat, p.lng) <= config.reachRadiusM) {
         rs.reached.add(s.stopId);
         await this._instant(gid, { ...who, type: 'STOP_REACHED', startedAt: t, lat: s.lat, lng: s.lng, placeName: s.name, data: { stopId: s.stopId, name: s.name } });
@@ -345,7 +345,13 @@ class TimelineEngine {
       case 'TRIP_STARTED':
         return this._instant(gid, { ...who, type: 'TRIP_STARTED', lat: act.lat, lng: act.lng, placeName: act.placeName || '', data: { name: act.name } });
       case 'STOP_ADDED':
-        return this._instant(gid, { ...who, type: 'STOP_ADDED', lat: act.stop.lat, lng: act.stop.lng, placeName: act.stop.name, data: { stopId: act.stop.stopId, name: act.stop.name, category: act.stop.category } });
+        return this._instant(gid, { ...who, type: 'STOP_ADDED', lat: act.stop.lat, lng: act.stop.lng, placeName: act.stop.name, data: { stopId: act.stop.stopId, name: act.stop.name, category: act.stop.category, suggestedBy: act.suggestedBy || '' } });
+      case 'STOP_SUGGESTED':
+        return this._instant(gid, { ...who, type: 'STOP_SUGGESTED', lat: act.stop.lat, lng: act.stop.lng, placeName: act.stop.name, data: { stopId: act.stop.stopId, name: act.stop.name, category: act.stop.category } });
+      case 'STOP_SKIPPED':
+        return this._instant(gid, { ...who, type: 'STOP_SKIPPED', placeName: act.stop.name, data: { stopId: act.stop.stopId, name: act.stop.name } });
+      case 'ROUTE_CHANGED':
+        return this._instant(gid, { ...who, type: 'ROUTE_CHANGED', lat: act.place?.lat, lng: act.place?.lng, placeName: act.place?.name || '', data: { change: act.change } });
       case 'STATUS': {
         const open = st.open.get(`STOPPED:${act.user.userId}`);
         if (open && act.reason) { open.data.reason = act.reason; open.updatedAt = this.now(); await this.repo.upsertEvent(open).catch(() => {}); this.convoys._emit(gid, 'TIMELINE_UPDATE', { event: publicEvent(open) }); }

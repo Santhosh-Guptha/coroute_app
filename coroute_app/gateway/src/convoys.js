@@ -13,6 +13,10 @@ const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const config = require('./config');
 const { ACTIVE_STATUSES } = require('./oracle/repo');
+const { haversine, encodePolyline } = require('./geo_math');
+
+const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'SCENIC', 'TOLL', 'OTHER']);
+const MAX_STOPS = 20;
 
 class ConvoyError extends Error {
   /** reason: machine-readable cause. The app leaves a convoy only for NOT_MEMBER / CONVOY_GONE, never for other errors. */
@@ -40,6 +44,9 @@ class ConvoyManager extends EventEmitter {
     this.rooms = new Map(); // groupId -> room
     this.persistIntervalMs = opts.persistIntervalMs ?? config.riderPersistIntervalMs;
     this.log = opts.logger || console;
+    /** async (waypoints[]) => { distanceM, durationS, polyline, legs[] } | null. Set by app.js (GeoProxy). */
+    this.router = opts.router || null;
+    this.routeSeq = new Map(); // groupId -> latest route request number (stale answers are ignored)
   }
 
   // ---------------------------------------------------------------- rooms
@@ -101,6 +108,7 @@ class ConvoyManager extends EventEmitter {
       voiceGuidanceEnabled: m.voiceGuidanceEnabled ?? true,
       routeBreadcrumbs: m.routeBreadcrumbs || [],
       start: m.start || null,
+      route: m.route ? publicRoute(m.route) : null,
       members: Object.values(m.members || {}).map((x) => ({ userId: x.userId, name: x.name, role: x.role, joinedAt: x.joinedAt, leftAt: x.leftAt || 0 })),
     };
   }
@@ -146,7 +154,7 @@ class ConvoyManager extends EventEmitter {
       stopThresholdSeconds: num(p.stopThresholdSeconds, 180),
       voiceGuidanceEnabled: p.voiceGuidanceEnabled !== false,
       routeBreadcrumbs: sanitizeBreadcrumbs(p.routeBreadcrumbs),
-      stopPoints: [],
+      stopPoints: sanitizeStops(p.stops, { by: user, status: 'PLANNED' }),
       waitRequests: {},
       members: { [user.userId]: memberRecord(user, { ...(p.rider || {}), role: 'LEAD' }, t) },
     });
@@ -161,6 +169,8 @@ class ConvoyManager extends EventEmitter {
     this.emit('fleet');
     const at = meta.start || (rider.lat || rider.lng ? { lat: rider.lat, lng: rider.lng, name: '' } : null);
     this.emit('activity', groupId, { type: 'TRIP_STARTED', user, name, lat: at?.lat, lng: at?.lng, placeName: at?.name || meta.startLocationName || '' });
+    if (!meta.start && at) meta.start = { lat: at.lat, lng: at.lng, name: meta.startLocationName || '' };
+    this.recomputeRoute(groupId).catch((e) => this.log.warn('[convoys] route failed', e.message));
     return this.snapshot(room);
   }
 
@@ -347,19 +357,170 @@ class ConvoyManager extends EventEmitter {
   }
 
   // ------------------------------------------------------ stops / config
-  async addStop(groupId, user, { name, lat, lng, category = 'REST' }) {
-    const room = await this.getRoom(groupId);
+  isLead(room, user) {
+    const rider = room.riders.get(user.userId);
+    return user.role === 'MASTER_ADMIN' || room.meta.createdByUserId === user.userId || rider?.role === 'LEAD';
+  }
+
+  _requireMember(room, user) {
     if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
-    const stop = {
-      stopId: `STOP-${shortId(3)}`, name: String(name || 'Stop').slice(0, 80), lat: clampLat(lat), lng: clampLng(lng),
-      orderIndex: (room.meta.stopPoints || []).length + 1, category: String(category).slice(0, 24), isVisited: false,
-    };
-    room.meta.stopPoints = [...(room.meta.stopPoints || []), stop];
+  }
+
+  _requireLead(room, user) {
+    this._requireMember(room, user);
+    if (!this.isLead(room, user)) throw new ConvoyError('Only the convoy lead can change the route.', 403);
+  }
+
+  async _saveStops(room, { route = true } = {}) {
+    // Keep orderIndex 1..n in list order.
+    room.meta.stopPoints = (room.meta.stopPoints || []).map((s, i) => ({ ...s, orderIndex: i + 1 }));
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
-    this._emit(groupId, 'STOPS', { stopPoints: room.meta.stopPoints });
-    this.emit('activity', groupId, { type: 'STOP_ADDED', user, stop });
+    this._emit(room.groupId, 'STOPS', { stopPoints: room.meta.stopPoints });
+    if (route) this.recomputeRoute(room.groupId).catch((e) => this.log.warn('[convoys] route failed', e.message));
+  }
+
+  /** The lead adds a planned stop; anyone else's stop becomes a suggestion the lead accepts or declines. */
+  async addStop(groupId, user, p) {
+    const room = await this.getRoom(groupId);
+    this._requireMember(room, user);
+    const lead = this.isLead(room, user);
+    if ((room.meta.stopPoints || []).length >= MAX_STOPS) throw new ConvoyError(`A trip can have at most ${MAX_STOPS} stops.`);
+    const [stop] = sanitizeStops([p], { by: user, status: lead ? 'PLANNED' : 'SUGGESTED' });
+    if (!stop) throw new ConvoyError('Pick a place for the stop.');
+    room.meta.stopPoints = [...(room.meta.stopPoints || []), stop];
+    await this._saveStops(room, { route: lead });
+    this.emit('activity', groupId, { type: lead ? 'STOP_ADDED' : 'STOP_SUGGESTED', user, stop });
     return stop;
+  }
+
+  async suggestStop(groupId, user, p) {
+    const room = await this.getRoom(groupId);
+    this._requireMember(room, user);
+    const [stop] = sanitizeStops([p], { by: user, status: 'SUGGESTED' });
+    if (!stop) throw new ConvoyError('Pick a place for the stop.');
+    if ((room.meta.stopPoints || []).length >= MAX_STOPS) throw new ConvoyError(`A trip can have at most ${MAX_STOPS} stops.`);
+    room.meta.stopPoints = [...(room.meta.stopPoints || []), stop];
+    await this._saveStops(room, { route: false });
+    this.emit('activity', groupId, { type: 'STOP_SUGGESTED', user, stop });
+    return stop;
+  }
+
+  /** Lead: accept (becomes a planned stop) or decline (removed) a suggestion. */
+  async decideStop(groupId, user, stopId, accept) {
+    const room = await this.getRoom(groupId);
+    this._requireLead(room, user);
+    const stop = (room.meta.stopPoints || []).find((s) => s.stopId === stopId);
+    if (!stop || stop.status !== 'SUGGESTED') throw new ConvoyError('That suggestion is no longer open.', 404);
+    if (accept) {
+      room.meta.stopPoints = room.meta.stopPoints.map((s) => (s.stopId === stopId ? { ...s, status: 'PLANNED', acceptedBy: user.userId } : s));
+    } else {
+      room.meta.stopPoints = room.meta.stopPoints.filter((s) => s.stopId !== stopId);
+    }
+    await this._saveStops(room, { route: accept });
+    if (accept) this.emit('activity', groupId, { type: 'STOP_ADDED', user, stop: { ...stop, status: 'PLANNED' }, suggestedBy: stop.suggestedByName });
+    return true;
+  }
+
+  async removeStop(groupId, user, stopId) {
+    const room = await this.getRoom(groupId);
+    this._requireLead(room, user);
+    const before = (room.meta.stopPoints || []).length;
+    room.meta.stopPoints = (room.meta.stopPoints || []).filter((s) => s.stopId !== stopId);
+    if (room.meta.stopPoints.length === before) return false;
+    await this._saveStops(room);
+    this.emit('activity', groupId, { type: 'ROUTE_CHANGED', user, change: 'STOP_REMOVED' });
+    return true;
+  }
+
+  async skipStop(groupId, user, stopId) {
+    const room = await this.getRoom(groupId);
+    this._requireLead(room, user);
+    const stop = (room.meta.stopPoints || []).find((s) => s.stopId === stopId);
+    if (!stop) throw new ConvoyError('Stop not found.', 404);
+    room.meta.stopPoints = room.meta.stopPoints.map((s) => (s.stopId === stopId ? { ...s, status: 'SKIPPED', skippedBy: user.userId } : s));
+    await this._saveStops(room);
+    this.emit('activity', groupId, { type: 'STOP_SKIPPED', user, stop });
+    return true;
+  }
+
+  /** Lead: new stop order (list of stopIds). Unknown ids are ignored; stops not listed keep their place at the end. */
+  async reorderStops(groupId, user, order) {
+    const room = await this.getRoom(groupId);
+    this._requireLead(room, user);
+    const ids = Array.isArray(order) ? order.map(String) : [];
+    const byId = new Map((room.meta.stopPoints || []).map((s) => [s.stopId, s]));
+    const next = [];
+    for (const id of ids) if (byId.has(id)) { next.push(byId.get(id)); byId.delete(id); }
+    room.meta.stopPoints = [...next, ...byId.values()];
+    await this._saveStops(room);
+    this.emit('activity', groupId, { type: 'ROUTE_CHANGED', user, change: 'STOPS_REORDERED' });
+    return room.meta.stopPoints;
+  }
+
+  /** Lead: change the start and/or the destination. */
+  async setRoute(groupId, user, { start, destination } = {}) {
+    const room = await this.getRoom(groupId);
+    this._requireLead(room, user);
+    const s = sanitizePlace(start);
+    const d = sanitizePlace(destination);
+    if (!s && !d) throw new ConvoyError('Pick a place.');
+    if (s) { room.meta.start = s; room.meta.startLocationName = s.name || room.meta.startLocationName; }
+    if (d) { room.meta.destinationLat = d.lat; room.meta.destinationLng = d.lng; room.meta.destinationName = d.name || 'Destination'; }
+    this._touch(room);
+    await this.repo.saveConvoyMeta(room.meta);
+    this._emit(groupId, 'DESTINATION', {
+      destinationName: room.meta.destinationName, destinationLat: room.meta.destinationLat, destinationLng: room.meta.destinationLng,
+      start: room.meta.start || null, startLocationName: room.meta.startLocationName || '',
+    });
+    this.emit('activity', groupId, { type: 'ROUTE_CHANGED', user, change: d ? 'DESTINATION' : 'START', place: d || s });
+    this.recomputeRoute(groupId).catch((e) => this.log.warn('[convoys] route failed', e.message));
+    return true;
+  }
+
+  /** Waypoints: start, planned (not skipped, not suggested, not yet visited) stops in order, destination. */
+  routeWaypoints(meta) {
+    const wp = [];
+    if (meta.start) wp.push({ lat: meta.start.lat, lng: meta.start.lng });
+    for (const s of meta.stopPoints || []) {
+      if (s.status === 'SUGGESTED' || s.status === 'SKIPPED') continue;
+      wp.push({ lat: s.lat, lng: s.lng, stopId: s.stopId });
+    }
+    if (meta.destinationLat || meta.destinationLng) wp.push({ lat: meta.destinationLat, lng: meta.destinationLng });
+    return wp.slice(0, 25);
+  }
+
+  /**
+   * Computes the driving route through every waypoint (free OSRM through the
+   * gateway cache). If the routing service is unavailable the route is the
+   * straight line between the points, marked approximate, so the app always
+   * has something to show and measure against.
+   */
+  async recomputeRoute(groupId) {
+    const room = await this.getRoom(groupId, { required: false });
+    if (!room) return null;
+    const wp = this.routeWaypoints(room.meta);
+    const seq = (this.routeSeq.get(groupId) || 0) + 1;
+    this.routeSeq.set(groupId, seq);
+    if (wp.length < 2) {
+      room.meta.route = null;
+      await this.repo.saveConvoyMeta(room.meta);
+      this._emit(groupId, 'ROUTE', { route: null });
+      return null;
+    }
+    let r = null;
+    if (this.router) {
+      try { r = await this.router(wp); } catch { r = null; }
+    }
+    if (this.routeSeq.get(groupId) !== seq || !this.rooms.has(groupId)) return null; // a newer request won
+    const route = r ? { ...r, approximate: false } : straightRoute(wp);
+    route.waypoints = wp;
+    route.computedAt = now();
+    room.meta.route = route;
+    this._touch(room);
+    await this.repo.saveConvoyMeta(room.meta);
+    this._emit(groupId, 'ROUTE', { route: publicRoute(route) });
+    return route;
   }
 
   async setStopVisited(groupId, user, stopId, isVisited) {
@@ -433,6 +594,42 @@ function memberRecord(user, rider, joinedAt) {
     userId: user.userId, name: user.name, role: rider.role || 'PACK', vehicleType: rider.vehicleType || '',
     vehicleNo: rider.vehicleNo || '', joinedAt: joinedAt || rider.joinedAt || Date.now(),
   };
+}
+
+function sanitizeStops(list, { by, status }) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const p of list.slice(0, MAX_STOPS)) {
+    const place = sanitizePlace(p);
+    if (!place) continue;
+    const cat = String(p.category || 'REST').toUpperCase();
+    out.push({
+      stopId: `STOP-${shortId(3)}`, name: String(p.name || place.name || 'Stop').slice(0, 80), lat: place.lat, lng: place.lng,
+      orderIndex: out.length + 1, category: STOP_CATEGORIES.has(cat) ? cat : 'OTHER', isVisited: false,
+      status, plannedDwellMin: Math.max(0, Math.min(600, Math.round(num(p.plannedDwellMin, 0)))),
+      suggestedBy: by?.userId || '', suggestedByName: by?.name || '', createdAt: now(),
+    });
+  }
+  return out;
+}
+
+function straightRoute(wp) {
+  const legs = [];
+  for (let i = 1; i < wp.length; i++) {
+    const d = haversine(wp[i - 1].lat, wp[i - 1].lng, wp[i].lat, wp[i].lng);
+    legs.push({ distanceM: Math.round(d), durationS: Math.round(d / (45 / 3.6)) }); // 45 km/h estimate
+  }
+  return {
+    approximate: true,
+    distanceM: legs.reduce((a, l) => a + l.distanceM, 0),
+    durationS: legs.reduce((a, l) => a + l.durationS, 0),
+    polyline: encodePolyline(wp),
+    legs,
+  };
+}
+
+function publicRoute(r) {
+  return { distanceM: r.distanceM || 0, durationS: r.durationS || 0, polyline: r.polyline || '', legs: r.legs || [], approximate: !!r.approximate, computedAt: r.computedAt || 0 };
 }
 
 function sanitizePlace(p) {

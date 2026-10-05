@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/config/app_config.dart';
@@ -16,6 +15,7 @@ import '../widgets/connection_banner.dart';
 import '../widgets/intercom_dock.dart';
 import 'live_cockpit_map_screen.dart';
 import '../timeline/live_timeline_screen.dart';
+import '../trip_planner/route_stops_panel.dart';
 
 class ConvoyDashboardScreen extends StatefulWidget {
   final String groupId;
@@ -165,95 +165,6 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
         });
       }
     }
-  }
-
-  void _showAddStopDialog(BuildContext context, ConvoyService convoyService) {
-    final nameCtrl = TextEditingController();
-    String category = 'REST';
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: AppTheme.slateCard,
-          title: const Text('Add Route Checkpoint', style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'e.g. Express Toll, Breakfast Stop',
-                  hintStyle: const TextStyle(color: AppTheme.textMuted),
-                  filled: true,
-                  fillColor: AppTheme.elevatedCard,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(height: 14),
-              DropdownButtonFormField<String>(
-                value: category,
-                dropdownColor: AppTheme.elevatedCard,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: AppTheme.elevatedCard,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'REST', child: Text('☕ Rest Stop')),
-                  DropdownMenuItem(value: 'FUEL', child: Text('⛽ Fuel Station')),
-                  DropdownMenuItem(value: 'FOOD', child: Text('🍔 Food / Dining')),
-                  DropdownMenuItem(value: 'SCENIC', child: Text('📸 Scenic Viewpoint')),
-                  DropdownMenuItem(value: 'TOLL', child: Text('🛑 Toll Plaza')),
-                ],
-                onChanged: (v) {
-                  if (v != null) setDialogState(() => category = v);
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final txt = nameCtrl.text.trim();
-                if (txt.isNotEmpty) {
-                  // Use real GPS position for the stop point
-                  double stopLat = 0.0;
-                  double stopLng = 0.0;
-                  try {
-                    final pos = await Geolocator.getLastKnownPosition() ??
-                        await Geolocator.getCurrentPosition(
-                          locationSettings: const LocationSettings(
-                            accuracy: LocationAccuracy.medium,
-                            timeLimit: Duration(seconds: 1),
-                          ),
-                        );
-                    stopLat = pos.latitude;
-                    stopLng = pos.longitude;
-                  } catch (_) {}
-
-                  convoyService.addStopPoint(
-                    name: txt,
-                    lat: stopLat,
-                    lng: stopLng,
-                    category: category,
-                  );
-                  if (ctx.mounted) Navigator.pop(ctx);
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan),
-              child: const Text('Add Stop', style: TextStyle(color: Colors.black)),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   void _showMemberProfileDialog(BuildContext context, RiderModel member, ConvoyService convoyService, String currentUserId) {
@@ -1230,68 +1141,8 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
 
   // --- TAB 2: STOPS VIEW ---
   Widget _buildStopsTab(ConvoyModel convoy, bool isCreator, ConvoyService service) {
-    return ListView(
-      padding: const EdgeInsets.all(12),
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Planned Checkpoints (${convoy.stopPoints.length})',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            ElevatedButton.icon(
-              onPressed: () => _showAddStopDialog(context, service),
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text('Add Stop', style: TextStyle(fontSize: 12)),
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan, foregroundColor: Colors.black),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-
-        if (convoy.stopPoints.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(
-              child: Text('No planned stops added yet.', style: TextStyle(color: AppTheme.textMuted)),
-            ),
-          )
-        else
-          ...convoy.stopPoints.map((stop) {
-            return Card(
-              color: AppTheme.elevatedCard,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: stop.isVisited ? AppTheme.emeraldSafe : AppTheme.devmonksPurple,
-                  child: Icon(
-                    stop.isVisited ? Icons.check : Icons.place_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                ),
-                title: Text(
-                  stop.name,
-                  style: TextStyle(
-                    color: Colors.white,
-                    decoration: stop.isVisited ? TextDecoration.lineThrough : null,
-                  ),
-                ),
-                subtitle: Text('Category: ${stop.category}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
-                trailing: Checkbox(
-                  value: stop.isVisited,
-                  activeColor: AppTheme.emeraldSafe,
-                  onChanged: (val) {
-                    if (val != null) service.toggleStopVisited(stop.stopId, val);
-                  },
-                ),
-              ),
-            );
-          }),
-      ],
-    );
+    // Start, stops (with suggestions), destination and route summary; the lead edits, others suggest.
+    return RouteStopsPanel(convoy: convoy);
   }
 
   // --- TAB 3: SETTINGS VIEW ---

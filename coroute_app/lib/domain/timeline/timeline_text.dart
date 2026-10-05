@@ -73,6 +73,23 @@ class TimelineText {
         return '$who: ${reason(e.dataString('reason'))}';
       case 'STOP_ADDED':
         return '$who added the stop ${e.dataString('name')}';
+      case 'STOP_SUGGESTED':
+        return '$who suggested the stop ${e.dataString('name')}';
+      case 'STOP_SKIPPED':
+        return '$who skipped the stop ${e.dataString('name')}';
+      case 'ROUTE_CHANGED':
+        switch (e.dataString('change')) {
+          case 'DESTINATION':
+            return '$who changed the destination';
+          case 'START':
+            return '$who changed the start';
+          case 'STOPS_REORDERED':
+            return '$who changed the order of the stops';
+          case 'STOP_REMOVED':
+            return '$who removed a stop';
+          default:
+            return '$who changed the route';
+        }
       case 'STOP_REACHED':
         return '$who reached ${e.dataString('name').isEmpty ? 'a stop' : e.dataString('name')}';
       case 'DESTINATION_REACHED':
@@ -88,7 +105,9 @@ class TimelineText {
   /// Second line: where, why and how it ended.
   static String detail(TimelineEventModel e, {required int nowMs}) {
     final parts = <String>[];
-    if (e.placeName.isNotEmpty && e.type != 'STOP_ADDED' && e.type != 'STOP_REACHED') parts.add(e.placeName);
+    const namedInTitle = {'STOP_ADDED', 'STOP_REACHED', 'STOP_SUGGESTED', 'STOP_SKIPPED'};
+    if (e.placeName.isNotEmpty && !namedInTitle.contains(e.type)) parts.add(e.placeName);
+    if (e.type == 'STOP_ADDED' && e.dataString('suggestedBy').isNotEmpty) parts.add('suggested by ${e.dataString('suggestedBy')}');
     switch (e.type) {
       case 'STOPPED':
         final r = e.dataString('reason');

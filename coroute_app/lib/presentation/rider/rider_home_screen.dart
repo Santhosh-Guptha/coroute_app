@@ -5,17 +5,15 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/devmonks_branding.dart';
 import '../../core/widgets/glass_card.dart';
-import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
-import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/trip_storage_service.dart';
-import '../../data/services/routing_service.dart';
 import '../account/account_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import 'convoy_dashboard_screen.dart';
 import 'trip_history_screen.dart';
+import '../trip_planner/trip_planner_screen.dart';
 
 class RiderHomeScreen extends StatefulWidget {
   const RiderHomeScreen({super.key});
@@ -26,8 +24,6 @@ class RiderHomeScreen extends StatefulWidget {
 
 class _RiderHomeScreenState extends State<RiderHomeScreen> {
   final _joinCodeController = TextEditingController();
-  final _createNameController = TextEditingController();
-  final _destinationController = TextEditingController();
   ConvoyService? _convoyService;
   bool _joinDialogOpen = false;
 
@@ -56,237 +52,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   void dispose() {
     _convoyService?.removeListener(_onConvoyChanged);
     _joinCodeController.dispose();
-    _createNameController.dispose();
-    _destinationController.dispose();
     super.dispose();
-  }
-
-  void _showCreateConvoyDialog(BuildContext context) {
-    List<PlaceSuggestion> suggestions = [];
-    double selectedLat = 0.0;
-    double selectedLng = 0.0;
-    RouteDetails? routeDetails;
-    bool isSearching = false;
-    bool isRouting = false;
-
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (dialogCtx, setDialogState) {
-            return AlertDialog(
-              backgroundColor: AppTheme.slateCard,
-              title: const Row(
-                children: [
-                  Icon(Icons.add_road, color: AppTheme.neonCyan),
-                  SizedBox(width: 8),
-                  Text('Create Convoy', style: TextStyle(color: Colors.white, fontSize: 18)),
-                ],
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Convoy Name', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                    const SizedBox(height: 6),
-                    TextField(
-                      controller: _createNameController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(hintText: 'e.g. Coastal Dawn Run'),
-                    ),
-                    const SizedBox(height: 14),
-                    const Text('Target Destination / Waypoint', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                    const SizedBox(height: 6),
-                    TextField(
-                      controller: _destinationController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: 'Search city, landmark, or cafe...',
-                        suffixIcon: isSearching
-                            ? const Padding(
-                                padding: EdgeInsets.all(12),
-                                child: SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan),
-                                ),
-                              )
-                            : const Icon(Icons.search, color: AppTheme.neonCyan, size: 20),
-                      ),
-                      onChanged: (val) async {
-                        if (val.trim().length >= 3) {
-                          setDialogState(() => isSearching = true);
-                          final results = await RoutingService.searchPlaces(val);
-                          setDialogState(() {
-                            suggestions = results;
-                            isSearching = false;
-                          });
-                        } else {
-                          setDialogState(() => suggestions = []);
-                        }
-                      },
-                    ),
-
-                    if (suggestions.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        constraints: const BoxConstraints(maxHeight: 180),
-                        decoration: BoxDecoration(
-                          color: AppTheme.elevatedCard,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppTheme.glassBorder),
-                        ),
-                        child: ListView.separated(
-                          shrinkWrap: true,
-                          itemCount: suggestions.length,
-                          separatorBuilder: (_, _) => const Divider(color: AppTheme.subtleBorder, height: 1),
-                          itemBuilder: (c, idx) {
-                            final place = suggestions[idx];
-                            return ListTile(
-                              dense: true,
-                              leading: const Icon(Icons.location_on, color: AppTheme.laserRed, size: 18),
-                              title: Text(
-                                place.displayName,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white, fontSize: 12),
-                              ),
-                              onTap: () async {
-                                final shortName = place.displayName.split(',').take(2).join(',');
-                                _destinationController.text = shortName;
-                                selectedLat = place.lat;
-                                selectedLng = place.lng;
-                                suggestions = [];
-                                isRouting = true;
-                                setDialogState(() {});
-
-                                // Compute OSRM route from current device GPS (fast 2s max)
-                                Position? pos = await Geolocator.getLastKnownPosition();
-                                if (pos == null) {
-                                  try {
-                                    pos = await Geolocator.getCurrentPosition(
-                                      locationSettings: const LocationSettings(
-                                        accuracy: LocationAccuracy.medium,
-                                        timeLimit: Duration(seconds: 2),
-                                      ),
-                                    );
-                                  } catch (_) {}
-                                }
-
-                                final startLat = pos?.latitude ?? selectedLat;
-                                final startLng = pos?.longitude ?? selectedLng;
-
-                                final route = await RoutingService.fetchRoute(
-                                  startLat: startLat,
-                                  startLng: startLng,
-                                  endLat: selectedLat,
-                                  endLng: selectedLng,
-                                );
-                                setDialogState(() {
-                                  routeDetails = route;
-                                  isRouting = false;
-                                });
-                              },
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-
-                    if (isRouting) ...[
-                      const SizedBox(height: 10),
-                      const Row(
-                        children: [
-                          SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.hyperAmber)),
-                          SizedBox(width: 8),
-                          Text('Computing OSRM driving route...', style: TextStyle(color: AppTheme.hyperAmber, fontSize: 11)),
-                        ],
-                      ),
-                    ],
-
-                    if (routeDetails != null) ...[
-                      const SizedBox(height: 10),
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppTheme.emeraldSafe.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppTheme.emeraldSafe.withOpacity(0.4)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.directions, color: AppTheme.emeraldSafe, size: 18),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Route: ${routeDetails!.distanceKm} km · ${routeDetails!.durationMinutes.toInt()} mins',
-                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    if (_createNameController.text.trim().isEmpty) return;
-                    final auth = context.read<AuthService>();
-                    final convoyService = context.read<ConvoyService>();
-                    if (!await PermissionsScreen.ensure(context)) return;
-                    if (!ctx.mounted) return;
-
-                    final breadcrumbs = routeDetails?.polyline
-                            .map((p) => {'lat': p.latitude, 'lng': p.longitude})
-                            .toList() ??
-                        [];
-
-                    final ConvoyModel newConvoy;
-                    try {
-                      newConvoy = await convoyService.createConvoy(
-                        name: _createNameController.text,
-                        creatorId: auth.currentUserId ?? '',
-                        creatorName: auth.currentUserName ?? 'Lead Rider',
-                        destination: _destinationController.text,
-                        destLat: selectedLat,
-                        destLng: selectedLng,
-                        vehicleType: auth.vehicleType ?? 'Motorcycle',
-                        vehicleNo: auth.vehicleNo ?? '',
-                        phone: auth.phone ?? '',
-                        routeBreadcrumbs: breadcrumbs,
-                      );
-                    } catch (e) {
-                      if (!ctx.mounted) return;
-                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-                        content: Text(e is ApiException ? e.message : 'Could not create the convoy. Check your connection.'),
-                        backgroundColor: AppTheme.laserRed,
-                      ));
-                      return;
-                    }
-
-                    if (!ctx.mounted) return;
-                    Navigator.pop(ctx);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => ConvoyDashboardScreen(groupId: newConvoy.groupId)),
-                    );
-                  },
-                  child: const Text('Launch Convoy'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
   }
 
   void _showJoinConvoyDialog(BuildContext context) {
@@ -740,7 +506,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                   child: GlassCard(
                     padding: const EdgeInsets.all(18),
                     borderColor: AppTheme.neonCyan.withOpacity(0.3),
-                    onTap: () => _showCreateConvoyDialog(context),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TripPlannerScreen())),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [

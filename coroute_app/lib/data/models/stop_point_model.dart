@@ -5,7 +5,17 @@ class StopPointModel {
   final double lng;
   final bool isVisited;
   final int orderIndex;
-  final String category; // 'FUEL', 'REST', 'FOOD', 'SCENIC', 'TOLL'
+  final String category; // 'FUEL', 'REST', 'FOOD', 'SCENIC', 'TOLL', 'OTHER'
+
+  /// 'PLANNED' (on the route), 'SUGGESTED' (waiting for the lead) or 'SKIPPED'.
+  final String status;
+  final String suggestedBy;
+  final String suggestedByName;
+  final int plannedDwellMin;
+
+  bool get isSuggested => status == 'SUGGESTED';
+  bool get isSkipped => status == 'SKIPPED';
+  bool get isPlanned => !isSuggested && !isSkipped;
 
   StopPointModel({
     required this.stopId,
@@ -15,6 +25,10 @@ class StopPointModel {
     this.isVisited = false,
     this.orderIndex = 0,
     this.category = 'REST',
+    this.status = 'PLANNED',
+    this.suggestedBy = '',
+    this.suggestedByName = '',
+    this.plannedDwellMin = 0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -25,6 +39,10 @@ class StopPointModel {
         'isVisited': isVisited,
         'orderIndex': orderIndex,
         'category': category,
+        'status': status,
+        'suggestedBy': suggestedBy,
+        'suggestedByName': suggestedByName,
+        'plannedDwellMin': plannedDwellMin,
       };
 
   factory StopPointModel.fromJson(Map<String, dynamic> json) => StopPointModel(
@@ -35,6 +53,10 @@ class StopPointModel {
         isVisited: json['isVisited'] ?? false,
         orderIndex: (json['orderIndex'] as num?)?.toInt() ?? 0,
         category: json['category'] ?? 'REST',
+        status: json['status']?.toString() ?? 'PLANNED',
+        suggestedBy: json['suggestedBy']?.toString() ?? '',
+        suggestedByName: json['suggestedByName']?.toString() ?? '',
+        plannedDwellMin: (json['plannedDwellMin'] as num?)?.toInt() ?? 0,
       );
 
   StopPointModel copyWith({
@@ -54,6 +76,10 @@ class StopPointModel {
       isVisited: isVisited ?? this.isVisited,
       orderIndex: orderIndex ?? this.orderIndex,
       category: category ?? this.category,
+      status: status,
+      suggestedBy: suggestedBy,
+      suggestedByName: suggestedByName,
+      plannedDwellMin: plannedDwellMin,
     );
   }
 }

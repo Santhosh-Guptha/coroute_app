@@ -221,6 +221,13 @@ class Hub {
       case 'SOS': return void await this.convoys.raiseSos(this._requireRoom(ws), u, msg);
       case 'SOS_RESOLVE': return void await this.convoys.resolveSos(this._requireRoom(ws), u, String(msg.alertId || ''));
       case 'STOP_ADD': return void await this.convoys.addStop(this._requireRoom(ws), u, msg);
+      case 'STOP_SUGGEST': return void await this.convoys.suggestStop(this._requireRoom(ws), u, msg);
+      case 'STOP_ACCEPT': return void await this.convoys.decideStop(this._requireRoom(ws), u, String(msg.stopId || ''), true);
+      case 'STOP_DECLINE': return void await this.convoys.decideStop(this._requireRoom(ws), u, String(msg.stopId || ''), false);
+      case 'STOP_REMOVE': return void await this.convoys.removeStop(this._requireRoom(ws), u, String(msg.stopId || ''));
+      case 'STOP_SKIP': return void await this.convoys.skipStop(this._requireRoom(ws), u, String(msg.stopId || ''));
+      case 'STOP_REORDER': return void await this.convoys.reorderStops(this._requireRoom(ws), u, msg.order);
+      case 'ROUTE_SET': return void await this.convoys.setRoute(this._requireRoom(ws), u, msg);
       case 'STOP_VISITED': return void await this.convoys.setStopVisited(this._requireRoom(ws), u, String(msg.stopId || ''), !!msg.isVisited);
       case 'CONFIG': return void await this.convoys.updateConfig(this._requireRoom(ws), u, msg);
       case 'TRIP_STATUS': {

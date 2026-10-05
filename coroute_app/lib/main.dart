@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'core/constants/app_constants.dart';
 import 'core/theme/app_theme.dart';
+import 'data/services/alert_service.dart';
 import 'data/services/api_client.dart';
 import 'data/services/auth_service.dart';
 import 'data/services/background_service.dart';
@@ -75,6 +76,12 @@ class CoRouteApp extends StatelessWidget {
           ),
         ),
         ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>())),
+        // Trip alerts (SOS, stopped, separated, no signal, arrivals), separate from the ongoing status.
+        Provider<AlertService>(
+          lazy: false,
+          create: (ctx) => AlertService(ctx.read<ConvoyService>(), ctx.read<TimelineService>()),
+          dispose: (_, a) => a.dispose(),
+        ),
       ],
       child: const _SessionBinder(
         child: _DeepLinkListener(

@@ -15,7 +15,10 @@ class TimelineFilter {
   static const stops = TimelineFilter('Stops', {'STOPPED', 'STOP_REACHED', 'DESTINATION_REACHED', 'STATUS'});
   static const alerts = TimelineFilter('Alerts', {'SOS', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE'});
   static const riding = TimelineFilter('Riding', {'MOVING', 'CORIDE'});
-  static const group = TimelineFilter('Group', {'TRIP_STARTED', 'TRIP_PAUSED', 'TRIP_RESUMED', 'TRIP_ENDED', 'JOINED', 'LEFT', 'STOP_ADDED'});
+  static const group = TimelineFilter('Group', {
+    'TRIP_STARTED', 'TRIP_PAUSED', 'TRIP_RESUMED', 'TRIP_ENDED', 'JOINED', 'LEFT',
+    'STOP_ADDED', 'STOP_SUGGESTED', 'STOP_SKIPPED', 'ROUTE_CHANGED',
+  });
   static const values = [all, stops, alerts, riding, group];
 }
 
@@ -66,6 +69,9 @@ class _TimelineListState extends State<TimelineList> {
     'STOP_REACHED': Icons.where_to_vote_rounded,
     'DESTINATION_REACHED': Icons.sports_score_rounded,
     'CORIDE': Icons.people_alt_rounded,
+    'STOP_SUGGESTED': Icons.add_comment_rounded,
+    'STOP_SKIPPED': Icons.not_interested_rounded,
+    'ROUTE_CHANGED': Icons.alt_route_rounded,
   };
 
   static Color _tone(TimelineEventModel e) {

@@ -40,7 +40,39 @@ Implementation plan, version 1 (5 October 2026). Target: app 3.1.0+61, gateway 3
   - Sliding session: `/me` returns a fresh token (`X-CoRoute-Token`) once a day, built from the database user, so active riders are never signed out. The realtime link uses the refreshed token, and a refused socket (4401) triggers a check instead of a sign-out.
   - Tests: gateway `session.test.js`, app `coroute_unit_test.dart` ("Bad networks never sign anyone out").
 
-**Next:** Phase 3 (map picker, trip planner, multi-stop route), then Phase 4 (alert channels).
+**Phase 3 built (map picking and multi-stop route):**
+
+- **Gateway:**
+  - `createConvoy` accepts `start` and `stops[]`.
+  - Route through start, planned stops and destination, via the OSRM proxy. When OSRM is down it falls back to a straight-line route marked `approximate`. Stale answers are discarded.
+  - Stop status `PLANNED`, `SUGGESTED` or `SKIPPED`.
+  - WS commands: `STOP_ADD` (the lead's stops are planned, others' become suggestions), `STOP_SUGGEST`, `STOP_ACCEPT`, `STOP_DECLINE`, `STOP_REMOVE`, `STOP_SKIP`, `STOP_REORDER`, `ROUTE_SET` (start or destination).
+  - Pushes `ROUTE` and `DESTINATION`.
+  - Timeline entries `STOP_SUGGESTED`, `STOP_SKIPPED`, `ROUTE_CHANGED`.
+  - Geofence ignores suggested and skipped stops. Test: `route.test.js`.
+- **App:**
+  - `MapPickerScreen`: centre pin, tap, search, my location, place name, stop category and planned stay.
+  - `TripPlannerScreen` replaces the create dialog: name, start, destination, reorderable stops, live route preview with distance and time per leg.
+  - `RouteStopsPanel` on the convoy Stops tab and the cockpit sheet. The lead adds, reorders, skips, removes stops and changes the destination; members suggest; the lead accepts or declines.
+  - The cockpit map draws the route and numbered stops. Long-press adds or suggests a stop.
+  - The status notification uses distance along the route to the destination.
+  - `routing_service.dart` (direct calls from the app to OSM) removed.
+
+**Phase 4 built (alerts):**
+
+- **Logic:** `AlertPolicy` (pure, tested) plus `AlertService` (flutter_local_notifications 19). Four channels: SOS (max, alarm category, insistent sound until seen), group alerts (high), trip updates (default) and activity (low).
+- **Standing alerts, reconciled every 30 s and on each timeline change** (shown when true, removed when resolved):
+  - SOS: everyone except the sender.
+  - Stopped at or beyond 20 min: lead and sweeper.
+  - Separated: the rider and the lead/sweeper.
+  - No signal at or beyond 5 min: lead.
+  - Off route: the rider and the lead.
+- **One-time alerts** for live entries (auto-removed after 10 min): destination or stop reached, stop suggested (to the lead), joined/left, route changed.
+- **Quiet in the foreground:** while the app is open, only SOS is posted. Notifications are grouped per trip, with no coordinates in the text.
+- **Full screen:** the full-screen SOS intent was deliberately not used (Play policy, and the activity would have to show over the lock screen at all times). The insistent alarm sound covers it.
+- Android build: core library desugaring (`desugar_jdk_libs 2.1.4`), `VIBRATE` permission.
+
+App version 3.3.0+63.
 
 ## 0. Goals and decisions
 

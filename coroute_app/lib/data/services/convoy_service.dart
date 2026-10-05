@@ -11,6 +11,7 @@ import '../../core/constants/app_constants.dart';
 import '../models/convoy_model.dart';
 import '../models/group_message_model.dart';
 import '../models/rider_model.dart';
+import '../models/route_model.dart';
 import '../models/sos_alert_model.dart';
 import '../models/stop_point_model.dart';
 import '../models/trip_history_model.dart';
@@ -19,6 +20,7 @@ import '../../domain/tracking/geo_math.dart';
 import '../../domain/tracking/track_point.dart';
 import 'api_client.dart';
 import 'background_service.dart';
+import 'geo_service.dart';
 import 'realtime_service.dart';
 import 'timeline_service.dart';
 import 'track_recorder.dart';
@@ -177,10 +179,7 @@ class ConvoyService extends ChangeNotifier {
     if (convoy == null || uid == null || _statusTimer == null) return;
     final me = convoy.riders[uid];
     final now = DateTime.now().millisecondsSinceEpoch;
-    final route = convoy.routeBreadcrumbs
-        .where((p) => p['lat'] != null && p['lng'] != null)
-        .map((p) => (p['lat']!, p['lng']!))
-        .toList();
+    final route = convoy.routeLine;
     final meLat = me?.lat ?? 0.0, meLng = me?.lng ?? 0.0;
     final hasMe = meLat != 0 || meLng != 0;
     final myAlong = hasMe ? GeoMath.alongRoute(meLat, meLng, route) : null;
@@ -204,14 +203,17 @@ class ConvoyService extends ChangeNotifier {
         stoppedFor: stoppedFor,
       ));
     }
-    final stops = convoy.stopPoints.where((s) => !s.isVisited).toList()..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+    final stops = convoy.plannedStops.where((s) => !s.isVisited).toList();
     final next = stops.isNotEmpty ? stops.first : null;
     final status = StatusText.build(
       convoyName: convoy.name,
       others: others,
-      destinationRemainingM: hasMe && (convoy.destinationLat != 0 || convoy.destinationLng != 0)
-          ? GeoMath.haversine(meLat, meLng, convoy.destinationLat, convoy.destinationLng)
-          : null,
+      destinationRemainingM: !hasMe || (convoy.destinationLat == 0 && convoy.destinationLng == 0)
+          ? null
+          : (myAlong != null && route.length >= 2)
+              // Along the planned route, not as the crow flies.
+              ? ((GeoMath.alongRoute(route.last.$1, route.last.$2, route)?.along ?? 0) - myAlong.along).clamp(0.0, double.infinity).toDouble()
+              : GeoMath.haversine(meLat, meLng, convoy.destinationLat, convoy.destinationLng),
       nextStopName: next?.name,
       nextStopRemainingM: hasMe && next != null ? GeoMath.haversine(meLat, meLng, next.lat, next.lng) : null,
     );
@@ -322,6 +324,26 @@ class ConvoyService extends ChangeNotifier {
         if (convoy == null || e['stopPoints'] is! List) return;
         final stops = (e['stopPoints'] as List).whereType<Map>().map((s) => StopPointModel.fromJson(Map<String, dynamic>.from(s))).toList();
         _allConvoys[gid] = convoy.copyWith(stopPoints: stops);
+        break;
+      case 'ROUTE':
+        if (convoy == null) return;
+        final r = e['route'];
+        _allConvoys[gid] = r is Map
+            ? convoy.copyWith(route: RouteModel.fromJson(Map<String, dynamic>.from(r)))
+            : convoy.copyWith(clearRoute: true);
+        _lastStatus = ''; // distances along the route changed
+        break;
+      case 'DESTINATION':
+        if (convoy == null) return;
+        final st = e['start'];
+        _allConvoys[gid] = convoy.copyWith(
+          destinationName: e['destinationName']?.toString(),
+          destinationLat: (e['destinationLat'] as num?)?.toDouble(),
+          destinationLng: (e['destinationLng'] as num?)?.toDouble(),
+          startLocationName: e['startLocationName']?.toString(),
+          startLat: st is Map ? (st['lat'] as num?)?.toDouble() : null,
+          startLng: st is Map ? (st['lng'] as num?)?.toDouble() : null,
+        );
         break;
       case 'WAIT_REQUESTS':
         if (convoy == null || e['waitRequests'] is! Map) return;
@@ -435,13 +457,19 @@ class ConvoyService extends ChangeNotifier {
     double distanceThresholdMeters = 1000.0,
     int stopThresholdSeconds = 180,
     bool voiceGuidanceEnabled = true,
+    PickedPlace? start,
+    List<PickedPlace> stops = const [],
   }) async {
     final pos = await _getCurrentPosition();
     await _refreshBatteryLevel();
     final res = await _api.post('/convoys', {
       'name': name.trim(),
       'startPoint': startPoint,
-      if (pos != null) 'start': {'lat': pos.latitude, 'lng': pos.longitude, 'name': startPoint},
+      if (start != null)
+        'start': start.toJson()
+      else if (pos != null)
+        'start': {'lat': pos.latitude, 'lng': pos.longitude, 'name': startPoint},
+      if (stops.isNotEmpty) 'stops': stops.map((p) => p.toJson()).toList(),
       'destination': destination,
       'destLat': destLat,
       'destLng': destLng,
@@ -752,6 +780,55 @@ class ConvoyService extends ChangeNotifier {
     if (_activeGroupId == null) return;
     _rt.send({'type': 'STOP_ADD', 'name': name, 'lat': lat, 'lng': lng, 'category': category});
   }
+
+  // ------------------------------------------------------ route planning
+  /// True when this rider may change the route (lead or creator).
+  bool get canEditRoute {
+    final c = activeConvoy;
+    final uid = _myUserId;
+    if (c == null || uid == null) return false;
+    return c.createdByUserId == uid || c.riders[uid]?.role == 'LEAD';
+  }
+
+  bool _sendRoute(Map<String, dynamic> msg) {
+    if (_activeGroupId == null) return false;
+    final ok = _rt.send(msg);
+    if (!ok) {
+      _lastError = 'No connection. Try again when you are back online.';
+      notifyListeners();
+    }
+    return ok;
+  }
+
+  /// Lead: adds a planned stop. Anyone else: sends a suggestion for the lead.
+  bool addStop(PickedPlace p) => _sendRoute({'type': 'STOP_ADD', ...p.toJson()});
+  bool suggestStop(PickedPlace p) => _sendRoute({'type': 'STOP_SUGGEST', ...p.toJson()});
+  bool acceptStop(String stopId) => _sendRoute({'type': 'STOP_ACCEPT', 'stopId': stopId});
+  bool declineStop(String stopId) => _sendRoute({'type': 'STOP_DECLINE', 'stopId': stopId});
+  bool removeStop(String stopId) => _sendRoute({'type': 'STOP_REMOVE', 'stopId': stopId});
+  bool skipStop(String stopId) => _sendRoute({'type': 'STOP_SKIP', 'stopId': stopId});
+
+  /// Lead: new order of stops. Applied locally at once so the list does not jump back.
+  bool reorderStops(List<String> stopIds) {
+    final gid = _activeGroupId;
+    final c = gid != null ? _allConvoys[gid] : null;
+    if (c != null) {
+      final byId = {for (final s in c.stopPoints) s.stopId: s};
+      final next = <StopPointModel>[
+        for (var i = 0; i < stopIds.length; i++)
+          if (byId[stopIds[i]] != null) byId[stopIds[i]]!.copyWith(orderIndex: i + 1),
+      ];
+      for (final s in c.stopPoints) {
+        if (!stopIds.contains(s.stopId)) next.add(s.copyWith(orderIndex: next.length + 1));
+      }
+      _allConvoys[gid!] = c.copyWith(stopPoints: next);
+      notifyListeners();
+    }
+    return _sendRoute({'type': 'STOP_REORDER', 'order': stopIds});
+  }
+
+  bool setDestination(PickedPlace p) => _sendRoute({'type': 'ROUTE_SET', 'destination': p.toJson()});
+  bool setStart(PickedPlace p) => _sendRoute({'type': 'ROUTE_SET', 'start': p.toJson()});
 
   void toggleStopVisited(String stopId, bool isVisited) {
     if (_activeGroupId == null) return;

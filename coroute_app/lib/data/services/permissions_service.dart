@@ -34,7 +34,7 @@ class PermissionsService {
       PermissionItem(key: 'location', title: 'Location while using the app', reason: 'Puts you on the convoy map and powers the SOS position.', required: true, granted: loc.isGranted),
       PermissionItem(key: 'locationAlways', title: 'Location in the background', reason: 'Keeps sharing your position with your convoy when the phone is in your pocket or the screen is locked. Choose "Allow all the time".', required: true, granted: always.isGranted),
       PermissionItem(key: 'microphone', title: 'Microphone', reason: 'Only used while you hold Talk or have armed the hands-free mode.', required: false, granted: mic.isGranted),
-      PermissionItem(key: 'notification', title: 'Notifications', reason: 'Shows the "Convoy active" notification with the SOS and Leave buttons while you ride.', required: false, granted: notif.isGranted),
+      PermissionItem(key: 'notification', title: 'Notifications', reason: 'Shows your group on the lock screen while you ride, and alerts you when someone raises an SOS, stops for long or falls behind.', required: false, granted: notif.isGranted),
       if (Platform.isAndroid)
         PermissionItem(key: 'battery', title: 'Unrestricted battery use', reason: 'Stops the phone from closing CoRoute in the background on long rides.', required: false, granted: battery),
     ];
