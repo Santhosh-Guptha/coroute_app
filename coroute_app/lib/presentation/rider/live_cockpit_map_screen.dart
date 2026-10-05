@@ -653,6 +653,35 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     }
   }
 
+  LatLng? _lastFollowed;
+
+  /// Where to open the map: my position, else another rider's, else the trip start.
+  LatLng _initialCenter(RiderModel me, ConvoyModel convoy) {
+    if (me.lat != 0 || me.lng != 0) return LatLng(me.lat, me.lng);
+    for (final r in convoy.riders.values) {
+      if (r.lat != 0 || r.lng != 0) return LatLng(r.lat, r.lng);
+    }
+    if (convoy.startLat != null && convoy.startLng != null) return LatLng(convoy.startLat!, convoy.startLng!);
+    return const LatLng(20.5937, 78.9629); // centre of India
+  }
+
+  /// Keeps my marker in view while auto-follow is on. Moves only when I moved
+  /// more than 15 m (no constant redraws, which would cost battery).
+  void _follow(RiderModel me, ConvoyModel convoy) {
+    if (!_autoFollow || (me.lat == 0 && me.lng == 0)) return;
+    final here = LatLng(me.lat, me.lng);
+    final last = _lastFollowed;
+    if (last != null && const Distance().as(LengthUnit.Meter, last, here) < 15) return;
+    final first = last == null;
+    _lastFollowed = here;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_autoFollow) return;
+      try {
+        _mapController.move(here, first ? 15.5 : _mapController.camera.zoom);
+      } catch (_) {}
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
@@ -676,6 +705,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     final myRider = convoy.riders[auth.currentUserId ?? ''] ??
         RiderModel(userId: auth.currentUserId ?? '0', name: auth.currentUserName ?? 'Rider', lat: 0.0, lng: 0.0, lastSeenEpochMs: 0);
 
+    _follow(myRider, convoy);
+
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
       body: Stack(
@@ -684,8 +715,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: LatLng(myRider.lat, myRider.lng),
-              initialZoom: 15.5,
+              initialCenter: _initialCenter(myRider, convoy),
+              initialZoom: (myRider.lat != 0 || myRider.lng != 0) ? 15.5 : 12,
               onPositionChanged: (pos, hasGesture) {
                 if (hasGesture && _autoFollow) {
                   setState(() => _autoFollow = false);
@@ -746,7 +777,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
                   return Marker(
                     point: LatLng(r.lat, r.lng),
-                    width: 64,
+                    width: 112,
                     height: 64,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -759,10 +790,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                             borderRadius: BorderRadius.circular(4),
                             border: Border.all(color: (isOffline ? AppTheme.laserRed : roleColor).withOpacity(0.8), width: 0.8),
                           ),
+                          constraints: const BoxConstraints(maxWidth: 108),
                           child: Text(
                             isOffline
-                                ? '${r.name.split(' ').first} · Last Known'
-                                : '${isMe ? "You" : r.name.split(' ').first} · ${r.speedKmh.toStringAsFixed(0)}',
+                                ? '${r.name.split(' ').first} · last seen ${((DateTime.now().millisecondsSinceEpoch - r.lastSeenEpochMs) ~/ 60000).clamp(1, 999)}m'
+                                : '${isMe ? "You" : r.name.split(' ').first} · ${r.speedKmh.toStringAsFixed(0)} km/h',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: isOffline ? AppTheme.hyperAmber : roleColor,
                               fontSize: 9,
@@ -1011,6 +1045,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                             ),
                             Text(
                               '${metrics.activeRiderCount} online · ${metrics.spreadKm.toStringAsFixed(1)} km spread · ${metrics.averageSpeedKmh.toStringAsFixed(0)} km/h avg',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10),
                             ),
                           ],
@@ -1043,52 +1079,52 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-
-          // 3. Floating Glassmorphic Cockpit Telemetry HUD
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 76,
-            left: 12,
-            child: CockpitHud(
-              speedKmh: myRider.speedKmh,
-              heading: (myRider.speedKmh < 10.0 && _deviceCompassHeading != null)
-                  ? _deviceCompassHeading!
-                  : myRider.heading,
-              batteryLevel: myRider.batteryLevel,
-              isCharging: myRider.isCharging,
-            ),
-          ),
-
-          // 3b. Floating Quick-Action Buttons Column (Pack List, Live Chat, Stops/Checkpoints)
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 76,
-            right: 12,
-            child: Column(
-              children: [
-                _buildMapQuickButton(
-                  icon: Icons.two_wheeler_rounded,
-                  badgeText: '${riders.length}',
-                  badgeColor: AppTheme.neonCyan,
-                  tooltip: 'Convoy Riders Pack',
-                  onTap: () => _showRidersListModal(context, convoy, myRider),
-                ),
-                const SizedBox(height: 10),
-                _buildMapQuickButton(
-                  icon: Icons.chat_bubble_rounded,
-                  badgeText: convoy.messages.isNotEmpty ? '${convoy.messages.length}' : null,
-                  badgeColor: AppTheme.hyperAmber,
-                  tooltip: 'Convoy Live Chat',
-                  onTap: () => _showChatModal(context, convoy, convoyService, myRider),
-                ),
-                const SizedBox(height: 10),
-                _buildMapQuickButton(
-                  icon: Icons.flag_rounded,
-                  badgeText: convoy.stopPoints.isNotEmpty ? '${convoy.stopPoints.length}' : null,
-                  badgeColor: AppTheme.emeraldSafe,
-                  tooltip: 'Route Checkpoints',
-                  onTap: () => _showStopsModal(context, convoy, convoyService),
+                const SizedBox(height: 8),
+                // Speed / heading / battery on the left, quick actions on the right, always below the header.
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Flexible(
+                      child: Align(
+                        alignment: Alignment.topLeft,
+                        child: CockpitHud(
+                          speedKmh: myRider.speedKmh,
+                          heading: (myRider.speedKmh < 10.0 && _deviceCompassHeading != null) ? _deviceCompassHeading! : myRider.heading,
+                          batteryLevel: myRider.batteryLevel,
+                          isCharging: myRider.isCharging,
+                          speedLimitKmh: convoy.speedLimitKmh,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      children: [
+                        _buildMapQuickButton(
+                          icon: Icons.two_wheeler_rounded,
+                          badgeText: '${riders.length}',
+                          badgeColor: AppTheme.neonCyan,
+                          tooltip: 'Riders',
+                          onTap: () => _showRidersListModal(context, convoy, myRider),
+                        ),
+                        const SizedBox(height: 10),
+                        _buildMapQuickButton(
+                          icon: Icons.chat_bubble_rounded,
+                          badgeText: convoy.messages.isNotEmpty ? '${convoy.messages.length}' : null,
+                          badgeColor: AppTheme.hyperAmber,
+                          tooltip: 'Chat',
+                          onTap: () => _showChatModal(context, convoy, convoyService, myRider),
+                        ),
+                        const SizedBox(height: 10),
+                        _buildMapQuickButton(
+                          icon: Icons.flag_rounded,
+                          badgeText: convoy.plannedStops.isNotEmpty ? '${convoy.plannedStops.length}' : null,
+                          badgeColor: AppTheme.emeraldSafe,
+                          tooltip: 'Route and stops',
+                          onTap: () => _showStopsModal(context, convoy, convoyService),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1118,7 +1154,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               foregroundColor: _autoFollow ? AppTheme.neonCyan : AppTheme.textMuted,
               onPressed: () {
                 setState(() => _autoFollow = true);
-                _mapController.move(LatLng(myRider.lat, myRider.lng), 16.0);
+                _lastFollowed = null;
+                if (myRider.lat != 0 || myRider.lng != 0) _mapController.move(LatLng(myRider.lat, myRider.lng), 16.0);
               },
               child: const Icon(Icons.my_location),
             ),

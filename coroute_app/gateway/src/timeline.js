@@ -4,8 +4,9 @@
  * group timeline (collection trip_events), shared by every member.
  *
  * Two kinds of entries:
- *   instant   JOINED, LEFT, STOP_ADDED, STATUS, STOP_REACHED, DESTINATION_REACHED, TRIP_*
- *   interval  STOPPED, SEPARATED, OFF_ROUTE, OFFLINE, SOS, CORIDE, MOVING
+ *   instant   JOINED, LEFT, STOP_ADDED, STATUS, STOP_PASSED, STOP_ALL_REACHED, DESTINATION_ALL_REACHED, TRIP_*
+ *   interval  STOPPED, SEPARATED, OFF_ROUTE, OFFLINE, SOS, CORIDE, MOVING, STOP_REACHED, DESTINATION_REACHED (time at the place),
+ *             OVERSPEED (over the group speed limit)
  *             (open while it lasts; closed with endedAt/durationMs)
  *
  * Live entries are computed from telemetry the moment they happen
@@ -22,7 +23,7 @@ const config = require('./config');
 const { haversine, distanceToPolyline, medianCentre, decodePolyline } = require('./geo_math');
 const { buildTripReport } = require('./report');
 
-const INTERVAL_TYPES = new Set(['STOPPED', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'SOS', 'CORIDE', 'MOVING']);
+const INTERVAL_TYPES = new Set(['STOPPED', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'SOS', 'CORIDE', 'MOVING', 'STOP_REACHED', 'DESTINATION_REACHED', 'OVERSPEED']);
 const FRESH_MS = 2 * 60000;
 const HOLD_MS = 60000; // a condition must last this long before it becomes an entry
 const MAX_TS = Number.MAX_SAFE_INTEGER;
@@ -100,7 +101,7 @@ class TimelineEngine {
 
   _rs(st, userId) {
     let r = st.riders.get(userId);
-    if (!r) { r = { cluster: null, sepSince: 0, offSince: 0, reached: new Set(), lastFixAt: 0 }; st.riders.set(userId, r); }
+    if (!r) { r = { cluster: null, sepSince: 0, offSince: 0, visits: {}, lastFixAt: 0 }; st.riders.set(userId, r); }
     return r;
   }
 
@@ -208,19 +209,14 @@ class TimelineEngine {
       }
     }
 
-    // Planned stops and destination reached.
+    // Planned stops and destination: every rider's arrival and departure is logged.
     const m = room.meta;
     for (const s of m.stopPoints || []) {
-      if (rs.reached.has(s.stopId) || !s.lat || s.status === 'SUGGESTED' || s.status === 'SKIPPED') continue;
-      if (haversine(s.lat, s.lng, p.lat, p.lng) <= config.reachRadiusM) {
-        rs.reached.add(s.stopId);
-        await this._instant(gid, { ...who, type: 'STOP_REACHED', startedAt: t, lat: s.lat, lng: s.lng, placeName: s.name, data: { stopId: s.stopId, name: s.name } });
-        if (rider.role === 'LEAD' && !s.isVisited) await this.convoys.setStopVisited(gid, { userId: rider.userId }, s.stopId, true).catch(() => {});
-      }
+      if (!s.lat || s.status === 'SUGGESTED' || s.status === 'SKIPPED') continue;
+      await this._visit(gid, st, rs, rider, p, t, { key: s.stopId, lat: s.lat, lng: s.lng, name: s.name, stopId: s.stopId });
     }
-    if (m.destinationLat && !rs.reached.has('DEST') && haversine(m.destinationLat, m.destinationLng, p.lat, p.lng) <= config.reachRadiusM) {
-      rs.reached.add('DEST');
-      await this._instant(gid, { ...who, type: 'DESTINATION_REACHED', startedAt: t, lat: m.destinationLat, lng: m.destinationLng, placeName: m.destinationName || '' });
+    if (m.destinationLat || m.destinationLng) {
+      await this._visit(gid, st, rs, rider, p, t, { key: 'DEST', lat: m.destinationLat, lng: m.destinationLng, name: m.destinationName || 'the destination', stopId: null });
     }
 
     // Off route.
@@ -240,11 +236,107 @@ class TimelineEngine {
       }
     }
 
+    // Group speed limit.
+    await this._speed(gid, st, rs, rider, p, t, m.speedLimitKmh || 0);
+
     // Separation, at most every 5 s per convoy.
     if (t - st.lastSepCheck >= 5000) {
       st.lastSepCheck = t;
       await this._checkSeparation(gid, st, room, t);
     }
+  }
+
+  /**
+   * Arrival at a planned stop or the destination. Inside the radius AND slow
+   * (under 15 km/h) or inside for 30 s counts as reached; riding through
+   * without slowing is logged as passed. Leaving closes the visit with its
+   * duration. When every rider in the convoy has reached it, the stop is
+   * marked visited for the group.
+   */
+  async _visit(gid, st, rs, rider, p, t, target) {
+    rs.visits = rs.visits || {};
+    const v = rs.visits[target.key] || (rs.visits[target.key] = { inside: false, enteredAt: 0, reached: false, done: false });
+    if (v.done) return;
+    const d = haversine(target.lat, target.lng, p.lat, p.lng);
+    const R = config.reachRadiusM;
+    const who = { userId: rider.userId, userName: rider.name };
+    const dest = target.key === 'DEST';
+    const slot = `VISIT:${target.key}:${rider.userId}`;
+    if (d <= R) {
+      if (!v.inside) { v.inside = true; v.enteredAt = t; }
+      if (!v.reached && ((rider.speedKmh ?? 99) < 15 || t - v.enteredAt >= 30000)) {
+        v.reached = true;
+        await this._open(gid, st, slot, {
+          ...who, type: dest ? 'DESTINATION_REACHED' : 'STOP_REACHED', startedAt: v.enteredAt, lat: target.lat, lng: target.lng,
+          placeName: target.name, data: { stopId: target.stopId, name: target.name },
+        });
+        const res = await this.convoys.recordVisit(gid, target.stopId, rider, { arrivedAt: v.enteredAt }).catch(() => null);
+        if (res?.allReachedNow) {
+          await this._instant(gid, { type: dest ? 'DESTINATION_ALL_REACHED' : 'STOP_ALL_REACHED', startedAt: t, lat: target.lat, lng: target.lng, placeName: target.name, data: { stopId: target.stopId, name: target.name, riders: res.count } });
+        }
+      }
+    } else if (v.inside && d > R * 1.3) {
+      v.inside = false;
+      if (v.reached) {
+        v.done = true;
+        await this._close(gid, st, slot, t);
+        await this.convoys.recordVisit(gid, target.stopId, rider, { leftAt: t }).catch(() => null);
+      } else {
+        v.done = true;
+        await this._instant(gid, { ...who, type: 'STOP_PASSED', startedAt: t, lat: target.lat, lng: target.lng, placeName: target.name, data: { stopId: target.stopId, name: target.name, destination: dest } });
+        await this.convoys.recordVisit(gid, target.stopId, rider, { passedAt: t }).catch(() => null);
+      }
+    }
+  }
+
+  /**
+   * Group speed limit. Riding above (limit + tolerance) for overspeedHoldMs
+   * opens an OVERSPEED entry for that rider, so a single GPS spike never
+   * counts. Riding at or under the limit for overspeedClearMs closes it with
+   * its duration and top speed. Every episode is logged; only the first one
+   * is announced to the group (data.notify). A repeat by the same rider
+   * before overspeedRenotifyMs has passed since their last episode ended is
+   * logged without a new notification.
+   */
+  async _speed(gid, st, rs, rider, p, t, limit) {
+    const slot = `OVERSPEED:${rider.userId}`;
+    const open = st.open.get(slot);
+    if (!limit) {
+      rs.overSince = 0; rs.underSince = 0; rs.overPeak = 0;
+      if (open) await this._close(gid, st, slot, t);
+      return;
+    }
+    const v = Math.round(Number(rider.speedKmh) || 0);
+    if (v > limit + config.overspeedToleranceKmh) {
+      rs.underSince = 0;
+      if (open) {
+        if (v > (open.data.maxKmh || 0)) open.data.maxKmh = v;
+        return;
+      }
+      if (!rs.overSince) { rs.overSince = t; rs.overPeak = v; rs.overAt = { lat: p.lat, lng: p.lng }; return; }
+      rs.overPeak = Math.max(rs.overPeak || 0, v);
+      if (t - rs.overSince < config.overspeedHoldMs) return;
+      rs.overCount = (rs.overCount || 0) + 1;
+      const notify = !rs.overEndedAt || rs.overSince - rs.overEndedAt >= config.overspeedRenotifyMs;
+      await this._open(gid, st, slot, {
+        userId: rider.userId, userName: rider.name, type: 'OVERSPEED', startedAt: rs.overSince,
+        lat: rs.overAt?.lat ?? p.lat, lng: rs.overAt?.lng ?? p.lng,
+        data: { limitKmh: limit, maxKmh: rs.overPeak, count: rs.overCount, notify },
+      });
+      rs.overSince = 0;
+    } else if (v <= limit) {
+      rs.overSince = 0;
+      if (!open) return;
+      if (!rs.underSince) rs.underSince = t;
+      if (t - rs.underSince >= config.overspeedClearMs) await this._endOverspeed(gid, st, rs, slot);
+    }
+  }
+
+  async _endOverspeed(gid, st, rs, slot) {
+    const at = rs.underSince;
+    rs.underSince = 0;
+    rs.overEndedAt = at;
+    await this._close(gid, st, slot, at);
   }
 
   async _checkSeparation(gid, st, room, t) {
@@ -289,6 +381,10 @@ class TimelineEngine {
         if (last && t - last >= limit && !st.open.has(slot)) {
           await this._open(gid, st, slot, { userId: r.userId, userName: r.name, type: 'OFFLINE', startedAt: last, lat: r.lat, lng: r.lng });
         }
+        // A rider who slowed down and then parked sends few fixes: end the episode here.
+        const rs = st.riders.get(r.userId);
+        const over = `OVERSPEED:${r.userId}`;
+        if (rs?.underSince && st.open.has(over) && t - rs.underSince >= config.overspeedClearMs) await this._endOverspeed(gid, st, rs, over);
       }
     }
   }

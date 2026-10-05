@@ -115,9 +115,11 @@ class AlertService with WidgetsBindingObserver {
       _lastEventCount = events.length;
       for (final TimelineEventModel e in events) {
         if (!_oneShotsSeen.add(e.eventId)) continue;
-        if (firstLoad || now - e.startedAt > const Duration(minutes: 2).inMilliseconds || _foreground) continue;
+        if (firstLoad || now - e.startedAt > const Duration(minutes: 2).inMilliseconds) continue;
         final a = _policy.oneShot(e, me);
-        if (a != null) _show(a, timeout: const Duration(minutes: 10));
+        // Safety alerts (the alerts channel) show even while the app is open; the rest only in the background.
+        if (a == null || (_foreground && a.channel != AlertChannel.alerts)) continue;
+        _show(a, timeout: const Duration(minutes: 10));
       }
     }
   }

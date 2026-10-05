@@ -12,6 +12,16 @@ const sumDur = (events, type, userId) => events
   .filter((e) => e.type === type && e.userId === userId)
   .reduce((s, e) => s + (e.durationMs || 0), 0);
 
+/** Times over the group speed limit, total time over it and the top speed while over. */
+function overspeed(events, userId) {
+  const list = events.filter((e) => e.type === 'OVERSPEED' && e.userId === userId);
+  return {
+    overspeedCount: list.length,
+    overspeedMs: list.reduce((s, e) => s + (e.durationMs || 0), 0),
+    overspeedMaxKmh: list.reduce((mx, e) => Math.max(mx, Number(e.data?.maxKmh) || 0), 0),
+  };
+}
+
 function buildTripReport({ meta, tracksByUser, events }) {
   const minStopMs = (meta.stopThresholdSeconds ?? 180) * 1000;
   const members = Object.values(meta.members || {});
@@ -49,6 +59,7 @@ function buildTripReport({ meta, tracksByUser, events }) {
       offRouteMs: sumDur(events, 'OFF_ROUTE', m.userId),
       offlineMs: sumDur(events, 'OFFLINE', m.userId),
       sos: events.filter((e) => e.type === 'SOS' && e.userId === m.userId).length,
+      ...overspeed(events, m.userId),
       reachedDestination: events.some((e) => e.type === 'DESTINATION_REACHED' && e.userId === m.userId),
     };
 
@@ -87,6 +98,8 @@ function buildTripReport({ meta, tracksByUser, events }) {
       distanceM: perMember.reduce((mx, p) => Math.max(mx, p.stats.distanceM), 0),
       plannedStops: (meta.stopPoints || []).length, visitedStops,
       sos: events.filter((e) => e.type === 'SOS').length,
+      speedLimitKmh: meta.speedLimitKmh || 0,
+      overspeedCount: events.filter((e) => e.type === 'OVERSPEED').length,
       arrived: perMember.filter((p) => p.stats.reachedDestination).length,
     },
     members: perMember.map((p) => p.stats),

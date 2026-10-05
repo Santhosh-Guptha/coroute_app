@@ -226,6 +226,8 @@ class _TripReportScreenState extends State<TripReportScreen> {
       ('Longest stop', dur(me?.longestStopMs ?? 0)),
       ('Average', '${(me?.avgMovingKmh ?? t.avgSpeedKmh).round()} km/h'),
       ('Top speed', '${(me?.maxKmh ?? t.topSpeedKmh).round()} km/h'),
+      if ((r?.speedLimitKmh ?? 0) > 0)
+        ('Over ${r!.speedLimitKmh} km/h', (me?.overspeedCount ?? 0) == 0 ? 'Never' : '${me!.overspeedCount}x, ${dur(me.overspeedMs)}'),
     ];
 
     return ListView(
@@ -289,6 +291,7 @@ class _TripReportScreenState extends State<TripReportScreen> {
                   DataColumn(label: Text('Top'), numeric: true),
                   DataColumn(label: Text('Behind group'), numeric: true),
                   DataColumn(label: Text('No signal'), numeric: true),
+                  DataColumn(label: Text('Over limit'), numeric: true),
                   DataColumn(label: Text('Arrived')),
                 ],
                 rows: [
@@ -307,6 +310,10 @@ class _TripReportScreenState extends State<TripReportScreen> {
                       DataCell(Text(m.trackAvailable ? '${m.maxKmh.round()}' : 'n/a')),
                       DataCell(Text(m.separatedMs > 0 ? dur(m.separatedMs) : '-')),
                       DataCell(Text(m.offlineMs > 0 ? dur(m.offlineMs) : '-')),
+                      DataCell(Text(
+                        m.overspeedCount > 0 ? '${m.overspeedCount}x · ${dur(m.overspeedMs)} · top ${m.overspeedMaxKmh.round()}' : '-',
+                        style: TextStyle(color: m.overspeedCount > 0 ? AppTheme.speedWarning : null),
+                      )),
                       DataCell(Icon(m.reachedDestination ? Icons.check_circle_rounded : Icons.remove_rounded,
                           size: 16, color: m.reachedDestination ? AppTheme.emeraldSafe : AppTheme.textMuted)),
                     ]),
@@ -315,8 +322,10 @@ class _TripReportScreenState extends State<TripReportScreen> {
             ),
           ),
           const SizedBox(height: 6),
-          const Text('Distance, average and top speed come from each rider\'s recorded route. n/a: that phone did not upload a route.',
-              style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+          Text(
+              'Distance, average and top speed come from each rider\'s recorded route. n/a: that phone did not upload a route.'
+              '${r.speedLimitKmh > 0 ? ' Over limit: times above the group limit of ${r.speedLimitKmh} km/h, total time and top speed.' : ''}',
+              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
         ] else
           const Padding(
             padding: EdgeInsets.only(top: 18),

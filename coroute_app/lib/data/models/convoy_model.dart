@@ -25,8 +25,11 @@ class ConvoyModel {
   final double distanceThresholdMeters;
   final int stopThresholdSeconds;
   final bool voiceGuidanceEnabled;
+  /// Group speed limit in km/h set by the lead; 0 means no limit.
+  final int speedLimitKmh;
   final List<Map<String, double>> routeBreadcrumbs;
   final RouteModel? route;
+  final Map<String, StopArrival> destinationArrivals;
   final double? startLat;
   final double? startLng;
 
@@ -64,8 +67,10 @@ class ConvoyModel {
     this.distanceThresholdMeters = 1000.0,
     this.stopThresholdSeconds = 180,
     this.voiceGuidanceEnabled = true,
+    this.speedLimitKmh = 0,
     this.routeBreadcrumbs = const [],
     this.route,
+    this.destinationArrivals = const {},
     this.startLat,
     this.startLng,
   });
@@ -91,9 +96,11 @@ class ConvoyModel {
     double? distanceThresholdMeters,
     int? stopThresholdSeconds,
     bool? voiceGuidanceEnabled,
+    int? speedLimitKmh,
     List<Map<String, double>>? routeBreadcrumbs,
     RouteModel? route,
     bool clearRoute = false,
+    Map<String, StopArrival>? destinationArrivals,
     double? startLat,
     double? startLng,
   }) {
@@ -118,8 +125,10 @@ class ConvoyModel {
       distanceThresholdMeters: distanceThresholdMeters ?? this.distanceThresholdMeters,
       stopThresholdSeconds: stopThresholdSeconds ?? this.stopThresholdSeconds,
       voiceGuidanceEnabled: voiceGuidanceEnabled ?? this.voiceGuidanceEnabled,
+      speedLimitKmh: speedLimitKmh ?? this.speedLimitKmh,
       routeBreadcrumbs: routeBreadcrumbs ?? this.routeBreadcrumbs,
       route: clearRoute ? null : (route ?? this.route),
+      destinationArrivals: destinationArrivals ?? this.destinationArrivals,
       startLat: startLat ?? this.startLat,
       startLng: startLng ?? this.startLng,
     );
@@ -147,8 +156,10 @@ class ConvoyModel {
       'distanceThresholdMeters': distanceThresholdMeters,
       'stopThresholdSeconds': stopThresholdSeconds,
       'voiceGuidanceEnabled': voiceGuidanceEnabled,
+      'speedLimitKmh': speedLimitKmh,
       'routeBreadcrumbs': routeBreadcrumbs,
       if (route != null) 'route': route!.toJson(),
+      'destinationArrivals': destinationArrivals.map((k, v) => MapEntry(k, v.toJson())),
       if (startLat != null && startLng != null) 'start': {'lat': startLat, 'lng': startLng, 'name': startLocationName},
     };
   }
@@ -218,8 +229,10 @@ class ConvoyModel {
       distanceThresholdMeters: (json['distanceThresholdMeters'] as num?)?.toDouble() ?? 1000.0,
       stopThresholdSeconds: (json['stopThresholdSeconds'] as num?)?.toInt() ?? 180,
       voiceGuidanceEnabled: json['voiceGuidanceEnabled'] ?? true,
+      speedLimitKmh: (json['speedLimitKmh'] as num?)?.toInt() ?? 0,
       routeBreadcrumbs: breadcrumbsList,
       route: json['route'] is Map ? RouteModel.fromJson(Map<String, dynamic>.from(json['route'] as Map)) : null,
+      destinationArrivals: StopArrival.mapFrom(json['destinationArrivals']),
       startLat: json['start'] is Map ? ((json['start'] as Map)['lat'] as num?)?.toDouble() : null,
       startLng: json['start'] is Map ? ((json['start'] as Map)['lng'] as num?)?.toDouble() : null,
     );

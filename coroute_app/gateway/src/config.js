@@ -66,6 +66,11 @@ const config = {
   stopExitM: int('STOP_EXIT_M', 60),
   offRouteM: int('OFF_ROUTE_M', 300),
   offlineAlertMinutes: int('OFFLINE_ALERT_MIN', 5),
+  // Group speed limit: over (limit + tolerance) for HOLD counts, under the limit for CLEAR ends it.
+  overspeedToleranceKmh: int('OVERSPEED_TOLERANCE_KMH', 2),
+  overspeedHoldMs: int('OVERSPEED_HOLD_MS', 10000),
+  overspeedClearMs: int('OVERSPEED_CLEAR_MS', 20000),
+  overspeedRenotifyMs: int('OVERSPEED_RENOTIFY_MS', 600000),
   stationaryAlertMinutes: int('STATIONARY_ALERT_MIN', 20),
   reachRadiusM: int('REACH_RADIUS_M', 150),
   timelineTickMs: int('TIMELINE_TICK_MS', 30000),
@@ -78,6 +83,12 @@ const config = {
   // Free OpenStreetMap services, proxied and cached by the gateway (empty = disabled).
   geoSearchUrl: (process.env.GEO_SEARCH_URL ?? (isTest ? '' : 'https://nominatim.openstreetmap.org')).trim().replace(/\/+$/, ''),
   geoRouteUrl: (process.env.GEO_ROUTE_URL ?? (isTest ? '' : 'https://router.project-osrm.org')).trim().replace(/\/+$/, ''),
+  // Search-as-you-type: Photon (built for it). Nominatim stays for reverse lookups only.
+  geoPhotonUrl: (process.env.GEO_PHOTON_URL ?? (isTest ? '' : 'https://photon.komoot.io')).trim().replace(/\/+$/, ''),
+  geoCountry: (process.env.GEO_COUNTRY || 'in').trim().toLowerCase(),
+  // minLon,minLat,maxLon,maxLat of the home country (India incl. all of J&K and Ladakh).
+  geoCountryBbox: (process.env.GEO_COUNTRY_BBOX || '68.0,6.4,97.6,37.1').split(',').map(Number),
+  geoPhotonMinIntervalMs: int('GEO_PHOTON_MIN_INTERVAL_MS', 250),
   geoContact: (process.env.GEO_CONTACT || process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
   geoCacheDays: int('GEO_CACHE_DAYS', 30),
   geoMinIntervalMs: int('GEO_MIN_INTERVAL_MS', 1100),
@@ -89,7 +100,7 @@ const config = {
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
-  latestAppBuild: int('LATEST_APP_BUILD', 63),
+  latestAppBuild: int('LATEST_APP_BUILD', 64),
   supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
 
   // CORS: comma separated origins or empty for same-origin/mobile only

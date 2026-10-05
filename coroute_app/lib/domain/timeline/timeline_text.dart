@@ -35,6 +35,21 @@ class TimelineText {
     'EMERGENCY': 'emergency',
   };
 
+  static String ordinal(int n) {
+    final t = n % 100;
+    if (t >= 11 && t <= 13) return '${n}th';
+    switch (n % 10) {
+      case 1:
+        return '${n}st';
+      case 2:
+        return '${n}nd';
+      case 3:
+        return '${n}rd';
+      default:
+        return '${n}th';
+    }
+  }
+
   static String reason(String code) => reasons[code] ?? code.toLowerCase().replaceAll('_', ' ');
 
   /// Main line, e.g. "Priya stopped for 18 min".
@@ -91,9 +106,21 @@ class TimelineText {
             return '$who changed the route';
         }
       case 'STOP_REACHED':
-        return '$who reached ${e.dataString('name').isEmpty ? 'a stop' : e.dataString('name')}';
+        final at = e.dataString('name').isEmpty ? 'a stop' : e.dataString('name');
+        return e.open ? '$who is at $at, $dur so far' : '$who reached $at, stayed $dur';
+      case 'STOP_PASSED':
+        return e.data['destination'] == true ? '$who rode past the destination' : '$who rode past ${e.dataString('name').isEmpty ? 'a stop' : e.dataString('name')}';
+      case 'STOP_ALL_REACHED':
+        return 'Everyone reached ${e.dataString('name').isEmpty ? 'the stop' : e.dataString('name')}';
+      case 'DESTINATION_ALL_REACHED':
+        return 'Everyone reached the destination';
       case 'DESTINATION_REACHED':
-        return '$who reached the destination';
+        return e.open || e.durationMs == 0 ? '$who reached the destination' : '$who reached the destination, stayed $dur';
+      case 'OVERSPEED':
+        final top = e.dataNum('maxKmh');
+        final limit = e.dataNum('limitKmh');
+        if (e.open) return '$who is over the ${limit == null ? 'group' : '${limit.round()} km/h'} limit';
+        return '$who rode over the limit for $dur${top == null ? '' : ', top ${top.round()} km/h'}';
       case 'CORIDE':
         final w = e.dataString('withName');
         return e.open ? '$who is riding with ${w.isEmpty ? 'another rider' : w}' : '$who rode with ${w.isEmpty ? 'another rider' : w} for $dur';
@@ -105,7 +132,7 @@ class TimelineText {
   /// Second line: where, why and how it ended.
   static String detail(TimelineEventModel e, {required int nowMs}) {
     final parts = <String>[];
-    const namedInTitle = {'STOP_ADDED', 'STOP_REACHED', 'STOP_SUGGESTED', 'STOP_SKIPPED'};
+    const namedInTitle = {'STOP_ADDED', 'STOP_REACHED', 'STOP_SUGGESTED', 'STOP_SKIPPED', 'STOP_PASSED', 'STOP_ALL_REACHED'};
     if (e.placeName.isNotEmpty && !namedInTitle.contains(e.type)) parts.add(e.placeName);
     if (e.type == 'STOP_ADDED' && e.dataString('suggestedBy').isNotEmpty) parts.add('suggested by ${e.dataString('suggestedBy')}');
     switch (e.type) {
@@ -134,6 +161,14 @@ class TimelineText {
           final by = e.dataString('resolvedByName');
           parts.add('resolved${by.isEmpty ? '' : ' by $by'} after ${duration(e.durationAt(nowMs))}');
         }
+        break;
+      case 'OVERSPEED':
+        final limitKmh = e.dataNum('limitKmh');
+        final peakKmh = e.dataNum('maxKmh');
+        final n = e.dataNum('count')?.toInt() ?? 1;
+        if (limitKmh != null) parts.add('limit ${limitKmh.round()} km/h');
+        if (e.open && peakKmh != null) parts.add('${peakKmh.round()} km/h');
+        if (n > 1) parts.add('${ordinal(n)} time this trip');
         break;
       case 'STATUS':
         final msg = e.dataString('message');

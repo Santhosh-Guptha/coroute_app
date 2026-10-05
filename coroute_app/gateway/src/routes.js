@@ -245,7 +245,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   const geoLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => req.user?.userId || req.ip, message: { error: 'Too many place lookups. Wait a moment.' } });
   r.get('/geo/search', geoLimiter, wrap(async (req, res) => {
     const lat = Number(req.query.lat), lng = Number(req.query.lng);
-    res.json({ results: await geo.search(req.query.q, { lat, lng, countryCodes: String(req.query.cc || '').toLowerCase() }) });
+    res.json({ results: await geo.search(req.query.q, { lat, lng }) });
   }));
   r.get('/geo/reverse', geoLimiter, wrap(async (req, res) => {
     const lat = Number(req.query.lat), lng = Number(req.query.lng);

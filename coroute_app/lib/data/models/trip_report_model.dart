@@ -11,6 +11,8 @@ class TripReportModel {
   final int visitedStops;
   final int sos;
   final int arrived;
+  final int speedLimitKmh;
+  final int overspeedCount;
   final List<MemberReport> members;
 
   const TripReportModel({
@@ -24,6 +26,8 @@ class TripReportModel {
     required this.visitedStops,
     required this.sos,
     required this.arrived,
+    this.speedLimitKmh = 0,
+    this.overspeedCount = 0,
     required this.members,
   });
 
@@ -44,6 +48,8 @@ class TripReportModel {
       visitedStops: _i(g['visitedStops']),
       sos: _i(g['sos']),
       arrived: _i(g['arrived']),
+      speedLimitKmh: _i(g['speedLimitKmh']),
+      overspeedCount: _i(g['overspeedCount']),
       members: ms,
     );
   }
@@ -67,6 +73,9 @@ class MemberReport {
   final int offRouteMs;
   final int offlineMs;
   final int sos;
+  final int overspeedCount;
+  final int overspeedMs;
+  final double overspeedMaxKmh;
   final bool reachedDestination;
 
   const MemberReport({
@@ -87,6 +96,9 @@ class MemberReport {
     this.offRouteMs = 0,
     this.offlineMs = 0,
     this.sos = 0,
+    this.overspeedCount = 0,
+    this.overspeedMs = 0,
+    this.overspeedMaxKmh = 0,
     this.reachedDestination = false,
   });
 
@@ -111,6 +123,9 @@ class MemberReport {
       offRouteMs: i('offRouteMs'),
       offlineMs: i('offlineMs'),
       sos: i('sos'),
+      overspeedCount: i('overspeedCount'),
+      overspeedMs: i('overspeedMs'),
+      overspeedMaxKmh: d('overspeedMaxKmh'),
       reachedDestination: j['reachedDestination'] == true,
     );
   }

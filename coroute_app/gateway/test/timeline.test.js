@@ -178,7 +178,7 @@ test('group timeline: every member tracked, isolated per group, exact report', a
     ws.sendJson({ type: 'JOIN', groupId: g });
     await ws.next((m) => m.type === 'SNAPSHOT');
   }
-  wsA.sendJson({ type: 'STOP_ADD', name: 'Lunch', lat: latAt(30), lng: 78.4, category: 'FOOD' });
+  wsA.sendJson({ type: 'STOP_ADD', name: 'Lunch', lat: latAt(16), lng: 78.4, category: 'FOOD' }); // where the group waits
   await wsA.next((m) => m.type === 'STOPS');
 
   // ---- drive the ride: telemetry every 30 s of simulated time ----
@@ -269,10 +269,20 @@ test('group timeline: every member tracked, isolated per group, exact report', a
   assert.equal(sos.length, 1);
   assert.equal(sos[0].data.resolvedBy, A.user.userId);
   assert.equal(sos[0].durationMs, 20000);
-  assert.equal(find('STOP_REACHED').length, 3);
+  const atLunch = find('STOP_REACHED');
+  assert.equal(atLunch.length, 3, 'every rider logged at the stop');
+  const lunchA = atLunch.find((e) => e.userId === A.user.userId);
+  assert.equal(lunchA.startedAt, T0 + 16 * MIN);
+  assert.equal(lunchA.durationMs, 10.5 * MIN); // left the radius at 26:30
+  assert.equal(atLunch.find((e) => e.userId === B.user.userId).startedAt, T0 + 19 * MIN);
+  assert.equal(find('STOP_ALL_REACHED').length, 1);
   assert.equal(find('DESTINATION_REACHED').length, 3);
+  assert.equal(find('DESTINATION_ALL_REACHED').length, 1);
   assert.equal(find('STOP_ADDED').length, 1);
-  assert.ok((await gw.convoys.getRoom(gid)).meta.stopPoints[0].isVisited, 'lead reaching the stop marks it visited');
+  const lunch = (await gw.convoys.getRoom(gid)).meta.stopPoints[0];
+  assert.ok(lunch.isVisited, 'visited once everyone reached it');
+  assert.equal(Object.keys(lunch.arrivals).length, 3);
+  assert.ok(lunch.arrivals[B.user.userId].leftAt > lunch.arrivals[B.user.userId].arrivedAt);
 
   // Pushed live to the group only.
   assert.ok(wsB.inbox.some((x) => x.type === 'TIMELINE' && x.event.type === 'STOPPED'));

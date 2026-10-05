@@ -333,6 +333,10 @@ class ConvoyService extends ChangeNotifier {
             : convoy.copyWith(clearRoute: true);
         _lastStatus = ''; // distances along the route changed
         break;
+      case 'DESTINATION_ARRIVALS':
+        if (convoy == null) return;
+        _allConvoys[gid] = convoy.copyWith(destinationArrivals: StopArrival.mapFrom(e['destinationArrivals']));
+        break;
       case 'DESTINATION':
         if (convoy == null) return;
         final st = e['start'];
@@ -359,6 +363,7 @@ class ConvoyService extends ChangeNotifier {
           distanceThresholdMeters: (e['distanceThresholdMeters'] as num?)?.toDouble(),
           stopThresholdSeconds: (e['stopThresholdSeconds'] as num?)?.toInt(),
           voiceGuidanceEnabled: e['voiceGuidanceEnabled'] as bool?,
+          speedLimitKmh: (e['speedLimitKmh'] as num?)?.toInt(),
         );
         break;
       case 'TRIP_STATUS':
@@ -457,6 +462,7 @@ class ConvoyService extends ChangeNotifier {
     double distanceThresholdMeters = 1000.0,
     int stopThresholdSeconds = 180,
     bool voiceGuidanceEnabled = true,
+    int speedLimitKmh = 0,
     PickedPlace? start,
     List<PickedPlace> stops = const [],
   }) async {
@@ -476,6 +482,7 @@ class ConvoyService extends ChangeNotifier {
       'distanceThresholdMeters': distanceThresholdMeters,
       'stopThresholdSeconds': stopThresholdSeconds,
       'voiceGuidanceEnabled': voiceGuidanceEnabled,
+      if (speedLimitKmh > 0) 'speedLimitKmh': speedLimitKmh,
       'routeBreadcrumbs': routeBreadcrumbs,
       'rider': {
         'lat': pos?.latitude ?? 0.0,
@@ -857,11 +864,12 @@ class ConvoyService extends ChangeNotifier {
     _rt.send({'type': 'CORIDER', 'ridingWithUserId': driverId});
   }
 
-  void updateGroupConfig({double? distanceThresholdMeters, int? stopThresholdSeconds, bool? voiceGuidanceEnabled}) {
+  void updateGroupConfig({double? distanceThresholdMeters, int? stopThresholdSeconds, bool? voiceGuidanceEnabled, int? speedLimitKmh}) {
     final payload = <String, dynamic>{'type': 'CONFIG'};
     if (distanceThresholdMeters != null) payload['distanceThresholdMeters'] = distanceThresholdMeters;
     if (stopThresholdSeconds != null) payload['stopThresholdSeconds'] = stopThresholdSeconds;
     if (voiceGuidanceEnabled != null) payload['voiceGuidanceEnabled'] = voiceGuidanceEnabled;
+    if (speedLimitKmh != null) payload['speedLimitKmh'] = speedLimitKmh;
     _rt.send(payload);
   }
 

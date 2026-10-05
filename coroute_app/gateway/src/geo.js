@@ -10,7 +10,7 @@
  */
 const crypto = require('crypto');
 const config = require('./config');
-const { encodePolyline } = require('./geo_math');
+const { encodePolyline, haversine } = require('./geo_math');
 
 const UA = () => `CoRoute/3.1 (+https://coroute.duckdns.org; ${config.geoContact})`;
 const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
@@ -70,19 +70,73 @@ class GeoProxy {
     });
   }
 
-  async search(q, { lat, lng, countryCodes } = {}) {
+  /**
+   * Place search for the app's search box.
+   *
+   * Home country first: places near the rider inside the country, then the
+   * rest of the country, and only when the country has nothing, the world
+   * (marked outside: true). Uses Photon, which is built for search as you
+   * type; falls back to Nominatim if Photon is unavailable.
+   */
+  async search(q, { lat, lng } = {}) {
     const query = String(q || '').trim().slice(0, 120);
-    if (!this.searchEnabled || query.length < 3) return [];
-    const bias = Number.isFinite(lat) && Number.isFinite(lng) ? `&viewbox=${round(lng - 1, 2)},${round(lat + 1, 2)},${round(lng + 1, 2)},${round(lat - 1, 2)}` : '';
-    const cc = /^[a-z]{2}(,[a-z]{2})*$/.test(countryCodes || '') ? `&countrycodes=${countryCodes}` : '';
-    const k = `q:${hash(`${query.toLowerCase()}|${bias}|${cc}`)}`;
+    if (query.length < 3) return [];
+    const near = Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0) ? { lat: round(lat, 2), lng: round(lng, 2) } : null;
+    const k = `q2:${hash(`${query.toLowerCase()}|${near ? `${near.lat},${near.lng}` : ''}|${config.geoCountry}`)}`;
     return (await this._cached(k, config.geoCacheDays, async () => {
-      try {
-        const j = await this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&addressdetails=1&limit=8&q=${encodeURIComponent(query)}${bias}${cc}`));
-        return (Array.isArray(j) ? j : []).map((r) => ({ name: shortName(r) || r.display_name, displayName: r.display_name, lat: Number(r.lat), lng: Number(r.lon), type: r.type || '' }))
-          .filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng));
-      } catch (e) { this.log.warn('[geo] search failed', e.message); return null; }
+      let results = null;
+      if (config.geoPhotonUrl) results = await this._photonSearch(query, near).catch((e) => { this.log.warn('[geo] photon failed', e.message); return null; });
+      if (results === null && this.searchEnabled) results = await this._nominatimSearch(query, near).catch((e) => { this.log.warn('[geo] search failed', e.message); return null; });
+      return results;
     })) || [];
+  }
+
+  async _photonGet(params) {
+    const run = async () => {
+      const wait = (this.lastPhotonAt || 0) + config.geoPhotonMinIntervalMs - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      this.lastPhotonAt = Date.now();
+      return this._getJson(`${config.geoPhotonUrl}/api/?${params}`);
+    };
+    const p = (this.photonChain || Promise.resolve()).then(run);
+    this.photonChain = p.catch(() => {});
+    return p;
+  }
+
+  async _photonSearch(query, near) {
+    const base = `q=${encodeURIComponent(query)}&limit=10&lang=en`;
+    const bias = near ? `&lat=${near.lat}&lon=${near.lng}&zoom=10&location_bias_scale=0.4` : '';
+    const bbox = config.geoCountryBbox.length === 4 && config.geoCountryBbox.every(Number.isFinite) ? `&bbox=${config.geoCountryBbox.join(',')}` : '';
+    const home = config.geoCountry.toUpperCase();
+    // 1. Inside the home country, nearest first.
+    let feats = ((await this._photonGet(base + bias + bbox))?.features || []).filter((f) => !home || f.properties?.countrycode === home);
+    let outside = false;
+    // 2. Nothing at home: the world.
+    if (feats.length === 0) {
+      feats = (await this._photonGet(base + bias))?.features || [];
+      outside = true;
+    }
+    return dedupe(feats.map((f) => photonResult(f, near, home)).filter(Boolean).map((r) => ({ ...r, outside: outside || r.outside })));
+  }
+
+  async _nominatimSearch(query, near) {
+    const bias = near ? `&viewbox=${round(near.lng - 1, 2)},${round(near.lat + 1, 2)},${round(near.lng + 1, 2)},${round(near.lat - 1, 2)}` : '';
+    const get = (extra) => this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&addressdetails=1&limit=8&q=${encodeURIComponent(query)}${bias}${extra}`));
+    let rows = config.geoCountry ? await get(`&countrycodes=${config.geoCountry}`) : [];
+    let outside = false;
+    if (!Array.isArray(rows) || rows.length === 0) { rows = await get(''); outside = true; }
+    return dedupe((Array.isArray(rows) ? rows : []).map((r) => {
+      const la = Number(r.lat), ln = Number(r.lon);
+      if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
+      const a = r.address || {};
+      return {
+        name: r.name || shortName(r) || r.display_name,
+        displayName: indianLine(r.name, a.suburb || a.village || a.town || a.city, a.state_district || a.county, a.state, a.country_code !== config.geoCountry ? a.country : ''),
+        lat: la, lng: ln, type: r.type || '',
+        distanceM: near ? Math.round(haversine(near.lat, near.lng, la, ln)) : null,
+        outside: outside || (a.country_code && a.country_code !== config.geoCountry),
+      };
+    }).filter(Boolean));
   }
 
   /** Driving route through 2..25 waypoints. Returns { distanceM, durationS, polyline, legs[] } or null. */
@@ -106,6 +160,43 @@ class GeoProxy {
   }
 }
 
+/** "Shamshabad, Rangareddy, Telangana": locality, district, state (country only when abroad). */
+function indianLine(...parts) {
+  const out = [];
+  for (const p of parts) {
+    const v = String(p || '').trim();
+    if (v && !out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(v);
+  }
+  return out.join(', ');
+}
+
+function photonResult(f, near, home) {
+  const c = f?.geometry?.coordinates;
+  const p = f?.properties || {};
+  if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) return null;
+  const lat = c[1], lng = c[0];
+  const street = [p.housenumber, p.street].filter(Boolean).join(' ');
+  const name = p.name || street || p.locality || p.district || p.city || p.county || p.state;
+  if (!name) return null;
+  return {
+    name: String(name).slice(0, 100),
+    displayName: indianLine(p.name ? street : '', p.locality || p.district, p.city || p.county, p.state, p.countrycode !== home ? p.country : '').slice(0, 160) || String(name),
+    lat, lng, type: p.osm_value || p.type || '',
+    distanceM: near ? Math.round(haversine(near.lat, near.lng, lat, lng)) : null,
+    outside: !!home && p.countrycode !== home,
+  };
+}
+
+/** Same place reported twice (node and way, or two providers): keep the first. */
+function dedupe(list) {
+  const out = [];
+  for (const r of list) {
+    if (out.some((o) => o.name.toLowerCase() === r.name.toLowerCase() && haversine(o.lat, o.lng, r.lat, r.lng) < 300)) continue;
+    out.push(r);
+  }
+  return out.slice(0, 8);
+}
+
 function shortName(r) {
   if (!r) return null;
   const a = r.address || {};
@@ -115,4 +206,4 @@ function shortName(r) {
   return (out || r.display_name || '').slice(0, 120) || null;
 }
 
-module.exports = { GeoProxy, shortName };
+module.exports = { GeoProxy, shortName, indianLine, photonResult, dedupe };

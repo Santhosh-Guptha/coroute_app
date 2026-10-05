@@ -33,6 +33,8 @@ const shortId = (n = 4) => crypto.randomBytes(n).toString('hex').toUpperCase();
 const now = () => Date.now();
 
 function num(v, def = 0) { const n = Number(v); return Number.isFinite(n) ? n : def; }
+/** Group speed limit in km/h: 0 means off, otherwise 20-200 in whole km/h. */
+function speedLimit(v) { const n = Math.round(num(v, 0)); return n <= 0 ? 0 : Math.max(20, Math.min(200, n)); }
 function clampLat(v) { return Math.max(-90, Math.min(90, num(v))); }
 function clampLng(v) { return Math.max(-180, Math.min(180, num(v))); }
 
@@ -106,9 +108,11 @@ class ConvoyManager extends EventEmitter {
       distanceThresholdMeters: m.distanceThresholdMeters ?? 1000,
       stopThresholdSeconds: m.stopThresholdSeconds ?? 180,
       voiceGuidanceEnabled: m.voiceGuidanceEnabled ?? true,
+      speedLimitKmh: m.speedLimitKmh || 0,
       routeBreadcrumbs: m.routeBreadcrumbs || [],
       start: m.start || null,
       route: m.route ? publicRoute(m.route) : null,
+      destinationArrivals: m.destinationArrivals || {},
       members: Object.values(m.members || {}).map((x) => ({ userId: x.userId, name: x.name, role: x.role, joinedAt: x.joinedAt, leftAt: x.leftAt || 0 })),
     };
   }
@@ -153,6 +157,7 @@ class ConvoyManager extends EventEmitter {
       distanceThresholdMeters: num(p.distanceThresholdMeters, 1000),
       stopThresholdSeconds: num(p.stopThresholdSeconds, 180),
       voiceGuidanceEnabled: p.voiceGuidanceEnabled !== false,
+      speedLimitKmh: speedLimit(p.speedLimitKmh),
       routeBreadcrumbs: sanitizeBreadcrumbs(p.routeBreadcrumbs),
       stopPoints: sanitizeStops(p.stops, { by: user, status: 'PLANNED' }),
       waitRequests: {},
@@ -357,6 +362,40 @@ class ConvoyManager extends EventEmitter {
   }
 
   // ------------------------------------------------------ stops / config
+  /**
+   * Logs one rider's arrival / departure / pass at a planned stop (stopId) or
+   * the destination (stopId null). Marks the stop visited once every rider
+   * currently in the convoy has reached it. Returns { allReachedNow, count }.
+   */
+  async recordVisit(groupId, stopId, rider, patch) {
+    const room = this.rooms.get(groupId);
+    if (!room) return null;
+    const entry = (prev) => ({ ...(prev || {}), name: rider.name, ...patch });
+    const everyone = [...room.riders.keys()];
+    let allReachedNow = false;
+    if (stopId) {
+      const stop = (room.meta.stopPoints || []).find((s) => s.stopId === stopId);
+      if (!stop) return null;
+      const arrivals = { ...(stop.arrivals || {}), [rider.userId]: entry(stop.arrivals?.[rider.userId]) };
+      const all = everyone.length > 0 && everyone.every((u) => arrivals[u]?.arrivedAt);
+      allReachedNow = all && !stop.isVisited;
+      room.meta.stopPoints = room.meta.stopPoints.map((s) => (s.stopId === stopId ? { ...s, arrivals, ...(all ? { isVisited: true, visitedAt: s.visitedAt || now() } : {}) } : s));
+      this._touch(room);
+      await this.repo.saveConvoyMeta(room.meta);
+      this._emit(groupId, 'STOPS', { stopPoints: room.meta.stopPoints });
+    } else {
+      const arrivals = { ...(room.meta.destinationArrivals || {}), [rider.userId]: entry(room.meta.destinationArrivals?.[rider.userId]) };
+      const all = everyone.length > 0 && everyone.every((u) => arrivals[u]?.arrivedAt);
+      allReachedNow = all && !room.meta.destinationAllReachedAt;
+      room.meta.destinationArrivals = arrivals;
+      if (allReachedNow) room.meta.destinationAllReachedAt = now();
+      this._touch(room);
+      await this.repo.saveConvoyMeta(room.meta);
+      this._emit(groupId, 'DESTINATION_ARRIVALS', { destinationArrivals: arrivals, allReachedAt: room.meta.destinationAllReachedAt || 0 });
+    }
+    return { allReachedNow, count: everyone.length };
+  }
+
   isLead(room, user) {
     const rider = room.riders.get(user.userId);
     return user.role === 'MASTER_ADMIN' || room.meta.createdByUserId === user.userId || rider?.role === 'LEAD';
@@ -542,10 +581,11 @@ class ConvoyManager extends EventEmitter {
     if (patch.distanceThresholdMeters !== undefined) room.meta.distanceThresholdMeters = Math.max(100, Math.min(20000, num(patch.distanceThresholdMeters, 1000)));
     if (patch.stopThresholdSeconds !== undefined) room.meta.stopThresholdSeconds = Math.max(30, Math.min(3600, num(patch.stopThresholdSeconds, 180)));
     if (patch.voiceGuidanceEnabled !== undefined) room.meta.voiceGuidanceEnabled = !!patch.voiceGuidanceEnabled;
+    if (patch.speedLimitKmh !== undefined) room.meta.speedLimitKmh = speedLimit(patch.speedLimitKmh);
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
     const { distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled } = room.meta;
-    this._emit(groupId, 'CONFIG', { distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled });
+    this._emit(groupId, 'CONFIG', { distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled, speedLimitKmh: room.meta.speedLimitKmh || 0 });
   }
 
   // ---------------------------------------------------------------- admin

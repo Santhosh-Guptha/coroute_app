@@ -59,6 +59,74 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
     );
   }
 
+  void _shareInvite(ConvoyModel convoy) {
+    final link = '${AppConfig.apiBaseUrl}/join/${convoy.joinCode}';
+    SharePlus.instance.share(ShareParams(
+      text: 'Join my CoRoute convoy "${convoy.name}". Code ${convoy.joinCode}. Tap to open: $link',
+      subject: 'CoRoute convoy: ${convoy.name}',
+    ));
+  }
+
+  Future<void> _confirmLeave(ConvoyService service, String userId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.slateCard,
+        title: const Text('Leave this convoy?', style: TextStyle(color: Colors.white)),
+        content: const Text('Your group will stop seeing your position. Your ride so far is kept in trip history.', style: TextStyle(color: AppTheme.textSecondary)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Stay')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Leave', style: TextStyle(color: AppTheme.laserRed))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    service.leaveActiveConvoy(userId);
+    Navigator.pop(context);
+  }
+
+  void _showStatusSheet(BuildContext context, ConvoyService convoyService, String userId) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.slateCard,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Why are you stopped?', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final r in _statusReasons)
+                    ActionChip(
+                      avatar: Text(r['emoji']!),
+                      label: Text(r['label']!, style: const TextStyle(fontSize: 12, color: Colors.white)),
+                      backgroundColor: AppTheme.elevatedCard,
+                      side: const BorderSide(color: AppTheme.glassBorder),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        if (r['code'] == 'CUSTOM') {
+                          _showCustomReasonDialog(context, convoyService, userId);
+                        } else {
+                          convoyService.updateStatusReason(userId: userId, reason: r['code']!);
+                        }
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showCustomReasonDialog(BuildContext context, ConvoyService convoyService, String userId) {
     final customCtrl = TextEditingController();
     showDialog(
@@ -367,33 +435,16 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
             ),
             Row(
               children: [
-                Text(
-                  'CODE: ${convoy.joinCode}',
-                  style: const TextStyle(color: AppTheme.neonCyan, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.copy_rounded, color: AppTheme.neonCyan, size: 13),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  onPressed: () {
+                GestureDetector(
+                  onTap: () => _shareInvite(convoy),
+                  onLongPress: () {
                     Clipboard.setData(ClipboardData(text: convoy.joinCode));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Convoy Code ${convoy.joinCode} copied!')),
-                    );
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Code ${convoy.joinCode} copied')));
                   },
-                ),
-                IconButton(
-                  tooltip: 'Share invite link',
-                  icon: const Icon(Icons.share_rounded, color: AppTheme.neonCyan, size: 13),
-                  padding: const EdgeInsets.only(left: 6),
-                  constraints: const BoxConstraints(),
-                  onPressed: () {
-                    final link = '${AppConfig.apiBaseUrl}/join/${convoy.joinCode}';
-                    SharePlus.instance.share(ShareParams(
-                      text: 'Join my CoRoute convoy "${convoy.name}". Code ${convoy.joinCode}. Tap to open: $link',
-                      subject: 'CoRoute convoy: ${convoy.name}',
-                    ));
-                  },
+                  child: Text(
+                    'CODE ${convoy.joinCode} · Invite',
+                    style: const TextStyle(color: AppTheme.neonCyan, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8),
+                  ),
                 ),
               ],
             ),
@@ -401,53 +452,35 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
         ),
         actions: [
           IconButton(
-            icon: Icon(
-              _isFocusMode ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-              color: _isFocusMode ? AppTheme.hyperAmber : Colors.white,
-            ),
-            tooltip: 'Riding Focus Mode',
-            onPressed: () => setState(() => _isFocusMode = !_isFocusMode),
-          ),
-          IconButton(
             icon: const Icon(Icons.timeline_rounded, color: AppTheme.neonCyan),
             tooltip: 'Group timeline',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: convoy.groupId)),
-            ),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: convoy.groupId))),
           ),
           IconButton(
             icon: const Icon(Icons.map_rounded, color: AppTheme.neonCyan),
-            tooltip: 'Live Cockpit Map',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => LiveCockpitMapScreen(convoyId: convoy.groupId),
-                ),
-              );
-            },
+            tooltip: 'Live map',
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LiveCockpitMapScreen(convoyId: convoy.groupId))),
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
             color: AppTheme.elevatedCard,
             onSelected: (val) {
-              if (val == 'leave') {
-                convoyService.leaveActiveConvoy(currentUserId);
-                Navigator.pop(context);
+              switch (val) {
+                case 'invite':
+                  _shareInvite(convoy);
+                  break;
+                case 'focus':
+                  setState(() => _isFocusMode = !_isFocusMode);
+                  break;
+                case 'leave':
+                  _confirmLeave(convoyService, currentUserId);
+                  break;
               }
             },
             itemBuilder: (ctx) => [
-              const PopupMenuItem(
-                value: 'leave',
-                child: Row(
-                  children: [
-                    Icon(Icons.exit_to_app_rounded, color: AppTheme.laserRed, size: 18),
-                    SizedBox(width: 8),
-                    Text('Leave Convoy', style: TextStyle(color: AppTheme.laserRed, fontSize: 13)),
-                  ],
-                ),
-              ),
+              const PopupMenuItem(value: 'invite', child: Text('Invite riders', style: TextStyle(color: Colors.white, fontSize: 13))),
+              PopupMenuItem(value: 'focus', child: Text(_isFocusMode ? 'Exit focus mode' : 'Focus mode', style: const TextStyle(color: Colors.white, fontSize: 13))),
+              const PopupMenuItem(value: 'leave', child: Text('Leave convoy', style: TextStyle(color: AppTheme.laserRed, fontSize: 13))),
             ],
           ),
         ],
@@ -589,49 +622,32 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
               ),
             ),
 
-          // 3. Stopped Rider Prompt (If current rider stopped for long)
-          if (currentRider.speedKmh < 1.5 && currentRider.statusReason.isEmpty)
+          // 3. Stopped for longer than the group's stop limit: one slim line, details in a sheet.
+          if (currentRider.statusReason.isEmpty &&
+              currentRider.stoppedSince > 0 &&
+              DateTime.now().millisecondsSinceEpoch - currentRider.stoppedSince >= convoy.stopThresholdSeconds * 1000)
             Container(
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              padding: const EdgeInsets.all(10),
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.only(left: 12, right: 4),
               decoration: BoxDecoration(
                 color: AppTheme.hyperAmber.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: AppTheme.hyperAmber.withOpacity(0.4)),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  const Text(
-                    '🛑 You are stopped. Let your convoy know why:',
-                    style: TextStyle(color: AppTheme.hyperAmber, fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 6),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: _statusReasons.map((r) {
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: ActionChip(
-                            avatar: Text(r['emoji']!),
-                            label: Text(r['label']!, style: const TextStyle(fontSize: 11, color: Colors.white)),
-                            backgroundColor: AppTheme.elevatedCard,
-                            side: const BorderSide(color: AppTheme.glassBorder),
-                            onPressed: () {
-                              if (r['code'] == 'CUSTOM') {
-                                _showCustomReasonDialog(context, convoyService, currentRider.userId);
-                              } else {
-                                convoyService.updateStatusReason(
-                                  userId: currentRider.userId,
-                                  reason: r['code']!,
-                                );
-                              }
-                            },
-                          ),
-                        );
-                      }).toList(),
+                  const Icon(Icons.local_parking_rounded, color: AppTheme.hyperAmber, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Stopped ${((DateTime.now().millisecondsSinceEpoch - currentRider.stoppedSince) ~/ 60000)} min',
+                      style: const TextStyle(color: AppTheme.hyperAmber, fontSize: 13, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
                     ),
+                  ),
+                  TextButton(
+                    onPressed: () => _showStatusSheet(context, convoyService, currentRider.userId),
+                    child: const Text('Tell the group why'),
                   ),
                 ],
               ),
@@ -896,34 +912,15 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                               children: [
                                 const Icon(Icons.signal_cellular_connected_no_internet_4_bar_rounded, size: 12, color: AppTheme.laserRed),
                                 const SizedBox(width: 4),
-                                const Text(
-                                  'Signal lost · Last captured location retained',
-                                  style: TextStyle(color: AppTheme.laserRed, fontSize: 10, fontWeight: FontWeight.bold),
+                                const Flexible(
+                                  child: Text(
+                                    'Signal lost · last known position shown',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(color: AppTheme.laserRed, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
                                 ),
                               ],
                             ),
-                            if (member.lat != 0.0 || member.lng != 0.0) ...[
-                              const SizedBox(height: 6),
-                              SizedBox(
-                                height: 26,
-                                child: ElevatedButton.icon(
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => LiveCockpitMapScreen(convoyId: convoy.groupId),
-                                      ),
-                                    );
-                                  },
-                                  icon: const Icon(Icons.near_me_rounded, size: 12, color: Colors.black),
-                                  label: const Text('Navigate to Last Location', style: TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold)),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppTheme.hyperAmber,
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                  ),
-                                ),
-                              ),
-                            ],
                           ],
                           if (member.statusReason.isNotEmpty) ...[
                             const SizedBox(height: 4),
@@ -1145,6 +1142,9 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
     return RouteStopsPanel(convoy: convoy);
   }
 
+  /// Choices for the group speed limit, in km/h (0 = off).
+  static const List<int> _speedLimitChoices = [0, 40, 60, 80, 100, 120];
+
   // --- TAB 3: SETTINGS VIEW ---
   Widget _buildSettingsTab(ConvoyModel convoy, bool isCreator, ConvoyService service) {
     return ListView(
@@ -1213,6 +1213,49 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
 
         GlassCard(
           padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(child: Text('Group speed limit', style: TextStyle(color: Colors.white, fontSize: 13))),
+                  Text(convoy.speedLimitKmh > 0 ? '${convoy.speedLimitKmh} km/h' : 'Off',
+                      style: const TextStyle(color: AppTheme.speedWarning, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final v in _speedLimitChoices)
+                    ChoiceChip(
+                      label: Text(v == 0 ? 'Off' : '$v'),
+                      selected: convoy.speedLimitKmh == v,
+                      onSelected: isCreator ? (_) => service.updateGroupConfig(speedLimitKmh: v) : null,
+                      selectedColor: AppTheme.speedWarning.withOpacity(0.2),
+                      labelStyle: TextStyle(color: convoy.speedLimitKmh == v ? AppTheme.speedWarning : AppTheme.textSecondary, fontSize: 12),
+                      backgroundColor: AppTheme.slateCard,
+                      side: const BorderSide(color: AppTheme.subtleBorder),
+                      showCheckmark: false,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                isCreator
+                    ? 'When a rider stays over this speed for 10 seconds it is logged on the timeline and everyone is told once.'
+                    : 'Set by the lead. Riding over it is logged on the timeline and the group is told once.',
+                style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        GlassCard(
+          padding: const EdgeInsets.all(14),
           child: SwitchListTile(
             title: const Text('Voice Guidance & Alerts (TTS)', style: TextStyle(color: Colors.white, fontSize: 13)),
             subtitle: const Text('Spoken audio warnings for separation and emergency stops.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
@@ -1226,21 +1269,16 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
 
         GlassCard(
           padding: const EdgeInsets.all(14),
-          child: SwitchListTile(
-            title: const Text('Real-Time GPS Tracking', style: TextStyle(color: Colors.white, fontSize: 13)),
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.my_location_rounded, color: service.isRealGpsActive ? AppTheme.emeraldSafe : AppTheme.hyperAmber),
+            title: const Text('Location sharing', style: TextStyle(color: Colors.white, fontSize: 13)),
             subtitle: Text(
-              service.isRealGpsActive ? 'Live GPS Active · Tracking your position' : 'GPS Paused · Tap to resume tracking',
+              service.isRealGpsActive
+                  ? 'On while you are in this convoy. It stops when you leave.'
+                  : 'Waiting for GPS. Check that location is on and allowed for CoRoute.',
               style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
             ),
-            value: service.isRealGpsActive,
-            activeColor: AppTheme.emeraldSafe,
-            onChanged: (v) {
-              if (v) {
-                service.startRealGpsTracking(convoy.createdByUserId);
-              } else {
-                service.stopRealGpsTracking();
-              }
-            },
           ),
         ),
       ],

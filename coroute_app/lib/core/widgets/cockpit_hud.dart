@@ -8,6 +8,8 @@ class CockpitHud extends StatelessWidget {
   final double heading;
   final int batteryLevel;
   final bool isCharging;
+  /// The group speed limit; 0 when the lead has not set one.
+  final int speedLimitKmh;
 
   const CockpitHud({
     super.key,
@@ -15,6 +17,7 @@ class CockpitHud extends StatelessWidget {
     required this.heading,
     this.batteryLevel = 100,
     this.isCharging = false,
+    this.speedLimitKmh = 0,
   });
 
   @override
@@ -23,7 +26,14 @@ class CockpitHud extends StatelessWidget {
     final speedCat = TelemetryUtils.getSpeedCategory(speedKmh);
 
     Color speedColor = AppTheme.neonCyan;
-    if (speedKmh > 95) {
+    final limit = speedLimitKmh;
+    if (limit > 0) {
+      if (speedKmh > limit) {
+        speedColor = AppTheme.speedWarning;
+      } else if (speedKmh > limit - 10) {
+        speedColor = AppTheme.hyperAmber;
+      }
+    } else if (speedKmh > 95) {
       speedColor = AppTheme.speedWarning;
     } else if (speedKmh > 60) {
       speedColor = AppTheme.hyperAmber;
@@ -76,9 +86,9 @@ class CockpitHud extends StatelessWidget {
                 ],
               ),
               Text(
-                speedCat,
-                style: const TextStyle(
-                  color: AppTheme.textMuted,
+                limit > 0 ? (speedKmh > limit ? 'Over the $limit limit' : 'Limit $limit') : speedCat,
+                style: TextStyle(
+                  color: limit > 0 && speedKmh > limit ? AppTheme.speedWarning : AppTheme.textMuted,
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
                 ),

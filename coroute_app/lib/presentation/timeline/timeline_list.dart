@@ -12,8 +12,10 @@ class TimelineFilter {
   const TimelineFilter(this.label, this.types);
 
   static const all = TimelineFilter('All', {});
-  static const stops = TimelineFilter('Stops', {'STOPPED', 'STOP_REACHED', 'DESTINATION_REACHED', 'STATUS'});
-  static const alerts = TimelineFilter('Alerts', {'SOS', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE'});
+  static const stops = TimelineFilter('Stops', {
+    'STOPPED', 'STOP_REACHED', 'STOP_PASSED', 'STOP_ALL_REACHED', 'DESTINATION_REACHED', 'DESTINATION_ALL_REACHED', 'STATUS',
+  });
+  static const alerts = TimelineFilter('Alerts', {'SOS', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'OVERSPEED'});
   static const riding = TimelineFilter('Riding', {'MOVING', 'CORIDE'});
   static const group = TimelineFilter('Group', {
     'TRIP_STARTED', 'TRIP_PAUSED', 'TRIP_RESUMED', 'TRIP_ENDED', 'JOINED', 'LEFT',
@@ -72,6 +74,10 @@ class _TimelineListState extends State<TimelineList> {
     'STOP_SUGGESTED': Icons.add_comment_rounded,
     'STOP_SKIPPED': Icons.not_interested_rounded,
     'ROUTE_CHANGED': Icons.alt_route_rounded,
+    'STOP_PASSED': Icons.fast_forward_rounded,
+    'OVERSPEED': Icons.speed_rounded,
+    'STOP_ALL_REACHED': Icons.groups_rounded,
+    'DESTINATION_ALL_REACHED': Icons.emoji_flags_rounded,
   };
 
   static Color _tone(TimelineEventModel e) {
@@ -81,9 +87,12 @@ class _TimelineListState extends State<TimelineList> {
       case 'SEPARATED':
       case 'OFF_ROUTE':
       case 'OFFLINE':
+      case 'OVERSPEED':
         return AppTheme.hyperAmber;
       case 'DESTINATION_REACHED':
       case 'STOP_REACHED':
+      case 'STOP_ALL_REACHED':
+      case 'DESTINATION_ALL_REACHED':
         return AppTheme.emeraldSafe;
       default:
         return AppTheme.textSecondary;

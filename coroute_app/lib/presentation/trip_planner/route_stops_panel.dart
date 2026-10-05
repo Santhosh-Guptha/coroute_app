@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/convoy_model.dart';
@@ -37,6 +38,30 @@ class RouteStopsPanel extends StatelessWidget {
     final skipped = convoy.stopPoints.where((s) => s.isSkipped).toList();
     final suggestions = convoy.suggestedStops;
     final route = convoy.route;
+
+    // Who has reached a stop (with the time), who rode past, who is still coming.
+    final hhmm = DateFormat('HH:mm');
+    String arrivalsLine(Map<String, StopArrival> arrivals) {
+      if (convoy.riders.isEmpty || arrivals.isEmpty) return '';
+      final reached = <String>[], passed = <String>[], waiting = <String>[];
+      convoy.riders.forEach((uid, r) {
+        final a = arrivals[uid];
+        final first = r.name.split(' ').first;
+        if (a != null && a.reached) {
+          reached.add('$first ${hhmm.format(DateTime.fromMillisecondsSinceEpoch(a.arrivedAt))}');
+        } else if (a != null && a.passed) {
+          passed.add(first);
+        } else {
+          waiting.add(first);
+        }
+      });
+      if (waiting.isEmpty && passed.isEmpty) return 'Everyone reached: ${reached.join(', ')}';
+      return [
+        '${reached.length} of ${convoy.riders.length} reached${reached.isEmpty ? '' : ': ${reached.join(', ')}'}',
+        if (passed.isNotEmpty) 'rode past: ${passed.join(', ')}',
+        if (waiting.isNotEmpty) 'waiting for ${waiting.join(', ')}',
+      ].join(' · ');
+    }
 
     String fromMe(double lat, double lng) => hasMe ? TimelineText.distance(GeoMath.haversine(meLat, meLng, lat, lng)) : '';
 
@@ -116,6 +141,7 @@ class RouteStopsPanel extends StatelessWidget {
               index: i,
               lead: lead,
               distance: s.isVisited ? 'visited' : fromMe(s.lat, s.lng),
+              arrivals: arrivalsLine(s.arrivals),
               onVisited: (v) => service.toggleStopVisited(s.stopId, v),
               onSkip: () => service.skipStop(s.stopId),
               onRemove: () => service.removeStop(s.stopId),
@@ -128,7 +154,10 @@ class RouteStopsPanel extends StatelessWidget {
         icon: Icons.sports_score_rounded,
         color: AppTheme.laserRed,
         title: convoy.destinationName.isNotEmpty ? convoy.destinationName : 'No destination set',
-        subtitle: (convoy.destinationLat != 0 || convoy.destinationLng != 0) ? 'Destination ${fromMe(convoy.destinationLat, convoy.destinationLng)}' : 'Destination',
+        subtitle: [
+          (convoy.destinationLat != 0 || convoy.destinationLng != 0) ? 'Destination ${fromMe(convoy.destinationLat, convoy.destinationLng)}' : 'Destination',
+          if (arrivalsLine(convoy.destinationArrivals).isNotEmpty) arrivalsLine(convoy.destinationArrivals),
+        ].join('\n'),
         trailing: lead ? IconButton(tooltip: 'Change destination', icon: const Icon(Icons.edit_location_alt_rounded, color: AppTheme.textSecondary), onPressed: changeDestination) : null,
       ),
       const SizedBox(height: 8),
@@ -190,6 +219,7 @@ class _StopTile extends StatelessWidget {
   final int index;
   final bool lead;
   final String distance;
+  final String arrivals;
   final ValueChanged<bool> onVisited;
   final VoidCallback onSkip;
   final VoidCallback onRemove;
@@ -200,6 +230,7 @@ class _StopTile extends StatelessWidget {
     required this.index,
     required this.lead,
     required this.distance,
+    this.arrivals = '',
     required this.onVisited,
     required this.onSkip,
     required this.onRemove,
@@ -234,7 +265,7 @@ class _StopTile extends StatelessWidget {
                 style: TextStyle(color: Colors.white, fontSize: 14, decoration: s.isVisited ? TextDecoration.lineThrough : null)),
           ),
         ]),
-        subtitle: details.isEmpty ? null : Text(details, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+        subtitle: (details.isEmpty && arrivals.isEmpty) ? null : Text([if (details.isNotEmpty) details, if (arrivals.isNotEmpty) arrivals].join('\n'), style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           Checkbox(value: s.isVisited, activeColor: AppTheme.emeraldSafe, onChanged: (v) {
             if (v != null) onVisited(v);

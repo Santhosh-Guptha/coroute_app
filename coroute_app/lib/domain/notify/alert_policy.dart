@@ -112,6 +112,20 @@ class AlertPolicy {
       case 'STOP_REACHED':
         if (mine) return null;
         return AlertSpec('EV:${e.eventId}', AlertChannel.updates, '$who reached ${e.dataString('name').isEmpty ? 'the stop' : e.dataString('name')}', '');
+      case 'STOP_ALL_REACHED':
+        return AlertSpec('EV:${e.eventId}', AlertChannel.updates, 'Everyone reached ${e.dataString('name').isEmpty ? 'the stop' : e.dataString('name')}', 'The whole group is together.');
+      case 'DESTINATION_ALL_REACHED':
+        return AlertSpec('EV:${e.eventId}', AlertChannel.updates, 'Everyone reached the destination', e.placeName);
+      case 'OVERSPEED':
+        // Announced once per episode to everyone; repeats soon after are only logged.
+        if (e.data['notify'] == false) return null;
+        final limit = e.dataNum('limitKmh')?.round();
+        final top = e.dataNum('maxKmh')?.round();
+        final lim = limit == null ? 'the group speed limit' : 'the group limit of $limit km/h';
+        final body = mine
+            ? ['Please slow down.', if (top != null) 'You reached $top km/h.'].join(' ')
+            : [if (top != null) 'Reached $top km/h', if (e.placeName.isNotEmpty) 'near ${e.placeName}'].join(' ');
+        return AlertSpec('EV:${e.eventId}', AlertChannel.alerts, mine ? 'You are over $lim' : '$who is over $lim', body);
       case 'STOP_SUGGESTED':
         if (!me.isLead || mine) return null;
         return AlertSpec('EV:${e.eventId}', AlertChannel.updates, '$who suggests a stop', '${e.dataString('name')}. Open the stops list to add it or decline.');
