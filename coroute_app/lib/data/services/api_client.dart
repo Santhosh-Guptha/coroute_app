@@ -32,6 +32,10 @@ class ApiException implements Exception {
 /// * Normalises errors into [ApiException].
 /// * Notifies listeners when the session expires so the UI can return to login.
 class ApiClient extends ChangeNotifier {
+  /// This app's build number, sent with every request so the server knows
+  /// which builds are still in use (set at start-up; 0 = unknown, not sent).
+  static int appBuild = 0;
+
   ApiClient({http.Client? httpClient, FlutterSecureStorage? storage})
       : _http = httpClient ?? http.Client(),
         _storage = storage ?? const FlutterSecureStorage();
@@ -87,6 +91,7 @@ class ApiClient extends ChangeNotifier {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
         if (auth && hasToken) 'Authorization': 'Bearer $_token',
+        if (appBuild > 0) 'X-CoRoute-Build': '$appBuild',
       };
 
   Future<dynamic> get(String path, {Duration timeout = const Duration(seconds: 10)}) =>

@@ -1,36 +1,68 @@
-# Play Store listing copy — CoRoute
+# Play Store listing: CoRoute
 
-**App name (30):** CoRoute – Group Ride Convoy
-**Short description (80):** Ride together. Live convoy map, voice intercom and SOS for group rides. Free.
+Text below follows the website rules: no emoji, no em dashes, no invented numbers or reviews.
 
-**Full description (≤4000):**
-CoRoute keeps a group of riders together. Create a convoy, share the six-digit code, and every rider appears on one live map with speed, heading and battery. Hold to talk to the whole group or privately to one rider through the built-in voice intercom, drop a quick card when you stop for fuel, and send a one-tap SOS with your exact location if something goes wrong.
+**App name (max 30):** CoRoute: Group Ride Convoy
+**Short description (max 80):** Keep your group together: live convoy map, intercom, SOS and trip reports.
 
-WHAT YOU GET
-• Live convoy map (OpenStreetMap) with planned route, stops and group spread
-• Voice intercom: push-to-talk or hands-free VOX, group or private 1:1, no recordings
-• One-tap SOS that stays on every rider's screen until resolved
-• Quick status cards: fuel, rest, photo stop, two-minute regroup
-• Ride history: who rode, how far, how fast, where you stopped
-• Battery-smart tracking that slows down when you stop and keeps working with the screen off
+**Full description (max 4000):**
+
+CoRoute keeps a group of riders together. The lead creates a convoy and shares a six-digit code. Everyone who joins appears on one live map with speed, heading and battery, and the whole group can talk, send a status card or raise an SOS.
+
+ON THE RIDE
+- Live convoy map with the planned route, stops and destination
+- Voice intercom: hold to talk or hands-free, to the whole group or privately to one rider; nothing is recorded
+- One-tap SOS that stays on every rider's screen until someone resolves it
+- Status cards for fuel, rest, photo stop or a short regroup
+- Each rider is marked as they reach a planned stop, and the stop is done when the whole group is there
+- A group speed limit set by the lead: riding over it is logged and the group is told once
+- The lock screen shows how far each rider is from you
+- Light theme for bright sun and dark theme for night, switching by itself at sunrise and sunset
+
+AFTER THE RIDE
+- A trip report for every rider: distance, riding time, stops and top speed
+- One map with each rider's route in their own colour, where they started, waited and finished
+- A shared timeline of the ride: who stopped and for how long, who fell behind, who lost signal
+- A replay of the whole ride and a GPX file of your own route
+
+BATTERY AND SIGNAL
+GPS slows down when you stop, audio is sent only while someone talks, and the app keeps a single connection. When there is no signal your route is kept on the phone and sent when the connection returns.
 
 FREE AND NON-PROFIT
-CoRoute is built by riders as a public service. No subscription, no ads, no trackers, no data sales — ever.
+CoRoute is made by riders at devmonks.space as a public service. There is no subscription, no advertising, no trackers and no sale of data.
 
 PRIVACY
-Your position is shared only with the convoy you are in and only while you are in it. Voice is never recorded. GPS traces are deleted after 90 days; your account and ride summaries stay until you delete them. Full policy: https://coroute.duckdns.org/privacy
+Your position is shared only with the convoy you are in, and only while you are in it. Voice is relayed live and never stored. Recorded routes are deleted after 90 days; your account and ride summaries stay until you delete them, which you can do in the app. Full policy: https://coroute.duckdns.org/privacy
 
 PERMISSIONS
-Location (including in the background) so your convoy can see you while your phone is in your pocket; microphone for the intercom; both only while you are in an active convoy.
+Location, including in the background, so your convoy still sees you with the phone in your pocket. Microphone for the intercom. Both are used only while you are in an active convoy.
 
-**Category:** Maps & Navigation · **Tags:** motorcycle, group ride, convoy, intercom, touring
-**Contact e-mail:** santhoshbukka5@gmail.com · **Website:** https://coroute.duckdns.org · **Privacy policy:** https://coroute.duckdns.org/privacy
+**Category:** Maps & Navigation
+**Tags:** motorcycle, group ride, convoy, intercom, touring
+**Contact e-mail:** santhoshbukka5@gmail.com
+**Website:** https://coroute.duckdns.org
+**Privacy policy:** https://coroute.duckdns.org/privacy
 
-## Assets in this folder
-- `feature_graphic_1024x500.png` — Play feature graphic (required)
-- `icon_512.png` — hi-res icon (required, 512×512 PNG)
-- `ic_launcher_foreground_432.png` — adaptive-icon foreground layer if you want the in-app launcher icon to match (drop into `android/app/src/main/res/mipmap-xxxhdpi/` or use `flutter_launcher_icons`)
+## Graphics in this folder
+- `icon_512.png`: hi-res icon (512 x 512, required)
+- `feature_graphic_1024x500.png`: feature graphic (required)
+- `ic_launcher_foreground_432.png`: adaptive icon foreground layer
 
-## Still needed from a device
-- 2–8 phone screenshots (1080×1920 or similar): convoy map, intercom dock with "Talk to" picker, SOS banner, trip history, join-with-code dialog
-- 30-second screen recording for the background-location declaration (script in `gateway/deploy/PLAY_STORE_CHECKLIST.md`)
+## Screenshots (2 to 8 required, take them from a real ride)
+Run `store/capture_screenshots.ps1` with a phone connected over USB. It walks you through these screens and saves each one into `store/screenshots/`:
+
+1. Cockpit map during a ride with two or more riders
+2. Convoy screen with the riders list
+3. Intercom with the "Talk to" picker open
+4. Stops list showing who reached a stop
+5. Trip report, Map tab with each rider's coloured route
+6. Trip report, Summary with the rider cards
+7. Group timeline
+8. Light theme on the cockpit (Account, Appearance, Light)
+
+Use real rides with real riders who agreed to be shown. Do not stage numbers.
+
+## After the listing is live
+1. Copy the Play Store link (https://play.google.com/store/apps/details?id=space.devmonks.coroute_app).
+2. On the server add `PLAY_STORE_URL=<that link>` to `/etc/coroute/gateway.env` and restart the gateway (`sudo systemctl restart coroute-gateway`).
+3. The website's download buttons and the app's "Get the update" button go through `/download`, which then opens the Play Store instead of the APK. Nothing in the app or the website needs to change.

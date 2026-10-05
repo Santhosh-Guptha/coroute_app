@@ -130,3 +130,17 @@ On `SIGTERM` the gateway flushes in-memory telemetry to Oracle before exiting; c
 * Voice is PCM16 @ 16 kHz: 32 KB/s per *active speaker*. A convoy of 10 where one person speaks = 32 KB/s in, 288 KB/s out — trivial for the VM; OCI Always Free includes 10 TB/month egress.
 * The Always Free ADB allows 20 GB. A rider document is ~1 KB; a convoy's full GPS history is never stored (only the latest position per rider) and trip trails are trimmed by retention, so storage stays flat in the tens of MB.
 * Always Free compute: either VM.Standard.E2.1.Micro (1 OCPU / 1 GB) or up to 4 OCPU / 24 GB of Ampere A1. The gateway is I/O-bound and comfortably serves hundreds of concurrent riders on the Micro shape; move to A1 for thousands.
+
+## Retiring old app builds (MIN_APP_BUILD)
+1. In the app, as admin: Feedback & analytics, App versions. It lists the builds riders used in the last 30 days and, for each build, how many riders would be locked out if it became the minimum.
+2. Builds before 65 do not report their number; they show as "Older than build 65".
+3. When a build shows "Safe to make this the minimum", set it on the server and restart:
+   ```
+   sudo sed -i "s/^MIN_APP_BUILD=.*/MIN_APP_BUILD=66/" /etc/coroute/gateway.env   # add the line if it is missing
+   sudo systemctl restart coroute-gateway
+   ```
+   Riders below the minimum see "Update required" with a download button.
+4. Keep `LATEST_APP_BUILD` equal to the build of the APK (or Play release) you published.
+
+## After the Play Store listing is live
+Add `PLAY_STORE_URL=https://play.google.com/store/apps/details?id=space.devmonks.coroute_app` to `/etc/coroute/gateway.env` and restart the gateway. `/download` (used by the website buttons and the app's update screen) then opens the Play Store instead of the APK.

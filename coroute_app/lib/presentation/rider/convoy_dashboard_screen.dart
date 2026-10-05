@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/telemetry_utils.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/convoy_model.dart';
@@ -1142,9 +1143,6 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
     return RouteStopsPanel(convoy: convoy);
   }
 
-  /// Choices for the group speed limit, in km/h (0 = off).
-  static const List<int> _speedLimitChoices = [0, 40, 60, 80, 100, 120];
-
   // --- TAB 3: SETTINGS VIEW ---
   Widget _buildSettingsTab(ConvoyModel convoy, bool isCreator, ConvoyService service) {
     return ListView(
@@ -1228,7 +1226,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  for (final v in _speedLimitChoices)
+                  for (final v in AppConstants.speedLimitChoices)
                     ChoiceChip(
                       label: Text(v == 0 ? 'Off' : '$v'),
                       selected: convoy.speedLimitKmh == v,

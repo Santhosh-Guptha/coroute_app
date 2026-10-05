@@ -47,6 +47,7 @@ class MetaService extends ChangeNotifier {
       final info = await PackageInfo.fromPlatform();
       currentVersion = info.version;
       currentBuild = int.tryParse(info.buildNumber) ?? 0;
+      ApiClient.appBuild = currentBuild;
     } catch (_) {
       // Leave unknown.
     }

@@ -5,7 +5,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/services/api_client.dart';
 
-/// Master admin: website/app feedback and first-party page-view counts.
+/// Master admin: website/app feedback, first-party page-view counts and the
+/// app builds riders use (to know when the minimum build can be raised).
 class AdminInsightsScreen extends StatefulWidget {
   const AdminInsightsScreen({super.key});
 
@@ -14,9 +15,10 @@ class AdminInsightsScreen extends StatefulWidget {
 }
 
 class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 2, vsync: this);
+  late final TabController _tabs = TabController(length: 3, vsync: this);
   List<Map<String, dynamic>> _feedback = [];
   List<Map<String, dynamic>> _views = [];
+  Map<String, dynamic> _builds = {};
   bool _loading = true;
   String? _error;
 
@@ -41,6 +43,8 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
     try {
       final fb = await api.get('/admin/feedback');
       final an = await api.get('/admin/analytics?days=30');
+      final ab = await api.get('/admin/app-builds?days=30');
+      _builds = ab is Map ? Map<String, dynamic>.from(ab) : {};
       _feedback = ((fb is Map ? fb['feedback'] : null) as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
       _views = ((an is Map ? an['pageviews'] : null) as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
     } on ApiException catch (e) {
@@ -63,14 +67,15 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
           indicatorColor: AppTheme.neonCyan,
           labelColor: AppTheme.neonCyan,
           unselectedLabelColor: AppTheme.textMuted,
-          tabs: [Tab(text: 'Feedback (${_feedback.length})'), const Tab(text: 'Page views, 30 days')],
+          isScrollable: true,
+          tabs: [Tab(text: 'Feedback (${_feedback.length})'), const Tab(text: 'Page views, 30 days'), const Tab(text: 'App versions')],
         ),
       ),
       body: _loading
           ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
           : _error != null
               ? Center(child: Text(_error!, style: TextStyle(color: AppTheme.laserRed)))
-              : TabBarView(controller: _tabs, children: [_feedbackList(), _viewsList()]),
+              : TabBarView(controller: _tabs, children: [_feedbackList(), _viewsList(), _buildsList()]),
     );
   }
 
@@ -175,5 +180,67 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
         Text('Counts only: no cookies, IP addresses or identifiers are stored.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
       ],
     );
+  }
+
+  /// Which app builds the riders of the last 30 days use, and how many riders
+  /// each possible minimum build would lock out.
+  Widget _buildsList() {
+    int n(String k) => (_builds[k] as num?)?.toInt() ?? 0;
+    final total = n('total'), older = n('older'), minBuild = n('minBuild'), latest = n('latestBuild'), onLatest = n('onLatest');
+    final builds = (_builds['builds'] as List? ?? const []).whereType<Map>().toList();
+    final lockout = {
+      for (final l in (_builds['lockout'] as List? ?? const []).whereType<Map>()) (l['build'] as num).toInt(): (l['wouldLockOut'] as num).toInt(),
+    };
+    String pct(int part) => total == 0 ? '0%' : '${(part * 100 / total).round()}%';
+    final line = TextStyle(color: AppTheme.textSecondary, fontSize: 13);
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      GlassCard(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('$total riders used the app in the last 30 days', style: TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 6),
+          Text('Minimum build $minBuild, latest $latest. ${pct(onLatest)} are on the latest build.', style: line),
+        ]),
+      ),
+      const SizedBox(height: 12),
+      for (final b in builds)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: GlassCard(
+            padding: const EdgeInsets.all(12),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Build ${b['build']}', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600)),
+                  Text(
+                    (lockout[(b['build'] as num).toInt()] ?? 0) == 0
+                        ? 'Safe to make this the minimum: nobody would be locked out.'
+                        : 'As the minimum it would lock out ${lockout[(b['build'] as num).toInt()]} riders.',
+                    style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                  ),
+                ]),
+              ),
+              Text('${b['users']} (${pct((b['users'] as num).toInt())})', style: TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold)),
+            ]),
+          ),
+        ),
+      if (older > 0)
+        GlassCard(
+          padding: const EdgeInsets.all(12),
+          child: Row(children: [
+            Expanded(
+              child: Text('Older than build 65 (these builds do not report their number)',
+                  style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600)),
+            ),
+            Text('$older (${pct(older)})', style: TextStyle(color: AppTheme.hyperAmber, fontWeight: FontWeight.bold)),
+          ]),
+        ),
+      const SizedBox(height: 12),
+      Text(
+        'To raise the minimum build, set MIN_APP_BUILD in /etc/coroute/gateway.env on the server and restart the gateway. '
+        'Riders below it see "Update required" and a download link.',
+        style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+      ),
+    ]);
   }
 }

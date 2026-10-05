@@ -211,10 +211,38 @@ class AuthService {
   /** A fresh session token for an already verified user (sliding refresh). */
   issueToken(user) { return signToken(user); }
 
-  async me(userId) {
+  async me(userId, { appBuild = 0, now = Date.now() } = {}) {
     const user = await this.repo.findUserById(userId);
     if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
+    // Which app build each rider uses, so the minimum build can be raised safely.
+    // Written only when it changes, or once in 12 hours to keep "active" current.
+    const build = Number.isInteger(appBuild) && appBuild > 0 && appBuild < 1000000 ? appBuild : 0;
+    const patch = {};
+    if (build && build !== user.appBuild) patch.appBuild = build;
+    if (!user.lastActiveAt || now - user.lastActiveAt > 12 * 3600000) patch.lastActiveAt = now;
+    if (Object.keys(patch).length) await this.repo.updateUser(user.key, patch).catch(() => null);
     return publicUser(user);
+  }
+
+  /**
+   * App builds of riders active in the last [days] days. Builds before 65 do
+   * not report themselves; they are counted as "older".
+   */
+  async appBuilds({ days = 30, now = Date.now(), minBuild = 0, latestBuild = 0 } = {}) {
+    const since = now - days * 86400000;
+    const active = (await this.repo.listUsers(5000)).filter((u) => (u.lastActiveAt || 0) >= since);
+    const counts = new Map();
+    let older = 0;
+    for (const u of active) {
+      if (u.appBuild) counts.set(u.appBuild, (counts.get(u.appBuild) || 0) + 1);
+      else older++;
+    }
+    const builds = [...counts.entries()].sort((a, b) => b[0] - a[0]).map(([build, users]) => ({ build, users }));
+    const total = active.length;
+    const onLatest = latestBuild ? builds.filter((b) => b.build >= latestBuild).reduce((s, b) => s + b.users, 0) : 0;
+    // Raising the minimum to B locks out everyone below B: report how many that would be for each reported build.
+    const lockout = builds.map((b) => ({ build: b.build, wouldLockOut: older + builds.filter((x) => x.build < b.build).reduce((s, x) => s + x.users, 0) }));
+    return { days, total, older, builds, onLatest, minBuild, latestBuild, lockout };
   }
 }
 

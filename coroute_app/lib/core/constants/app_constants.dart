@@ -26,6 +26,9 @@ class AppConstants {
 
   // Tile source URLs (OpenStreetMap — free, no API keys)
   static const String osmTileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  /// Choices for the group speed limit in km/h (0 = no limit).
+  static const List<int> speedLimitChoices = [0, 40, 60, 80, 100, 120];
+
   // Where a map opens when there is nothing to show yet: the centre of India.
   static const double defaultMapLat = 20.5937;
   static const double defaultMapLng = 78.9629;

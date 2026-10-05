@@ -95,7 +95,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.use(requireAuth, apiLimiter);
 
   r.get('/me', wrap(async (req, res) => {
-    const me = await auth.me(req.user.userId);
+    const me = await auth.me(req.user.userId, { appBuild: parseInt(req.get('X-CoRoute-Build') || '0', 10) });
     // Sliding session: a rider who opens the app at least once a month is never signed out.
     // The new token is built from the database user, so role changes take effect too.
     if (Date.now() - (req.tokenIssuedAt || 0) > config.tokenRefreshAfterHours * 3600000) {
@@ -280,6 +280,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
     const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
     res.json({ since, pageviews: await repo.listPageviews(since) });
+  }));
+  r.get('/admin/app-builds', requireAdmin, wrap(async (req, res) => {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+    res.json(await auth.appBuilds({ days, minBuild: config.minAppBuild, latestBuild: config.latestAppBuild }));
   }));
   r.get('/admin/feedback', requireAdmin, wrap(async (req, res) => res.json({ feedback: await repo.listFeedback() })));
   r.get('/admin/users', requireAdmin, wrap(async (req, res) => res.json({ users: await auth.listUsers() })));

@@ -46,6 +46,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   RouteModel? _route;
   bool _routing = false;
   bool _launching = false;
+  int _speedLimit = 0;
   int _routeRequest = 0;
 
   @override
@@ -167,6 +168,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         phone: auth.phone ?? '',
         start: _start,
         stops: List.of(_stops),
+        speedLimitKmh: _speedLimit,
       );
     } catch (e) {
       if (mounted) setState(() => _launching = false);
@@ -347,6 +349,30 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         else
           Text('Pick a destination to see the route. Stops are optional and can be added during the ride too.',
               style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+        const SizedBox(height: 16),
+        Row(children: [
+          Icon(Icons.speed_rounded, size: 18, color: AppTheme.textSecondary),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Group speed limit', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600))),
+          Text(_speedLimit > 0 ? '$_speedLimit km/h' : 'Off', style: TextStyle(color: AppTheme.speedWarning, fontWeight: FontWeight.bold)),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final v in AppConstants.speedLimitChoices)
+            ChoiceChip(
+              label: Text(v == 0 ? 'Off' : '$v'),
+              selected: _speedLimit == v,
+              onSelected: (_) => setState(() => _speedLimit = v),
+              selectedColor: AppTheme.speedWarning.withOpacity(0.2),
+              labelStyle: TextStyle(color: _speedLimit == v ? AppTheme.speedWarning : AppTheme.textSecondary, fontSize: 12),
+              backgroundColor: AppTheme.slateCard,
+              side: BorderSide(color: AppTheme.subtleBorder),
+              showCheckmark: false,
+            ),
+        ]),
+        const SizedBox(height: 4),
+        Text('Riding over it for 10 seconds is logged and the group is told once. You can change it during the ride.',
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
       ],
     );
   }
