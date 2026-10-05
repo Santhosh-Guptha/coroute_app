@@ -4,13 +4,15 @@ const rateLimit = require('express-rate-limit');
 const { requireAuth, requireAdmin, AuthError } = require('./auth');
 const { ConvoyError } = require('./convoys');
 const config = require('./config');
+const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
+const { toWire, toGpx, filterPoints, validateChunk, uploadPermission, TrackError } = require('./tracks');
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo }) {
   const r = express.Router();
 
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again later.' } });
@@ -97,6 +99,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt }) {
   r.post('/me/password', wrap(async (req, res) => res.json(await auth.changePassword(req.user.userId, req.body || {}))));
   r.delete('/me', wrap(async (req, res) => {
     await convoys.leaveAll(req.user.userId);
+    if (timeline) await timeline.idle(); // let a trip that just ended finish writing before we erase
     res.json(await auth.deleteAccount(req.user.userId));
   }));
 
@@ -130,11 +133,123 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt }) {
   r.post('/trips', wrap(async (req, res) => {
     const t = req.body || {};
     if (!t.tripId || typeof t.tripId !== 'string') return res.status(400).json({ error: 'tripId required' });
-    const trip = { ...t, userId: req.user.userId, savedAt: Date.now() };
+    // Trips built by the server from the real tracks are authoritative; a phone's estimate never replaces them.
+    const existing = await repo.getTrip(t.tripId);
+    if (existing && (existing.source === 'server' || existing.userId !== req.user.userId)) return res.status(200).json({ ok: true, kept: 'server' });
+    const trip = { ...t, source: 'device', userId: req.user.userId, savedAt: Date.now() };
     if (Array.isArray(trip.breadcrumbTrail) && trip.breadcrumbTrail.length > 20000) trip.breadcrumbTrail = trip.breadcrumbTrail.slice(-20000);
     await repo.saveTrip(trip);
     res.status(201).json({ ok: true });
   }));
+  // ---- group timeline, tracks and report (members only, limited to the viewer's membership window) ----
+  const viewWindow = async (req, res) => {
+    const meta = await repo.getConvoyMeta(String(req.params.groupId));
+    const win = visibleWindow(meta, req.user);
+    if (!win) { res.status(403).json({ error: 'Not a member of this convoy.' }); return null; }
+    return { meta, win };
+  };
+  const intQ = (v, def) => { const n = Number(v); return Number.isFinite(n) ? n : def; };
+
+  r.get('/convoys/:groupId/timeline', wrap(async (req, res) => {
+    const v = await viewWindow(req, res); if (!v) return;
+    const since = Math.max(0, intQ(req.query.since, 0));
+    const types = String(req.query.types || '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+    const onlyUser = req.query.userId ? String(req.query.userId) : null;
+    let events = (await repo.listEvents(v.meta.groupId, { since, userId: onlyUser || undefined, limit: 20000 }))
+      .filter((e) => eventVisible(e, v.win, req.user.userId));
+    if (types.length) events = events.filter((e) => types.includes(e.type));
+    res.json({ groupId: v.meta.groupId, events: events.map(publicEvent), serverTime: Date.now() });
+  }));
+
+  r.get('/convoys/:groupId/tracks', wrap(async (req, res) => {
+    const v = await viewWindow(req, res); if (!v) return;
+    const reqFrom = Math.max(0, intQ(req.query.from, 0));
+    const reqTo = intQ(req.query.to, Number.MAX_SAFE_INTEGER);
+    const simplifyM = Math.min(100, Math.max(0, intQ(req.query.simplify, 0)));
+    const onlyUser = req.query.userId ? String(req.query.userId) : undefined;
+    const byUser = await tracks.load(v.meta.groupId, { userId: onlyUser, from: reqFrom, to: reqTo });
+    const out = [];
+    for (const [uid, pts] of byUser) {
+      const own = uid === req.user.userId;
+      const clipped = own ? pts : pts.filter((p) => p.ts >= v.win.from && p.ts <= v.win.to);
+      if (!clipped.length) continue;
+      out.push({ userId: uid, name: v.meta.members?.[uid]?.name || '', points: toWire(filterPoints(clipped), simplifyM) });
+    }
+    res.json({ groupId: v.meta.groupId, tracks: out, format: ['ts', 'lat', 'lng', 'kmh'] });
+  }));
+
+  // Batch upload of recorded points (the app's normal path; also works after the trip ended, within the grace period).
+  const trackLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => req.user?.userId || req.ip });
+  r.post('/convoys/:groupId/tracks', trackLimiter, wrap(async (req, res) => {
+    const gid = String(req.params.groupId);
+    const room = convoys.rooms.get(gid);
+    const meta = room ? room.meta : await repo.getConvoyMeta(gid);
+    const perm = uploadPermission(meta, req.user.userId);
+    if (!perm.ok) return res.status(perm.tooLate ? 410 : 403).json({ error: perm.tooLate ? 'This trip is closed for uploads.' : 'Not a member of this convoy.' });
+    const chunks = Array.isArray(req.body?.chunks) ? req.body.chunks : [];
+    if (chunks.length === 0 || chunks.length > 20) return res.status(400).json({ error: 'Send 1 to 20 chunks.' });
+    const acked = [], rejected = [];
+    let added = false;
+    for (const c of chunks) {
+      try {
+        const chunk = validateChunk(c, { tripStartMs: perm.tripStartMs });
+        const r2 = await tracks.save(gid, req.user.userId, chunk);
+        acked.push(r2.seq);
+        if (!r2.duplicate) added = true;
+      } catch (e) {
+        if (!(e instanceof TrackError)) throw e;
+        rejected.push({ seq: c?.seq ?? null, error: e.message });
+      }
+    }
+    if (perm.ended && added && timeline) timeline.scheduleRebuild(gid);
+    res.json({ acked, rejected });
+  }));
+
+  r.get('/convoys/:groupId/report', wrap(async (req, res) => {
+    const v = await viewWindow(req, res); if (!v) return;
+    res.json({ groupId: v.meta.groupId, tripStatus: v.meta.tripStatus, report: v.meta.report || null });
+  }));
+
+  r.get('/convoys/:groupId/gpx', wrap(async (req, res) => {
+    const v = await viewWindow(req, res); if (!v) return;
+    const uid = String(req.query.userId || req.user.userId);
+    const byUser = await tracks.load(v.meta.groupId, { userId: uid });
+    let pts = filterPoints(byUser.get(uid) || []);
+    if (uid !== req.user.userId) pts = pts.filter((p) => p.ts >= v.win.from && p.ts <= v.win.to);
+    if (!pts.length) return res.status(404).json({ error: 'No recorded track for this rider.' });
+    const name = `${v.meta.name || 'CoRoute trip'} - ${v.meta.members?.[uid]?.name || 'rider'}`;
+    const safe = name.replace(/[^A-Za-z0-9 _-]/g, '').trim().replace(/\s+/g, '_').slice(0, 60) || 'coroute_trip';
+    res.type('application/gpx+xml').set('Content-Disposition', `attachment; filename="${safe}.gpx"`).send(toGpx({ name, tracks: [{ name, points: pts }] }));
+  }));
+
+  r.get('/trips/:tripId/report', wrap(async (req, res) => {
+    const trip = await repo.getTrip(String(req.params.tripId));
+    if (!trip || trip.userId !== req.user.userId) return res.status(404).json({ error: 'Trip not found.' });
+    if (!trip.groupId) return res.json({ trip, report: null, events: [] });
+    const meta = await repo.getConvoyMeta(trip.groupId);
+    const win = visibleWindow(meta, req.user);
+    if (!win) return res.json({ trip, report: null, events: [] });
+    const events = (await repo.listEvents(trip.groupId, { limit: 20000 })).filter((e) => eventVisible(e, win, req.user.userId)).map(publicEvent);
+    res.json({ trip, report: meta.report || null, events, members: Object.values(meta.members || {}).map((m) => ({ userId: m.userId, name: m.name, role: m.role })) });
+  }));
+
+  // ---- places and routes (free OSM services through the gateway cache) ----
+  const geoLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => req.user?.userId || req.ip, message: { error: 'Too many place lookups. Wait a moment.' } });
+  r.get('/geo/search', geoLimiter, wrap(async (req, res) => {
+    const lat = Number(req.query.lat), lng = Number(req.query.lng);
+    res.json({ results: await geo.search(req.query.q, { lat, lng, countryCodes: String(req.query.cc || '').toLowerCase() }) });
+  }));
+  r.get('/geo/reverse', geoLimiter, wrap(async (req, res) => {
+    const lat = Number(req.query.lat), lng = Number(req.query.lng);
+    if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) return res.status(400).json({ error: 'Invalid coordinates.' });
+    res.json({ name: await geo.reverse(lat, lng) });
+  }));
+  r.post('/geo/route', geoLimiter, wrap(async (req, res) => {
+    const route = await geo.route(req.body?.waypoints);
+    if (!route) return res.status(502).json({ error: 'Route is not available right now.' });
+    res.json(route);
+  }));
+
   r.delete('/trips/:tripId', wrap(async (req, res) => res.json({ removed: await repo.deleteTrip(req.params.tripId, req.user.userId) })));
 
   // Admin

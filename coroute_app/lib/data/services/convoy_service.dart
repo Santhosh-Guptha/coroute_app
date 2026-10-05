@@ -14,9 +14,14 @@ import '../models/rider_model.dart';
 import '../models/sos_alert_model.dart';
 import '../models/stop_point_model.dart';
 import '../models/trip_history_model.dart';
+import '../../domain/notify/status_text.dart';
+import '../../domain/tracking/geo_math.dart';
+import '../../domain/tracking/track_point.dart';
 import 'api_client.dart';
 import 'background_service.dart';
 import 'realtime_service.dart';
+import 'timeline_service.dart';
+import 'track_recorder.dart';
 import 'trip_storage_service.dart';
 
 /// Convoy state for the signed-in rider.
@@ -25,7 +30,7 @@ import 'trip_storage_service.dart';
 /// active convoy that is updated by push events over one WebSocket (no polling),
 /// and sends the rider's own telemetry with battery-aware throttling.
 class ConvoyService extends ChangeNotifier {
-  ConvoyService(this._api, this._rt, this._trips) {
+  ConvoyService(this._api, this._rt, this._trips, {this.recorder, this.timeline}) {
     _eventSub = _rt.events.listen(_onEvent);
     BackgroundService.addButtonListener(_onNotificationButton);
     _rt.addListener(_onConnectionChanged);
@@ -35,6 +40,8 @@ class ConvoyService extends ChangeNotifier {
   final ApiClient _api;
   final RealtimeService _rt;
   final TripStorageService _trips;
+  final TrackRecorder? recorder;
+  final TimelineService? timeline;
   final Battery _battery = Battery();
 
   StreamSubscription<Map<String, dynamic>>? _eventSub;
@@ -44,6 +51,8 @@ class ConvoyService extends ChangeNotifier {
   Timer? _idleHeartbeat;
   Timer? _batteryRefresh;
   Timer? _broadcastClear;
+  Timer? _statusTimer;
+  String _lastStatus = '';
 
   final Map<String, ConvoyModel> _allConvoys = {};
   String? _activeGroupId;
@@ -99,6 +108,9 @@ class ConvoyService extends ChangeNotifier {
 
   /// Call on sign-out.
   Future<void> endSession() async {
+    _stopStatus();
+    recorder?.stop().ignore();
+    timeline?.detach();
     BackgroundService.stop().ignore();
     stopRealGpsTracking();
     _rt.disconnect();
@@ -132,16 +144,81 @@ class ConvoyService extends ChangeNotifier {
     _rt.joinRoom(convoy.groupId);
     SharedPreferences.getInstance().then((p) => p.setString(AppConstants.keyActiveGroupId, convoy.groupId)).ignore();
     _initCompassTracking();
+    // Every member's route is recorded on their own phone and uploaded for the group timeline.
+    recorder?.start(convoy.groupId, minStop: Duration(seconds: convoy.stopThresholdSeconds));
+    timeline?.attach(convoy.groupId).ignore();
+    _startStatus();
     if (_myUserId != null) startRealGpsTracking(_myUserId!).ignore();
     // Foreground service: keeps GPS, intercom and the connection alive with the screen locked.
     BackgroundService.start(convoyName: convoy.name, riderCount: convoy.riders.length).ignore();
     notifyListeners();
   }
 
-  void _refreshNotification() {
-    final c = activeConvoy;
-    if (c == null) return;
-    BackgroundService.start(convoyName: c.name, riderCount: c.riders.length).ignore();
+  void _refreshNotification() => _pushStatus();
+
+  // ------------------------------------------------ live status notification
+  void _startStatus() {
+    _statusTimer?.cancel();
+    _lastStatus = '';
+    // Redraw at most every 10 s, and only when the visible text changed (no sound, same notification).
+    _statusTimer = Timer.periodic(const Duration(seconds: 10), (_) => _pushStatus());
+    Timer(const Duration(seconds: 3), _pushStatus);
+  }
+
+  void _stopStatus() {
+    _statusTimer?.cancel();
+    _statusTimer = null;
+    _lastStatus = '';
+  }
+
+  void _pushStatus() {
+    final convoy = activeConvoy;
+    final uid = _myUserId;
+    if (convoy == null || uid == null || _statusTimer == null) return;
+    final me = convoy.riders[uid];
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final route = convoy.routeBreadcrumbs
+        .where((p) => p['lat'] != null && p['lng'] != null)
+        .map((p) => (p['lat']!, p['lng']!))
+        .toList();
+    final meLat = me?.lat ?? 0.0, meLng = me?.lng ?? 0.0;
+    final hasMe = meLat != 0 || meLng != 0;
+    final myAlong = hasMe ? GeoMath.alongRoute(meLat, meLng, route) : null;
+    final others = <StatusMember>[];
+    for (final r in convoy.riders.values) {
+      if (r.userId == uid || (r.lat == 0 && r.lng == 0)) continue;
+      final along = myAlong != null ? GeoMath.alongRoute(r.lat, r.lng, route) : null;
+      Duration? stoppedFor;
+      final openStop = timeline?.openFor(r.userId, 'STOPPED');
+      if (openStop != null) {
+        stoppedFor = openStop.durationAt(now);
+      } else if (r.stoppedSince > 0 && r.speedKmh < 3 && now - r.stoppedSince >= convoy.stopThresholdSeconds * 1000) {
+        stoppedFor = Duration(milliseconds: now - r.stoppedSince);
+      }
+      others.add(StatusMember(
+        name: r.name,
+        distanceM: hasMe ? GeoMath.haversine(meLat, meLng, r.lat, r.lng) : 0.0,
+        ahead: (myAlong != null && along != null && (along.along - myAlong.along).abs() > 30) ? along.along > myAlong.along : null,
+        speedKmh: r.speedKmh,
+        sinceUpdate: Duration(milliseconds: (now - r.lastSeenEpochMs).clamp(0, 1 << 40).toInt()),
+        stoppedFor: stoppedFor,
+      ));
+    }
+    final stops = convoy.stopPoints.where((s) => !s.isVisited).toList()..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+    final next = stops.isNotEmpty ? stops.first : null;
+    final status = StatusText.build(
+      convoyName: convoy.name,
+      others: others,
+      destinationRemainingM: hasMe && (convoy.destinationLat != 0 || convoy.destinationLng != 0)
+          ? GeoMath.haversine(meLat, meLng, convoy.destinationLat, convoy.destinationLng)
+          : null,
+      nextStopName: next?.name,
+      nextStopRemainingM: hasMe && next != null ? GeoMath.haversine(meLat, meLng, next.lat, next.lng) : null,
+    );
+    final key = '${status.title}\n${status.text}';
+    if (key == _lastStatus) return;
+    _lastStatus = key;
+    BackgroundService.updateStatus(title: status.title, text: status.text).ignore();
   }
 
   /// Buttons on the persistent notification (usable from the lock screen).
@@ -160,7 +237,16 @@ class ConvoyService extends ChangeNotifier {
     }
   }
 
-  void _onConnectionChanged() => notifyListeners();
+  void _onConnectionChanged() {
+    if (_rt.isConnected) recorder?.uploadNow(); // send what was recorded in the dead zone
+    notifyListeners();
+  }
+
+  /// The server builds the exact trip report shortly after a trip ends; fetch it then.
+  void _syncTripsLater() {
+    final uid = _myUserId;
+    Timer(const Duration(seconds: 45), () => _trips.syncWithCloud(userId: uid).ignore());
+  }
 
   // --------------------------------------------------------- push events
   void _onEvent(Map<String, dynamic> e) {
@@ -278,6 +364,9 @@ class ConvoyService extends ChangeNotifier {
 
   void _dropActiveConvoyLocally() {
     final gid = _activeGroupId;
+    _stopStatus();
+    recorder?.stop().ignore();
+    timeline?.detach();
     BackgroundService.stop().ignore();
     stopRealGpsTracking();
     _compassSub?.cancel();
@@ -292,6 +381,9 @@ class ConvoyService extends ChangeNotifier {
     if (_myUserId != null && convoy.riders.containsKey(_myUserId)) {
       _trips.saveTrip(buildTripHistory(convoy, userId: _myUserId), userId: _myUserId).ignore();
     }
+    _stopStatus();
+    recorder?.stop().ignore();
+    _syncTripsLater();
     BackgroundService.stop().ignore();
     stopRealGpsTracking();
     _compassSub?.cancel();
@@ -322,6 +414,7 @@ class ConvoyService extends ChangeNotifier {
     final res = await _api.post('/convoys', {
       'name': name.trim(),
       'startPoint': startPoint,
+      if (pos != null) 'start': {'lat': pos.latitude, 'lng': pos.longitude, 'name': startPoint},
       'destination': destination,
       'destLat': destLat,
       'destLng': destLng,
@@ -384,6 +477,9 @@ class ConvoyService extends ChangeNotifier {
     if (convoy != null && convoy.riders.isNotEmpty) {
       _trips.saveTrip(buildTripHistory(convoy, userId: userId), userId: userId).ignore();
     }
+    _stopStatus();
+    recorder?.stop().ignore();
+    _syncTripsLater();
     BackgroundService.stop().ignore();
     stopRealGpsTracking();
     _compassSub?.cancel();
@@ -448,6 +544,8 @@ class ConvoyService extends ChangeNotifier {
     _idleHeartbeat?.cancel();
     _idleHeartbeat = Timer.periodic(AppConfig.telemetryIdleInterval, (_) {
       // While stopped the position stream is silent; a light heartbeat keeps "last seen" fresh.
+      // Parked: the GPS stream is quiet, so the heartbeat records the parked time (not in a tunnel while moving).
+      if (_gpsIdleProfile || _stationarySince != null) recorder?.onHeartbeat();
       final me = activeConvoy?.riders[_myUserId];
       if (me != null && DateTime.now().difference(_lastTelemetryPush) >= AppConfig.telemetryIdleInterval) {
         _pushTelemetry(me.copyWith(speedKmh: 0));
@@ -471,6 +569,13 @@ class ConvoyService extends ChangeNotifier {
     final current = convoy.riders[userId];
 
     final speedKmh = (position.speed.isFinite ? position.speed * 3.6 : 0.0).clamp(0.0, 300.0).toDouble();
+    recorder?.onFix(TrackPoint(
+      ts: position.timestamp.millisecondsSinceEpoch,
+      lat: position.latitude,
+      lng: position.longitude,
+      speedKmh: speedKmh,
+      accuracyM: position.accuracy.isFinite ? position.accuracy : 999,
+    ));
     final gpsHeading = position.heading.isFinite ? position.heading.clamp(0.0, 360.0).toDouble() : 0.0;
     final isMoving = speedKmh >= 3.0;
 
@@ -746,6 +851,7 @@ class ConvoyService extends ChangeNotifier {
     _gpsSub?.cancel();
     _idleHeartbeat?.cancel();
     _broadcastClear?.cancel();
+    _statusTimer?.cancel();
     super.dispose();
   }
 }

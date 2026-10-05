@@ -99,6 +99,8 @@ class ConvoyManager extends EventEmitter {
       stopThresholdSeconds: m.stopThresholdSeconds ?? 180,
       voiceGuidanceEnabled: m.voiceGuidanceEnabled ?? true,
       routeBreadcrumbs: m.routeBreadcrumbs || [],
+      start: m.start || null,
+      members: Object.values(m.members || {}).map((x) => ({ userId: x.userId, name: x.name, role: x.role, joinedAt: x.joinedAt, leftAt: x.leftAt || 0 })),
     };
   }
 
@@ -132,7 +134,8 @@ class ConvoyManager extends EventEmitter {
       joinCode,
       createdByUserId: user.userId,
       createdByUserName: user.name,
-      startLocationName: String(p.startPoint || p.startLocationName || '').slice(0, 120),
+      startLocationName: String(p.startPoint || p.startLocationName || p.start?.name || '').slice(0, 120),
+      start: sanitizePlace(p.start),
       destinationName: String(p.destination || p.destinationName || '').slice(0, 120),
       destinationLat: clampLat(p.destLat ?? p.destinationLat),
       destinationLng: clampLng(p.destLng ?? p.destinationLng),
@@ -155,6 +158,8 @@ class ConvoyManager extends EventEmitter {
     };
     this.rooms.set(groupId, room);
     this.emit('fleet');
+    const at = meta.start || (rider.lat || rider.lng ? { lat: rider.lat, lng: rider.lng, name: '' } : null);
+    this.emit('activity', groupId, { type: 'TRIP_STARTED', user, name, lat: at?.lat, lng: at?.lng, placeName: at?.name || meta.startLocationName || '' });
     return this.snapshot(room);
   }
 
@@ -170,7 +175,10 @@ class ConvoyManager extends EventEmitter {
     const existing = room.riders.get(user.userId);
     const rider = buildRider(user, { ...(existing || {}), ...riderProfile, role: existing?.role || 'PACK' }, now());
     room.riders.set(rider.userId, rider);
-    room.meta.members = { ...(room.meta.members || {}), [rider.userId]: memberRecord(user, rider, existing ? undefined : now()) };
+    const prev = room.meta.members?.[rider.userId];
+    const record = memberRecord(user, rider, existing ? (prev?.joinedAt || rider.joinedAt) : now());
+    record.firstJoinedAt = prev?.firstJoinedAt || prev?.joinedAt || record.joinedAt;
+    room.meta.members = { ...(room.meta.members || {}), [rider.userId]: record };
     await this.repo.upsertRider(room.groupId, rider);
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
@@ -246,6 +254,7 @@ class ConvoyManager extends EventEmitter {
     room.riders.set(userId, next);
     room.dirty.add(userId);
     this._schedulePersist(room);
+    if (patch.lat !== undefined && patch.lng !== undefined) this.emit('telemetry', room.groupId, next);
     if (emit) this._emit(room.groupId, 'RIDER_UPDATE', { rider: publicRider(next) });
     return next;
   }
@@ -348,6 +357,7 @@ class ConvoyManager extends EventEmitter {
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
     this._emit(groupId, 'STOPS', { stopPoints: room.meta.stopPoints });
+    this.emit('activity', groupId, { type: 'STOP_ADDED', user, stop });
     return stop;
   }
 
@@ -422,6 +432,13 @@ function memberRecord(user, rider, joinedAt) {
     userId: user.userId, name: user.name, role: rider.role || 'PACK', vehicleType: rider.vehicleType || '',
     vehicleNo: rider.vehicleNo || '', joinedAt: joinedAt || rider.joinedAt || Date.now(),
   };
+}
+
+function sanitizePlace(p) {
+  if (!p || typeof p !== 'object') return null;
+  const lat = Number(p.lat), lng = Number(p.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return null;
+  return { lat: clampLat(lat), lng: clampLng(lng), name: String(p.name || '').slice(0, 120) };
 }
 
 function stripKey(o) { const { key, ...rest } = o; return rest; }

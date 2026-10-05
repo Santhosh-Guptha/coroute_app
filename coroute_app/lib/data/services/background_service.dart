@@ -84,6 +84,20 @@ class BackgroundService {
     }
   }
 
+  /// Replaces the notification's title and text in place (no sound, no new
+  /// notification). The first line of [text] is what the collapsed
+  /// notification shows; the expanded one shows every line.
+  static Future<void> updateStatus({required String title, required String text}) async {
+    if (!_isAndroidOrIos) return;
+    try {
+      if (await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.updateService(notificationTitle: title, notificationText: text);
+      }
+    } catch (e) {
+      debugPrint('Foreground service update note: $e');
+    }
+  }
+
   static Future<void> stop() async {
     if (!_isAndroidOrIos) return;
     try {

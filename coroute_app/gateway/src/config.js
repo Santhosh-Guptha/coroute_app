@@ -58,6 +58,29 @@ const config = {
   voiceStreamIdleMs: int('VOICE_STREAM_IDLE_MS', 1500),
   voiceMaxStreamMs: int('VOICE_MAX_STREAM_MS', 60000),
 
+  // Group tracking and timeline (per-convoy values override these defaults)
+  trackMaxPoints: int('TRACK_MAX_POINTS', 120),
+  trackRetentionDays: int('TRACK_RETENTION_DAYS', 90),
+  stopRadiusM: int('STOP_RADIUS_M', 50),
+  stopExitM: int('STOP_EXIT_M', 60),
+  offRouteM: int('OFF_ROUTE_M', 300),
+  offlineAlertMinutes: int('OFFLINE_ALERT_MIN', 5),
+  stationaryAlertMinutes: int('STATIONARY_ALERT_MIN', 20),
+  reachRadiusM: int('REACH_RADIUS_M', 150),
+  timelineTickMs: int('TIMELINE_TICK_MS', 30000),
+  // Phones get this long to upload their last points before the trip report is built,
+  // and late uploads within the grace period rebuild it.
+  reportDelayMs: int('REPORT_DELAY_MS', isTest ? 0 : 20000),
+  reportRebuildMs: int('REPORT_REBUILD_MS', isTest ? 50 : 30000),
+  trackUploadGraceMinutes: int('TRACK_UPLOAD_GRACE_MIN', 30),
+
+  // Free OpenStreetMap services, proxied and cached by the gateway (empty = disabled).
+  geoSearchUrl: (process.env.GEO_SEARCH_URL ?? (isTest ? '' : 'https://nominatim.openstreetmap.org')).trim().replace(/\/+$/, ''),
+  geoRouteUrl: (process.env.GEO_ROUTE_URL ?? (isTest ? '' : 'https://router.project-osrm.org')).trim().replace(/\/+$/, ''),
+  geoContact: (process.env.GEO_CONTACT || process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
+  geoCacheDays: int('GEO_CACHE_DAYS', 30),
+  geoMinIntervalMs: int('GEO_MIN_INTERVAL_MS', 1100),
+
   // Website: where the "Download" button sends people. Play Store URL once the listing is live,
   // otherwise the GitHub release page. Changing these needs no rebuild of the site.
   playStoreUrl: (process.env.PLAY_STORE_URL || '').trim(),

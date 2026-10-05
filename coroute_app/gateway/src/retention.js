@@ -4,12 +4,17 @@
  *
  * Policy (what is KEPT forever vs. what is removed):
  *   KEPT    : user accounts, convoy records (name, members, dates, settings),
- *             trip records (name, members, dates, distance / speed statistics).
+ *             trip records (name, members, dates, distance / speed statistics),
+ *             the group timeline (who, what, when, how long, place name) and trip reports.
  *   REMOVED : per-rider GPS traces only —
  *             • convoy_riders documents of convoys ended > RETENTION_ENDED_CONVOY_DAYS
  *             • routeBreadcrumbs of those convoys
  *             • breadcrumbTrail inside trips older than RETENTION_ENDED_CONVOY_DAYS
+ *             • track_chunks (uploaded GPS points) older than TRACK_RETENTION_DAYS
+ *             • lat/lng on trip_events older than TRACK_RETENTION_DAYS (the entry, its
+ *               times, durations and place name are KEPT)
  *             • voice_log entries older than RETENTION_VOICE_LOG_DAYS (metadata only; audio is never stored)
+ *             • geo_cache entries older than GEO_CACHE_DAYS
  *   AUTO-END: active convoys with no activity for RETENTION_STALE_CONVOY_HOURS.
  *   KEEPALIVE: a tiny read keeps an Always-Free Autonomous DB from being auto-paused.
  */
@@ -41,7 +46,7 @@ class Retention {
   }
 
   async runOnce(nowMs = Date.now()) {
-    const stats = { autoEnded: 0, convoysStripped: 0, riderDocsRemoved: 0, tripsStripped: 0, voiceLogsRemoved: 0 };
+    const stats = { autoEnded: 0, convoysStripped: 0, riderDocsRemoved: 0, tripsStripped: 0, voiceLogsRemoved: 0, trackChunksRemoved: 0, eventsStripped: 0, geoCacheRemoved: 0 };
 
     // 1. End convoys nobody has touched for a long time (phones died, app uninstalled, ...).
     stats.autoEnded = await this.convoys.autoEndStaleConvoys(nowMs - config.retentionStaleConvoyHours * 3600000);
@@ -66,7 +71,21 @@ class Retention {
       stats.tripsStripped++;
     }
 
-    // 4. Voice session metadata is operational only.
+    // 4. Raw GPS points and timeline coordinates.
+    const trackCutoff = nowMs - config.trackRetentionDays * DAY;
+    stats.trackChunksRemoved = await this.repo.purgeOlderThan(COLLECTIONS.trackChunks, 'endTs', trackCutoff);
+    for (let round = 0; round < 20; round++) {
+      const rows = await this.soda.query(COLLECTIONS.events, { startedAt: { $lt: trackCutoff }, coordsStripped: { $exists: false } }, { limit: 500 });
+      if (!rows.length) break;
+      for (const { key, value } of rows) {
+        await this.soda.replace(COLLECTIONS.events, key, { ...value, lat: null, lng: null, coordsStripped: true });
+        stats.eventsStripped++;
+      }
+      if (rows.length < 500) break;
+    }
+    stats.geoCacheRemoved = await this.repo.purgeOlderThan(COLLECTIONS.geoCache, 'createdAt', nowMs - config.geoCacheDays * DAY);
+
+    // 5. Voice session metadata is operational only.
     stats.voiceLogsRemoved = await this.repo.purgeOlderThan(COLLECTIONS.voiceLog, 'startedAt', nowMs - config.retentionVoiceLogDays * DAY);
 
     this.log.info('[retention] done', JSON.stringify(stats));

@@ -168,6 +168,7 @@ class RealtimeService extends ChangeNotifier {
       const roomScoped = {
         'SNAPSHOT', 'RIDER_UPDATE', 'RIDER_LEFT', 'MESSAGE', 'ALERT', 'ALERT_RESOLVED', 'STOPS',
         'WAIT_REQUESTS', 'CONFIG', 'TRIP_STATUS', 'DISSOLVED', 'VOICE_BUSY',
+        'TIMELINE', 'TIMELINE_UPDATE', 'TIMELINE_BATCH', 'REPORT_READY',
       };
       if (roomScoped.contains(type) && _groupId == null) return;
       if (type == 'SNAPSHOT' && msg['convoy'] is Map && msg['convoy']['groupId'] != _groupId) return;

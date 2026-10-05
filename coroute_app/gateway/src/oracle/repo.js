@@ -12,6 +12,9 @@
  *   trips           finished journeys          indexed: userId, endTimeEpochMs
  *   voice_log       voice session metadata     indexed: startedAt  (NO audio is ever stored)
  *   broadcasts      admin fleet announcements  indexed: timestamp
+ *   track_chunks    uploaded GPS points        unique: (groupId,userId,seq); removed after TRACK_RETENTION_DAYS
+ *   trip_events     group timeline entries     unique: eventId; kept forever, coordinates removed after TRACK_RETENTION_DAYS
+ *   geo_cache       place search / route cache unique: k; removed after GEO_CACHE_DAYS
  */
 const C = {
   users: 'users',
@@ -24,6 +27,9 @@ const C = {
   broadcasts: 'broadcasts',
   pageviews: 'pageviews',
   feedback: 'feedback',
+  trackChunks: 'track_chunks',
+  events: 'trip_events',
+  geoCache: 'geo_cache',
 };
 
 const ACTIVE_STATUSES = ['PLANNING', 'STARTED', 'PAUSED'];
@@ -56,6 +62,14 @@ class Repo {
     await idx(C.broadcasts, 'broadcasts_ts_ix', [{ path: 'timestamp', datatype: 'number' }]);
     await idx(C.pageviews, 'pageviews_day_path_ux', ['day', 'path'], true);
     await idx(C.feedback, 'feedback_ts_ix', [{ path: 'createdAt', datatype: 'number' }]);
+    await idx(C.trackChunks, 'tracks_group_user_seq_ux', ['groupId', 'userId', { path: 'seq', datatype: 'number' }], true);
+    await idx(C.trackChunks, 'tracks_group_ts_ix', ['groupId', { path: 'startTs', datatype: 'number' }]);
+    await idx(C.trackChunks, 'tracks_end_ix', [{ path: 'endTs', datatype: 'number' }]);
+    await idx(C.events, 'events_id_ux', ['eventId'], true);
+    await idx(C.events, 'events_group_ts_ix', ['groupId', { path: 'startedAt', datatype: 'number' }]);
+    await idx(C.events, 'events_user_ix', ['userId']);
+    await idx(C.geoCache, 'geo_k_ux', ['k'], true);
+    await idx(C.geoCache, 'geo_created_ix', [{ path: 'createdAt', datatype: 'number' }]);
   }
 
   // ---------- users ----------
@@ -80,6 +94,8 @@ class Repo {
   async deleteUserCascade(user) {
     await this.soda.removeWhere(C.riders, { userId: user.userId });
     await this.soda.removeWhere(C.trips, { userId: user.userId });
+    await this.soda.removeWhere(C.trackChunks, { userId: user.userId });
+    await this.soda.removeWhere(C.events, { userId: user.userId });
     if (user.email) await this.soda.removeWhere(C.feedback, { email: user.email });
     await this.soda.removeWhere(C.users, { userId: user.userId });
   }
@@ -141,6 +157,8 @@ class Repo {
       this.soda.removeWhere(C.messages, { groupId }),
       this.soda.removeWhere(C.alerts, { groupId }),
       this.soda.removeWhere(C.voiceLog, { groupId }),
+      this.soda.removeWhere(C.trackChunks, { groupId }),
+      this.soda.removeWhere(C.events, { groupId }),
     ]);
     await this.soda.removeWhere(C.convoys, { groupId });
   }
@@ -205,6 +223,10 @@ class Repo {
     const key = await this.soda.upsertBy(C.trips, { tripId: trip.tripId }, trip);
     return key;
   }
+  async getTrip(tripId) {
+    const r = await this.soda.findOne(C.trips, { tripId });
+    return r ? r.value : null;
+  }
   async listTripsForUser(userId, limit = 100) {
     const rows = await this.soda.query(C.trips, { userId }, {
       orderBy: [{ path: 'endTimeEpochMs', datatype: 'number', order: 'desc' }],
@@ -244,6 +266,57 @@ class Repo {
   async listFeedback(limit = 200) {
     const rows = await this.soda.query(C.feedback, {}, { orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }], limit });
     return rows.map((r) => ({ ...r.value, key: r.key }));
+  }
+
+  // ---------- tracks ----------
+  async findTrackChunk(groupId, userId, seq) {
+    return this.soda.findOne(C.trackChunks, { groupId, userId, seq });
+  }
+  async insertTrackChunk(doc) { return this.soda.insert(C.trackChunks, doc); }
+  /** All chunks overlapping [from, to], oldest first, paged so long trips load completely. */
+  async listTrackChunks(groupId, { userId, from = 0, to = Number.MAX_SAFE_INTEGER } = {}) {
+    const filter = { groupId, startTs: { $lte: to }, endTs: { $gte: from } };
+    if (userId) filter.userId = userId;
+    const out = [];
+    for (let offset = 0; offset < 200000; offset += 1000) {
+      const rows = await this.soda.query(C.trackChunks, filter, { orderBy: [{ path: 'startTs', datatype: 'number', order: 'asc' }], limit: 1000, offset });
+      for (const r of rows) out.push(r.value);
+      if (rows.length < 1000) break;
+    }
+    return out;
+  }
+
+  // ---------- timeline ----------
+  async upsertEvent(ev) {
+    const doc = { ...ev };
+    delete doc.key;
+    return this.soda.upsertBy(C.events, { eventId: ev.eventId }, doc);
+  }
+  async removeEvent(eventId) { return this.soda.removeWhere(C.events, { eventId }); }
+  async listEvents(groupId, { since = 0, userId, limit = 2000 } = {}) {
+    const filter = { groupId };
+    if (since) filter.updatedAt = { $gt: since };
+    if (userId) filter.userId = userId;
+    const out = [];
+    for (let offset = 0; offset < limit; offset += 1000) {
+      const rows = await this.soda.query(C.events, filter, { orderBy: [{ path: 'startedAt', datatype: 'number', order: 'asc' }], limit: Math.min(1000, limit - offset), offset });
+      for (const r of rows) out.push(r.value);
+      if (rows.length < 1000) break;
+    }
+    return out;
+  }
+  async listOpenEvents(groupId) {
+    const rows = await this.soda.query(C.events, { groupId, open: true }, { limit: 500 });
+    return rows.map((r) => r.value);
+  }
+
+  // ---------- geo cache ----------
+  async geoCacheGet(k) {
+    const r = await this.soda.findOne(C.geoCache, { k });
+    return r ? r.value : null;
+  }
+  async geoCachePut(k, value) {
+    return this.soda.upsertBy(C.geoCache, { k }, { k, value, createdAt: Date.now() });
   }
 
   // ---------- housekeeping ----------

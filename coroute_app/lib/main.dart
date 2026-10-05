@@ -12,7 +12,11 @@ import 'data/services/background_service.dart';
 import 'data/services/convoy_service.dart';
 import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
+import 'data/local/sqflite_track_queue.dart';
 import 'data/services/realtime_service.dart';
+import 'data/services/timeline_service.dart';
+import 'data/services/track_recorder.dart';
+import 'data/services/track_uploader.dart';
 import 'data/services/trip_storage_service.dart';
 import 'presentation/auth/access_gate_screen.dart';
 import 'presentation/splash/splash_screen.dart';
@@ -46,8 +50,19 @@ class CoRouteApp extends StatelessWidget {
         ChangeNotifierProvider(create: (ctx) => AuthService(ctx.read<ApiClient>())),
         ChangeNotifierProvider(create: (ctx) => MetaService(ctx.read<ApiClient>())..load()),
         ChangeNotifierProvider(create: (ctx) => TripStorageService(ctx.read<ApiClient>())),
+        ChangeNotifierProvider(create: (ctx) => TimelineService(ctx.read<ApiClient>(), ctx.read<RealtimeService>())),
+        ChangeNotifierProvider(create: (ctx) {
+          final queue = SqfliteTrackQueue();
+          return TrackRecorder(queue, TrackUploader(ctx.read<ApiClient>(), queue));
+        }),
         ChangeNotifierProvider(
-          create: (ctx) => ConvoyService(ctx.read<ApiClient>(), ctx.read<RealtimeService>(), ctx.read<TripStorageService>()),
+          create: (ctx) => ConvoyService(
+            ctx.read<ApiClient>(),
+            ctx.read<RealtimeService>(),
+            ctx.read<TripStorageService>(),
+            recorder: ctx.read<TrackRecorder>(),
+            timeline: ctx.read<TimelineService>(),
+          ),
         ),
         ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>())),
       ],

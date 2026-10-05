@@ -24,6 +24,8 @@ const crypto = require('crypto');
 const config = require('./config');
 const { verifyToken, ROLE_ADMIN } = require('./auth');
 const { ConvoyError } = require('./convoys');
+const { validateChunk, TrackError, uploadPermission } = require('./tracks');
+const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 
 const VOICE_START = 0x01, VOICE_FRAME = 0x02, VOICE_END = 0x03;
 
@@ -49,8 +51,8 @@ class Hub {
   /**
    * @param {{server: import('http').Server, convoys: import('./convoys').ConvoyManager, repo: any, logger?: any}} deps
    */
-  constructor({ server, convoys, repo, logger = console, path = '/ws' }) {
-    this.convoys = convoys; this.repo = repo; this.log = logger;
+  constructor({ server, convoys, repo, tracks = null, timeline = null, logger = console, path = '/ws' }) {
+    this.convoys = convoys; this.repo = repo; this.tracks = tracks; this.timeline = timeline; this.log = logger;
     this.rooms = new Map(); // groupId -> Set<ws>
     this.admins = new Set();
     this.voice = new Map(); // groupId -> { group: stream|null, private: Map<from, stream> }
@@ -131,7 +133,7 @@ class Hub {
     ws.user = { userId: claims.sub, name: claims.name, role: claims.role, email: claims.email };
     ws.isAlive = true;
     ws.groupId = null;
-    ws.rate = { telemetry: 0, chat: 0, windowStart: Date.now() };
+    ws.rate = { telemetry: 0, chat: 0, track: 0, windowStart: Date.now() };
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('message', (data, isBinary) => {
       if (isBinary) this._onVoice(ws, data);
@@ -143,14 +145,14 @@ class Hub {
   }
 
   _handleError(ws, e) {
-    if (e instanceof ConvoyError) return this.sendError(ws, e.status, e.message);
+    if (e instanceof ConvoyError || e instanceof TrackError) return this.sendError(ws, e.status, e.message);
     this.log.warn('[ws] error', e.message);
     this.sendError(ws, 500, 'Internal error');
   }
 
   _allow(ws, bucket, limitPerSec) {
     const t = Date.now();
-    if (t - ws.rate.windowStart >= 1000) { ws.rate.windowStart = t; ws.rate.telemetry = 0; ws.rate.chat = 0; }
+    if (t - ws.rate.windowStart >= 1000) { ws.rate.windowStart = t; ws.rate.telemetry = 0; ws.rate.chat = 0; ws.rate.track = 0; }
     return ++ws.rate[bucket] <= limitPerSec;
   }
 
@@ -192,7 +194,11 @@ class Hub {
         const room = await this.convoys.getRoom(gid);
         const patch = { statusReason: String(msg.statusReason ?? '').slice(0, 24), statusMessage: String(msg.statusMessage ?? '').slice(0, 140) };
         patch.stoppedSince = patch.statusReason ? (msg.stoppedSince || Date.now()) : 0;
-        this.convoys.patchRider(room, u.userId, patch);
+        const prevReason = room.riders.get(u.userId)?.statusReason || '';
+        const next = this.convoys.patchRider(room, u.userId, patch);
+        if (patch.statusReason !== prevReason) {
+          this.convoys.emit('activity', gid, { type: 'STATUS', user: u, reason: patch.statusReason, message: patch.statusMessage, lat: next.lat, lng: next.lng });
+        }
         return;
       }
       case 'CORIDER': {
@@ -200,7 +206,9 @@ class Hub {
         const room = await this.convoys.getRoom(gid);
         const driver = String(msg.ridingWithUserId || '');
         if (driver && !room.riders.has(driver)) throw new ConvoyError('Driver is not in this convoy.');
+        const was = room.riders.get(u.userId)?.ridingWithUserId || '';
         this.convoys.patchRider(room, u.userId, { isCoRiding: !!driver, ridingWithUserId: driver });
+        if (was !== driver) this.convoys.emit('activity', gid, { type: 'CORIDE', user: u, withUserId: driver });
         return;
       }
       case 'CHAT': {
@@ -224,6 +232,30 @@ class Hub {
         }
         await this.convoys.setTripStatus(gid, String(msg.status || ''));
         return;
+      }
+
+      case 'TRACK': {
+        // GPS points recorded on the phone (also the backlog after a dead zone).
+        const gid = this._requireRoom(ws);
+        if (!this.tracks) throw new ConvoyError('Track upload is not available.', 503);
+        if (!this._allow(ws, 'track', 3)) throw new ConvoyError('Slow down.', 429);
+        const room = this.convoys.rooms.get(gid);
+        const meta = room ? room.meta : await this.repo.getConvoyMeta(gid);
+        const perm = uploadPermission(meta, u.userId);
+        if (!perm.ok) throw new ConvoyError('Not a member of this convoy.', 403);
+        const chunk = validateChunk(msg, { tripStartMs: perm.tripStartMs });
+        const r = await this.tracks.save(gid, u.userId, chunk);
+        if (perm.ended && !r.duplicate && this.timeline) this.timeline.scheduleRebuild(gid);
+        return this.send(ws, { type: 'TRACK_ACK', seq: r.seq, duplicate: r.duplicate, ts: Date.now() });
+      }
+      case 'TIMELINE_SINCE': {
+        const gid = this._requireRoom(ws);
+        const meta = await this.repo.getConvoyMeta(gid);
+        const win = visibleWindow(meta, u);
+        if (!win) throw new ConvoyError('Not a member of this convoy.', 403);
+        const since = Math.max(0, Number(msg.since) || 0);
+        const events = (await this.repo.listEvents(gid, { since })).filter((e) => eventVisible(e, win, u.userId)).map(publicEvent);
+        return this.send(ws, { type: 'TIMELINE_BATCH', events, since, ts: Date.now() });
       }
 
       case 'ADMIN_SUBSCRIBE': {
