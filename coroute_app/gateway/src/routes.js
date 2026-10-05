@@ -226,6 +226,18 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     res.json({ acked, rejected });
   }));
 
+  // Everything the trip report screen needs for one convoy, for any viewer allowed to see it (members within their window, admins).
+  r.get('/convoys/:groupId/summary', wrap(async (req, res) => {
+    const v = await viewWindow(req, res); if (!v) return;
+    const events = (await repo.listEvents(v.meta.groupId, { limit: 20000 })).filter((e) => eventVisible(e, v.win, req.user.userId)).map(publicEvent);
+    res.json({
+      groupId: v.meta.groupId, name: v.meta.name, tripStatus: v.meta.tripStatus,
+      startedAt: v.meta.createdAtEpochMs || 0, endedAt: v.meta.endedAtEpochMs || 0,
+      startName: v.meta.start?.name || v.meta.startLocationName || '', destinationName: v.meta.destinationName || '',
+      report: v.meta.report || null, events, plan: publicPlan(v.meta),
+      members: Object.values(v.meta.members || {}).map((m) => ({ userId: m.userId, name: m.name, role: m.role })),
+    });
+  }));
   r.get('/convoys/:groupId/report', wrap(async (req, res) => {
     const v = await viewWindow(req, res); if (!v) return;
     res.json({ groupId: v.meta.groupId, tripStatus: v.meta.tripStatus, report: v.meta.report || null });
@@ -284,6 +296,46 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.get('/admin/app-builds', requireAdmin, wrap(async (req, res) => {
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
     res.json(await auth.appBuilds({ days, minBuild: config.minAppBuild, latestBuild: config.latestAppBuild }));
+  }));
+  // Finished rides across all riders, with each report's headline numbers (no coordinates).
+  const convoySummary = (m) => ({
+    groupId: m.groupId, name: m.name, createdByUserName: m.createdByUserName || '',
+    startedAt: m.createdAtEpochMs || 0, endedAt: m.endedAtEpochMs || 0,
+    startName: m.start?.name || m.startLocationName || '', destinationName: m.destinationName || '',
+    members: Object.keys(m.members || {}).length,
+    hasReport: !!m.report,
+    distanceM: m.report?.group?.distanceM || 0,
+    durationMs: m.report?.group?.durationMs || Math.max(0, (m.endedAtEpochMs || 0) - (m.createdAtEpochMs || 0)),
+    arrived: m.report?.group?.arrived || 0,
+    sos: m.report?.group?.sos || 0,
+    plannedStops: m.report?.group?.plannedStops || 0,
+    visitedStops: m.report?.group?.visitedStops || 0,
+  });
+  r.get('/admin/convoys/history', requireAdmin, wrap(async (req, res) => {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    res.json({ convoys: (await repo.listEndedConvoyMeta(limit)).map(convoySummary) });
+  }));
+  r.get('/admin/stats', requireAdmin, wrap(async (req, res) => {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 3650);
+    const since = Date.now() - days * 86400000;
+    const ended = (await repo.listEndedConvoyMeta(5000)).map(convoySummary);
+    const recent = ended.filter((c) => c.endedAt >= since);
+    const users = await repo.listUsers(5000);
+    const sum = (list, k) => list.reduce((s, c) => s + (c[k] || 0), 0);
+    res.json({
+      days,
+      riders: users.length,
+      activeRiders: users.filter((u) => (u.lastActiveAt || 0) >= since).length,
+      newRiders: users.filter((u) => (u.createdAt || 0) >= since).length,
+      liveConvoys: convoys.rooms.size,
+      rides: { all: ended.length, recent: recent.length },
+      // Group distance is the longest rider's distance in each ride.
+      distanceM: { all: sum(ended, 'distanceM'), recent: sum(recent, 'distanceM') },
+      rideMs: { all: sum(ended, 'durationMs'), recent: sum(recent, 'durationMs') },
+      riderTrips: await repo.countTrips(),
+      avgGroupSize: ended.length ? +(sum(ended, 'members') / ended.length).toFixed(1) : 0,
+      sos: { all: sum(ended, 'sos'), recent: sum(recent, 'sos') },
+    });
   }));
   r.get('/admin/feedback', requireAdmin, wrap(async (req, res) => res.json({ feedback: await repo.listFeedback() })));
   r.get('/admin/users', requireAdmin, wrap(async (req, res) => res.json({ users: await auth.listUsers() })));

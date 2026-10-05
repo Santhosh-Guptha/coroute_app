@@ -11,6 +11,7 @@ import '../../data/services/convoy_service.dart';
 import '../auth/access_gate_screen.dart';
 import 'admin_convoy_inspector.dart';
 import 'admin_insights_screen.dart';
+import 'admin_ride_history_screen.dart';
 import 'admin_users_screen.dart';
 import '../../core/theme/map_tiles.dart';
 
@@ -152,6 +153,11 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             onPressed: () => _showBroadcastDialog(context, convoyService),
           ),
           IconButton(
+            tooltip: 'Ride history',
+            icon: Icon(Icons.history_rounded, color: AppTheme.emeraldSafe),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRideHistoryScreen())),
+          ),
+          IconButton(
             tooltip: 'Feedback & analytics',
             icon: Icon(Icons.insights_rounded, color: AppTheme.neonCyan),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminInsightsScreen())),
@@ -209,6 +215,26 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                   const DevMonksBadge(isCompact: true),
                 ],
               ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // The live radar below is empty when nobody is riding; finished rides live here.
+            GlassCard(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRideHistoryScreen())),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(children: [
+                Icon(Icons.history_rounded, color: AppTheme.emeraldSafe),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Ride history and fleet totals', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text('Every finished ride with its report, map of each rider and timeline.',
+                        style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                  ]),
+                ),
+                Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
+              ]),
             ),
 
             const SizedBox(height: 10),
@@ -395,7 +421,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                 child: Padding(
                   padding: EdgeInsets.all(24),
                   child: Text(
-                    'No active convoys running currently.',
+                    'No convoys on the road right now. Finished rides are in Ride history.',
                     style: TextStyle(color: AppTheme.textMuted),
                   ),
                 ),

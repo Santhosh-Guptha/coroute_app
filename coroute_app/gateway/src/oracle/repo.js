@@ -151,6 +151,17 @@ class Repo {
     });
     return rows.map((r) => ({ ...r.value, key: r.key }));
   }
+  /** Finished convoys, newest first (admin history). */
+  async listEndedConvoyMeta(limit = 200) {
+    const rows = await this.soda.query(C.convoys, { tripStatus: 'ENDED' }, {
+      orderBy: [{ path: 'updatedAt', datatype: 'number', order: 'desc' }],
+      limit,
+    });
+    return rows.map((r) => ({ ...r.value, key: r.key }));
+  }
+  async countTrips(limit = 100000) {
+    return (await this.soda.query(C.trips, {}, { limit })).length;
+  }
   async deleteConvoyCascade(groupId) {
     await Promise.all([
       this.soda.removeWhere(C.riders, { groupId }),

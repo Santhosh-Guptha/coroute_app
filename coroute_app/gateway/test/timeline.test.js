@@ -337,6 +337,20 @@ test('group timeline: every member tracked, isolated per group, exact report', a
   assert.ok(tr.json.events.length > 10);
   assert.equal((await api('GET', `/trips/${ta.tripId}/report`, null, B.token)).status, 404);
   assert.ok(tr.json.plan, 'the report carries the planned start, stops and destination for the map');
+
+  // Admin: finished rides across all riders, fleet totals, and the full report of any convoy.
+  const ADM = await register('Admin', 'admin@coroute.test');
+  const hist = await api('GET', '/admin/convoys/history', null, ADM.token);
+  assert.equal(hist.status, 200);
+  const row = hist.json.convoys.find((c) => c.groupId === gid);
+  assert.ok(row && row.hasReport && row.members >= 3 && row.distanceM > 30000, JSON.stringify(row));
+  assert.equal((await api('GET', '/admin/convoys/history', null, A.token)).status, 403, 'riders cannot list all rides');
+  const stats = (await api('GET', '/admin/stats?days=30', null, ADM.token)).json;
+  assert.ok(stats.rides.all >= 1 && stats.riderTrips >= 1 && stats.riders >= 5 && stats.distanceM.all > 30000, JSON.stringify(stats));
+  const sum = await api('GET', `/convoys/${gid}/summary`, null, ADM.token);
+  assert.equal(sum.status, 200);
+  assert.ok(sum.json.report && sum.json.events.length > 10 && sum.json.plan && sum.json.members.length >= 3);
+  assert.equal((await api('GET', `/convoys/${gid}/summary`, null, D.token)).status, 403, 'non-members cannot open it');
   assert.ok(Array.isArray(tr.json.plan.stops));
 
   // Replay data and GPX.

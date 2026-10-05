@@ -23,7 +23,11 @@ import 'trip_route_map.dart';
 /// group timeline and the replay. Built by the server from the recorded routes.
 class TripReportScreen extends StatefulWidget {
   final TripHistoryModel trip;
-  const TripReportScreen({super.key, required this.trip});
+
+  /// Opened by an administrator from Ride history: the whole group's report,
+  /// without the personal "your ride" part.
+  final bool adminView;
+  const TripReportScreen({super.key, required this.trip, this.adminView = false});
 
   @override
   State<TripReportScreen> createState() => _TripReportScreenState();
@@ -52,7 +56,10 @@ class _TripReportScreenState extends State<TripReportScreen> {
     });
     final api = context.read<ApiClient>();
     try {
-      final res = await api.get('/trips/${Uri.encodeComponent(widget.trip.tripId)}/report', timeout: const Duration(seconds: 20));
+      final path = widget.adminView || widget.trip.tripId.isEmpty
+          ? '/convoys/${Uri.encodeComponent(widget.trip.groupId)}/summary'
+          : '/trips/${Uri.encodeComponent(widget.trip.tripId)}/report';
+      final res = await api.get(path, timeout: const Duration(seconds: 20));
       if (!mounted) return;
       final m = res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
       final report = m['report'] is Map ? TripReportModel.fromJson(Map<String, dynamic>.from(m['report'] as Map)) : null;
@@ -154,6 +161,7 @@ class _TripReportScreenState extends State<TripReportScreen> {
           title: Text(widget.trip.tripName, overflow: TextOverflow.ellipsis),
           actions: [
             IconButton(tooltip: 'Share summary', icon: const Icon(Icons.ios_share_rounded), onPressed: _report == null ? null : _shareSummary),
+            if (!widget.adminView)
             IconButton(
               tooltip: 'Share my route (GPX)',
               icon: _sharing
@@ -300,6 +308,7 @@ class _TripReportScreenState extends State<TripReportScreen> {
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w600)),
           ),
         const SizedBox(height: 14),
+        if (!widget.adminView) ...[
         Text('YOUR RIDE', style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
         const SizedBox(height: 8),
         LayoutBuilder(builder: (context, c) {
@@ -326,6 +335,7 @@ class _TripReportScreenState extends State<TripReportScreen> {
             child: Text('Your phone did not upload a route for this trip, so distance and riding time are estimates.',
                 style: TextStyle(color: AppTheme.hyperAmber, fontSize: 12)),
           ),
+        ],
         if (r != null) ...[
           const SizedBox(height: 22),
           Text('THE GROUP: ${r.memberCount} RIDERS, ${r.arrived} ARRIVED${r.plannedStops > 0 ? ', ${r.visitedStops} OF ${r.plannedStops} STOPS' : ''}${r.sos > 0 ? ', ${r.sos} SOS' : ''}',
