@@ -41,6 +41,7 @@ const config = {
   // Auth
   jwtSecret: isTest ? 'test-secret-test-secret-test-secret-1234' : required('JWT_SECRET'),
   jwtTtlDays: int('JWT_TTL_DAYS', 30),
+  tokenRefreshAfterHours: int('TOKEN_REFRESH_AFTER_HOURS', 24),
   googleClientIds: list('GOOGLE_CLIENT_IDS'),
   // Seeds the first admin account(s) only; roles are then managed in the database.
   adminEmails: list('BOOTSTRAP_ADMIN_EMAILS', list('ADMIN_EMAILS')),

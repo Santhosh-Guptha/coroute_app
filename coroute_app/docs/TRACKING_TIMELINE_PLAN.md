@@ -15,7 +15,32 @@ Implementation plan, version 1 (5 October 2026). Target: app 3.1.0+61, gateway 3
 - **Upload path:** phones upload points with `POST /api/convoys/:id/tracks` (batches of up to 20 chunks), not the WebSocket. This also works after the trip ended (30-minute grace), and a late upload rebuilds the report automatically. WS `TRACK` exists as well.
 - **Stops:** live stops are detected by the gateway from telemetry (the 30 s parked heartbeat included), so no separate `STOP_EVENT` command is needed. The phone runs the same rule locally for its own display.
 
-**Next:** Phase 2 (timeline screen, replay, report screen). The live status notification from Phase 4 is already wired using the plugin; the alert channels come in Phase 4.
+**Phase 1 deployed** (commit `41751ea`, app 3.1.0+61, gateway 3.1.0).
+
+**Phase 2 built (written to the project, awaiting analyze/test):**
+
+- **Live group timeline** (convoy screen, timeline icon): newest first, filters by type (Stops, Alerts, Riding, Group) and by rider. Tap an entry to open it on the map.
+- **Replay:** time slider and play at 30x, 120x or 600x. Every rider's marker shows where they were at that moment, with a 10-minute tail. No position is drawn across a signal gap longer than 10 minutes. Opened from an entry, it starts at that moment with a pin and that rider highlighted.
+- **Trip report** (history, for trips built by the server): your ride tiles, a member comparison table (distance, riding, stopped, stops, average, top speed, time behind the group, no signal, arrived), the full timeline, the replay, a GPX share of your own route, and a text summary share.
+- Stable colours per rider everywhere. Wide and landscape layouts adapt.
+
+**Sign-out fix (reported 2026-10-05):** riders were being signed out, or thrown out of their convoy, during bad network.
+
+- **Causes:**
+  - The app treated any 401 as "session ended", including Wi-Fi login pages and proxies.
+  - It treated a 404 from `/me` as a deleted account.
+  - Any 403/404 socket error dropped the convoy, including a 1:1 call to a rider who is offline.
+  - A failed keystore read on start counted as signed out.
+  - Sessions expired after 30 days with no refresh.
+- **Fixes:**
+  - The gateway now sends machine-readable codes (`SESSION_INVALID`, `ACCOUNT_GONE`, `NOT_MEMBER`, `CONVOY_GONE`), and the app acts only on those.
+  - Non-JSON responses are never treated as session decisions.
+  - A convoy drop is double-checked with `/convoys/active` before leaving.
+  - Keystore reads and writes are retried.
+  - Sliding session: `/me` returns a fresh token (`X-CoRoute-Token`) once a day, built from the database user, so active riders are never signed out. The realtime link uses the refreshed token, and a refused socket (4401) triggers a check instead of a sign-out.
+  - Tests: gateway `session.test.js`, app `coroute_unit_test.dart` ("Bad networks never sign anyone out").
+
+**Next:** Phase 3 (map picker, trip planner, multi-stop route), then Phase 4 (alert channels).
 
 ## 0. Goals and decisions
 

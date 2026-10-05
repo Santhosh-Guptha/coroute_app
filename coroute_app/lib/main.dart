@@ -46,8 +46,18 @@ class CoRouteApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ApiClient()),
-        ChangeNotifierProvider(create: (_) => RealtimeService()),
-        ChangeNotifierProvider(create: (ctx) => AuthService(ctx.read<ApiClient>())),
+        ChangeNotifierProvider(create: (ctx) {
+          final api = ctx.read<ApiClient>();
+          final rt = RealtimeService();
+          // A refreshed session token is used for the next reconnect.
+          api.addListener(() => rt.updateToken(api.token));
+          return rt;
+        }),
+        ChangeNotifierProvider(create: (ctx) {
+          final auth = AuthService(ctx.read<ApiClient>());
+          ctx.read<RealtimeService>().onAuthRejected = auth.revalidate;
+          return auth;
+        }),
         ChangeNotifierProvider(create: (ctx) => MetaService(ctx.read<ApiClient>())..load()),
         ChangeNotifierProvider(create: (ctx) => TripStorageService(ctx.read<ApiClient>())),
         ChangeNotifierProvider(create: (ctx) => TimelineService(ctx.read<ApiClient>(), ctx.read<RealtimeService>())),

@@ -214,7 +214,7 @@ void main() {
         }
         if (path.endsWith('/me')) {
           if (request.headers['Authorization'] != 'Bearer jwt-token') {
-            return http.Response(jsonEncode({'error': 'Unauthorized'}), 401);
+            return http.Response(jsonEncode({'error': 'Your session has ended.', 'code': 'SESSION_INVALID'}), 401);
           }
           return http.Response(jsonEncode({'userId': 'usr_ghostrider', 'name': 'GhostRider', 'email': 'ghost@coroute.test', 'role': 'RIDER'}), 200);
         }
@@ -285,6 +285,41 @@ void main() {
       await api.setToken('stale-token');
       expect(() => api.get('/me'), throwsA(isA<ApiException>()));
       await Future.delayed(const Duration(milliseconds: 50));
+      expect(api.hasToken, false);
+    });
+
+    test('Bad networks never sign anyone out; only the gateway saying so does', () async {
+      var mode = 'portal';
+      final client = MockClient((request) async {
+        switch (mode) {
+          case 'portal': // a Wi-Fi login page or carrier proxy answering in place of our server
+            return http.Response('<html><body>Please log in to the hotspot</body></html>', 401, headers: {'content-type': 'text/html'});
+          case 'outage':
+            return http.Response('<html>502 Bad Gateway</html>', 502);
+          case 'plain401': // a 401 without the gateway's session code (for example a wrong password)
+            return http.Response(jsonEncode({'error': 'Invalid credentials.'}), 401);
+          case 'refresh':
+            return http.Response(jsonEncode({'userId': 'u'}), 200, headers: {'x-coroute-token': 'fresh-token'});
+          default:
+            return http.Response(jsonEncode({'error': 'Your session has ended.', 'code': 'SESSION_INVALID'}), 401);
+        }
+      });
+      final api = ApiClient(httpClient: client, storage: const FlutterSecureStorage());
+      await api.setToken('good-token');
+      for (final m in ['portal', 'outage', 'plain401']) {
+        mode = m;
+        await expectLater(api.get('/me'), throwsA(isA<ApiException>()));
+        expect(api.token, 'good-token', reason: m);
+      }
+      mode = 'refresh';
+      await api.get('/me');
+      expect(api.token, 'fresh-token'); // sliding session
+      mode = 'ended';
+      try {
+        await api.get('/me');
+      } on ApiException catch (e) {
+        expect(e.endsSession, true);
+      }
       expect(api.hasToken, false);
     });
 

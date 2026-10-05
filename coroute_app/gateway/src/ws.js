@@ -78,7 +78,7 @@ class Hub {
 
   // ------------------------------------------------------------- helpers
   send(ws, obj) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
-  sendError(ws, code, message) { this.send(ws, { type: 'ERROR', code, message }); }
+  sendError(ws, code, message, reason) { this.send(ws, { type: 'ERROR', code, message, ...(reason ? { reason } : {}) }); }
 
   broadcast(groupId, payload, { except } = {}) {
     const set = this.rooms.get(groupId);
@@ -145,7 +145,7 @@ class Hub {
   }
 
   _handleError(ws, e) {
-    if (e instanceof ConvoyError || e instanceof TrackError) return this.sendError(ws, e.status, e.message);
+    if (e instanceof ConvoyError || e instanceof TrackError) return this.sendError(ws, e.status, e.message, e.reason);
     this.log.warn('[ws] error', e.message);
     this.sendError(ws, 500, 'Internal error');
   }
@@ -170,7 +170,7 @@ class Hub {
 
       case 'JOIN': {
         const groupId = String(msg.groupId || '');
-        if (!(await this.convoys.isMember(groupId, u.userId))) throw new ConvoyError('You are not a member of this convoy.', 403);
+        if (!(await this.convoys.isMember(groupId, u.userId))) throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER');
         this._bind(ws, groupId);
         const room = await this.convoys.getRoom(groupId);
         return this.send(ws, { type: 'SNAPSHOT', convoy: this.convoys.snapshot(room), ts: Date.now() });

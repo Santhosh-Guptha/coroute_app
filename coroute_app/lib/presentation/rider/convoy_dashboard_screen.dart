@@ -15,6 +15,7 @@ import '../../data/services/convoy_service.dart';
 import '../widgets/connection_banner.dart';
 import '../widgets/intercom_dock.dart';
 import 'live_cockpit_map_screen.dart';
+import '../timeline/live_timeline_screen.dart';
 
 class ConvoyDashboardScreen extends StatefulWidget {
   final String groupId;
@@ -495,6 +496,14 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
             ),
             tooltip: 'Riding Focus Mode',
             onPressed: () => setState(() => _isFocusMode = !_isFocusMode),
+          ),
+          IconButton(
+            icon: const Icon(Icons.timeline_rounded, color: AppTheme.neonCyan),
+            tooltip: 'Group timeline',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: convoy.groupId)),
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.map_rounded, color: AppTheme.neonCyan),

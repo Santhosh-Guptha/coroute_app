@@ -268,7 +268,11 @@ class ConvoyService extends ChangeNotifier {
     if (type == 'ERROR') {
       _lastError = e['message']?.toString();
       debugPrint('gateway error ${e['code']}: ${e['message']}');
-      if (e['code'] == 403 || e['code'] == 404) _dropActiveConvoyLocally();
+      // Leave the convoy only when the server says we are no longer in it, and only after
+      // double-checking: a slow link, a restart or an unrelated error (for example a 1:1 call
+      // to a rider who is offline) must never throw a rider out of their group.
+      final reason = e['reason']?.toString();
+      if (reason == 'NOT_MEMBER' || reason == 'CONVOY_GONE') _confirmMembershipOrDrop().ignore();
       notifyListeners();
       return;
     }
@@ -360,6 +364,29 @@ class ConvoyService extends ChangeNotifier {
     }
     _allConvoys.removeWhere((k, _) => !seen.contains(k) && k != _activeGroupId);
     notifyListeners();
+  }
+
+  bool _confirmingMembership = false;
+
+  Future<void> _confirmMembershipOrDrop() async {
+    final gid = _activeGroupId;
+    if (gid == null || _confirmingMembership) return;
+    _confirmingMembership = true;
+    try {
+      final res = await _api.get('/convoys/active');
+      final c = res is Map ? res['convoy'] : null;
+      if (c is Map && c['groupId'] == gid) {
+        _allConvoys[gid] = ConvoyModel.fromJson(Map<String, dynamic>.from(c));
+        _rt.joinRoom(gid); // still a member: just rejoin the room
+        notifyListeners();
+      } else if (_activeGroupId == gid) {
+        _dropActiveConvoyLocally();
+      }
+    } catch (_) {
+      // Could not confirm (offline): stay in the convoy; the next reconnect re-joins it.
+    } finally {
+      _confirmingMembership = false;
+    }
   }
 
   void _dropActiveConvoyLocally() {

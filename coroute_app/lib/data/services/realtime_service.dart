@@ -59,6 +59,15 @@ class RealtimeService extends ChangeNotifier {
   String? get groupId => _groupId;
 
   // ------------------------------------------------------------ lifecycle
+  /// Called when the gateway refused the socket's token (close code 4401).
+  /// The app then asks the server whether the session is really over.
+  VoidCallback? onAuthRejected;
+
+  /// Use a refreshed token for the next (re)connect; the open socket stays as it is.
+  void updateToken(String? token) {
+    if (token != null && token.isNotEmpty) _token = token;
+  }
+
   void connect(String token, {bool adminMode = false}) {
     _token = token;
     _adminMode = adminMode;
@@ -130,7 +139,10 @@ class RealtimeService extends ChangeNotifier {
       final uri = Uri.parse('${AppConfig.wsUrl}?token=${Uri.encodeQueryComponent(_token!)}');
       final ch = WebSocketChannel.connect(uri);
       _channel = ch;
-      _sub = ch.stream.listen(_onData, onError: (_) => _scheduleReconnect(), onDone: _scheduleReconnect, cancelOnError: true);
+      _sub = ch.stream.listen(_onData, onError: (_) => _scheduleReconnect(), onDone: () {
+        if (ch.closeCode == 4401) onAuthRejected?.call();
+        _scheduleReconnect();
+      }, cancelOnError: true);
       _lastMessageAt = DateTime.now();
       _staleTimer?.cancel();
       _staleTimer = Timer.periodic(const Duration(seconds: 40), (_) {

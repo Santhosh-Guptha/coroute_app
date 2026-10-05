@@ -9,7 +9,19 @@ import 'api_client.dart';
 /// there is no guest mode. Roles come from the database, not from the app.
 class AuthService extends ChangeNotifier {
   AuthService(this._api) {
+    _api.addListener(_onApiChanged);
     _loadSavedSession();
+  }
+
+  /// The API client dropped the token because the gateway ended the session.
+  void _onApiChanged() {
+    if (!_api.hasToken && _userId != null && !_isLoading) _clearSession().ignore();
+  }
+
+  @override
+  void dispose() {
+    _api.removeListener(_onApiChanged);
+    super.dispose();
   }
 
   final ApiClient _api;
@@ -65,9 +77,21 @@ class AuthService extends ChangeNotifier {
         final me = await _api.get('/me');
         if (me is Map) await _applyUser(Map<String, dynamic>.from(me));
       } on ApiException catch (e) {
-        if (e.isUnauthorized || e.statusCode == 404) await _clearSession(); // revoked or deleted account
+        if (e.endsSession) await _clearSession(); // revoked token or deleted account, as stated by the gateway
       } catch (_) {}
     }
+  }
+
+  /// Called when the realtime link was refused at connect. Asks the server
+  /// whether the session is still valid; signs out only if it says no.
+  Future<void> revalidate() async {
+    if (!_api.hasToken) return;
+    try {
+      final me = await _api.get('/me');
+      if (me is Map) await _applyUser(Map<String, dynamic>.from(me));
+    } on ApiException catch (e) {
+      if (e.endsSession) await _clearSession();
+    } catch (_) {}
   }
 
   Future<void> _applyUser(Map<String, dynamic> u) async {
@@ -223,9 +247,13 @@ class AuthService extends ChangeNotifier {
     await _clearSession();
   }
 
+  bool _clearing = false;
+
   Future<void> _clearSession() async {
+    if (_clearing) return;
+    _clearing = true;
+    _userId = null; // first, so the API listener does not re-enter
     await _api.setToken(null);
-    _userId = null;
     _role = null;
     _email = null;
     _name = null;
@@ -243,6 +271,7 @@ class AuthService extends ChangeNotifier {
     ]) {
       await prefs.remove(k);
     }
+    _clearing = false;
     notifyListeners();
   }
 }

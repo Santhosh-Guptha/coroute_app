@@ -94,7 +94,15 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // ---- authenticated ----
   r.use(requireAuth, apiLimiter);
 
-  r.get('/me', wrap(async (req, res) => res.json(await auth.me(req.user.userId))));
+  r.get('/me', wrap(async (req, res) => {
+    const me = await auth.me(req.user.userId);
+    // Sliding session: a rider who opens the app at least once a month is never signed out.
+    // The new token is built from the database user, so role changes take effect too.
+    if (Date.now() - (req.tokenIssuedAt || 0) > config.tokenRefreshAfterHours * 3600000) {
+      res.set('X-CoRoute-Token', auth.issueToken(me));
+    }
+    res.json(me);
+  }));
   r.patch('/me', wrap(async (req, res) => res.json(await auth.updateProfile(req.user.userId, req.body || {}))));
   r.post('/me/password', wrap(async (req, res) => res.json(await auth.changePassword(req.user.userId, req.body || {}))));
   r.delete('/me', wrap(async (req, res) => {
@@ -269,7 +277,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // Errors
   // eslint-disable-next-line no-unused-vars
   r.use((err, req, res, next) => {
-    if (err instanceof AuthError || err instanceof ConvoyError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof AuthError) return res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+    if (err instanceof ConvoyError) return res.status(err.status).json({ error: err.message, ...(err.reason ? { code: err.reason } : {}) });
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Malformed JSON' });
     console.error('[api]', err);
     res.status(500).json({ error: 'Internal error' });

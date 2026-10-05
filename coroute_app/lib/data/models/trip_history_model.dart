@@ -47,6 +47,13 @@ class TripHistoryModel {
   final String userId;
   final String createdByUserName;
 
+  /// Set on trips built by the server from the recorded tracks; opens the full report.
+  final String groupId;
+  final int movingMs;
+  final int restMs;
+
+  bool get hasReport => groupId.isNotEmpty;
+
   TripHistoryModel({
     required this.tripId,
     required this.tripName,
@@ -62,6 +69,9 @@ class TripHistoryModel {
     this.breadcrumbTrail = const [],
     this.userId = '',
     this.createdByUserName = '',
+    this.groupId = '',
+    this.movingMs = 0,
+    this.restMs = 0,
   });
 
   int get durationMinutes {
@@ -85,6 +95,10 @@ class TripHistoryModel {
       'breadcrumbTrail': breadcrumbTrail.map((e) => e.toJson()).toList(),
       'userId': userId,
       'createdByUserName': createdByUserName,
+      if (groupId.isNotEmpty) 'groupId': groupId,
+      if (groupId.isNotEmpty) 'source': 'server',
+      'movingMs': movingMs,
+      'restMs': restMs,
     };
   }
 
@@ -110,6 +124,9 @@ class TripHistoryModel {
       breadcrumbTrail: points,
       userId: json['userId'] ?? '',
       createdByUserName: json['createdByUserName'] ?? '',
+      groupId: json['source'] == 'server' ? (json['groupId']?.toString() ?? '') : '',
+      movingMs: (json['movingMs'] as num?)?.toInt() ?? 0,
+      restMs: (json['restMs'] as num?)?.toInt() ?? 0,
     );
   }
 }

@@ -10,6 +10,7 @@ import '../../core/widgets/glass_card.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../data/services/auth_service.dart';
+import '../report/trip_report_screen.dart';
 
 class TripHistoryScreen extends StatefulWidget {
   const TripHistoryScreen({super.key});
@@ -99,7 +100,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => TripReplayDetailScreen(trip: trip),
+                          builder: (_) => trip.hasReport ? TripReportScreen(trip: trip) : TripReplayDetailScreen(trip: trip),
                         ),
                       );
                     },

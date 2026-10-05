@@ -9,7 +9,8 @@ const ROLE_ADMIN = 'MASTER_ADMIN';
 const ROLE_RIDER = 'RIDER';
 
 class AuthError extends Error {
-  constructor(message, status = 400) { super(message); this.status = status; this.name = 'AuthError'; }
+  /** code: machine-readable cause. The app signs out only for SESSION_INVALID / ACCOUNT_GONE. */
+  constructor(message, status = 400, code = undefined) { super(message); this.status = status; this.name = 'AuthError'; this.code = code; }
 }
 
 function slug(s) {
@@ -147,7 +148,7 @@ class AuthService {
 
   async changePassword(userId, { currentPassword, newPassword }) {
     const user = await this.repo.findUserById(userId);
-    if (!user) throw new AuthError('User not found.', 404);
+    if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
     if (!newPassword || newPassword.length < 8) throw new AuthError('New password must be at least 8 characters.');
     if (user.passwordHash) {
       const ok = currentPassword && await bcrypt.compare(currentPassword, user.passwordHash);
@@ -170,7 +171,7 @@ class AuthService {
 
   async deleteAccount(userId) {
     const user = await this.repo.findUserById(userId);
-    if (!user) throw new AuthError('User not found.', 404);
+    if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
     if (user.role === ROLE_ADMIN && (await this.repo.countAdmins()) <= 1) {
       throw new AuthError('Promote another administrator before deleting the last admin account.', 409);
     }
@@ -180,7 +181,7 @@ class AuthService {
 
   async updateProfile(userId, patch) {
     const user = await this.repo.findUserById(userId);
-    if (!user) throw new AuthError('User not found.', 404);
+    if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
     const allowed = ['phone', 'vehicleType', 'vehicleNo', 'emergencyContact', 'emergencyContactName'];
     const clean = {};
     for (const k of allowed) if (patch[k] !== undefined) clean[k] = String(patch[k]).trim();
@@ -207,9 +208,12 @@ class AuthService {
     return publicUser(updated);
   }
 
+  /** A fresh session token for an already verified user (sliding refresh). */
+  issueToken(user) { return signToken(user); }
+
   async me(userId) {
     const user = await this.repo.findUserById(userId);
-    if (!user) throw new AuthError('User not found.', 404);
+    if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
     return publicUser(user);
   }
 }
@@ -219,7 +223,8 @@ function requireAuth(req, res, next) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
   const claims = token && verifyToken(token);
-  if (!claims) return res.status(401).json({ error: 'Unauthorized' });
+  if (!claims) return res.status(401).json({ error: 'Your session has ended. Please sign in again.', code: 'SESSION_INVALID' });
+  req.tokenIssuedAt = (claims.iat || 0) * 1000;
   req.user = { userId: claims.sub, name: claims.name, role: claims.role, email: claims.email };
   next();
 }

@@ -15,7 +15,8 @@ const config = require('./config');
 const { ACTIVE_STATUSES } = require('./oracle/repo');
 
 class ConvoyError extends Error {
-  constructor(message, status = 400) { super(message); this.status = status; this.name = 'ConvoyError'; }
+  /** reason: machine-readable cause. The app leaves a convoy only for NOT_MEMBER / CONVOY_GONE, never for other errors. */
+  constructor(message, status = 400, reason = undefined) { super(message); this.status = status; this.name = 'ConvoyError'; this.reason = reason; }
 }
 
 const RIDER_PATCH_FIELDS = new Set([
@@ -67,7 +68,7 @@ class ConvoyManager extends EventEmitter {
   async getRoom(groupId, { required = true } = {}) {
     let room = this.rooms.get(groupId);
     if (!room) room = await this._loadRoom(groupId);
-    if (!room && required) throw new ConvoyError('Convoy not found.', 404);
+    if (!room && required) throw new ConvoyError('Convoy not found.', 404, 'CONVOY_GONE');
     return room;
   }
 
@@ -239,7 +240,7 @@ class ConvoyManager extends EventEmitter {
   /** Applies a telemetry/status patch to one rider. Memory first, DB later. */
   patchRider(room, userId, patch, { emit = true } = {}) {
     const current = room.riders.get(userId);
-    if (!current) throw new ConvoyError('Not a member of this convoy.', 403);
+    if (!current) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const next = { ...current };
     for (const [k, v] of Object.entries(patch || {})) {
       if (!RIDER_PATCH_FIELDS.has(k) || v === undefined || v === null) continue;
@@ -291,7 +292,7 @@ class ConvoyManager extends EventEmitter {
   // ------------------------------------------------------ chat / alerts
   async sendMessage(groupId, user, { text, isQuickCard = false, cardType = 'CUSTOM' }) {
     const room = await this.getRoom(groupId);
-    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403);
+    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const clean = String(text || '').trim().slice(0, 500);
     if (!clean) throw new ConvoyError('Message text is required.');
     const msg = {
@@ -307,7 +308,7 @@ class ConvoyManager extends EventEmitter {
 
   async requestWait(groupId, user) {
     const room = await this.getRoom(groupId);
-    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403);
+    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     room.meta.waitRequests = { ...(room.meta.waitRequests || {}), [user.name]: now() };
     // Expire stale wait requests (>2 min) while we are here.
     for (const [k, v] of Object.entries(room.meta.waitRequests)) if (now() - v > 150000) delete room.meta.waitRequests[k];
@@ -322,7 +323,7 @@ class ConvoyManager extends EventEmitter {
   async raiseSos(groupId, user, { lat, lng, type, alertType }) {
     type = alertType || type || 'EMERGENCY';
     const room = await this.getRoom(groupId);
-    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403);
+    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const alert = {
       alertId: `SOS-${crypto.randomUUID()}`, userId: user.userId, userName: user.name,
       lat: clampLat(lat), lng: clampLng(lng), alertType: String(type).slice(0, 24), timestamp: now(), resolved: false,
@@ -336,7 +337,7 @@ class ConvoyManager extends EventEmitter {
 
   async resolveSos(groupId, user, alertId) {
     const room = await this.getRoom(groupId);
-    if (!room.riders.has(user.userId) && user.role !== 'MASTER_ADMIN') throw new ConvoyError('Not a member of this convoy.', 403);
+    if (!room.riders.has(user.userId) && user.role !== 'MASTER_ADMIN') throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const a = room.alerts.get(alertId);
     if (a) { a.resolved = true; a.resolvedAt = now(); a.resolvedBy = user.userId; }
     await this.repo.resolveAlert(groupId, alertId, user.userId);
@@ -348,7 +349,7 @@ class ConvoyManager extends EventEmitter {
   // ------------------------------------------------------ stops / config
   async addStop(groupId, user, { name, lat, lng, category = 'REST' }) {
     const room = await this.getRoom(groupId);
-    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403);
+    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const stop = {
       stopId: `STOP-${shortId(3)}`, name: String(name || 'Stop').slice(0, 80), lat: clampLat(lat), lng: clampLng(lng),
       orderIndex: (room.meta.stopPoints || []).length + 1, category: String(category).slice(0, 24), isVisited: false,
@@ -363,7 +364,7 @@ class ConvoyManager extends EventEmitter {
 
   async setStopVisited(groupId, user, stopId, isVisited) {
     const room = await this.getRoom(groupId);
-    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403);
+    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     room.meta.stopPoints = (room.meta.stopPoints || []).map((s) => (s.stopId === stopId ? { ...s, isVisited: !!isVisited } : s));
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
@@ -373,7 +374,7 @@ class ConvoyManager extends EventEmitter {
   async updateConfig(groupId, user, patch) {
     const room = await this.getRoom(groupId);
     const rider = room.riders.get(user.userId);
-    if (!rider) throw new ConvoyError('Not a member of this convoy.', 403);
+    if (!rider) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     if (rider.role !== 'LEAD' && room.meta.createdByUserId !== user.userId && user.role !== 'MASTER_ADMIN') {
       throw new ConvoyError('Only the convoy lead can change settings.', 403);
     }
