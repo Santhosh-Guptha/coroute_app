@@ -67,16 +67,16 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
         ),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
+          ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: AppTheme.laserRed)))
+              ? Center(child: Text(_error!, style: TextStyle(color: AppTheme.laserRed)))
               : TabBarView(controller: _tabs, children: [_feedbackList(), _viewsList()]),
     );
   }
 
   Widget _feedbackList() {
     if (_feedback.isEmpty) {
-      return const Center(child: Text('No feedback yet.', style: TextStyle(color: AppTheme.textMuted)));
+      return Center(child: Text('No feedback yet.', style: TextStyle(color: AppTheme.textMuted)));
     }
     final fmt = DateFormat('d MMM yyyy, HH:mm');
     return ListView.builder(
@@ -96,15 +96,15 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
               children: [
                 Row(
                   children: [
-                    Expanded(child: Text(from, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis)),
-                    Text(ts > 0 ? fmt.format(DateTime.fromMillisecondsSinceEpoch(ts)) : '', style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                    Expanded(child: Text(from, style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis)),
+                    Text(ts > 0 ? fmt.format(DateTime.fromMillisecondsSinceEpoch(ts)) : '', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
                   ],
                 ),
                 const SizedBox(height: 6),
-                SelectableText(f['message']?.toString() ?? '', style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13, height: 1.4)),
+                SelectableText(f['message']?.toString() ?? '', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, height: 1.4)),
                 if (meta.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  Text(meta, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                  Text(meta, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
                 ],
               ],
             ),
@@ -116,7 +116,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
 
   Widget _viewsList() {
     if (_views.isEmpty) {
-      return const Center(child: Text('No page views recorded yet.', style: TextStyle(color: AppTheme.textMuted)));
+      return Center(child: Text('No page views recorded yet.', style: TextStyle(color: AppTheme.textMuted)));
     }
     final total = _views.fold<int>(0, (a, v) => a + ((v['count'] as num?)?.toInt() ?? 0));
     final byPath = <String, int>{};
@@ -139,15 +139,15 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                Text(title, style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
                 const SizedBox(height: 8),
                 for (final r in rows.take(12))
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 3),
                     child: Row(
                       children: [
-                        Expanded(child: Text(r.key, style: const TextStyle(color: Colors.white, fontSize: 13), overflow: TextOverflow.ellipsis)),
-                        Text('${r.value}', style: const TextStyle(color: AppTheme.neonCyan, fontSize: 13, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
+                        Expanded(child: Text(r.key, style: TextStyle(color: AppTheme.textPrimary, fontSize: 13), overflow: TextOverflow.ellipsis)),
+                        Text('${r.value}', style: TextStyle(color: AppTheme.neonCyan, fontSize: 13, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
                       ],
                     ),
                   ),
@@ -163,8 +163,8 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
           padding: const EdgeInsets.all(14),
           child: Row(
             children: [
-              const Expanded(child: Text('Total page views, last 30 days', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13))),
-              Text('$total', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+              Expanded(child: Text('Total page views, last 30 days', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13))),
+              Text('$total', style: TextStyle(color: AppTheme.textPrimary, fontSize: 22, fontWeight: FontWeight.bold)),
             ],
           ),
         ),
@@ -172,7 +172,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
         block('BY PAGE', sorted(byPath)),
         block('BY DAY', days),
         block('BY REFERRER', sorted(byRef)),
-        const Text('Counts only: no cookies, IP addresses or identifiers are stored.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+        Text('Counts only: no cookies, IP addresses or identifiers are stored.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
       ],
     );
   }

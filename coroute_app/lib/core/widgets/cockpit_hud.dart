@@ -39,7 +39,11 @@ class CockpitHud extends StatelessWidget {
       speedColor = AppTheme.hyperAmber;
     }
 
-    return Container(
+    // Scales down as a whole on narrow phones or large text instead of overflowing.
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.topLeft,
+      child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: AppTheme.obsidianVoid.withOpacity(0.85),
@@ -47,7 +51,7 @@ class CockpitHud extends StatelessWidget {
         border: Border.all(color: AppTheme.neonCyan.withOpacity(0.35), width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.5),
+            color: AppTheme.shadow,
             blurRadius: 14,
             offset: const Offset(0, 4),
           ),
@@ -75,7 +79,7 @@ class CockpitHud extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  const Text(
+                  Text(
                     'km/h',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
@@ -113,7 +117,7 @@ class CockpitHud extends StatelessWidget {
                     shape: BoxShape.circle,
                     border: Border.all(color: AppTheme.neonCyan.withOpacity(0.4), width: 1.5),
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Icon(
                       Icons.navigation,
                       color: AppTheme.neonCyan,
@@ -125,7 +129,7 @@ class CockpitHud extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 '${heading.round()}° $cardinal',
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
@@ -153,7 +157,7 @@ class CockpitHud extends StatelessWidget {
                   const SizedBox(width: 4),
                   Text(
                     '$batteryLevel%',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppTheme.textPrimary,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
@@ -161,7 +165,7 @@ class CockpitHud extends StatelessWidget {
                   ),
                 ],
               ),
-              const Text(
+              Text(
                 'Live Cockpit',
                 style: TextStyle(
                   color: AppTheme.textMuted,
@@ -172,6 +176,7 @@ class CockpitHud extends StatelessWidget {
           ),
         ],
       ),
+    ),
     );
   }
 }

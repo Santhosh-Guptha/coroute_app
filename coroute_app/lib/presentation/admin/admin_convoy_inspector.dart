@@ -8,6 +8,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/services/convoy_service.dart';
+import '../../core/theme/map_tiles.dart';
 
 class AdminConvoyInspector extends StatelessWidget {
   final ConvoyModel convoy;
@@ -20,15 +21,15 @@ class AdminConvoyInspector extends StatelessWidget {
       builder: (ctx) {
         return AlertDialog(
           backgroundColor: AppTheme.slateCard,
-          title: const Text('Dissolve Convoy?', style: TextStyle(color: AppTheme.laserRed)),
+          title: Text('Dissolve Convoy?', style: TextStyle(color: AppTheme.laserRed)),
           content: Text(
             'Are you sure you want to forcibly terminate "${convoy.name}" (Code: ${convoy.joinCode})? All active riders will be dismissed.',
-            style: const TextStyle(color: AppTheme.textSecondary),
+            style: TextStyle(color: AppTheme.textSecondary),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+              child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.laserRed),
@@ -65,7 +66,7 @@ class AdminConvoyInspector extends StatelessWidget {
         actions: [
           IconButton(
             tooltip: 'Dissolve Convoy',
-            icon: const Icon(Icons.delete_forever, color: AppTheme.laserRed),
+            icon: Icon(Icons.delete_forever, color: AppTheme.laserRed),
             onPressed: () => _confirmDissolveConvoy(context, convoyService),
           ),
         ],
@@ -105,6 +106,7 @@ class AdminConvoyInspector extends StatelessWidget {
                   ),
                   children: [
                     TileLayer(
+                      tileBuilder: mapTileBuilder,
                       urlTemplate: AppConstants.osmTileUrl,
                       userAgentPackageName: AppConstants.osmUserAgent,
                     ),
@@ -119,12 +121,12 @@ class AdminConvoyInspector extends StatelessWidget {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.8),
+                                  color: AppTheme.slateCard.withOpacity(0.9),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
                                   r.name,
-                                  style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 8, fontWeight: FontWeight.bold),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
@@ -157,9 +159,9 @@ class AdminConvoyInspector extends StatelessWidget {
             const SizedBox(height: 20),
 
             // Riders List
-            const Text(
+            Text(
               'Roster & Telemetry Breakdown',
-              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 10),
 
@@ -190,10 +192,9 @@ class AdminConvoyInspector extends StatelessWidget {
                           children: [
                             Row(
                               children: [
-                                Text(
+                                Flexible(child: Text(
                                   r.name,
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                ),
+                                  style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis)),
                                 const SizedBox(width: 6),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -215,7 +216,7 @@ class AdminConvoyInspector extends StatelessWidget {
                             const SizedBox(height: 2),
                             Text(
                               '${r.vehicleType} · ${r.vehicleColor}',
-                              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                              style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                             ),
                           ],
                         ),
@@ -225,11 +226,11 @@ class AdminConvoyInspector extends StatelessWidget {
                         children: [
                           Text(
                             '${r.speedKmh.toStringAsFixed(0)} km/h',
-                            style: const TextStyle(color: AppTheme.neonCyan, fontSize: 16, fontWeight: FontWeight.bold),
+                            style: TextStyle(color: AppTheme.neonCyan, fontSize: 16, fontWeight: FontWeight.bold),
                           ),
                           Text(
                             '🧭 ${r.heading.round()}° $cardinal',
-                            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10),
+                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 10),
                           ),
                         ],
                       ),
@@ -247,7 +248,7 @@ class AdminConvoyInspector extends StatelessWidget {
   Widget _buildMetricPill(String title, String value, Color color) {
     return Column(
       children: [
-        Text(title, style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+        Text(title, style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
         const SizedBox(height: 2),
         Text(
           value,

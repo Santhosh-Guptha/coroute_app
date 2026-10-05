@@ -98,13 +98,13 @@ class RouteStopsPanel extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppTheme.subtleBorder)),
           child: Row(children: [
-            const Icon(Icons.directions_rounded, color: AppTheme.emeraldSafe),
+            Icon(Icons.directions_rounded, color: AppTheme.emeraldSafe),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 '${TimelineText.distance(route.distanceM)} · about ${TimelineText.duration(Duration(seconds: route.durationS))} riding'
                 '${route.approximate ? '\nStraight-line estimate: the road route is not available right now.' : ''}',
-                style: const TextStyle(color: Colors.white, fontSize: 13),
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
               ),
             ),
           ]),
@@ -116,7 +116,7 @@ class RouteStopsPanel extends StatelessWidget {
         subtitle: 'Start',
       ),
       if (planned.isEmpty)
-        const Padding(
+        Padding(
           padding: EdgeInsets.symmetric(vertical: 10, horizontal: 8),
           child: Text('No stops planned.', style: TextStyle(color: AppTheme.textMuted)),
         )
@@ -158,19 +158,19 @@ class RouteStopsPanel extends StatelessWidget {
           (convoy.destinationLat != 0 || convoy.destinationLng != 0) ? 'Destination ${fromMe(convoy.destinationLat, convoy.destinationLng)}' : 'Destination',
           if (arrivalsLine(convoy.destinationArrivals).isNotEmpty) arrivalsLine(convoy.destinationArrivals),
         ].join('\n'),
-        trailing: lead ? IconButton(tooltip: 'Change destination', icon: const Icon(Icons.edit_location_alt_rounded, color: AppTheme.textSecondary), onPressed: changeDestination) : null,
+        trailing: lead ? IconButton(tooltip: 'Change destination', icon: Icon(Icons.edit_location_alt_rounded, color: AppTheme.textSecondary), onPressed: changeDestination) : null,
       ),
       const SizedBox(height: 8),
       OutlinedButton.icon(
         onPressed: planned.length + suggestions.length >= 20 ? null : addOrSuggest,
         icon: Icon(lead ? Icons.add_location_alt_rounded : Icons.add_comment_rounded),
         label: Text(lead ? 'Add a stop' : 'Suggest a stop'),
-        style: OutlinedButton.styleFrom(foregroundColor: AppTheme.hyperAmber, side: const BorderSide(color: AppTheme.hyperAmber), minimumSize: const Size.fromHeight(44)),
+        style: OutlinedButton.styleFrom(foregroundColor: AppTheme.hyperAmber, side: BorderSide(color: AppTheme.hyperAmber), minimumSize: const Size.fromHeight(44)),
       ),
       if (suggestions.isNotEmpty) ...[
         const SizedBox(height: 16),
         Text(lead ? 'SUGGESTED BY THE GROUP' : 'SUGGESTIONS WAITING FOR THE LEAD',
-            style: const TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
         const SizedBox(height: 6),
         for (final s in suggestions)
           Card(
@@ -179,15 +179,15 @@ class RouteStopsPanel extends StatelessWidget {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             child: ListTile(
               leading: Icon(categoryIcons[s.category] ?? Icons.place_rounded, color: AppTheme.hyperAmber),
-              title: Text(s.name, style: const TextStyle(color: Colors.white, fontSize: 14)),
+              title: Text(s.name, style: TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
               subtitle: Text(
                 [if (s.suggestedByName.isNotEmpty) 'from ${s.suggestedByName}', if (fromMe(s.lat, s.lng).isNotEmpty) fromMe(s.lat, s.lng)].join(' · '),
-                style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
               ),
               trailing: lead
                   ? Row(mainAxisSize: MainAxisSize.min, children: [
-                      IconButton(tooltip: 'Decline', icon: const Icon(Icons.close_rounded, color: AppTheme.laserRed), onPressed: () => service.declineStop(s.stopId)),
-                      IconButton(tooltip: 'Add to the route', icon: const Icon(Icons.check_rounded, color: AppTheme.emeraldSafe), onPressed: () => service.acceptStop(s.stopId)),
+                      IconButton(tooltip: 'Decline', icon: Icon(Icons.close_rounded, color: AppTheme.laserRed), onPressed: () => service.declineStop(s.stopId)),
+                      IconButton(tooltip: 'Add to the route', icon: Icon(Icons.check_rounded, color: AppTheme.emeraldSafe), onPressed: () => service.acceptStop(s.stopId)),
                     ])
                   : null,
             ),
@@ -207,8 +207,8 @@ class RouteStopsPanel extends StatelessWidget {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 8),
       leading: Icon(icon, color: color),
-      title: Text(title, style: TextStyle(color: Colors.white, fontSize: 14, decoration: strike ? TextDecoration.lineThrough : null)),
-      subtitle: Text(subtitle, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+      title: Text(title, style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, decoration: strike ? TextDecoration.lineThrough : null)),
+      subtitle: Text(subtitle, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
       trailing: trailing,
     );
   }
@@ -262,17 +262,17 @@ class _StopTile extends StatelessWidget {
           Expanded(
             child: Text(s.name,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: Colors.white, fontSize: 14, decoration: s.isVisited ? TextDecoration.lineThrough : null)),
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, decoration: s.isVisited ? TextDecoration.lineThrough : null)),
           ),
         ]),
-        subtitle: (details.isEmpty && arrivals.isEmpty) ? null : Text([if (details.isNotEmpty) details, if (arrivals.isNotEmpty) arrivals].join('\n'), style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+        subtitle: (details.isEmpty && arrivals.isEmpty) ? null : Text([if (details.isNotEmpty) details, if (arrivals.isNotEmpty) arrivals].join('\n'), style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           Checkbox(value: s.isVisited, activeColor: AppTheme.emeraldSafe, onChanged: (v) {
             if (v != null) onVisited(v);
           }),
           if (lead)
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert_rounded, color: AppTheme.textSecondary),
+              icon: Icon(Icons.more_vert_rounded, color: AppTheme.textSecondary),
               color: AppTheme.elevatedCard,
               onSelected: (v) {
                 if (v == 'skip') {
@@ -286,7 +286,7 @@ class _StopTile extends StatelessWidget {
                 PopupMenuItem(value: 'remove', child: Text('Remove from the route')),
               ],
             ),
-          if (lead) ReorderableDragStartListener(index: index, child: const Icon(Icons.drag_handle_rounded, color: AppTheme.textSecondary)),
+          if (lead) ReorderableDragStartListener(index: index, child: Icon(Icons.drag_handle_rounded, color: AppTheme.textSecondary)),
         ]),
       ),
     );

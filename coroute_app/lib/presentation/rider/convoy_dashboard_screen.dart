@@ -72,11 +72,11 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.slateCard,
-        title: const Text('Leave this convoy?', style: TextStyle(color: Colors.white)),
-        content: const Text('Your group will stop seeing your position. Your ride so far is kept in trip history.', style: TextStyle(color: AppTheme.textSecondary)),
+        title: Text('Leave this convoy?', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text('Your group will stop seeing your position. Your ride so far is kept in trip history.', style: TextStyle(color: AppTheme.textSecondary)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Stay')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Leave', style: TextStyle(color: AppTheme.laserRed))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Leave', style: TextStyle(color: AppTheme.laserRed))),
         ],
       ),
     );
@@ -97,7 +97,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Why are you stopped?', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              Text('Why are you stopped?', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -106,9 +106,9 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                   for (final r in _statusReasons)
                     ActionChip(
                       avatar: Text(r['emoji']!),
-                      label: Text(r['label']!, style: const TextStyle(fontSize: 12, color: Colors.white)),
+                      label: Text(r['label']!, style: TextStyle(fontSize: 12, color: AppTheme.textPrimary)),
                       backgroundColor: AppTheme.elevatedCard,
-                      side: const BorderSide(color: AppTheme.glassBorder),
+                      side: BorderSide(color: AppTheme.glassBorder),
                       onPressed: () {
                         Navigator.pop(ctx);
                         if (r['code'] == 'CUSTOM') {
@@ -133,14 +133,14 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.slateCard,
-        title: const Text('💬 Custom Stop Reason', style: TextStyle(color: Colors.white, fontSize: 16)),
+        title: Text('💬 Custom Stop Reason', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
         content: TextField(
           controller: customCtrl,
           autofocus: true,
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: AppTheme.textPrimary),
           decoration: InputDecoration(
             hintText: 'e.g. ATM withdrawal, adjusting gear...',
-            hintStyle: const TextStyle(color: AppTheme.textMuted),
+            hintStyle: TextStyle(color: AppTheme.textMuted),
             filled: true,
             fillColor: AppTheme.elevatedCard,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -149,7 +149,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+            child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -245,7 +245,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
           children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppTheme.neonCyan,
               ),
@@ -256,8 +256,8 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(member.name, style: const TextStyle(color: Colors.white, fontSize: 16)),
-                  Text(member.vehicleType, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  Text(member.name, style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+                  Text(member.vehicleType, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                 ],
               ),
             ),
@@ -269,11 +269,11 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
           children: [
             if (member.vehicleNo.isNotEmpty) ...[
               _buildProfileRow(Icons.pin_outlined, 'Vehicle No', member.vehicleNo),
-              const Divider(color: AppTheme.glassBorder),
+              Divider(color: AppTheme.glassBorder),
             ],
             if (member.phone.isNotEmpty) ...[
               _buildProfileRow(Icons.phone_outlined, 'Rider Contact', member.phone),
-              const Divider(color: AppTheme.glassBorder),
+              Divider(color: AppTheme.glassBorder),
             ],
             if (member.emergencyContact.isNotEmpty) ...[
               _buildProfileRow(
@@ -281,7 +281,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                 'Emergency SOS Contact',
                 '${member.emergencyContactName.isNotEmpty ? "${member.emergencyContactName} - " : ""}${member.emergencyContact}',
               ),
-              const Divider(color: AppTheme.glassBorder),
+              Divider(color: AppTheme.glassBorder),
             ],
             _buildProfileRow(Icons.speed_rounded, 'Speed & Heading', '${member.speedKmh.round()} km/h · ${TelemetryUtils.formatHeading(member.heading)}'),
             const SizedBox(height: 6),
@@ -297,8 +297,8 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                     SnackBar(content: Text('Paired with driver ${member.name} as pillion rider!')),
                   );
                 },
-                icon: const Icon(Icons.link_rounded, color: AppTheme.neonCyan, size: 16),
-                label: const Text('Pair as Pillion (Driver Separation Alert)', style: TextStyle(color: AppTheme.neonCyan, fontSize: 12)),
+                icon: Icon(Icons.link_rounded, color: AppTheme.neonCyan, size: 16),
+                label: Text('Pair as Pillion (Driver Separation Alert)', style: TextStyle(color: AppTheme.neonCyan, fontSize: 12)),
               ),
             ],
           ],
@@ -306,7 +306,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close', style: TextStyle(color: AppTheme.neonCyan)),
+            child: Text('Close', style: TextStyle(color: AppTheme.neonCyan)),
           ),
         ],
       ),
@@ -324,8 +324,8 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
-                Text(value, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                Text(value, style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.bold)),
               ],
             ),
           ),
@@ -344,8 +344,8 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
       return Scaffold(
         backgroundColor: AppTheme.obsidianVoid,
         appBar: AppBar(title: const Text('Convoy Dashboard')),
-        body: const Center(
-          child: Text('Convoy session not found or concluded.', style: TextStyle(color: Colors.white)),
+        body: Center(
+          child: Text('Convoy session not found or concluded.', style: TextStyle(color: AppTheme.textPrimary)),
         ),
       );
     }
@@ -355,7 +355,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         convoyService.clearSosRequest();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('SOS sent to your convoy from the notification. Resolve it below when you are safe.'),
           backgroundColor: AppTheme.laserRed,
           duration: Duration(seconds: 5),
@@ -391,7 +391,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
         elevation: 0,
         titleSpacing: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+          icon: Icon(Icons.arrow_back_rounded, color: AppTheme.textPrimary),
           onPressed: () => Navigator.pop(context),
         ),
         title: Column(
@@ -402,7 +402,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                 Flexible(
                   child: Text(
                     convoy.name,
-                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -443,7 +443,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                   },
                   child: Text(
                     'CODE ${convoy.joinCode} · Invite',
-                    style: const TextStyle(color: AppTheme.neonCyan, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8),
+                    style: TextStyle(color: AppTheme.neonCyan, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8),
                   ),
                 ),
               ],
@@ -452,17 +452,17 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.timeline_rounded, color: AppTheme.neonCyan),
+            icon: Icon(Icons.timeline_rounded, color: AppTheme.neonCyan),
             tooltip: 'Group timeline',
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: convoy.groupId))),
           ),
           IconButton(
-            icon: const Icon(Icons.map_rounded, color: AppTheme.neonCyan),
+            icon: Icon(Icons.map_rounded, color: AppTheme.neonCyan),
             tooltip: 'Live map',
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LiveCockpitMapScreen(convoyId: convoy.groupId))),
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
+            icon: Icon(Icons.more_vert_rounded, color: AppTheme.textPrimary),
             color: AppTheme.elevatedCard,
             onSelected: (val) {
               switch (val) {
@@ -478,9 +478,9 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
               }
             },
             itemBuilder: (ctx) => [
-              const PopupMenuItem(value: 'invite', child: Text('Invite riders', style: TextStyle(color: Colors.white, fontSize: 13))),
-              PopupMenuItem(value: 'focus', child: Text(_isFocusMode ? 'Exit focus mode' : 'Focus mode', style: const TextStyle(color: Colors.white, fontSize: 13))),
-              const PopupMenuItem(value: 'leave', child: Text('Leave convoy', style: TextStyle(color: AppTheme.laserRed, fontSize: 13))),
+              PopupMenuItem(value: 'invite', child: Text('Invite riders', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13))),
+              PopupMenuItem(value: 'focus', child: Text(_isFocusMode ? 'Exit focus mode' : 'Focus mode', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13))),
+              PopupMenuItem(value: 'leave', child: Text('Leave convoy', style: TextStyle(color: AppTheme.laserRed, fontSize: 13))),
             ],
           ),
         ],
@@ -582,7 +582,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                         ),
                         Text(
                           'Emergency Type: ${otherSosAlerts.last.alertType}',
-                          style: const TextStyle(color: Colors.white70, fontSize: 11),
+                          style: TextStyle(color: Colors.white70, fontSize: 11),
                         ),
                       ],
                     ),
@@ -608,7 +608,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                     child: const Text('NAVIGATE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+                    icon: Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
                     tooltip: 'Acknowledge & Dismiss Alert',
                     onPressed: () {
                       final alertId = otherSosAlerts.last.alertId;
@@ -636,12 +636,12 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.local_parking_rounded, color: AppTheme.hyperAmber, size: 18),
+                  Icon(Icons.local_parking_rounded, color: AppTheme.hyperAmber, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Stopped ${((DateTime.now().millisecondsSinceEpoch - currentRider.stoppedSince) ~/ 60000)} min',
-                      style: const TextStyle(color: AppTheme.hyperAmber, fontSize: 13, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: AppTheme.hyperAmber, fontSize: 13, fontWeight: FontWeight.w600),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -676,7 +676,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                   Expanded(
                     child: Text(
                       'Your Status: ${_getStatusInfo(currentRider.statusReason)['label']}${currentRider.statusMessage.isNotEmpty ? " (${currentRider.statusMessage})" : ""}',
-                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                   ),
                   TextButton.icon(
@@ -686,8 +686,8 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                         reason: '',
                       );
                     },
-                    icon: const Icon(Icons.check_circle_outline, size: 16, color: AppTheme.emeraldSafe),
-                    label: const Text('Clear', style: TextStyle(color: AppTheme.emeraldSafe, fontSize: 12)),
+                    icon: Icon(Icons.check_circle_outline, size: 16, color: AppTheme.emeraldSafe),
+                    label: Text('Clear', style: TextStyle(color: AppTheme.emeraldSafe, fontSize: 12)),
                   ),
                 ],
               ),
@@ -759,15 +759,15 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                     context: context,
                     builder: (ctx) => AlertDialog(
                       backgroundColor: AppTheme.slateCard,
-                      title: const Text('🛑 End Convoy Ride?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      content: const Text(
+                      title: Text('🛑 End Convoy Ride?', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
+                      content: Text(
                         'This will conclude the active ride for all members and save the journey to everyone\'s trip history.',
                         style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
                       ),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.pop(ctx),
-                          child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+                          child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
                         ),
                         ElevatedButton(
                           onPressed: () {
@@ -775,7 +775,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                             service.updateTripState('ENDED');
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
+                                SnackBar(
                                   content: Text('Convoy ride ended and journey saved to Trip History.'),
                                   backgroundColor: AppTheme.emeraldSafe,
                                 ),
@@ -790,9 +790,9 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                     ),
                   );
                 },
-                icon: const Icon(Icons.stop_rounded, color: AppTheme.laserRed, size: 16),
-                label: const Text('End Trip', style: TextStyle(color: AppTheme.laserRed)),
-                style: OutlinedButton.styleFrom(side: const BorderSide(color: AppTheme.laserRed)),
+                icon: Icon(Icons.stop_rounded, color: AppTheme.laserRed, size: 16),
+                label: Text('End Trip', style: TextStyle(color: AppTheme.laserRed)),
+                style: OutlinedButton.styleFrom(side: BorderSide(color: AppTheme.laserRed)),
               ),
             ],
           ),
@@ -845,7 +845,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                             right: 0,
                             child: Container(
                               padding: const EdgeInsets.all(2),
-                              decoration: const BoxDecoration(shape: BoxShape.circle, color: AppTheme.hyperAmber),
+                              decoration: BoxDecoration(shape: BoxShape.circle, color: AppTheme.hyperAmber),
                               child: const Icon(Icons.star, size: 10, color: Colors.black),
                             ),
                           ),
@@ -862,7 +862,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                             children: [
                               Text(
                                 member.name + (isSelf ? ' (You)' : ''),
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
                               ),
                               const Spacer(),
                               if (!isSelf && !isOffline)
@@ -892,7 +892,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                                   ),
                                   child: Text(
                                     'OFFLINE · ${minutesSinceSeen <= 1 ? "1m" : "${minutesSinceSeen}m"} ago',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: AppTheme.laserRed,
                                       fontSize: 10,
                                       fontWeight: FontWeight.bold,
@@ -904,15 +904,15 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                           const SizedBox(height: 3),
                           Text(
                             member.vehicleType + (member.vehicleNo.isNotEmpty ? ' · ${member.vehicleNo}' : ''),
-                            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                           ),
                           if (isOffline) ...[
                             const SizedBox(height: 4),
                             Row(
                               children: [
-                                const Icon(Icons.signal_cellular_connected_no_internet_4_bar_rounded, size: 12, color: AppTheme.laserRed),
+                                Icon(Icons.signal_cellular_connected_no_internet_4_bar_rounded, size: 12, color: AppTheme.laserRed),
                                 const SizedBox(width: 4),
-                                const Flexible(
+                                Flexible(
                                   child: Text(
                                     'Signal lost · last known position shown',
                                     overflow: TextOverflow.ellipsis,
@@ -955,11 +955,11 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                       children: [
                         Text(
                           '${member.speedKmh.round()} km/h',
-                          style: const TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold, fontSize: 13),
+                          style: TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                         Text(
                           TelemetryUtils.formatHeading(member.heading),
-                          style: const TextStyle(color: AppTheme.textMuted, fontSize: 10),
+                          style: TextStyle(color: AppTheme.textMuted, fontSize: 10),
                         ),
                         Row(
                           mainAxisSize: MainAxisSize.min,
@@ -971,7 +971,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                             ),
                             Text(
                               '${member.batteryLevel}%',
-                              style: const TextStyle(color: AppTheme.textMuted, fontSize: 10),
+                              style: TextStyle(color: AppTheme.textMuted, fontSize: 10),
                             ),
                           ],
                         ),
@@ -1035,7 +1035,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
         // Message List
         Expanded(
           child: convoy.messages.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text('No group messages yet. Broadcast to your riders!', style: TextStyle(color: AppTheme.textMuted)),
                 )
               : ListView.builder(
@@ -1073,7 +1073,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                               ),
                             ),
                             const SizedBox(height: 2),
-                            Text(msg.text, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                            Text(msg.text, style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
                           ],
                         ),
                       ),
@@ -1091,10 +1091,10 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
               Expanded(
                 child: TextField(
                   controller: _messageController,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                   decoration: InputDecoration(
                     hintText: 'Broadcast quick update...',
-                    hintStyle: const TextStyle(color: AppTheme.textMuted),
+                    hintStyle: TextStyle(color: AppTheme.textMuted),
                     filled: true,
                     fillColor: AppTheme.elevatedCard,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1104,7 +1104,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
               ),
               const SizedBox(width: 8),
               IconButton(
-                icon: const Icon(Icons.send_rounded, color: AppTheme.neonCyan),
+                icon: Icon(Icons.send_rounded, color: AppTheme.neonCyan),
                 onPressed: () {
                   final txt = _messageController.text.trim();
                   if (txt.isNotEmpty) {
@@ -1128,9 +1128,9 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
     return Padding(
       padding: const EdgeInsets.only(right: 6),
       child: ActionChip(
-        label: Text(label, style: const TextStyle(color: Colors.white, fontSize: 11)),
+        label: Text(label, style: TextStyle(color: AppTheme.textPrimary, fontSize: 11)),
         backgroundColor: AppTheme.slateCard,
-        side: const BorderSide(color: AppTheme.glassBorder),
+        side: BorderSide(color: AppTheme.glassBorder),
         onPressed: onTap,
       ),
     );
@@ -1150,7 +1150,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text('SAFETY & TELEMETRY THRESHOLDS', style: TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold, fontSize: 12)),
+        Text('SAFETY & TELEMETRY THRESHOLDS', style: TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold, fontSize: 12)),
         const SizedBox(height: 12),
 
         GlassCard(
@@ -1161,8 +1161,8 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Convoy Separation Warning', style: TextStyle(color: Colors.white, fontSize: 13)),
-                  Text('${convoy.distanceThresholdMeters.round()} m', style: const TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold)),
+                  Expanded(child: Text('Convoy Separation Warning', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13))),
+                  Text('${convoy.distanceThresholdMeters.round()} m', style: TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold)),
                 ],
               ),
               Slider(
@@ -1175,7 +1175,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                     ? (v) => service.updateGroupConfig(distanceThresholdMeters: v)
                     : null,
               ),
-              const Text('Alerts riders when they stretch beyond this distance from the pack.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+              Text('Alerts riders when they stretch beyond this distance from the pack.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
             ],
           ),
         ),
@@ -1190,8 +1190,8 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Stopped Duration Alert', style: TextStyle(color: Colors.white, fontSize: 13)),
-                  Text('${convoy.stopThresholdSeconds ~/ 60} min', style: const TextStyle(color: AppTheme.hyperAmber, fontWeight: FontWeight.bold)),
+                  Expanded(child: Text('Stopped Duration Alert', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13))),
+                  Text('${convoy.stopThresholdSeconds ~/ 60} min', style: TextStyle(color: AppTheme.hyperAmber, fontWeight: FontWeight.bold)),
                 ],
               ),
               Slider(
@@ -1204,7 +1204,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                     ? (v) => service.updateGroupConfig(stopThresholdSeconds: v.toInt())
                     : null,
               ),
-              const Text('Automatically prompts the rider to submit status if stationary.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+              Text('Automatically prompts the rider to submit status if stationary.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
             ],
           ),
         ),
@@ -1218,9 +1218,9 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
             children: [
               Row(
                 children: [
-                  const Expanded(child: Text('Group speed limit', style: TextStyle(color: Colors.white, fontSize: 13))),
+                  Expanded(child: Text('Group speed limit', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13))),
                   Text(convoy.speedLimitKmh > 0 ? '${convoy.speedLimitKmh} km/h' : 'Off',
-                      style: const TextStyle(color: AppTheme.speedWarning, fontWeight: FontWeight.bold)),
+                      style: TextStyle(color: AppTheme.speedWarning, fontWeight: FontWeight.bold)),
                 ],
               ),
               const SizedBox(height: 8),
@@ -1236,7 +1236,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                       selectedColor: AppTheme.speedWarning.withOpacity(0.2),
                       labelStyle: TextStyle(color: convoy.speedLimitKmh == v ? AppTheme.speedWarning : AppTheme.textSecondary, fontSize: 12),
                       backgroundColor: AppTheme.slateCard,
-                      side: const BorderSide(color: AppTheme.subtleBorder),
+                      side: BorderSide(color: AppTheme.subtleBorder),
                       showCheckmark: false,
                     ),
                 ],
@@ -1246,7 +1246,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                 isCreator
                     ? 'When a rider stays over this speed for 10 seconds it is logged on the timeline and everyone is told once.'
                     : 'Set by the lead. Riding over it is logged on the timeline and the group is told once.',
-                style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
               ),
             ],
           ),
@@ -1257,8 +1257,8 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
         GlassCard(
           padding: const EdgeInsets.all(14),
           child: SwitchListTile(
-            title: const Text('Voice Guidance & Alerts (TTS)', style: TextStyle(color: Colors.white, fontSize: 13)),
-            subtitle: const Text('Spoken audio warnings for separation and emergency stops.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+            title: Text('Voice Guidance & Alerts (TTS)', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+            subtitle: Text('Spoken audio warnings for separation and emergency stops.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
             value: convoy.voiceGuidanceEnabled,
             activeColor: AppTheme.neonCyan,
             onChanged: (v) => service.updateGroupConfig(voiceGuidanceEnabled: v),
@@ -1272,12 +1272,12 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
           child: ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.my_location_rounded, color: service.isRealGpsActive ? AppTheme.emeraldSafe : AppTheme.hyperAmber),
-            title: const Text('Location sharing', style: TextStyle(color: Colors.white, fontSize: 13)),
+            title: Text('Location sharing', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
             subtitle: Text(
               service.isRealGpsActive
                   ? 'On while you are in this convoy. It stops when you leave.'
                   : 'Waiting for GPS. Check that location is on and allowed for CoRoute.',
-              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+              style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
             ),
           ),
         ),
@@ -1299,7 +1299,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
           type: 'CRASH_OR_EMERGENCY',
         );
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text('🚨 SOS EMERGENCY BROADCAST TO CONVOY!'),
             backgroundColor: AppTheme.laserRed,
           ),
@@ -1340,7 +1340,7 @@ class ConvoyMetricsBanner extends StatelessWidget {
   Widget _buildMetric(String label, String value, Color color) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 9, fontWeight: FontWeight.bold)),
+        Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 9, fontWeight: FontWeight.bold)),
         const SizedBox(height: 2),
         Text(value, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
       ],

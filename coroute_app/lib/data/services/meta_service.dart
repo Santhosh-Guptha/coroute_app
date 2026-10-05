@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'api_client.dart';
 
 /// Server-provided app metadata: minimum supported build, links and support contact.
@@ -35,17 +36,29 @@ class MetaService extends ChangeNotifier {
   MetaService(this._api);
   final ApiClient _api;
 
-  /// Build number of this binary. Keep in sync with pubspec `version: x.y.z+N`.
-  static const int currentBuild = 60;
-  static const String currentVersion = '3.0.0';
+  /// Version and build number of this binary, read from the installed
+  /// package (pubspec `version: x.y.z+N`) by [readPackageInfo] before the
+  /// app starts. 0 means unknown, and an unknown build is never blocked.
+  static int currentBuild = 0;
+  static String currentVersion = '';
+
+  static Future<void> readPackageInfo() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      currentVersion = info.version;
+      currentBuild = int.tryParse(info.buildNumber) ?? 0;
+    } catch (_) {
+      // Leave unknown.
+    }
+  }
 
   AppMeta? _meta;
   bool _loaded = false;
 
   AppMeta? get meta => _meta;
   bool get loaded => _loaded;
-  bool get updateRequired => _meta != null && _meta!.minBuild > currentBuild;
-  bool get updateAvailable => _meta != null && _meta!.latestBuild > currentBuild;
+  bool get updateRequired => currentBuild > 0 && _meta != null && _meta!.minBuild > currentBuild;
+  bool get updateAvailable => currentBuild > 0 && _meta != null && _meta!.latestBuild > currentBuild;
 
   Future<void> load() async {
     try {

@@ -72,11 +72,11 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
           child: _loading
-              ? const Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
+              ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
               : ListView(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
                   children: [
-                    const Text(
+                    Text(
                       'CoRoute needs a few permissions to keep your convoy together. Each one is used only while you are in a convoy.',
                       style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
                     ),
@@ -98,20 +98,20 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
                                   children: [
                                     Row(
                                       children: [
-                                        Flexible(child: Text(p.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))),
+                                        Flexible(child: Text(p.title, style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14))),
                                         if (p.required) ...[
                                           const SizedBox(width: 6),
-                                          const Text('Required', style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold)),
+                                          Text('Required', style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold)),
                                         ],
                                       ],
                                     ),
                                     const SizedBox(height: 4),
-                                    Text(p.reason, style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                                    Text(p.reason, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                                     if (!p.granted) ...[
                                       const SizedBox(height: 8),
                                       OutlinedButton(
                                         onPressed: () => _request(p),
-                                        style: OutlinedButton.styleFrom(foregroundColor: AppTheme.neonCyan, side: const BorderSide(color: AppTheme.neonCyan), visualDensity: VisualDensity.compact),
+                                        style: OutlinedButton.styleFrom(foregroundColor: AppTheme.neonCyan, side: BorderSide(color: AppTheme.neonCyan), visualDensity: VisualDensity.compact),
                                         child: const Text('Allow'),
                                       ),
                                     ],

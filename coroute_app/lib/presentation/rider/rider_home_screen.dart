@@ -62,27 +62,27 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
       builder: (ctx) {
         return AlertDialog(
           backgroundColor: AppTheme.slateCard,
-          title: const Row(
+          title: Row(
             children: [
               Icon(Icons.qr_code_scanner, color: AppTheme.hyperAmber),
               SizedBox(width: 8),
-              Text('Join with Code', style: TextStyle(color: Colors.white, fontSize: 18)),
+              Flexible(child: Text('Join with Code', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18))),
             ],
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Enter the 6-character room code shared by your convoy lead.',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 14),
               TextField(
                 controller: _joinCodeController,
-                style: const TextStyle(color: Colors.white, letterSpacing: 3, fontWeight: FontWeight.bold),
+                style: TextStyle(color: AppTheme.textPrimary, letterSpacing: 3, fontWeight: FontWeight.bold),
                 textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: 'e.g. WST900',
                   prefixIcon: Icon(Icons.key, color: AppTheme.hyperAmber),
                 ),
@@ -92,7 +92,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+              child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.hyperAmber),
@@ -179,12 +179,12 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
-              const Icon(Icons.manage_accounts_rounded, color: AppTheme.neonCyan),
+              Icon(Icons.manage_accounts_rounded, color: AppTheme.neonCyan),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   '${auth.currentUserName} Profile',
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 16),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -195,22 +195,22 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('PHONE NUMBER', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+                Text('PHONE NUMBER', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 TextField(
                   controller: phoneCtrl,
                   keyboardType: TextInputType.phone,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                   decoration: InputDecoration(
                     hintText: 'Your mobile number',
-                    hintStyle: const TextStyle(color: AppTheme.textMuted),
+                    hintStyle: TextStyle(color: AppTheme.textMuted),
                     filled: true,
                     fillColor: AppTheme.elevatedCard,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text('VEHICLE TYPE', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+                Text('VEHICLE TYPE', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -224,7 +224,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                       value: vehicleTypes.contains(vehicleType) ? vehicleType : vehicleTypes.first,
                       dropdownColor: AppTheme.slateCard,
                       isExpanded: true,
-                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
                       items: vehicleTypes.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
                       onChanged: (val) {
                         if (val != null) setDialogState(() => vehicleType = val);
@@ -233,44 +233,44 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text('VEHICLE REGISTRATION NUMBER', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+                Text('VEHICLE REGISTRATION NUMBER', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 TextField(
                   controller: vehicleNoCtrl,
                   textCapitalization: TextCapitalization.characters,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                   decoration: InputDecoration(
                     hintText: 'e.g. KA 01 AB 1234',
-                    hintStyle: const TextStyle(color: AppTheme.textMuted),
+                    hintStyle: TextStyle(color: AppTheme.textMuted),
                     filled: true,
                     fillColor: AppTheme.elevatedCard,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text('EMERGENCY (ICE) CONTACT NAME', style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold)),
+                Text('EMERGENCY (ICE) CONTACT NAME', style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 TextField(
                   controller: emergencyNameCtrl,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                   decoration: InputDecoration(
                     hintText: 'Contact Name (e.g. Spouse / Brother)',
-                    hintStyle: const TextStyle(color: AppTheme.textMuted),
+                    hintStyle: TextStyle(color: AppTheme.textMuted),
                     filled: true,
                     fillColor: AppTheme.elevatedCard,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text('EMERGENCY (ICE) PHONE NUMBER', style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold)),
+                Text('EMERGENCY (ICE) PHONE NUMBER', style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 TextField(
                   controller: emergencyPhoneCtrl,
                   keyboardType: TextInputType.phone,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                   decoration: InputDecoration(
                     hintText: 'Emergency phone number',
-                    hintStyle: const TextStyle(color: AppTheme.textMuted),
+                    hintStyle: TextStyle(color: AppTheme.textMuted),
                     filled: true,
                     fillColor: AppTheme.elevatedCard,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -282,7 +282,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+              child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
             ),
             ElevatedButton(
               onPressed: () async {
@@ -298,7 +298,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                 }
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Rider profile updated!'), backgroundColor: AppTheme.emeraldSafe),
+                    SnackBar(content: Text('Rider profile updated!'), backgroundColor: AppTheme.emeraldSafe),
                   );
                 }
               },
@@ -325,7 +325,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
           children: [
             Container(
               padding: const EdgeInsets.all(6),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppTheme.neonCyan,
               ),
@@ -338,7 +338,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
         actions: [
           IconButton(
             tooltip: 'Trip History',
-            icon: const Icon(Icons.history, color: AppTheme.neonCyan),
+            icon: Icon(Icons.history, color: AppTheme.neonCyan),
             onPressed: () {
               Navigator.push(
                 context,
@@ -348,7 +348,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
           ),
           IconButton(
             tooltip: 'Account & security',
-            icon: const Icon(Icons.manage_accounts_rounded, color: AppTheme.textMuted),
+            icon: Icon(Icons.manage_accounts_rounded, color: AppTheme.textMuted),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountScreen())),
           ),
         ],
@@ -371,7 +371,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                     CircleAvatar(
                       radius: 22,
                       backgroundColor: AppTheme.neonCyan.withOpacity(0.18),
-                      child: const Icon(Icons.person, color: AppTheme.neonCyan, size: 26),
+                      child: Icon(Icons.person, color: AppTheme.neonCyan, size: 26),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -384,20 +384,20 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                                 child: Text(
                                   auth.currentUserName ?? 'Rider',
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
+                                  style: TextStyle(
+                                    color: AppTheme.textPrimary,
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 6),
-                              const Icon(Icons.edit_note_rounded, color: AppTheme.neonCyan, size: 18),
+                              Icon(Icons.edit_note_rounded, color: AppTheme.neonCyan, size: 18),
                             ],
                           ),
                           Text(
                             '${auth.vehicleType ?? 'Motorcycle'}${auth.vehicleNo != null && auth.vehicleNo!.isNotEmpty ? " · ${auth.vehicleNo}" : ""} · ${auth.phone != null && auth.phone!.isNotEmpty ? auth.phone : "Tap to edit profile"}',
-                            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                           ),
                         ],
                       ),
@@ -415,8 +415,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF0F2B48), Color(0xFF161F2E)],
+                  gradient: LinearGradient(
+                    colors: [AppTheme.heroTop, AppTheme.slateCard],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
@@ -435,30 +435,29 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
+                        Flexible(child: Row(
                           children: [
-                            const Icon(Icons.sensors, color: AppTheme.emeraldSafe, size: 18),
+                            Icon(Icons.sensors, color: AppTheme.emeraldSafe, size: 18),
                             const SizedBox(width: 6),
-                            const Text(
+                            Flexible(child: Text(
                               'LIVE CONVOY ACTIVE',
                               style: TextStyle(
                                 color: AppTheme.emeraldSafe,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 12,
                                 letterSpacing: 0.8,
-                              ),
-                            ),
+                              ), maxLines: 1, overflow: TextOverflow.ellipsis)),
                           ],
-                        ),
+                        )),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.4),
+                            color: AppTheme.obsidianVoid.withOpacity(0.5),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
                             'Code: ${activeConvoy.joinCode}',
-                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                            style: TextStyle(color: AppTheme.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
                           ),
                         ),
                       ],
@@ -466,15 +465,15 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                     const SizedBox(height: 10),
                     Text(
                       activeConvoy.name,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     Text(
                       '${activeConvoy.riders.length} teammates tracking live · ${activeConvoy.destinationName}',
-                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                     ),
                     const SizedBox(height: 14),
                     SizedBox(
@@ -516,19 +515,19 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                             color: AppTheme.neonCyan.withOpacity(0.15),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.add_road, color: AppTheme.neonCyan, size: 26),
+                          child: Icon(Icons.add_road, color: AppTheme.neonCyan, size: 26),
                         ),
                         const SizedBox(height: 14),
-                        const Text(
+                        Text(
                           'Create Convoy',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: AppTheme.textPrimary,
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         const SizedBox(height: 4),
-                        const Text(
+                        Text(
                           'Start a ride as lead and get room code',
                           style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                         ),
@@ -551,19 +550,19 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                             color: AppTheme.hyperAmber.withOpacity(0.15),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.qr_code_scanner, color: AppTheme.hyperAmber, size: 26),
+                          child: Icon(Icons.qr_code_scanner, color: AppTheme.hyperAmber, size: 26),
                         ),
                         const SizedBox(height: 14),
-                        const Text(
+                        Text(
                           'Join Convoy',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: AppTheme.textPrimary,
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         const SizedBox(height: 4),
-                        const Text(
+                        Text(
                           'Enter 6-digit code from your pack lead',
                           style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                         ),
@@ -580,9 +579,9 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
+                Text(
                   'Recent Journeys',
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 TextButton(
                   onPressed: () {
@@ -591,7 +590,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                       MaterialPageRoute(builder: (_) => const TripHistoryScreen()),
                     );
                   },
-                  child: const Text('View All', style: TextStyle(color: AppTheme.neonCyan)),
+                  child: Text('View All', style: TextStyle(color: AppTheme.neonCyan)),
                 ),
               ],
             ),
@@ -615,7 +614,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                           color: AppTheme.elevatedCard,
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: const Icon(Icons.route, color: AppTheme.hyperAmber, size: 20),
+                        child: Icon(Icons.route, color: AppTheme.hyperAmber, size: 20),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -624,20 +623,20 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                           children: [
                             Text(
                               trip.tripName,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: AppTheme.textPrimary,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13,
                               ),
                             ),
                             Text(
                               '${trip.totalDistanceKm} km · ${trip.durationMinutes} mins · ${trip.riderCount} riders',
-                              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                              style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                             ),
                           ],
                         ),
                       ),
-                      const Icon(Icons.chevron_right, color: AppTheme.textMuted, size: 18),
+                      Icon(Icons.chevron_right, color: AppTheme.textMuted, size: 18),
                     ],
                   ),
                 ),

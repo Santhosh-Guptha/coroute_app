@@ -22,6 +22,7 @@ import '../../data/services/geo_service.dart';
 import '../map_picker/map_picker_screen.dart';
 import '../trip_planner/route_stops_panel.dart';
 import '../../data/models/stop_point_model.dart';
+import '../../core/theme/map_tiles.dart';
 
 class LiveCockpitMapScreen extends StatefulWidget {
   final String convoyId;
@@ -93,7 +94,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         final riders = convoy.riders.values.toList();
         return Container(
           constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: AppTheme.obsidianVoid,
             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             border: Border(top: BorderSide(color: AppTheme.neonCyan, width: 1.5)),
@@ -114,21 +115,20 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
+                  Expanded(child: Text(
                     '🏍️ Convoy Pack (${riders.length} Riders)',
-                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
                   IconButton(
-                    icon: const Icon(Icons.close, color: AppTheme.textMuted, size: 20),
+                    icon: Icon(Icons.close, color: AppTheme.textMuted, size: 20),
                     onPressed: () => Navigator.pop(ctx),
                   ),
                 ],
               ),
-              const Divider(color: AppTheme.glassBorder),
+              Divider(color: AppTheme.glassBorder),
               Expanded(
                 child: ListView.separated(
                   itemCount: riders.length,
-                  separatorBuilder: (context, index) => const Divider(color: AppTheme.glassBorder, height: 1),
+                  separatorBuilder: (context, index) => Divider(color: AppTheme.glassBorder, height: 1),
                   itemBuilder: (context, idx) {
                     final r = riders[idx];
                     final isMe = r.userId == myRider.userId || r.name == myRider.name;
@@ -174,7 +174,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                           Flexible(
                             child: Text(
                               isMe ? '${r.name} (You)' : r.name,
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                              style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -196,13 +196,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
+                          Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               Text(
                                 isOffline ? 'Signal Lost' : '${r.speedKmh.round()} km/h',
                                 style: TextStyle(color: isOffline ? AppTheme.laserRed : AppTheme.neonCyan, fontSize: 11, fontWeight: FontWeight.bold),
                               ),
-                              const Text(' · ', style: TextStyle(color: AppTheme.textMuted)),
+                              Text(' · ', style: TextStyle(color: AppTheme.textMuted)),
                               Icon(
                                 r.isCharging ? Icons.battery_charging_full_rounded : Icons.battery_std_rounded,
                                 size: 13,
@@ -210,13 +211,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                               ),
                               Text(
                                 ' ${r.batteryLevel}%',
-                                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                               ),
                               if (!isMe && (r.lat != 0.0 || r.lng != 0.0)) ...[
-                                const Text(' · ', style: TextStyle(color: AppTheme.textMuted)),
+                                Text(' · ', style: TextStyle(color: AppTheme.textMuted)),
                                 Text(
                                   distText,
-                                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                  style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                                 ),
                               ],
                             ],
@@ -226,7 +227,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                               padding: const EdgeInsets.only(top: 2),
                               child: Text(
                                 '⚠️ Last captured location · ${minutesAgo <= 1 ? "1m" : "${minutesAgo}m"} ago',
-                                style: const TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold),
                               ),
                             ),
                         ],
@@ -275,7 +276,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
               child: Container(
                 constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: AppTheme.obsidianVoid,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                   border: Border(top: BorderSide(color: AppTheme.neonCyan, width: 1.5)),
@@ -296,12 +297,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
+                        Expanded(child: Text(
                           '💬 Convoy Live Chat (${messages.length})',
-                          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
+                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
                         IconButton(
-                          icon: const Icon(Icons.close, color: AppTheme.textMuted, size: 20),
+                          icon: Icon(Icons.close, color: AppTheme.textMuted, size: 20),
                           onPressed: () => Navigator.pop(ctx),
                         ),
                       ],
@@ -321,8 +321,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                             padding: const EdgeInsets.only(right: 6, bottom: 8),
                             child: ActionChip(
                               backgroundColor: AppTheme.elevatedCard,
-                              label: Text('${q['emoji']} ${q['text']}', style: const TextStyle(color: Colors.white, fontSize: 11)),
-                              side: const BorderSide(color: AppTheme.glassBorder),
+                              label: Text('${q['emoji']} ${q['text']}', style: TextStyle(color: AppTheme.textPrimary, fontSize: 11)),
+                              side: BorderSide(color: AppTheme.glassBorder),
                               onPressed: () {
                                 convoyService.sendGroupMessage(
                                   senderId: myRider.userId,
@@ -337,10 +337,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         }).toList(),
                       ),
                     ),
-                    const Divider(color: AppTheme.glassBorder, height: 1),
+                    Divider(color: AppTheme.glassBorder, height: 1),
                     Expanded(
                       child: messages.isEmpty
-                          ? const Center(
+                          ? Center(
                               child: Text('No messages yet. Send a quick shout-out!', style: TextStyle(color: AppTheme.textMuted)),
                             )
                           : ListView.builder(
@@ -367,11 +367,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                                         if (!isMe)
                                           Text(
                                             msg.senderName,
-                                            style: const TextStyle(color: AppTheme.neonCyan, fontSize: 10, fontWeight: FontWeight.bold),
+                                            style: TextStyle(color: AppTheme.neonCyan, fontSize: 10, fontWeight: FontWeight.bold),
                                           ),
                                         Text(
                                           msg.text,
-                                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                                         ),
                                       ],
                                     ),
@@ -386,10 +386,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         Expanded(
                           child: TextField(
                             controller: textCtrl,
-                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                            style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                             decoration: InputDecoration(
                               hintText: 'Type a message to pack...',
-                              hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                              hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                               filled: true,
                               fillColor: AppTheme.elevatedCard,
                               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -402,7 +402,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         ),
                         const SizedBox(width: 8),
                         IconButton(
-                          icon: const Icon(Icons.send_rounded, color: AppTheme.neonCyan),
+                          icon: Icon(Icons.send_rounded, color: AppTheme.neonCyan),
                           onPressed: () {
                             final txt = textCtrl.text.trim();
                             if (txt.isNotEmpty) {
@@ -437,7 +437,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       builder: (ctx) {
         return Container(
           constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.75),
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: AppTheme.obsidianVoid,
             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             border: Border(top: BorderSide(color: AppTheme.hyperAmber, width: 1.5)),
@@ -454,8 +454,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               Row(
                 children: [
                   const SizedBox(width: 16),
-                  const Expanded(child: Text('Route and stops', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))),
-                  IconButton(icon: const Icon(Icons.close, color: AppTheme.textMuted, size: 20), onPressed: () => Navigator.pop(ctx)),
+                  Expanded(child: Text('Route and stops', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold))),
+                  IconButton(icon: Icon(Icons.close, color: AppTheme.textMuted, size: 20), onPressed: () => Navigator.pop(ctx)),
                 ],
               ),
               Flexible(
@@ -506,9 +506,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     required IconData icon,
     required VoidCallback onTap,
     String? badgeText,
-    Color badgeColor = AppTheme.neonCyan,
+    Color? badgeColor,
     required String tooltip,
   }) {
+    badgeColor ??= AppTheme.neonCyan;
     return Tooltip(
       message: tooltip,
       child: GestureDetector(
@@ -525,14 +526,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 border: Border.all(color: AppTheme.glassBorder, width: 1.2),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.4),
+                    color: AppTheme.shadow,
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),
                 ],
               ),
               child: Center(
-                child: Icon(icon, color: Colors.white, size: 20),
+                child: Icon(icon, color: AppTheme.textPrimary, size: 20),
               ),
             ),
             if (badgeText != null)
@@ -568,15 +569,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       builder: (ctx) {
         return AlertDialog(
           backgroundColor: AppTheme.slateCard,
-          title: const Text('Conclude Journey?', style: TextStyle(color: Colors.white)),
+          title: Text('Conclude Journey?', style: TextStyle(color: AppTheme.textPrimary)),
           content: Text(
             'This will complete the ride for "${convoy.name}" and save your full route and statistics to Trip History.',
-            style: const TextStyle(color: AppTheme.textSecondary),
+            style: TextStyle(color: AppTheme.textSecondary),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Keep Riding', style: TextStyle(color: AppTheme.textMuted)),
+              child: Text('Keep Riding', style: TextStyle(color: AppTheme.textMuted)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.hyperAmber),
@@ -592,7 +593,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 if (context.mounted) Navigator.pop(context);
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
+                    SnackBar(
                       content: Text('Journey saved to your trip history.'),
                       backgroundColor: AppTheme.emeraldSafe,
                     ),
@@ -639,13 +640,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           backgroundColor: AppTheme.laserRed,
           content: Row(
             children: [
               Icon(Icons.warning, color: Colors.white),
               SizedBox(width: 8),
-              Text('SOS Emergency Broadcasted to entire Convoy!'),
+              Expanded(child: Text('SOS Emergency Broadcasted to entire Convoy!')),
             ],
           ),
         ),
@@ -692,7 +693,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       return Scaffold(
         backgroundColor: AppTheme.obsidianVoid,
         appBar: AppBar(title: const Text('Convoy Concluded')),
-        body: const Center(
+        body: Center(
           child: Text('This convoy has been dissolved or ended.', style: TextStyle(color: AppTheme.textMuted)),
         ),
       );
@@ -727,6 +728,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             ),
             children: [
               TileLayer(
+                tileBuilder: mapTileBuilder,
                 urlTemplate: AppConstants.osmTileUrl,
                 userAgentPackageName: AppConstants.osmUserAgent,
               ),
@@ -750,14 +752,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     point: LatLng(st.lat, st.lng),
                     width: 26,
                     height: 26,
-                    child: const Icon(Icons.add_location_rounded, color: AppTheme.hyperAmber, size: 24),
+                    child: Icon(Icons.add_location_rounded, color: AppTheme.hyperAmber, size: 24),
                   ),
                 if (convoy.destinationLat != 0 || convoy.destinationLng != 0)
                   Marker(
                     point: LatLng(convoy.destinationLat, convoy.destinationLng),
                     width: 34,
                     height: 34,
-                    child: const Icon(Icons.sports_score_rounded, color: AppTheme.laserRed, size: 30),
+                    child: Icon(Icons.sports_score_rounded, color: AppTheme.laserRed, size: 30),
                   ),
               ]),
 
@@ -786,7 +788,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.85),
+                            color: AppTheme.slateCard.withOpacity(0.92),
                             borderRadius: BorderRadius.circular(4),
                             border: Border.all(color: (isOffline ? AppTheme.laserRed : roleColor).withOpacity(0.8), width: 0.8),
                           ),
@@ -870,7 +872,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         Expanded(
                           child: Text(
                             convoyService.systemBroadcastMessage!,
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                           ),
                         ),
                       ],
@@ -976,11 +978,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                                 children: [
                                   Text(
                                     '🚨 SOS: ${lastSos.userName} NEEDS HELP!',
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                                   ),
                                   Text(
                                     'Type: ${lastSos.alertType}',
-                                    style: const TextStyle(color: Colors.white70, fontSize: 10),
+                                    style: TextStyle(color: Colors.white70, fontSize: 10),
                                   ),
                                 ],
                               ),
@@ -988,7 +990,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                             if (lastSos.lat != 0.0 && lastSos.lng != 0.0)
                               IconButton(
                                 tooltip: 'Focus on Map',
-                                icon: const Icon(Icons.location_searching, color: Colors.white, size: 18),
+                                icon: Icon(Icons.location_searching, color: AppTheme.textPrimary, size: 18),
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints(),
                                 onPressed: () {
@@ -999,7 +1001,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                             const SizedBox(width: 8),
                             IconButton(
                               tooltip: 'Acknowledge & Dismiss',
-                              icon: const Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+                              icon: Icon(Icons.check_circle_outline, color: AppTheme.textPrimary, size: 20),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
                               onPressed: () {
@@ -1026,7 +1028,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                       IconButton(
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
-                        icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                        icon: Icon(Icons.arrow_back, color: AppTheme.textPrimary, size: 20),
                         onPressed: () => Navigator.pop(context),
                       ),
                       const SizedBox(width: 10),
@@ -1036,8 +1038,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                           children: [
                             Text(
                               convoy.name,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: AppTheme.textPrimary,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14,
                               ),
@@ -1047,7 +1049,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                               '${metrics.activeRiderCount} online · ${metrics.spreadKm.toStringAsFixed(1)} km spread · ${metrics.averageSpeedKmh.toStringAsFixed(0)} km/h avg',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10),
+                              style: TextStyle(color: AppTheme.textSecondary, fontSize: 10),
                             ),
                           ],
                         ),
@@ -1073,7 +1075,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                         tooltip: 'End Ride',
-                        icon: const Icon(Icons.flag_circle, color: AppTheme.hyperAmber, size: 22),
+                        icon: Icon(Icons.flag_circle, color: AppTheme.hyperAmber, size: 22),
                         onPressed: () => _showEndTripDialog(context, convoy),
                       ),
                     ],

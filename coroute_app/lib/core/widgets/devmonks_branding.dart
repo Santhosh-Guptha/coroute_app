@@ -20,11 +20,11 @@ class DevMonksBadge extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.bolt, color: AppTheme.neonCyan, size: 12),
+            Icon(Icons.bolt, color: AppTheme.neonCyan, size: 12),
             const SizedBox(width: 4),
             Text(
               AppConstants.brandName,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.neonCyan,
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
@@ -55,7 +55,7 @@ class DevMonksBadge extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.all(4),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: AppTheme.devmonksPurple,
             ),
@@ -63,7 +63,7 @@ class DevMonksBadge extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           RichText(
-            text: const TextSpan(
+            text: TextSpan(
               children: [
                 TextSpan(
                   text: 'Powered by ',
@@ -127,7 +127,7 @@ class CoRouteHeaderLogo extends StatelessWidget {
             Text(
               AppConstants.appName,
               style: TextStyle(
-                color: Colors.white,
+                color: AppTheme.textPrimary,
                 fontSize: 26 * scale,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 1.2,

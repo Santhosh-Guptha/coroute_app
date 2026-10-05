@@ -11,6 +11,7 @@ import '../../data/models/trip_history_model.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../data/services/auth_service.dart';
 import '../report/trip_report_screen.dart';
+import '../../core/theme/map_tiles.dart';
 
 class TripHistoryScreen extends StatefulWidget {
   const TripHistoryScreen({super.key});
@@ -60,7 +61,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
         title: const Text('Trip History & Replay'),
         actions: [
           if (_isSyncing)
-            const Padding(
+            Padding(
               padding: EdgeInsets.all(16),
               child: SizedBox(
                 width: 18,
@@ -71,13 +72,13 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
           else
             IconButton(
               tooltip: 'Sync with cloud',
-              icon: const Icon(Icons.cloud_sync, color: AppTheme.neonCyan),
+              icon: Icon(Icons.cloud_sync, color: AppTheme.neonCyan),
               onPressed: _triggerSync,
             ),
         ],
       ),
       body: trips.isEmpty
-          ? const Center(
+          ? Center(
               child: Text(
                 'No recorded trips yet.\nStart a ride to automatically capture full telemetry.',
                 textAlign: TextAlign.center,
@@ -115,7 +116,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                                 color: AppTheme.neonCyan.withOpacity(0.15),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(Icons.two_wheeler, color: AppTheme.neonCyan, size: 20),
+                              child: Icon(Icons.two_wheeler, color: AppTheme.neonCyan, size: 20),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
@@ -124,21 +125,21 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                                 children: [
                                   Text(
                                     trip.tripName,
-                                    style: const TextStyle(
-                                      color: Colors.white,
+                                    style: TextStyle(
+                                      color: AppTheme.textPrimary,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 15,
                                     ),
                                   ),
                                   Text(
                                     dateStr,
-                                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                                   ),
                                 ],
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline, color: AppTheme.textMuted, size: 20),
+                              icon: Icon(Icons.delete_outline, color: AppTheme.textMuted, size: 20),
                               onPressed: () {
                                 tripStorage.deleteTrip(trip.tripId);
                               },
@@ -156,7 +157,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                           ],
                         ),
                         const SizedBox(height: 12),
-                        const Row(
+                        Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
                             Text(
@@ -182,7 +183,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
   Widget _buildTripStat(String label, String value, Color color) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+        Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
         const SizedBox(height: 2),
         Text(
           value,
@@ -220,6 +221,7 @@ class TripReplayDetailScreen extends StatelessWidget {
               ),
               children: [
                 TileLayer(
+                  tileBuilder: mapTileBuilder,
                   urlTemplate: AppConstants.osmTileUrl,
                   userAgentPackageName: AppConstants.osmUserAgent,
                 ),
@@ -241,14 +243,14 @@ class TripReplayDetailScreen extends StatelessWidget {
                         point: points.first,
                         width: 32,
                         height: 32,
-                        child: const Icon(Icons.location_on, color: AppTheme.emeraldSafe, size: 30),
+                        child: Icon(Icons.location_on, color: AppTheme.emeraldSafe, size: 30),
                       ),
                       // End Marker
                       Marker(
                         point: points.last,
                         width: 32,
                         height: 32,
-                        child: const Icon(Icons.flag, color: AppTheme.hyperAmber, size: 28),
+                        child: Icon(Icons.flag, color: AppTheme.hyperAmber, size: 28),
                       ),
                     ],
                   ),
@@ -261,7 +263,7 @@ class TripReplayDetailScreen extends StatelessWidget {
             flex: 4,
             child: Container(
               padding: const EdgeInsets.all(20),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: AppTheme.slateCard,
                 borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(24),
@@ -274,17 +276,16 @@ class TripReplayDetailScreen extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
+                      Expanded(child: Text(
                         trip.tripName,
-                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
+                        style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
                       const DevMonksBadge(isCompact: true),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Text(
                     '${trip.startLocationName} ──► ${trip.destinationName}',
-                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                   ),
                   const SizedBox(height: 18),
                   Row(
@@ -322,8 +323,8 @@ class TripReplayDetailScreen extends StatelessWidget {
       children: [
         Icon(icon, color: AppTheme.neonCyan, size: 22),
         const SizedBox(height: 6),
-        Text(value, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-        Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+        Text(value, style: TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.bold)),
+        Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
       ],
     );
   }

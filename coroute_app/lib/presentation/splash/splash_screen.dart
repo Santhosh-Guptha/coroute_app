@@ -131,7 +131,7 @@ class _SplashScreenState extends State<SplashScreen>
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: const RadialGradient(
+                      gradient: RadialGradient(
                         colors: [AppTheme.slateCard, AppTheme.obsidianVoid],
                       ),
                       border: Border.all(color: AppTheme.neonCyan, width: 2),
@@ -143,7 +143,7 @@ class _SplashScreenState extends State<SplashScreen>
                         ),
                       ],
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.navigation_rounded,
                       color: AppTheme.neonCyan,
                       size: 56,
@@ -153,8 +153,8 @@ class _SplashScreenState extends State<SplashScreen>
                 const SizedBox(height: 28),
                 Text(
                   AppConstants.appName,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
                     fontSize: 34,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 2.0,
@@ -163,14 +163,14 @@ class _SplashScreenState extends State<SplashScreen>
                 const SizedBox(height: 6),
                 Text(
                   AppConstants.appTagline,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 13,
                     letterSpacing: 1.0,
                   ),
                 ),
                 const SizedBox(height: 36),
-                const SizedBox(
+                SizedBox(
                   width: 24,
                   height: 24,
                   child: CircularProgressIndicator(

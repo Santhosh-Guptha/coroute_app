@@ -52,19 +52,19 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.slateCard,
-        title: Text(promote ? 'Make $name an admin?' : 'Remove admin from $name?', style: const TextStyle(color: Colors.white, fontSize: 16)),
+        title: Text(promote ? 'Make $name an admin?' : 'Remove admin from $name?', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
         content: Text(
           promote
               ? 'Admins can see every convoy, broadcast fleet-wide alerts, dissolve convoys and manage roles.'
               : 'They will become a regular rider immediately.',
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: promote ? AppTheme.neonCyan : AppTheme.laserRed),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(promote ? 'Promote' : 'Demote', style: TextStyle(color: promote ? Colors.black : Colors.white)),
+            child: Text(promote ? 'Promote' : 'Demote', style: TextStyle(color: promote ? Colors.black : AppTheme.textPrimary)),
           ),
         ],
       ),
@@ -109,8 +109,8 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                 child: TextField(
                   onChanged: (v) => setState(() => _query = v),
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
+                  style: TextStyle(color: AppTheme.textPrimary),
+                  decoration: InputDecoration(
                     hintText: 'Search by name or e-mail',
                     prefixIcon: Icon(Icons.search_rounded, color: AppTheme.textMuted),
                   ),
@@ -121,15 +121,15 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                 child: Row(
                   children: [
                     Text('${_users.length} accounts · $adminCount admin${adminCount == 1 ? '' : 's'}',
-                        style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                        style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                   ],
                 ),
               ),
               Expanded(
                 child: _loading
-                    ? const Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
+                    ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
                     : _error != null
-                        ? Center(child: Text(_error!, style: const TextStyle(color: AppTheme.laserRed)))
+                        ? Center(child: Text(_error!, style: TextStyle(color: AppTheme.laserRed)))
                         : RefreshIndicator(
                             onRefresh: _load,
                             child: ListView.builder(
@@ -158,10 +158,10 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                                             children: [
                                               Text('${u['name'] ?? ''}${isMe ? ' (you)' : ''}',
                                                   overflow: TextOverflow.ellipsis,
-                                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                                                  style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
                                               Text('${u['email'] ?? ''} · ${u['provider'] ?? 'password'}',
                                                   overflow: TextOverflow.ellipsis,
-                                                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                                                  style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
                                             ],
                                           ),
                                         ),
@@ -171,7 +171,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                                             onPressed: isMe ? null : () => _setRole(u, AppConstants.riderRole),
                                             style: OutlinedButton.styleFrom(
                                               foregroundColor: AppTheme.laserRed,
-                                              side: const BorderSide(color: AppTheme.laserRed),
+                                              side: BorderSide(color: AppTheme.laserRed),
                                               visualDensity: VisualDensity.compact,
                                             ),
                                             child: const Text('Demote', style: TextStyle(fontSize: 12)),

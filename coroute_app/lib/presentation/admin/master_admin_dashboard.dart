@@ -12,6 +12,7 @@ import '../auth/access_gate_screen.dart';
 import 'admin_convoy_inspector.dart';
 import 'admin_insights_screen.dart';
 import 'admin_users_screen.dart';
+import '../../core/theme/map_tiles.dart';
 
 class MasterAdminDashboard extends StatefulWidget {
   const MasterAdminDashboard({super.key});
@@ -59,18 +60,18 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
       builder: (ctx) {
         return AlertDialog(
           backgroundColor: AppTheme.slateCard,
-          title: const Row(
+          title: Row(
             children: [
               Icon(Icons.campaign, color: AppTheme.hyperAmber),
               SizedBox(width: 8),
-              Text('Global Safety Broadcast', style: TextStyle(color: Colors.white, fontSize: 18)),
+              Flexible(child: Text('Global Safety Broadcast', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18))),
             ],
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'This alert will be broadcasted to all active convoys immediately on their map HUD.',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
               ),
@@ -78,7 +79,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
               TextField(
                 controller: _broadcastController,
                 maxLines: 2,
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: AppTheme.textPrimary),
                 decoration: const InputDecoration(
                   hintText: 'e.g. Heavy rain alert on NH-48. Reduce speed and regroup.',
                 ),
@@ -88,7 +89,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+              child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.hyperAmber),
@@ -132,38 +133,37 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
           children: [
             Container(
               padding: const EdgeInsets.all(6),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppTheme.devmonksPurple,
               ),
               child: const Icon(Icons.shield, color: Colors.white, size: 16),
             ),
             const SizedBox(width: 8),
-            const Text(
+            Flexible(child: const Text(
               'Master Admin Console',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
           ],
         ),
         actions: [
           IconButton(
             tooltip: 'Safety Broadcast',
-            icon: const Icon(Icons.campaign, color: AppTheme.hyperAmber),
+            icon: Icon(Icons.campaign, color: AppTheme.hyperAmber),
             onPressed: () => _showBroadcastDialog(context, convoyService),
           ),
           IconButton(
             tooltip: 'Feedback & analytics',
-            icon: const Icon(Icons.insights_rounded, color: AppTheme.neonCyan),
+            icon: Icon(Icons.insights_rounded, color: AppTheme.neonCyan),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminInsightsScreen())),
           ),
           IconButton(
             tooltip: 'Users & roles',
-            icon: const Icon(Icons.manage_accounts_rounded, color: AppTheme.devmonksPurple),
+            icon: Icon(Icons.manage_accounts_rounded, color: AppTheme.devmonksPurple),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())),
           ),
           IconButton(
             tooltip: 'Logout',
-            icon: const Icon(Icons.logout, color: AppTheme.textMuted),
+            icon: Icon(Icons.logout, color: AppTheme.textMuted),
             onPressed: () async {
               await auth.logout();
               if (context.mounted) {
@@ -194,12 +194,12 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.admin_panel_settings, color: AppTheme.neonCyan, size: 18),
+                  Icon(Icons.admin_panel_settings, color: AppTheme.neonCyan, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Root Access: ${auth.currentUserEmail}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -248,15 +248,15 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'CoRoute Gateway · Oracle Autonomous DB',
-                          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.bold),
                         ),
                         Text(
                           isOnline
                               ? 'Realtime link up · fleet updates pushed live'
                               : 'Reconnecting to gateway…',
-                          style: const TextStyle(color: AppTheme.textMuted, fontSize: 10),
+                          style: TextStyle(color: AppTheme.textMuted, fontSize: 10),
                         ),
                       ],
                     ),
@@ -267,7 +267,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                       color: AppTheme.devmonksPurple.withOpacity(0.3),
                       borderRadius: BorderRadius.circular(6),
                     ),
-                    child: const Text('LIVE', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    child: Text('LIVE', style: TextStyle(color: AppTheme.textPrimary, fontSize: 10, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -315,9 +315,9 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             const SizedBox(height: 20),
 
             // Fleet Radar Map
-            const Text(
+            Text(
               'Global Fleet Radar',
-              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 10),
             ClipRRect(
@@ -334,6 +334,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                   ),
                   children: [
                     TileLayer(
+                      tileBuilder: mapTileBuilder,
                       urlTemplate: AppConstants.osmTileUrl,
                       userAgentPackageName: AppConstants.osmUserAgent,
                     ),
@@ -351,7 +352,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                                 border: Border.all(color: Colors.black, width: 2),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.5),
+                                    color: AppTheme.shadow,
                                     blurRadius: 4,
                                   ),
                                 ],
@@ -377,20 +378,20 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
+                Text(
                   'Active Convoys',
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 Text(
                   '${convoys.length} live sessions',
-                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                  style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                 ),
               ],
             ),
             const SizedBox(height: 10),
 
             if (convoys.isEmpty)
-              const Center(
+              Center(
                 child: Padding(
                   padding: EdgeInsets.all(24),
                   child: Text(
@@ -423,7 +424,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                                 color: AppTheme.neonCyan.withOpacity(0.15),
                                 borderRadius: BorderRadius.circular(10),
                               ),
-                              child: const Icon(Icons.group_work, color: AppTheme.neonCyan, size: 20),
+                              child: Icon(Icons.group_work, color: AppTheme.neonCyan, size: 20),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -432,15 +433,15 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                                 children: [
                                   Text(
                                     convoy.name,
-                                    style: const TextStyle(
-                                      color: Colors.white,
+                                    style: TextStyle(
+                                      color: AppTheme.textPrimary,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 15,
                                     ),
                                   ),
                                   Text(
                                     'Code: ${convoy.joinCode} · Lead: ${convoy.createdByUserName}',
-                                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                                   ),
                                 ],
                               ),
@@ -453,11 +454,11 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.people, size: 12, color: AppTheme.emeraldSafe),
+                                  Icon(Icons.people, size: 12, color: AppTheme.emeraldSafe),
                                   const SizedBox(width: 4),
                                   Text(
                                     '${convoy.riders.length}',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: AppTheme.emeraldSafe,
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
@@ -472,11 +473,10 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
+                            Expanded(child: Text(
                               'Destination: ${convoy.destinationName.ifEmpty ? 'Open Highway' : convoy.destinationName}',
-                              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
-                            ),
-                            const Row(
+                              style: TextStyle(color: AppTheme.textMuted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                            Row(
                               children: [
                                 Text(
                                   'Inspect Telemetry',
@@ -530,13 +530,13 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                    style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     value,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),

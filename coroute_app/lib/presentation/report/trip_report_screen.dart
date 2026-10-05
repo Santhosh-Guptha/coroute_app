@@ -151,12 +151,12 @@ class _TripReportScreenState extends State<TripReportScreen> {
             IconButton(
               tooltip: 'Share my route (GPX)',
               icon: _sharing
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan))
-                  : const Icon(Icons.route_rounded, color: AppTheme.neonCyan),
+                  ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan))
+                  : Icon(Icons.route_rounded, color: AppTheme.neonCyan),
               onPressed: _sharing ? null : _shareGpx,
             ),
           ],
-          bottom: const TabBar(
+          bottom: TabBar(
             indicatorColor: AppTheme.neonCyan,
             labelColor: AppTheme.neonCyan,
             unselectedLabelColor: AppTheme.textMuted,
@@ -164,11 +164,11 @@ class _TripReportScreenState extends State<TripReportScreen> {
           ),
         ),
         body: _loading
-            ? const Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
+            ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
             : _error != null
                 ? Center(
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Text(_error!, style: const TextStyle(color: AppTheme.laserRed), textAlign: TextAlign.center),
+                      Text(_error!, style: TextStyle(color: AppTheme.laserRed), textAlign: TextAlign.center),
                       const SizedBox(height: 12),
                       OutlinedButton(onPressed: _load, child: const Text('Try again')),
                     ]),
@@ -190,9 +190,9 @@ class _TripReportScreenState extends State<TripReportScreen> {
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.slow_motion_video_rounded, color: AppTheme.neonCyan, size: 48),
+          Icon(Icons.slow_motion_video_rounded, color: AppTheme.neonCyan, size: 48),
           const SizedBox(height: 12),
-          const Text('Watch the whole group ride again. Drag the time bar to see where everyone was at any moment.',
+          Text('Watch the whole group ride again. Drag the time bar to see where everyone was at any moment.',
               textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary)),
           const SizedBox(height: 16),
           ElevatedButton.icon(
@@ -233,15 +233,15 @@ class _TripReportScreenState extends State<TripReportScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text(dateFmt.format(DateTime.fromMillisecondsSinceEpoch(t.startTimeEpochMs)), style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+        Text(dateFmt.format(DateTime.fromMillisecondsSinceEpoch(t.startTimeEpochMs)), style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
         if (t.startLocationName.isNotEmpty || t.destinationName.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text('${t.startLocationName.isEmpty ? 'Start' : t.startLocationName}  to  ${t.destinationName.isEmpty ? 'destination' : t.destinationName}',
-                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w600)),
           ),
         const SizedBox(height: 14),
-        const Text('YOUR RIDE', style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+        Text('YOUR RIDE', style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
         const SizedBox(height: 8),
         LayoutBuilder(builder: (context, c) {
           final cols = c.maxWidth > 700 ? 4 : 2;
@@ -253,16 +253,16 @@ class _TripReportScreenState extends State<TripReportScreen> {
                 child: GlassCard(
                   padding: const EdgeInsets.all(12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                    Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
                     const SizedBox(height: 4),
-                    Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(value, style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
                   ]),
                 ),
               ),
           ]);
         }),
         if (me != null && !me.trackAvailable)
-          const Padding(
+          Padding(
             padding: EdgeInsets.only(top: 10),
             child: Text('Your phone did not upload a route for this trip, so distance and riding time are estimates.',
                 style: TextStyle(color: AppTheme.hyperAmber, fontSize: 12)),
@@ -270,15 +270,15 @@ class _TripReportScreenState extends State<TripReportScreen> {
         if (r != null) ...[
           const SizedBox(height: 22),
           Text('THE GROUP: ${r.memberCount} RIDERS, ${r.arrived} ARRIVED${r.plannedStops > 0 ? ', ${r.visitedStops} OF ${r.plannedStops} STOPS' : ''}${r.sos > 0 ? ', ${r.sos} SOS' : ''}',
-              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+              style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
           const SizedBox(height: 8),
           GlassCard(
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
-                headingTextStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold),
-                dataTextStyle: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                headingTextStyle: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold),
+                dataTextStyle: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                 columnSpacing: 18,
                 horizontalMargin: 12,
                 columns: const [
@@ -325,9 +325,9 @@ class _TripReportScreenState extends State<TripReportScreen> {
           Text(
               'Distance, average and top speed come from each rider\'s recorded route. n/a: that phone did not upload a route.'
               '${r.speedLimitKmh > 0 ? ' Over limit: times above the group limit of ${r.speedLimitKmh} km/h, total time and top speed.' : ''}',
-              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+              style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
         ] else
-          const Padding(
+          Padding(
             padding: EdgeInsets.only(top: 18),
             child: Text('The group report is being prepared. It is ready about a minute after the trip ends.',
                 style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),

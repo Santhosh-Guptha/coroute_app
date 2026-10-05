@@ -148,7 +148,7 @@ class _TimelineListState extends State<TimelineList> {
                     selectedColor: AppTheme.neonCyan.withOpacity(0.2),
                     labelStyle: TextStyle(color: _filter == f ? AppTheme.neonCyan : AppTheme.textSecondary, fontSize: 12),
                     backgroundColor: AppTheme.slateCard,
-                    side: const BorderSide(color: AppTheme.subtleBorder),
+                    side: BorderSide(color: AppTheme.subtleBorder),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     showCheckmark: false,
                   ),
@@ -172,9 +172,9 @@ class _TimelineListState extends State<TimelineList> {
                       selected: _members.contains(entry.key),
                       onSelected: (on) => setState(() => on ? _members.add(entry.key) : _members.remove(entry.key)),
                       selectedColor: (widget.colors[entry.key] ?? AppTheme.neonCyan).withOpacity(0.18),
-                      labelStyle: const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+                      labelStyle: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
                       backgroundColor: AppTheme.slateCard,
-                      side: const BorderSide(color: AppTheme.subtleBorder),
+                      side: BorderSide(color: AppTheme.subtleBorder),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       showCheckmark: false,
                     ),
@@ -185,7 +185,7 @@ class _TimelineListState extends State<TimelineList> {
         Expanded(
           child: rows.isEmpty
               ? (widget.emptyState ??
-                  const Center(child: Text('Nothing here yet.', style: TextStyle(color: AppTheme.textMuted))))
+                  Center(child: Text('Nothing here yet.', style: TextStyle(color: AppTheme.textMuted))))
               : ListView(padding: const EdgeInsets.fromLTRB(12, 4, 12, 24), children: rows),
         ),
       ],
@@ -200,7 +200,7 @@ class _HourHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(4, 14, 4, 6),
-        child: Text(text.toUpperCase(), style: const TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+        child: Text(text.toUpperCase(), style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
       );
 }
 
@@ -227,7 +227,7 @@ class _EventRow extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(width: 44, child: Text(time, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontFeatures: [FontFeature.tabularFigures()]))),
+            SizedBox(width: 44, child: Text(time, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontFeatures: [FontFeature.tabularFigures()]))),
             Container(
               width: 30,
               height: 30,
@@ -251,7 +251,7 @@ class _EventRow extends StatelessWidget {
                       if (!e.isGroupEntry) ...[Icon(icon, size: 14, color: tone), const SizedBox(width: 5)],
                       Expanded(
                         child: Text(TimelineText.title(e, nowMs: nowMs),
-                            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+                            style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
                       ),
                       if (e.open)
                         Container(
@@ -264,10 +264,10 @@ class _EventRow extends StatelessWidget {
                   ),
                   if (detail.isNotEmpty) ...[
                     const SizedBox(height: 2),
-                    Text(detail, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                    Text(detail, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                   ],
                   if (e.hasPlace && onTap != null)
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.only(top: 2),
                       child: Text('Show on map', style: TextStyle(color: AppTheme.neonCyan, fontSize: 11)),
                     ),

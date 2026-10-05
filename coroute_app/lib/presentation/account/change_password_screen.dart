@@ -51,7 +51,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (res['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password changed.'), backgroundColor: AppTheme.emeraldSafe));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Password changed.'), backgroundColor: AppTheme.emeraldSafe));
       Navigator.pop(context, true);
     } else {
       setState(() => _error = res['error']?.toString() ?? 'Could not change the password.');
@@ -60,7 +60,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
   InputDecoration _dec(String label) => InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(color: AppTheme.textMuted),
+        labelStyle: TextStyle(color: AppTheme.textMuted),
         filled: true,
         fillColor: AppTheme.elevatedCard,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -84,7 +84,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               padding: const EdgeInsets.all(20),
               children: [
                 if (widget.forced)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.only(bottom: 16),
                     child: Text(
                       'You signed in with a temporary password. Choose a new one to continue.',
@@ -92,15 +92,15 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                     ),
                   ),
                 if (!widget.forced) ...[
-                  TextField(controller: _current, obscureText: _obscure, style: const TextStyle(color: Colors.white), decoration: _dec('Current password')),
+                  TextField(controller: _current, obscureText: _obscure, style: TextStyle(color: AppTheme.textPrimary), decoration: _dec('Current password')),
                   const SizedBox(height: 12),
                 ],
-                TextField(controller: _next, obscureText: _obscure, style: const TextStyle(color: Colors.white), decoration: _dec('New password (8+ characters)')),
+                TextField(controller: _next, obscureText: _obscure, style: TextStyle(color: AppTheme.textPrimary), decoration: _dec('New password (8+ characters)')),
                 const SizedBox(height: 12),
-                TextField(controller: _confirm, obscureText: _obscure, style: const TextStyle(color: Colors.white), decoration: _dec('Repeat new password')),
+                TextField(controller: _confirm, obscureText: _obscure, style: TextStyle(color: AppTheme.textPrimary), decoration: _dec('Repeat new password')),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
-                  Text(_error!, style: const TextStyle(color: AppTheme.laserRed, fontSize: 13)),
+                  Text(_error!, style: TextStyle(color: AppTheme.laserRed, fontSize: 13)),
                 ],
                 const SizedBox(height: 20),
                 ElevatedButton(

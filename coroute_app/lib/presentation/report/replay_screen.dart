@@ -9,6 +9,7 @@ import '../../core/theme/app_theme.dart';
 import '../../data/services/api_client.dart';
 import '../../domain/tracking/replay_math.dart';
 import '../timeline/member_colors.dart';
+import '../../core/theme/map_tiles.dart';
 
 /// Replays a convoy: drag the time slider (or press play) and every rider's
 /// marker moves to where they were at that moment, with a 10-minute tail.
@@ -119,9 +120,9 @@ class _ReplayScreenState extends State<ReplayScreen> {
       backgroundColor: AppTheme.obsidianVoid,
       appBar: AppBar(title: Text(widget.title)),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
+          ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
           : _error != null
-              ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: AppTheme.laserRed))))
+              ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.laserRed))))
               : LayoutBuilder(builder: (context, c) {
                   final wide = c.maxWidth > c.maxHeight && c.maxWidth > 700;
                   final map = _map();
@@ -144,7 +145,7 @@ class _ReplayScreenState extends State<ReplayScreen> {
         initialCameraFit: (widget.pin == null && bounds != null) ? CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)) : null,
       ),
       children: [
-        TileLayer(urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
+        TileLayer(tileBuilder: mapTileBuilder, urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
         PolylineLayer(polylines: [
           for (final t in _tracks)
             Polyline(
@@ -161,7 +162,7 @@ class _ReplayScreenState extends State<ReplayScreen> {
         ]),
         MarkerLayer(markers: [
           if (widget.pin != null)
-            Marker(point: widget.pin!, width: 36, height: 36, child: const Icon(Icons.location_on, color: AppTheme.hyperAmber, size: 34)),
+            Marker(point: widget.pin!, width: 36, height: 36, child: Icon(Icons.location_on, color: AppTheme.hyperAmber, size: 34)),
           for (final t in _tracks)
             if (t.positionAt(_t) != null)
               Marker(
@@ -196,7 +197,7 @@ class _ReplayScreenState extends State<ReplayScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_tracks.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Text('No recorded route for this trip yet. Routes appear a minute after riders move.',
                     textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textMuted, fontSize: 13)),
@@ -211,11 +212,11 @@ class _ReplayScreenState extends State<ReplayScreen> {
                   ),
                   Expanded(
                     child: Text(_t > 0 ? fmt.format(DateTime.fromMillisecondsSinceEpoch(_t)) : '',
-                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
+                        style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
                   ),
                   TextButton(
                     onPressed: () => setState(() => _speedIndex = (_speedIndex + 1) % _speeds.length),
-                    child: Text('${_speeds[_speedIndex]}x', style: const TextStyle(color: AppTheme.neonCyan)),
+                    child: Text('${_speeds[_speedIndex]}x', style: TextStyle(color: AppTheme.neonCyan)),
                   ),
                 ],
               ),
@@ -237,10 +238,9 @@ class _ReplayScreenState extends State<ReplayScreen> {
                       children: [
                         CircleAvatar(radius: 5, backgroundColor: _colors[t.userId] ?? AppTheme.neonCyan),
                         const SizedBox(width: 5),
-                        Text(
+                        Flexible(child: Text(
                           t.positionAt(_t) == null ? '${t.name}: no data' : '${t.name}: ${t.positionAt(_t)!.kmh.round()} km/h',
-                          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                        ),
+                          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
                       ],
                     ),
                 ],

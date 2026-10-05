@@ -1,7 +1,6 @@
 class AppConstants {
   static const String appName = 'CoRoute';
   static const String appTagline = 'Ride Together. Stay Safe.';
-  static const String appVersion = '3.0.0 (Build 60)';
 
   // DevMonks.space branding
   static const String brandName = 'devmonks.space';

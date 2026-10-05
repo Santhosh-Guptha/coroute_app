@@ -15,6 +15,7 @@ import '../../domain/timeline/timeline_text.dart';
 import '../map_picker/map_picker_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../rider/convoy_dashboard_screen.dart';
+import '../../core/theme/map_tiles.dart';
 
 /// Plan a trip before starting it: name, start, destination and any number
 /// of stops, all picked on the map, with a live route preview through every
@@ -216,11 +217,11 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       mapController: _map,
       options: MapOptions(initialCenter: center, initialZoom: 11, onMapReady: _fit),
       children: [
-        TileLayer(urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
+        TileLayer(tileBuilder: mapTileBuilder, urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
         if (line.length >= 2) PolylineLayer(polylines: [Polyline(points: line, strokeWidth: 5, color: AppTheme.neonCyan)]),
         MarkerLayer(markers: [
           if (_start != null)
-            Marker(point: LatLng(_start!.lat, _start!.lng), width: 30, height: 30, child: const Icon(Icons.trip_origin_rounded, color: AppTheme.emeraldSafe, size: 24)),
+            Marker(point: LatLng(_start!.lat, _start!.lng), width: 30, height: 30, child: Icon(Icons.trip_origin_rounded, color: AppTheme.emeraldSafe, size: 24)),
           for (var i = 0; i < _stops.length; i++)
             Marker(
               point: LatLng(_stops[i].lat, _stops[i].lng),
@@ -233,7 +234,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
               ),
             ),
           if (_destination != null)
-            Marker(point: LatLng(_destination!.lat, _destination!.lng), width: 34, height: 34, child: const Icon(Icons.sports_score_rounded, color: AppTheme.laserRed, size: 30)),
+            Marker(point: LatLng(_destination!.lat, _destination!.lng), width: 34, height: 34, child: Icon(Icons.sports_score_rounded, color: AppTheme.laserRed, size: 30)),
         ]),
       ],
     );
@@ -243,9 +244,9 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 4),
       leading: Icon(icon, color: color),
-      title: Text(label, style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-      subtitle: Text(place?.name ?? empty, style: TextStyle(color: place == null ? AppTheme.neonCyan : Colors.white, fontSize: 15)),
-      trailing: const Icon(Icons.edit_location_alt_rounded, color: AppTheme.textSecondary),
+      title: Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+      subtitle: Text(place?.name ?? empty, style: TextStyle(color: place == null ? AppTheme.neonCyan : AppTheme.textPrimary, fontSize: 15)),
+      trailing: Icon(Icons.edit_location_alt_rounded, color: AppTheme.textSecondary),
       onTap: onTap,
     );
   }
@@ -258,7 +259,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       children: [
         TextField(
           controller: _name,
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: AppTheme.textPrimary),
           textCapitalization: TextCapitalization.sentences,
           decoration: const InputDecoration(labelText: 'Trip name', hintText: 'e.g. Sunday ride to Srisailam', prefixIcon: Icon(Icons.flag_rounded)),
         ),
@@ -286,26 +287,26 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
               title: Row(children: [
                 Icon(_categoryIcons[s.category] ?? Icons.place_rounded, size: 16, color: AppTheme.textSecondary),
                 const SizedBox(width: 6),
-                Expanded(child: Text(s.name, style: const TextStyle(color: Colors.white, fontSize: 14), overflow: TextOverflow.ellipsis)),
+                Expanded(child: Text(s.name, style: TextStyle(color: AppTheme.textPrimary, fontSize: 14), overflow: TextOverflow.ellipsis)),
               ]),
               subtitle: Text(
                 [
                   if (leg != null) '${TimelineText.distance(leg.distanceM)}, ${TimelineText.duration(Duration(seconds: leg.durationS))} from previous',
                   if (s.plannedDwellMin > 0) 'stay ${s.plannedDwellMin} min',
                 ].join(' · '),
-                style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
               ),
               onTap: () => _editStop(i),
               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                 IconButton(
                   tooltip: 'Remove stop',
-                  icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 20),
+                  icon: Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 20),
                   onPressed: () {
                     setState(() => _stops.removeAt(i));
                     _refreshRoute();
                   },
                 ),
-                ReorderableDragStartListener(index: i, child: const Icon(Icons.drag_handle_rounded, color: AppTheme.textSecondary)),
+                ReorderableDragStartListener(index: i, child: Icon(Icons.drag_handle_rounded, color: AppTheme.textSecondary)),
               ]),
             );
           },
@@ -319,7 +320,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         _placeTile(icon: Icons.sports_score_rounded, color: AppTheme.laserRed, label: 'DESTINATION', place: _destination, onTap: _pickDestination),
         const SizedBox(height: 10),
         if (_routing)
-          const Row(children: [
+          Row(children: [
             SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan)),
             SizedBox(width: 8),
             Text('Working out the route...', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
@@ -329,22 +330,22 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: AppTheme.emeraldSafe.withOpacity(0.10), borderRadius: BorderRadius.circular(10), border: Border.all(color: AppTheme.emeraldSafe.withOpacity(0.35))),
             child: Row(children: [
-              const Icon(Icons.directions_rounded, color: AppTheme.emeraldSafe),
+              Icon(Icons.directions_rounded, color: AppTheme.emeraldSafe),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   '${TimelineText.distance(r.distanceM)} · about ${TimelineText.duration(Duration(seconds: r.durationS))} riding'
                   '${_stops.isEmpty ? '' : ' · ${_stops.length} stop${_stops.length == 1 ? '' : 's'}'}',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600),
                 ),
               ),
             ]),
           )
         else if (_waypoints.length >= 2)
-          const Text('Route preview is not available right now. The trip can still start; the route is worked out on the server.',
+          Text('Route preview is not available right now. The trip can still start; the route is worked out on the server.',
               style: TextStyle(color: AppTheme.textMuted, fontSize: 12))
         else
-          const Text('Pick a destination to see the route. Stops are optional and can be added during the ride too.',
+          Text('Pick a destination to see the route. Stops are optional and can be added during the ride too.',
               style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
       ],
     );

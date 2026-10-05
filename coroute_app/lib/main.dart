@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'core/constants/app_constants.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/theme_controller.dart';
 import 'data/services/alert_service.dart';
 import 'data/services/api_client.dart';
 import 'data/services/auth_service.dart';
@@ -30,22 +31,23 @@ void main() async {
   BackgroundService.initCommunicationPort();
   // Portrait + landscape are both supported; layouts adapt to width.
   await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
-    systemNavigationBarColor: AppTheme.obsidianVoid,
-    systemNavigationBarIconBrightness: Brightness.light,
-  ));
-  runApp(const CoRouteApp());
+  // Light or dark is decided before the first frame, so there is no flash.
+  await MetaService.readPackageInfo();
+  final theme = ThemeController();
+  await theme.load();
+  SystemChrome.setSystemUIOverlayStyle(AppTheme.overlayStyle);
+  runApp(CoRouteApp(theme: theme));
 }
 
 class CoRouteApp extends StatelessWidget {
-  const CoRouteApp({super.key});
+  final ThemeController theme;
+  const CoRouteApp({super.key, required this.theme});
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider<ThemeController>.value(value: theme),
         ChangeNotifierProvider(create: (_) => ApiClient()),
         ChangeNotifierProvider(create: (ctx) {
           final api = ctx.read<ApiClient>();
@@ -73,7 +75,7 @@ class CoRouteApp extends StatelessWidget {
             ctx.read<TripStorageService>(),
             recorder: ctx.read<TrackRecorder>(),
             timeline: ctx.read<TimelineService>(),
-          ),
+          )..addListener(() => _notePosition(ctx)),
         ),
         ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>())),
         // Trip alerts (SOS, stopped, separated, no signal, arrivals), separate from the ongoing status.
@@ -92,16 +94,27 @@ class CoRouteApp extends StatelessWidget {
   }
 }
 
+/// Keeps automatic light/dark accurate as the rider travels, using the
+/// position the convoy already shares (no extra GPS work).
+void _notePosition(BuildContext ctx) {
+  final convoys = ctx.read<ConvoyService>();
+  final me = convoys.myUserId == null ? null : convoys.activeConvoy?.riders[convoys.myUserId];
+  if (me != null) ctx.read<ThemeController>().notePosition(me.lat, me.lng);
+}
+
 class _App extends StatelessWidget {
   const _App();
 
   @override
   Widget build(BuildContext context) {
+    final theme = context.watch<ThemeController>();
     return MaterialApp(
       navigatorKey: appNavigatorKey,
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
+      theme: AppTheme.themeFor(theme.palette),
+      // Colours switch at once everywhere; a cross-fade would mix the two themes.
+      themeAnimationDuration: Duration.zero,
       home: const SplashScreen(),
       builder: (context, child) {
         // Clamp runaway system font scaling so HUD layouts never overflow.
@@ -137,9 +150,9 @@ class _UpdateGate extends StatelessWidget {
               children: [
                 Image.asset('assets/branding/coroute_icon.png', width: 72, height: 72),
                 const SizedBox(height: 18),
-                const Text('Update required', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                Text('Update required', style: TextStyle(color: AppTheme.textPrimary, fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'This version of CoRoute no longer works with the convoy service. Install the latest version to keep riding with your group.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),

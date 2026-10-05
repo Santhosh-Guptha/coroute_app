@@ -28,7 +28,7 @@ class IntercomDock extends StatelessWidget {
 
     return Container(
       padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14, vertical: compact ? 6 : 10),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.slateCard,
         border: Border(top: BorderSide(color: AppTheme.glassBorder)),
       ),
@@ -39,7 +39,7 @@ class IntercomDock extends StatelessWidget {
           children: [
             if (ic.isReceiving) _SpeakerBadge(name: ic.activeSpeakerName!, isPrivate: ic.activeSpeakerIsPrivate),
             if (ic.busyWith != null) _InfoChip(icon: Icons.hourglass_top_rounded, text: '${ic.busyWith} is talking — wait for a gap', color: AppTheme.hyperAmber),
-            if (!ic.isOnline) const _InfoChip(icon: Icons.cloud_off_rounded, text: 'Reconnecting to convoy radio…', color: AppTheme.textMuted),
+            if (!ic.isOnline) _InfoChip(icon: Icons.cloud_off_rounded, text: 'Reconnecting to convoy radio…', color: AppTheme.textMuted),
             Row(
               children: [
                 Expanded(child: _TalkTargetChip(others: others, ic: ic)),
@@ -59,7 +59,7 @@ class IntercomDock extends StatelessWidget {
                 IconButton(
                   tooltip: ic.isDeafened ? 'Hear convoy' : 'Deafen',
                   visualDensity: VisualDensity.compact,
-                  icon: Icon(ic.isDeafened ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: ic.isDeafened ? AppTheme.laserRed : Colors.white),
+                  icon: Icon(ic.isDeafened ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: ic.isDeafened ? AppTheme.laserRed : AppTheme.textPrimary),
                   onPressed: () => ic.setDeafened(!ic.isDeafened),
                 ),
                 Expanded(child: ic.mode == IntercomMode.ptt ? _PttButton(ic: ic) : _VoxButton(ic: ic)),
@@ -180,35 +180,35 @@ class _TalkTargetChip extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Padding(
+                Padding(
                   padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
-                  child: Text('Who should hear you?', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                  child: Text('Who should hear you?', style: TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.bold)),
                 ),
                 Flexible(
                   child: ListView(
                     shrinkWrap: true,
                     children: [
                       ListTile(
-                        leading: const Icon(Icons.groups_rounded, color: AppTheme.neonCyan),
-                        title: const Text('Everyone in the convoy', style: TextStyle(color: Colors.white)),
-                        subtitle: const Text('Group channel', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
-                        trailing: !ic.isPrivateTalk ? const Icon(Icons.check_rounded, color: AppTheme.neonCyan) : null,
+                        leading: Icon(Icons.groups_rounded, color: AppTheme.neonCyan),
+                        title: Text('Everyone in the convoy', style: TextStyle(color: AppTheme.textPrimary)),
+                        subtitle: Text('Group channel', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                        trailing: !ic.isPrivateTalk ? Icon(Icons.check_rounded, color: AppTheme.neonCyan) : null,
                         onTap: () {
                           ic.setTalkTarget();
                           Navigator.pop(ctx);
                         },
                       ),
                       if (others.isEmpty)
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.all(16),
                           child: Text('No other riders online yet.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                         ),
                       for (final r in others)
                         ListTile(
-                          leading: const Icon(Icons.person_rounded, color: AppTheme.devmonksPurple),
-                          title: Text(r.name, style: const TextStyle(color: Colors.white)),
-                          subtitle: Text('Private 1:1 • ${r.role} • ${r.vehicleType}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
-                          trailing: ic.talkTargetUserId == r.userId ? const Icon(Icons.check_rounded, color: AppTheme.devmonksPurple) : null,
+                          leading: Icon(Icons.person_rounded, color: AppTheme.devmonksPurple),
+                          title: Text(r.name, style: TextStyle(color: AppTheme.textPrimary)),
+                          subtitle: Text('Private 1:1 • ${r.role} • ${r.vehicleType}', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                          trailing: ic.talkTargetUserId == r.userId ? Icon(Icons.check_rounded, color: AppTheme.devmonksPurple) : null,
                           onTap: () {
                             ic.setTalkTarget(userId: r.userId, name: r.name);
                             Navigator.pop(ctx);
@@ -320,13 +320,13 @@ class _PttButton extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(tx ? Icons.mic_rounded : Icons.radio_button_checked_rounded, size: 16, color: tx ? Colors.black : Colors.white),
+              Icon(tx ? Icons.mic_rounded : Icons.radio_button_checked_rounded, size: 16, color: tx ? Colors.black : AppTheme.textPrimary),
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
                   tx ? (private ? 'PRIVATE — TALKING…' : 'TRANSMITTING…') : 'HOLD TO TALK',
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: tx ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                  style: TextStyle(color: tx ? Colors.black : AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
                 ),
               ),
             ],
@@ -367,7 +367,7 @@ class _VoxButton extends StatelessWidget {
                 child: Text(
                   tx ? 'VOX — SENDING' : (armed ? 'VOX ARMED (tap to stop)' : 'VOX OFF (tap to arm)'),
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                  style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 11),
                 ),
               ),
             ],

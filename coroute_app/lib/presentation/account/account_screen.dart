@@ -5,12 +5,14 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/app_config.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/theme_controller.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/meta_service.dart';
 import '../auth/access_gate_screen.dart';
 import '../onboarding/permissions_screen.dart';
+import 'appearance_sheet.dart';
 import 'change_password_screen.dart';
 
 /// Account and security: password, permissions, legal pages, problem reports,
@@ -29,21 +31,23 @@ class AccountScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final meta = context.watch<MetaService>().meta;
+    final theme = context.watch<ThemeController>();
     final base = AppConfig.apiBaseUrl;
     final privacyUrl = meta?.privacyUrl.isNotEmpty == true ? meta!.privacyUrl : '$base/privacy';
     final termsUrl = meta?.termsUrl.isNotEmpty == true ? meta!.termsUrl : '$base/terms';
     final support = meta?.supportEmail ?? '';
 
-    Widget tile(IconData icon, String title, String subtitle, VoidCallback onTap, {Color color = AppTheme.neonCyan}) {
+    Widget tile(IconData icon, String title, String subtitle, VoidCallback onTap, {Color? color}) {
+      color ??= AppTheme.neonCyan;
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: GlassCard(
           padding: EdgeInsets.zero,
           child: ListTile(
             leading: Icon(icon, color: color),
-            title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-            subtitle: Text(subtitle, style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-            trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
+            title: Text(title, style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
+            subtitle: Text(subtitle, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+            trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
             onTap: onTap,
           ),
         ),
@@ -62,14 +66,14 @@ class AccountScreen extends StatelessWidget {
               GlassCard(
                 child: Row(
                   children: [
-                    const CircleAvatar(radius: 20, backgroundColor: AppTheme.elevatedCard, child: Icon(Icons.person_rounded, color: AppTheme.neonCyan)),
+                    CircleAvatar(radius: 20, backgroundColor: AppTheme.elevatedCard, child: Icon(Icons.person_rounded, color: AppTheme.neonCyan)),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(auth.currentUserName ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15), overflow: TextOverflow.ellipsis),
-                          Text(auth.currentUserEmail ?? '', style: const TextStyle(color: AppTheme.textMuted, fontSize: 12), overflow: TextOverflow.ellipsis),
+                          Text(auth.currentUserName ?? '', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 15), overflow: TextOverflow.ellipsis),
+                          Text(auth.currentUserEmail ?? '', style: TextStyle(color: AppTheme.textMuted, fontSize: 12), overflow: TextOverflow.ellipsis),
                         ],
                       ),
                     ),
@@ -77,6 +81,10 @@ class AccountScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
+              const _SectionLabel('Appearance'),
+              tile(theme.isLight ? Icons.light_mode_rounded : Icons.dark_mode_rounded, 'Theme', AppearanceSheet.summary(theme),
+                  () => AppearanceSheet.show(context)),
+              const SizedBox(height: 8),
               const _SectionLabel('Security'),
               tile(Icons.password_rounded, 'Change password', 'Use at least 8 characters.',
                   () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen()))),
@@ -102,7 +110,7 @@ class AccountScreen extends StatelessWidget {
               Center(
                 child: Text(
                   'CoRoute ${MetaService.currentVersion} (build ${MetaService.currentBuild})${support.isNotEmpty ? ' · $support' : ''}',
-                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                  style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -120,12 +128,12 @@ class AccountScreen extends StatelessWidget {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
           backgroundColor: AppTheme.slateCard,
-          title: const Text('Delete your account?', style: TextStyle(color: Colors.white, fontSize: 16)),
+          title: Text('Delete your account?', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'This permanently removes your account, profile, convoy memberships and ride history. It cannot be undone.\n\nType DELETE to confirm.',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
               ),
@@ -134,13 +142,13 @@ class AccountScreen extends StatelessWidget {
                 controller: ctrl,
                 autofocus: true,
                 onChanged: (_) => setState(() {}),
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: AppTheme.textPrimary),
                 decoration: InputDecoration(filled: true, fillColor: AppTheme.elevatedCard, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted))),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted))),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.laserRed, foregroundColor: Colors.white),
               onPressed: ctrl.text.trim() == 'DELETE'
@@ -171,7 +179,7 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8, left: 4),
-        child: Text(text.toUpperCase(), style: const TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+        child: Text(text.toUpperCase(), style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
       );
 }
 
@@ -218,7 +226,7 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
         'device': device,
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Thanks. Your report was sent.'), backgroundColor: AppTheme.emeraldSafe));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Thanks. Your report was sent.'), backgroundColor: AppTheme.emeraldSafe));
       Navigator.pop(context);
     } on ApiException catch (e) {
       setState(() => _error = e.message);
@@ -240,7 +248,7 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
-              const Text(
+              Text(
                 'What happened, what you expected, and which screen you were on. Your e-mail, app version and phone platform are attached so we can reply.',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
               ),
@@ -250,17 +258,17 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
                 minLines: 6,
                 maxLines: 12,
                 maxLength: 2000,
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: AppTheme.textPrimary),
                 decoration: InputDecoration(
                   hintText: 'Describe the problem',
-                  hintStyle: const TextStyle(color: AppTheme.textMuted),
+                  hintStyle: TextStyle(color: AppTheme.textMuted),
                   filled: true,
                   fillColor: AppTheme.elevatedCard,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  counterStyle: const TextStyle(color: AppTheme.textMuted),
+                  counterStyle: TextStyle(color: AppTheme.textMuted),
                 ),
               ),
-              if (_error != null) Text(_error!, style: const TextStyle(color: AppTheme.laserRed, fontSize: 13)),
+              if (_error != null) Text(_error!, style: TextStyle(color: AppTheme.laserRed, fontSize: 13)),
               const SizedBox(height: 16),
               ElevatedButton(
                 onPressed: _busy ? null : _send,

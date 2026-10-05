@@ -23,14 +23,14 @@ class ConnectionBanner extends StatelessWidget {
             width: 12,
             height: 12,
             child: connecting
-                ? const CircularProgressIndicator(strokeWidth: 2, color: AppTheme.hyperAmber)
-                : const Icon(Icons.cloud_off_rounded, size: 12, color: AppTheme.hyperAmber),
+                ? CircularProgressIndicator(strokeWidth: 2, color: AppTheme.hyperAmber)
+                : Icon(Icons.cloud_off_rounded, size: 12, color: AppTheme.hyperAmber),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               connecting ? 'Reconnecting to the convoy…' : 'Offline. Positions shown may be out of date.',
-              style: const TextStyle(color: AppTheme.hyperAmber, fontSize: 12, fontWeight: FontWeight.w600),
+              style: TextStyle(color: AppTheme.hyperAmber, fontSize: 12, fontWeight: FontWeight.w600),
               overflow: TextOverflow.ellipsis,
             ),
           ),

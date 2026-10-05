@@ -56,7 +56,7 @@ class LiveTimelineScreen extends StatelessWidget {
         actions: [
           IconButton(
             tooltip: 'Replay the ride',
-            icon: const Icon(Icons.slow_motion_video_rounded, color: AppTheme.neonCyan),
+            icon: Icon(Icons.slow_motion_video_rounded, color: AppTheme.neonCyan),
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => ReplayScreen(groupId: groupId, title: 'Replay', colors: colors)),
@@ -70,7 +70,7 @@ class LiveTimelineScreen extends StatelessWidget {
         ],
       ),
       body: timeline.isLoading && events.isEmpty
-          ? const Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
+          ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
           : TimelineList(
               events: events,
               colors: colors,
@@ -83,7 +83,7 @@ class LiveTimelineScreen extends StatelessWidget {
                   child: Text(
                     timeline.error ?? 'The timeline fills in as the ride goes: who joins, stops, falls behind and arrives.',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: AppTheme.textMuted),
+                    style: TextStyle(color: AppTheme.textMuted),
                   ),
                 ),
               ),

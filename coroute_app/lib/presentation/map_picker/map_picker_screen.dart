@@ -8,6 +8,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/geo_service.dart';
+import '../../core/theme/map_tiles.dart';
 
 /// Pick a place on the map: move the map under the centre pin (or tap,
 /// or search), see the place name, confirm. Used for the start, the
@@ -176,11 +177,11 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
               },
             ),
             children: [
-              TileLayer(urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
+              TileLayer(tileBuilder: mapTileBuilder, urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
             ],
           ),
           // Fixed centre pin: the map moves underneath it.
-          const IgnorePointer(
+          IgnorePointer(
             child: Center(
               child: Padding(
                 padding: EdgeInsets.only(bottom: 40),
@@ -201,18 +202,18 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                   child: TextField(
                     controller: _search,
                     onChanged: _onSearchChanged,
-                    style: const TextStyle(color: Colors.white),
+                    style: TextStyle(color: AppTheme.textPrimary),
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
                       hintText: 'Search a place, town or address',
-                      hintStyle: const TextStyle(color: AppTheme.textMuted),
-                      prefixIcon: const Icon(Icons.search_rounded, color: AppTheme.textMuted),
+                      hintStyle: TextStyle(color: AppTheme.textMuted),
+                      prefixIcon: Icon(Icons.search_rounded, color: AppTheme.textMuted),
                       suffixIcon: _searching
-                          ? const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan)))
+                          ? Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan)))
                           : (_search.text.isEmpty
                               ? null
                               : IconButton(
-                                  icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted),
+                                  icon: Icon(Icons.close_rounded, color: AppTheme.textMuted),
                                   onPressed: () => setState(() {
                                     _search.clear();
                                     _results = [];
@@ -232,14 +233,14 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                       shrinkWrap: true,
                       padding: EdgeInsets.zero,
                       itemCount: _results.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1, color: AppTheme.subtleBorder),
+                      separatorBuilder: (_, _) => Divider(height: 1, color: AppTheme.subtleBorder),
                       itemBuilder: (_, i) {
                         final r = _results[i];
                         return ListTile(
                           dense: true,
-                          leading: const Icon(Icons.place_outlined, color: AppTheme.neonCyan, size: 20),
-                          title: Text(r.name, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                          subtitle: Text(r.displayName, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                          leading: Icon(Icons.place_outlined, color: AppTheme.neonCyan, size: 20),
+                          title: Text(r.name, style: TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
+                          subtitle: Text(r.displayName, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
                           onTap: () {
                             FocusScope.of(context).unfocus();
                             setState(() => _results = []);
@@ -260,7 +261,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
               backgroundColor: AppTheme.slateCard,
               onPressed: () => _goToMyLocation(),
               tooltip: 'My location',
-              child: const Icon(Icons.my_location_rounded, color: AppTheme.neonCyan),
+              child: Icon(Icons.my_location_rounded, color: AppTheme.neonCyan),
             ),
           ),
           Positioned(left: 0, right: 0, bottom: 0, child: _confirmSheet()),
@@ -271,7 +272,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
 
   Widget _confirmSheet() {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.darkCanvas,
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
         boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 12)],
@@ -286,15 +287,15 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
             TextField(
               controller: _name,
               onChanged: (_) => _nameEdited = true,
-              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w600),
               decoration: InputDecoration(
                 labelText: 'Name',
-                labelStyle: const TextStyle(color: AppTheme.textMuted),
-                suffixIcon: _naming ? const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.textMuted))) : null,
+                labelStyle: TextStyle(color: AppTheme.textMuted),
+                suffixIcon: _naming ? Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.textMuted))) : null,
               ),
             ),
             const SizedBox(height: 4),
-            Text('${_center.latitude.toStringAsFixed(5)}, ${_center.longitude.toStringAsFixed(5)}', style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+            Text('${_center.latitude.toStringAsFixed(5)}, ${_center.longitude.toStringAsFixed(5)}', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
             if (widget.forStop) ...[
               const SizedBox(height: 10),
               SizedBox(
@@ -323,16 +324,16 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  const Text('Planned stay', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                  Text('Planned stay', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
                   const Spacer(),
                   IconButton(
                     onPressed: _dwell <= 0 ? null : () => setState(() => _dwell = (_dwell - 5).clamp(0, 600).toInt()),
-                    icon: const Icon(Icons.remove_circle_outline_rounded, color: AppTheme.textSecondary),
+                    icon: Icon(Icons.remove_circle_outline_rounded, color: AppTheme.textSecondary),
                   ),
-                  Text(_dwell == 0 ? 'not set' : '$_dwell min', style: const TextStyle(color: Colors.white)),
+                  Text(_dwell == 0 ? 'not set' : '$_dwell min', style: TextStyle(color: AppTheme.textPrimary)),
                   IconButton(
                     onPressed: () => setState(() => _dwell = (_dwell + 5).clamp(0, 600).toInt()),
-                    icon: const Icon(Icons.add_circle_outline_rounded, color: AppTheme.textSecondary),
+                    icon: Icon(Icons.add_circle_outline_rounded, color: AppTheme.textSecondary),
                   ),
                 ],
               ),
