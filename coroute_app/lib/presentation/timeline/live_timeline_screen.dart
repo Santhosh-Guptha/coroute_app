@@ -44,6 +44,7 @@ class LiveTimelineScreen extends StatelessWidget {
             focusUserId: e.userId,
             pin: LatLng(e.lat!, e.lng!),
             colors: colors,
+            events: events,
           ),
         ),
       );
@@ -59,7 +60,7 @@ class LiveTimelineScreen extends StatelessWidget {
             icon: Icon(Icons.slow_motion_video_rounded, color: AppTheme.neonCyan),
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => ReplayScreen(groupId: groupId, title: 'Replay', colors: colors)),
+              MaterialPageRoute(builder: (_) => ReplayScreen(groupId: groupId, title: 'Replay', colors: colors, events: events)),
             ),
           ),
           IconButton(

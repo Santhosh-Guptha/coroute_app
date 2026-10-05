@@ -47,12 +47,19 @@ class TripHistoryModel {
   final String userId;
   final String createdByUserName;
 
-  /// Set on trips built by the server from the recorded tracks; opens the full report.
+  /// The convoy this trip belongs to; such trips open the group report.
   final String groupId;
   final int movingMs;
   final int restMs;
 
+  /// 'server': built from the recorded routes when the trip ended (exact).
+  /// 'device': the phone's own record, kept until the server's arrives.
+  final String source;
+
   bool get hasReport => groupId.isNotEmpty;
+
+  /// A convoy trip whose exact report has not reached this phone yet.
+  bool get isEstimate => groupId.isNotEmpty && source != 'server';
 
   TripHistoryModel({
     required this.tripId,
@@ -72,6 +79,7 @@ class TripHistoryModel {
     this.groupId = '',
     this.movingMs = 0,
     this.restMs = 0,
+    this.source = 'device',
   });
 
   int get durationMinutes {
@@ -96,7 +104,7 @@ class TripHistoryModel {
       'userId': userId,
       'createdByUserName': createdByUserName,
       if (groupId.isNotEmpty) 'groupId': groupId,
-      if (groupId.isNotEmpty) 'source': 'server',
+      'source': source,
       'movingMs': movingMs,
       'restMs': restMs,
     };
@@ -124,7 +132,8 @@ class TripHistoryModel {
       breadcrumbTrail: points,
       userId: json['userId'] ?? '',
       createdByUserName: json['createdByUserName'] ?? '',
-      groupId: json['source'] == 'server' ? (json['groupId']?.toString() ?? '') : '',
+      groupId: json['groupId']?.toString() ?? '',
+      source: json['source']?.toString() == 'server' ? 'server' : 'device',
       movingMs: (json['movingMs'] as num?)?.toInt() ?? 0,
       restMs: (json['restMs'] as num?)?.toInt() ?? 0,
     );

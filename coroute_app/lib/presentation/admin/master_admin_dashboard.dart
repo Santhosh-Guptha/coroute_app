@@ -44,7 +44,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
         }
       }
     }
-    if (count == 0) return const LatLng(20.5937, 78.9629); // India center as neutral default
+    if (count == 0) return const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng); // India center as neutral default
     return LatLng(totalLat / count, totalLng / count);
   }
 

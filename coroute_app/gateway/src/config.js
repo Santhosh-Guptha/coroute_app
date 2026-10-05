@@ -89,6 +89,7 @@ const config = {
   // minLon,minLat,maxLon,maxLat of the home country (India incl. all of J&K and Ladakh).
   geoCountryBbox: (process.env.GEO_COUNTRY_BBOX || '68.0,6.4,97.6,37.1').split(',').map(Number),
   geoPhotonMinIntervalMs: int('GEO_PHOTON_MIN_INTERVAL_MS', 250),
+  geoReverseTimeoutMs: int('GEO_REVERSE_TIMEOUT_MS', 8000),
   geoContact: (process.env.GEO_CONTACT || process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
   geoCacheDays: int('GEO_CACHE_DAYS', 30),
   geoMinIntervalMs: int('GEO_MIN_INTERVAL_MS', 1100),
@@ -100,7 +101,7 @@ const config = {
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
-  latestAppBuild: int('LATEST_APP_BUILD', 65),
+  latestAppBuild: int('LATEST_APP_BUILD', 66),
   supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
 
   // CORS: comma separated origins or empty for same-origin/mobile only

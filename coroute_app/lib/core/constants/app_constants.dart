@@ -26,5 +26,9 @@ class AppConstants {
 
   // Tile source URLs (OpenStreetMap — free, no API keys)
   static const String osmTileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  // Where a map opens when there is nothing to show yet: the centre of India.
+  static const double defaultMapLat = 20.5937;
+  static const double defaultMapLng = 78.9629;
+
   static const String osmUserAgent = 'CoRouteFlutter/3.0 (devmonks.space; space.devmonks.coroute_app)';
 }

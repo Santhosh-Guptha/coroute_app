@@ -163,6 +163,12 @@ class TimelineEngine {
     return ev;
   }
 
+  /** Place name for a point, or '' (never holds the report up for long). */
+  async _placeName(lat, lng) {
+    const timeout = new Promise((r) => { const t = setTimeout(() => r(null), config.geoReverseTimeoutMs); if (t.unref) t.unref(); });
+    return (await Promise.race([this.geo.reverse(lat, lng).catch(() => null), timeout])) || '';
+  }
+
   async _enrichPlace(gid, ev) {
     const name = await this.geo.reverse(ev.lat, ev.lng);
     if (!name) return;
@@ -500,10 +506,25 @@ class TimelineEngine {
       }
     }
 
+    // Where each rider actually started and finished (names only, kept with the report).
+    if (this.geo) {
+      for (const pm of perMember) {
+        const pts = pm.analysis?.points || [];
+        if (pts.length < 2) continue;
+        const first = pts[0], last = pts[pts.length - 1];
+        const [startPlace, endPlace] = await Promise.all([this._placeName(first.lat, first.lng), this._placeName(last.lat, last.lng)]);
+        const row = report.members.find((x) => x.userId === pm.userId);
+        if (row) { row.startPlace = startPlace; row.endPlace = endPlace; }
+      }
+    }
+
     const fresh = await this.repo.getConvoyMeta(gid);
+    const rebuilt = !!fresh?.report; // a later rebuild after late uploads
     await this.repo.saveConvoyMeta({ ...fresh, report });
     for (const pm of perMember) {
-      if (await this.repo.findUserById(pm.userId)) await this.repo.saveTrip(pm.tripDoc); // never resurrect a deleted account
+      if (!(await this.repo.findUserById(pm.userId))) continue; // never resurrect a deleted account
+      if (rebuilt && !(await this.repo.getTrip(pm.tripDoc.tripId).catch(() => null))) continue; // the rider deleted this trip
+      await this.repo.saveTrip(pm.tripDoc);
     }
     this.convoys._emit(gid, 'REPORT_READY', { groupId: gid });
     return report;

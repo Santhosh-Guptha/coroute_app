@@ -8,13 +8,16 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../data/models/trip_history_model.dart';
+import '../../data/models/trip_plan_model.dart';
 import '../../data/models/trip_report_model.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../domain/timeline/timeline_text.dart';
+import '../../domain/tracking/replay_math.dart';
 import '../timeline/member_colors.dart';
 import '../timeline/timeline_list.dart';
 import 'replay_screen.dart';
+import 'trip_route_map.dart';
 
 /// Full report of a finished trip: summary, every member side by side, the
 /// group timeline and the replay. Built by the server from the recorded routes.
@@ -31,6 +34,7 @@ class _TripReportScreenState extends State<TripReportScreen> {
   List<TimelineEventModel> _events = [];
   Map<String, String> _names = {};
   Map<String, Color> _colors = {};
+  TripPlan? _plan;
   bool _loading = true;
   String? _error;
   bool _sharing = false;
@@ -67,6 +71,7 @@ class _TripReportScreenState extends State<TripReportScreen> {
         _events = events;
         _names = names;
         _colors = MemberColors.assign(names.keys);
+        _plan = TripPlan.fromJson(m['plan']);
         _loading = false;
       });
     } on ApiException catch (e) {
@@ -133,6 +138,7 @@ class _TripReportScreenState extends State<TripReportScreen> {
           focusUserId: e.userId,
           pin: LatLng(e.lat!, e.lng!),
           colors: _colors,
+          events: _events,
         ),
       ),
     );
@@ -160,7 +166,7 @@ class _TripReportScreenState extends State<TripReportScreen> {
             indicatorColor: AppTheme.neonCyan,
             labelColor: AppTheme.neonCyan,
             unselectedLabelColor: AppTheme.textMuted,
-            tabs: [Tab(text: 'Summary'), Tab(text: 'Timeline'), Tab(text: 'Replay')],
+            tabs: const [Tab(text: 'Summary'), Tab(text: 'Map'), Tab(text: 'Timeline')],
           ),
         ),
         body: _loading
@@ -177,32 +183,85 @@ class _TripReportScreenState extends State<TripReportScreen> {
                     physics: const NeverScrollableScrollPhysics(), // the replay map needs horizontal drags
                     children: [
                       _summary(),
+                      _RouteMapTab(
+                        groupId: widget.trip.groupId,
+                        title: widget.trip.tripName,
+                        colors: _colors,
+                        names: _names,
+                        events: _events,
+                        plan: _plan,
+                        myUserId: context.read<AuthService>().currentUserId,
+                      ),
                       TimelineList(events: _events, colors: _colors, memberNames: _names, onTap: _openOnMap),
-                      _replayTab(),
                     ],
                   ),
       ),
     );
   }
 
-  Widget _replayTab() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.slow_motion_video_rounded, color: AppTheme.neonCyan, size: 48),
-          const SizedBox(height: 12),
-          Text('Watch the whole group ride again. Drag the time bar to see where everyone was at any moment.',
-              textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary)),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => ReplayScreen(groupId: widget.trip.groupId, title: widget.trip.tripName, colors: _colors)),
+  /// One rider's day: start, every wait (when, how long, why, where), finish.
+  Widget _riderCard(MemberReport m, String? myId) {
+    final c = _colors[m.userId] ?? AppTheme.neonCyan;
+    final hm = DateFormat('HH:mm');
+    String dur(int ms) => TimelineText.duration(Duration(milliseconds: ms));
+    String at(int ms) => ms > 0 ? hm.format(DateTime.fromMillisecondsSinceEpoch(ms)) : '';
+    final waits = _events.where((e) => e.userId == m.userId && e.type == 'STOPPED').toList()..sort((a, b) => a.startedAt.compareTo(b.startedAt));
+    final started = m.firstFixAt > 0 ? m.firstFixAt : m.joinedAt;
+    final line = TextStyle(color: AppTheme.textSecondary, fontSize: 12);
+    Widget row(IconData icon, Color iconColor, String text, {VoidCallback? onTap}) => InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(icon, size: 15, color: iconColor),
+              const SizedBox(width: 8),
+              Expanded(child: Text(text, style: onTap == null ? line : line.copyWith(color: AppTheme.textPrimary))),
+            ]),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: GlassCard(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            CircleAvatar(radius: 6, backgroundColor: c),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(m.userId == myId ? '${m.name} (you)' : m.name,
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
             ),
-            icon: const Icon(Icons.play_arrow_rounded),
-            label: const Text('Open replay'),
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan, foregroundColor: Colors.black, minimumSize: const Size(200, 46)),
+            if (m.reachedDestination) Icon(Icons.sports_score_rounded, size: 16, color: AppTheme.emeraldSafe),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+            m.trackAvailable
+                ? '${TimelineText.distance(m.distanceM)} · riding ${dur(m.movingMs)} · waited ${waits.length} ${waits.length == 1 ? 'time' : 'times'}, ${dur(m.restMs)}'
+                : 'No route was uploaded from this phone. Waits below come from the live updates.',
+            style: TextStyle(color: m.trackAvailable ? AppTheme.textPrimary : AppTheme.hyperAmber, fontSize: 12),
+          ),
+          const SizedBox(height: 6),
+          row(Icons.play_circle_outline_rounded, c, ['Started ${at(started)}', if (m.startPlace.isNotEmpty) m.startPlace].join(' · ')),
+          for (final w in waits)
+            row(
+              Icons.pause_circle_outline_rounded,
+              c,
+              [
+                '${at(w.startedAt)}-${at(w.endedAt ?? (w.startedAt + w.durationMs))}, ${dur(w.durationMs)}',
+                if (w.dataString('reason').isNotEmpty) TimelineText.reason(w.dataString('reason')),
+                if (w.placeName.isNotEmpty) w.placeName,
+              ].join(' · '),
+              onTap: w.hasPlace ? () => _openOnMap(w) : null,
+            ),
+          row(
+            m.reachedDestination ? Icons.sports_score_rounded : Icons.flag_outlined,
+            m.reachedDestination ? AppTheme.emeraldSafe : c,
+            [
+              m.reachedDestination ? 'Reached the destination' : 'Finished',
+              if (m.lastFixAt > 0) at(m.lastFixAt),
+              if (m.endPlace.isNotEmpty) m.endPlace,
+            ].join(' · '),
           ),
         ]),
       ),
@@ -326,6 +385,11 @@ class _TripReportScreenState extends State<TripReportScreen> {
               'Distance, average and top speed come from each rider\'s recorded route. n/a: that phone did not upload a route.'
               '${r.speedLimitKmh > 0 ? ' Over limit: times above the group limit of ${r.speedLimitKmh} km/h, total time and top speed.' : ''}',
               style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+          const SizedBox(height: 22),
+          Text('EVERY RIDER: WHERE THEY STARTED, WAITED AND FINISHED',
+              style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+          const SizedBox(height: 8),
+          for (final m in r.members) _riderCard(m, myId),
         ] else
           Padding(
             padding: EdgeInsets.only(top: 18),
@@ -334,5 +398,227 @@ class _TripReportScreenState extends State<TripReportScreen> {
           ),
       ],
     );
+  }
+}
+
+/// The trip on one map: each rider's route in their colour, their start and
+/// finish, where they waited, the planned stops and the destination. Riders
+/// can be switched on and off; tapping a symbol tells what happened there.
+class _RouteMapTab extends StatefulWidget {
+  final String groupId;
+  final String title;
+  final Map<String, Color> colors;
+  final Map<String, String> names;
+  final List<TimelineEventModel> events;
+  final TripPlan? plan;
+  final String? myUserId;
+
+  const _RouteMapTab({
+    required this.groupId,
+    required this.title,
+    required this.colors,
+    required this.names,
+    required this.events,
+    required this.plan,
+    required this.myUserId,
+  });
+
+  @override
+  State<_RouteMapTab> createState() => _RouteMapTabState();
+}
+
+class _RouteMapTabState extends State<_RouteMapTab> with AutomaticKeepAliveClientMixin {
+  List<ReplayTrack> _tracks = [];
+  TripPlan? _plan;
+  bool _loading = true;
+  String? _error;
+  Set<String>? _visible; // null = everyone
+
+  @override
+  bool get wantKeepAlive => true; // keep the loaded routes when switching tabs
+
+  @override
+  void initState() {
+    super.initState();
+    _plan = widget.plan;
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final res = await context.read<ApiClient>().get('/convoys/${widget.groupId}/tracks?simplify=8', timeout: const Duration(seconds: 25));
+      final list = (res is Map ? res['tracks'] : null) as List? ?? const [];
+      final tracks = list.whereType<Map>().map((m) => ReplayTrack.fromJson(Map<String, dynamic>.from(m))).where((t) => t.points.length >= 2).toList();
+      if (!mounted) return;
+      setState(() {
+        _tracks = tracks;
+        _plan = (res is Map ? TripPlan.fromJson(res['plan']) : null) ?? widget.plan;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (mounted) setState(() { _error = e.message; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _error = 'Could not load the routes.'; _loading = false; });
+    }
+  }
+
+  String _name(String userId) => widget.names[userId]?.isNotEmpty == true ? widget.names[userId]! : 'A rider';
+
+  void _toggle(String userId) {
+    setState(() {
+      final all = _tracks.map((t) => t.userId).toSet();
+      final v = _visible ?? Set<String>.from(all);
+      if (!v.remove(userId)) v.add(userId);
+      _visible = v.length == all.length ? null : v;
+    });
+  }
+
+  void _sheet(String title, List<String> lines, {Color? color}) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.slateCard,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              if (color != null) ...[CircleAvatar(radius: 6, backgroundColor: color), const SizedBox(width: 8)],
+              Expanded(child: Text(title, style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold))),
+            ]),
+            const SizedBox(height: 8),
+            for (final l in lines)
+              Padding(padding: const EdgeInsets.only(top: 4), child: Text(l, style: TextStyle(color: AppTheme.textSecondary, fontSize: 13))),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  static String _hm(int ms) => DateFormat('HH:mm').format(DateTime.fromMillisecondsSinceEpoch(ms));
+  static String _dur(int ms) => TimelineText.duration(Duration(milliseconds: ms));
+
+  void _onStop(TimelineEventModel e) {
+    final end = e.endedAt ?? (e.startedAt + e.durationMs);
+    _sheet(
+      '${_name(e.userId ?? '')} waited ${_dur(e.durationMs)}',
+      [
+        '${_hm(e.startedAt)} to ${_hm(end)}',
+        if (e.dataString('reason').isNotEmpty) 'Reason: ${TimelineText.reason(e.dataString('reason'))}',
+        if (e.placeName.isNotEmpty) e.placeName,
+        if (e.confidence == 'confirmed') 'Measured from the recorded route.' else 'From the live updates during the ride.',
+      ],
+      color: widget.colors[e.userId],
+    );
+  }
+
+  void _onPlanStop(PlanStop s) {
+    final lines = <String>[];
+    if (s.isSkipped) lines.add('Skipped by the lead.');
+    final ids = {...widget.names.keys, ...s.arrivals.keys};
+    for (final id in ids) {
+      final a = s.arrivals[id];
+      final who = a?.name.isNotEmpty == true ? a!.name : _name(id);
+      if (a == null) {
+        lines.add('$who: did not reach it');
+      } else if (a.reached) {
+        lines.add(a.leftAt > 0
+            ? '$who: arrived ${_hm(a.arrivedAt)}, left ${_hm(a.leftAt)} (${_dur(a.leftAt - a.arrivedAt)})'
+            : '$who: arrived ${_hm(a.arrivedAt)}');
+      } else if (a.passed) {
+        lines.add('$who: rode past at ${_hm(a.passedAt)}');
+      }
+    }
+    _sheet(s.name.isEmpty ? 'Planned stop' : s.name, lines);
+  }
+
+  void _onRiderEnd(ReplayTrack t, bool start) {
+    final p = start ? t.points.first : t.points.last;
+    _sheet('${_name(t.userId)} ${start ? 'started' : 'finished'} at ${_hm(p.ts)}', [
+      '${DateFormat('EEE d MMM').format(DateTime.fromMillisecondsSinceEpoch(p.ts))}, ${p.lat.toStringAsFixed(5)}, ${p.lng.toStringAsFixed(5)}',
+    ], color: widget.colors[t.userId]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    if (_loading) return Center(child: CircularProgressIndicator(color: AppTheme.neonCyan));
+    if (_error != null) {
+      return Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(padding: const EdgeInsets.all(16), child: Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.laserRed))),
+          OutlinedButton(onPressed: _load, child: const Text('Try again')),
+        ]),
+      );
+    }
+    final stops = widget.events.where((e) => e.type == 'STOPPED' && e.hasPlace).toList();
+    return LayoutBuilder(builder: (context, c) {
+      final map = TripRouteMap(
+        tracks: _tracks,
+        colors: widget.colors,
+        plan: _plan,
+        stops: stops,
+        visible: _visible,
+        onStopTap: _onStop,
+        onPlanStopTap: _onPlanStop,
+        onRiderEndTap: _onRiderEnd,
+      );
+      final panel = Container(
+        color: AppTheme.darkCanvas,
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        child: SafeArea(
+          top: false,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            if (_tracks.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'No recorded routes for this trip (routes are kept for 90 days). The planned stops and destination are still shown.',
+                  style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                ),
+              )
+            else
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final t in _tracks)
+                  FilterChip(
+                    avatar: CircleAvatar(backgroundColor: widget.colors[t.userId] ?? AppTheme.neonCyan, radius: 6),
+                    label: Text(t.userId == widget.myUserId ? '${_name(t.userId)} (you)' : _name(t.userId), overflow: TextOverflow.ellipsis),
+                    selected: _visible == null || _visible!.contains(t.userId),
+                    onSelected: (_) => _toggle(t.userId),
+                    showCheckmark: false,
+                    selectedColor: (widget.colors[t.userId] ?? AppTheme.neonCyan).withOpacity(0.18),
+                    backgroundColor: AppTheme.slateCard,
+                    labelStyle: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+                    side: BorderSide(color: AppTheme.subtleBorder),
+                  ),
+              ]),
+            const SizedBox(height: 8),
+            const TripMapLegend(),
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              onPressed: _tracks.isEmpty
+                  ? null
+                  : () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => ReplayScreen(groupId: widget.groupId, title: widget.title, colors: widget.colors, events: widget.events)),
+                      ),
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('Play the ride'),
+              style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(44)),
+            ),
+          ]),
+        ),
+      );
+      final wide = c.maxWidth > c.maxHeight && c.maxWidth > 700;
+      if (wide) return Row(children: [Expanded(child: map), SizedBox(width: 340, child: SingleChildScrollView(child: panel))]);
+      return Column(children: [
+        Expanded(child: map),
+        ConstrainedBox(constraints: BoxConstraints(maxHeight: c.maxHeight * 0.45), child: SingleChildScrollView(child: panel)),
+      ]);
+    });
   }
 }

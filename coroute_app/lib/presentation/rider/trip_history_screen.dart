@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/devmonks_branding.dart';
@@ -10,6 +12,7 @@ import '../../core/widgets/glass_card.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../data/services/auth_service.dart';
+import '../../domain/timeline/timeline_text.dart';
 import '../report/trip_report_screen.dart';
 import '../../core/theme/map_tiles.dart';
 
@@ -85,7 +88,11 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                 style: TextStyle(color: AppTheme.textMuted),
               ),
             )
-          : ListView.builder(
+          : RefreshIndicator(
+              color: AppTheme.neonCyan,
+              onRefresh: _triggerSync,
+              child: ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               itemCount: trips.length,
               itemBuilder: (ctx, index) {
@@ -139,33 +146,53 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                               ),
                             ),
                             IconButton(
+                              tooltip: 'Delete this trip',
                               icon: Icon(Icons.delete_outline, color: AppTheme.textMuted, size: 20),
-                              onPressed: () {
-                                tripStorage.deleteTrip(trip.tripId);
-                              },
+                              onPressed: () => _confirmDelete(trip, tripStorage),
                             ),
                           ],
                         ),
+                        if (trip.startLocationName.isNotEmpty || trip.destinationName.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            '${trip.startLocationName.isEmpty ? 'Start' : trip.startLocationName}  to  ${trip.destinationName.isEmpty ? 'destination' : trip.destinationName}',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                          ),
+                        ],
                         const SizedBox(height: 14),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _buildTripStat('Distance', '${trip.totalDistanceKm} km', AppTheme.neonCyan),
-                            _buildTripStat('Duration', '${trip.durationMinutes} min', AppTheme.hyperAmber),
-                            _buildTripStat('Top Speed', '${trip.topSpeedKmh.toStringAsFixed(0)} km/h', AppTheme.speedWarning),
-                            _buildTripStat('Avg Speed', '${trip.avgSpeedKmh.toStringAsFixed(0)} km/h', AppTheme.emeraldSafe),
-                          ],
-                        ),
+                        if (trip.isEstimate)
+                          Text(
+                            'The exact report (distance, every rider\'s route and waits) is being prepared from the recorded routes. Pull to refresh in a minute.',
+                            style: TextStyle(color: AppTheme.hyperAmber, fontSize: 12),
+                          )
+                        else
+                          Wrap(
+                            alignment: WrapAlignment.spaceAround,
+                            spacing: 18,
+                            runSpacing: 10,
+                            children: [
+                              _buildTripStat('Distance', TimelineText.distance(trip.totalDistanceKm * 1000), AppTheme.neonCyan),
+                              if (trip.movingMs > 0)
+                                _buildTripStat('Riding', TimelineText.duration(Duration(milliseconds: trip.movingMs)), AppTheme.emeraldSafe)
+                              else
+                                _buildTripStat('Duration', TimelineText.duration(Duration(minutes: trip.durationMinutes)), AppTheme.hyperAmber),
+                              if (trip.movingMs > 0) _buildTripStat('Stopped', '${TimelineText.duration(Duration(milliseconds: trip.restMs))}, ${trip.stopCount}x', AppTheme.hyperAmber),
+                              _buildTripStat('Top speed', '${trip.topSpeedKmh.toStringAsFixed(0)} km/h', AppTheme.speedWarning),
+                              if (trip.riderCount > 1) _buildTripStat('Riders', '${trip.riderCount}', AppTheme.textSecondary),
+                            ],
+                          ),
                         const SizedBox(height: 12),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
-                            Text(
-                              'View Interactive Route Replay',
-                              style: TextStyle(
-                                color: AppTheme.neonCyan,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
+                            Flexible(
+                              child: Text(
+                                trip.hasReport ? 'Report, map of every rider and replay' : 'View the route',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: AppTheme.neonCyan, fontSize: 11, fontWeight: FontWeight.bold),
                               ),
                             ),
                             Icon(Icons.chevron_right, color: AppTheme.neonCyan, size: 16),
@@ -177,7 +204,27 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                 );
               },
             ),
+            ),
     );
+  }
+
+  Future<void> _confirmDelete(TripHistoryModel trip, TripStorageService storage) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.slateCard,
+        title: Text('Delete this trip?', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text(
+          '"${trip.tripName}" is removed from your history on all your devices. The other riders keep their own copy.',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Delete', style: TextStyle(color: AppTheme.laserRed))),
+        ],
+      ),
+    );
+    if (ok == true) await storage.deleteTrip(trip.tripId);
   }
 
   Widget _buildTripStat(String label, String value, Color color) {
@@ -199,127 +246,127 @@ class TripReplayDetailScreen extends StatelessWidget {
 
   const TripReplayDetailScreen({super.key, required this.trip});
 
+  /// GPX 1.1 of this trip's saved route, for other map and fitness apps.
+  static String gpx(TripHistoryModel trip) {
+    String esc(String v) => v.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+    final pts = trip.breadcrumbTrail
+        .where((p) => p.lat != 0 || p.lng != 0)
+        .map((p) => '    <trkpt lat="${p.lat.toStringAsFixed(6)}" lon="${p.lng.toStringAsFixed(6)}">'
+            '${p.timestamp > 0 ? '<time>${DateTime.fromMillisecondsSinceEpoch(p.timestamp, isUtc: true).toIso8601String()}</time>' : ''}</trkpt>')
+        .join('\n');
+    return '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<gpx version="1.1" creator="CoRoute" xmlns="http://www.topografix.com/GPX/1/1">\n'
+        '  <metadata><name>${esc(trip.tripName)}</name></metadata>\n'
+        '  <trk><name>${esc(trip.tripName)}</name><trkseg>\n$pts\n  </trkseg></trk>\n</gpx>\n';
+  }
+
+  Future<void> _share(BuildContext context) async {
+    final safe = trip.tripName.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '').trim().replaceAll(RegExp(r'\s+'), '_');
+    try {
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile.fromData(utf8.encode(gpx(trip)), mimeType: 'application/gpx+xml', name: '${safe.isEmpty ? 'coroute_trip' : safe}.gpx')],
+        subject: 'CoRoute trip: ${trip.tripName}',
+      ));
+    } catch (_) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not share the route.')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final points = trip.breadcrumbTrail.map((p) => LatLng(p.lat, p.lng)).toList();
-    final center = points.isNotEmpty ? points.first : const LatLng(0, 0);
+    final points = trip.breadcrumbTrail.where((p) => p.lat != 0 || p.lng != 0).map((p) => LatLng(p.lat, p.lng)).toList();
+    final bounds = points.length >= 2 ? LatLngBounds.fromPoints(points) : null;
+    final center = points.isNotEmpty ? points.first : const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng);
+
+    final details = Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.slateCard,
+        borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(trip.tripName,
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+                const DevMonksBadge(isCompact: true),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text('${trip.startLocationName} to ${trip.destinationName}', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+            const SizedBox(height: 18),
+            Wrap(
+              alignment: WrapAlignment.spaceAround,
+              spacing: 24,
+              runSpacing: 12,
+              children: [
+                _buildSummaryItem(Icons.straighten, 'Total distance', TimelineText.distance(trip.totalDistanceKm * 1000)),
+                _buildSummaryItem(Icons.speed, 'Top speed', '${trip.topSpeedKmh.toStringAsFixed(0)} km/h'),
+                _buildSummaryItem(Icons.timer, 'Duration', TimelineText.duration(Duration(minutes: trip.durationMinutes))),
+              ],
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: points.isEmpty ? null : () => _share(context),
+                icon: const Icon(Icons.share),
+                label: const Text('Share the route (GPX)'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
 
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(
-        title: Text(trip.tripName),
-      ),
-      body: Column(
-        children: [
-          // Route Map
-          Expanded(
-            flex: 6,
-            child: FlutterMap(
-              options: MapOptions(
-                initialCenter: center,
-                initialZoom: 13.0,
-              ),
-              children: [
-                TileLayer(
-                  tileBuilder: mapTileBuilder,
-                  urlTemplate: AppConstants.osmTileUrl,
-                  userAgentPackageName: AppConstants.osmUserAgent,
-                ),
-                if (points.isNotEmpty)
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: points,
-                        strokeWidth: 5.0,
-                        color: AppTheme.neonCyan,
-                      ),
-                    ],
-                  ),
-                if (points.isNotEmpty)
-                  MarkerLayer(
-                    markers: [
-                      // Start Marker
-                      Marker(
-                        point: points.first,
-                        width: 32,
-                        height: 32,
-                        child: Icon(Icons.location_on, color: AppTheme.emeraldSafe, size: 30),
-                      ),
-                      // End Marker
-                      Marker(
-                        point: points.last,
-                        width: 32,
-                        height: 32,
-                        child: Icon(Icons.flag, color: AppTheme.hyperAmber, size: 28),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
+      appBar: AppBar(title: Text(trip.tripName, overflow: TextOverflow.ellipsis)),
+      body: LayoutBuilder(builder: (context, c) {
+        final map = FlutterMap(
+          options: MapOptions(
+            initialCenter: center,
+            initialZoom: points.isEmpty ? 5 : 13.0,
+            initialCameraFit: bounds == null ? null : CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)),
           ),
-
-          // Trip Telemetry Breakdown
-          Expanded(
-            flex: 4,
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppTheme.slateCard,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(24),
-                  topRight: Radius.circular(24),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(child: Text(
-                        trip.tripName,
-                        style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                      const DevMonksBadge(isCompact: true),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${trip.startLocationName} ──► ${trip.destinationName}',
-                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                  ),
-                  const SizedBox(height: 18),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _buildSummaryItem(Icons.straighten, 'Total Distance', '${trip.totalDistanceKm} km'),
-                      _buildSummaryItem(Icons.speed, 'Max Speed', '${trip.topSpeedKmh.toStringAsFixed(0)} km/h'),
-                      _buildSummaryItem(Icons.timer, 'Ride Duration', '${trip.durationMinutes} min'),
-                    ],
-                  ),
-                  const Spacer(),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Trip coordinates exported as GPX file.')),
-                        );
-                      },
-                      icon: const Icon(Icons.share),
-                      label: const Text('Export GPX / Share Trip'),
-                    ),
-                  ),
+          children: [
+            TileLayer(
+              tileBuilder: mapTileBuilder,
+              urlTemplate: AppConstants.osmTileUrl,
+              userAgentPackageName: AppConstants.osmUserAgent,
+            ),
+            if (points.length >= 2)
+              PolylineLayer(polylines: [Polyline(points: points, strokeWidth: 5.0, color: AppTheme.neonCyan)]),
+            if (points.isNotEmpty)
+              MarkerLayer(
+                markers: [
+                  Marker(point: points.first, width: 32, height: 32, alignment: Alignment.topCenter, child: Icon(Icons.location_on, color: AppTheme.emeraldSafe, size: 30)),
+                  Marker(point: points.last, width: 32, height: 32, alignment: Alignment.topCenter, child: Icon(Icons.flag, color: AppTheme.hyperAmber, size: 28)),
                 ],
               ),
-            ),
-          ),
-        ],
-      ),
+          ],
+        );
+        if (c.maxWidth > c.maxHeight && c.maxWidth > 700) {
+          return Row(children: [Expanded(child: map), SizedBox(width: 360, child: SingleChildScrollView(child: details))]);
+        }
+        return Column(children: [
+          Expanded(child: map),
+          ConstrainedBox(constraints: BoxConstraints(maxHeight: c.maxHeight * 0.5), child: SingleChildScrollView(child: details)),
+        ]);
+      }),
     );
   }
 
   Widget _buildSummaryItem(IconData icon, String label, String value) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, color: AppTheme.neonCyan, size: 22),
         const SizedBox(height: 6),

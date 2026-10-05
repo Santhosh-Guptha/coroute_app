@@ -80,7 +80,13 @@ class TimelineService extends ChangeNotifier {
       final res = await _api.get('/convoys/$gid/timeline');
       if (_groupId != gid) return;
       final list = res is Map ? res['events'] : null;
-      if (list is List) _applyAll(list);
+      if (list is List) {
+        // The server's list is complete: start from it, so entries the report
+        // replaced or removed (live stops that were only GPS drift) disappear.
+        _byId.clear();
+        _lastUpdatedAt = 0;
+        _applyAll(list);
+      }
     } on ApiException catch (e) {
       _error = e.message;
     } catch (_) {

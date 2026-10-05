@@ -921,35 +921,28 @@ class ConvoyService extends ChangeNotifier {
   }
 
   // ----------------------------------------------------------- trip summary
+  /// The phone's own record of a convoy trip, saved the moment it ends so the
+  /// trip is in history at once (also offline). It carries no made-up numbers:
+  /// distance, speeds and the route come from the server's report, which
+  /// replaces this record a minute later (same trip id).
   TripHistoryModel buildTripHistory(ConvoyModel convoy, {String? userId}) {
     final now = DateTime.now().millisecondsSinceEpoch;
-    final riders = convoy.riders.values.toList();
-    double topSpeed = 0.0, totalSpeed = 0.0;
-    for (final r in riders) {
-      if (r.speedKmh > topSpeed) topSpeed = r.speedKmh;
-      totalSpeed += r.speedKmh;
-    }
-    final avgSpeed = riders.isNotEmpty ? totalSpeed / riders.length : 0.0;
-    final durationMs = math.max(60000, now - convoy.createdAtEpochMs);
-    final estimatedDistanceKm = avgSpeed * (durationMs / 3600000.0);
-
     return TripHistoryModel(
       tripId: 'TRIP-${convoy.groupId.replaceAll('GRP-', '')}-${userId ?? convoy.createdByUserId}',
       tripName: convoy.name,
       startLocationName: convoy.startLocationName.isNotEmpty ? convoy.startLocationName : 'Convoy Start',
       destinationName: convoy.destinationName.isNotEmpty ? convoy.destinationName : 'Final Waypoint',
       startTimeEpochMs: convoy.createdAtEpochMs,
-      endTimeEpochMs: now,
-      totalDistanceKm: double.parse(estimatedDistanceKm.toStringAsFixed(1)),
-      topSpeedKmh: double.parse(topSpeed.toStringAsFixed(1)),
-      avgSpeedKmh: double.parse(avgSpeed.toStringAsFixed(1)),
+      endTimeEpochMs: math.max(now, convoy.createdAtEpochMs + 60000),
+      totalDistanceKm: 0,
+      topSpeedKmh: 0,
+      avgSpeedKmh: 0,
       riderCount: convoy.riders.length,
-      stopCount: convoy.stopPoints.where((s) => s.isVisited).length,
-      breadcrumbTrail: riders
-          .map((r) => TripBreadcrumbPoint(lat: r.lat, lng: r.lng, speedKmh: r.speedKmh, heading: r.heading, timestamp: r.lastSeenEpochMs))
-          .toList(),
+      stopCount: 0,
       userId: userId ?? convoy.createdByUserId,
       createdByUserName: convoy.createdByUserName,
+      groupId: convoy.groupId,
+      source: 'device',
     );
   }
 

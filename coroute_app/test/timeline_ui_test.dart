@@ -62,12 +62,18 @@ void main() {
       expect(r.members.last.distanceM, 0);
     });
 
-    test('only server-built trips open the full report, and that survives local storage', () {
+    test('convoy trips open the group report; the phone\'s own record is marked as not final', () {
       final server = TripHistoryModel.fromJson({'tripId': 'T1', 'tripName': 'x', 'source': 'server', 'groupId': 'GRP-1', 'startTimeEpochMs': t0, 'endTimeEpochMs': t0 + min});
       final device = TripHistoryModel.fromJson({'tripId': 'T2', 'tripName': 'y', 'groupId': 'GRP-2', 'startTimeEpochMs': t0, 'endTimeEpochMs': t0 + min});
+      final solo = TripHistoryModel.fromJson({'tripId': 'T3', 'tripName': 'z', 'startTimeEpochMs': t0, 'endTimeEpochMs': t0 + min});
       expect(server.hasReport, isTrue);
-      expect(device.hasReport, isFalse);
+      expect(server.isEstimate, isFalse);
+      expect(device.hasReport, isTrue);
+      expect(device.isEstimate, isTrue);
+      expect(solo.hasReport, isFalse);
       expect(TripHistoryModel.fromJson(server.toJson()).groupId, 'GRP-1');
+      expect(TripHistoryModel.fromJson(server.toJson()).isEstimate, isFalse);
+      expect(TripHistoryModel.fromJson(device.toJson()).isEstimate, isTrue, reason: 'local storage keeps the source');
     });
 
     test('member colours are stable and distinct for a small group', () {

@@ -182,6 +182,7 @@ function analyseTrack(rawPoints, { minStopMs = 120000, gapMs = config.offlineAle
   const spanMs = lastTs - firstTs;
   const restMs = stops.reduce((s, x) => s + x.durationMs, 0);
   const gapTotal = gaps.reduce((s, x) => s + x.durationMs, 0);
+  const gapDistance = gaps.reduce((s, x) => s + x.distanceM, 0);
   const movingMs = Math.max(0, spanMs - restMs - gapTotal);
 
   // Moving segments between stops (and from start / to end).
@@ -204,7 +205,8 @@ function analyseTrack(rawPoints, { minStopMs = 120000, gapMs = config.offlineAle
 
   return {
     points, distanceM, firstTs, lastTs, spanMs, restMs, gapMs: gapTotal, movingMs,
-    maxKmh: Math.round(maxKmh), avgMovingKmh: movingMs > 0 ? +(distanceM / 1000 / (movingMs / 3600000)).toFixed(1) : 0,
+    // Average while moving: the straight line across a signal gap is not riding time, so it is left out.
+    maxKmh: Math.round(maxKmh), avgMovingKmh: movingMs > 0 ? +(Math.max(0, distanceM - gapDistance) / 1000 / (movingMs / 3600000)).toFixed(1) : 0,
     stops, segments, gaps,
   };
 }

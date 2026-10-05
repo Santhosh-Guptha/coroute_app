@@ -157,6 +157,19 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     return { meta, win };
   };
   const intQ = (v, def) => { const n = Number(v); return Number.isFinite(n) ? n : def; };
+  /** The planned trip for the maps: start, planned stops with who reached them, destination. */
+  const publicPlan = (meta) => {
+    if (!meta) return null;
+    const place = (lat, lng, name) => (Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng) ? { lat, lng, name: name || '' } : null);
+    return {
+      start: meta.start ? place(meta.start.lat, meta.start.lng, meta.start.name || meta.startLocationName) : null,
+      destination: place(meta.destinationLat, meta.destinationLng, meta.destinationName),
+      destinationArrivals: meta.destinationArrivals || {},
+      stops: (meta.stopPoints || [])
+        .filter((s) => s.status !== 'SUGGESTED' && Number.isFinite(s.lat) && Number.isFinite(s.lng))
+        .map((s) => ({ stopId: s.stopId, name: s.name, lat: s.lat, lng: s.lng, category: s.category || 'OTHER', status: s.status || 'PLANNED', isVisited: !!s.isVisited, orderIndex: s.orderIndex || 0, arrivals: s.arrivals || {} })),
+    };
+  };
 
   r.get('/convoys/:groupId/timeline', wrap(async (req, res) => {
     const v = await viewWindow(req, res); if (!v) return;
@@ -183,7 +196,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       if (!clipped.length) continue;
       out.push({ userId: uid, name: v.meta.members?.[uid]?.name || '', points: toWire(filterPoints(clipped), simplifyM) });
     }
-    res.json({ groupId: v.meta.groupId, tracks: out, format: ['ts', 'lat', 'lng', 'kmh'] });
+    res.json({ groupId: v.meta.groupId, tracks: out, format: ['ts', 'lat', 'lng', 'kmh'], plan: publicPlan(v.meta) });
   }));
 
   // Batch upload of recorded points (the app's normal path; also works after the trip ended, within the grace period).
@@ -238,7 +251,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     const win = visibleWindow(meta, req.user);
     if (!win) return res.json({ trip, report: null, events: [] });
     const events = (await repo.listEvents(trip.groupId, { limit: 20000 })).filter((e) => eventVisible(e, win, req.user.userId)).map(publicEvent);
-    res.json({ trip, report: meta.report || null, events, members: Object.values(meta.members || {}).map((m) => ({ userId: m.userId, name: m.name, role: m.role })) });
+    res.json({ trip, report: meta.report || null, events, plan: publicPlan(meta), members: Object.values(meta.members || {}).map((m) => ({ userId: m.userId, name: m.name, role: m.role })) });
   }));
 
   // ---- places and routes (free OSM services through the gateway cache) ----

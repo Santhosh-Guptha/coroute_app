@@ -1,18 +1,20 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
-import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../data/models/timeline_event_model.dart';
+import '../../data/models/trip_plan_model.dart';
 import '../../data/services/api_client.dart';
 import '../../domain/tracking/replay_math.dart';
 import '../timeline/member_colors.dart';
-import '../../core/theme/map_tiles.dart';
+import 'trip_route_map.dart';
 
 /// Replays a convoy: drag the time slider (or press play) and every rider's
 /// marker moves to where they were at that moment, with a 10-minute tail.
+/// The whole route of each rider, their start and finish, where they waited,
+/// the planned stops and the destination stay on the map.
 /// Opened from a timeline entry it starts at that moment, with a pin on the
 /// place and that rider highlighted.
 class ReplayScreen extends StatefulWidget {
@@ -24,6 +26,9 @@ class ReplayScreen extends StatefulWidget {
   final String? pinLabel;
   final Map<String, Color>? colors;
 
+  /// Timeline entries already loaded by the caller (waiting points come from here).
+  final List<TimelineEventModel>? events;
+
   const ReplayScreen({
     super.key,
     required this.groupId,
@@ -33,6 +38,7 @@ class ReplayScreen extends StatefulWidget {
     this.pin,
     this.pinLabel,
     this.colors,
+    this.events,
   });
 
   @override
@@ -41,6 +47,8 @@ class ReplayScreen extends StatefulWidget {
 
 class _ReplayScreenState extends State<ReplayScreen> {
   List<ReplayTrack> _tracks = [];
+  List<TimelineEventModel> _stops = [];
+  TripPlan? _plan;
   Map<String, Color> _colors = {};
   bool _loading = true;
   String? _error;
@@ -67,11 +75,26 @@ class _ReplayScreenState extends State<ReplayScreen> {
       final res = await api.get('/convoys/${widget.groupId}/tracks?simplify=8', timeout: const Duration(seconds: 25));
       final list = (res is Map ? res['tracks'] : null) as List? ?? const [];
       final tracks = list.whereType<Map>().map((m) => ReplayTrack.fromJson(Map<String, dynamic>.from(m))).where((t) => t.points.length >= 2).toList();
+      final plan = res is Map ? TripPlan.fromJson(res['plan']) : null;
+      var events = widget.events;
+      if (events == null) {
+        try {
+          final tl = await api.get('/convoys/${widget.groupId}/timeline?types=STOPPED', timeout: const Duration(seconds: 20));
+          events = ((tl is Map ? tl['events'] : null) as List? ?? const [])
+              .whereType<Map>()
+              .map((e) => TimelineEventModel.fromJson(Map<String, dynamic>.from(e)))
+              .toList();
+        } catch (_) {
+          events = const []; // the routes still show without the waiting points
+        }
+      }
       if (!mounted) return;
       final from = tracks.isEmpty ? 0 : tracks.map((t) => t.firstTs).reduce((a, b) => a < b ? a : b);
       final to = tracks.isEmpty ? 0 : tracks.map((t) => t.lastTs).reduce((a, b) => a > b ? a : b);
       setState(() {
         _tracks = tracks;
+        _plan = plan;
+        _stops = events!.where((e) => e.type == 'STOPPED' && e.hasPlace).toList();
         _colors = widget.colors ?? MemberColors.assign(tracks.map((t) => t.userId));
         _from = from;
         _to = to;
@@ -93,10 +116,12 @@ class _ReplayScreenState extends State<ReplayScreen> {
       return;
     }
     if (_t >= _to) _t = _from;
-    _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+    // 5 frames a second is smooth enough for map markers and keeps the phone cool.
+    const frame = Duration(milliseconds: 200);
+    _timer = Timer.periodic(frame, (_) {
       if (!mounted) return;
       setState(() {
-        _t += _speeds[_speedIndex] * 100;
+        _t += _speeds[_speedIndex] * frame.inMilliseconds;
         if (_t >= _to) {
           _t = _to;
           _timer?.cancel();
@@ -107,85 +132,40 @@ class _ReplayScreenState extends State<ReplayScreen> {
     setState(() {});
   }
 
-  LatLngBounds? _bounds() {
-    final pts = <LatLng>[for (final t in _tracks) for (final p in t.points) LatLng(p.lat, p.lng)];
-    if (widget.pin != null) pts.add(widget.pin!);
-    if (pts.length < 2) return null;
-    return LatLngBounds.fromPoints(pts);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: AppBar(title: Text(widget.title, overflow: TextOverflow.ellipsis)),
       body: _loading
           ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
           : _error != null
               ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.laserRed))))
               : LayoutBuilder(builder: (context, c) {
                   final wide = c.maxWidth > c.maxHeight && c.maxWidth > 700;
-                  final map = _map();
+                  final map = TripRouteMap(
+                    tracks: _tracks,
+                    colors: _colors,
+                    plan: _plan,
+                    stops: _stops,
+                    timeMs: _tracks.isEmpty ? null : _t,
+                    focusUserId: widget.focusUserId,
+                    pin: widget.pin,
+                  );
                   final panel = _panel();
-                  return wide
-                      ? Row(children: [Expanded(flex: 3, child: map), SizedBox(width: 360, child: panel)])
-                      : Column(children: [Expanded(child: map), panel]);
+                  if (wide) return Row(children: [Expanded(flex: 3, child: map), SizedBox(width: 360, child: SingleChildScrollView(child: panel))]);
+                  // The panel never takes more than 45% of the height, so the map stays usable in landscape.
+                  return Column(children: [
+                    Expanded(child: map),
+                    ConstrainedBox(constraints: BoxConstraints(maxHeight: c.maxHeight * 0.45), child: SingleChildScrollView(child: panel)),
+                  ]);
                 }),
-    );
-  }
-
-  Widget _map() {
-    final bounds = _bounds();
-    final center = widget.pin ?? (bounds?.center ?? const LatLng(17.385, 78.4867));
-    final focus = widget.focusUserId;
-    return FlutterMap(
-      options: MapOptions(
-        initialCenter: center,
-        initialZoom: 13,
-        initialCameraFit: (widget.pin == null && bounds != null) ? CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)) : null,
-      ),
-      children: [
-        TileLayer(tileBuilder: mapTileBuilder, urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
-        PolylineLayer(polylines: [
-          for (final t in _tracks)
-            Polyline(
-              points: [for (final p in t.points) LatLng(p.lat, p.lng)],
-              strokeWidth: t.userId == focus ? 3 : 2,
-              color: (_colors[t.userId] ?? AppTheme.neonCyan).withOpacity(focus == null || t.userId == focus ? 0.35 : 0.15),
-            ),
-          for (final t in _tracks)
-            Polyline(
-              points: [for (final p in t.tail(_t)) LatLng(p.lat, p.lng)],
-              strokeWidth: t.userId == focus ? 6 : 4.5,
-              color: _colors[t.userId] ?? AppTheme.neonCyan,
-            ),
-        ]),
-        MarkerLayer(markers: [
-          if (widget.pin != null)
-            Marker(point: widget.pin!, width: 36, height: 36, child: Icon(Icons.location_on, color: AppTheme.hyperAmber, size: 34)),
-          for (final t in _tracks)
-            if (t.positionAt(_t) != null)
-              Marker(
-                point: LatLng(t.positionAt(_t)!.lat, t.positionAt(_t)!.lng),
-                width: 34,
-                height: 34,
-                child: Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: AppTheme.obsidianVoid,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: _colors[t.userId] ?? AppTheme.neonCyan, width: t.userId == focus ? 3 : 2),
-                  ),
-                  child: Text(MemberColors.initials(t.name), style: TextStyle(color: _colors[t.userId] ?? AppTheme.neonCyan, fontSize: 11, fontWeight: FontWeight.bold)),
-                ),
-              ),
-        ]),
-      ],
     );
   }
 
   Widget _panel() {
     final fmt = DateFormat('HH:mm:ss');
+    final day = DateFormat('EEE d MMM');
     final hasRange = _to > _from;
     return Container(
       color: AppTheme.darkCanvas,
@@ -198,9 +178,13 @@ class _ReplayScreenState extends State<ReplayScreen> {
           children: [
             if (_tracks.isEmpty)
               Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text('No recorded route for this trip yet. Routes appear a minute after riders move.',
-                    textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textMuted, fontSize: 13)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                    _plan == null
+                        ? 'No recorded route for this trip yet. Routes appear a minute after riders move.'
+                        : 'No recorded routes for this trip. The map shows the planned stops and destination.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppTheme.textMuted, fontSize: 13)),
               )
             else ...[
               Row(
@@ -211,8 +195,11 @@ class _ReplayScreenState extends State<ReplayScreen> {
                     tooltip: _timer != null ? 'Pause' : 'Play',
                   ),
                   Expanded(
-                    child: Text(_t > 0 ? fmt.format(DateTime.fromMillisecondsSinceEpoch(_t)) : '',
-                        style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                      Text(_t > 0 ? fmt.format(DateTime.fromMillisecondsSinceEpoch(_t)) : '',
+                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold, fontFeatures: const [FontFeature.tabularFigures()])),
+                      if (_t > 0) Text(day.format(DateTime.fromMillisecondsSinceEpoch(_t)), style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                    ]),
                   ),
                   TextButton(
                     onPressed: () => setState(() => _speedIndex = (_speedIndex + 1) % _speeds.length),
@@ -238,17 +225,30 @@ class _ReplayScreenState extends State<ReplayScreen> {
                       children: [
                         CircleAvatar(radius: 5, backgroundColor: _colors[t.userId] ?? AppTheme.neonCyan),
                         const SizedBox(width: 5),
-                        Flexible(child: Text(
-                          t.positionAt(_t) == null ? '${t.name}: no data' : '${t.name}: ${t.positionAt(_t)!.kmh.round()} km/h',
-                          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                        Flexible(
+                          child: Text(_riderNow(t), style: TextStyle(color: AppTheme.textSecondary, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        ),
                       ],
                     ),
                 ],
               ),
             ],
+            const SizedBox(height: 10),
+            const TripMapLegend(),
           ],
         ),
       ),
     );
+  }
+
+  /// "Asha: 54 km/h", "Asha: waiting", "Asha: not started", "Asha: finished", "Asha: no signal".
+  String _riderNow(ReplayTrack t) {
+    if (_t < t.firstTs) return '${t.name}: not started';
+    if (_t > t.lastTs) return '${t.name}: finished';
+    final waiting = _stops.any((e) => e.userId == t.userId && e.startedAt <= _t && (e.endedAt ?? e.startedAt + e.durationMs) >= _t);
+    if (waiting) return '${t.name}: waiting';
+    final at = t.positionAt(_t);
+    if (at == null) return '${t.name}: no signal';
+    return '${t.name}: ${at.kmh.round()} km/h';
   }
 }

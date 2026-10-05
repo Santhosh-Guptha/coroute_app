@@ -78,6 +78,15 @@ class MemberReport {
   final double overspeedMaxKmh;
   final bool reachedDestination;
 
+  /// When this rider's recorded route begins and ends, and the place names there.
+  final int firstFixAt;
+  final int lastFixAt;
+  final String startPlace;
+  final String endPlace;
+
+  /// When the rider joined, for riders without an uploaded route.
+  final int joinedAt;
+
   const MemberReport({
     required this.userId,
     required this.name,
@@ -100,6 +109,11 @@ class MemberReport {
     this.overspeedMs = 0,
     this.overspeedMaxKmh = 0,
     this.reachedDestination = false,
+    this.firstFixAt = 0,
+    this.lastFixAt = 0,
+    this.startPlace = '',
+    this.endPlace = '',
+    this.joinedAt = 0,
   });
 
   factory MemberReport.fromJson(Map<String, dynamic> j) {
@@ -127,6 +141,11 @@ class MemberReport {
       overspeedMs: i('overspeedMs'),
       overspeedMaxKmh: d('overspeedMaxKmh'),
       reachedDestination: j['reachedDestination'] == true,
+      firstFixAt: i('firstFixAt'),
+      lastFixAt: i('lastFixAt'),
+      startPlace: j['startPlace']?.toString() ?? '',
+      endPlace: j['endPlace']?.toString() ?? '',
+      joinedAt: i('joinedAt'),
     );
   }
 }

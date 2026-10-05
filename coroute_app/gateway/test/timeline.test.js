@@ -336,14 +336,23 @@ test('group timeline: every member tracked, isolated per group, exact report', a
   assert.equal(tr.status, 200);
   assert.ok(tr.json.events.length > 10);
   assert.equal((await api('GET', `/trips/${ta.tripId}/report`, null, B.token)).status, 404);
+  assert.ok(tr.json.plan, 'the report carries the planned start, stops and destination for the map');
+  assert.ok(Array.isArray(tr.json.plan.stops));
 
   // Replay data and GPX.
-  const tracks = (await api('GET', `/convoys/${gid}/tracks?simplify=15`, null, B.token)).json.tracks;
+  const tracksRes = (await api('GET', `/convoys/${gid}/tracks?simplify=15`, null, B.token)).json;
+  assert.ok(tracksRes.plan, 'replay gets the plan too');
+  const tracks = tracksRes.tracks;
   assert.equal(tracks.length, 1);
   assert.ok(tracks[0].points.length < trackA.length);
   const gpx = await api('GET', `/convoys/${gid}/gpx?userId=${A.user.userId}`, null, C.token);
   assert.equal(gpx.status, 200);
   assert.ok(gpx.text.includes('<trkpt'));
+
+  // C deletes their trip; a later rebuild must not bring it back.
+  const tcId = `TRIP-${gid.replace('GRP-', '')}-${C.user.userId}`;
+  assert.ok(await gw.repo.getTrip(tcId), 'C has a server trip');
+  assert.equal((await api('DELETE', `/trips/${tcId}`, null, C.token)).status, 200);
 
   // ---- B's phone uploads its backlog after the trip ended: the report is rebuilt with B's real track ----
   const bPts = [];
@@ -370,6 +379,8 @@ test('group timeline: every member tracked, isolated per group, exact report', a
   assert.equal(rb2.stops, 2);
   assert.ok(Math.abs(rb2.distanceM - 40000) / 40000 < 0.015, `B distance ${rb2.distanceM}`);
   assert.equal(rebuilt.members.find((m) => m.userId === A.user.userId).stops, 1, 'rebuild is idempotent for A');
+  assert.equal(await gw.repo.getTrip(tcId), null, 'a deleted trip stays deleted after a rebuild');
+  assert.ok(await gw.repo.getTrip(ta.tripId), 'other riders keep theirs');
   const afterRebuild = (await api('GET', `/convoys/${gid}/timeline`, null, A.token)).json.events;
   assert.equal(afterRebuild.filter((e) => e.type === 'STOPPED' && e.userId === A.user.userId).length, 1);
   // Past the grace period uploads are refused.

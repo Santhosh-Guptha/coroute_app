@@ -663,7 +663,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       if (r.lat != 0 || r.lng != 0) return LatLng(r.lat, r.lng);
     }
     if (convoy.startLat != null && convoy.startLng != null) return LatLng(convoy.startLat!, convoy.startLng!);
-    return const LatLng(20.5937, 78.9629); // centre of India
+    return const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng); // centre of India
   }
 
   /// Keeps my marker in view while auto-follow is on. Moves only when I moved
