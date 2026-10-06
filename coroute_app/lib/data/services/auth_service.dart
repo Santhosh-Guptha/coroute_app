@@ -53,15 +53,22 @@ class AuthService extends ChangeNotifier {
   String? get vehicleNo => _vehicleNo;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _api.hasToken && _userId != null;
-  bool get isMasterAdmin => _role == AppConstants.adminRole;
+  bool get isMasterAdmin =>
+      _role == AppConstants.adminRole ||
+      (_email != null && _email!.trim().toLowerCase() == AppConstants.masterAdminEmail.toLowerCase());
   String? get token => _api.token;
 
   Future<void> _loadSavedSession() async {
     await _api.init();
     final prefs = await SharedPreferences.getInstance();
     _userId = prefs.getString(AppConstants.keyUserId);
-    _role = prefs.getString(AppConstants.keyUserRole);
     _email = prefs.getString(AppConstants.keyUserEmail);
+    final cleanEmail = _email?.trim().toLowerCase();
+    if (cleanEmail != null && cleanEmail == AppConstants.masterAdminEmail.toLowerCase()) {
+      _role = AppConstants.adminRole;
+    } else {
+      _role = prefs.getString(AppConstants.keyUserRole);
+    }
     _name = prefs.getString(AppConstants.keyUserName);
     _vehicleType = prefs.getString(AppConstants.keyVehicleType) ?? 'Motorcycle';
     _phone = prefs.getString(AppConstants.keyPhone) ?? '';
@@ -96,8 +103,13 @@ class AuthService extends ChangeNotifier {
 
   Future<void> _applyUser(Map<String, dynamic> u) async {
     _userId = u['userId']?.toString();
-    _role = u['role']?.toString() ?? AppConstants.riderRole;
     _email = u['email']?.toString();
+    final cleanEmail = _email?.trim().toLowerCase();
+    if (cleanEmail != null && cleanEmail == AppConstants.masterAdminEmail.toLowerCase()) {
+      _role = AppConstants.adminRole;
+    } else {
+      _role = u['role']?.toString() ?? AppConstants.riderRole;
+    }
     _name = u['name']?.toString();
     _vehicleType = u['vehicleType']?.toString() ?? 'Motorcycle';
     _phone = u['phone']?.toString() ?? '';

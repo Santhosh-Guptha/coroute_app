@@ -17,7 +17,9 @@ import '../../data/models/rider_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/trip_storage_service.dart';
+import '../widgets/emergency_sos_sheet.dart';
 import '../widgets/intercom_dock.dart';
+import '../widgets/rider_status_sheet.dart';
 import '../../data/services/geo_service.dart';
 import '../map_picker/map_picker_screen.dart';
 import '../trip_planner/route_stops_panel.dart';
@@ -639,17 +641,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     );
 
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: AppTheme.laserRed,
-          content: Row(
-            children: [
-              Icon(Icons.warning, color: Colors.white),
-              SizedBox(width: 8),
-              Expanded(child: Text('SOS Emergency Broadcasted to entire Convoy!')),
-            ],
-          ),
-        ),
+      EmergencySosSheet.show(
+        context,
+        lat: lat,
+        lng: lng,
       );
     }
   }
@@ -777,6 +772,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                       ? ((r.speedKmh < 10.0 && _deviceCompassHeading != null) ? _deviceCompassHeading! : r.heading)
                       : r.heading;
 
+                  final hasStatus = r.statusReason.isNotEmpty;
+                  final statusEmoji = hasStatus ? RiderStatusSheet.getStatusEmoji(r.statusReason) : '';
+                  final statusLabel = hasStatus ? RiderStatusSheet.getStatusLabel(r.statusReason) : '';
+
                   return Marker(
                     point: LatLng(r.lat, r.lng),
                     width: 112,
@@ -784,23 +783,25 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Rider name & speed tag
+                        // Rider name & speed tag / status badge
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                           decoration: BoxDecoration(
                             color: AppTheme.slateCard.withOpacity(0.92),
                             borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: (isOffline ? AppTheme.laserRed : roleColor).withOpacity(0.8), width: 0.8),
+                            border: Border.all(color: (isOffline ? AppTheme.laserRed : (hasStatus ? AppTheme.hyperAmber : roleColor)).withOpacity(0.8), width: 0.8),
                           ),
-                          constraints: const BoxConstraints(maxWidth: 108),
+                          constraints: const BoxConstraints(maxWidth: 118),
                           child: Text(
                             isOffline
                                 ? '${r.name.split(' ').first} · last seen ${((DateTime.now().millisecondsSinceEpoch - r.lastSeenEpochMs) ~/ 60000).clamp(1, 999)}m'
-                                : '${isMe ? "You" : r.name.split(' ').first} · ${r.speedKmh.toStringAsFixed(0)} km/h',
+                                : (hasStatus
+                                    ? '$statusEmoji ${isMe ? "You" : r.name.split(' ').first} · $statusLabel'
+                                    : '${isMe ? "You" : r.name.split(' ').first} · ${r.speedKmh.toStringAsFixed(0)} km/h'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: isOffline ? AppTheme.hyperAmber : roleColor,
+                              color: isOffline ? AppTheme.hyperAmber : (hasStatus ? AppTheme.hyperAmber : roleColor),
                               fontSize: 9,
                               fontWeight: FontWeight.bold,
                             ),
@@ -1019,6 +1020,75 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
                   return widgets;
                 })(),
+
+                // Stopped Rider Prompt Banner (Section 5.5 in PROJECT_CONTEXT.md)
+                if (myRider.statusReason.isEmpty &&
+                    myRider.stoppedSince > 0 &&
+                    DateTime.now().millisecondsSinceEpoch - myRider.stoppedSince >= convoy.stopThresholdSeconds * 1000) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppTheme.hyperAmber.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.hyperAmber.withOpacity(0.7)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.local_parking_rounded, color: AppTheme.hyperAmber, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Stopped ${((DateTime.now().millisecondsSinceEpoch - myRider.stoppedSince) ~/ 60000)} min',
+                            style: TextStyle(color: AppTheme.hyperAmber, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.hyperAmber,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: () => RiderStatusSheet.show(context, convoyService: convoyService, userId: myRider.userId),
+                          child: const Text('Set Reason', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                // Active Status Banner (if current rider set a status)
+                if (myRider.statusReason.isNotEmpty) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppTheme.slateCard.withOpacity(0.92),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppTheme.hyperAmber.withOpacity(0.6)),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(RiderStatusSheet.getStatusEmoji(myRider.statusReason), style: const TextStyle(fontSize: 14)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Status: ${RiderStatusSheet.getStatusLabel(myRider.statusReason)}${myRider.statusMessage.isNotEmpty ? ": ${myRider.statusMessage}" : ""}',
+                            style: TextStyle(color: AppTheme.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        TextButton(
+                          style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+                          onPressed: () => convoyService.updateStatusReason(userId: myRider.userId, reason: ''),
+                          child: Text('Clear', style: TextStyle(color: AppTheme.laserRed, fontSize: 11, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 // Convoy Header Card
                 GlassCard(

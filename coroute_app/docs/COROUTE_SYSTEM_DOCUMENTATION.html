@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CoRoute — System Architecture & Application Flow Specification</title>
+  <style>
+    :root {
+      --obsidian-void: #0B0D11;
+      --dark-canvas: #10141D;
+      --slate-card: #161A22;
+      --elevated-card: #1E232E;
+      --glass-border: rgba(255, 255, 255, 0.08);
+      --glass-border-hover: rgba(0, 229, 255, 0.3);
+      --neon-cyan: #00E5FF;
+      --electric-blue: #2979FF;
+      --hyper-amber: #FFB300;
+      --laser-red: #FF2A6D;
+      --emerald-safe: #00E676;
+      --devmonks-purple: #7C4DFF;
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--obsidian-void);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      display: flex;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Sidebar Navigation */
+    nav.sidebar {
+      width: 290px;
+      background: var(--dark-canvas);
+      border-right: 1px solid var(--glass-border);
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      padding: 24px 16px;
+      overflow-y: auto;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .brand-header {
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    .brand-title {
+      font-size: 20px;
+      font-weight: 900;
+      letter-spacing: 1.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-primary);
+    }
+
+    .brand-badge {
+      background: rgba(0, 229, 255, 0.12);
+      border: 1px solid rgba(0, 229, 255, 0.4);
+      color: var(--neon-cyan);
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+
+    .brand-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .nav-group-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-muted);
+      font-weight: 800;
+      margin-top: 12px;
+      margin-bottom: 6px;
+      padding-left: 8px;
+    }
+
+    .nav-links {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 13px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-links a:hover {
+      color: var(--neon-cyan);
+      background: rgba(0, 229, 255, 0.08);
+      transform: translateX(4px);
+    }
+
+    /* Main Content Area */
+    main.content {
+      margin-left: 290px;
+      padding: 48px 64px 96px;
+      max-width: 1200px;
+      width: calc(100% - 290px);
+    }
+
+    header.doc-header {
+      margin-bottom: 48px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    .doc-meta {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .tag-cyan { background: rgba(0, 229, 255, 0.15); color: var(--neon-cyan); border: 1px solid rgba(0, 229, 255, 0.4); }
+    .tag-amber { background: rgba(255, 179, 0, 0.15); color: var(--hyper-amber); border: 1px solid rgba(255, 179, 0, 0.4); }
+    .tag-red { background: rgba(255, 42, 109, 0.15); color: var(--laser-red); border: 1px solid rgba(255, 42, 109, 0.4); }
+    .tag-green { background: rgba(0, 230, 118, 0.15); color: var(--emerald-safe); border: 1px solid rgba(0, 230, 118, 0.4); }
+    .tag-purple { background: rgba(124, 77, 255, 0.15); color: var(--devmonks-purple); border: 1px solid rgba(124, 77, 255, 0.4); }
+
+    h1 {
+      font-size: 34px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      margin-bottom: 12px;
+      color: #FFFFFF;
+    }
+
+    p.lead {
+      font-size: 16px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+
+    h2 {
+      font-size: 22px;
+      font-weight: 800;
+      margin-top: 48px;
+      margin-bottom: 20px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    h3 {
+      font-size: 17px;
+      font-weight: 700;
+      margin-top: 28px;
+      margin-bottom: 12px;
+      color: var(--neon-cyan);
+    }
+
+    p {
+      margin-bottom: 16px;
+      color: var(--text-secondary);
+      font-size: 14.5px;
+    }
+
+    /* Cards & Containers */
+    .glass-card {
+      background: var(--slate-card);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .glass-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+      opacity: 0.3;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+      margin-bottom: 28px;
+    }
+
+    .feature-card {
+      background: var(--elevated-card);
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      padding: 20px;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--glass-border-hover);
+    }
+
+    .feature-card h4 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .feature-card p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 0;
+    }
+
+    /* Diagrams & Architecture Flows */
+    .flow-diagram {
+      background: var(--dark-canvas);
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      padding: 24px;
+      margin: 24px 0;
+      overflow-x: auto;
+    }
+
+    .node-chain {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .flow-node {
+      background: var(--elevated-card);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      padding: 12px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 160px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .flow-node .node-type {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+    }
+
+    .flow-node.highlight-cyan { border-color: rgba(0, 229, 255, 0.6); background: rgba(0, 229, 255, 0.05); }
+    .flow-node.highlight-amber { border-color: rgba(255, 179, 0, 0.6); background: rgba(255, 179, 0, 0.05); }
+    .flow-node.highlight-red { border-color: rgba(255, 42, 109, 0.6); background: rgba(255, 42, 109, 0.05); }
+    .flow-node.highlight-green { border-color: rgba(0, 230, 118, 0.6); background: rgba(0, 230, 118, 0.05); }
+
+    .flow-arrow {
+      color: var(--text-muted);
+      font-weight: 900;
+      font-size: 18px;
+    }
+
+    /* Tables */
+    table.spec-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 13.5px;
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    table.spec-table th {
+      background: var(--dark-canvas);
+      color: var(--text-primary);
+      text-align: left;
+      padding: 12px 16px;
+      font-weight: 700;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    table.spec-table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      color: var(--text-secondary);
+      vertical-align: top;
+    }
+
+    table.spec-table tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      background: rgba(255, 255, 255, 0.07);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--neon-cyan);
+    }
+
+    pre {
+      background: #090B0E;
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      padding: 18px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.5;
+      color: #E2E8F0;
+      margin: 16px 0 24px;
+    }
+
+    /* Alerts and Callouts */
+    .callout {
+      padding: 16px 20px;
+      border-radius: 10px;
+      margin: 20px 0;
+      font-size: 13.5px;
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    .callout-amber {
+      background: rgba(255, 179, 0, 0.08);
+      border: 1px solid rgba(255, 179, 0, 0.35);
+      color: #F8FAFC;
+    }
+
+    .callout-red {
+      background: rgba(255, 42, 109, 0.08);
+      border: 1px solid rgba(255, 42, 109, 0.35);
+      color: #F8FAFC;
+    }
+
+    .callout-cyan {
+      background: rgba(0, 229, 255, 0.08);
+      border: 1px solid rgba(0, 229, 255, 0.35);
+      color: #F8FAFC;
+    }
+
+    .callout-icon {
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    /* Status Badges List */
+    .status-badge-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 12px;
+      margin: 18px 0;
+    }
+
+    .status-badge-item {
+      background: var(--dark-canvas);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+    }
+
+    .status-badge-item .emoji {
+      font-size: 20px;
+    }
+
+    .status-badge-item .info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .status-badge-item .label {
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .status-badge-item .code {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    @media (max-width: 960px) {
+      nav.sidebar {
+        display: none;
+      }
+      main.content {
+        margin-left: 0;
+        width: 100%;
+        padding: 24px 20px 60px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar Navigation -->
+  <nav class="sidebar">
+    <div class="brand-header">
+      <div class="brand-title">
+        <span>COROUTE</span>
+        <span class="brand-badge">PROD 2.4</span>
+      </div>
+      <div class="brand-subtitle">Telemetry & Lifeline System</div>
+    </div>
+
+    <div>
+      <div class="nav-group-title">Architecture & System</div>
+      <ul class="nav-links">
+        <li><a href="#overview">⚡ System Overview</a></li>
+        <li><a href="#architecture">🏛️ Technical Architecture</a></li>
+        <li><a href="#master-admin">🛡️ Master Admin Invariant</a></li>
+      </ul>
+
+      <div class="nav-group-title">Application Flows</div>
+      <ul class="nav-links">
+        <li><a href="#onboarding">🔐 Auth & Registration</a></li>
+        <li><a href="#convoy-lifecycle">👥 Convoy Creation & Join</a></li>
+        <li><a href="#telemetry-tracking">📡 Telemetry & Radar Engine</a></li>
+        <li><a href="#cockpit-hud">🧭 Cockpit HUD & Map</a></li>
+        <li><a href="#stationary-dwell">🛑 Stationary Dwell & Badges</a></li>
+        <li><a href="#intercom-radio">🎙️ Half-Duplex Radio (PTT)</a></li>
+        <li><a href="#emergency-sos">🚨 Emergency SOS Lifeline</a></li>
+        <li><a href="#profile-ice">👤 Rider Profile & ICE</a></li>
+      </ul>
+
+      <div class="nav-group-title">Protocols & Specs</div>
+      <ul class="nav-links">
+        <li><a href="#websocket-spec">🔌 WebSocket Packet Specs</a></li>
+        <li><a href="#rest-api-spec">🌐 REST API Endpoint Index</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="content">
+
+    <header class="doc-header">
+      <div class="doc-meta">
+        <span class="tag tag-cyan">Flutter 3.x Mobile Client</span>
+        <span class="tag tag-purple">Realtime Gateway</span>
+        <span class="tag tag-green">Zero-Mock Verified</span>
+        <span class="tag tag-amber">Mission Critical</span>
+      </div>
+      <h1>CoRoute System Architecture &amp; Complete Application Flow</h1>
+      <p class="lead">
+        CoRoute is an offline-resilient, real-time group motorcycle convoy coordination, sensor-fused telemetry radar, and emergency life-safety platform built for group expeditions through remote corridors, ghats, and high-speed expressways.
+      </p>
+    </header>
+
+    <!-- SECTION 1: OVERVIEW -->
+    <section id="overview">
+      <h2>⚡ System Overview &amp; Core Tenets</h2>
+      <p>
+        Group motorcycling presents unique challenges: intermittent connectivity, vibration, sunlight readability, gloved operation, and the high-stakes necessity of tracking stragglers without inducing rider distraction. CoRoute addresses these through five architectural pillars:
+      </p>
+
+      <div class="card-grid">
+        <div class="feature-card">
+          <h4>📡 Adaptive Telemetry Engine</h4>
+          <p>Dynamically modulates GPS publishing between 3s (active riding &gt;10 km/h) and 30s (stationary dwell), preserving device battery over 10-hour rides while providing tight radar resolution.</p>
+        </div>
+        <div class="feature-card">
+          <h4>🧭 Compass Sensor Fusion</h4>
+          <p>Combines GPS bearing with hardware magnetometer compass. Eliminates "spinning map" anomalies when stationary or moving under 10 km/h at hairpins and intersections.</p>
+        </div>
+        <div class="feature-card">
+          <h4>📴 Offline-First Packet Queue</h4>
+          <p>Local SQLite buffering stores location telemetry breadcrumbs when traversing mountain dead zones, automatically re-syncing in FIFO order once connectivity resumes.</p>
+        </div>
+        <div class="feature-card">
+          <h4>🚨 Redundant Emergency Lifeline</h4>
+          <p>Distress beacon alerts convoy riders in real-time while concurrently firing native intents for designated emergency phone calls, SMS with live Google Maps coordinate links, and 112 emergency dispatch.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 2: TECHNICAL ARCHITECTURE -->
+    <section id="architecture">
+      <h2>🏛️ Technical Architecture</h2>
+      <p>
+        CoRoute operates a dual-channel client-server architecture balancing low-latency binary/JSON streaming with durable relational persistence:
+      </p>
+
+      <div class="flow-diagram">
+        <div class="node-chain">
+          <div class="flow-node highlight-cyan">
+            <span class="node-type">Mobile Client (Flutter)</span>
+            <span>Sensor Fusion + UI Layer</span>
+          </div>
+          <span class="flow-arrow">⇄</span>
+          <div class="flow-node highlight-purple">
+            <span class="node-type">Node.js Gateway</span>
+            <span>REST API + WS Pub/Sub</span>
+          </div>
+          <span class="flow-arrow">⇄</span>
+          <div class="flow-node highlight-green">
+            <span class="node-type">Relational Database</span>
+            <span>Accounts, Convoys, Trips</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <h3>Communication Channels</h3>
+        <table class="spec-table">
+          <thead>
+            <tr>
+              <th>Channel</th>
+              <th>Protocol / Port</th>
+              <th>Primary Purpose</th>
+              <th>Failure Mitigation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Transactional API</strong></td>
+              <td>HTTPS / REST (JWT)</td>
+              <td>Registration, authentication, profile sync, convoy management, stop checkpoint persistence.</td>
+              <td>Exponential backoff retry with offline request queuing for state writes.</td>
+            </tr>
+            <tr>
+              <td><strong>Realtime Telemetry</strong></td>
+              <td>WSS (JSON WebSocket)</td>
+              <td>Sub-second rider position broadcasts, speeds, headings, stationary statuses, SOS distress beacons.</td>
+              <td>Automatic reconnect ping/pong loop (heartbeat); last-known packet retained client-side.</td>
+            </tr>
+            <tr>
+              <td><strong>Voice Intercom</strong></td>
+              <td>WSS (Binary PCM / Opus)</td>
+              <td>Half-duplex Push-To-Talk (PTT) radio stream for team communication without cellular phone calls.</td>
+              <td>Loss-tolerant packet dropping; UI displays realtime radio channel connectivity state.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 3: MASTER ADMIN INVARIANT -->
+    <section id="master-admin">
+      <h2>🛡️ Master Admin Elevation Invariant (Rule 3)</h2>
+      <p>
+        To ensure organizational continuity, emergency system oversight, and prevent lockouts due to cache invalidation or server payload fallbacks, CoRoute enforces the <strong>Rule 3 Master Admin Invariant</strong>:
+      </p>
+
+      <div class="callout callout-cyan">
+        <div class="callout-icon">👑</div>
+        <div>
+          <strong>Invariant Statement:</strong> Any authenticated session associated with <code>santhoshbukka5@gmail.com</code> is permanently and unconditionally elevated to <code>MASTER_ADMIN</code> client-side regardless of server payload fallback, session token refresh, or offline cache hydration.
+        </div>
+      </div>
+
+      <p>Implemented in <code>lib/data/services/auth_service.dart</code> and verified via automated test suites:</p>
+      <pre><code>// Client-side elevation enforcement in AuthService
+if (cleanEmail != null && cleanEmail == AppConstants.masterAdminEmail.toLowerCase()) {
+  _role = AppConstants.adminRole; // Hardened MASTER_ADMIN elevation
+} else {
+  _role = u['role']?.toString() ?? AppConstants.riderRole;
+}</code></pre>
+    </section>
+
+    <!-- SECTION 4: COMPLETE APPLICATION FLOWS -->
+    <section id="onboarding">
+      <h2>🔐 Flow 1: Onboarding, Permissions &amp; Authentication</h2>
+      <p>
+        CoRoute enforces strict permission priming and zero-guest authentication to maintain safety standards across all convoys.
+      </p>
+
+      <div class="flow-diagram">
+        <div class="node-chain">
+          <div class="flow-node">
+            <span class="node-type">Launch App</span>
+            <span>Splash &amp; Token Check</span>
+          </div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node highlight-amber">
+            <span class="node-type">Permissions Gate</span>
+            <span>Location, Mic, Battery</span>
+          </div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node highlight-cyan">
+            <span class="node-type">Access Gate</span>
+            <span>Sign In / Register</span>
+          </div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node highlight-green">
+            <span class="node-type">Role Routing</span>
+            <span>Admin HUD / Rider Home</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <h3>Step-by-Step Execution</h3>
+        <ol style="margin-left: 20px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 8px;">
+          <li><strong>Token &amp; Keystore Hydration:</strong> <code>ApiClient.init()</code> accesses secure hardware storage with a 4-stage retry backoff loop to retrieve active session JWT.</li>
+          <li><strong>Mandatory Permission Priming:</strong> <code>PermissionsScreen</code> guides the rider to grant High Accuracy Background Location (<code>ACCESS_BACKGROUND_LOCATION</code>), Microphone access for voice PTT, and Battery Optimization Exemption to prevent Android Doze mode from freezing GPS streams.</li>
+          <li><strong>Rider Registration:</strong> Collects Callsign/Full Name, Email, Password (8+ chars), Mobile Phone, Vehicle Category (Adv, Cruiser, Sport, Commuter, Scooter, Chase Car), Vehicle Registration Number, and In-Case-of-Emergency (ICE) Contact Name &amp; Phone.</li>
+          <li><strong>Role Routing:</strong> Master Admin (<code>santhoshbukka5@gmail.com</code>) routes to <code>MasterAdminDashboard</code>; all other riders route to <code>RiderHomeScreen</code>.</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- SECTION 5: CONVOY LIFECYCLE -->
+    <section id="convoy-lifecycle">
+      <h2>👥 Flow 2: Convoy Lifecycle (Creation, Joining &amp; Lobby)</h2>
+      <p>
+        A convoy is an ephemeral or scheduled group ride session that synchronizes telemetry, intercom, and route checkpoints among authenticated riders.
+      </p>
+
+      <div class="card-grid">
+        <div class="feature-card">
+          <h4>1. Creating a Convoy</h4>
+          <p>The ride leader configures the Convoy Name, Description, Speed Limit (km/h), and <strong>Stationary Dwell Threshold</strong> (1 to 30 minutes, default 3 minutes). The server allocates a 6-character unique join code (e.g. <code>W7K2M9</code>).</p>
+        </div>
+        <div class="feature-card">
+          <h4>2. Joining via Code / Link</h4>
+          <p>Teammates enter the join code or tap deep links (<code>https://api.coroute.space/join/CODE</code>). The app confirms entry, joins the group WebSocket channel, and requests convoy state.</p>
+        </div>
+        <div class="feature-card">
+          <h4>3. Tactical Roles</h4>
+          <p>Riders can be designated as <strong>LEAD</strong> (pacesetter, amber marker), <strong>SWEEPER</strong> (rear guard, electric blue marker), or <strong>MEMBER</strong> (neon cyan marker) to ensure formation integrity.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 6: TELEMETRY & RADAR ENGINE -->
+    <section id="telemetry-tracking">
+      <h2>📡 Flow 3: Telemetry &amp; Radar Engine</h2>
+      <p>
+        The heart of CoRoute is the real-time telemetry pipeline coordinated by <code>ConvoyService</code> and <code>GeoService</code>:
+      </p>
+
+      <div class="flow-diagram">
+        <div class="node-chain">
+          <div class="flow-node">
+            <span class="node-type">Hardware Sensors</span>
+            <span>GPS + Compass Fusion</span>
+          </div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node highlight-cyan">
+            <span class="node-type">Telemetry Filter</span>
+            <span>Speed &amp; Heading Smoothing</span>
+          </div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node highlight-amber">
+            <span class="node-type">Rate Controller</span>
+            <span>3s Cruising / 30s Idle</span>
+          </div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node highlight-green">
+            <span class="node-type">WebSocket Mesh</span>
+            <span>All Convoy Riders</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <h3>Telemetry Operational Mechanics</h3>
+        <ul style="margin-left: 20px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 10px;">
+          <li><strong>Variable Frequency Transmission:</strong> When moving (&gt;10 km/h), telemetry broadcasts every <strong>3 seconds</strong>. When stationary (&le;10 km/h), updates drop to an <strong>idle 30-second heartbeat</strong>, dramatically cutting battery and network load.</li>
+          <li><strong>Dead Reckoning &amp; Fusion:</strong> If the vehicle is stationary or moving under 10 km/h, the GPS heading becomes erratic. CoRoute seamlessly switches to the device's hardware compass sensor (<code>_deviceCompassHeading</code>) for true north orientation.</li>
+          <li><strong>Convoy Formation Metrics:</strong> Continuously computes:
+            <ul style="margin-left: 20px; margin-top: 6px;">
+              <li><strong>Lead-to-Sweeper Gap:</strong> Haversine distance separating the ride leader from the tail sweeper.</li>
+              <li><strong>Average Convoy Pace:</strong> Mean velocity across all actively moving group members.</li>
+              <li><strong>Separation Warnings:</strong> Alerts if a rider falls beyond safety distance or stops unexpectedly.</li>
+            </ul>
+          </li>
+          <li><strong>Offline Resilience:</strong> If network connectivity drops, <code>MemoryTrackQueue</code> / SQLite buffers coordinates with timestamps and speeds. Upon reconnection, packets are flushed in chronological batches without dropped history.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- SECTION 7: COCKPIT HUD & MAP RADAR -->
+    <section id="cockpit-hud">
+      <h2>🧭 Flow 4: Cockpit HUD &amp; Live Map Radar</h2>
+      <p>
+        <code>LiveCockpitMapScreen</code> provides an ultra-high-contrast, glove-friendly heads-up display engineered for handlebars in bright sunlight or night conditions.
+      </p>
+
+      <div class="card-grid">
+        <div class="feature-card">
+          <h4>⚡ Oversized Telemetry HUD</h4>
+          <p>Large digital speedometer with color-coded speed tier indicators (Green: Cruising, Amber: Highway, Red: Limit Exceeded), cardinal compass bearing (e.g. <code>NW 315°</code>), and battery percentage.</p>
+        </div>
+        <div class="feature-card">
+          <h4>🗺️ Directional Rotating Chevrons</h4>
+          <p>Teammate markers render as directional chevrons rotated to their exact compass heading (<code>math.pi / 180.0</code>), color-coded by role (Amber Lead, Blue Sweeper, Cyan Rider).</p>
+        </div>
+        <div class="feature-card">
+          <h4>📴 Last Seen &amp; Lost Rider Detection</h4>
+          <p>If a rider stops transmitting for &gt;60 seconds, their marker changes to a pin-drop icon with an amber tag showing elapsed offline time (e.g. <code>GhostRider · last seen 4m</code>).</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 8: STATIONARY DWELL & STOP REASONS -->
+    <section id="stationary-dwell">
+      <h2>🛑 Flow 5: Stationary Dwell &amp; Stop Reason Cards (Section 5.5)</h2>
+      <p>
+        When a rider pulls over, teammates need to know immediately whether it's a routine fuel stop or a breakdown requiring the convoy to regroup.
+      </p>
+
+      <div class="callout callout-amber">
+        <div class="callout-icon">⏱️</div>
+        <div>
+          <strong>Stationary Detection:</strong> When speed drops below 3 km/h for longer than the convoy's configured <code>stopThresholdSeconds</code> (default: 3 minutes), the system prompts the rider to declare their reason.
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <h3>Standard CoRoute Stop Categories</h3>
+        <p>Accessible via <code>RiderStatusSheet</code> in the Cockpit Map, Dashboard, and automatic dwell prompt banner:</p>
+
+        <div class="status-badge-grid">
+          <div class="status-badge-item">
+            <span class="emoji">⛽</span>
+            <div class="info"><span class="label">Fueling</span><span class="code">FUELING</span></div>
+          </div>
+          <div class="status-badge-item">
+            <span class="emoji">☕</span>
+            <div class="info"><span class="label">Rest Break</span><span class="code">REST_BREAK</span></div>
+          </div>
+          <div class="status-badge-item">
+            <span class="emoji">🔧</span>
+            <div class="info"><span class="label">Mechanical</span><span class="code">MECHANICAL</span></div>
+          </div>
+          <div class="status-badge-item">
+            <span class="emoji">🛞</span>
+            <div class="info"><span class="label">Flat Tire</span><span class="code">FLAT_TIRE</span></div>
+          </div>
+          <div class="status-badge-item">
+            <span class="emoji">🚦</span>
+            <div class="info"><span class="label">Traffic Delay</span><span class="code">TRAFFIC</span></div>
+          </div>
+          <div class="status-badge-item">
+            <span class="emoji">🌧️</span>
+            <div class="info"><span class="label">Weather Delay</span><span class="code">RAIN_DELAY</span></div>
+          </div>
+          <div class="status-badge-item">
+            <span class="emoji">📸</span>
+            <div class="info"><span class="label">Photo Stop</span><span class="code">PHOTO_STOP</span></div>
+          </div>
+          <div class="status-badge-item">
+            <span class="emoji">🏥</span>
+            <div class="info"><span class="label">Medical Emergency</span><span class="code">MEDICAL</span></div>
+          </div>
+          <div class="status-badge-item">
+            <span class="emoji">🛑</span>
+            <div class="info"><span class="label">Regroup Wait</span><span class="code">REGROUP</span></div>
+          </div>
+          <div class="status-badge-item">
+            <span class="emoji">💬</span>
+            <div class="info"><span class="label">Custom Reason</span><span class="code">CUSTOM</span></div>
+          </div>
+        </div>
+
+        <h3 style="margin-top: 24px;">Radar Integration</h3>
+        <p>Once selected, the status reason broadcasts over WebSocket and appears <strong>directly on the rider's map marker</strong> across all teammates' screens (e.g. <code>⛽ Alex · Fueling</code>). Medical and Mechanical issues trigger immediate high-contrast visual alerts.</p>
+      </div>
+    </section>
+
+    <!-- SECTION 9: INTERCOM RADIO PTT -->
+    <section id="intercom-radio">
+      <h2>🎙️ Flow 6: Half-Duplex Radio Intercom (PTT)</h2>
+      <p>
+        <code>IntercomDock</code> provides low-latency group voice communication using binary WebSockets, designed for Bluetooth helmet headsets (Sena, Cardo, etc.).
+      </p>
+
+      <div class="card-grid">
+        <div class="feature-card">
+          <h4>🔘 Push-To-Talk (PTT)</h4>
+          <p>Hold-to-talk button on screen or mapped to handlebar media button. Streams microphone audio frames only while depressed to conserve battery and eliminate wind noise.</p>
+        </div>
+        <div class="feature-card">
+          <h4>🗣️ Voice Activation (VOX)</h4>
+          <p>Hands-free mode that automatically streams when speech volume exceeds a configurable decibel threshold, auto-closing after 1.5 seconds of silence.</p>
+        </div>
+        <div class="feature-card">
+          <h4>🔀 Channel Switching</h4>
+          <p>Allows broadcasting to <strong>Everyone in Convoy</strong> or toggling to a private 1-on-1 channel with Lead, Sweeper, or any individual teammate.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 10: EMERGENCY SOS DISTRESS PROTOCOL -->
+    <section id="emergency-sos">
+      <h2>🚨 Flow 7: Emergency SOS Distress Protocol (Section 5.4)</h2>
+      <p>
+        In an emergency or crash, seconds matter. CoRoute's SOS protocol connects physical distress with digital life-safety dispatch:
+      </p>
+
+      <div class="flow-diagram">
+        <div class="node-chain">
+          <div class="flow-node highlight-red">
+            <span class="node-type">SOS Button Trigger</span>
+            <span>Long Press / Haptic</span>
+          </div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node highlight-red">
+            <span class="node-type">WebSocket Beacon</span>
+            <span>Pulsing Convoy Radar</span>
+          </div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node highlight-amber">
+            <span class="node-type">Native Intent: SMS</span>
+            <span>Google Maps GPS Link</span>
+          </div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-node highlight-green">
+            <span class="node-type">Native Intent: Call</span>
+            <span>ICE Contact / 112 Dispatch</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <h3>Emergency Action Sheet (`EmergencySosSheet`) Components</h3>
+        <table class="spec-table">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Action Triggered</th>
+              <th>Technical Payload</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>🚨 SOS Radar Beacon</strong></td>
+              <td>Broadcasts distress packet to all active convoy members.</td>
+              <td><code>{"type": "SOS_TRIGGER", "lat": 12.9716, "lng": 77.5945, "alertId": "..."}</code></td>
+            </tr>
+            <tr>
+              <td><strong>📍 Exact GPS Location Box</strong></td>
+              <td>Displays 5-decimal latitude/longitude with one-tap clipboard link.</td>
+              <td><code>https://maps.google.com/?q=12.97160,77.59456</code></td>
+            </tr>
+            <tr>
+              <td><strong>📞 Direct ICE Phone Call</strong></td>
+              <td>Fires native phone dialer directly to designated emergency contact.</td>
+              <td><code>tel:+919876543210</code> via <code>url_launcher</code></td>
+            </tr>
+            <tr>
+              <td><strong>💬 Emergency SMS with Map Link</strong></td>
+              <td>Pre-populates SMS with live coordinates and Google Maps pin link.</td>
+              <td><code>sms:+919876543210?body=EMERGENCY! I need immediate help. My location: https://maps.google.com/?q=...</code></td>
+            </tr>
+            <tr>
+              <td><strong>🚑 112 National Emergency</strong></td>
+              <td>One-tap rapid call button to 112 national emergency dispatch services.</td>
+              <td><code>tel:112</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 11: RIDER PROFILE & ICE -->
+    <section id="profile-ice">
+      <h2>👤 Flow 8: Rider Profile &amp; ICE Management</h2>
+      <p>
+        Riders manage telemetry identification and safety contacts via <code>EditProfileScreen</code>, accessible under the <strong>Profile</strong> section of <code>AccountScreen</code>.
+      </p>
+
+      <div class="glass-card">
+        <h3>Managed Attributes</h3>
+        <ul style="margin-left: 20px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 8px;">
+          <li><strong>Rider Mobile Number:</strong> Primary cellular phone used for team voice contacts.</li>
+          <li><strong>Vehicle Category:</strong> <code>Motorcycle (Adv)</code>, <code>Cruiser</code>, <code>Sport</code>, <code>Commuter</code>, <code>Scooter</code>, <code>Support / Chase Car</code>, or <code>Other</code>.</li>
+          <li><strong>Registration Plate No:</strong> Capitalized plate number (e.g. <code>KA 01 AB 1234</code>) for roadside identification.</li>
+          <li><strong>In-Case-of-Emergency (ICE) Name:</strong> Contact name and relationship (e.g. Spouse, Brother, Mother).</li>
+          <li><strong>ICE Emergency Phone:</strong> The telephone number dialed during SOS distress triggers and receiving emergency coordinate SMS.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- SECTION 12: WEBSOCKET PACKET SPECS -->
+    <section id="websocket-spec">
+      <h2>🔌 WebSocket Packet Specifications</h2>
+      <p>
+        Real-time telemetry frames exchanged over the persistent WSS connection (<code>/ws</code>):
+      </p>
+
+      <div class="glass-card">
+        <h3>1. Rider Telemetry Frame (`TELEMETRY`)</h3>
+        <pre><code>{
+  "type": "TELEMETRY",
+  "userId": "usr_789",
+  "groupId": "GRP-GHATS-01",
+  "lat": 12.971598,
+  "lng": 77.594562,
+  "speedKmh": 68.4,
+  "heading": 215.0,
+  "batteryLevel": 88,
+  "statusReason": "FUELING",
+  "statusMessage": "Shell Station",
+  "stoppedSince": 1728211200000,
+  "timestamp": 1728211380000
+}</code></pre>
+
+        <h3>2. Distress Beacon Frame (`SOS_TRIGGER`)</h3>
+        <pre><code>{
+  "type": "SOS_TRIGGER",
+  "alertId": "sos_alert_102",
+  "userId": "usr_789",
+  "userName": "GhostRider",
+  "groupId": "GRP-GHATS-01",
+  "lat": 12.971598,
+  "lng": 77.594562,
+  "timestamp": 1728211400000
+}</code></pre>
+
+        <h3>3. Status Update Frame (`STATUS_UPDATE`)</h3>
+        <pre><code>{
+  "type": "STATUS_UPDATE",
+  "userId": "usr_789",
+  "groupId": "GRP-GHATS-01",
+  "reason": "MECHANICAL",
+  "message": "Chain tension adjustment"
+}</code></pre>
+      </div>
+    </section>
+
+    <!-- SECTION 13: REST API SPEC -->
+    <section id="rest-api-spec">
+      <h2>🌐 REST API Endpoint Index</h2>
+      <table class="spec-table">
+        <thead>
+          <tr>
+            <th>Method</th>
+            <th>Endpoint</th>
+            <th>Description</th>
+            <th>Authentication</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/auth/register</code></td>
+            <td>Registers new rider account with profile &amp; ICE details.</td>
+            <td>Public</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/auth/login</code></td>
+            <td>Authenticates rider with email/callsign and password.</td>
+            <td>Public</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/auth/google</code></td>
+            <td>Verifies Google OAuth ID token and issues CoRoute JWT.</td>
+            <td>Public</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/me</code></td>
+            <td>Fetches authenticated rider profile, role, vehicle, and ICE contacts.</td>
+            <td>Bearer JWT</td>
+          </tr>
+          <tr>
+            <td><code>PATCH</code></td>
+            <td><code>/me</code></td>
+            <td>Updates phone, vehicle type, plate number, and ICE details.</td>
+            <td>Bearer JWT</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/me/password</code></td>
+            <td>Changes password or converts temporary password.</td>
+            <td>Bearer JWT</td>
+          </tr>
+          <tr>
+            <td><code>DELETE</code></td>
+            <td><code>/me</code></td>
+            <td>Permanently deletes account, memberships, and ride history.</td>
+            <td>Bearer JWT</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/convoys</code></td>
+            <td>Lists convoys the rider belongs to.</td>
+            <td>Bearer JWT</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/convoys</code></td>
+            <td>Creates a new convoy with dwell limits and checkpoints.</td>
+            <td>Bearer JWT</td>
+          </tr>
+          <tr>
+            <td><code>POST</code></td>
+            <td><code>/convoys/join</code></td>
+            <td>Joins an existing convoy using a 6-character code.</td>
+            <td>Bearer JWT</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/meta</code></td>
+            <td>Fetches app versioning, support contacts, privacy, and terms URLs.</td>
+            <td>Public</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer style="margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--glass-border); color: var(--text-muted); font-size: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <div>CoRoute Engine &copy; 2026 DevMonks. Verified Production Architecture.</div>
+      <div>Telemetry · Intercom · Lifeline Radar</div>
+    </footer>
+
+  </main>
+</body>
+</html>

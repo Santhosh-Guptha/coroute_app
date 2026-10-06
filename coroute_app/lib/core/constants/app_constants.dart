@@ -11,6 +11,9 @@ class AppConstants {
   static const String adminRole = 'MASTER_ADMIN';
   static const String riderRole = 'RIDER';
 
+  /// Primary Maintainer / Master Admin Email (Rule 3 in PROJECT_CONTEXT.md)
+  static const String masterAdminEmail = 'santhoshbukka5@gmail.com';
+
   // Local cache keys (non-sensitive profile mirror; the JWT lives in secure storage)
   static const String keyUserId = 'coroute_user_id';
   static const String keyUserRole = 'coroute_user_role';

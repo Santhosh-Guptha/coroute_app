@@ -13,7 +13,9 @@ import '../../data/models/rider_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../widgets/connection_banner.dart';
+import '../widgets/emergency_sos_sheet.dart';
 import '../widgets/intercom_dock.dart';
+import '../widgets/rider_status_sheet.dart';
 import 'live_cockpit_map_screen.dart';
 import '../timeline/live_timeline_screen.dart';
 import '../trip_planner/route_stops_panel.dart';
@@ -40,24 +42,12 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
   int _waitRemainingSeconds = 0;
   String? _waitRequesterName;
 
-  final List<Map<String, String>> _statusReasons = [
-    {'code': 'FUELING', 'label': 'Fueling', 'emoji': '⛽'},
-    {'code': 'REST_BREAK', 'label': 'Rest Break', 'emoji': '☕'},
-    {'code': 'MECHANICAL', 'label': 'Mechanical Issue', 'emoji': '🔧'},
-    {'code': 'FLAT_TIRE', 'label': 'Flat Tire', 'emoji': '🛞'},
-    {'code': 'TRAFFIC', 'label': 'Traffic Delay', 'emoji': '🚦'},
-    {'code': 'RAIN_DELAY', 'label': 'Rain Delay', 'emoji': '🌧️'},
-    {'code': 'PHOTO_STOP', 'label': 'Photo Stop', 'emoji': '📸'},
-    {'code': 'MEDICAL', 'label': 'Medical Emergency', 'emoji': '🏥'},
-    {'code': 'REGROUP', 'label': 'Regroup Wait', 'emoji': '🛑'},
-    {'code': 'CUSTOM', 'label': 'Custom Reason', 'emoji': '💬'},
-  ];
-
   Map<String, String> _getStatusInfo(String code) {
-    return _statusReasons.firstWhere(
-      (r) => r['code'] == code,
-      orElse: () => {'code': code, 'label': code, 'emoji': '⚠️'},
-    );
+    return {
+      'code': code,
+      'label': RiderStatusSheet.getStatusLabel(code),
+      'emoji': RiderStatusSheet.getStatusEmoji(code),
+    };
   }
 
   void _shareInvite(ConvoyModel convoy) {
@@ -86,90 +76,8 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
     Navigator.pop(context);
   }
 
-  void _showStatusSheet(BuildContext context, ConvoyService convoyService, String userId) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.slateCard,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Why are you stopped?', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final r in _statusReasons)
-                    ActionChip(
-                      avatar: Text(r['emoji']!),
-                      label: Text(r['label']!, style: TextStyle(fontSize: 12, color: AppTheme.textPrimary)),
-                      backgroundColor: AppTheme.elevatedCard,
-                      side: BorderSide(color: AppTheme.glassBorder),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        if (r['code'] == 'CUSTOM') {
-                          _showCustomReasonDialog(context, convoyService, userId);
-                        } else {
-                          convoyService.updateStatusReason(userId: userId, reason: r['code']!);
-                        }
-                      },
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showCustomReasonDialog(BuildContext context, ConvoyService convoyService, String userId) {
-    final customCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.slateCard,
-        title: Text('💬 Custom Stop Reason', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
-        content: TextField(
-          controller: customCtrl,
-          autofocus: true,
-          style: TextStyle(color: AppTheme.textPrimary),
-          decoration: InputDecoration(
-            hintText: 'e.g. ATM withdrawal, adjusting gear...',
-            hintStyle: TextStyle(color: AppTheme.textMuted),
-            filled: true,
-            fillColor: AppTheme.elevatedCard,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final text = customCtrl.text.trim();
-              if (text.isNotEmpty) {
-                convoyService.updateStatusReason(
-                  userId: userId,
-                  reason: 'CUSTOM',
-                  message: text,
-                );
-              }
-              Navigator.pop(ctx);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan),
-            child: const Text('Set Status', style: TextStyle(color: Colors.black)),
-          ),
-        ],
-      ),
-    );
+  void _showStatusSheet(BuildContext context, String userId) {
+    RiderStatusSheet.show(context, userId: userId);
   }
 
   @override
@@ -647,7 +555,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                     ),
                   ),
                   TextButton(
-                    onPressed: () => _showStatusSheet(context, convoyService, currentRider.userId),
+                    onPressed: () => _showStatusSheet(context, currentRider.userId),
                     child: const Text('Tell the group why'),
                   ),
                 ],
@@ -1296,11 +1204,10 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
           lng: myLoc.lng,
           type: 'CRASH_OR_EMERGENCY',
         );
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('🚨 SOS EMERGENCY BROADCAST TO CONVOY!'),
-            backgroundColor: AppTheme.laserRed,
-          ),
+        EmergencySosSheet.show(
+          context,
+          lat: myLoc.lat,
+          lng: myLoc.lng,
         );
       },
     );

@@ -14,6 +14,7 @@ import '../auth/access_gate_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import 'appearance_sheet.dart';
 import 'change_password_screen.dart';
+import 'edit_profile_screen.dart';
 
 /// Account and security: password, permissions, legal pages, problem reports,
 /// account deletion (required by Google Play for apps with account creation).
@@ -81,6 +82,15 @@ class AccountScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
+              const _SectionLabel('Profile'),
+              tile(
+                Icons.badge_rounded,
+                'Rider profile & ICE contacts',
+                '${auth.vehicleType?.isNotEmpty == true ? auth.vehicleType : 'Motorcycle'} · ${auth.emergencyContact?.isNotEmpty == true ? 'ICE active' : 'No ICE contact configured'}',
+                () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfileScreen())),
+                color: AppTheme.hyperAmber,
+              ),
+              const SizedBox(height: 8),
               const _SectionLabel('Appearance'),
               tile(theme.isLight ? Icons.light_mode_rounded : Icons.dark_mode_rounded, 'Theme', AppearanceSheet.summary(theme),
                   () => AppearanceSheet.show(context)),
