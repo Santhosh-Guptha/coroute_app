@@ -25,6 +25,7 @@ import '../map_picker/map_picker_screen.dart';
 import '../trip_planner/route_stops_panel.dart';
 import '../../data/models/stop_point_model.dart';
 import '../../core/theme/map_tiles.dart';
+import '../timeline/live_timeline_screen.dart';
 
 class LiveCockpitMapScreen extends StatefulWidget {
   final String convoyId;
@@ -1193,6 +1194,17 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                           badgeColor: AppTheme.emeraldSafe,
                           tooltip: 'Route and stops',
                           onTap: () => _showStopsModal(context, convoy, convoyService),
+                        ),
+                        const SizedBox(height: 10),
+                        _buildMapQuickButton(
+                          icon: Icons.timeline_rounded,
+                          badgeText: null,
+                          badgeColor: AppTheme.neonCyan,
+                          tooltip: 'Live Timeline',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: convoy.groupId)),
+                          ),
                         ),
                       ],
                     ),

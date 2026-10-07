@@ -9,6 +9,8 @@ import '../../core/widgets/glass_card.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/services/convoy_service.dart';
 import '../../core/theme/map_tiles.dart';
+import '../timeline/live_timeline_screen.dart';
+import '../report/replay_screen.dart';
 
 class AdminConvoyInspector extends StatelessWidget {
   final ConvoyModel convoy;
@@ -64,6 +66,22 @@ class AdminConvoyInspector extends StatelessWidget {
       appBar: AppBar(
         title: Text(currentConvoy.name),
         actions: [
+          IconButton(
+            tooltip: 'Live Timeline',
+            icon: Icon(Icons.timeline_rounded, color: AppTheme.neonCyan),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: currentConvoy.groupId)),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Replay & Routes',
+            icon: Icon(Icons.slow_motion_video_rounded, color: AppTheme.emeraldSafe),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => ReplayScreen(groupId: currentConvoy.groupId, title: '${currentConvoy.name}: Replay')),
+            ),
+          ),
           IconButton(
             tooltip: 'Dissolve Convoy',
             icon: Icon(Icons.delete_forever, color: AppTheme.laserRed),
