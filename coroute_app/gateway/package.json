@@ -1,6 +1,6 @@
 {
   "name": "coroute-gateway",
-  "version": "3.9.0",
+  "version": "3.10.0",
   "description": "CoRoute real-time gateway: JWT auth, Oracle Autonomous DB (SODA) persistence, room-scoped WebSocket telemetry and low-latency voice relay.",
   "main": "src/server.js",
   "private": true,
