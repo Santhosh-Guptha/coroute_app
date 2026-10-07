@@ -1,18 +1,122 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/map_tiles.dart';
+import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/geo_service.dart';
-import '../../core/theme/map_tiles.dart';
+
+/// The stop category code sent to the gateway for a [StopKind].
+///
+/// Same as [StopKind.category], except that a meeting point is stored as
+/// MEETING (the gateway accepts it since 3.12; older gateways fall back to
+/// OTHER on their own). Custom is OTHER.
+String stopWireCode(StopKind kind) => kind == StopKind.meeting ? 'MEETING' : kind.category;
+
+/// Short label for the stop type choices: Fuel, Food, Rest, Meeting, Custom.
+String stopKindChoiceLabel(StopKind kind) {
+  switch (kind) {
+    case StopKind.meeting:
+      return 'Meeting';
+    case StopKind.custom:
+      return 'Custom';
+    case StopKind.fuel:
+    case StopKind.food:
+    case StopKind.rest:
+    case StopKind.scenic:
+    case StopKind.toll:
+      return kind.label;
+  }
+}
+
+/// The five stop types (Fuel, Food, Rest, Meeting, Custom) as a wrapping
+/// row of choice chips. No horizontal scrolling. [selected] may be null
+/// (nothing chosen yet, or a legacy type such as Scenic).
+class StopKindChoices extends StatelessWidget {
+  final StopKind? selected;
+  final ValueChanged<StopKind> onSelected;
+
+  const StopKindChoices({super.key, required this.selected, required this.onSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: Space.s8,
+      runSpacing: Space.s8,
+      children: [
+        for (final k in StopKind.pickable)
+          ChoiceChip(
+            avatar: Icon(k.icon, size: 18, color: selected == k ? Colors.black : AppTheme.textSecondary),
+            label: Text(stopKindChoiceLabel(k)),
+            selected: selected == k,
+            onSelected: (_) => onSelected(k),
+            selectedColor: AppTheme.neonCyan,
+            backgroundColor: AppTheme.slateCard,
+            labelStyle: AppText.label.copyWith(color: selected == k ? Colors.black : AppTheme.textPrimary),
+            side: BorderSide(color: selected == k ? AppTheme.neonCyan : AppTheme.subtleBorder),
+            showCheckmark: false,
+            materialTapTargetSize: MaterialTapTargetSize.padded,
+            shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
+          ),
+      ],
+    );
+  }
+}
+
+/// The last few places confirmed in the picker, kept on this phone only
+/// (SharedPreferences, no network). Newest first.
+class RecentPlaces {
+  RecentPlaces._();
+
+  static const String prefsKey = 'coroute_recent_places_v1';
+  static const int max = 5;
+
+  static Future<List<PickedPlace>> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(prefsKey) ?? const <String>[];
+      final out = <PickedPlace>[];
+      for (final s in raw) {
+        final m = jsonDecode(s);
+        if (m is! Map) continue;
+        final lat = m['lat'], lng = m['lng'];
+        if (lat is! num || lng is! num) continue;
+        out.add(PickedPlace(lat: lat.toDouble(), lng: lng.toDouble(), name: (m['name'] ?? '').toString()));
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static Future<void> remember(PickedPlace p) async {
+    if (p.name.trim().isEmpty) return;
+    try {
+      final list = await load();
+      bool same(PickedPlace o) =>
+          o.name == p.name || ((o.lat - p.lat).abs() < 0.0005 && (o.lng - p.lng).abs() < 0.0005);
+      final next = [p, ...list.where((o) => !same(o))].take(max);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(prefsKey, [
+        for (final o in next) jsonEncode({'lat': o.lat, 'lng': o.lng, 'name': o.name}),
+      ]);
+    } catch (_) {}
+  }
+}
 
 /// Pick a place on the map: move the map under the centre pin (or tap,
-/// or search), see the place name, confirm. Used for the start, the
-/// destination and every stop. Returns a [PickedPlace] or null.
+/// search, pick a recent place or use the current location), see the place
+/// name, confirm. Used for the start, the destination and every stop.
+/// Returns a [PickedPlace] or null. For stops, [PickedPlace.category] holds
+/// the gateway code (FUEL, FOOD, REST, MEETING, OTHER; legacy SCENIC and
+/// TOLL are kept when an old stop is edited).
 class MapPickerScreen extends StatefulWidget {
   final String title;
   final PickedPlace? initial;
@@ -34,22 +138,15 @@ class MapPickerScreen extends StatefulWidget {
 }
 
 class _MapPickerScreenState extends State<MapPickerScreen> {
-  static const _categories = [
-    ('FUEL', 'Fuel', Icons.local_gas_station_rounded),
-    ('FOOD', 'Food', Icons.restaurant_rounded),
-    ('REST', 'Rest', Icons.airline_seat_recline_normal_rounded),
-    ('SCENIC', 'Scenic', Icons.landscape_rounded),
-    ('TOLL', 'Toll', Icons.toll_rounded),
-    ('OTHER', 'Other', Icons.place_rounded),
-  ];
-
   late final GeoService _geo = GeoService(context.read<ApiClient>());
   final MapController _map = MapController();
   final TextEditingController _search = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
   final TextEditingController _name = TextEditingController();
   Timer? _searchDebounce;
   Timer? _reverseDebounce;
   List<PlaceResult> _results = [];
+  List<PickedPlace> _recent = const [];
   bool _searching = false;
   bool _naming = false;
   bool _nameEdited = false;
@@ -61,7 +158,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   void initState() {
     super.initState();
     final i = widget.initial;
-    _center = i != null ? LatLng(i.lat, i.lng) : const LatLng(17.385, 78.4867);
+    _center = i != null ? LatLng(i.lat, i.lng) : const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng);
     if (i != null) {
       _name.text = i.name;
       _category = i.category;
@@ -71,15 +168,25 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _goToMyLocation(quiet: true));
     }
     if (_name.text.isEmpty) _scheduleReverse();
+    _searchFocus.addListener(_onFocusChanged);
+    RecentPlaces.load().then((r) {
+      if (mounted) setState(() => _recent = r);
+    });
   }
 
   @override
   void dispose() {
     _searchDebounce?.cancel();
     _reverseDebounce?.cancel();
+    _searchFocus.removeListener(_onFocusChanged);
+    _searchFocus.dispose();
     _search.dispose();
     _name.dispose();
     super.dispose();
+  }
+
+  void _onFocusChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _goToMyLocation({bool quiet = false}) async {
@@ -116,6 +223,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     _reverseDebounce?.cancel();
     _reverseDebounce = Timer(const Duration(milliseconds: 800), () async {
       final at = _center;
+      if (!mounted) return;
       setState(() => _naming = true);
       final n = await _geo.reverse(at.latitude, at.longitude);
       if (!mounted || at != _center) return;
@@ -133,6 +241,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       return;
     }
     _searchDebounce = Timer(const Duration(milliseconds: 600), () async {
+      if (!mounted) return;
       setState(() => _searching = true);
       final r = await _geo.search(q, nearLat: _center.latitude, nearLng: _center.longitude);
       if (!mounted) return;
@@ -143,210 +252,283 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     });
   }
 
+  void _choose(LatLng p, String name) {
+    FocusScope.of(context).unfocus();
+    setState(() => _results = []);
+    _moveTo(p, zoom: 15, name: name);
+  }
+
   void _confirm() {
     final name = _name.text.trim();
-    Navigator.pop(
-      context,
-      PickedPlace(
-        lat: _center.latitude,
-        lng: _center.longitude,
-        name: name.isNotEmpty ? name : '${_center.latitude.toStringAsFixed(4)}, ${_center.longitude.toStringAsFixed(4)}',
-        category: _category,
-        plannedDwellMin: _dwell,
-      ),
+    final place = PickedPlace(
+      lat: _center.latitude,
+      lng: _center.longitude,
+      name: name.isNotEmpty ? name : '${_center.latitude.toStringAsFixed(4)}, ${_center.longitude.toStringAsFixed(4)}',
+      category: _category,
+      plannedDwellMin: _dwell,
     );
+    unawaited(RecentPlaces.remember(place));
+    Navigator.pop(context, place);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(title: Text(widget.title)),
-      body: Stack(
-        children: [
-          FlutterMap(
-            mapController: _map,
-            options: MapOptions(
-              initialCenter: _center,
-              initialZoom: widget.initial != null ? 15 : 12,
-              onTap: (_, p) => _moveTo(p),
-              onPositionChanged: (camera, hasGesture) {
-                if (!hasGesture) return;
-                setState(() => _center = camera.center);
-                _scheduleReverse();
-              },
+      appBar: AppBar(title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+      body: LayoutBuilder(builder: (context, c) {
+        return Column(
+          children: [
+            Expanded(child: _mapArea()),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: c.maxHeight * 0.6),
+              child: _confirmPanel(),
             ),
-            children: [
-              TileLayer(tileBuilder: mapTileBuilder, urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
-            ],
+          ],
+        );
+      }),
+    );
+  }
+
+  Widget _mapArea() {
+    final showRecent = _searchFocus.hasFocus && _search.text.isEmpty && _recent.isNotEmpty;
+    return Stack(
+      children: [
+        FlutterMap(
+          mapController: _map,
+          options: MapOptions(
+            initialCenter: _center,
+            initialZoom: widget.initial != null ? 15 : 12,
+            onTap: (_, p) => _moveTo(p),
+            onPositionChanged: (camera, hasGesture) {
+              if (!hasGesture) return;
+              setState(() => _center = camera.center);
+              _scheduleReverse();
+            },
           ),
-          // Fixed centre pin: the map moves underneath it.
-          IgnorePointer(
-            child: Center(
-              child: Padding(
-                padding: EdgeInsets.only(bottom: 40),
-                child: Icon(Icons.location_on, size: 46, color: AppTheme.hyperAmber, shadows: [Shadow(blurRadius: 8, color: Colors.black54)]),
+          children: [
+            TileLayer(tileBuilder: mapTileBuilder, urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
+          ],
+        ),
+        // Fixed centre pin: the map moves underneath it. The tip sits on the centre.
+        IgnorePointer(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 44),
+              child: Semantics(
+                label: 'Pin. Move the map to place it.',
+                child: Icon(Icons.location_on_rounded, size: 44, color: AppTheme.hyperAmber),
               ),
             ),
           ),
-          Positioned(
-            left: 12,
-            right: 12,
-            top: 12,
-            child: Column(
-              children: [
-                Material(
-                  color: AppTheme.slateCard,
-                  borderRadius: BorderRadius.circular(12),
-                  elevation: 4,
-                  child: TextField(
-                    controller: _search,
-                    onChanged: _onSearchChanged,
-                    style: TextStyle(color: AppTheme.textPrimary),
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      hintText: 'Search a place, town or address',
-                      hintStyle: TextStyle(color: AppTheme.textMuted),
-                      prefixIcon: Icon(Icons.search_rounded, color: AppTheme.textMuted),
-                      suffixIcon: _searching
-                          ? Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan)))
-                          : (_search.text.isEmpty
-                              ? null
-                              : IconButton(
-                                  icon: Icon(Icons.close_rounded, color: AppTheme.textMuted),
-                                  onPressed: () => setState(() {
-                                    _search.clear();
-                                    _results = [];
-                                  }),
-                                )),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        ),
+        Positioned(
+          left: Space.s12,
+          right: Space.s12,
+          top: Space.s12,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _searchField(),
+              if (_results.isNotEmpty)
+                _resultList([
+                  for (final r in _results)
+                    _ResultRow(
+                      icon: Icons.place_rounded,
+                      title: r.name,
+                      subtitle: r.displayName,
+                      onTap: () => _choose(LatLng(r.lat, r.lng), r.name),
                     ),
+                ])
+              else if (showRecent)
+                _resultList([
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s16, Space.s4),
+                    child: Text('Recent', style: AppText.label),
                   ),
-                ),
-                if (_results.isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(top: 6),
-                    constraints: const BoxConstraints(maxHeight: 260),
-                    decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.subtleBorder)),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      padding: EdgeInsets.zero,
-                      itemCount: _results.length,
-                      separatorBuilder: (_, _) => Divider(height: 1, color: AppTheme.subtleBorder),
-                      itemBuilder: (_, i) {
-                        final r = _results[i];
-                        return ListTile(
-                          dense: true,
-                          leading: Icon(Icons.place_outlined, color: AppTheme.neonCyan, size: 20),
-                          title: Text(r.name, style: TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
-                          subtitle: Text(r.displayName, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
-                          onTap: () {
-                            FocusScope.of(context).unfocus();
-                            setState(() => _results = []);
-                            _moveTo(LatLng(r.lat, r.lng), zoom: 15, name: r.name);
-                          },
-                        );
-                      },
+                  for (final p in _recent)
+                    _ResultRow(
+                      icon: Icons.history_rounded,
+                      title: p.name,
+                      onTap: () => _choose(LatLng(p.lat, p.lng), p.name),
                     ),
-                  ),
-              ],
-            ),
+                ]),
+            ],
           ),
-          Positioned(
-            right: 12,
-            bottom: widget.forStop ? 262 : 196,
-            child: FloatingActionButton.small(
-              heroTag: 'picker_my_location',
-              backgroundColor: AppTheme.slateCard,
-              onPressed: () => _goToMyLocation(),
-              tooltip: 'My location',
-              child: Icon(Icons.my_location_rounded, color: AppTheme.neonCyan),
-            ),
+        ),
+        Positioned(
+          right: Space.s12,
+          bottom: Space.s12,
+          child: MapControl(
+            icon: Icons.my_location_rounded,
+            tooltip: 'Use my location',
+            onPressed: () => _goToMyLocation(),
           ),
-          Positioned(left: 0, right: 0, bottom: 0, child: _confirmSheet()),
-        ],
+        ),
+      ],
+    );
+  }
+
+  Widget _searchField() {
+    return Material(
+      color: AppTheme.slateCard,
+      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
+      clipBehavior: Clip.antiAlias,
+      child: TextField(
+        controller: _search,
+        focusNode: _searchFocus,
+        onChanged: (q) {
+          _onSearchChanged(q);
+          setState(() {});
+        },
+        style: AppText.body,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: 'Search a place, town or address',
+          hintStyle: AppText.body.copyWith(color: AppTheme.textMuted),
+          prefixIcon: Icon(Icons.search_rounded, color: AppTheme.textMuted),
+          suffixIcon: _searching
+              ? Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan)),
+                )
+              : (_search.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear search',
+                      icon: Icon(Icons.close_rounded, color: AppTheme.textMuted),
+                      onPressed: () => setState(() {
+                        _search.clear();
+                        _results = [];
+                      }),
+                    )),
+          filled: false,
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        ),
       ),
     );
   }
 
-  Widget _confirmSheet() {
+  Widget _resultList(List<Widget> rows) {
+    return Container(
+      margin: const EdgeInsets.only(top: Space.s8),
+      constraints: const BoxConstraints(maxHeight: 280),
+      decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.subtleBorder)),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        type: MaterialType.transparency,
+        child: ListView(shrinkWrap: true, padding: EdgeInsets.zero, children: rows),
+      ),
+    );
+  }
+
+  Widget _confirmPanel() {
+    // A legacy type (Scenic, Toll) shows no chip selected and is kept unless one is tapped.
+    final kind = StopKind.fromCategory(_category);
+    final selected = StopKind.pickable.contains(kind) ? kind : null;
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.darkCanvas,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-        boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 12)],
+        color: AppTheme.slateCard,
+        borderRadius: Radii.sheetTop,
+        border: Border(top: BorderSide(color: AppTheme.subtleBorder)),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       child: SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TextField(
-              controller: _name,
-              onChanged: (_) => _nameEdited = true,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.w600),
-              decoration: InputDecoration(
-                labelText: 'Name',
-                labelStyle: TextStyle(color: AppTheme.textMuted),
-                suffixIcon: _naming ? Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.textMuted))) : null,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text('${_center.latitude.toStringAsFixed(5)}, ${_center.longitude.toStringAsFixed(5)}', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
-            if (widget.forStop) ...[
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 36,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, 0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final (id, label, icon) in _categories)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          avatar: Icon(icon, size: 16, color: _category == id ? Colors.black : AppTheme.textSecondary),
-                          label: Text(label),
-                          selected: _category == id,
-                          onSelected: (_) => setState(() => _category = id),
-                          selectedColor: AppTheme.neonCyan,
-                          labelStyle: TextStyle(color: _category == id ? Colors.black : AppTheme.textSecondary, fontSize: 12),
-                          backgroundColor: AppTheme.slateCard,
-                          showCheckmark: false,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
+                    TextField(
+                      controller: _name,
+                      onChanged: (_) => _nameEdited = true,
+                      style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        labelText: 'Name',
+                        suffixIcon: _naming
+                            ? Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.textMuted)),
+                              )
+                            : null,
                       ),
+                    ),
+                    const SizedBox(height: Space.s4),
+                    Text(
+                      '${_center.latitude.toStringAsFixed(5)}, ${_center.longitude.toStringAsFixed(5)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.caption,
+                    ),
+                    if (widget.forStop) ...[
+                      const SizedBox(height: Space.s12),
+                      StopKindChoices(
+                        selected: selected,
+                        onSelected: (k) => setState(() => _category = stopWireCode(k)),
+                      ),
+                      const SizedBox(height: Space.s4),
+                      Row(
+                        children: [
+                          Expanded(child: Text('Planned stay', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label)),
+                          IconButton(
+                            tooltip: 'Shorter stay',
+                            onPressed: _dwell <= 0 ? null : () => setState(() => _dwell = (_dwell - 5).clamp(0, 600).toInt()),
+                            icon: Icon(Icons.remove_circle_outline_rounded, color: AppTheme.textSecondary),
+                          ),
+                          Text(_dwell == 0 ? 'Not set' : '$_dwell min', style: AppText.body),
+                          IconButton(
+                            tooltip: 'Longer stay',
+                            onPressed: () => setState(() => _dwell = (_dwell + 5).clamp(0, 600).toInt()),
+                            icon: Icon(Icons.add_circle_outline_rounded, color: AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Text('Planned stay', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: _dwell <= 0 ? null : () => setState(() => _dwell = (_dwell - 5).clamp(0, 600).toInt()),
-                    icon: Icon(Icons.remove_circle_outline_rounded, color: AppTheme.textSecondary),
-                  ),
-                  Text(_dwell == 0 ? 'not set' : '$_dwell min', style: TextStyle(color: AppTheme.textPrimary)),
-                  IconButton(
-                    onPressed: () => setState(() => _dwell = (_dwell + 5).clamp(0, 600).toInt()),
-                    icon: Icon(Icons.add_circle_outline_rounded, color: AppTheme.textSecondary),
-                  ),
-                ],
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s16, Space.s16),
+              child: FilledButton(
+                onPressed: _confirm,
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+                child: Text(widget.confirmLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
               ),
-            ],
-            const SizedBox(height: 10),
-            ElevatedButton(
-              onPressed: _confirm,
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-              child: Text(widget.confirmLabel, style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// One search result or recent place row.
+class _ResultRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final VoidCallback onTap;
+
+  const _ResultRow({required this.icon, required this.title, this.subtitle, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final sub = subtitle;
+    return ListTile(
+      leading: Icon(icon, color: AppTheme.neonCyan),
+      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body),
+      subtitle: sub == null || sub.isEmpty ? null : Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+      onTap: onTap,
     );
   }
 }

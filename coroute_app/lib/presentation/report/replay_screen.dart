@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../data/models/trip_plan_model.dart';
 import '../../data/services/api_client.dart';
@@ -56,6 +57,7 @@ class _ReplayScreenState extends State<ReplayScreen> {
   Timer? _timer;
   int _speedIndex = 1;
   static const _speeds = [30, 120, 600]; // seconds of ride per second of replay
+  static const _speedNames = ['Slow', 'Normal', 'Fast'];
 
   @override
   void initState() {
@@ -70,6 +72,12 @@ class _ReplayScreenState extends State<ReplayScreen> {
   }
 
   Future<void> _load() async {
+    if (_error != null) {
+      setState(() {
+        _error = null;
+        _loading = true;
+      });
+    }
     final api = context.read<ApiClient>();
     try {
       final res = await api.get('/convoys/${widget.groupId}/tracks?simplify=8', timeout: const Duration(seconds: 25));
@@ -137,29 +145,31 @@ class _ReplayScreenState extends State<ReplayScreen> {
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
       appBar: AppBar(title: Text(widget.title, overflow: TextOverflow.ellipsis)),
-      body: _loading
-          ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
-          : _error != null
-              ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.laserRed))))
-              : LayoutBuilder(builder: (context, c) {
-                  final wide = c.maxWidth > c.maxHeight && c.maxWidth > 700;
-                  final map = TripRouteMap(
-                    tracks: _tracks,
-                    colors: _colors,
-                    plan: _plan,
-                    stops: _stops,
-                    timeMs: _tracks.isEmpty ? null : _t,
-                    focusUserId: widget.focusUserId,
-                    pin: widget.pin,
-                  );
-                  final panel = _panel();
-                  if (wide) return Row(children: [Expanded(flex: 3, child: map), SizedBox(width: 360, child: SingleChildScrollView(child: panel))]);
-                  // The panel never takes more than 45% of the height, so the map stays usable in landscape.
-                  return Column(children: [
-                    Expanded(child: map),
-                    ConstrainedBox(constraints: BoxConstraints(maxHeight: c.maxHeight * 0.45), child: SingleChildScrollView(child: panel)),
-                  ]);
-                }),
+      // Never blocks: the map (planned stops, destination) shows at once and
+      // the routes appear when they arrive.
+      body: LayoutBuilder(builder: (context, c) {
+        final wide = c.maxWidth > c.maxHeight && c.maxWidth > 700;
+        final map = LoadingState(
+          loading: _loading,
+          child: TripRouteMap(
+            tracks: _tracks,
+            colors: _colors,
+            plan: _plan,
+            stops: _stops,
+            plannedLine: TripRouteMap.plannedLineOf(_plan),
+            timeMs: _tracks.isEmpty ? null : _t,
+            focusUserId: widget.focusUserId,
+            pin: widget.pin,
+          ),
+        );
+        final panel = _panel();
+        if (wide) return Row(children: [Expanded(flex: 3, child: map), SizedBox(width: 360, child: SingleChildScrollView(child: panel))]);
+        // The panel never takes more than 45% of the height, so the map stays usable in landscape.
+        return Column(children: [
+          Expanded(child: map),
+          ConstrainedBox(constraints: BoxConstraints(maxHeight: c.maxHeight * 0.45), child: SingleChildScrollView(child: panel)),
+        ]);
+      }),
     );
   }
 
@@ -169,41 +179,60 @@ class _ReplayScreenState extends State<ReplayScreen> {
     final hasRange = _to > _from;
     return Container(
       color: AppTheme.darkCanvas,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+      padding: const EdgeInsets.fromLTRB(Space.s12, Space.s8, Space.s12, Space.s12),
       child: SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (_tracks.isEmpty)
+            if (_error != null)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.only(bottom: Space.s8),
+                child: RideAlert(tier: AlertTier.normal, title: _error!, actionLabel: 'Try again', onAction: _load),
+              )
+            else if (_loading)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: Space.s12),
+                child: Text('Loading the routes...', textAlign: TextAlign.center, style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+              )
+            else if (_tracks.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: Space.s12),
                 child: Text(
                     _plan == null
                         ? 'No recorded route for this trip yet. Routes appear a minute after riders move.'
                         : 'No recorded routes for this trip. The map shows the planned stops and destination.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: AppTheme.textMuted, fontSize: 13)),
+                    style: AppText.body.copyWith(color: AppTheme.textMuted)),
               )
             else ...[
               Row(
                 children: [
                   IconButton(
                     onPressed: hasRange ? _togglePlay : null,
-                    icon: Icon(_timer != null ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded, color: AppTheme.neonCyan, size: 36),
+                    iconSize: 40,
+                    constraints: const BoxConstraints(minWidth: 56, minHeight: 56),
+                    icon: Icon(_timer != null ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded, color: AppTheme.neonCyan),
                     tooltip: _timer != null ? 'Pause' : 'Play',
                   ),
+                  const SizedBox(width: Space.s4),
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                       Text(_t > 0 ? fmt.format(DateTime.fromMillisecondsSinceEpoch(_t)) : '',
-                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold, fontFeatures: const [FontFeature.tabularFigures()])),
-                      if (_t > 0) Text(day.format(DateTime.fromMillisecondsSinceEpoch(_t)), style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                          maxLines: 1, style: AppText.metric.copyWith(fontSize: 20)),
+                      if (_t > 0)
+                        Text(day.format(DateTime.fromMillisecondsSinceEpoch(_t)), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
                     ]),
                   ),
-                  TextButton(
-                    onPressed: () => setState(() => _speedIndex = (_speedIndex + 1) % _speeds.length),
-                    child: Text('${_speeds[_speedIndex]}x', style: TextStyle(color: AppTheme.neonCyan)),
+                  Semantics(
+                    hint: 'Changes the replay speed',
+                    child: TextButton.icon(
+                      onPressed: () => setState(() => _speedIndex = (_speedIndex + 1) % _speeds.length),
+                      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                      icon: const Icon(Icons.speed_rounded, size: 20),
+                      label: Text(_speedNames[_speedIndex], maxLines: 1),
+                    ),
                   ),
                 ],
               ),
@@ -213,27 +242,28 @@ class _ReplayScreenState extends State<ReplayScreen> {
                   min: _from.toDouble(),
                   max: _to.toDouble(),
                   activeColor: AppTheme.neonCyan,
+                  semanticFormatterCallback: (v) => fmt.format(DateTime.fromMillisecondsSinceEpoch(v.round())),
                   onChanged: (v) => setState(() => _t = v.round()),
                 ),
               Wrap(
-                spacing: 12,
-                runSpacing: 6,
+                spacing: Space.s12,
+                runSpacing: Space.s4,
                 children: [
                   for (final t in _tracks)
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         CircleAvatar(radius: 5, backgroundColor: _colors[t.userId] ?? AppTheme.neonCyan),
-                        const SizedBox(width: 5),
+                        const SizedBox(width: Space.s4),
                         Flexible(
-                          child: Text(_riderNow(t), style: TextStyle(color: AppTheme.textSecondary, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          child: Text(_riderNow(t), style: AppText.caption.copyWith(color: AppTheme.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
                         ),
                       ],
                     ),
                 ],
               ),
             ],
-            const SizedBox(height: 10),
+            const SizedBox(height: Space.s8),
             const TripMapLegend(),
           ],
         ),

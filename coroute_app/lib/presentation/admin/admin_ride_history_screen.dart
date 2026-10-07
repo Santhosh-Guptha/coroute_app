@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/api_client.dart';
@@ -98,38 +99,17 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
     final name = c['name']?.toString() ?? 'this group';
     final isActive = c['tripStatus'] != 'ENDED';
 
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.slateCard,
-        title: Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: AppTheme.laserRed),
-            const SizedBox(width: 8),
-            Flexible(child: Text('Delete Group Immediately?', style: TextStyle(color: AppTheme.laserRed, fontSize: 16))),
-          ],
-        ),
-        content: Text(
-          isActive
-              ? 'Permanently delete active convoy "$name"? This will immediately dismiss all active riders and purge all route tracks, telemetry, messages, alerts, and records from the database.'
-              : 'Permanently delete completed group "$name"? All recorded GPS tracks, timeline events, and trip reports will be permanently purged immediately.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.laserRed, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete Immediately'),
-          ),
-        ],
-      ),
+    final confirm = await confirmAction(
+      context,
+      title: 'Delete trip?',
+      message: isActive
+          ? 'Permanently delete the active ride "$name"? All riders are removed and its tracks, messages, alerts and records are deleted.'
+          : 'Permanently delete the ride "$name"? Its tracks, timeline and trip report are deleted.',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
 
-    if (confirm != true || !mounted) return;
+    if (!confirm || !mounted) return;
 
     try {
       await context.read<ApiClient>().delete('/admin/convoys/$groupId');
@@ -292,7 +272,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
           const SizedBox(height: 4),
           Text(
             'GPS routes are kept for 90 days before automatic retention cleanup. Admins can trigger immediate deletion anytime.',
-            style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
           ),
           const SizedBox(height: 10),
           LayoutBuilder(builder: (context, c) {
@@ -303,7 +283,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
                 SizedBox(
                   width: w,
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                    Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                     Text(value, style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.bold)),
                   ]),
                 ),
@@ -363,7 +343,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
                         ),
                         child: Text(
                           isActive ? 'ACTIVE' : 'COMPLETED',
-                          style: TextStyle(color: isActive ? AppTheme.neonCyan : AppTheme.textMuted, fontSize: 9, fontWeight: FontWeight.bold),
+                          style: TextStyle(color: isActive ? AppTheme.neonCyan : AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ],
@@ -403,7 +383,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
                         color: AppTheme.slateCard,
                         borderRadius: BorderRadius.circular(4),
                       ),
-                      child: Text('Retention Cleaned (GPS stripped)', style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                      child: Text('Retention Cleaned (GPS stripped)', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                     )
                   else if (isApproachingRetention)
                     Container(
@@ -415,7 +395,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
                       ),
                       child: Text(
                         'Approaching retention: ${daysRemaining ?? 0} days left',
-                        style: TextStyle(color: AppTheme.laserRed, fontSize: 10, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: AppTheme.laserRed, fontSize: 12, fontWeight: FontWeight.bold),
                       ),
                     )
                   else if (daysRemaining != null)
@@ -425,7 +405,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
                         color: AppTheme.slateCard,
                         borderRadius: BorderRadius.circular(4),
                       ),
-                      child: Text('⏱️ $daysRemaining days retention remaining', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10)),
+                      child: Text('Kept for $daysRemaining more days', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                     ),
                 ],
               ),

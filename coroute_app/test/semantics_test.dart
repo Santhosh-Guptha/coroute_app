@@ -5,6 +5,7 @@ import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/services/intercom_service.dart';
 import 'package:coroute_app/data/services/realtime_service.dart';
+import 'package:coroute_app/presentation/rider/live_cockpit_map_screen.dart';
 import 'package:coroute_app/presentation/widgets/intercom_dock.dart';
 
 void main() {
@@ -28,7 +29,15 @@ void main() {
         ChangeNotifierProvider<RealtimeService>.value(value: rt),
         ChangeNotifierProvider(create: (_) => IntercomService(rt)),
       ],
-      child: MaterialApp(home: Scaffold(body: Column(children: [IntercomDock(convoy: convoy(), me: rider('usr_me', 'Me'), onSos: () {})]))),
+      // The ride screen puts the hold-to-send SOS button on the map and the talk row in the sheet.
+      child: MaterialApp(
+        home: Scaffold(
+          body: Column(children: [
+            RideSosButton(onTriggered: () {}),
+            IntercomDock(convoy: convoy(), me: rider('usr_me', 'Me')),
+          ]),
+        ),
+      ),
     ));
     expect(find.bySemanticsLabel('Send SOS to your convoy'), findsOneWidget);
     expect(find.bySemanticsLabel('Hold to talk to everyone'), findsOneWidget);

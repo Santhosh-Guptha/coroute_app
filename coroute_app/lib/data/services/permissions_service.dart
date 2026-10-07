@@ -31,12 +31,12 @@ class PermissionsService {
     final notif = await Permission.notification.status;
     final battery = await BackgroundService.isIgnoringBatteryOptimizations();
     return [
-      PermissionItem(key: 'location', title: 'Location while using the app', reason: 'Puts you on the convoy map and powers the SOS position.', required: true, granted: loc.isGranted),
-      PermissionItem(key: 'locationAlways', title: 'Location in the background', reason: 'Keeps sharing your position with your convoy when the phone is in your pocket or the screen is locked. Choose "Allow all the time".', required: true, granted: always.isGranted),
-      PermissionItem(key: 'microphone', title: 'Microphone', reason: 'Only used while you hold Talk or have armed the hands-free mode.', required: false, granted: mic.isGranted),
-      PermissionItem(key: 'notification', title: 'Notifications', reason: 'Shows your group on the lock screen while you ride, and alerts you when someone raises an SOS, stops for long or falls behind.', required: false, granted: notif.isGranted),
+      PermissionItem(key: 'location', title: 'Location while using the app', reason: 'We need your location so your riding group can see your position during an active ride.', required: true, granted: loc.isGranted),
+      PermissionItem(key: 'locationAlways', title: 'Location in the background', reason: 'Keeps your group updated while the phone is in your pocket or the screen is locked, only during an active ride. Choose "Allow all the time".', required: true, granted: always.isGranted),
+      PermissionItem(key: 'microphone', title: 'Microphone', reason: 'Used only while you hold Talk or turn on hands-free talk.', required: false, granted: mic.isGranted),
+      PermissionItem(key: 'notification', title: 'Notifications', reason: 'Enable ride alerts to receive group separation and emergency updates.', required: false, granted: notif.isGranted),
       if (Platform.isAndroid)
-        PermissionItem(key: 'battery', title: 'Unrestricted battery use', reason: 'Stops the phone from closing CoRoute in the background on long rides.', required: false, granted: battery),
+        PermissionItem(key: 'battery', title: 'Unrestricted battery use', reason: 'Stops the phone from closing CoRoute during long rides.', required: false, granted: battery),
     ];
   }
 

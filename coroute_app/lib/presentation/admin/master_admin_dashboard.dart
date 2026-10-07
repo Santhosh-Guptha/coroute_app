@@ -134,7 +134,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AppTheme.devmonksPurple,
+                color: AppTheme.infoBlue,
               ),
               child: const Icon(Icons.shield, color: Colors.white, size: 16),
             ),
@@ -162,7 +162,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
           ),
           IconButton(
             tooltip: 'Registered Users',
-            icon: Icon(Icons.people_alt_rounded, color: AppTheme.devmonksPurple),
+            icon: Icon(Icons.people_alt_rounded, color: AppTheme.infoBlue),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())),
           ),
           IconButton(
@@ -219,7 +219,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                               const SizedBox(height: 2),
                               Text(
                                 'Active rides & policy',
-                                style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -260,7 +260,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                               const SizedBox(height: 2),
                               Text(
                                 'Hold, block & trips',
-                                style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -352,12 +352,6 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                                 shape: BoxShape.circle,
                                 color: r.role == 'LEAD' ? AppTheme.hyperAmber : AppTheme.neonCyan,
                                 border: Border.all(color: Colors.black, width: 2),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppTheme.shadow,
-                                    blurRadius: 4,
-                                  ),
-                                ],
                               ),
                               child: const Icon(
                                 Icons.two_wheeler,
@@ -443,7 +437,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                                   ),
                                   Text(
                                     'Code: ${convoy.joinCode} · Lead: ${convoy.createdByUserName}',
-                                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                                   ),
                                 ],
                               ),
@@ -477,14 +471,14 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                           children: [
                             Expanded(child: Text(
                               'Destination: ${convoy.destinationName.ifEmpty ? 'Open Highway' : convoy.destinationName}',
-                              style: TextStyle(color: AppTheme.textMuted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                              style: TextStyle(color: AppTheme.textMuted, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
                             Row(
                               children: [
                                 Text(
                                   'Inspect Telemetry',
                                   style: TextStyle(
                                     color: AppTheme.neonCyan,
-                                    fontSize: 11,
+                                    fontSize: 12,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
@@ -532,7 +526,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                 children: [
                   Text(
                     title,
-                    style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                    style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                   ),
                   const SizedBox(height: 2),
                   Text(

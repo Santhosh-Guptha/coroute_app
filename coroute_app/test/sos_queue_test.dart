@@ -76,6 +76,16 @@ void main() {
       expect(ConnectionBanner.lines(connecting: true, pendingPoints: 0, sosWaiting: false).length, 1);
       expect(ConnectionBanner.lines(connecting: true, pendingPoints: 1, sosWaiting: false)[1], '1 point waiting to upload');
     });
+
+    test('top bar status: nothing when live, last update when not, SOS first', () {
+      const now = 1700000000000;
+      expect(ConnectionBanner.status(state: RealtimeState.connected, lastUpdateMs: now, nowMs: now), isNull);
+      expect(ConnectionBanner.status(state: RealtimeState.disconnected, lastUpdateMs: now - 120000, nowMs: now), 'Offline, last updated 2 min ago');
+      expect(ConnectionBanner.status(state: RealtimeState.connecting, lastUpdateMs: now - 5000, nowMs: now), 'Reconnecting, last updated just now');
+      expect(ConnectionBanner.status(state: RealtimeState.disconnected, lastUpdateMs: 0, nowMs: now), 'Offline');
+      expect(ConnectionBanner.status(state: RealtimeState.disconnected, nowMs: now, sosWaiting: true), 'SOS waiting to send');
+      expect(ConnectionBanner.status(state: RealtimeState.connected, nowMs: now, sosWaiting: true), 'Sending your SOS');
+    });
   });
 
   group('SOS sheet status', () {

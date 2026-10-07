@@ -24,6 +24,7 @@ import 'package:coroute_app/data/services/trip_storage_service.dart';
 import 'package:coroute_app/domain/tracking/track_point.dart';
 import 'package:coroute_app/presentation/admin/master_admin_dashboard.dart';
 import 'package:coroute_app/presentation/auth/access_gate_screen.dart';
+import 'package:coroute_app/presentation/onboarding/onboarding_screen.dart';
 import 'package:coroute_app/presentation/rider/rider_home_screen.dart';
 import 'package:coroute_app/presentation/splash/splash_screen.dart';
 
@@ -31,7 +32,8 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
+    // Onboarding already seen, so boot goes straight to sign-in (a separate test covers onboarding).
+    SharedPreferences.setMockInitialValues({OnboardingScreen.doneKey: true});
     FlutterSecureStorage.setMockInitialValues({});
   });
 
@@ -102,7 +104,7 @@ void main() {
       expect(find.byType(SplashScreen), findsOneWidget);
       expect(find.text(AppConstants.appName), findsOneWidget);
 
-      // Wait for auth loading and minimum splash display timer
+      // Wait for auth loading (the splash has no minimum display time)
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pump(const Duration(milliseconds: 800));
       await tester.pumpAndSettle();
@@ -111,6 +113,51 @@ void main() {
       expect(find.byType(AccessGateScreen), findsOneWidget);
       expect(find.text('Sign In'), findsOneWidget);
       expect(find.text('Register Account'), findsOneWidget);
+    });
+
+    testWidgets('First launch shows the three onboarding pages once, then sign-in', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final mockHttp = MockClient((req) async => http.Response('{}', 404));
+      final api = ApiClient(httpClient: mockHttp, storage: const FlutterSecureStorage());
+      final auth = AuthService(api);
+      final rt = RealtimeService();
+      final meta = MetaService(api);
+      final trips = TripStorageService(api);
+      final timeline = TimelineService(api, rt);
+      final queue = MemoryTrackQueue();
+      final recorder = TrackRecorder(queue, TrackUploader(api, queue));
+      final convoy = ConvoyService(api, rt, trips, recorder: recorder, timeline: timeline);
+      final intercom = IntercomService(rt);
+
+      await tester.pumpWidget(buildAppHarness(
+        apiClient: api,
+        authService: auth,
+        realtimeService: rt,
+        convoyService: convoy,
+        metaService: meta,
+        tripStorageService: trips,
+        timelineService: timeline,
+        trackRecorder: recorder,
+        intercomService: intercom,
+        child: const SplashScreen(),
+      ));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(OnboardingScreen), findsOneWidget);
+      expect(find.text('Ride Together'), findsOneWidget);
+      expect(find.text('Skip'), findsOneWidget);
+      expect(OnboardingScreen.pages.length, 3);
+
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      expect(find.text('Stay Connected'), findsOneWidget);
+
+      await tester.tap(find.text('Skip'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AccessGateScreen), findsOneWidget);
+      expect((await SharedPreferences.getInstance()).getBool(OnboardingScreen.doneKey), isTrue);
+      expect(await OnboardingScreen.isDone(), isTrue);
     });
 
     testWidgets('Authenticated Rider boot routes to RiderHomeScreen', (tester) async {

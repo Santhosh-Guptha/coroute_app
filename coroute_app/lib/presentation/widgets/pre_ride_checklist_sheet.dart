@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/permissions_service.dart';
@@ -168,11 +169,9 @@ class PreRideChecklistSheet extends StatefulWidget {
       isCharging: convoys?.isCharging ?? false,
       hasEmergencyContact: auth == null ? null : (auth.emergencyContact ?? '').trim().isNotEmpty,
     );
-    final result = await showModalBottomSheet<bool>(
-      context: context,
+    final result = await showAppSheet<bool>(
+      context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.slateCard,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => PreRideChecklistSheet(checks: checks),
     );
     return result ?? false;
@@ -219,69 +218,53 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
   @override
   Widget build(BuildContext context) {
     final maxHeight = MediaQuery.of(context).size.height * 0.9;
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxHeight),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-              child: Text('Before you ride', style: TextStyle(color: AppTheme.textPrimary, fontSize: 17, fontWeight: FontWeight.bold)),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text('A quick check. Nothing here is sent anywhere.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-            ),
-            const SizedBox(height: 8),
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                children: [
-                  for (var i = 0; i < _checks.length; i++) _autoRow(i),
-                  const Divider(),
-                  for (var i = 0; i < PreRideChecklist.manualItems.length; i++)
-                    CheckboxListTile(
-                      dense: true,
-                      value: _ticked.contains(i),
-                      activeColor: AppTheme.emeraldSafe,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: Text(PreRideChecklist.manualItems[i], style: TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
-                      onChanged: (v) => setState(() {
-                        if (v == true) {
-                          _ticked.add(i);
-                        } else {
-                          _ticked.remove(i);
-                        }
-                      }),
-                    ),
-                  const Divider(),
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const AppSheetHeader(title: 'Before you ride', subtitle: 'A quick check. Nothing here is sent anywhere.'),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              children: [
+                for (var i = 0; i < _checks.length; i++) _autoRow(i),
+                const Divider(),
+                for (var i = 0; i < PreRideChecklist.manualItems.length; i++)
                   CheckboxListTile(
-                    dense: true,
-                    value: _skip24h,
+                    contentPadding: EdgeInsets.zero,
+                    value: _ticked.contains(i),
+                    activeColor: AppTheme.emeraldSafe,
                     controlAffinity: ListTileControlAffinity.leading,
-                    title: Text('Do not show for 24 hours', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-                    onChanged: (v) => setState(() => _skip24h = v == true),
+                    title: Text(PreRideChecklist.manualItems[i], style: AppText.body),
+                    onChanged: (v) => setState(() {
+                      if (v == true) {
+                        _ticked.add(i);
+                      } else {
+                        _ticked.remove(i);
+                      }
+                    }),
                   ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: ElevatedButton(
-                onPressed: _start,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.neonCyan,
-                  foregroundColor: Colors.black,
-                  minimumSize: const Size.fromHeight(48),
+                const Divider(),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _skip24h,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text('Do not show for 24 hours', style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+                  onChanged: (v) => setState(() => _skip24h = v == true),
                 ),
-                child: const Text('Start the ride', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
+              ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: Space.s12),
+          FilledButton(
+            onPressed: _start,
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+            child: const Text('Start the ride', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
       ),
     );
   }
@@ -291,12 +274,16 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
     final attention = !c.ok && !c.infoOnly;
     final color = c.ok ? AppTheme.emeraldSafe : (attention ? AppTheme.hyperAmber : AppTheme.textMuted);
     return ListTile(
-      dense: true,
+      contentPadding: EdgeInsets.zero,
       leading: Icon(c.ok ? Icons.check_circle_rounded : (attention ? Icons.error_outline_rounded : Icons.info_outline_rounded), color: color),
-      title: Text(c.title, style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
-      subtitle: Text(c.ok ? c.okText : c.problemText, style: TextStyle(color: attention ? AppTheme.hyperAmber : AppTheme.textMuted, fontSize: 12)),
+      title: Text(c.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+      subtitle: Text(c.ok ? c.okText : c.problemText, style: AppText.caption.copyWith(color: attention ? AppTheme.hyperAmber : AppTheme.textMuted)),
       trailing: (!c.ok && c.fix != null)
-          ? TextButton(onPressed: () => _fix(i), child: Text('Fix', style: TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold)))
+          ? TextButton(
+              onPressed: () => _fix(i),
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              child: Text('Fix', style: TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold)),
+            )
           : null,
     );
   }

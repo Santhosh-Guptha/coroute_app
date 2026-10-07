@@ -137,3 +137,32 @@ test('trip planned on the map: route through every stop, suggestions, reorder, s
   assert.ok(routeCalls >= 3);
   wl.close(); wm.close();
 });
+
+test('meeting point stops keep their MEETING category; unknown categories fall back to OTHER', async () => {
+  const lead = (await api('POST', '/auth/register', { name: 'Lead Meera', email: 'meera@coroute.test', password: 'Password#123', phone: '9999999999', vehicleNo: 'TS09AB1234', emergencyContact: '+919000000001', emergencyContactName: 'Family Contact' })).json;
+  const created = await api('POST', '/convoys', {
+    name: 'Meet and ride',
+    start: { lat: 17.0, lng: 78.0, name: 'Home' },
+    destination: 'Fort', destLat: 17.3, destLng: 78.0,
+    stops: [
+      { name: 'Flyover gate', lat: 17.1, lng: 78.0, category: 'meeting' },
+      { name: 'Odd one', lat: 17.2, lng: 78.0, category: 'PICNIC' },
+    ],
+  }, lead.token);
+  assert.equal(created.status, 201);
+  const gid = created.json.groupId;
+  assert.deepEqual(created.json.stopPoints.map((s) => s.category), ['MEETING', 'OTHER']);
+
+  // A meeting point added during the ride by the lead keeps the category too.
+  const wl = await wsConnect(lead.token);
+  wl.json({ type: 'JOIN', groupId: gid });
+  await wl.wait((m) => m.type === 'SNAPSHOT');
+  wl.json({ type: 'STOP_ADD', name: 'Regroup at toll', lat: 17.25, lng: 78.0, category: 'MEETING' });
+  const added = await wl.wait((m) => m.type === 'STOPS' && m.stopPoints.some((s) => s.name === 'Regroup at toll'));
+  assert.equal(added.stopPoints.find((s) => s.name === 'Regroup at toll').category, 'MEETING');
+
+  // Round trip: the stored plan reads back as MEETING.
+  const meta = (await gw.convoys.getRoom(gid)).meta;
+  assert.equal(meta.stopPoints.find((s) => s.name === 'Flyover gate').category, 'MEETING');
+  wl.close();
+});

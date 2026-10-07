@@ -24,6 +24,12 @@ class AppPalette {
   final Color speedWarning;
   final Color devmonksPurple;
 
+  /// Status blue for neutral information (resting, tips, normal alerts).
+  final Color infoBlue;
+
+  /// Status grey for a rider who is offline (no update for a while).
+  final Color offlineGrey;
+
   // Text
   final Color textPrimary;
   final Color textSecondary;
@@ -53,6 +59,8 @@ class AppPalette {
     required this.emeraldSafe,
     required this.speedWarning,
     required this.devmonksPurple,
+    required this.infoBlue,
+    required this.offlineGrey,
     required this.textPrimary,
     required this.textSecondary,
     required this.textMuted,
@@ -78,6 +86,8 @@ class AppPalette {
     emeraldSafe: Color(0xFF00E676),
     speedWarning: Color(0xFFFF5252),
     devmonksPurple: Color(0xFF7C4DFF),
+    infoBlue: Color(0xFF5AA9FF),
+    offlineGrey: Color(0xFF8B98AB),
     textPrimary: Color(0xFFF8FAFC),
     textSecondary: Color(0xFF94A3B8),
     textMuted: Color(0xFF64748B),
@@ -114,6 +124,8 @@ class AppPalette {
     emeraldSafe: Color(0xFF1E8540),
     speedWarning: Color(0xFFC62828),
     devmonksPurple: Color(0xFF5E35B1),
+    infoBlue: Color(0xFF1565C0),
+    offlineGrey: Color(0xFF5F6B7A),
     textPrimary: Color(0xFF0F172A),
     textSecondary: Color(0xFF475569),
     textMuted: Color(0xFF5B6B80),

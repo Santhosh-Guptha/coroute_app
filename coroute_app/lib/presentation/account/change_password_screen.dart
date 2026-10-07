@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui.dart';
 import '../../data/services/auth_service.dart';
 
 /// Change password. When [forced] (temporary password issued by an admin) the
@@ -51,7 +52,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (res['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Password changed.'), backgroundColor: AppTheme.emeraldSafe));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password changed.')));
       Navigator.pop(context, true);
     } else {
       setState(() => _error = res['error']?.toString() ?? 'Could not change the password.');
@@ -63,8 +64,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         labelStyle: TextStyle(color: AppTheme.textMuted),
         filled: true,
         fillColor: AppTheme.elevatedCard,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        border: const OutlineInputBorder(borderRadius: Radii.mdAll),
         suffixIcon: IconButton(
+          tooltip: _obscure ? 'Show passwords' : 'Hide passwords',
           icon: Icon(_obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: AppTheme.textMuted),
           onPressed: () => setState(() => _obscure = !_obscure),
         ),
@@ -81,14 +83,14 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
             child: ListView(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(Space.s16),
               children: [
                 if (widget.forced)
                   Padding(
-                    padding: EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.only(bottom: Space.s16),
                     child: Text(
                       'You signed in with a temporary password. Choose a new one to continue.',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                      style: AppText.body.copyWith(color: AppTheme.textSecondary),
                     ),
                   ),
                 if (!widget.forced) ...[
@@ -100,14 +102,14 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                 TextField(controller: _confirm, obscureText: _obscure, style: TextStyle(color: AppTheme.textPrimary), decoration: _dec('Repeat new password')),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
-                  Text(_error!, style: TextStyle(color: AppTheme.laserRed, fontSize: 13)),
+                  Text(_error!, style: AppText.label.copyWith(color: StatusColors.critical)),
                 ],
-                const SizedBox(height: 20),
-                ElevatedButton(
+                const SizedBox(height: Space.s24),
+                FilledButton(
                   onPressed: _busy ? null : _submit,
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
                   child: _busy
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
                       : const Text('Save password'),
                 ),
               ],

@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/app_bottom_sheet.dart';
+import '../../core/ui/ui_tokens.dart';
 import '../../data/services/convoy_service.dart';
 
-/// Reusable Rider Status Sheet for selecting reasons for being stationary.
+/// "Why are you stopped?": tells the group the reason for a stop.
 ///
 /// Implements Section 5.5 of CoRoute Specifications: fueling, rest break, mechanical issue,
 /// flat tyre, traffic, weather, photo stop, medical emergency, regroup, or a custom reason.
-/// Each reason has a Material icon (no emoji in the app).
+/// Each reason has a Material icon (no emoji in the app). The five common reasons come
+/// first as big tiles; "More reasons" shows the rest and a typed reason, in the same sheet.
 class RiderStatusSheet {
   static const List<Map<String, String>> statusReasons = [
     {'code': 'FUELING', 'label': 'Fueling'},
@@ -36,6 +39,12 @@ class RiderStatusSheet {
     'CUSTOM': Icons.chat_bubble_outline_rounded,
   };
 
+  /// Shown first, as big tiles (the rest are behind "More reasons").
+  static const List<String> commonCodes = ['FUELING', 'REST_BREAK', 'MECHANICAL', 'FLAT_TIRE', 'MEDICAL'];
+
+  /// The other preset reasons (the typed reason is separate).
+  static const List<String> moreCodes = ['TRAFFIC', 'RAIN_DELAY', 'PHOTO_STOP', 'REGROUP'];
+
   static Map<String, String> getStatusInfo(String code) {
     return statusReasons.firstWhere(
       (r) => r['code'] == code,
@@ -52,102 +61,181 @@ class RiderStatusSheet {
     required String userId,
   }) {
     final activeService = convoyService ?? context.read<ConvoyService>();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.slateCard,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Why are you stopped?',
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      activeService.updateStatusReason(userId: userId, reason: '');
-                      Navigator.pop(ctx);
-                    },
-                    child: Text('Clear Status', style: TextStyle(color: AppTheme.laserRed, fontSize: 12)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final r in statusReasons)
-                    ActionChip(
-                      avatar: Icon(getStatusIcon(r['code']!), size: 18, color: AppTheme.neonCyan),
-                      label: Text(r['label']!, style: TextStyle(fontSize: 12, color: AppTheme.textPrimary)),
-                      backgroundColor: AppTheme.elevatedCard,
-                      side: BorderSide(color: AppTheme.glassBorder),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        if (r['code'] == 'CUSTOM') {
-                          _showCustomReasonDialog(context, activeService, userId);
-                        } else {
-                          activeService.updateStatusReason(userId: userId, reason: r['code']!);
-                        }
-                      },
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
+    final current = activeService.activeConvoy?.riders[userId]?.statusReason ?? '';
+    showAppSheet<void>(
+      context,
+      title: 'Why are you stopped?',
+      isScrollControlled: true,
+      builder: (ctx) => StatusPicker(
+        currentCode: current,
+        onPick: (code, message) {
+          activeService.updateStatusReason(userId: userId, reason: code, message: message);
+          Navigator.pop(ctx);
+        },
+        onClear: () {
+          activeService.updateStatusReason(userId: userId, reason: '');
+          Navigator.pop(ctx);
+        },
       ),
     );
   }
+}
 
-  static void _showCustomReasonDialog(BuildContext context, ConvoyService convoyService, String userId) {
-    final customCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.slateCard,
-        title: Text('Custom stop reason', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
-        content: TextField(
-          controller: customCtrl,
-          autofocus: true,
-          style: TextStyle(color: AppTheme.textPrimary),
-          decoration: InputDecoration(
-            hintText: 'e.g. Broken clutch cable, waiting for tow',
-            hintStyle: TextStyle(color: AppTheme.textMuted),
-            filled: true,
-            fillColor: AppTheme.elevatedCard,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+/// The body of the status sheet: reason tiles, "More reasons", a typed reason and
+/// "Clear status". Calls [onPick] with the code (and the typed text for CUSTOM).
+class StatusPicker extends StatefulWidget {
+  final String currentCode;
+  final void Function(String code, String message) onPick;
+  final VoidCallback onClear;
+
+  const StatusPicker({super.key, this.currentCode = '', required this.onPick, required this.onClear});
+
+  @override
+  State<StatusPicker> createState() => _StatusPickerState();
+}
+
+class _StatusPickerState extends State<StatusPicker> {
+  bool _more = false;
+  final _custom = TextEditingController();
+
+  @override
+  void dispose() {
+    _custom.dispose();
+    super.dispose();
+  }
+
+  void _sendCustom() {
+    final text = _custom.text.trim();
+    if (text.isEmpty) return;
+    widget.onPick('CUSTOM', text);
+  }
+
+  Widget _grid(List<String> codes) {
+    return LayoutBuilder(builder: (context, c) {
+      final w = (c.maxWidth - Space.s8) / 2;
+      return Wrap(
+        spacing: Space.s8,
+        runSpacing: Space.s8,
+        children: [
+          for (final code in codes)
+            SizedBox(
+              width: w,
+              child: _ReasonTile(
+                icon: RiderStatusSheet.getStatusIcon(code),
+                label: RiderStatusSheet.getStatusLabel(code),
+                selected: widget.currentCode == code,
+                onTap: () => widget.onPick(code, ''),
+              ),
+            ),
+        ],
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _grid(RiderStatusSheet.commonCodes),
+          const SizedBox(height: Space.s8),
+          if (!_more)
+            TextButton.icon(
+              style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.neonCyan),
+              onPressed: () => setState(() => _more = true),
+              icon: const Icon(Icons.expand_more_rounded),
+              label: const Text('More reasons'),
+            )
+          else ...[
+            _grid(RiderStatusSheet.moreCodes),
+            const SizedBox(height: Space.s12),
+            Text('Or type a reason', style: AppText.label),
+            const SizedBox(height: Space.s8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _custom,
+                    maxLength: 80,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _sendCustom(),
+                    style: AppText.body,
+                    decoration: InputDecoration(
+                      hintText: 'For example: waiting for a mechanic',
+                      hintStyle: AppText.caption,
+                      counterText: '',
+                      filled: true,
+                      fillColor: AppTheme.elevatedCard,
+                      border: const OutlineInputBorder(borderRadius: Radii.mdAll, borderSide: BorderSide.none),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: Space.s8),
+                FilledButton(
+                  style: FilledButton.styleFrom(minimumSize: const Size(64, 48)),
+                  onPressed: _sendCustom,
+                  child: const Text('Set'),
+                ),
+              ],
+            ),
+          ],
+          if (widget.currentCode.isNotEmpty) ...[
+            const SizedBox(height: Space.s8),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.textPrimary),
+              onPressed: widget.onClear,
+              icon: const Icon(Icons.check_rounded),
+              label: const Text('Clear status'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ReasonTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ReasonTile({required this.icon, required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color accent = selected ? AppTheme.neonCyan : AppTheme.subtleBorder;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      excludeSemantics: true,
+      onTap: onTap,
+      child: Material(
+        color: selected ? AppTheme.neonCyan.withOpacity(0.12) : AppTheme.elevatedCard,
+        shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: accent)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 56),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: Space.s8),
+              child: Row(
+                children: [
+                  Icon(icon, size: 22, color: AppTheme.neonCyan),
+                  const SizedBox(width: Space.s8),
+                  Expanded(
+                    child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                  ),
+                  if (selected) Icon(Icons.check_rounded, size: 20, color: AppTheme.neonCyan),
+                ],
+              ),
+            ),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final text = customCtrl.text.trim();
-              if (text.isNotEmpty) {
-                convoyService.updateStatusReason(
-                  userId: userId,
-                  reason: 'CUSTOM',
-                  message: text,
-                );
-              }
-              Navigator.pop(ctx);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan),
-            child: const Text('Set Status', style: TextStyle(color: Colors.black)),
-          ),
-        ],
       ),
     );
   }

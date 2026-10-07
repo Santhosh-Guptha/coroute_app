@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../ui/ui_tokens.dart';
 import 'app_palette.dart';
 
 /// The app's colours and Material theme.
@@ -39,6 +40,8 @@ class AppTheme {
   static Color get emeraldSafe => _p.emeraldSafe;
   static Color get speedWarning => _p.speedWarning;
   static Color get devmonksPurple => _p.devmonksPurple;
+  static Color get infoBlue => _p.infoBlue;
+  static Color get offlineGrey => _p.offlineGrey;
 
   // Text
   static Color get textPrimary => _p.textPrimary;
@@ -103,13 +106,70 @@ class AppTheme {
       ),
       iconTheme: IconThemeData(color: p.textSecondary),
       listTileTheme: ListTileThemeData(textColor: p.textPrimary, iconColor: p.textSecondary),
-      dialogTheme: DialogThemeData(backgroundColor: p.slateCard),
-      bottomSheetTheme: BottomSheetThemeData(backgroundColor: p.slateCard, modalBackgroundColor: p.slateCard),
+      dialogTheme: DialogThemeData(
+        backgroundColor: p.slateCard,
+        shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
+      ),
+      // The drag handle is not switched on for every sheet here: older sheets
+      // draw their own. showAppSheet (lib/core/ui) turns it on.
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: p.slateCard,
+        modalBackgroundColor: p.slateCard,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),
+        dragHandleColor: p.textMuted,
+        dragHandleSize: const Size(36, 4),
+      ),
+      cardTheme: CardThemeData(
+        color: p.slateCard,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(64, 48),
+          shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(64, 48),
+          shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: p.slateCard,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: p.neonCyan.withOpacity(0.18),
+        indicatorShape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        height: 64,
+        elevation: 0,
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            size: 24,
+            color: states.contains(WidgetState.selected) ? p.neonCyan : p.textSecondary,
+          ),
+        ),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            fontSize: 12,
+            fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
+            color: states.contains(WidgetState.selected) ? p.textPrimary : p.textSecondary,
+          ),
+        ),
+      ),
       popupMenuTheme: PopupMenuThemeData(color: p.elevatedCard),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: p.isLight ? const Color(0xFF1E293B) : p.elevatedCard,
         contentTextStyle: const TextStyle(color: Color(0xFFF8FAFC)),
         behavior: SnackBarBehavior.floating,
+        shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(

@@ -11,6 +11,7 @@ import 'package:coroute_app/core/constants/app_constants.dart';
 import 'package:coroute_app/core/theme/app_palette.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/core/theme/theme_controller.dart';
+import 'package:coroute_app/core/ui/ui.dart';
 import 'package:coroute_app/core/widgets/cockpit_hud.dart';
 import 'package:coroute_app/data/local/track_queue.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
@@ -27,10 +28,12 @@ import 'package:coroute_app/data/services/timeline_service.dart';
 import 'package:coroute_app/data/services/track_recorder.dart';
 import 'package:coroute_app/data/services/track_uploader.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
+import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/presentation/admin/master_admin_dashboard.dart';
 import 'package:coroute_app/presentation/auth/access_gate_screen.dart';
-import 'package:coroute_app/presentation/rider/convoy_dashboard_screen.dart';
+import 'package:coroute_app/presentation/ride/riders_ladder.dart';
 import 'package:coroute_app/presentation/rider/rider_home_screen.dart';
+import 'package:coroute_app/presentation/widgets/intercom_dock.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -126,7 +129,7 @@ void main() {
       expect(find.textContaining('EMAIL ADDRESS'), findsOneWidget);
       expect(find.textContaining('MOBILE PHONE NUMBER'), findsOneWidget);
       expect(find.textContaining('VEHICLE TYPE'), findsOneWidget);
-      expect(find.textContaining('EMERGENCY (ICE) CONTACT'), findsOneWidget);
+      expect(find.textContaining('EMERGENCY CONTACT'), findsOneWidget);
       expect(find.textContaining('I accept the '), findsOneWidget);
       expect(find.text('REGISTER RIDER ACCOUNT'), findsOneWidget);
 
@@ -184,7 +187,7 @@ void main() {
   });
 
   group('UI Level E2E: RiderHomeScreen Controls & Modals', () {
-    testWidgets('RiderHomeScreen renders rider profile card, actions, and Join Modal', (tester) async {
+    testWidgets('RiderHomeScreen shell renders the Ride tab, the join sheet and the Profile tab', (tester) async {
       SharedPreferences.setMockInitialValues({
         AppConstants.keyUserId: 'usr_neo',
         AppConstants.keyUserName: 'Neo One',
@@ -243,34 +246,45 @@ void main() {
       ));
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Check Profile Header Card
+      // Ride tab (default): no active ride, so the start view with its two actions.
+      // The drawer and the home profile card are gone (3.12 shell).
+      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(find.text('No active ride'), findsOneWidget);
+      expect(find.text('Start Ride'), findsOneWidget);
+      expect(find.text('Join Ride'), findsOneWidget);
+      expect(find.byType(Drawer), findsNothing);
+
+      // Join Ride opens the join sheet (not a dialog).
+      await tester.tap(find.text('Join Ride'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text('Join a ride'), findsOneWidget);
+      expect(find.text('Enter the code shared by the person who started the ride.'), findsOneWidget);
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.text('Join'), findsOneWidget);
+
+      // Close the sheet.
+      Navigator.of(tester.element(find.text('Join a ride'))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Join a ride'), findsNothing);
+
+      // The profile header now lives on the Profile tab.
+      await tester.tap(find.widgetWithText(NavigationDestination, 'Profile'));
+      await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Neo One'), findsOneWidget);
       expect(find.textContaining('Motorcycle (Adv)'), findsOneWidget);
       expect(find.textContaining('KA-05-EX-9999'), findsOneWidget);
-
-      // Check Action Cards
-      expect(find.text('Create Convoy'), findsOneWidget);
-      expect(find.text('Join Convoy'), findsOneWidget);
-
-      // Tap Join Convoy Card -> Opens Join with Code Dialog
-      await tester.tap(find.text('Join Convoy'));
-      await tester.pump(const Duration(milliseconds: 300));
-
-      expect(find.text('Join with Code'), findsOneWidget);
-      expect(find.text('Enter the 6-character room code shared by your convoy lead.'), findsOneWidget);
-      expect(find.byType(TextField), findsOneWidget);
-      expect(find.text('Cancel'), findsOneWidget);
-      expect(find.text('Connect to Convoy'), findsOneWidget);
-
-      // Cancel Dialog
-      await tester.tap(find.text('Cancel'));
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(find.text('Join with Code'), findsNothing);
+      expect(find.text('Emergency contact: set'), findsOneWidget);
     });
   });
 
-  group('UI Level E2E: ConvoyDashboardScreen Tabs, Intercom & Status', () {
-    testWidgets('ConvoyDashboardScreen renders active convoy, tabs, intercom dock and status sheet', (tester) async {
+  // The dashboard screen is gone (3.12): the ride is one map with one sheet. The map itself
+  // loads network tiles, so this test drives the ride sheet parts with the live service data
+  // instead of the whole screen (A's ui_widgets_test covers each part at 320 dp).
+  group('UI Level E2E: Active ride sheet, riders ladder, trip progress and intercom', () {
+    testWidgets('An active convoy shows its riders, stops and the talk-to picker', (tester) async {
       tester.view.physicalSize = const Size(800, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() {
@@ -350,6 +364,40 @@ void main() {
 
       await convoy.startSession(token: 'test-token', userId: 'usr_me');
 
+      Widget rideParts() => Consumer<ConvoyService>(builder: (context, service, _) {
+            final c = service.activeConvoy;
+            if (c == null) return const SizedBox.shrink();
+            final nowMs = DateTime.now().millisecondsSinceEpoch;
+            final me = c.riders['usr_me']!;
+            return Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(c.name),
+                        Text('Code ${c.joinCode}'),
+                        RidersLadder(
+                          rungs: RideFacts.ladder(c, 'usr_me'),
+                          colors: const {},
+                          statuses: {for (final r in c.riders.values) r.userId: riderStatusOf(r, c, isMe: r.userId == 'usr_me', nowMs: nowMs)},
+                          nowMs: nowMs,
+                          onTap: (_) {},
+                        ),
+                        TripProgress(stops: [
+                          for (final st in c.plannedStops)
+                            TripProgressStop(name: st.name, kind: StopKind.fromCategory(st.category), done: st.isVisited),
+                        ]),
+                      ],
+                    ),
+                  ),
+                ),
+                IntercomDock(convoy: c, me: me),
+              ],
+            );
+          });
+
       await tester.pumpWidget(createUiHarness(
         api: api,
         auth: auth,
@@ -359,57 +407,40 @@ void main() {
         trips: trips,
         timeline: timeline,
         intercom: intercom,
-        child: const ConvoyDashboardScreen(groupId: 'GRP-GHATS-01'),
+        child: rideParts(),
       ));
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Convoy Header Info
+      // Convoy loaded from the session
       expect(find.text('Western Ghats Monsoon Express'), findsOneWidget);
       expect(find.textContaining('WST900'), findsOneWidget);
 
-      // Verify Tab bar headers
-      expect(find.text('Riders (3)'), findsOneWidget);
-      expect(find.text('Chat (0)'), findsOneWidget);
-      expect(find.text('Stops (2)'), findsOneWidget);
-      expect(find.text('Settings'), findsOneWidget);
+      // Riders ladder: everyone, with me marked
+      expect(find.text('Captain Jack'), findsOneWidget);
+      expect(find.text('Tail Sweep'), findsOneWidget);
+      expect(find.textContaining('Phoenix (Me)'), findsOneWidget);
 
-      // Verify Intercom Dock
-      expect(find.text('Talk to: Everyone'), findsOneWidget);
-      expect(find.text('PTT'), findsOneWidget);
-      expect(find.text('VOX'), findsOneWidget);
-      expect(find.text('HOLD TO TALK'), findsOneWidget);
-      expect(find.text('SOS'), findsOneWidget);
-
-      // Switch to Stops Tab
-      await tester.tap(find.widgetWithText(Tab, 'Stops (2)'));
-      for (int i = 0; i < 5; i++) {
-        await tester.pump(const Duration(milliseconds: 100));
-      }
+      // Trip progress lists the planned stops
       expect(find.text('Shell Fuel Stop'), findsOneWidget);
       expect(find.text('Hilltop Cafe'), findsOneWidget);
 
-      // Switch to Chat Tab
-      await tester.tap(find.widgetWithText(Tab, 'Chat (0)'));
-      for (int i = 0; i < 5; i++) {
-        await tester.pump(const Duration(milliseconds: 100));
-      }
-      expect(find.textContaining('No group messages yet'), findsOneWidget);
-
-      // Switch back to Riders Tab
-      await tester.tap(find.widgetWithText(Tab, 'Riders (3)'));
-      for (int i = 0; i < 5; i++) {
-        await tester.pump(const Duration(milliseconds: 100));
-      }
+      // Intercom dock: one row, no mode toggle and no SOS (SOS is the hold button on the map)
+      expect(find.text('Talk to: Everyone'), findsOneWidget);
+      expect(find.text('HOLD TO TALK'), findsOneWidget);
+      expect(find.text('PTT'), findsNothing);
+      expect(find.text('VOX'), findsNothing);
+      expect(find.text('SOS'), findsNothing);
 
       // Open Intercom Talk-To Channel Picker
       await tester.tap(find.text('Talk to: Everyone'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
+      final sheet = find.byType(BottomSheet);
       expect(find.text('Everyone in the convoy'), findsOneWidget);
-      expect(find.text('Captain Jack'), findsAtLeastNWidgets(1));
-      expect(find.text('Tail Sweep'), findsAtLeastNWidgets(1));
-      expect(find.text('Phoenix (Me)'), findsNothing);
+      expect(find.descendant(of: sheet, matching: find.text('Captain Jack')), findsOneWidget);
+      expect(find.descendant(of: sheet, matching: find.text('Tail Sweep')), findsOneWidget);
+      expect(find.descendant(of: sheet, matching: find.textContaining('Phoenix (Me)')), findsNothing);
 
       // Select Captain Jack for Private 1:1 Radio
       await tester.tap(find.widgetWithText(ListTile, 'Captain Jack'));
@@ -419,47 +450,45 @@ void main() {
 
       // Clean up session and background timers
       await convoy.endSession();
+      await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 4));
     });
   });
 
   group('UI Level E2E: Cockpit HUD Dynamics & Master Admin Controls', () {
-    testWidgets('CockpitHud dynamically adapts speed colors and cardinal directions', (tester) async {
-      // 1. Cruising speed (45 km/h, East = 90 deg)
+    // 3.12: the HUD is only the speed card; compass, heading and speed category are gone.
+    testWidgets('CockpitHud shows the speed and, without a group limit, the label Speed', (tester) async {
+      // 1. 45 km/h (heading and battery are still accepted, no longer shown)
       await tester.pumpWidget(MaterialApp(
         theme: AppTheme.themeFor(AppPalette.dark),
         home: const Scaffold(
           body: CockpitHud(speedKmh: 45.0, heading: 90.0, batteryLevel: 95),
         ),
       ));
-      expect(find.text('45'), findsOneWidget);
-      expect(find.text('km/h'), findsOneWidget);
-      expect(find.text('90° E'), findsOneWidget);
-      expect(find.text('City Cruising'), findsOneWidget);
+      // RideMetric draws the number and unit as one rich text.
+      expect(find.text('45 km/h'), findsOneWidget);
 
-      // 2. Highway pace (80 km/h, Northwest = 315 deg)
+      // 2. 80 km/h
       await tester.pumpWidget(MaterialApp(
         theme: AppTheme.themeFor(AppPalette.dark),
         home: const Scaffold(
           body: CockpitHud(speedKmh: 80.0, heading: 315.0, batteryLevel: 80),
         ),
       ));
-      expect(find.text('80'), findsOneWidget);
-      expect(find.text('km/h'), findsOneWidget);
-      expect(find.text('315° NW'), findsOneWidget);
-      expect(find.text('Highway Pace'), findsOneWidget);
+      // RideMetric draws the number and unit as one rich text.
+      expect(find.text('80 km/h'), findsOneWidget);
 
-      // 3. High speed warning (115 km/h, South = 180 deg)
+      // 3. 115 km/h, no limit set: label 'Speed', no compass text
       await tester.pumpWidget(MaterialApp(
         theme: AppTheme.themeFor(AppPalette.dark),
         home: const Scaffold(
           body: CockpitHud(speedKmh: 115.0, heading: 180.0, batteryLevel: 65),
         ),
       ));
-      expect(find.text('115'), findsOneWidget);
-      expect(find.text('km/h'), findsOneWidget);
-      expect(find.text('180° S'), findsOneWidget);
-      expect(find.text('High Speed'), findsOneWidget);
+      // RideMetric draws the number and unit as one rich text.
+      expect(find.text('115 km/h'), findsOneWidget);
+      expect(find.text('Speed'), findsOneWidget);
+      expect(find.text('180° S'), findsNothing);
     });
 
     testWidgets('MasterAdminDashboard displays fleet counters and Global Broadcast modal', (tester) async {

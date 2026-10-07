@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/app_bottom_sheet.dart';
+import '../../core/ui/ui_tokens.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 
@@ -37,21 +39,17 @@ class EmergencySosSheet extends StatelessWidget {
     String? alertId,
     VoidCallback? onResolved,
   }) {
-    HapticFeedback.heavyImpact();
-    return showModalBottomSheet(
-      context: context,
-      isDismissible: true,
-      enableDrag: true,
+    // No haptic here: the SOS button already gave one when the hold completed.
+    return showAppSheet<void>(
+      context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.slateCard,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => EmergencySosSheet(
-        lat: lat,
-        lng: lng,
-        alertId: alertId,
-        onResolved: onResolved,
+      builder: (ctx) => SingleChildScrollView(
+        child: EmergencySosSheet(
+          lat: lat,
+          lng: lng,
+          alertId: alertId,
+          onResolved: onResolved,
+        ),
       ),
     );
   }
@@ -126,26 +124,10 @@ class EmergencySosSheet extends StatelessWidget {
     final hasEmergencyContact = emergencyPhone.isNotEmpty;
     final mapsUrl = 'https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng.toStringAsFixed(6)}';
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-        child: Column(
+    return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Drag handle
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.glassBorder,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-
             // Header Banner
             Semantics(
               liveRegion: true,
@@ -180,12 +162,12 @@ class EmergencySosSheet extends StatelessWidget {
                         children: [
                           Text(
                             title,
-                            style: TextStyle(color: headerColor, fontWeight: FontWeight.w900, fontSize: 14),
+                            style: AppText.body.copyWith(color: headerColor, fontWeight: FontWeight.w800),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             subtitle,
-                            style: TextStyle(color: AppTheme.textPrimary.withOpacity(0.9), fontSize: 12),
+                            style: AppText.label.copyWith(color: AppTheme.textPrimary, fontWeight: FontWeight.w400),
                           ),
                         ],
                       ),
@@ -198,33 +180,34 @@ class EmergencySosSheet extends StatelessWidget {
 
             // Location Box
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.only(left: Space.s12, right: Space.s4),
               decoration: BoxDecoration(
                 color: AppTheme.elevatedCard,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppTheme.glassBorder),
+                borderRadius: Radii.mdAll,
+                border: Border.all(color: AppTheme.subtleBorder),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.my_location_rounded, color: AppTheme.neonCyan, size: 16),
-                  const SizedBox(width: 8),
+                  Icon(Icons.my_location_rounded, color: AppTheme.neonCyan, size: 18),
+                  const SizedBox(width: Space.s8),
                   Expanded(
                     child: Text(
                       'Position: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontFamily: 'monospace'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.caption.copyWith(color: AppTheme.textSecondary, fontFeatures: const [FontFeature.tabularFigures()]),
                     ),
                   ),
-                  InkWell(
-                    onTap: () {
+                  TextButton.icon(
+                    style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: AppTheme.neonCyan),
+                    onPressed: () {
                       Clipboard.setData(ClipboardData(text: mapsUrl));
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('Map link copied.')),
                       );
                     },
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Text('Copy link', style: TextStyle(color: AppTheme.neonCyan, fontSize: 10, fontWeight: FontWeight.bold)),
-                    ),
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    label: const Text('Copy link', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                   ),
                 ],
               ),
@@ -238,13 +221,13 @@ class EmergencySosSheet extends StatelessWidget {
                 icon: const Icon(Icons.phone_in_talk_rounded, color: Colors.white),
                 label: Text(
                   'Call ${emergencyName.isNotEmpty ? emergencyName : "emergency contact"} ($emergencyPhone)',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.emeraldSafe,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  minimumSize: const Size.fromHeight(56),
+                  shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
                 ),
               ),
               const SizedBox(height: 8),
@@ -255,13 +238,13 @@ class EmergencySosSheet extends StatelessWidget {
                 icon: const Icon(Icons.sms_rounded, color: Colors.black),
                 label: Text(
                   'Text my location to $emergencyPhone',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.hyperAmber,
                   foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  minimumSize: const Size.fromHeight(56),
+                  shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
                 ),
               ),
               const SizedBox(height: 8),
@@ -273,21 +256,25 @@ class EmergencySosSheet extends StatelessWidget {
               icon: Icon(Icons.local_hospital_rounded, color: AppTheme.laserRed),
               label: Text(
                 'Dial 112 (emergency services)',
-                style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.laserRed, fontSize: 13),
+                style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.laserRed, fontSize: 14),
               ),
               style: OutlinedButton.styleFrom(
                 side: BorderSide(color: AppTheme.laserRed),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                minimumSize: const Size.fromHeight(56),
+                shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
               ),
             ),
             const SizedBox(height: 12),
 
-            // Resolve / Cancel Button
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(
+            // Resolve / Cancel Button: full width, then "Keep it on".
+            FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.elevatedCard,
+                      foregroundColor: AppTheme.textPrimary,
+                      minimumSize: const Size.fromHeight(56),
+                      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
+                    ),
+                    icon: Icon(Icons.verified_user_rounded, color: AppTheme.emeraldSafe),
                     onPressed: () {
                       // Resolves this rider's own open SOS on the server (also when the sheet was
                       // opened without an alert id) and drops one that is still waiting to be sent.
@@ -303,18 +290,15 @@ class EmergencySosSheet extends StatelessWidget {
                         const SnackBar(content: Text('SOS cancelled. Your convoy sees that you are OK.')),
                       );
                     },
-                    child: Text('I am safe, cancel the SOS', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('Keep it on', style: TextStyle(color: AppTheme.neonCyan, fontSize: 12, fontWeight: FontWeight.bold)),
-                ),
-              ],
+                    label: const Text('I am safe, cancel the SOS', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            ),
+            const SizedBox(height: Space.s4),
+            TextButton(
+              style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.neonCyan),
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Keep it on', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
             ),
           ],
-        ),
-      ),
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/telemetry_utils.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/services/convoy_service.dart';
@@ -17,38 +18,19 @@ class AdminConvoyInspector extends StatelessWidget {
 
   const AdminConvoyInspector({super.key, required this.convoy});
 
-  void _confirmDissolveConvoy(BuildContext context, ConvoyService convoyService) {
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: AppTheme.slateCard,
-          title: Text('Dissolve Convoy?', style: TextStyle(color: AppTheme.laserRed)),
-          content: Text(
-            'Are you sure you want to forcibly terminate "${convoy.name}" (Code: ${convoy.joinCode})? All active riders will be dismissed.',
-            style: TextStyle(color: AppTheme.textSecondary),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.laserRed),
-              onPressed: () {
-                convoyService.adminDissolveConvoy(convoy.groupId);
-                Navigator.pop(ctx); // pop dialog
-                Navigator.pop(context); // pop inspector
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Convoy ${convoy.name} terminated.')),
-                );
-              },
-              child: const Text('Force Terminate', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
+  Future<void> _confirmDissolveConvoy(BuildContext context, ConvoyService convoyService) async {
+    final ok = await confirmAction(
+      context,
+      title: 'End this ride for everyone?',
+      message: 'This ends "${convoy.name}" (code ${convoy.joinCode}) for all riders. Their live location sharing stops.',
+      confirmLabel: 'End ride',
+      destructive: true,
     );
+    if (!ok || !context.mounted) return;
+    convoyService.adminDissolveConvoy(convoy.groupId);
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.pop(context); // close the inspector
+    messenger.showSnackBar(SnackBar(content: Text('Ride ${convoy.name} ended.')));
   }
 
   @override
@@ -144,7 +126,7 @@ class AdminConvoyInspector extends StatelessWidget {
                                 ),
                                 child: Text(
                                   r.name,
-                                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 8, fontWeight: FontWeight.bold),
+                                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.bold),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
@@ -224,7 +206,7 @@ class AdminConvoyInspector extends StatelessWidget {
                                     r.role,
                                     style: TextStyle(
                                       color: r.role == 'LEAD' ? Colors.black : AppTheme.textSecondary,
-                                      fontSize: 9,
+                                      fontSize: 12,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
@@ -234,7 +216,7 @@ class AdminConvoyInspector extends StatelessWidget {
                             const SizedBox(height: 2),
                             Text(
                               '${r.vehicleType} · ${r.vehicleColor}',
-                              style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                              style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                             ),
                           ],
                         ),
@@ -248,7 +230,7 @@ class AdminConvoyInspector extends StatelessWidget {
                           ),
                           Text(
                             'Heading ${r.heading.round()}° $cardinal',
-                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 10),
+                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                           ),
                         ],
                       ),
@@ -266,7 +248,7 @@ class AdminConvoyInspector extends StatelessWidget {
   Widget _buildMetricPill(String title, String value, Color color) {
     return Column(
       children: [
-        Text(title, style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+        Text(title, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
         const SizedBox(height: 2),
         Text(
           value,

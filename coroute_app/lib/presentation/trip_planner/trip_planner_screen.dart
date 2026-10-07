@@ -1,26 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
-import '../../data/models/convoy_model.dart';
+import '../../core/theme/map_tiles.dart';
+import '../../core/ui/ui.dart';
 import '../../data/models/route_model.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/geo_service.dart';
-import '../../domain/timeline/timeline_text.dart';
 import '../map_picker/map_picker_screen.dart';
 import '../onboarding/permissions_screen.dart';
-import '../rider/convoy_dashboard_screen.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
-import '../../core/theme/map_tiles.dart';
+import 'trip_review_sheet.dart';
 
-/// Plan a trip before starting it: name, start, destination and any number
-/// of stops, all picked on the map, with a live route preview through every
-/// stop (distance and time per leg).
+/// Plan a ride on one screen, map first: name, start, destination, stops
+/// (picked on the map or by long-pressing it), then Review and Start Ride.
+/// The live route preview runs through every stop.
+///
+/// After the ride is created the planner returns to the root route; the
+/// home shell sees the new active ride and switches to the Ride tab.
 class TripPlannerScreen extends StatefulWidget {
   const TripPlannerScreen({super.key});
 
@@ -29,24 +32,20 @@ class TripPlannerScreen extends StatefulWidget {
 }
 
 class _TripPlannerScreenState extends State<TripPlannerScreen> {
-  static const _categoryIcons = {
-    'FUEL': Icons.local_gas_station_rounded,
-    'FOOD': Icons.restaurant_rounded,
-    'REST': Icons.airline_seat_recline_normal_rounded,
-    'SCENIC': Icons.landscape_rounded,
-    'TOLL': Icons.toll_rounded,
-    'OTHER': Icons.place_rounded,
-  };
+  static const int _maxStops = 20;
 
   final _name = TextEditingController();
+  final _nameFocus = FocusNode();
   late final GeoService _geo = GeoService(context.read<ApiClient>());
   final MapController _map = MapController();
   PickedPlace? _start;
   PickedPlace? _destination;
   final List<PickedPlace> _stops = [];
+  List<PickedPlace> _recent = const [];
   RouteModel? _route;
   bool _routing = false;
   bool _launching = false;
+  String? _nameError;
   int _speedLimit = 0;
   int _routeRequest = 0;
 
@@ -54,11 +53,15 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _useCurrentLocationAsStart());
+    RecentPlaces.load().then((r) {
+      if (mounted) setState(() => _recent = r);
+    });
   }
 
   @override
   void dispose() {
     _name.dispose();
+    _nameFocus.dispose();
     super.dispose();
   }
 
@@ -71,9 +74,9 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
           await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 6)));
       if (!mounted || _start != null) return;
       setState(() => _start = PickedPlace(lat: p.latitude, lng: p.longitude, name: 'My location'));
+      _refreshRoute();
       final name = await _geo.reverse(p.latitude, p.longitude);
       if (mounted && name != null && _start?.name == 'My location') setState(() => _start = _start!.copyWith(name: name));
-      _refreshRoute();
     } catch (_) {}
   }
 
@@ -83,6 +86,8 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         if (_destination != null) (_destination!.lat, _destination!.lng),
       ];
 
+  /// Recomputes the route. The old line stays on the map (with a thin
+  /// progress bar) until the new one arrives.
   Future<void> _refreshRoute() async {
     final wp = _waypoints;
     final req = ++_routeRequest;
@@ -123,6 +128,10 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   Future<void> _pickDestination() async {
     final p = await MapPickerScreen.pick(context, title: 'Destination', initial: _destination);
     if (p == null) return;
+    _setDestination(p);
+  }
+
+  void _setDestination(PickedPlace p) {
     setState(() => _destination = p);
     _refreshRoute();
   }
@@ -136,6 +145,24 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     _refreshRoute();
   }
 
+  /// Long-press on the map: name the place, choose its type, add it.
+  Future<void> _addStopAt(LatLng point) async {
+    if (_launching) return;
+    if (_stops.length >= _maxStops) {
+      _snack('A trip can have up to $_maxStops stops.');
+      return;
+    }
+    final p = await showAppSheet<PickedPlace>(
+      context,
+      title: 'Add a stop here',
+      isScrollControlled: true,
+      builder: (_) => _AddStopSheet(geo: _geo, point: point),
+    );
+    if (p == null || !mounted) return;
+    setState(() => _stops.add(p));
+    _refreshRoute();
+  }
+
   Future<void> _editStop(int i) async {
     final p = await MapPickerScreen.pick(context, title: 'Edit stop', forStop: true, confirmLabel: 'Save stop', initial: _stops[i]);
     if (p == null) return;
@@ -143,12 +170,34 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     _refreshRoute();
   }
 
-  Future<void> _launch() async {
+  void _removeStop(int i) {
+    setState(() => _stops.removeAt(i));
+    _refreshRoute();
+  }
+
+  Future<void> _review() async {
     final name = _name.text.trim();
     if (name.length < 2) {
-      _snack('Give the trip a name.');
+      setState(() => _nameError = 'Give the trip a name.');
+      _nameFocus.requestFocus();
       return;
     }
+    FocusScope.of(context).unfocus();
+    final limit = await TripReviewSheet.show(
+      context,
+      name: name,
+      startName: _start?.name,
+      destinationName: _destination?.name,
+      route: _route,
+      stops: _stops.length,
+      speedLimitKmh: _speedLimit,
+    );
+    if (limit == null || !mounted) return;
+    setState(() => _speedLimit = limit);
+    await _launch(name);
+  }
+
+  Future<void> _launch(String name) async {
     final auth = context.read<AuthService>();
     final convoys = context.read<ConvoyService>();
     if (!await PermissionsScreen.ensure(context)) return;
@@ -157,9 +206,8 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     if (!await PreRideChecklistSheet.show(context)) return;
     if (!mounted) return;
     setState(() => _launching = true);
-    final ConvoyModel convoy;
     try {
-      convoy = await convoys.createConvoy(
+      await convoys.createConvoy(
         name: name,
         creatorId: auth.currentUserId ?? '',
         creatorName: auth.currentUserName ?? 'Lead rider',
@@ -176,11 +224,13 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       );
     } catch (e) {
       if (mounted) setState(() => _launching = false);
-      _snack(e is ApiException ? e.message : 'Could not create the convoy. Check your connection.');
+      _snack(e is ApiException ? e.message : 'Could not start the ride. Check your connection.');
       return;
     }
     if (!mounted) return;
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => ConvoyDashboardScreen(groupId: convoy.groupId)));
+    HapticFeedback.mediumImpact();
+    // Back to the home shell; it switches to the Ride tab when the active ride appears.
+    Navigator.of(context).popUntil((r) => r.isFirst);
   }
 
   void _snack(String m) {
@@ -192,24 +242,27 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(title: const Text('Plan a trip')),
+      appBar: AppBar(title: const Text('Plan a ride')),
       body: LayoutBuilder(builder: (context, c) {
-        final wide = c.maxWidth > 760;
-        final map = _mapView();
+        final map = LoadingState(loading: _routing, child: _mapView());
         final form = _form();
-        if (wide) return Row(children: [SizedBox(width: 420, child: form), Expanded(child: map)]);
-        return Column(children: [SizedBox(height: c.maxHeight * 0.34, child: map), Expanded(child: form)]);
+        final sideBySide = c.maxWidth > c.maxHeight && c.maxWidth >= 560;
+        if (sideBySide) {
+          final formWidth = (c.maxWidth * 0.45).clamp(280.0, 420.0).toDouble();
+          return Row(children: [SizedBox(width: formWidth, child: form), Expanded(child: map)]);
+        }
+        return Column(children: [SizedBox(height: c.maxHeight * 0.55, child: map), Expanded(child: form)]);
       }),
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: ElevatedButton.icon(
-            onPressed: _launching ? null : _launch,
+          padding: const EdgeInsets.fromLTRB(Space.s16, Space.s8, Space.s16, Space.s12),
+          child: FilledButton.icon(
+            onPressed: _launching ? null : _review,
             icon: _launching
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                : const Icon(Icons.play_arrow_rounded),
-            label: const Text('Start convoy', style: TextStyle(fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(50)),
+                ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.textSecondary))
+                : const Icon(Icons.fact_check_rounded),
+            label: Text(_launching ? 'Starting the ride' : 'Review', style: const TextStyle(fontWeight: FontWeight.w700)),
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
           ),
         ),
       ),
@@ -218,59 +271,116 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
 
   Widget _mapView() {
     final line = <LatLng>[for (final (lat, lng) in _route?.points ?? const <(double, double)>[]) LatLng(lat, lng)];
-    final center = _start != null ? LatLng(_start!.lat, _start!.lng) : const LatLng(17.385, 78.4867);
+    final center = _start != null ? LatLng(_start!.lat, _start!.lng) : const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng);
     return FlutterMap(
       mapController: _map,
-      options: MapOptions(initialCenter: center, initialZoom: 11, onMapReady: _fit),
+      options: MapOptions(
+        initialCenter: center,
+        initialZoom: _start != null ? 11 : 5,
+        onMapReady: _fit,
+        onLongPress: (_, p) => _addStopAt(p),
+      ),
       children: [
         TileLayer(tileBuilder: mapTileBuilder, urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
         if (line.length >= 2) PolylineLayer(polylines: [Polyline(points: line, strokeWidth: 5, color: AppTheme.neonCyan)]),
         MarkerLayer(markers: [
           if (_start != null)
-            Marker(point: LatLng(_start!.lat, _start!.lng), width: 30, height: 30, child: Icon(Icons.trip_origin_rounded, color: AppTheme.emeraldSafe, size: 24)),
+            Marker(
+              point: LatLng(_start!.lat, _start!.lng),
+              width: 32,
+              height: 32,
+              child: Semantics(label: 'Start: ${_start!.name}', child: Icon(Icons.trip_origin_rounded, color: AppTheme.emeraldSafe, size: 24)),
+            ),
           for (var i = 0; i < _stops.length; i++)
             Marker(
               point: LatLng(_stops[i].lat, _stops[i].lng),
-              width: 28,
-              height: 28,
-              child: Container(
-                alignment: Alignment.center,
-                decoration: BoxDecoration(color: AppTheme.hyperAmber, shape: BoxShape.circle, border: Border.all(color: Colors.black, width: 1.5)),
-                child: Text('${i + 1}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12)),
-              ),
+              width: 32,
+              height: 32,
+              child: _StopMarker(index: i, place: _stops[i]),
             ),
           if (_destination != null)
-            Marker(point: LatLng(_destination!.lat, _destination!.lng), width: 34, height: 34, child: Icon(Icons.sports_score_rounded, color: AppTheme.laserRed, size: 30)),
+            Marker(
+              point: LatLng(_destination!.lat, _destination!.lng),
+              width: 36,
+              height: 36,
+              child: Semantics(label: 'Destination: ${_destination!.name}', child: Icon(Icons.sports_score_rounded, color: AppTheme.laserRed, size: 30)),
+            ),
         ]),
       ],
     );
   }
 
-  Widget _placeTile({required IconData icon, required Color color, required String label, required PickedPlace? place, required VoidCallback onTap, String empty = 'Choose on map'}) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-      leading: Icon(icon, color: color),
-      title: Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-      subtitle: Text(place?.name ?? empty, style: TextStyle(color: place == null ? AppTheme.neonCyan : AppTheme.textPrimary, fontSize: 15)),
-      trailing: Icon(Icons.edit_location_alt_rounded, color: AppTheme.textSecondary),
-      onTap: onTap,
-    );
-  }
-
   Widget _form() {
-    final r = _route;
-    final legs = r?.legs ?? const <RouteLeg>[];
+    final legs = _route?.legs ?? const <RouteLeg>[];
+    final recent = _destination == null
+        ? _recent.where((p) => _start == null || p.name != _start!.name).take(3).toList()
+        : const <PickedPlace>[];
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s16),
       children: [
         TextField(
           controller: _name,
-          style: TextStyle(color: AppTheme.textPrimary),
+          focusNode: _nameFocus,
+          style: AppText.body,
           textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(labelText: 'Trip name', hintText: 'e.g. Sunday ride to Srisailam', prefixIcon: Icon(Icons.flag_rounded)),
+          textInputAction: TextInputAction.done,
+          onChanged: (_) {
+            if (_nameError != null) setState(() => _nameError = null);
+          },
+          decoration: InputDecoration(
+            labelText: 'Trip name',
+            hintText: 'For example: Sunday ride to Srisailam',
+            errorText: _nameError,
+            prefixIcon: const Icon(Icons.edit_rounded),
+          ),
         ),
-        const SizedBox(height: 8),
-        _placeTile(icon: Icons.trip_origin_rounded, color: AppTheme.emeraldSafe, label: 'START', place: _start, onTap: _pickStart, empty: 'Finding your location...'),
+        const SizedBox(height: Space.s8),
+        _PlaceRow(
+          icon: Icons.trip_origin_rounded,
+          color: AppTheme.emeraldSafe,
+          label: 'Start',
+          value: _start?.name,
+          empty: 'Finding your location',
+          onTap: _pickStart,
+        ),
+        _PlaceRow(
+          icon: Icons.sports_score_rounded,
+          color: AppTheme.laserRed,
+          label: 'Destination',
+          value: _destination?.name,
+          empty: 'Choose on the map',
+          onTap: _pickDestination,
+        ),
+        if (recent.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(left: Space.s4, bottom: Space.s8),
+            child: Wrap(
+              spacing: Space.s8,
+              runSpacing: Space.s8,
+              children: [
+                for (final p in recent)
+                  ActionChip(
+                    avatar: Icon(Icons.history_rounded, size: 18, color: AppTheme.textSecondary),
+                    label: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 220),
+                      child: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    labelStyle: AppText.label.copyWith(color: AppTheme.textPrimary),
+                    tooltip: 'Ride to ${p.name}',
+                    backgroundColor: AppTheme.slateCard,
+                    side: BorderSide(color: AppTheme.subtleBorder),
+                    shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
+                    materialTapTargetSize: MaterialTapTargetSize.padded,
+                    onPressed: () => _setDestination(p),
+                  ),
+              ],
+            ),
+          ),
+        const SizedBox(height: Space.s8),
+        Text('Stops', style: AppText.title),
+        const SizedBox(height: Space.s4),
+        Text('Optional. Long-press the map to add one there.', style: AppText.caption),
+        const SizedBox(height: Space.s8),
         ReorderableListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -286,98 +396,199 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
           itemBuilder: (_, i) {
             final s = _stops[i];
             final leg = i < legs.length ? legs[i] : null;
-            return ListTile(
-              key: ValueKey('stop_${i}_${s.lat}_${s.lng}'),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-              leading: CircleAvatar(radius: 13, backgroundColor: AppTheme.hyperAmber, child: Text('${i + 1}', style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold))),
-              title: Row(children: [
-                Icon(_categoryIcons[s.category] ?? Icons.place_rounded, size: 16, color: AppTheme.textSecondary),
-                const SizedBox(width: 6),
-                Expanded(child: Text(s.name, style: TextStyle(color: AppTheme.textPrimary, fontSize: 14), overflow: TextOverflow.ellipsis)),
-              ]),
-              subtitle: Text(
-                [
-                  if (leg != null) '${TimelineText.distance(leg.distanceM)}, ${TimelineText.duration(Duration(seconds: leg.durationS))} from previous',
-                  if (s.plannedDwellMin > 0) 'stay ${s.plannedDwellMin} min',
-                ].join(' · '),
-                style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+            final detail = [
+              if (leg != null) '${formatDistance(leg.distanceM)}, ${formatDuration(Duration(seconds: leg.durationS))} from previous',
+              if (s.plannedDwellMin > 0) 'stay ${s.plannedDwellMin} min',
+            ].join(', ');
+            return Padding(
+              key: ObjectKey(s),
+              padding: const EdgeInsets.only(bottom: Space.s8),
+              child: StopCard(
+                kind: StopKind.fromCategory(s.category),
+                name: s.name,
+                subtitle: detail,
+                onTap: () => _editStop(i),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  IconButton(
+                    tooltip: 'Remove stop',
+                    icon: Icon(Icons.close_rounded, color: AppTheme.textMuted),
+                    onPressed: () => _removeStop(i),
+                  ),
+                  ReorderableDragStartListener(
+                    index: i,
+                    child: Semantics(
+                      label: 'Drag to reorder ${s.name}',
+                      child: SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: Icon(Icons.drag_handle_rounded, color: AppTheme.textSecondary),
+                      ),
+                    ),
+                  ),
+                ]),
               ),
-              onTap: () => _editStop(i),
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(
-                  tooltip: 'Remove stop',
-                  icon: Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 20),
-                  onPressed: () {
-                    setState(() => _stops.removeAt(i));
-                    _refreshRoute();
-                  },
-                ),
-                ReorderableDragStartListener(index: i, child: Icon(Icons.drag_handle_rounded, color: AppTheme.textSecondary)),
-              ]),
             );
           },
         ),
-        TextButton.icon(
-          onPressed: _stops.length >= 20 ? null : _addStop,
-          icon: const Icon(Icons.add_location_alt_rounded),
-          label: const Text('Add a stop'),
-          style: TextButton.styleFrom(foregroundColor: AppTheme.hyperAmber, alignment: Alignment.centerLeft),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _stops.length >= _maxStops ? null : _addStop,
+            icon: const Icon(Icons.add_location_alt_rounded),
+            label: const Text('Add a stop'),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+          ),
         ),
-        _placeTile(icon: Icons.sports_score_rounded, color: AppTheme.laserRed, label: 'DESTINATION', place: _destination, onTap: _pickDestination),
-        const SizedBox(height: 10),
-        if (_routing)
-          Row(children: [
-            SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan)),
-            SizedBox(width: 8),
-            Text('Working out the route...', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-          ])
-        else if (r != null)
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: AppTheme.emeraldSafe.withOpacity(0.10), borderRadius: BorderRadius.circular(10), border: Border.all(color: AppTheme.emeraldSafe.withOpacity(0.35))),
-            child: Row(children: [
-              Icon(Icons.directions_rounded, color: AppTheme.emeraldSafe),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  '${TimelineText.distance(r.distanceM)} · about ${TimelineText.duration(Duration(seconds: r.durationS))} riding'
-                  '${_stops.isEmpty ? '' : ' · ${_stops.length} stop${_stops.length == 1 ? '' : 's'}'}',
-                  style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ]),
-          )
-        else if (_waypoints.length >= 2)
-          Text('Route preview is not available right now. The trip can still start; the route is worked out on the server.',
-              style: TextStyle(color: AppTheme.textMuted, fontSize: 12))
-        else
-          Text('Pick a destination to see the route. Stops are optional and can be added during the ride too.',
-              style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-        const SizedBox(height: 16),
-        Row(children: [
-          Icon(Icons.speed_rounded, size: 18, color: AppTheme.textSecondary),
-          const SizedBox(width: 8),
-          Expanded(child: Text('Group speed limit', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600))),
-          Text(_speedLimit > 0 ? '$_speedLimit km/h' : 'Off', style: TextStyle(color: AppTheme.speedWarning, fontWeight: FontWeight.bold)),
-        ]),
-        const SizedBox(height: 8),
-        Wrap(spacing: 6, runSpacing: 6, children: [
-          for (final v in AppConstants.speedLimitChoices)
-            ChoiceChip(
-              label: Text(v == 0 ? 'Off' : '$v'),
-              selected: _speedLimit == v,
-              onSelected: (_) => setState(() => _speedLimit = v),
-              selectedColor: AppTheme.speedWarning.withOpacity(0.2),
-              labelStyle: TextStyle(color: _speedLimit == v ? AppTheme.speedWarning : AppTheme.textSecondary, fontSize: 12),
-              backgroundColor: AppTheme.slateCard,
-              side: BorderSide(color: AppTheme.subtleBorder),
-              showCheckmark: false,
-            ),
-        ]),
-        const SizedBox(height: 4),
-        Text('Riding over it for 10 seconds is logged and the group is told once. You can change it during the ride.',
-            style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
       ],
+    );
+  }
+}
+
+/// Start or destination row: icon, small label, place name, tap to pick on the map.
+class _PlaceRow extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label;
+  final String? value;
+  final String empty;
+  final VoidCallback onTap;
+
+  const _PlaceRow({required this.icon, required this.color, required this.label, required this.value, required this.empty, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final v = value;
+    final has = v != null && v.isNotEmpty;
+    final text = v != null && v.isNotEmpty ? v : empty;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: Space.s4),
+      leading: Icon(icon, color: color),
+      title: Text(label, style: AppText.caption),
+      subtitle: Text(
+        text,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: AppText.body.copyWith(color: has ? AppTheme.textPrimary : AppTheme.neonCyan),
+      ),
+      trailing: Icon(Icons.edit_location_alt_rounded, color: AppTheme.textSecondary),
+      onTap: onTap,
+    );
+  }
+}
+
+/// A planned stop on the planner map: its type icon in an amber circle.
+class _StopMarker extends StatelessWidget {
+  final int index;
+  final PickedPlace place;
+
+  const _StopMarker({required this.index, required this.place});
+
+  @override
+  Widget build(BuildContext context) {
+    final kind = StopKind.fromCategory(place.category);
+    return Semantics(
+      label: 'Stop ${index + 1}, ${stopKindChoiceLabel(kind)}: ${place.name}',
+      excludeSemantics: true,
+      child: Container(
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: AppTheme.hyperAmber, shape: BoxShape.circle, border: Border.all(color: Colors.black, width: 1.5)),
+        child: Icon(kind.icon, size: 18, color: Colors.black),
+      ),
+    );
+  }
+}
+
+/// Opened by a long-press on the planner map: the place name (looked up,
+/// editable), the stop type, then [Add stop]. Returns a [PickedPlace].
+class _AddStopSheet extends StatefulWidget {
+  final GeoService geo;
+  final LatLng point;
+
+  const _AddStopSheet({required this.geo, required this.point});
+
+  @override
+  State<_AddStopSheet> createState() => _AddStopSheetState();
+}
+
+class _AddStopSheetState extends State<_AddStopSheet> {
+  final TextEditingController _name = TextEditingController();
+  bool _naming = true;
+  bool _edited = false;
+  StopKind? _kind;
+
+  @override
+  void initState() {
+    super.initState();
+    _lookUpName();
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _lookUpName() async {
+    final n = await widget.geo.reverse(widget.point.latitude, widget.point.longitude);
+    if (!mounted) return;
+    setState(() {
+      _naming = false;
+      if (!_edited && n != null) _name.text = n;
+    });
+  }
+
+  void _add() {
+    final kind = _kind;
+    if (kind == null) return;
+    final typed = _name.text.trim();
+    final p = widget.point;
+    Navigator.pop(
+      context,
+      PickedPlace(
+        lat: p.latitude,
+        lng: p.longitude,
+        name: typed.isNotEmpty ? typed : stopKindChoiceLabel(kind),
+        category: stopWireCode(kind),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _name,
+            onChanged: (_) => _edited = true,
+            style: AppText.body,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(
+              labelText: 'Name',
+              hintText: _naming ? 'Finding the place name' : 'Name this stop',
+              suffixIcon: _naming
+                  ? Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.textMuted)),
+                    )
+                  : null,
+            ),
+          ),
+          const SizedBox(height: Space.s16),
+          Text('What kind of stop?', style: AppText.label),
+          const SizedBox(height: Space.s8),
+          StopKindChoices(selected: _kind, onSelected: (k) => setState(() => _kind = k)),
+          const SizedBox(height: Space.s16),
+          FilledButton.icon(
+            onPressed: _kind == null ? null : _add,
+            icon: const Icon(Icons.add_location_alt_rounded),
+            label: const Text('Add stop', style: TextStyle(fontWeight: FontWeight.w700)),
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+          ),
+        ],
+      ),
     );
   }
 }

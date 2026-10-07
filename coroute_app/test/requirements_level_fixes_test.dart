@@ -214,6 +214,9 @@ void main() {
         await auth.loginRiderWithPassword(identifier: 'santhosh@example.com', password: 'password');
       });
 
+      await tester.binding.setSurfaceSize(const Size(800, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
       await tester.pumpWidget(
         ChangeNotifierProvider.value(
           value: auth,
@@ -225,7 +228,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(seconds: 4));
 
-      expect(find.text('Rider Profile & ICE'), findsOneWidget);
+      expect(find.text('Edit profile'), findsOneWidget);
 
       final fields = tester.widgetList<TextField>(find.byType(TextField)).toList();
       expect(fields.any((f) => f.controller?.text == '+91 98765 43210'), true);
@@ -235,7 +238,7 @@ void main() {
 
       await tester.drag(find.byType(ListView), const Offset(0, -400));
       await tester.pump();
-      expect(find.text('SAVE PROFILE & CONTACTS'), findsOneWidget);
+      expect(find.text('Save'), findsOneWidget);
     });
   });
 }

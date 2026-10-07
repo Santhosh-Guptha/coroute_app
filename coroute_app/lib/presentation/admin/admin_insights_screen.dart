@@ -102,14 +102,14 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
                 Row(
                   children: [
                     Expanded(child: Text(from, style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis)),
-                    Text(ts > 0 ? fmt.format(DateTime.fromMillisecondsSinceEpoch(ts)) : '', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                    Text(ts > 0 ? fmt.format(DateTime.fromMillisecondsSinceEpoch(ts)) : '', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                   ],
                 ),
                 const SizedBox(height: 6),
                 SelectableText(f['message']?.toString() ?? '', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, height: 1.4)),
                 if (meta.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  Text(meta, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                  Text(meta, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                 ],
               ],
             ),
@@ -144,7 +144,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                Text(title, style: TextStyle(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1)),
                 const SizedBox(height: 8),
                 for (final r in rows.take(12))
                   Padding(
@@ -177,7 +177,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
         block('BY PAGE', sorted(byPath)),
         block('BY DAY', days),
         block('BY REFERRER', sorted(byRef)),
-        Text('Counts only: no cookies, IP addresses or identifiers are stored.', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+        Text('Counts only: no cookies, IP addresses or identifiers are stored.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
       ],
     );
   }

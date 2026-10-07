@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/api_client.dart';
@@ -150,29 +151,14 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
   }
 
   Future<void> _deleteUser() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.slateCard,
-        title: Text('Delete User Account?', style: TextStyle(color: AppTheme.laserRed)),
-        content: Text(
-          'Permanently delete ${_user?['name'] ?? 'this user'}? All account data, profile details, and personal records will be purged immediately. This action cannot be undone.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.laserRed, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete Permanently'),
-          ),
-        ],
-      ),
+    final confirm = await confirmAction(
+      context,
+      title: 'Delete this account?',
+      message: 'Permanently delete ${_user?['name'] ?? 'this user'}? Their account, profile and personal records are removed. This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
-    if (confirm != true || !mounted) return;
+    if (!confirm || !mounted) return;
 
     setState(() => _isActionInProgress = true);
     try {
@@ -304,10 +290,10 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
             children: [
               CircleAvatar(
                 radius: 26,
-                backgroundColor: isMasterAdmin ? AppTheme.devmonksPurple.withOpacity(0.25) : statusColor.withOpacity(0.2),
+                backgroundColor: isMasterAdmin ? AppTheme.infoBlue.withOpacity(0.25) : statusColor.withOpacity(0.2),
                 child: Icon(
                   isMasterAdmin ? Icons.shield_rounded : Icons.person_rounded,
-                  color: isMasterAdmin ? AppTheme.devmonksPurple : statusColor,
+                  color: isMasterAdmin ? AppTheme.infoBlue : statusColor,
                   size: 28,
                 ),
               ),
@@ -335,7 +321,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
                           ),
                           child: Text(
                             status.replaceAll('_', ' '),
-                            style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold),
+                            style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.bold),
                           ),
                         ),
                       ],
@@ -371,7 +357,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+        Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
         const SizedBox(height: 2),
         Text(value, style: TextStyle(color: color ?? AppTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
       ],
@@ -487,7 +473,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
             Expanded(
               child: Text(
                 'ALL CONVOYS & TRIPS (${_groups.length})',
-                style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1),
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1),
               ),
             ),
           ],
@@ -542,7 +528,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
                   ),
                   child: Text(
                     isGroupActive ? 'ACTIVE' : 'COMPLETED',
-                    style: TextStyle(color: isGroupActive ? AppTheme.neonCyan : AppTheme.textMuted, fontSize: 9, fontWeight: FontWeight.bold),
+                    style: TextStyle(color: isGroupActive ? AppTheme.neonCyan : AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
@@ -560,7 +546,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
             const SizedBox(height: 4),
             Text(
               '${distanceKm.toStringAsFixed(1)} km · ${TimelineText.duration(Duration(milliseconds: movingMs))} riding · ${members.length} members',
-              style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+              style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
             ),
             Divider(color: AppTheme.subtleBorder, height: 18),
 
@@ -584,16 +570,16 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
                       children: [
                         CircleAvatar(
                           radius: 5,
-                          backgroundColor: m['role'] == 'LEAD' ? AppTheme.hyperAmber : (m['role'] == 'SWEEP' ? AppTheme.devmonksPurple : AppTheme.neonCyan),
+                          backgroundColor: m['role'] == 'LEAD' ? AppTheme.hyperAmber : (m['role'] == 'SWEEP' ? AppTheme.infoBlue : AppTheme.neonCyan),
                         ),
                         const SizedBox(width: 6),
                         Text(
                           '${m['name'] ?? 'Rider'}${m['userId'] == widget.userId ? " (this rider)" : ""} [${m['role'] ?? "PACK"}]',
-                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 11, fontWeight: FontWeight.w500),
+                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w500),
                         ),
                         if ((m['vehicleType'] ?? '').toString().isNotEmpty) ...[
                           const SizedBox(width: 4),
-                          Text('· ${m['vehicleType']}', style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
+                          Text('· ${m['vehicleType']}', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                         ],
                       ],
                     ),

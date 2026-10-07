@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/glass_card.dart';
+import '../../core/ui/ui.dart';
 import '../../data/services/permissions_service.dart';
 
-/// Explains each permission before asking for it. Shown once before the first
-/// convoy, and reachable again from the account menu.
+/// Explains each permission before asking for it. Opened in context (before
+/// starting or joining a ride) and from the Profile tab.
 class PermissionsScreen extends StatefulWidget {
   /// When true the screen pops with `true` once the required permissions are granted.
   final bool gate;
@@ -49,6 +49,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
   }
 
   Future<void> _refresh() async {
+    if (mounted && !_loading) setState(() => _loading = true);
     final items = await PermissionsService.status();
     if (!mounted) return;
     setState(() {
@@ -71,71 +72,93 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
-          child: _loading
-              ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-                  children: [
-                    Text(
-                      'CoRoute needs a few permissions to keep your convoy together. Each one is used only while you are in a convoy.',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          child: LoadingState(
+            loading: _loading,
+            hasData: _items.isNotEmpty || !_loading,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s16, Space.s32),
+              children: [
+                Text(
+                  widget.gate
+                      ? 'Before the ride starts, CoRoute needs a few permissions. Each one is used only during an active ride.'
+                      : 'Each permission is used only during an active ride.',
+                  style: AppText.body.copyWith(color: AppTheme.textSecondary),
+                ),
+                const SizedBox(height: Space.s16),
+                for (final p in _items) _PermissionRow(item: p, onAllow: () => _request(p)),
+                const SizedBox(height: Space.s12),
+                if (widget.gate)
+                  FilledButton(
+                    onPressed: requiredOk
+                        ? () async {
+                            await PermissionsService.markIntroShown();
+                            if (context.mounted) Navigator.pop(context, true);
+                          }
+                        : null,
+                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+                    child: Text(
+                      requiredOk ? 'Continue' : 'Allow the required permissions to continue',
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 16),
-                    for (final p in _items)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: GlassCard(
-                          padding: const EdgeInsets.all(14),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(p.granted ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                                  color: p.granted ? AppTheme.emeraldSafe : AppTheme.textMuted),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Flexible(child: Text(p.title, style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14))),
-                                        if (p.required) ...[
-                                          const SizedBox(width: 6),
-                                          Text('Required', style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold)),
-                                        ],
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(p.reason, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-                                    if (!p.granted) ...[
-                                      const SizedBox(height: 8),
-                                      OutlinedButton(
-                                        onPressed: () => _request(p),
-                                        style: OutlinedButton.styleFrom(foregroundColor: AppTheme.neonCyan, side: BorderSide(color: AppTheme.neonCyan), visualDensity: VisualDensity.compact),
-                                        child: const Text('Allow'),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PermissionRow extends StatelessWidget {
+  final PermissionItem item;
+  final VoidCallback onAllow;
+  const _PermissionRow({required this.item, required this.onAllow});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = item;
+    final statusText = p.granted ? 'Allowed' : (p.required ? 'Required' : 'Optional');
+    final Color statusColor = p.granted ? StatusColors.success : (p.required ? StatusColors.warning : AppTheme.textMuted);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.s12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppTheme.slateCard,
+          borderRadius: Radii.mdAll,
+          border: Border.all(color: AppTheme.subtleBorder),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(Space.s16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(p.granted ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded, color: statusColor),
+              const SizedBox(width: Space.s12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(p.title, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 2),
+                    Text(statusText, style: AppText.label.copyWith(color: statusColor)),
+                    const SizedBox(height: Space.s4),
+                    Text(p.reason, style: AppText.label.copyWith(fontWeight: FontWeight.w400)),
+                    if (!p.granted) ...[
+                      const SizedBox(height: Space.s8),
+                      OutlinedButton(
+                        onPressed: onAllow,
+                        style: OutlinedButton.styleFrom(minimumSize: const Size(96, 48)),
+                        child: const Text('Allow'),
                       ),
-                    const SizedBox(height: 12),
-                    if (widget.gate)
-                      ElevatedButton(
-                        onPressed: requiredOk
-                            ? () async {
-                                await PermissionsService.markIntroShown();
-                                if (context.mounted) Navigator.pop(context, true);
-                              }
-                            : null,
-                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-                        child: Text(requiredOk ? 'Continue' : 'Allow the required permissions to continue'),
-                      ),
+                    ],
                   ],
                 ),
+              ),
+            ],
+          ),
         ),
       ),
     );

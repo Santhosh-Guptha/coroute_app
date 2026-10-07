@@ -183,10 +183,10 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                                             children: [
                                               CircleAvatar(
                                                 radius: 20,
-                                                backgroundColor: (isAdmin ? AppTheme.devmonksPurple : statusColor).withOpacity(0.2),
+                                                backgroundColor: (isAdmin ? AppTheme.infoBlue : statusColor).withOpacity(0.2),
                                                 child: Icon(
                                                   isAdmin ? Icons.shield_rounded : Icons.person_rounded,
-                                                  color: isAdmin ? AppTheme.devmonksPurple : statusColor,
+                                                  color: isAdmin ? AppTheme.infoBlue : statusColor,
                                                   size: 20,
                                                 ),
                                               ),
@@ -209,11 +209,11 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                                                           Container(
                                                             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                                             decoration: BoxDecoration(
-                                                              color: AppTheme.devmonksPurple.withOpacity(0.2),
+                                                              color: AppTheme.infoBlue.withOpacity(0.2),
                                                               borderRadius: BorderRadius.circular(4),
-                                                              border: Border.all(color: AppTheme.devmonksPurple),
+                                                              border: Border.all(color: AppTheme.infoBlue),
                                                             ),
-                                                            child: Text('ADMIN', style: TextStyle(color: AppTheme.devmonksPurple, fontSize: 9, fontWeight: FontWeight.bold)),
+                                                            child: Text('ADMIN', style: TextStyle(color: AppTheme.infoBlue, fontSize: 12, fontWeight: FontWeight.bold)),
                                                           )
                                                         else if (status != 'ACTIVE')
                                                           Container(
@@ -223,7 +223,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                                                               borderRadius: BorderRadius.circular(4),
                                                               border: Border.all(color: statusColor),
                                                             ),
-                                                            child: Text(status.replaceAll('_', ' '), style: TextStyle(color: statusColor, fontSize: 9, fontWeight: FontWeight.bold)),
+                                                            child: Text(status.replaceAll('_', ' '), style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.bold)),
                                                           ),
                                                       ],
                                                     ),
@@ -231,7 +231,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                                                     Text(
                                                       '${u['email'] ?? ''} ${u['phone'] != null && u['phone'].toString().isNotEmpty ? "· ${u['phone']}" : ""}',
                                                       overflow: TextOverflow.ellipsis,
-                                                      style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                                      style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                                                     ),
                                                     if (isRiding && activeGroup != null)
                                                       Padding(
@@ -251,7 +251,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                                                               Flexible(
                                                                 child: Text(
                                                                   'Riding in ${activeGroup['name']}',
-                                                                  style: TextStyle(color: AppTheme.neonCyan, fontSize: 10, fontWeight: FontWeight.bold),
+                                                                  style: TextStyle(color: AppTheme.neonCyan, fontSize: 12, fontWeight: FontWeight.bold),
                                                                   overflow: TextOverflow.ellipsis,
                                                                 ),
                                                               ),

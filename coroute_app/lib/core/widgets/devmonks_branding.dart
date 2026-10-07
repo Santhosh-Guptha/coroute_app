@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../constants/app_constants.dart';
 import '../theme/app_theme.dart';
+import '../ui/ui_tokens.dart';
 
+/// Small "Powered by" credit. Flat: no glow, no shadow.
 class DevMonksBadge extends StatelessWidget {
   final bool isCompact;
 
@@ -11,82 +13,39 @@ class DevMonksBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     if (isCompact) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
         decoration: BoxDecoration(
-          color: AppTheme.elevatedCard.withOpacity(0.8),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: AppTheme.devmonksPurple.withOpacity(0.4)),
+          color: AppTheme.elevatedCard,
+          borderRadius: Radii.smAll,
+          border: Border.all(color: AppTheme.subtleBorder),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.bolt, color: AppTheme.neonCyan, size: 12),
-            const SizedBox(width: 4),
-            Text(
-              AppConstants.brandName,
-              style: TextStyle(
-                color: AppTheme.neonCyan,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
+        child: Text(
+          AppConstants.brandName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: AppText.caption.copyWith(color: AppTheme.textSecondary, fontWeight: FontWeight.w600),
         ),
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppTheme.slateCard.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.glassBorder),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.neonCyan.withOpacity(0.12),
-            blurRadius: 10,
-            spreadRadius: 1,
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    return Text.rich(
+      TextSpan(
         children: [
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppTheme.devmonksPurple,
-            ),
-            child: const Icon(Icons.terminal, color: Colors.white, size: 12),
-          ),
-          const SizedBox(width: 8),
-          RichText(
-            text: TextSpan(
-              children: [
-                TextSpan(
-                  text: 'Powered by ',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-                ),
-                TextSpan(
-                  text: AppConstants.brandName,
-                  style: TextStyle(
-                    color: AppTheme.neonCyan,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
+          TextSpan(text: 'Powered by ', style: AppText.caption),
+          TextSpan(
+            text: AppConstants.brandName,
+            style: AppText.caption.copyWith(color: AppTheme.textSecondary, fontWeight: FontWeight.w600),
           ),
         ],
       ),
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }
 
+/// App icon, name and tagline, used at the top of the sign-in screen.
 class CoRouteHeaderLogo extends StatelessWidget {
   final double scale;
 
@@ -100,51 +59,37 @@ class CoRouteHeaderLogo extends StatelessWidget {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 44 * scale,
-              height: 44 * scale,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(11 * scale),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.neonCyan.withOpacity(0.28),
-                    blurRadius: 16 * scale,
-                    spreadRadius: 1 * scale,
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(11 * scale),
-                child: Image.asset(
-                  'assets/branding/coroute_icon.png',
-                  width: 44 * scale,
-                  height: 44 * scale,
-                  // Decode the 1024 px icon at about 3x its drawn size (not full size) to save memory.
-                  cacheWidth: (44 * scale * 3).round(),
-                  filterQuality: FilterQuality.medium,
-                ),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(Radii.md * scale),
+              child: Image.asset(
+                'assets/branding/coroute_icon.png',
+                width: 44 * scale,
+                height: 44 * scale,
+                // Decode the 1024 px icon at about 3x its drawn size (not full size) to save memory.
+                cacheWidth: (44 * scale * 3).round(),
+                filterQuality: FilterQuality.medium,
               ),
             ),
-            SizedBox(width: 10 * scale),
-            Text(
-              AppConstants.appName,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 26 * scale,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.2,
+            SizedBox(width: Space.s12 * scale),
+            Flexible(
+              child: Text(
+                AppConstants.appName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 26 * scale,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],
         ),
-        SizedBox(height: 4 * scale),
+        SizedBox(height: Space.s4 * scale),
         Text(
           AppConstants.appTagline,
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 11 * scale,
-            letterSpacing: 0.8,
-          ),
+          textAlign: TextAlign.center,
+          style: AppText.label,
         ),
       ],
     );

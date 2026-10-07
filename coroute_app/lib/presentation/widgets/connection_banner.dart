@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui_format.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/realtime_service.dart';
 
 /// Thin strip shown while the realtime link to the convoy is down, so stale
 /// positions are never mistaken for live ones. It also says what is waiting
 /// on the phone: recorded points to upload and, in red, an SOS not sent yet.
+///
+/// The ride screen does not place this strip; it shows [status] in its top
+/// bar and the SOS state in its alert slot. The strip stays usable elsewhere.
 class ConnectionBanner extends StatelessWidget {
   const ConnectionBanner({super.key});
 
@@ -16,6 +20,25 @@ class ConnectionBanner extends StatelessWidget {
         if (pendingPoints > 0) '$pendingPoints ${pendingPoints == 1 ? 'point' : 'points'} waiting to upload',
         if (sosWaiting) 'SOS waiting to send',
       ];
+
+  /// One short line for the ride top bar, or null when everything is live:
+  /// "Reconnecting, last updated 2 min ago", "Offline, last updated 6 min ago",
+  /// "SOS waiting to send" (pure, for tests). [lastUpdateMs] is the newest
+  /// position heard from the group (epoch ms, 0 or null when none).
+  static String? status({
+    required RealtimeState state,
+    int? lastUpdateMs,
+    required int nowMs,
+    bool sosWaiting = false,
+  }) {
+    final connected = state == RealtimeState.connected;
+    if (sosWaiting) return connected ? 'Sending your SOS' : 'SOS waiting to send';
+    if (connected) return null;
+    final last = lastUpdateMs;
+    final ago = (last == null || last <= 0) ? null : formatAgo(Duration(milliseconds: (nowMs - last).clamp(0, 1 << 40).toInt()));
+    final head = state == RealtimeState.connecting ? 'Reconnecting' : 'Offline';
+    return ago == null ? head : '$head, last updated $ago';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +51,7 @@ class ConnectionBanner extends StatelessWidget {
     if (state == RealtimeState.connected) {
       // Connected but the SOS is not confirmed yet: it is being sent.
       return _strip(
-        icon: Icon(Icons.sos_rounded, size: 14, color: AppTheme.laserRed),
+        icon: Icon(Icons.sos_rounded, size: 16, color: AppTheme.laserRed),
         children: [_line('Sending your SOS to the convoy...', AppTheme.laserRed)],
         color: AppTheme.laserRed,
       );
@@ -37,11 +60,11 @@ class ConnectionBanner extends StatelessWidget {
     final text = lines(connecting: connecting, pendingPoints: pendingPoints, sosWaiting: sosWaiting);
     return _strip(
       icon: SizedBox(
-        width: 12,
-        height: 12,
+        width: 16,
+        height: 16,
         child: connecting
-            ? CircularProgressIndicator(strokeWidth: 2, color: AppTheme.hyperAmber)
-            : Icon(Icons.cloud_off_rounded, size: 12, color: AppTheme.hyperAmber),
+            ? Icon(Icons.sync_rounded, size: 16, color: AppTheme.hyperAmber)
+            : Icon(Icons.cloud_off_rounded, size: 16, color: AppTheme.hyperAmber),
       ),
       color: sosWaiting ? AppTheme.laserRed : AppTheme.hyperAmber,
       children: [

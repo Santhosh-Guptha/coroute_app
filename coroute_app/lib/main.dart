@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'core/constants/app_constants.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
+import 'core/ui/ui.dart';
 import 'data/services/alert_service.dart';
 import 'data/services/api_client.dart';
 import 'data/services/auth_service.dart';
@@ -124,10 +125,10 @@ class _App extends StatelessWidget {
       themeAnimationDuration: Duration.zero,
       home: const SplashScreen(),
       builder: (context, child) {
-        // Clamp runaway system font scaling so HUD layouts never overflow.
+        // Large text is honoured up to 1.3x (every screen is laid out for it); beyond that it is capped.
         final mq = MediaQuery.of(context);
         return MediaQuery(
-          data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1.0).clamp(0.85, 1.2).toDouble())),
+          data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1.0).clamp(0.85, 1.3).toDouble())),
           child: _UpdateGate(child: child ?? const SizedBox.shrink()),
         );
       },
@@ -147,30 +148,35 @@ class _UpdateGate extends StatelessWidget {
     final url = meta.meta?.downloadUrl ?? '';
     return Material(
       color: AppTheme.obsidianVoid,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.all(28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.asset('assets/branding/coroute_icon.png', width: 72, height: 72, cacheWidth: 216),
-                const SizedBox(height: 18),
-                Text('Update required', style: TextStyle(color: AppTheme.textPrimary, fontSize: 20, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Text(
-                  'This version of CoRoute no longer works with the convoy service. Install the latest version to keep riding with your group.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: url.isEmpty ? null : () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan, foregroundColor: Colors.black, minimumSize: const Size(200, 48)),
-                  child: const Text('Get the update'),
-                ),
-              ],
+      child: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(Space.s24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ClipRRect(
+                    borderRadius: Radii.lgAll,
+                    child: Image.asset('assets/branding/coroute_icon.png', width: 72, height: 72, cacheWidth: 216),
+                  ),
+                  const SizedBox(height: Space.s24),
+                  Text('Update required', textAlign: TextAlign.center, style: AppText.title),
+                  const SizedBox(height: Space.s8),
+                  Text(
+                    'This version of CoRoute no longer works with the convoy service. Install the latest version to keep riding with your group.',
+                    textAlign: TextAlign.center,
+                    style: AppText.body.copyWith(color: AppTheme.textSecondary),
+                  ),
+                  const SizedBox(height: Space.s24),
+                  FilledButton(
+                    onPressed: url.isEmpty ? null : () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+                    style: FilledButton.styleFrom(minimumSize: const Size(200, 56)),
+                    child: const Text('Get the update'),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

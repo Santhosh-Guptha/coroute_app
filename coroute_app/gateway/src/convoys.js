@@ -16,7 +16,7 @@ const { ACTIVE_STATUSES } = require('./oracle/repo');
 const { haversine, encodePolyline } = require('./geo_math');
 const { scrub, scrubConvoyMeta, mentions } = require('./anonymise');
 
-const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'SCENIC', 'TOLL', 'OTHER']);
+const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'MEETING', 'SCENIC', 'TOLL', 'OTHER']);
 /** The chat card posted when a rider asks the group to wait (plain text, no emoji). */
 const WAIT_MESSAGE = 'Asked the group for a 2 minute stop. Please regroup safely.';
 const MAX_STOPS = 20;

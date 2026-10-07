@@ -85,6 +85,7 @@ class ConvoyService extends ChangeNotifier {
   int _currentBatteryLevel = 100;
   bool _isCharging = false;
   double? _deviceCompassHeading;
+  double? _lastFixAccuracyM;
   bool _adminWatching = false;
   PendingSos? _pendingSos;
   String? _deliveredSosAlertId;
@@ -113,6 +114,9 @@ class ConvoyService extends ChangeNotifier {
     notifyListeners();
   }
   bool get isRealGpsActive => _isRealGpsActive;
+
+  /// Accuracy in metres of the last GPS fix (read-only; for the "Low accuracy" GPS word).
+  double? get myFixAccuracyM => _lastFixAccuracyM;
   bool get isOnline => _rt.isConnected;
 
   /// An SOS this phone raised that the convoy has not confirmed yet (no signal, or not echoed yet).
@@ -704,6 +708,7 @@ class ConvoyService extends ChangeNotifier {
     final current = convoy.riders[userId];
 
     final speedKmh = (position.speed.isFinite ? position.speed * 3.6 : 0.0).clamp(0.0, 300.0).toDouble();
+    _lastFixAccuracyM = position.accuracy.isFinite ? position.accuracy : null;
     recorder?.onFix(TrackPoint(
       ts: position.timestamp.millisecondsSinceEpoch,
       lat: position.latitude,

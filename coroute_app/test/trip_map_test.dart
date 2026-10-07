@@ -68,6 +68,27 @@ void main() {
     });
   });
 
+  group('Planned route on the trip map', () {
+    test('runs start, the stops that were not skipped, then the destination', () {
+      final p = TripPlan.fromJson({
+        'start': {'lat': 17.38, 'lng': 78.48, 'name': 'Gachibowli'},
+        'destination': {'lat': 16.07, 'lng': 78.86, 'name': 'Srisailam'},
+        'stops': [
+          {'stopId': 's2', 'name': 'Lunch', 'lat': 16.5, 'lng': 78.7, 'orderIndex': 2},
+          {'stopId': 's1', 'name': 'Fuel', 'lat': 17.1, 'lng': 78.6, 'orderIndex': 1, 'category': 'FUEL'},
+          {'stopId': 's3', 'name': 'Tea', 'lat': 16.8, 'lng': 78.65, 'orderIndex': 3, 'status': 'SKIPPED'},
+        ],
+      });
+      final line = TripRouteMap.plannedLineOf(p);
+      expect(line.map((l) => l.latitude), [17.38, 17.1, 16.5, 16.07]);
+    });
+
+    test('is empty without a plan or with a single point', () {
+      expect(TripRouteMap.plannedLineOf(null), isEmpty);
+      expect(TripRouteMap.plannedLineOf(TripPlan.fromJson({'destination': {'lat': 16.07, 'lng': 78.86}})), isEmpty);
+    });
+  });
+
   group('Trip plan and rider report', () {
     test('the plan keeps stops in order with who reached them', () {
       final p = TripPlan.fromJson({

@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui_format.dart';
 
 /// A stable colour per rider, the same on the timeline, the replay map and
 /// the report, so a rider is recognisable everywhere.
@@ -22,12 +23,8 @@ class MemberColors {
     return _MemberColorMap(slots);
   }
 
-  static String initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-    if (parts.isEmpty) return '?';
-    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
-    return (parts.first.substring(0, 1) + parts.last.substring(0, 1)).toUpperCase();
-  }
+  /// Same as [initialsOf] in the UI kit (kept for existing callers).
+  static String initials(String name) => initialsOf(name);
 }
 
 class _MemberColorMap extends MapBase<String, Color> {

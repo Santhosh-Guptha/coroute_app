@@ -145,7 +145,7 @@ void main() {
               entry.value,
               scale,
               p,
-              Column(children: [const ConnectionBanner(), const Spacer(), IntercomDock(convoy: convoy, me: rider('usr_me', 'Me'), onSos: () {})]),
+              Column(children: [const ConnectionBanner(), const Spacer(), IntercomDock(convoy: convoy, me: rider('usr_me', 'Me'))]),
               providers: [
                 ChangeNotifierProvider<RealtimeService>.value(value: rt),
                 ChangeNotifierProvider(create: (_) => IntercomService(rt)),

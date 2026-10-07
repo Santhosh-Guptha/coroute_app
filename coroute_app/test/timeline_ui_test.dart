@@ -101,7 +101,7 @@ void main() {
     ];
 
     Future<void> pump(WidgetTester tester) async {
-      await tester.binding.setSurfaceSize(const Size(420, 900));
+      await tester.binding.setSurfaceSize(const Size(800, 900));
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: TimelineList(
@@ -129,10 +129,56 @@ void main() {
       expect(find.text('Chitra raised an SOS (mechanical issue)'), findsOneWidget);
 
       await tester.tap(find.widgetWithText(ChoiceChip, 'All'));
+      await tester.pumpAndSettle();
+      // One filter row: the rider chips live in a sheet behind "Riders".
+      expect(find.widgetWithText(FilterChip, 'Chitra'), findsNothing);
+      await tester.tap(find.widgetWithText(ActionChip, 'Riders'));
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilterChip, 'Chitra'));
       await tester.pumpAndSettle();
       expect(find.text('Chitra raised an SOS (mechanical issue)'), findsOneWidget);
       expect(find.text('Bala joined'), findsNothing);
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(ActionChip, 'Riders (1)'), findsOneWidget);
+      expect(find.text('Bala joined'), findsNothing);
+      await tester.binding.setSurfaceSize(null);
+    });
+
+    testWidgets('entries without a place can be tapped when asked, and the selected one is marked', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(420, 900));
+      TimelineEventModel? tapped;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: TimelineList(
+            events: events,
+            colors: MemberColors.assign(['a', 'b', 'c']),
+            memberNames: const {'a': 'Asha', 'b': 'Bala', 'c': 'Chitra'},
+            onTap: (e) => tapped = e,
+            tapWithoutPlace: true,
+            selectedEventId: '3',
+          ),
+        ),
+      ));
+      expect(find.text('Shown on the map'), findsOneWidget);
+      expect(find.text('Show on map'), findsNWidgets(events.length - 1));
+      await tester.tap(find.text('Trip ended'));
+      expect(tapped?.eventId, '6');
+      await tester.binding.setSurfaceSize(null);
+    });
+
+    testWidgets('without tapWithoutPlace, entries with no place are not tappable', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(420, 900));
+      TimelineEventModel? tapped;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: TimelineList(events: events, colors: MemberColors.assign(['a', 'b', 'c']), memberNames: const {'a': 'Asha'}, onTap: (e) => tapped = e),
+        ),
+      ));
+      expect(find.text('Show on map'), findsNothing);
+      expect(find.widgetWithText(ActionChip, 'Riders'), findsNothing, reason: 'one rider: no rider filter');
+      await tester.tap(find.text('Trip ended'));
+      expect(tapped, isNull);
       await tester.binding.setSurfaceSize(null);
     });
 

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../domain/timeline/timeline_text.dart';
-import 'member_colors.dart';
 
 /// Filter groups shown as chips above the timeline.
 class TimelineFilter {
@@ -24,16 +24,24 @@ class TimelineFilter {
   static const values = [all, stops, alerts, riding, group];
 }
 
-/// The shared group timeline: who did what, where, when and for how long.
-/// Grouped by hour, with member and type filters. Used live (convoy) and
-/// after the trip (report).
+/// The shared group timeline: who did what, where, when and for how long,
+/// in plain words ("Bala stopped for 6 min", "Trip ended"), never raw GPS.
+/// Grouped by hour, with one row of type filters plus a "Riders" filter.
+/// Used live (convoy) and after the trip (report).
 class TimelineList extends StatefulWidget {
   final List<TimelineEventModel> events;
   final Map<String, Color> colors;
-  final Map<String, String> memberNames; // userId -> name, for the member chips
+  final Map<String, String> memberNames; // userId -> name, for the rider filter
   final void Function(TimelineEventModel e)? onTap;
   final bool newestFirst;
   final Widget? emptyState;
+
+  /// The entry shown as selected (for example the one highlighted on the map).
+  final String? selectedEventId;
+
+  /// Lets entries without a place be tapped too (the report shows where the
+  /// riders were at that moment).
+  final bool tapWithoutPlace;
 
   const TimelineList({
     super.key,
@@ -43,6 +51,8 @@ class TimelineList extends StatefulWidget {
     this.onTap,
     this.newestFirst = false,
     this.emptyState,
+    this.selectedEventId,
+    this.tapWithoutPlace = false,
   });
 
   @override
@@ -83,20 +93,91 @@ class _TimelineListState extends State<TimelineList> {
   static Color _tone(TimelineEventModel e) {
     switch (e.type) {
       case 'SOS':
-        return AppTheme.laserRed;
+        return StatusColors.critical;
       case 'SEPARATED':
       case 'OFF_ROUTE':
       case 'OFFLINE':
       case 'OVERSPEED':
-        return AppTheme.hyperAmber;
+        return StatusColors.warning;
       case 'DESTINATION_REACHED':
       case 'STOP_REACHED':
       case 'STOP_ALL_REACHED':
       case 'DESTINATION_ALL_REACHED':
-        return AppTheme.emeraldSafe;
+        return StatusColors.success;
       default:
         return AppTheme.textSecondary;
     }
+  }
+
+  void _toggleMember(String id, bool on) {
+    if (!mounted) return;
+    setState(() => on ? _members.add(id) : _members.remove(id));
+  }
+
+  Future<void> _pickRiders() async {
+    await showAppSheet<void>(
+      context,
+      title: 'Show riders',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(_members.isEmpty ? 'Showing everyone. Pick riders to see only them.' : 'Showing ${_members.length} of ${widget.memberNames.length} riders.',
+                  style: AppText.label),
+              const SizedBox(height: Space.s12),
+              Wrap(
+                spacing: Space.s8,
+                runSpacing: Space.s8,
+                children: [
+                  for (final entry in widget.memberNames.entries)
+                    FilterChip(
+                      avatar: RiderAvatar(name: entry.value, color: widget.colors[entry.key], size: 24),
+                      label: Text(entry.value, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      selected: _members.contains(entry.key),
+                      onSelected: (on) {
+                        _toggleMember(entry.key, on);
+                        setSheet(() {});
+                      },
+                      selectedColor: (widget.colors[entry.key] ?? AppTheme.neonCyan).withOpacity(0.18),
+                      labelStyle: AppText.label.copyWith(color: AppTheme.textPrimary),
+                      backgroundColor: AppTheme.slateCard,
+                      side: BorderSide(color: AppTheme.subtleBorder),
+                      shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
+                      showCheckmark: true,
+                      checkmarkColor: AppTheme.textPrimary,
+                    ),
+                ],
+              ),
+              const SizedBox(height: Space.s16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _members.isEmpty
+                          ? null
+                          : () {
+                              if (mounted) setState(_members.clear);
+                              setSheet(() {});
+                            },
+                      child: const Text('Everyone', maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+                  const SizedBox(width: Space.s12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('Done', maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -120,73 +201,66 @@ class _TimelineListState extends State<TimelineList> {
         rows.add(_HourHeader(header));
         lastHeader = header;
       }
+      final tappable = widget.onTap != null && (e.hasPlace || widget.tapWithoutPlace);
       rows.add(_EventRow(
+        key: ValueKey(e.eventId),
         event: e,
         nowMs: now,
         color: e.userId != null ? (widget.colors[e.userId] ?? AppTheme.neonCyan) : AppTheme.textMuted,
         icon: _icons[e.type] ?? Icons.circle_outlined,
         tone: _tone(e),
-        onTap: widget.onTap == null ? null : () => widget.onTap!(e),
+        selected: widget.selectedEventId != null && widget.selectedEventId == e.eventId,
+        onTap: tappable ? () => widget.onTap!(e) : null,
       ));
     }
 
+    final riderCount = _members.length;
     return Column(
       children: [
         SizedBox(
-          height: 44,
+          height: 52,
           child: ListView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: Space.s4),
             children: [
               for (final f in TimelineFilter.values)
                 Padding(
-                  padding: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.only(right: Space.s8),
                   child: ChoiceChip(
                     label: Text(f.label),
                     selected: _filter == f,
                     onSelected: (_) => setState(() => _filter = f),
                     selectedColor: AppTheme.neonCyan.withOpacity(0.2),
-                    labelStyle: TextStyle(color: _filter == f ? AppTheme.neonCyan : AppTheme.textSecondary, fontSize: 12),
+                    labelStyle: AppText.label.copyWith(color: _filter == f ? AppTheme.neonCyan : AppTheme.textSecondary),
                     backgroundColor: AppTheme.slateCard,
-                    side: BorderSide(color: AppTheme.subtleBorder),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    side: BorderSide(color: _filter == f ? AppTheme.neonCyan : AppTheme.subtleBorder),
+                    shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
                     showCheckmark: false,
                   ),
+                ),
+              if (widget.memberNames.length > 1)
+                ActionChip(
+                  avatar: Icon(Icons.people_alt_rounded, size: 18, color: riderCount > 0 ? AppTheme.neonCyan : AppTheme.textSecondary),
+                  label: Text(riderCount > 0 ? 'Riders ($riderCount)' : 'Riders'),
+                  tooltip: 'Choose which riders to show',
+                  onPressed: _pickRiders,
+                  labelStyle: AppText.label.copyWith(color: riderCount > 0 ? AppTheme.neonCyan : AppTheme.textSecondary),
+                  backgroundColor: riderCount > 0 ? AppTheme.neonCyan.withOpacity(0.2) : AppTheme.slateCard,
+                  side: BorderSide(color: riderCount > 0 ? AppTheme.neonCyan : AppTheme.subtleBorder),
+                  shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
                 ),
             ],
           ),
         ),
-        if (widget.memberNames.length > 1)
-          SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              children: [
-                for (final entry in widget.memberNames.entries)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: FilterChip(
-                      avatar: CircleAvatar(backgroundColor: widget.colors[entry.key] ?? AppTheme.neonCyan, radius: 6),
-                      label: Text(entry.value),
-                      selected: _members.contains(entry.key),
-                      onSelected: (on) => setState(() => on ? _members.add(entry.key) : _members.remove(entry.key)),
-                      selectedColor: (widget.colors[entry.key] ?? AppTheme.neonCyan).withOpacity(0.18),
-                      labelStyle: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
-                      backgroundColor: AppTheme.slateCard,
-                      side: BorderSide(color: AppTheme.subtleBorder),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      showCheckmark: false,
-                    ),
-                  ),
-              ],
-            ),
-          ),
         Expanded(
           child: rows.isEmpty
               ? (widget.emptyState ??
-                  Center(child: Text('Nothing here yet.', style: TextStyle(color: AppTheme.textMuted))))
-              : ListView(padding: const EdgeInsets.fromLTRB(12, 4, 12, 24), children: rows),
+                  EmptyState(
+                    icon: Icons.timeline_rounded,
+                    title: 'Nothing here yet',
+                    message: _filter == TimelineFilter.all && _members.isEmpty ? null : 'Try another filter.',
+                  ))
+              : ListView(padding: const EdgeInsets.fromLTRB(Space.s12, Space.s4, Space.s12, Space.s24), children: rows),
         ),
       ],
     );
@@ -199,8 +273,11 @@ class _HourHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 14, 4, 6),
-        child: Text(text.toUpperCase(), style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+        padding: const EdgeInsets.fromLTRB(Space.s4, Space.s16, Space.s4, Space.s4),
+        child: Semantics(
+          header: true,
+          child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.textMuted)),
+        ),
       );
 }
 
@@ -210,71 +287,117 @@ class _EventRow extends StatelessWidget {
   final Color color;
   final IconData icon;
   final Color tone;
+  final bool selected;
   final VoidCallback? onTap;
 
-  const _EventRow({required this.event, required this.nowMs, required this.color, required this.icon, required this.tone, this.onTap});
+  const _EventRow({
+    super.key,
+    required this.event,
+    required this.nowMs,
+    required this.color,
+    required this.icon,
+    required this.tone,
+    this.selected = false,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final e = event;
     final time = DateFormat('HH:mm').format(DateTime.fromMillisecondsSinceEpoch(e.startedAt));
     final detail = TimelineText.detail(e, nowMs: nowMs);
-    return InkWell(
-      onTap: e.hasPlace ? onTap : null,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(width: 44, child: Text(time, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontFeatures: [FontFeature.tabularFigures()]))),
-            Container(
-              width: 30,
-              height: 30,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: e.isGroupEntry ? AppTheme.elevatedCard : color.withOpacity(0.18),
-                shape: BoxShape.circle,
-                border: Border.all(color: e.isGroupEntry ? AppTheme.subtleBorder : color, width: 1.4),
-              ),
-              child: e.isGroupEntry
-                  ? Icon(icon, size: 15, color: AppTheme.textSecondary)
-                  : Text(MemberColors.initials(e.userName), style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+    final Color? bg = selected ? AppTheme.neonCyan.withOpacity(0.12) : null;
+    return Material(
+      color: bg ?? Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: Radii.mdAll,
+        side: selected ? BorderSide(color: AppTheme.neonCyan) : BorderSide.none,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: Space.s8, horizontal: Space.s4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 48,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: Space.s8),
+                    child: Text(time, maxLines: 1, style: AppText.caption.copyWith(color: AppTheme.textSecondary, fontFeatures: const [FontFeature.tabularFigures()])),
+                  ),
+                ),
+                e.isGroupEntry
+                    ? Container(
+                        width: 32,
+                        height: 32,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppTheme.elevatedCard,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppTheme.subtleBorder, width: 1.4),
+                        ),
+                        child: Icon(icon, size: 16, color: AppTheme.textSecondary),
+                      )
+                    : RiderAvatar(name: e.userName, color: color, size: 32),
+                const SizedBox(width: Space.s12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (!e.isGroupEntry) ...[Icon(icon, size: 14, color: tone), const SizedBox(width: 5)],
-                      Expanded(
-                        child: Text(TimelineText.title(e, nowMs: nowMs),
-                            style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (!e.isGroupEntry) ...[
+                            Padding(padding: const EdgeInsets.only(top: 2), child: Icon(icon, size: 16, color: tone)),
+                            const SizedBox(width: Space.s4),
+                          ],
+                          Expanded(
+                            child: Text(
+                              TimelineText.title(e, nowMs: nowMs),
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          if (e.open)
+                            Container(
+                              margin: const EdgeInsets.only(left: Space.s4),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(color: tone.withOpacity(0.18), borderRadius: Radii.smAll),
+                              child: Text('NOW', style: AppText.caption.copyWith(color: tone, fontWeight: FontWeight.w700)),
+                            ),
+                        ],
                       ),
-                      if (e.open)
-                        Container(
-                          margin: const EdgeInsets.only(left: 6),
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(color: tone.withOpacity(0.18), borderRadius: BorderRadius.circular(4)),
-                          child: Text('NOW', style: TextStyle(color: tone, fontSize: 10, fontWeight: FontWeight.bold)),
+                      if (detail.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(detail, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
+                      ],
+                      if (onTap != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.map_rounded, size: 14, color: AppTheme.neonCyan),
+                            const SizedBox(width: Space.s4),
+                            Flexible(
+                              child: Text(
+                                selected ? 'Shown on the map' : 'Show on map',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppText.caption.copyWith(color: AppTheme.neonCyan, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ]),
                         ),
                     ],
                   ),
-                  if (detail.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(detail, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                  ],
-                  if (e.hasPlace && onTap != null)
-                    Padding(
-                      padding: EdgeInsets.only(top: 2),
-                      child: Text('Show on map', style: TextStyle(color: AppTheme.neonCyan, fontSize: 11)),
-                    ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

@@ -7,18 +7,25 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/glass_card.dart';
+import '../../core/ui/ui.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/settings_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../data/services/auth_service.dart';
-import '../../domain/timeline/timeline_text.dart';
 import '../report/trip_report_screen.dart';
 import '../../core/theme/map_tiles.dart';
+import 'rider_home_screen.dart';
 
+/// The Trips tab: ride totals on top, then one clean row per trip (name,
+/// date, distance, riding time). Tapping a trip opens its report. Pull down
+/// to sync; a quiet sync also runs when the list opens. Never blocks: the
+/// saved trips stay visible while syncing.
 class TripHistoryScreen extends StatefulWidget {
-  const TripHistoryScreen({super.key});
+  /// True when shown as a tab of the home shell (no back button).
+  final bool embedded;
+
+  const TripHistoryScreen({super.key, this.embedded = false});
 
   @override
   State<TripHistoryScreen> createState() => _TripHistoryScreenState();
@@ -30,28 +37,50 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _triggerSync();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _triggerSync());
   }
 
   Future<void> _triggerSync() async {
-    if (!mounted) return;
+    if (!mounted || _isSyncing) return;
     setState(() => _isSyncing = true);
     final auth = context.read<AuthService>();
     final tripStorage = context.read<TripStorageService>();
-    final count = await tripStorage.syncWithCloud(userId: auth.currentUserId);
-    if (mounted) {
-      setState(() => _isSyncing = false);
-      if (count > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Synchronized $count new journeys from Cloud!'),
-            backgroundColor: AppTheme.emeraldSafe,
-          ),
-        );
-      }
+    try {
+      await tripStorage.syncWithCloud(userId: auth.currentUserId);
+    } catch (_) {
+      // Offline or the server is busy: the saved trips stay as they are.
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
     }
+  }
+
+  /// Rides and distance from [HomeAnalytics]; riding time is the moving time,
+  /// or the whole duration for trips saved without it. One pass, cheap.
+  static ({int rides, double km, int ridingMs}) _totalsOf(List<TripHistoryModel> trips) {
+    final a = HomeAnalytics.of(trips);
+    var riding = 0;
+    for (final t in trips) {
+      riding += t.movingMs > 0 ? t.movingMs : t.durationMinutes * 60000;
+    }
+    return (rides: a.rides, km: a.totalDistanceKm, ridingMs: riding);
+  }
+
+  void _open(TripHistoryModel trip) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => trip.hasReport ? TripReportScreen(trip: trip) : TripReplayDetailScreen(trip: trip)),
+    );
+  }
+
+  Future<void> _confirmDelete(TripHistoryModel trip, TripStorageService storage) async {
+    final ok = await confirmAction(
+      context,
+      title: 'Delete trip?',
+      message: '"${trip.tripName}" is removed from your history on all your devices. The other riders keep their own copy.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (ok) await storage.deleteTrip(trip.tripId);
   }
 
   @override
@@ -59,185 +88,179 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
     final tripStorage = context.watch<TripStorageService>();
     final trips = tripStorage.trips;
 
+    final Widget content;
+    if (trips.isEmpty) {
+      content = LayoutBuilder(
+        builder: (context, c) => ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+              height: c.maxHeight,
+              child: EmptyState(
+                icon: Icons.route_rounded,
+                title: 'No trips yet',
+                message: 'Your rides are saved here when they end, with the route, stops and replay.',
+                primaryLabel: 'Start Ride',
+                onPrimary: () => RiderHomeScreen.selectTab(context, HomeTab.ride),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      final totals = _totalsOf(trips);
+      content = ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
+        itemCount: trips.length + 1,
+        itemBuilder: (ctx, index) {
+          if (index == 0) return _TotalsHeader(rides: totals.rides, km: totals.km, ridingMs: totals.ridingMs);
+          final trip = trips[index - 1];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: Space.s8),
+            child: _TripRow(
+              key: ValueKey(trip.tripId),
+              trip: trip,
+              onTap: () => _open(trip),
+              onDelete: () => _confirmDelete(trip, tripStorage),
+            ),
+          );
+        },
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
       appBar: AppBar(
-        title: const Text('Trip History & Replay'),
-        actions: [
-          if (_isSyncing)
-            Padding(
-              padding: EdgeInsets.all(16),
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan),
-              ),
-            )
-          else
-            IconButton(
-              tooltip: 'Sync with cloud',
-              icon: Icon(Icons.cloud_sync, color: AppTheme.neonCyan),
-              onPressed: _triggerSync,
-            ),
-        ],
+        title: const Text('Trips'),
+        automaticallyImplyLeading: !widget.embedded,
       ),
-      body: trips.isEmpty
-          ? Center(
-              child: Text(
-                'No recorded trips yet.\nStart a ride to automatically capture full telemetry.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppTheme.textMuted),
-              ),
-            )
-          : RefreshIndicator(
-              color: AppTheme.neonCyan,
-              onRefresh: _triggerSync,
-              child: ListView.builder(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              itemCount: trips.length,
-              itemBuilder: (ctx, index) {
-                final trip = trips[index];
-                final dateStr = DateFormat('dd MMM yyyy, hh:mm a').format(
-                  DateTime.fromMillisecondsSinceEpoch(trip.startTimeEpochMs),
-                );
+      body: LoadingState(
+        loading: _isSyncing,
+        hasData: trips.isNotEmpty,
+        child: RefreshIndicator(
+          color: AppTheme.neonCyan,
+          onRefresh: _triggerSync,
+          child: content,
+        ),
+      ),
+    );
+  }
+}
 
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: GlassCard(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => trip.hasReport ? TripReportScreen(trip: trip) : TripReplayDetailScreen(trip: trip),
-                        ),
-                      );
-                    },
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: AppTheme.neonCyan.withOpacity(0.15),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(Icons.two_wheeler, color: AppTheme.neonCyan, size: 20),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    trip.tripName,
-                                    style: TextStyle(
-                                      color: AppTheme.textPrimary,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 15,
-                                    ),
-                                  ),
-                                  Text(
-                                    dateStr,
-                                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: 'Delete this trip',
-                              icon: Icon(Icons.delete_outline, color: AppTheme.textMuted, size: 20),
-                              onPressed: () => _confirmDelete(trip, tripStorage),
-                            ),
-                          ],
-                        ),
-                        if (trip.startLocationName.isNotEmpty || trip.destinationName.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            '${trip.startLocationName.isEmpty ? 'Start' : trip.startLocationName}  to  ${trip.destinationName.isEmpty ? 'destination' : trip.destinationName}',
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+/// Totals over every saved trip: rides, distance, riding time.
+class _TotalsHeader extends StatelessWidget {
+  final int rides;
+  final double km;
+  final int ridingMs;
+  const _TotalsHeader({required this.rides, required this.km, required this.ridingMs});
+
+  @override
+  Widget build(BuildContext context) {
+    final dist = formatDistance(km * 1000);
+    final cut = dist.lastIndexOf(' ');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.s16),
+      child: Container(
+        padding: const EdgeInsets.all(Space.s16),
+        decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.subtleBorder)),
+        child: Row(children: [
+          Expanded(child: RideMetric(value: '$rides', label: rides == 1 ? 'Ride' : 'Rides')),
+          Expanded(
+            child: cut > 0
+                ? RideMetric(value: dist.substring(0, cut), unit: dist.substring(cut + 1), label: 'Distance')
+                : RideMetric(value: dist, label: 'Distance'),
+          ),
+          Expanded(child: RideMetric(value: formatDuration(Duration(milliseconds: ridingMs)), label: 'Riding time')),
+        ]),
+      ),
+    );
+  }
+}
+
+/// One trip in the list: name, date, "142 km · 3 h 10 min riding", a menu
+/// with Delete, and a chevron. The same card for every trip.
+class _TripRow extends StatelessWidget {
+  final TripHistoryModel trip;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  const _TripRow({super.key, required this.trip, required this.onTap, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    final date = DateFormat('EEE d MMM yyyy, HH:mm').format(DateTime.fromMillisecondsSinceEpoch(trip.startTimeEpochMs));
+    final riding = trip.movingMs > 0
+        ? '${formatDuration(Duration(milliseconds: trip.movingMs))} riding'
+        : formatDuration(Duration(minutes: trip.durationMinutes));
+    final facts = '${formatDistance(trip.totalDistanceKm * 1000)} · $riding';
+    return Material(
+      color: AppTheme.slateCard,
+      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 72),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(Space.s12, Space.s8, 0, Space.s8),
+            child: Row(children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(color: AppTheme.neonCyan.withOpacity(0.14), shape: BoxShape.circle),
+                child: Icon(Icons.two_wheeler_rounded, color: AppTheme.neonCyan, size: 22),
+              ),
+              const SizedBox(width: Space.s12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(trip.tripName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                    Text(date, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                    const SizedBox(height: 2),
+                    Text(facts, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
+                    if (trip.isEstimate)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Row(children: [
+                          Icon(Icons.hourglass_top_rounded, size: 14, color: StatusColors.warning),
+                          const SizedBox(width: Space.s4),
+                          Flexible(
+                            child: Text('Exact report being prepared',
+                                maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: StatusColors.warning)),
                           ),
-                        ],
-                        const SizedBox(height: 14),
-                        if (trip.isEstimate)
-                          Text(
-                            'The exact report (distance, every rider\'s route and waits) is being prepared from the recorded routes. Pull to refresh in a minute.',
-                            style: TextStyle(color: AppTheme.hyperAmber, fontSize: 12),
-                          )
-                        else
-                          Wrap(
-                            alignment: WrapAlignment.spaceAround,
-                            spacing: 18,
-                            runSpacing: 10,
-                            children: [
-                              _buildTripStat('Distance', TimelineText.distance(trip.totalDistanceKm * 1000), AppTheme.neonCyan),
-                              if (trip.movingMs > 0)
-                                _buildTripStat('Riding', TimelineText.duration(Duration(milliseconds: trip.movingMs)), AppTheme.emeraldSafe)
-                              else
-                                _buildTripStat('Duration', TimelineText.duration(Duration(minutes: trip.durationMinutes)), AppTheme.hyperAmber),
-                              if (trip.movingMs > 0) _buildTripStat('Stopped', '${TimelineText.duration(Duration(milliseconds: trip.restMs))}, ${trip.stopCount}x', AppTheme.hyperAmber),
-                              _buildTripStat('Top speed', '${trip.topSpeedKmh.toStringAsFixed(0)} km/h', AppTheme.speedWarning),
-                              if (trip.riderCount > 1) _buildTripStat('Riders', '${trip.riderCount}', AppTheme.textSecondary),
-                            ],
-                          ),
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                trip.hasReport ? 'Report, map of every rider and replay' : 'View the route',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: AppTheme.neonCyan, fontSize: 11, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            Icon(Icons.chevron_right, color: AppTheme.neonCyan, size: 16),
-                          ],
-                        ),
-                      ],
-                    ),
+                        ]),
+                      ),
+                  ],
+                ),
+              ),
+              PopupMenuButton<String>(
+                tooltip: 'More options',
+                icon: Icon(Icons.more_vert_rounded, color: AppTheme.textSecondary),
+                onSelected: (v) {
+                  if (v == 'delete') onDelete();
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Row(children: [
+                      Icon(Icons.delete_outline_rounded, color: StatusColors.critical),
+                      const SizedBox(width: Space.s12),
+                      const Flexible(child: Text('Delete trip', maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    ]),
                   ),
-                );
-              },
-            ),
-            ),
-    );
-  }
-
-  Future<void> _confirmDelete(TripHistoryModel trip, TripStorageService storage) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.slateCard,
-        title: Text('Delete this trip?', style: TextStyle(color: AppTheme.textPrimary)),
-        content: Text(
-          '"${trip.tripName}" is removed from your history on all your devices. The other riders keep their own copy.',
-          style: TextStyle(color: AppTheme.textSecondary),
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: Space.s8),
+                child: Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
+              ),
+            ]),
+          ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Delete', style: TextStyle(color: AppTheme.laserRed))),
-        ],
       ),
-    );
-    if (ok == true) await storage.deleteTrip(trip.tripId);
-  }
-
-  Widget _buildTripStat(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.bold),
-        ),
-      ],
     );
   }
 }
@@ -266,6 +289,8 @@ class TripReplayDetailScreen extends StatefulWidget {
 }
 
 class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
+  // A new map is built when a trail arrives (see the map key), so it gets a new controller too.
+  MapController _map = MapController();
   late TripHistoryModel trip;
   bool _loading = false;
   String? _loadError;
@@ -304,6 +329,7 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
       if (!mounted) return;
       setState(() {
         trip = full;
+        _map = MapController();
         _loading = false;
       });
     } on ApiException catch (e) {
@@ -339,26 +365,39 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
     final Widget child;
     if (_loading) {
       child = Row(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan)),
-        const SizedBox(width: 10),
-        Text('Loading the route...', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+        const SizedBox(width: 20, height: 20, child: LoadingSpinner()),
+        const SizedBox(width: Space.s12),
+        Flexible(child: Text('Loading the route...', style: AppText.body)),
       ]);
     } else if (_loadError != null) {
       child = Column(mainAxisSize: MainAxisSize.min, children: [
-        Text(_loadError!, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
-        TextButton(onPressed: _loadRoute, child: Text('Try again', style: TextStyle(color: AppTheme.neonCyan))),
+        Text(_loadError!, textAlign: TextAlign.center, style: AppText.body),
+        const SizedBox(height: Space.s8),
+        OutlinedButton(onPressed: _loadRoute, child: const Text('Try again')),
       ]);
     } else {
-      child = ElevatedButton.icon(onPressed: _loadRoute, icon: const Icon(Icons.download_rounded), label: const Text('Load route'));
+      child = FilledButton.icon(onPressed: _loadRoute, icon: const Icon(Icons.download_rounded), label: const Text('Load route'));
     }
     return Center(
       child: Container(
-        margin: const EdgeInsets.all(24),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(color: AppTheme.slateCard.withOpacity(0.95), borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(Space.s24),
+        padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s12),
+        decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.subtleBorder)),
         child: child,
       ),
     );
+  }
+
+  void _showWhole(LatLngBounds? bounds, LatLng center) {
+    try {
+      if (bounds != null) {
+        _map.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)));
+      } else {
+        _map.move(center, _map.camera.zoom);
+      }
+    } catch (_) {
+      // The map is not laid out yet.
+    }
   }
 
   @override
@@ -368,43 +407,45 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
     final center = points.isNotEmpty ? points.first : const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng);
 
     final details = Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.slateCard,
-        borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
-      ),
+      padding: const EdgeInsets.all(Space.s16),
+      decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.sheetTop),
       child: SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              trip.tripName,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            Text(trip.tripName, style: AppText.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            if (trip.startLocationName.isNotEmpty || trip.destinationName.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: Space.s4),
+                child: Text(
+                  '${trip.startLocationName.isEmpty ? 'Start' : trip.startLocationName} to ${trip.destinationName.isEmpty ? 'destination' : trip.destinationName}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption.copyWith(color: AppTheme.textSecondary),
+                ),
+              ),
+            const SizedBox(height: Space.s16),
+            RouteSummary(
+              distanceKm: trip.totalDistanceKm,
+              duration: Duration(minutes: trip.durationMinutes),
+              stops: trip.stopCount,
+              riders: trip.riderCount,
             ),
-            const SizedBox(height: 4),
-            Text('${trip.startLocationName} to ${trip.destinationName}', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-            const SizedBox(height: 18),
-            Wrap(
-              alignment: WrapAlignment.spaceAround,
-              spacing: 24,
-              runSpacing: 12,
-              children: [
-                _buildSummaryItem(Icons.straighten, 'Total distance', TimelineText.distance(trip.totalDistanceKm * 1000)),
-                _buildSummaryItem(Icons.speed, 'Top speed', '${trip.topSpeedKmh.toStringAsFixed(0)} km/h'),
-                _buildSummaryItem(Icons.timer, 'Duration', TimelineText.duration(Duration(minutes: trip.durationMinutes))),
-              ],
-            ),
-            const SizedBox(height: 18),
+            if (trip.topSpeedKmh > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: Space.s12),
+                child: Text('Top speed ${trip.topSpeedKmh.round()} km/h', style: AppText.label),
+              ),
+            const SizedBox(height: Space.s16),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton.icon(
+              child: FilledButton.icon(
                 onPressed: points.isEmpty ? null : () => _share(context),
-                icon: const Icon(Icons.share),
-                label: const Text('Share the route (GPX)'),
+                icon: const Icon(Icons.share_rounded),
+                label: const Text('Share the route (GPX)', maxLines: 1, overflow: TextOverflow.ellipsis),
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
               ),
             ),
           ],
@@ -419,6 +460,7 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
         final map = FlutterMap(
           // A new map (and camera fit) once a trail loaded on demand arrives.
           key: ValueKey('trail-${points.length}'),
+          mapController: _map,
           options: MapOptions(
             initialCenter: center,
             initialZoom: points.isEmpty ? 5 : 13.0,
@@ -435,14 +477,38 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
             if (points.isNotEmpty)
               MarkerLayer(
                 markers: [
-                  Marker(point: points.first, width: 32, height: 32, alignment: Alignment.topCenter, child: Icon(Icons.location_on, color: AppTheme.emeraldSafe, size: 30)),
-                  Marker(point: points.last, width: 32, height: 32, alignment: Alignment.topCenter, child: Icon(Icons.flag, color: AppTheme.hyperAmber, size: 28)),
+                  Marker(
+                    point: points.first,
+                    width: 32,
+                    height: 32,
+                    alignment: Alignment.topCenter,
+                    child: Semantics(label: 'Start', child: Icon(Icons.location_on_rounded, color: StatusColors.success, size: 30)),
+                  ),
+                  Marker(
+                    point: points.last,
+                    width: 32,
+                    height: 32,
+                    alignment: Alignment.topCenter,
+                    child: Semantics(label: 'Finish', child: Icon(Icons.flag_rounded, color: StatusColors.critical, size: 28)),
+                  ),
                 ],
               ),
           ],
         );
         final notice = _routeNotice();
-        final mapArea = notice == null ? map : Stack(children: [map, notice]);
+        final mapArea = Stack(children: [
+          Positioned.fill(child: map),
+          if (notice != null) Positioned.fill(child: notice),
+          Positioned(
+            top: Space.s8,
+            right: Space.s8,
+            child: MapControl(
+              icon: Icons.zoom_out_map_rounded,
+              tooltip: 'Show the whole route',
+              onPressed: points.isEmpty ? null : () => _showWhole(bounds, center),
+            ),
+          ),
+        ]);
         if (c.maxWidth > c.maxHeight && c.maxWidth > 700) {
           return Row(children: [Expanded(child: mapArea), SizedBox(width: 360, child: SingleChildScrollView(child: details))]);
         }
@@ -451,18 +517,6 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
           ConstrainedBox(constraints: BoxConstraints(maxHeight: c.maxHeight * 0.5), child: SingleChildScrollView(child: details)),
         ]);
       }),
-    );
-  }
-
-  Widget _buildSummaryItem(IconData icon, String label, String value) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: AppTheme.neonCyan, size: 22),
-        const SizedBox(height: 6),
-        Text(value, style: TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.bold)),
-        Text(label, style: TextStyle(color: AppTheme.textMuted, fontSize: 10)),
-      ],
     );
   }
 }

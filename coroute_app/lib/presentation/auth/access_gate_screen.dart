@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui.dart';
 import '../../core/widgets/devmonks_branding.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/services/auth_service.dart';
@@ -119,18 +120,16 @@ class _AccessGateScreenState extends State<AccessGateScreen>
 
   void _showForgotPassword() {
     final support = context.read<MetaService>().meta?.supportEmail ?? '';
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.slateCard,
-        title: Text('Forgot your password?', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
-        content: Text(
+    showAppSheet<void>(
+      context,
+      title: 'Forgot your password?',
+      builder: (ctx) => SingleChildScrollView(
+        child: Text(
           'If you registered with Google, use "Sign In with Google".\n\n'
           'Otherwise e-mail ${support.isNotEmpty ? support : 'the CoRoute team'} from the address you registered with. '
           'An administrator will give you a temporary password, and the app will ask you to set a new one when you sign in.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          style: AppText.body.copyWith(color: AppTheme.textSecondary),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text('OK', style: TextStyle(color: AppTheme.neonCyan)))],
       ),
     );
   }
@@ -205,11 +204,11 @@ class _AccessGateScreenState extends State<AccessGateScreen>
       return;
     }
     if (emergencyName.length < 2) {
-      setState(() => _errorMessage = 'Emergency (ICE) contact name is mandatory for rider safety.');
+      setState(() => _errorMessage = 'Enter the name of your emergency contact.');
       return;
     }
     if (emergencyPhone.length < 7) {
-      setState(() => _errorMessage = 'Emergency (ICE) contact phone number is mandatory for SOS alerts.');
+      setState(() => _errorMessage = 'Enter the phone number of your emergency contact.');
       return;
     }
     if (!_acceptedTerms) {
@@ -385,7 +384,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Rider & Command Access',
+                  'Welcome back',
                   style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 16,
@@ -393,23 +392,11 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                   ),
                 ),
                 Text(
-                  'Enter credentials to resume your session',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                  'Sign in to ride with your group.',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                 ),
               ],
             )),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppTheme.neonCyan.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: AppTheme.neonCyan.withOpacity(0.5)),
-              ),
-              child: Text(
-                'ONLINE',
-                style: TextStyle(color: AppTheme.neonCyan, fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ),
           ],
         ),
 
@@ -417,7 +404,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
 
         Text(
           'EMAIL OR CALLSIGN',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
         TextField(
@@ -425,7 +412,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxEmailLength)],
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
           decoration: InputDecoration(
-            prefixIcon: Icon(Icons.person_outline, color: AppTheme.neonCyan, size: 20),
+            prefixIcon: Icon(Icons.person_outline_rounded, color: AppTheme.neonCyan, size: 20),
             hintText: 'e.g. Maverick or rider@example.com',
             hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 13),
             filled: true,
@@ -438,7 +425,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
 
         Text(
           'PASSWORD',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 6),
         TextField(
@@ -446,10 +433,11 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           obscureText: _obscureLoginPassword,
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
           decoration: InputDecoration(
-            prefixIcon: Icon(Icons.lock_outline, color: AppTheme.neonCyan, size: 20),
+            prefixIcon: Icon(Icons.lock_outline_rounded, color: AppTheme.neonCyan, size: 20),
             suffixIcon: IconButton(
+              tooltip: _obscureLoginPassword ? 'Show password' : 'Hide password',
               icon: Icon(
-                _obscureLoginPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                _obscureLoginPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
                 color: AppTheme.textSecondary,
                 size: 18,
               ),
@@ -503,7 +491,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
             Expanded(child: Divider(color: AppTheme.subtleBorder)),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text('OR', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+              child: Text('OR', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
             ),
             Expanded(child: Divider(color: AppTheme.subtleBorder)),
           ],
@@ -531,7 +519,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           child: Text(
             'By continuing with Google you accept the Terms of Use and Privacy Policy.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
           ),
         ),
 
@@ -557,16 +545,16 @@ class _AccessGateScreenState extends State<AccessGateScreen>
       children: [
         Row(
           children: [
-            Icon(Icons.badge_outlined, color: AppTheme.hyperAmber, size: 20),
+            Icon(Icons.badge_rounded, color: AppTheme.hyperAmber, size: 20),
             SizedBox(width: 8),
             Expanded(child: Text(
-              'Rider Profile Registration',
+              'Create your account',
               style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
           ],
         ),
         Text(
-          'Register your telemetry call-sign and emergency contact',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+          'Your group uses these details to reach you and your family in an emergency.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
         ),
 
         const SizedBox(height: 16),
@@ -574,7 +562,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         // 1. Callsign / Full Name
         Text(
           'CALLSIGN / FULL NAME *',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 4),
         TextField(
@@ -582,7 +570,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxCallsignLength)],
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
           decoration: InputDecoration(
-            prefixIcon: Icon(Icons.person, color: AppTheme.neonCyan, size: 18),
+            prefixIcon: Icon(Icons.person_rounded, color: AppTheme.neonCyan, size: 18),
             hintText: 'e.g. Phoenix, GhostRider, Santhosh',
             hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
             filled: true,
@@ -596,7 +584,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         // 2. Email Address
         Text(
           'EMAIL ADDRESS *',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 4),
         TextField(
@@ -605,7 +593,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           keyboardType: TextInputType.emailAddress,
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
           decoration: InputDecoration(
-            prefixIcon: Icon(Icons.email_outlined, color: AppTheme.neonCyan, size: 18),
+            prefixIcon: Icon(Icons.email_rounded, color: AppTheme.neonCyan, size: 18),
             hintText: 'e.g. rider@example.com',
             hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
             filled: true,
@@ -619,7 +607,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         // 3. Mobile Phone Number
         Text(
           'MOBILE PHONE NUMBER *',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 4),
         TextField(
@@ -628,7 +616,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           keyboardType: TextInputType.phone,
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
           decoration: InputDecoration(
-            prefixIcon: Icon(Icons.phone_android, color: AppTheme.neonCyan, size: 18),
+            prefixIcon: Icon(Icons.phone_android_rounded, color: AppTheme.neonCyan, size: 18),
             hintText: 'e.g. +91 98765 43210',
             hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
             filled: true,
@@ -646,20 +634,21 @@ class _AccessGateScreenState extends State<AccessGateScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('PASSWORD *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+                  Text('PASSWORD *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: _regPasswordController,
                     obscureText: _obscureRegPassword,
                     style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                     decoration: InputDecoration(
-                      prefixIcon: Icon(Icons.lock_outline, color: AppTheme.neonCyan, size: 18),
+                      prefixIcon: Icon(Icons.lock_outline_rounded, color: AppTheme.neonCyan, size: 18),
                       suffixIcon: IconButton(
-                        icon: Icon(_obscureRegPassword ? Icons.visibility_off : Icons.visibility, color: AppTheme.textSecondary, size: 16),
+                        tooltip: _obscureRegPassword ? 'Show password' : 'Hide password',
+                        icon: Icon(_obscureRegPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: AppTheme.textSecondary, size: 16),
                         onPressed: () => setState(() => _obscureRegPassword = !_obscureRegPassword),
                       ),
                       hintText: 'Min 8 chars',
-                      hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                      hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                       filled: true,
                       fillColor: AppTheme.elevatedCard,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -673,20 +662,21 @@ class _AccessGateScreenState extends State<AccessGateScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('CONFIRM *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+                  Text('CONFIRM *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: _regConfirmPasswordController,
                     obscureText: _obscureRegConfirmPassword,
                     style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                     decoration: InputDecoration(
-                      prefixIcon: Icon(Icons.lock_reset, color: AppTheme.neonCyan, size: 18),
+                      prefixIcon: Icon(Icons.lock_reset_rounded, color: AppTheme.neonCyan, size: 18),
                       suffixIcon: IconButton(
-                        icon: Icon(_obscureRegConfirmPassword ? Icons.visibility_off : Icons.visibility, color: AppTheme.textSecondary, size: 16),
+                        tooltip: _obscureRegConfirmPassword ? 'Show password' : 'Hide password',
+                        icon: Icon(_obscureRegConfirmPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: AppTheme.textSecondary, size: 16),
                         onPressed: () => setState(() => _obscureRegConfirmPassword = !_obscureRegConfirmPassword),
                       ),
                       hintText: 'Repeat pass',
-                      hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                      hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                       filled: true,
                       fillColor: AppTheme.elevatedCard,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -703,7 +693,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         const SizedBox(height: 10),
 
         // 5. Rider Role & Vehicle Setup
-        Text('RIDER ROLE & VEHICLE SETUP *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+        Text('RIDER ROLE & VEHICLE SETUP *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
         Row(
           children: [
@@ -712,7 +702,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 label: const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.two_wheeler, size: 16),
+                    Icon(Icons.two_wheeler_rounded, size: 16),
                     SizedBox(width: 6),
                     Text('Bike Rider'),
                   ],
@@ -736,7 +726,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 label: const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.airline_seat_recline_normal, size: 16),
+                    Icon(Icons.airline_seat_recline_normal_rounded, size: 16),
                     SizedBox(width: 6),
                     Text('Pillion Rider'),
                   ],
@@ -766,7 +756,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('VEHICLE TYPE', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+                    Text('VEHICLE TYPE', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -796,7 +786,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('BIKE / REG NO *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+                    Text('BIKE / REG NO *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
                     TextField(
                       controller: _regVehicleNoController,
@@ -805,7 +795,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                       style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, letterSpacing: 1.1),
                       decoration: InputDecoration(
                         hintText: 'e.g. KA 01 AB 1234',
-                        hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                        hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                         filled: true,
                         fillColor: AppTheme.elevatedCard,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -826,12 +816,12 @@ class _AccessGateScreenState extends State<AccessGateScreen>
             ),
             child: Row(
               children: [
-                Icon(Icons.check_circle_outline, color: AppTheme.hyperAmber, size: 20),
+                Icon(Icons.check_circle_outline_rounded, color: AppTheme.hyperAmber, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Pillion Rider: You will participate in convoys without requiring a bike registration number.',
-                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                   ),
                 ),
               ],
@@ -844,8 +834,8 @@ class _AccessGateScreenState extends State<AccessGateScreen>
 
         // 6. Emergency ICE Contacts
         Text(
-          'EMERGENCY (ICE) CONTACT (MANDATORY FOR RIDER SAFETY) *',
-          style: TextStyle(color: AppTheme.laserRed, fontSize: 10, fontWeight: FontWeight.bold),
+          'EMERGENCY CONTACT *',
+          style: TextStyle(color: AppTheme.laserRed, fontSize: 12, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 4),
         Row(
@@ -856,9 +846,9 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxContactNameLength)],
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                 decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.person_pin, color: AppTheme.laserRed, size: 18),
+                  prefixIcon: Icon(Icons.person_pin_rounded, color: AppTheme.laserRed, size: 18),
                   hintText: 'Contact Name * (e.g. Brother)',
-                  hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                  hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                   filled: true,
                   fillColor: AppTheme.elevatedCard,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -873,9 +863,9 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 keyboardType: TextInputType.phone,
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                 decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.phone_in_talk, color: AppTheme.laserRed, size: 18),
+                  prefixIcon: Icon(Icons.phone_in_talk_rounded, color: AppTheme.laserRed, size: 18),
                   hintText: 'Emergency Phone *',
-                  hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                  hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
                   filled: true,
                   fillColor: AppTheme.elevatedCard,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -947,7 +937,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
             Expanded(child: Divider(color: AppTheme.subtleBorder)),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text('OR', style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+              child: Text('OR', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
             ),
             Expanded(child: Divider(color: AppTheme.subtleBorder)),
           ],
@@ -975,7 +965,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           child: Text(
             'By continuing with Google you accept the Terms of Use and Privacy Policy.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+            style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
           ),
         ),
 

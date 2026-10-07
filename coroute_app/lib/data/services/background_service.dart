@@ -148,6 +148,17 @@ class BackgroundService {
     }
   }
 
+  /// Sends the app to the background without closing it (Android back during a ride), so the
+  /// ride keeps running in the main isolate exactly as when the rider presses Home.
+  static void minimizeApp() {
+    if (!_isAndroidOrIos) return;
+    try {
+      FlutterForegroundTask.minimizeApp();
+    } catch (e) {
+      debugPrint('Minimize note: $e');
+    }
+  }
+
   /// Listen for notification button taps forwarded from the service isolate.
   static void addButtonListener(void Function(String buttonId) onButton) {
     if (!_isAndroidOrIos) return;
