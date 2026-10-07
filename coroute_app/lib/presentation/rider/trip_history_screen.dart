@@ -7,7 +7,6 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/devmonks_branding.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/trip_storage_service.dart';
@@ -290,14 +289,11 @@ class TripReplayDetailScreen extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(trip.tripName,
-                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-                const DevMonksBadge(isCompact: true),
-              ],
+            Text(
+              trip.tripName,
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 4),
             Text('${trip.startLocationName} to ${trip.destinationName}', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),

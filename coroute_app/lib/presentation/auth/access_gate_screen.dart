@@ -346,8 +346,6 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 ),
               ),
 
-              const SizedBox(height: 24),
-              const DevMonksBadge(),
               const SizedBox(height: 16),
             ],
           ),

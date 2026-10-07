@@ -3,7 +3,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/devmonks_branding.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/auth_service.dart';
@@ -338,7 +337,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                         ],
                       ),
                     ),
-                    const DevMonksBadge(isCompact: true),
+                    Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted, size: 22),
                   ],
                 ),
               ),
@@ -647,8 +646,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
               );
             }),
 
-            const SizedBox(height: 30),
-            const Center(child: DevMonksBadge()),
+            const SizedBox(height: 20),
           ],
         ),
           ),

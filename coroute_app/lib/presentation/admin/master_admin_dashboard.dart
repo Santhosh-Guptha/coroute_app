@@ -4,7 +4,6 @@ import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/devmonks_branding.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
@@ -117,7 +116,6 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final convoyService = context.watch<ConvoyService>();
-    final isOnline = convoyService.isOnline;
     final convoys = convoyService.allConvoys.values.toList();
 
     int totalRiders = 0;
@@ -190,136 +188,94 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Admin Identity & devmonks.space banner
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: AppTheme.elevatedCard,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.devmonksPurple.withOpacity(0.4)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.admin_panel_settings, color: AppTheme.neonCyan, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Root Access: ${auth.currentUserEmail}',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const DevMonksBadge(isCompact: true),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 10),
-
-            // Groups & Retention Manager
-            GlassCard(
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRideHistoryScreen())),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(children: [
-                Icon(Icons.history_rounded, color: AppTheme.emeraldSafe),
-                const SizedBox(width: 10),
+            // Management Hub
+            Row(
+              children: [
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Groups & Retention Manager', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
-                    Text('Active convoys, completed rides, retention tracking and immediate deletion.',
-                        style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-                  ]),
-                ),
-                Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
-              ]),
-            ),
-
-            const SizedBox(height: 10),
-
-            // Registered Users Directory
-            GlassCard(
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(children: [
-                Icon(Icons.people_alt_rounded, color: AppTheme.devmonksPurple),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Registered Users Directory', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
-                    Text('Manage accounts, hold/block riders, and inspect convoy histories with all members.',
-                        style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-                  ]),
-                ),
-                Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
-              ]),
-            ),
-
-            const SizedBox(height: 10),
-
-            // Gateway / Oracle Autonomous Database status card
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: AppTheme.slateCard,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isOnline
-                      ? AppTheme.emeraldSafe.withOpacity(0.6)
-                      : AppTheme.hyperAmber.withOpacity(0.4),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isOnline ? AppTheme.emeraldSafe : AppTheme.hyperAmber,
-                      boxShadow: [
-                        BoxShadow(
-                          color: (isOnline ? AppTheme.emeraldSafe : AppTheme.hyperAmber)
-                              .withOpacity(0.6),
-                          blurRadius: 6,
-                          spreadRadius: 1,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  child: GlassCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRideHistoryScreen())),
+                    child: Row(
                       children: [
-                        Text(
-                          'CoRoute Gateway · Oracle Autonomous DB',
-                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.bold),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.emeraldSafe.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(Icons.history_rounded, color: AppTheme.emeraldSafe, size: 20),
                         ),
-                        Text(
-                          isOnline
-                              ? 'Realtime link up · fleet updates pushed live'
-                              : 'Reconnecting to gateway…',
-                          style: TextStyle(color: AppTheme.textMuted, fontSize: 10),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Groups & Retention',
+                                style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Active rides & policy',
+                                style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
                         ),
+                        Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted, size: 18),
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppTheme.devmonksPurple.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(6),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: GlassCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.neonCyan.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(Icons.people_alt_rounded, color: AppTheme.neonCyan, size: 20),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Registered Users',
+                                style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Hold, block & trips',
+                                style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted, size: 18),
+                      ],
                     ),
-                    child: Text('LIVE', style: TextStyle(color: AppTheme.textPrimary, fontSize: 10, fontWeight: FontWeight.bold)),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
 
             // KPI Grid
             Row(
