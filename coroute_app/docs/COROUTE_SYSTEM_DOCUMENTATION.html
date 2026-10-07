@@ -471,12 +471,14 @@
       <ul class="nav-links">
         <li><a href="#overview">⚡ System Overview</a></li>
         <li><a href="#architecture">🏛️ Technical Architecture</a></li>
+        <li><a href="#cloud-infra">☁️ Cloud Infrastructure &amp; 403 Isolation</a></li>
         <li><a href="#master-admin">🛡️ Master Admin Invariant</a></li>
       </ul>
 
       <div class="nav-group-title">Application Flows</div>
       <ul class="nav-links">
         <li><a href="#onboarding">🔐 Auth & Registration</a></li>
+        <li><a href="#navigation-drawer">🧭 Navigation Drawer &amp; Analytics</a></li>
         <li><a href="#convoy-lifecycle">👥 Convoy Creation & Join</a></li>
         <li><a href="#telemetry-tracking">📡 Telemetry & Radar Engine</a></li>
         <li><a href="#cockpit-hud">🧭 Cockpit HUD & Map</a></li>
@@ -484,6 +486,7 @@
         <li><a href="#intercom-radio">🎙️ Half-Duplex Radio (PTT)</a></li>
         <li><a href="#emergency-sos">🚨 Emergency SOS Lifeline</a></li>
         <li><a href="#profile-ice">👤 Rider Profile & ICE</a></li>
+        <li><a href="#admin-management">🛡️ Admin Console &amp; Purge</a></li>
       </ul>
 
       <div class="nav-group-title">Protocols & Specs</div>
@@ -984,6 +987,87 @@ if (cleanEmail != null && cleanEmail == AppConstants.masterAdminEmail.toLowerCas
       </div>
     </section>
 
+    <!-- SECTION: CLOUD INFRASTRUCTURE & 403 PERIMETER ISOLATION -->
+    <section id="cloud-infra">
+      <h2>☁️ Cloud Infrastructure &amp; Zero-Exposure Perimeter (403 Lockdown)</h2>
+      <p>
+        CoRoute's backend is hosted on Oracle Cloud Infrastructure (OCI) in the <b>India South (Hyderabad)</b> region (<code>ap-hyderabad-1</code>) under an enterprise, zero-cost <b>Always Free</b> architecture:
+      </p>
+
+      <div class="card-grid">
+        <div class="feature-card">
+          <h4>🖥️ OCI Compute VM (152.67.181.198)</h4>
+          <p>Runs Ubuntu Linux, Caddy Edge Proxy with automated Let's Encrypt TLS 1.3, DuckDNS updater (<code>coroute.duckdns.org</code>), and the Node.js Gateway process daemon (port 3000). Pre-configured for migration to Always Free Ampere A1 Flex (4 OCPUs, 24 GB RAM).</p>
+        </div>
+        <div class="feature-card">
+          <h4>🧠 Oracle Autonomous AI Database (26ai)</h4>
+          <p>Serverless Autonomous Transaction Processing (ATP) with ORDS / SODA (Simple Oracle Document Access) REST API. Stores JSON Document collections for <code>riders</code>, <code>convoys</code>, <code>trips</code>, and <code>ended_convoys</code>.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-cyan">
+        <span class="callout-icon">🔒</span>
+        <div>
+          <b>Network Access Control List (ACL) Lockdown:</b>
+          Direct public HTTPS requests from the outside internet to the Oracle Autonomous Database URL return <b>HTTP 403 Forbidden</b>. Access is cryptographically and strictly restricted to the Virtual Cloud Network (<code>coroute-vcn</code>) and the VM Gateway IP (<code>152.67.181.198/32</code>). Zero external scanners or bots can reach the database login perimeter.
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: NAVIGATION DRAWER & ANALYTICS -->
+    <section id="navigation-drawer">
+      <h2>🧭 Navigation Drawer &amp; Telemetry Analytics Cockpit</h2>
+      <p>
+        The rider home screen has been elevated into a classy, distraction-free motorcycle cockpit featuring a unified navigation drawer and comprehensive lifetime telemetry analytics:
+      </p>
+
+      <div class="card-grid">
+        <div class="feature-card">
+          <h4>🗂️ Categorized Navigation Drawer</h4>
+          <p>Organizes all application capabilities into structured modules: <b>Convoys &amp; Rides</b> (Create, Join with PIN, Live Cockpit HUD), <b>Tracking &amp; Analytics</b> (Trip History, Replays, Live Group Timeline), <b>Safety &amp; Settings</b> (Profile, ICE Contacts, Theme, Permissions, Account Deletion), and <b>Administration</b> (Exclusive Master Admin Dashboard).</p>
+        </div>
+        <div class="feature-card">
+          <h4>📊 Rider Analytics &amp; Dynamics Dashboard</h4>
+          <p>Visualizes Lifetime Distance (km), Saddle Time (hours &amp; mins), Average Pace (km/h), and Peak Velocity (km/h). Computes a real-time <b>Safety &amp; Pace Compliance Score</b>, Time in Motion ratio, and recent GPS journeys log.</p>
+        </div>
+      </div>
+
+      <div class="callout callout-amber">
+        <span class="callout-icon">✨</span>
+        <div>
+          <b>Distraction-Free Cockpit Design:</b>
+          Unwanted database status bars, developer branding cards, and simulated clutter were removed from the rider's interface. The app maintains a pure, high-contrast, glove-friendly aesthetic optimized for motorcycle handlebar mounts.
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: MASTER ADMIN & PURGE -->
+    <section id="admin-management">
+      <h2>🛡️ Master Admin Operations, Convoy Purge &amp; Profile Gating</h2>
+      <p>
+        The Master Admin Console provides root administrators with complete governance and safety enforcement across all fleet operations:
+      </p>
+
+      <div class="card-grid">
+        <div class="feature-card">
+          <h4>🗑️ Immediate Convoy Purge</h4>
+          <p>Admins can permanently erase test, obsolete, or completed convoys via <code>DELETE /api/admin/convoys/:id/purge</code>. The Gateway automatically cascades the purge across timeline events and GPS track chunks while protecting active convoys on the road.</p>
+        </div>
+        <div class="feature-card">
+          <h4>🚫 Rider Lifecycle &amp; Safeguards</h4>
+          <p>Admins can toggle user account states between <code>ACTIVE</code>, <code>HOLD</code>, <code>BLOCKED</code>, and <code>DELETED</code>. Active convoy protection prevents blocking or holding riders who are actively riding on the road.</p>
+        </div>
+        <div class="feature-card">
+          <h4>📱 30-Day App Build Elevation</h4>
+          <p>Audits all client build numbers reported over the last 30 days via <code>GET /api/admin/builds</code>. Calculates exactly how many riders would be affected before safely elevating <code>MIN_APP_BUILD</code>.</p>
+        </div>
+        <div class="feature-card">
+          <h4>🛡️ Strict Registration &amp; ICE Gating</h4>
+          <p>Google Sign-In and standard registered users are required to complete full safety details (Verified Phone, Full Name, ICE Contact Name + Phone, Vehicle No / Pillion). Incomplete profiles are gated from joining or leading convoys.</p>
+        </div>
+      </div>
+    </section>
+
     <!-- SECTION 13: REST API SPEC -->
     <section id="rest-api-spec">
       <h2>🌐 REST API Endpoint Index</h2>
@@ -997,6 +1081,30 @@ if (cleanEmail != null && cleanEmail == AppConstants.masterAdminEmail.toLowerCas
           </tr>
         </thead>
         <tbody>
+          <tr>
+            <td><code>DELETE</code></td>
+            <td><code>/admin/convoys/:id/purge</code></td>
+            <td>Immediately purges convoy, chunks, and timeline events with active protection.</td>
+            <td>Master Admin</td>
+          </tr>
+          <tr>
+            <td><code>PATCH</code></td>
+            <td><code>/admin/users/:id/status</code></td>
+            <td>Updates user status (ACTIVE, HOLD, BLOCKED, DELETED) with convoy safeguards.</td>
+            <td>Master Admin</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/admin/builds</code></td>
+            <td>Analyzes 30-day active client builds to calculate safe MIN_APP_BUILD elevation.</td>
+            <td>Master Admin</td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td><code>/admin/rides</code></td>
+            <td>Fetches finished convoy ride history, breadcrumb maps, and fleet totals.</td>
+            <td>Master Admin</td>
+          </tr>
           <tr>
             <td><code>POST</code></td>
             <td><code>/auth/register</code></td>
