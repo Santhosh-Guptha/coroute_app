@@ -58,13 +58,14 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.get(['/', '/index.html'], (req, res) => sendPage(res, indexTemplate.replaceAll('__ORIGIN__', originOf(req))));
   app.get(['/privacy', '/privacy.html'], (req, res) => res.sendFile(pub('privacy.html')));
   app.get(['/terms', '/terms.html'], (req, res) => res.sendFile(pub('terms.html')));
+  app.get(['/docs', '/docs.html', '/architecture'], (req, res) => res.sendFile(pub('docs.html')));
   // One download link that never breaks: Play Store when configured, otherwise the latest GitHub release.
   app.get('/download', (req, res) => res.redirect(302, config.playStoreUrl || config.apkUrl));
   app.get('/robots.txt', (req, res) => res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${originOf(req)}/sitemap.xml\n`));
   app.get('/sitemap.xml', (req, res) => {
     const o = originOf(req);
     const today = new Date().toISOString().slice(0, 10);
-    const urls = [['/', '1.0'], ['/privacy', '0.3'], ['/terms', '0.3']]
+    const urls = [['/', '1.0'], ['/docs', '0.8'], ['/privacy', '0.3'], ['/terms', '0.3']]
       .map(([u, pr]) => `  <url><loc>${o}${u}</loc><lastmod>${today}</lastmod><priority>${pr}</priority></url>`).join('\n');
     res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
   });
