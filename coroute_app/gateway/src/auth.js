@@ -33,12 +33,17 @@ function publicUser(u) {
     name: u.name,
     email: u.email,
     role: u.role,
+    status: u.status || 'ACTIVE',
+    statusReason: u.statusReason || '',
+    statusChangedAt: u.statusChangedAt || 0,
     phone: u.phone || '',
     vehicleType: u.vehicleType || 'Motorcycle',
     vehicleNo: u.vehicleNo || '',
     emergencyContact: u.emergencyContact || '',
     emergencyContactName: u.emergencyContactName || '',
     provider: u.provider || 'password',
+    createdAt: u.createdAt || 0,
+    lastActiveAt: u.lastActiveAt || u.lastLoginAt || 0,
     mustChangePassword: !!u.mustChangePassword,
   };
 }
@@ -109,6 +114,8 @@ class AuthService {
     // Constant-ish time: always run a compare.
     const ok = user?.passwordHash ? await bcrypt.compare(password, user.passwordHash) : (await bcrypt.compare(password, '$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012345'), false);
     if (!user || !ok) throw new AuthError('Invalid credentials.', 401);
+    if (user.status === 'ON_HOLD') throw new AuthError('Your account has been placed on hold by the administrator.', 403, 'ACCOUNT_ON_HOLD');
+    if (user.status === 'BLOCKED') throw new AuthError('Your account has been blocked by the administrator.', 403, 'ACCOUNT_BLOCKED');
     const role = bootstrapRoleFor(user.email, user.role);
     const updated = await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role }) || user;
     return { token: signToken(updated), user: publicUser(updated) };
@@ -141,6 +148,8 @@ class AuthService {
         lastLoginAt: Date.now(),
       });
     } else {
+      if (user.status === 'ON_HOLD') throw new AuthError('Your account has been placed on hold by the administrator.', 403, 'ACCOUNT_ON_HOLD');
+      if (user.status === 'BLOCKED') throw new AuthError('Your account has been blocked by the administrator.', 403, 'ACCOUNT_BLOCKED');
       user = await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role: bootstrapRoleFor(email, user.role), googleSub: payload.sub }) || user;
     }
     return { token: signToken(user), user: publicUser(user) };
@@ -208,12 +217,31 @@ class AuthService {
     return publicUser(updated);
   }
 
+  async setUserStatus(actor, targetUserId, status, reason = '') {
+    const cleanStatus = String(status || '').toUpperCase();
+    if (!['ACTIVE', 'ON_HOLD', 'BLOCKED'].includes(cleanStatus)) throw new AuthError('Invalid user status.');
+    const target = await this.repo.findUserById(targetUserId);
+    if (!target) throw new AuthError('User not found.', 404);
+    if (target.role === ROLE_ADMIN && cleanStatus !== 'ACTIVE') {
+      throw new AuthError('Cannot place the master administrator on hold or blocked.', 403);
+    }
+    const updated = await this.repo.updateUser(target.key, {
+      status: cleanStatus,
+      statusChangedBy: actor.userId,
+      statusChangedAt: Date.now(),
+      statusReason: String(reason || '').trim(),
+    });
+    return publicUser(updated);
+  }
+
   /** A fresh session token for an already verified user (sliding refresh). */
   issueToken(user) { return signToken(user); }
 
   async me(userId, { appBuild = 0, now = Date.now() } = {}) {
     const user = await this.repo.findUserById(userId);
     if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
+    if (user.status === 'ON_HOLD') throw new AuthError('Your account has been placed on hold by the administrator.', 403, 'ACCOUNT_ON_HOLD');
+    if (user.status === 'BLOCKED') throw new AuthError('Your account has been blocked by the administrator.', 403, 'ACCOUNT_BLOCKED');
     // Which app build each rider uses, so the minimum build can be raised safely.
     // Written only when it changes, or once in 12 hours to keep "active" current.
     const build = Number.isInteger(appBuild) && appBuild > 0 && appBuild < 1000000 ? appBuild : 0;

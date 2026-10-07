@@ -153,7 +153,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             onPressed: () => _showBroadcastDialog(context, convoyService),
           ),
           IconButton(
-            tooltip: 'Ride history',
+            tooltip: 'Groups & Retention',
             icon: Icon(Icons.history_rounded, color: AppTheme.emeraldSafe),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRideHistoryScreen())),
           ),
@@ -163,8 +163,8 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminInsightsScreen())),
           ),
           IconButton(
-            tooltip: 'Users & roles',
-            icon: Icon(Icons.manage_accounts_rounded, color: AppTheme.devmonksPurple),
+            tooltip: 'Registered Users',
+            icon: Icon(Icons.people_alt_rounded, color: AppTheme.devmonksPurple),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())),
           ),
           IconButton(
@@ -219,7 +219,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
 
             const SizedBox(height: 10),
 
-            // The live radar below is empty when nobody is riding; finished rides live here.
+            // Groups & Retention Manager
             GlassCard(
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRideHistoryScreen())),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -228,8 +228,28 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Ride history and fleet totals', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
-                    Text('Every finished ride with its report, map of each rider and timeline.',
+                    Text('Groups & Retention Manager', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text('Active convoys, completed rides, retention tracking and immediate deletion.',
+                        style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                  ]),
+                ),
+                Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
+              ]),
+            ),
+
+            const SizedBox(height: 10),
+
+            // Registered Users Directory
+            GlassCard(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(children: [
+                Icon(Icons.people_alt_rounded, color: AppTheme.devmonksPurple),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Registered Users Directory', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text('Manage accounts, hold/block riders, and inspect convoy histories with all members.',
                         style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                   ]),
                 ),

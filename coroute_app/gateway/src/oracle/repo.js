@@ -170,6 +170,7 @@ class Repo {
       this.soda.removeWhere(C.voiceLog, { groupId }),
       this.soda.removeWhere(C.trackChunks, { groupId }),
       this.soda.removeWhere(C.events, { groupId }),
+      this.soda.removeWhere(C.trips, { groupId }),
     ]);
     await this.soda.removeWhere(C.convoys, { groupId });
   }

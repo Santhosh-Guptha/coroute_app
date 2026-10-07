@@ -297,20 +297,46 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
     res.json(await auth.appBuilds({ days, minBuild: config.minAppBuild, latestBuild: config.latestAppBuild }));
   }));
-  // Finished rides across all riders, with each report's headline numbers (no coordinates).
-  const convoySummary = (m) => ({
-    groupId: m.groupId, name: m.name, createdByUserName: m.createdByUserName || '',
-    startedAt: m.createdAtEpochMs || 0, endedAt: m.endedAtEpochMs || 0,
-    startName: m.start?.name || m.startLocationName || '', destinationName: m.destinationName || '',
-    members: Object.keys(m.members || {}).length,
-    hasReport: !!m.report,
-    distanceM: m.report?.group?.distanceM || 0,
-    durationMs: m.report?.group?.durationMs || Math.max(0, (m.endedAtEpochMs || 0) - (m.createdAtEpochMs || 0)),
-    arrived: m.report?.group?.arrived || 0,
-    sos: m.report?.group?.sos || 0,
-    plannedStops: m.report?.group?.plannedStops || 0,
-    visitedStops: m.report?.group?.visitedStops || 0,
-  });
+  // Finished rides across all riders, with each report's headline numbers and retention status.
+  const convoySummary = (m) => {
+    const startedAt = m.createdAtEpochMs || 0;
+    const endedAt = m.endedAtEpochMs || 0;
+    const retentionDays = config.retentionEndedConvoyDays || 90;
+    const retentionMs = retentionDays * 86400000;
+    const expiresAt = endedAt ? endedAt + retentionMs : null;
+    const daysRemaining = expiresAt ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 86400000)) : null;
+    const isApproachingRetention = daysRemaining !== null && daysRemaining <= 14;
+    return {
+      groupId: m.groupId, name: m.name, createdByUserName: m.createdByUserName || '',
+      startedAt, endedAt,
+      startName: m.start?.name || m.startLocationName || '', destinationName: m.destinationName || '',
+      members: Object.keys(m.members || {}).length,
+      hasReport: !!m.report,
+      distanceM: m.report?.group?.distanceM || 0,
+      durationMs: m.report?.group?.durationMs || Math.max(0, endedAt - startedAt),
+      arrived: m.report?.group?.arrived || 0,
+      sos: m.report?.group?.sos || 0,
+      plannedStops: m.report?.group?.plannedStops || 0,
+      visitedStops: m.report?.group?.visitedStops || 0,
+      tripStatus: m.tripStatus || 'ENDED',
+      gpsStripped: !!m.gpsStripped,
+      retentionDaysRemaining: daysRemaining,
+      isApproachingRetention,
+    };
+  };
+
+  r.get('/admin/groups', requireAdmin, wrap(async (req, res) => {
+    const active = await convoys.fleet();
+    const ended = (await repo.listEndedConvoyMeta(500)).map(convoySummary);
+    const approachingRetention = ended.filter((c) => c.isApproachingRetention || c.gpsStripped);
+    res.json({
+      active,
+      completed: ended,
+      approachingRetention,
+      retentionPolicyDays: config.retentionEndedConvoyDays || 90,
+    });
+  }));
+
   r.get('/admin/convoys/history', requireAdmin, wrap(async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
     res.json({ convoys: (await repo.listEndedConvoyMeta(limit)).map(convoySummary) });
@@ -329,7 +355,6 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       newRiders: users.filter((u) => (u.createdAt || 0) >= since).length,
       liveConvoys: convoys.rooms.size,
       rides: { all: ended.length, recent: recent.length },
-      // Group distance is the longest rider's distance in each ride.
       distanceM: { all: sum(ended, 'distanceM'), recent: sum(recent, 'distanceM') },
       rideMs: { all: sum(ended, 'durationMs'), recent: sum(recent, 'durationMs') },
       riderTrips: await repo.countTrips(),
@@ -338,10 +363,153 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     });
   }));
   r.get('/admin/feedback', requireAdmin, wrap(async (req, res) => res.json({ feedback: await repo.listFeedback() })));
-  r.get('/admin/users', requireAdmin, wrap(async (req, res) => res.json({ users: await auth.listUsers() })));
-  r.post('/admin/users/:userId/reset-password', requireAdmin, wrap(async (req, res) => res.json(await auth.adminResetPassword(req.user, req.params.userId))));
+
+  r.get('/admin/users', requireAdmin, wrap(async (req, res) => {
+    const users = await auth.listUsers(5000);
+    const activeMap = new Map();
+    for (const [gid, room] of convoys.rooms) {
+      for (const uid of room.riders.keys()) {
+        activeMap.set(uid, { groupId: gid, name: room.meta?.name || 'Active Ride', role: room.riders.get(uid)?.role || 'PACK' });
+      }
+    }
+    const activeMetas = await repo.listActiveConvoyMeta().catch(() => []);
+    for (const m of activeMetas) {
+      for (const uid of Object.keys(m.members || {})) {
+        if (!m.members[uid].leftAt && !activeMap.has(uid)) {
+          activeMap.set(uid, { groupId: m.groupId, name: m.name, role: m.members[uid].role || 'PACK' });
+        }
+      }
+    }
+    const enriched = users.map((u) => {
+      const act = activeMap.get(u.userId) || null;
+      return {
+        ...u,
+        activeGroup: act,
+        isInActiveConvoy: !!act,
+      };
+    });
+    res.json({ users: enriched });
+  }));
+
+  r.get('/admin/users/:userId/details', requireAdmin, wrap(async (req, res) => {
+    const { userId } = req.params;
+    const user = await repo.findUserById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+
+    let activeGroup = null;
+    for (const [gid, room] of convoys.rooms) {
+      if (room.riders.has(userId)) {
+        activeGroup = { groupId: gid, name: room.meta?.name || 'Active Ride', role: room.riders.get(userId)?.role || 'PACK' };
+        break;
+      }
+    }
+    if (!activeGroup) {
+      const act = await repo.findActiveMembership(userId);
+      if (act) {
+        activeGroup = { groupId: act.groupId, name: act.name, role: act.members?.[userId]?.role || 'PACK' };
+      }
+    }
+
+    const trips = await repo.listTripsForUser(userId, 500);
+    const groupIds = [...new Set(trips.map((t) => t.groupId).filter(Boolean))];
+    const groupMetaMap = new Map();
+    for (const gid of groupIds) {
+      const meta = await repo.getConvoyMeta(gid);
+      if (meta) groupMetaMap.set(gid, meta);
+    }
+
+    const groups = trips.map((t) => {
+      const meta = groupMetaMap.get(t.groupId);
+      const members = meta ? Object.values(meta.members || {}).map((m) => ({
+        userId: m.userId,
+        name: m.name,
+        role: m.role || 'PACK',
+        vehicleType: m.vehicleType || '',
+        vehicleNo: m.vehicleNo || '',
+      })) : [];
+      return {
+        tripId: t.tripId,
+        groupId: t.groupId || '',
+        name: t.tripName,
+        tripStatus: meta?.tripStatus || 'ENDED',
+        startedAt: t.startTimeEpochMs,
+        endedAt: t.endTimeEpochMs,
+        startName: t.startLocationName || meta?.start?.name || meta?.startLocationName || '',
+        destinationName: t.destinationName || meta?.destinationName || '',
+        totalDistanceKm: t.totalDistanceKm || 0,
+        movingMs: t.movingMs || 0,
+        restMs: t.restMs || 0,
+        userRole: meta?.members?.[userId]?.role || 'PACK',
+        members,
+      };
+    });
+
+    res.json({
+      user: {
+        userId: user.userId, name: user.name, email: user.email, role: user.role, status: user.status || 'ACTIVE',
+        statusReason: user.statusReason || '', statusChangedAt: user.statusChangedAt || 0,
+        phone: user.phone || '', vehicleType: user.vehicleType || 'Motorcycle', vehicleNo: user.vehicleNo || '',
+        emergencyContact: user.emergencyContact || '', emergencyContactName: user.emergencyContactName || '',
+        provider: user.provider || 'password', createdAt: user.createdAt || 0, lastActiveAt: user.lastActiveAt || 0,
+      },
+      activeGroup,
+      isInActiveConvoy: !!activeGroup,
+      groups,
+    });
+  }));
+
+  r.patch('/admin/users/:userId/status', requireAdmin, wrap(async (req, res) => {
+    const { userId } = req.params;
+    const status = String(req.body?.status || '').toUpperCase();
+    const reason = String(req.body?.reason || '').trim();
+    if (!['ACTIVE', 'ON_HOLD', 'BLOCKED'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be ACTIVE, ON_HOLD, or BLOCKED.' });
+    }
+
+    if (status !== 'ACTIVE') {
+      let inActive = false;
+      let activeName = '';
+      for (const [gid, room] of convoys.rooms) {
+        if (room.riders.has(userId)) {
+          inActive = true;
+          activeName = room.meta?.name || gid;
+          break;
+        }
+      }
+      if (!inActive) {
+        const act = await repo.findActiveMembership(userId);
+        if (act) {
+          inActive = true;
+          activeName = act.name || act.groupId;
+        }
+      }
+      if (inActive) {
+        return res.status(400).json({
+          error: `User is currently participating in active convoy "${activeName}". Cannot hold or block an active rider.`,
+          code: 'USER_IN_ACTIVE_CONVOY',
+        });
+      }
+    }
+
+    const updated = await auth.setUserStatus(req.user, userId, status, reason);
+    res.json({ user: updated });
+  }));
+
+  r.delete('/admin/users/:userId', requireAdmin, wrap(async (req, res) => {
+    const { userId } = req.params;
+    const target = await repo.findUserById(userId);
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+    if (target.role === 'MASTER_ADMIN') {
+      return res.status(403).json({ error: 'Cannot delete the master administrator account.' });
+    }
+    await convoys.leaveAll(userId);
+    await repo.deleteUserCascade(target);
+    res.json({ ok: true, userId });
+  }));
+
   r.patch('/admin/users/:userId/role', requireAdmin, wrap(async (req, res) => res.json(await auth.setRole(req.user, req.params.userId, String(req.body?.role || '')))));
-  r.delete('/admin/convoys/:groupId', requireAdmin, wrap(async (req, res) => { await convoys.adminDissolve(req.params.groupId); res.json({ ok: true }); }));
+  r.post('/admin/users/:userId/reset-password', requireAdmin, wrap(async (req, res) => res.json(await auth.adminResetPassword(req.user, req.params.userId))));
+  r.delete('/admin/convoys/:groupId', requireAdmin, wrap(async (req, res) => { await convoys.adminDissolve(req.params.groupId); res.json({ ok: true, groupId: req.params.groupId }); }));
 
   // Errors
   // eslint-disable-next-line no-unused-vars
