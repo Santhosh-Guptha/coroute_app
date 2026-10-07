@@ -188,10 +188,13 @@ void main() {
       SharedPreferences.setMockInitialValues({
         AppConstants.keyUserId: 'usr_neo',
         AppConstants.keyUserName: 'Neo One',
+        AppConstants.keyUserEmail: 'neo@example.com',
         AppConstants.keyUserRole: AppConstants.riderRole,
         AppConstants.keyVehicleType: 'Motorcycle (Adv)',
         AppConstants.keyVehicleNo: 'KA-05-EX-9999',
         AppConstants.keyPhone: '+91 9888877777',
+        AppConstants.keyEmergencyContact: '+91 9999911111',
+        AppConstants.keyEmergencyName: 'Morpheus',
       });
       final storage = const FlutterSecureStorage();
       await storage.write(key: 'coroute_jwt', value: 'token-neo');
@@ -201,10 +204,13 @@ void main() {
           return http.Response(jsonEncode({
             'userId': 'usr_neo',
             'name': 'Neo One',
+            'email': 'neo@example.com',
             'role': AppConstants.riderRole,
             'vehicleType': 'Motorcycle (Adv)',
             'vehicleNo': 'KA-05-EX-9999',
             'phone': '+91 9888877777',
+            'emergencyContact': '+91 9999911111',
+            'emergencyContactName': 'Morpheus',
           }), 200);
         }
         if (req.url.path.endsWith('/convoys/active')) {

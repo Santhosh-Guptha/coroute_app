@@ -56,6 +56,27 @@ class AuthService extends ChangeNotifier {
   bool get isMasterAdmin =>
       _role == AppConstants.adminRole ||
       (_email != null && _email!.trim().toLowerCase() == AppConstants.masterAdminEmail.toLowerCase());
+
+  /// True if the user is registered or designated as a pillion passenger.
+  bool get isPillion =>
+      (_vehicleType ?? '').trim().toLowerCase() == 'pillion rider' ||
+      (_vehicleNo ?? '').trim().toUpperCase() == 'PILLION';
+
+  /// Mandatory safety invariant:
+  /// Every rider must have verified contact numbers, bike registration (or pillion status),
+  /// and emergency (ICE) contacts before creating or participating in group rides.
+  bool get isProfileComplete {
+    if (isMasterAdmin) return true;
+    final nameOk = (_name ?? '').trim().length >= 2;
+    final emailOk = (_email ?? '').trim().contains('@');
+    final phoneOk = (_phone ?? '').trim().length >= 7;
+    final pillion = isPillion;
+    final vehicleOk = pillion || (_vehicleNo ?? '').trim().length >= 3;
+    final iceNameOk = (_emergencyContactName ?? '').trim().length >= 2;
+    final icePhoneOk = (_emergencyContact ?? '').trim().length >= 7;
+    return nameOk && emailOk && phoneOk && vehicleOk && iceNameOk && icePhoneOk;
+  }
+
   String? get token => _api.token;
 
   Future<void> _loadSavedSession() async {
@@ -212,15 +233,20 @@ class AuthService extends ChangeNotifier {
     required String vehicleNo,
     required String emergencyContact,
     required String emergencyContactName,
+    String? name,
   }) async {
     try {
-      final res = await _api.patch('/me', {
-        'phone': phone,
-        'vehicleType': vehicleType,
-        'vehicleNo': vehicleNo,
-        'emergencyContact': emergencyContact,
-        'emergencyContactName': emergencyContactName,
-      });
+      final payload = <String, dynamic>{
+        'phone': phone.trim(),
+        'vehicleType': vehicleType.trim(),
+        'vehicleNo': vehicleNo.trim().toUpperCase(),
+        'emergencyContact': emergencyContact.trim(),
+        'emergencyContactName': emergencyContactName.trim(),
+      };
+      if (name != null && name.trim().isNotEmpty) {
+        payload['name'] = name.trim();
+      }
+      final res = await _api.patch('/me', payload);
       if (res is Map) await _applyUser(Map<String, dynamic>.from(res));
       return true;
     } catch (e) {

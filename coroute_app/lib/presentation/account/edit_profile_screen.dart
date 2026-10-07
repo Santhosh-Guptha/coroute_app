@@ -26,6 +26,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     'Motorcycle (Sport)',
     'Motorcycle (Commuter)',
     'Scooter / Maxi',
+    'Pillion Rider',
     'Support / Chase Car',
     'Other',
   ];
@@ -39,17 +40,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     super.initState();
     final auth = context.read<AuthService>();
     _phoneController.text = auth.phone ?? '';
-    _vehicleNoController.text = auth.vehicleNo ?? '';
     _iceNameController.text = auth.emergencyContactName ?? '';
     _icePhoneController.text = auth.emergencyContact ?? '';
 
     final currentVehicle = auth.vehicleType ?? '';
-    if (_vehicleTypes.contains(currentVehicle)) {
+    if (auth.isPillion || currentVehicle == 'Pillion Rider' || auth.vehicleNo == 'PILLION') {
+      _selectedVehicle = 'Pillion Rider';
+      _vehicleNoController.text = 'PILLION';
+    } else if (_vehicleTypes.contains(currentVehicle)) {
       _selectedVehicle = currentVehicle;
+      _vehicleNoController.text = auth.vehicleNo ?? '';
     } else if (currentVehicle.isNotEmpty) {
       _selectedVehicle = 'Other';
+      _vehicleNoController.text = auth.vehicleNo ?? '';
     } else {
       _selectedVehicle = _vehicleTypes.first;
+      _vehicleNoController.text = auth.vehicleNo ?? '';
     }
   }
 
@@ -79,9 +85,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Future<void> _save() async {
     final phone = _phoneController.text.trim();
+    final isPillion = _selectedVehicle == 'Pillion Rider';
     final vehicleNo = _vehicleNoController.text.trim().toUpperCase();
     final iceName = _iceNameController.text.trim();
     final icePhone = _icePhoneController.text.trim();
+
+    if (phone.length < 7) {
+      setState(() => _error = 'Please provide a valid mobile phone number.');
+      return;
+    }
+    if (!isPillion && vehicleNo.length < 3) {
+      setState(() => _error = 'Bike / vehicle registration number is mandatory for riders (or select Pillion Rider).');
+      return;
+    }
+    if (iceName.length < 2) {
+      setState(() => _error = 'Emergency (ICE) contact name is mandatory for ride safety.');
+      return;
+    }
+    if (icePhone.length < 7) {
+      setState(() => _error = 'Emergency (ICE) contact phone number is mandatory for SOS alerts.');
+      return;
+    }
 
     setState(() {
       _busy = true;
@@ -91,7 +115,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final success = await context.read<AuthService>().updateProfile(
       phone: phone,
       vehicleType: _selectedVehicle,
-      vehicleNo: vehicleNo,
+      vehicleNo: isPillion ? 'PILLION' : vehicleNo,
       emergencyContact: icePhone,
       emergencyContactName: iceName,
     );
@@ -135,6 +159,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 540),
           child: ListView(
+            cacheExtent: 1500,
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [
               // User identity badge
@@ -233,7 +258,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                               items: _vehicleTypes.map((v) => DropdownMenuItem(value: v, child: Text(v, overflow: TextOverflow.ellipsis))).toList(),
                               onChanged: (val) {
-                                if (val != null) setState(() => _selectedVehicle = val);
+                                if (val != null) {
+                                  setState(() {
+                                    _selectedVehicle = val;
+                                    if (val == 'Pillion Rider') {
+                                      _vehicleNoController.text = 'PILLION';
+                                    } else if (_vehicleNoController.text == 'PILLION') {
+                                      _vehicleNoController.text = '';
+                                    }
+                                  });
+                                }
                               },
                             ),
                           ),
@@ -251,11 +285,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         const SizedBox(height: 6),
                         TextField(
                           controller: _vehicleNoController,
+                          enabled: _selectedVehicle != 'Pillion Rider',
                           textCapitalization: TextCapitalization.characters,
-                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                          style: TextStyle(
+                            color: _selectedVehicle == 'Pillion Rider' ? AppTheme.textMuted : AppTheme.textPrimary,
+                            fontSize: 13,
+                          ),
                           decoration: _inputDec(
-                            label: 'Plate No',
-                            hint: 'KA 01 AB 1234',
+                            label: _selectedVehicle == 'Pillion Rider' ? 'Not Required' : 'Plate No *',
+                            hint: _selectedVehicle == 'Pillion Rider' ? 'PILLION' : 'KA 01 AB 1234',
                           ),
                         ),
                       ],

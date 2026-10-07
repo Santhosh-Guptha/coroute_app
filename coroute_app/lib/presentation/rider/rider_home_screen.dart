@@ -14,6 +14,7 @@ import '../onboarding/permissions_screen.dart';
 import 'convoy_dashboard_screen.dart';
 import 'trip_history_screen.dart';
 import '../trip_planner/trip_planner_screen.dart';
+import '../auth/complete_profile_screen.dart';
 
 class RiderHomeScreen extends StatefulWidget {
   const RiderHomeScreen({super.key});
@@ -26,6 +27,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   final _joinCodeController = TextEditingController();
   ConvoyService? _convoyService;
   bool _joinDialogOpen = false;
+  bool _profilePromptShown = false;
 
   @override
   void initState() {
@@ -35,7 +37,79 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
       _convoyService = context.read<ConvoyService>();
       _convoyService!.addListener(_onConvoyChanged);
       _onConvoyChanged();
+      _checkMandatoryProfile();
     });
+  }
+
+  void _checkMandatoryProfile() {
+    if (_profilePromptShown || !mounted) return;
+    final auth = context.read<AuthService>();
+    if (!auth.isProfileComplete && !auth.isMasterAdmin) {
+      _profilePromptShown = true;
+      _showMandatoryProfilePopup(context);
+    }
+  }
+
+  void _showMandatoryProfilePopup(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.slateCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.shield_outlined, color: AppTheme.laserRed, size: 24),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Mandatory Safety Details Required',
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'CoRoute is a live convoy tracking platform designed around rider safety. To protect all riders in the convoy, you must provide:\n\n'
+              '• Verified Mobile Number\n'
+              '• Bike Registration Number (or select Pillion Rider)\n'
+              '• Emergency (ICE) Contact Name & Phone\n\n'
+              'Creating or joining convoys is restricted until these mandatory details are updated.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Remind Me Later', style: TextStyle(color: AppTheme.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.neonCyan,
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openCompleteProfile(context);
+            },
+            child: const Text('Update Details Now', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openCompleteProfile(BuildContext context) async {
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const CompleteProfileScreen(forced: false)),
+    );
+    if (mounted) setState(() {});
   }
 
   /// A join link (coroute://join/CODE) opens the join dialog with the code filled in.
@@ -100,6 +174,20 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                 final code = _joinCodeController.text.trim();
                 final auth = context.read<AuthService>();
                 final convoyService = context.read<ConvoyService>();
+
+                if (!auth.isProfileComplete && !auth.isMasterAdmin) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text('⚠️ Convoy joining locked! Mandatory safety details required.'),
+                      backgroundColor: AppTheme.laserRed,
+                      action: SnackBarAction(label: 'Update', textColor: Colors.white, onPressed: () => _openCompleteProfile(context)),
+                    ),
+                  );
+                  _openCompleteProfile(context);
+                  return;
+                }
+
                 if (!await PermissionsScreen.ensure(context)) return;
                 if (!ctx.mounted) return;
 
@@ -122,6 +210,10 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                   userId: auth.currentUserId ?? '',
                   name: auth.currentUserName ?? 'Rider',
                   vehicleType: auth.vehicleType ?? 'Motorcycle',
+                  vehicleNo: auth.vehicleNo ?? '',
+                  phone: auth.phone ?? '',
+                  emergencyContact: auth.emergencyContact ?? '',
+                  emergencyContactName: auth.emergencyContactName ?? '',
                   lat: joinLat,
                   lng: joinLng,
                   speedKmh: 0.0,
@@ -153,162 +245,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
         );
       },
     ).whenComplete(() => _joinDialogOpen = false);
-  }
-
-  void _showEditProfileDialog(BuildContext context, AuthService auth) {
-    final phoneCtrl = TextEditingController(text: auth.phone ?? '');
-    final vehicleNoCtrl = TextEditingController(text: auth.vehicleNo ?? '');
-    final emergencyNameCtrl = TextEditingController(text: auth.emergencyContactName ?? '');
-    final emergencyPhoneCtrl = TextEditingController(text: auth.emergencyContact ?? '');
-    String vehicleType = auth.vehicleType ?? 'Motorcycle (Adv)';
-
-    final vehicleTypes = [
-      'Motorcycle (Adv)',
-      'Motorcycle (Cruiser)',
-      'Motorcycle (Sport)',
-      'Motorcycle (Commuter)',
-      'Scooter / Maxi',
-      'Support Car / SUV',
-    ];
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: AppTheme.slateCard,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: [
-              Icon(Icons.manage_accounts_rounded, color: AppTheme.neonCyan),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  '${auth.currentUserName} Profile',
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 16),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('PHONE NUMBER', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                TextField(
-                  controller: phoneCtrl,
-                  keyboardType: TextInputType.phone,
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                  decoration: InputDecoration(
-                    hintText: 'Your mobile number',
-                    hintStyle: TextStyle(color: AppTheme.textMuted),
-                    filled: true,
-                    fillColor: AppTheme.elevatedCard,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text('VEHICLE TYPE', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.elevatedCard,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppTheme.glassBorder),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: vehicleTypes.contains(vehicleType) ? vehicleType : vehicleTypes.first,
-                      dropdownColor: AppTheme.slateCard,
-                      isExpanded: true,
-                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
-                      items: vehicleTypes.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
-                      onChanged: (val) {
-                        if (val != null) setDialogState(() => vehicleType = val);
-                      },
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text('VEHICLE REGISTRATION NUMBER', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                TextField(
-                  controller: vehicleNoCtrl,
-                  textCapitalization: TextCapitalization.characters,
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                  decoration: InputDecoration(
-                    hintText: 'e.g. KA 01 AB 1234',
-                    hintStyle: TextStyle(color: AppTheme.textMuted),
-                    filled: true,
-                    fillColor: AppTheme.elevatedCard,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text('EMERGENCY (ICE) CONTACT NAME', style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                TextField(
-                  controller: emergencyNameCtrl,
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                  decoration: InputDecoration(
-                    hintText: 'Contact Name (e.g. Spouse / Brother)',
-                    hintStyle: TextStyle(color: AppTheme.textMuted),
-                    filled: true,
-                    fillColor: AppTheme.elevatedCard,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text('EMERGENCY (ICE) PHONE NUMBER', style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                TextField(
-                  controller: emergencyPhoneCtrl,
-                  keyboardType: TextInputType.phone,
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                  decoration: InputDecoration(
-                    hintText: 'Emergency phone number',
-                    hintStyle: TextStyle(color: AppTheme.textMuted),
-                    filled: true,
-                    fillColor: AppTheme.elevatedCard,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                await auth.updateProfile(
-                  phone: phoneCtrl.text,
-                  vehicleType: vehicleType,
-                  vehicleNo: vehicleNoCtrl.text,
-                  emergencyContact: emergencyPhoneCtrl.text,
-                  emergencyContactName: emergencyNameCtrl.text,
-                );
-                if (ctx.mounted) {
-                  Navigator.pop(ctx);
-                }
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Rider profile updated!'), backgroundColor: AppTheme.emeraldSafe),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.neonCyan, foregroundColor: Colors.black),
-              child: const Text('Save Profile'),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
@@ -364,7 +300,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
             // Rider Profile & Callsign Header
             InkWell(
               borderRadius: BorderRadius.circular(16),
-              onTap: () => _showEditProfileDialog(context, auth),
+              onTap: () => _openCompleteProfile(context),
               child: GlassCard(
                 child: Row(
                   children: [
@@ -396,7 +332,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                             ],
                           ),
                           Text(
-                            '${auth.vehicleType ?? 'Motorcycle'}${auth.vehicleNo != null && auth.vehicleNo!.isNotEmpty ? " · ${auth.vehicleNo}" : ""} · ${auth.phone != null && auth.phone!.isNotEmpty ? auth.phone : "Tap to edit profile"}',
+                            '${auth.vehicleType ?? 'Motorcycle'}${auth.vehicleNo != null && auth.vehicleNo!.isNotEmpty ? " · ${auth.vehicleNo}" : ""} · ${auth.phone != null && auth.phone!.isNotEmpty ? auth.phone : "Tap to complete details"}',
                             style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                           ),
                         ],
@@ -408,7 +344,47 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
               ),
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+
+            // Incomplete Profile Restriction Banner
+            if (!auth.isProfileComplete && !auth.isMasterAdmin) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppTheme.laserRed.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.laserRed.withOpacity(0.5)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Icon(Icons.shield_outlined, color: AppTheme.laserRed, size: 26),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Mandatory Safety Details Required', style: TextStyle(color: AppTheme.laserRed, fontWeight: FontWeight.bold, fontSize: 13)),
+                          const SizedBox(height: 2),
+                          Text('Creating or joining convoys is locked until your phone, bike/pillion details, and emergency contacts are provided.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: () => _openCompleteProfile(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.laserRed,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      child: const Text('Update', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
 
             // Active Convoy Quick Resume Banner (if in session)
             if (activeConvoy != null) ...[
@@ -505,7 +481,21 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                   child: GlassCard(
                     padding: const EdgeInsets.all(18),
                     borderColor: AppTheme.neonCyan.withOpacity(0.3),
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TripPlannerScreen())),
+                    onTap: () {
+                      final auth = context.read<AuthService>();
+                      if (!auth.isProfileComplete && !auth.isMasterAdmin) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text('⚠️ Convoy creation locked! Mandatory safety details required.'),
+                            backgroundColor: AppTheme.laserRed,
+                            action: SnackBarAction(label: 'Update', textColor: Colors.white, onPressed: () => _openCompleteProfile(context)),
+                          ),
+                        );
+                        _openCompleteProfile(context);
+                        return;
+                      }
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const TripPlannerScreen()));
+                    },
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -540,7 +530,21 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                   child: GlassCard(
                     padding: const EdgeInsets.all(18),
                     borderColor: AppTheme.hyperAmber.withOpacity(0.3),
-                    onTap: () => _showJoinConvoyDialog(context),
+                    onTap: () {
+                      final auth = context.read<AuthService>();
+                      if (!auth.isProfileComplete && !auth.isMasterAdmin) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text('⚠️ Convoy joining locked! Mandatory safety details required.'),
+                            backgroundColor: AppTheme.laserRed,
+                            action: SnackBarAction(label: 'Update', textColor: Colors.white, onPressed: () => _openCompleteProfile(context)),
+                          ),
+                        );
+                        _openCompleteProfile(context);
+                        return;
+                      }
+                      _showJoinConvoyDialog(context);
+                    },
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [

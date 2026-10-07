@@ -112,8 +112,40 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   }));
 
   // Convoys
-  r.post('/convoys', wrap(async (req, res) => res.status(201).json(await convoys.createConvoy(req.user, req.body || {}))));
-  r.post('/convoys/join', wrap(async (req, res) => res.json(await convoys.joinByCode(req.user, req.body?.code, req.body?.rider || {}))));
+  const ensureProfileComplete = async (req) => {
+    if (req.user?.role === 'MASTER_ADMIN') return;
+    const isEnforce = Boolean(
+      req.get('X-CoRoute-Build') ||
+      req.get('X-CoRoute-Enforce-Profile') ||
+      req.body?.enforceProfile
+    );
+    if (!isEnforce) return;
+    const u = await repo.findUserById(req.user.userId);
+    if (!u) return;
+    const isPillion = (u.vehicleType || '').trim().toLowerCase() === 'pillion rider' || (u.vehicleNo || '').trim().toUpperCase() === 'PILLION';
+    const complete = Boolean(
+      (u.name || '').trim().length >= 2 &&
+      (u.phone || '').trim().length >= 7 &&
+      (isPillion || (u.vehicleNo || '').trim().length >= 2) &&
+      (u.emergencyContact || '').trim().length >= 7 &&
+      (u.emergencyContactName || '').trim().length >= 2
+    );
+    if (!complete) {
+      const err = new Error('Mandatory profile details missing. Please complete your phone, vehicle/pillion, and emergency contact details before creating or joining a convoy.');
+      err.status = 400;
+      err.code = 'PROFILE_INCOMPLETE';
+      throw err;
+    }
+  };
+
+  r.post('/convoys', wrap(async (req, res) => {
+    await ensureProfileComplete(req);
+    res.status(201).json(await convoys.createConvoy(req.user, req.body || {}));
+  }));
+  r.post('/convoys/join', wrap(async (req, res) => {
+    await ensureProfileComplete(req);
+    res.json(await convoys.joinByCode(req.user, req.body?.code, req.body?.rider || {}));
+  }));
   r.get('/convoys/active', wrap(async (req, res) => {
     const meta = await repo.findActiveMembership(req.user.userId);
     if (!meta) return res.json({ convoy: null });

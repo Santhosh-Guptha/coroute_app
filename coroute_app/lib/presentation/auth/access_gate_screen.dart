@@ -10,6 +10,7 @@ import '../../data/services/meta_service.dart';
 import '../account/change_password_screen.dart';
 import '../admin/master_admin_dashboard.dart';
 import '../rider/rider_home_screen.dart';
+import 'complete_profile_screen.dart';
 
 class AccessGateScreen extends StatefulWidget {
   const AccessGateScreen({super.key});
@@ -42,6 +43,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
   bool _isLoading = false;
   String? _errorMessage;
 
+  bool _isRegPillion = false;
   String _selectedVehicle = 'Motorcycle (Adv)';
   bool _acceptedTerms = false;
 
@@ -177,8 +179,20 @@ class _AccessGateScreenState extends State<AccessGateScreen>
       setState(() => _errorMessage = 'Passwords do not match. Please re-enter.');
       return;
     }
-    if (phone.isEmpty) {
+    if (phone.length < 7) {
       setState(() => _errorMessage = 'Please provide your mobile phone number for ride coordination.');
+      return;
+    }
+    if (!_isRegPillion && vehicleNo.length < 3) {
+      setState(() => _errorMessage = 'Bike registration number is mandatory for riders (or select Pillion Rider).');
+      return;
+    }
+    if (emergencyName.length < 2) {
+      setState(() => _errorMessage = 'Emergency (ICE) contact name is mandatory for rider safety.');
+      return;
+    }
+    if (emergencyPhone.length < 7) {
+      setState(() => _errorMessage = 'Emergency (ICE) contact phone number is mandatory for SOS alerts.');
       return;
     }
     if (!_acceptedTerms) {
@@ -198,8 +212,8 @@ class _AccessGateScreenState extends State<AccessGateScreen>
       email: email,
       password: password,
       phone: phone,
-      vehicleType: _selectedVehicle,
-      vehicleNo: vehicleNo,
+      vehicleType: _isRegPillion ? 'Pillion Rider' : _selectedVehicle,
+      vehicleNo: _isRegPillion ? 'PILLION' : vehicleNo,
       emergencyContact: emergencyPhone,
       emergencyContactName: emergencyName,
     );
@@ -236,7 +250,17 @@ class _AccessGateScreenState extends State<AccessGateScreen>
     setState(() => _isLoading = false);
 
     if (res['success'] == true) {
-      _enter(res['isAdmin'] == true);
+      final isAdmin = res['isAdmin'] == true;
+      if (!auth.isProfileComplete && !isAdmin) {
+        final completed = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const CompleteProfileScreen(forced: true, isGoogleUser: true),
+          ),
+        );
+        if (completed != true || !mounted) return;
+      }
+      _enter(isAdmin);
     } else {
       setState(() {
         _errorMessage = res['error']?.toString();
@@ -659,62 +683,140 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         Divider(color: AppTheme.glassBorder),
         const SizedBox(height: 10),
 
-        // 5. Vehicle Setup
+        // 5. Rider Role & Vehicle Setup
+        Text('RIDER ROLE & VEHICLE SETUP *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
         Row(
           children: [
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('VEHICLE TYPE', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.elevatedCard,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppTheme.glassBorder),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _selectedVehicle,
-                        dropdownColor: AppTheme.slateCard,
-                        isExpanded: true,
-                        style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
-                        items: _vehicleTypes.map((v) => DropdownMenuItem(value: v, child: Text(v, overflow: TextOverflow.ellipsis))).toList(),
-                        onChanged: (val) {
-                          if (val != null) setState(() => _selectedVehicle = val);
-                        },
-                      ),
-                    ),
-                  ),
-                ],
+              child: ChoiceChip(
+                label: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.two_wheeler, size: 16),
+                    SizedBox(width: 6),
+                    Text('Bike Rider'),
+                  ],
+                ),
+                selected: !_isRegPillion,
+                onSelected: (val) {
+                  if (val) setState(() => _isRegPillion = false);
+                },
+                selectedColor: AppTheme.neonCyan,
+                labelStyle: TextStyle(
+                  color: !_isRegPillion ? Colors.black : AppTheme.textPrimary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+                backgroundColor: AppTheme.elevatedCard,
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('VEHICLE REG NO', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  TextField(
-                    controller: _regVehicleNoController,
-                    textCapitalization: TextCapitalization.characters,
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                    decoration: InputDecoration(
-                      hintText: 'e.g. MH 12 AB 1234',
-                      hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 11),
-                      filled: true,
-                      fillColor: AppTheme.elevatedCard,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ],
+              child: ChoiceChip(
+                label: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.airline_seat_recline_normal, size: 16),
+                    SizedBox(width: 6),
+                    Text('Pillion Rider'),
+                  ],
+                ),
+                selected: _isRegPillion,
+                onSelected: (val) {
+                  if (val) setState(() => _isRegPillion = true);
+                },
+                selectedColor: AppTheme.hyperAmber,
+                labelStyle: TextStyle(
+                  color: _isRegPillion ? Colors.black : AppTheme.textPrimary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+                backgroundColor: AppTheme.elevatedCard,
               ),
             ),
           ],
         ),
+
+        const SizedBox(height: 10),
+
+        if (!_isRegPillion)
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('VEHICLE TYPE', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.elevatedCard,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppTheme.glassBorder),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedVehicle,
+                          dropdownColor: AppTheme.slateCard,
+                          isExpanded: true,
+                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+                          items: _vehicleTypes.map((v) => DropdownMenuItem(value: v, child: Text(v, overflow: TextOverflow.ellipsis))).toList(),
+                          onChanged: (val) {
+                            if (val != null) setState(() => _selectedVehicle = val);
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('BIKE / REG NO *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    TextField(
+                      controller: _regVehicleNoController,
+                      textCapitalization: TextCapitalization.characters,
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, letterSpacing: 1.1),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. KA 01 AB 1234',
+                        hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                        filled: true,
+                        fillColor: AppTheme.elevatedCard,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          )
+        else
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.hyperAmber.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppTheme.hyperAmber.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle_outline, color: AppTheme.hyperAmber, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Pillion Rider: You will participate in convoys without requiring a bike registration number.',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+          ),
 
         const SizedBox(height: 14),
         Divider(color: AppTheme.glassBorder),
@@ -722,8 +824,8 @@ class _AccessGateScreenState extends State<AccessGateScreen>
 
         // 6. Emergency ICE Contacts
         Text(
-          'EMERGENCY (ICE) CONTACT (OPTIONAL BUT RECOMMENDED)',
-          style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold),
+          'EMERGENCY (ICE) CONTACT (MANDATORY FOR RIDER SAFETY) *',
+          style: TextStyle(color: AppTheme.laserRed, fontSize: 10, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 4),
         Row(
@@ -733,8 +835,8 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 controller: _regEmergencyNameController,
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                 decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.person_pin, color: AppTheme.hyperAmber, size: 18),
-                  hintText: 'Contact Name (e.g. Brother)',
+                  prefixIcon: Icon(Icons.person_pin, color: AppTheme.laserRed, size: 18),
+                  hintText: 'Contact Name * (e.g. Brother)',
                   hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                   filled: true,
                   fillColor: AppTheme.elevatedCard,
@@ -749,8 +851,8 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 keyboardType: TextInputType.phone,
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                 decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.phone_in_talk, color: AppTheme.hyperAmber, size: 18),
-                  hintText: 'Emergency Phone',
+                  prefixIcon: Icon(Icons.phone_in_talk, color: AppTheme.laserRed, size: 18),
+                  hintText: 'Emergency Phone *',
                   hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                   filled: true,
                   fillColor: AppTheme.elevatedCard,

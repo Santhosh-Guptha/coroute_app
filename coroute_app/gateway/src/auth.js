@@ -27,7 +27,22 @@ function bootstrapRoleFor(email, currentRole) {
   return config.adminEmails.includes(email.toLowerCase()) ? ROLE_ADMIN : (currentRole || ROLE_RIDER);
 }
 
+function isPillionUser(u) {
+  return (u.vehicleType || '').trim().toLowerCase() === 'pillion rider' || (u.vehicleNo || '').trim().toUpperCase() === 'PILLION';
+}
+
+function checkProfileComplete(u) {
+  const hasName = Boolean((u.name || '').trim().length >= 2);
+  const hasEmail = Boolean((u.email || '').trim().includes('@'));
+  const hasPhone = Boolean((u.phone || '').trim().length >= 7);
+  const pillion = isPillionUser(u);
+  const hasVehicle = pillion || Boolean((u.vehicleNo || '').trim().length >= 2);
+  const hasIce = Boolean((u.emergencyContact || '').trim().length >= 7 && (u.emergencyContactName || '').trim().length >= 2);
+  return Boolean(hasName && hasEmail && hasPhone && hasVehicle && hasIce);
+}
+
 function publicUser(u) {
+  const pillion = isPillionUser(u);
   return {
     userId: u.userId,
     name: u.name,
@@ -37,8 +52,10 @@ function publicUser(u) {
     statusReason: u.statusReason || '',
     statusChangedAt: u.statusChangedAt || 0,
     phone: u.phone || '',
-    vehicleType: u.vehicleType || 'Motorcycle',
-    vehicleNo: u.vehicleNo || '',
+    vehicleType: pillion ? 'Pillion Rider' : (u.vehicleType || 'Motorcycle'),
+    vehicleNo: pillion ? 'PILLION' : (u.vehicleNo || ''),
+    isPillion: pillion,
+    isProfileComplete: checkProfileComplete(u),
     emergencyContact: u.emergencyContact || '',
     emergencyContactName: u.emergencyContactName || '',
     provider: u.provider || 'password',
@@ -89,6 +106,10 @@ class AuthService {
     if (!(phone || '').trim()) throw new AuthError('Mobile phone number is required.');
     if (await this.repo.findUserByEmail(cleanEmail)) throw new AuthError('This email is already registered. Please sign in.', 409);
 
+    const pillion = (vehicleType || '').trim().toLowerCase() === 'pillion rider' || (vehicleNo || '').trim().toUpperCase() === 'PILLION';
+    const cleanVehicleType = pillion ? 'Pillion Rider' : (vehicleType || 'Motorcycle').trim();
+    const cleanVehicleNo = pillion ? 'PILLION' : (vehicleNo || '').trim().toUpperCase();
+
     const user = await this.repo.createUser({
       userId: await this._uniqueUserId(cleanName),
       name: cleanName,
@@ -97,8 +118,8 @@ class AuthService {
       role: bootstrapRoleFor(cleanEmail),
       provider: 'password',
       phone: phone.trim(),
-      vehicleType: (vehicleType || 'Motorcycle').trim(),
-      vehicleNo: (vehicleNo || '').trim().toUpperCase(),
+      vehicleType: cleanVehicleType,
+      vehicleNo: cleanVehicleNo,
       emergencyContact: (emergencyContact || '').trim(),
       emergencyContactName: (emergencyContactName || '').trim(),
       createdAt: Date.now(),
@@ -191,10 +212,20 @@ class AuthService {
   async updateProfile(userId, patch) {
     const user = await this.repo.findUserById(userId);
     if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
-    const allowed = ['phone', 'vehicleType', 'vehicleNo', 'emergencyContact', 'emergencyContactName'];
+    const allowed = ['name', 'phone', 'vehicleType', 'vehicleNo', 'emergencyContact', 'emergencyContactName'];
     const clean = {};
     for (const k of allowed) if (patch[k] !== undefined) clean[k] = String(patch[k]).trim();
-    if (clean.vehicleNo) clean.vehicleNo = clean.vehicleNo.toUpperCase();
+    const pillion = (clean.vehicleType || user.vehicleType || '').toLowerCase() === 'pillion rider' ||
+                    (clean.vehicleNo || user.vehicleNo || '').toUpperCase() === 'PILLION' ||
+                    patch.isPillion === true;
+    if (patch.isPillion !== undefined || clean.vehicleType === 'Pillion Rider') {
+      if (pillion) {
+        clean.vehicleType = 'Pillion Rider';
+        clean.vehicleNo = 'PILLION';
+      }
+    } else if (clean.vehicleNo) {
+      clean.vehicleNo = clean.vehicleNo.toUpperCase();
+    }
     const updated = await this.repo.updateUser(user.key, clean);
     return publicUser(updated);
   }
