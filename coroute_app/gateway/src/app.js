@@ -11,7 +11,7 @@ const config = require('./config');
 const { SodaClient } = require('./oracle/soda');
 const { MemorySoda } = require('./oracle/memory_soda');
 const { Repo } = require('./oracle/repo');
-const { AuthService } = require('./auth');
+const { AuthService, UserGate } = require('./auth');
 const { ConvoyManager } = require('./convoys');
 const { Hub } = require('./ws');
 const { Retention } = require('./retention');
@@ -29,7 +29,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const repo = new Repo(soda);
   if (migrate) await repo.migrate();
 
-  const auth = new AuthService(repo, { googleVerifier });
+  const gate = new UserGate(repo);
+  const auth = new AuthService(repo, { googleVerifier, gate });
   const convoys = new ConvoyManager(repo, { logger });
   const tracks = new TrackStore(repo);
   const geo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
@@ -45,7 +46,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
 
   const server = http.createServer(app);
   const startedAt = Date.now();
-  const hub = new Hub({ server, convoys, repo, tracks, timeline, logger });
+  const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate });
   // ---- Public website, served from here so no extra hosting is needed ----
   const path = require('path');
   const fs = require('fs');
@@ -55,11 +56,13 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const indexTemplate = fs.readFileSync(pub('index.html'), 'utf8');
   const sendPage = (res, html) => res.type('html').set('Cache-Control', 'public, max-age=300').send(html);
 
-  app.get(['/', '/index.html'], (req, res) => sendPage(res, indexTemplate.replaceAll('__ORIGIN__', originOf(req))));
+  app.get(['/', '/index.html'], (req, res) => sendPage(res, indexTemplate.replaceAll('__ORIGIN__', originOf(req)).replaceAll('__MAX_RIDERS__', String(config.maxConvoyRiders))));
   app.get(['/privacy', '/privacy.html'], (req, res) => res.sendFile(pub('privacy.html')));
   app.get(['/terms', '/terms.html'], (req, res) => res.sendFile(pub('terms.html')));
-  // One download link that never breaks: Play Store when configured, otherwise the latest GitHub release.
-  app.get('/download', (req, res) => res.redirect(302, config.playStoreUrl || config.apkUrl));
+  // One download link that never breaks: Play Store when configured, otherwise the APK this server hosts
+  // (public/coroute.apk, 64-bit ARM). Older 32-bit phones use /download/32bit.
+  app.get('/download', (req, res) => res.redirect(302, config.playStoreUrl || config.apkUrl || `${originOf(req)}${config.apkPath}`));
+  app.get('/download/32bit', (req, res) => res.redirect(302, config.apkArm32Url || `${originOf(req)}${config.apkArm32Path}`));
   app.get('/robots.txt', (req, res) => res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${originOf(req)}/sitemap.xml\n`));
   app.get('/sitemap.xml', (req, res) => {
     const o = originOf(req);
@@ -78,8 +81,18 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // Android App Links verification (express.static ignores dot-directories, so serve it explicitly).
   app.get('/.well-known/assetlinks.json', (req, res) => res.type('application/json').set('Cache-Control', 'public, max-age=86400').sendFile(pub('.well-known/assetlinks.json')));
   app.get('/status', (req, res) => res.json({ service: 'CoRoute Gateway', version: require('../package.json').version, status: 'ONLINE' }));
-  app.use(express.static(pub(''), { index: false, maxAge: '7d', extensions: false, setHeaders: (res, p) => { if (p.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); } }));
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo }));
+  app.use(express.static(pub(''), {
+    index: false, maxAge: '7d', extensions: false,
+    setHeaders: (res, p) => {
+      if (p.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
+      // The APK keeps its name across releases: always check for a newer one.
+      if (p.endsWith('.apk')) {
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      }
+    },
+  }));
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -98,7 +111,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { app, server, hub, repo, soda, auth, convoys, retention, tracks, timeline, geo, shutdown };
+  return { app, server, hub, repo, soda, auth, gate, convoys, retention, tracks, timeline, geo, shutdown };
 }
 
 module.exports = { createApp, createSoda };

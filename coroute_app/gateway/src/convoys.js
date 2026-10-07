@@ -14,8 +14,11 @@ const crypto = require('crypto');
 const config = require('./config');
 const { ACTIVE_STATUSES } = require('./oracle/repo');
 const { haversine, encodePolyline } = require('./geo_math');
+const { scrub, scrubConvoyMeta, mentions } = require('./anonymise');
 
 const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'SCENIC', 'TOLL', 'OTHER']);
+/** The chat card posted when a rider asks the group to wait (plain text, no emoji). */
+const WAIT_MESSAGE = 'Asked the group for a 2 minute stop. Please regroup safely.';
 const MAX_STOPS = 20;
 
 class ConvoyError extends Error {
@@ -23,11 +26,14 @@ class ConvoyError extends Error {
   constructor(message, status = 400, reason = undefined) { super(message); this.status = status; this.name = 'ConvoyError'; this.reason = reason; }
 }
 
-const RIDER_PATCH_FIELDS = new Set([
-  'lat', 'lng', 'speedKmh', 'heading', 'batteryLevel', 'isCharging', 'statusReason', 'statusMessage',
-  'stoppedSince', 'isCoRiding', 'ridingWithUserId', 'vehicleType', 'vehicleColor', 'vehicleNo', 'phone',
-  'emergencyContact', 'emergencyContactName', 'role',
-]);
+/**
+ * The only rider fields a client message may change. Role, profile (phone, vehicle,
+ * emergency contact) and co-riding are never taken from a socket message: role and
+ * co-riding are set by server code paths only, the profile comes from the users table.
+ */
+const TELEMETRY_FIELDS = ['lat', 'lng', 'speedKmh', 'heading', 'batteryLevel', 'isCharging', 'statusReason', 'statusMessage', 'stoppedSince'];
+/** Extra fields only trusted server code may set (CORIDER handler). */
+const TRUSTED_FIELDS = ['isCoRiding', 'ridingWithUserId'];
 
 const shortId = (n = 4) => crypto.randomBytes(n).toString('hex').toUpperCase();
 const now = () => Date.now();
@@ -135,6 +141,8 @@ class ConvoyManager extends EventEmitter {
 
     // One active convoy per rider: leave any other first (prevents cross-group leakage).
     await this.leaveAll(user.userId);
+    // Phone, vehicle and emergency contact come from the account, never from the request.
+    const riderInput = { ...clientRiderInput(p.rider), ...profileOf(await this.repo.findUserById(user.userId)) };
 
     let joinCode;
     do { joinCode = String(100000 + crypto.randomInt(900000)); } while (await this.repo.joinCodeInUse(joinCode));
@@ -161,9 +169,9 @@ class ConvoyManager extends EventEmitter {
       routeBreadcrumbs: sanitizeBreadcrumbs(p.routeBreadcrumbs),
       stopPoints: sanitizeStops(p.stops, { by: user, status: 'PLANNED' }),
       waitRequests: {},
-      members: { [user.userId]: memberRecord(user, { ...(p.rider || {}), role: 'LEAD' }, t) },
+      members: { [user.userId]: memberRecord(user, { ...riderInput, role: 'LEAD' }, t) },
     });
-    const rider = buildRider(user, { ...(p.rider || {}), role: 'LEAD' }, t);
+    const rider = buildRider(user, { ...riderInput, role: 'LEAD' }, t);
     await this.repo.upsertRider(groupId, rider);
 
     const room = {
@@ -186,10 +194,15 @@ class ConvoyManager extends EventEmitter {
     if (!meta) throw new ConvoyError('No active convoy found for that code.', 404);
 
     const room = await this.getRoom(meta.groupId);
+    // Size cap for new riders only; someone already in the convoy can always re-join.
+    if (!room.riders.has(user.userId) && room.riders.size >= config.maxConvoyRiders) {
+      throw new ConvoyError(`This convoy is full (${config.maxConvoyRiders} riders).`, 409, 'CONVOY_FULL');
+    }
     if (!room.riders.has(user.userId)) await this.leaveAll(user.userId, { except: meta.groupId });
 
     const existing = room.riders.get(user.userId);
-    const rider = buildRider(user, { ...(existing || {}), ...riderProfile, role: existing?.role || 'PACK' }, now());
+    const profile = profileOf(await this.repo.findUserById(user.userId));
+    const rider = buildRider(user, { ...(existing || {}), ...clientRiderInput(riderProfile), ...profile, role: existing?.role || 'PACK' }, now());
     room.riders.set(rider.userId, rider);
     const prev = room.meta.members?.[rider.userId];
     const record = memberRecord(user, rider, existing ? (prev?.joinedAt || rider.joinedAt) : now());
@@ -252,25 +265,24 @@ class ConvoyManager extends EventEmitter {
   }
 
   // ------------------------------------------------------------ telemetry
-  /** Applies a telemetry/status patch to one rider. Memory first, DB later. */
-  patchRider(room, userId, patch, { emit = true } = {}) {
+  /**
+   * Applies a telemetry/status patch to one rider. Memory first, DB later.
+   * Only TELEMETRY_FIELDS are read from the patch, each coerced to its type;
+   * `trusted` (server code only) also allows the co-riding fields.
+   */
+  patchRider(room, userId, patch, { emit = true, trusted = false } = {}) {
     const current = room.riders.get(userId);
     if (!current) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
-    const next = { ...current };
-    for (const [k, v] of Object.entries(patch || {})) {
-      if (!RIDER_PATCH_FIELDS.has(k) || v === undefined || v === null) continue;
-      next[k] = v;
+    const next = { ...current, ...sanitizeTelemetry(patch) };
+    if (trusted && patch) {
+      if (patch.isCoRiding !== undefined) next.isCoRiding = !!patch.isCoRiding;
+      if (patch.ridingWithUserId !== undefined && patch.ridingWithUserId !== null) next.ridingWithUserId = String(patch.ridingWithUserId).slice(0, 64);
     }
-    if (patch.lat !== undefined) next.lat = clampLat(patch.lat);
-    if (patch.lng !== undefined) next.lng = clampLng(patch.lng);
-    if (patch.speedKmh !== undefined) next.speedKmh = Math.max(0, Math.min(300, num(patch.speedKmh)));
-    if (patch.heading !== undefined) next.heading = ((num(patch.heading) % 360) + 360) % 360;
-    if (patch.batteryLevel !== undefined) next.batteryLevel = Math.max(0, Math.min(100, Math.round(num(patch.batteryLevel, 100))));
     next.lastSeenEpochMs = now();
     room.riders.set(userId, next);
     room.dirty.add(userId);
     this._schedulePersist(room);
-    if (patch.lat !== undefined && patch.lng !== undefined) this.emit('telemetry', room.groupId, next);
+    if (patch && patch.lat !== undefined && patch.lng !== undefined) this.emit('telemetry', room.groupId, next);
     if (emit) this._emit(room.groupId, 'RIDER_UPDATE', { rider: publicRider(next) });
     return next;
   }
@@ -314,10 +326,14 @@ class ConvoyManager extends EventEmitter {
       messageId: `MSG-${shortId(4)}`, senderId: user.userId, senderName: user.name, text: clean,
       timestamp: now(), isQuickCard: !!isQuickCard, cardType: String(cardType || 'CUSTOM').slice(0, 24),
     };
+    return this._postMessage(room, msg);
+  }
+
+  async _postMessage(room, msg) {
     room.messages.push(msg);
     if (room.messages.length > 500) room.messages.splice(0, room.messages.length - 500);
-    await this.repo.addMessage(groupId, msg);
-    this._emit(groupId, 'MESSAGE', { message: msg });
+    await this.repo.addMessage(room.groupId, msg);
+    this._emit(room.groupId, 'MESSAGE', { message: msg });
     return msg;
   }
 
@@ -330,24 +346,42 @@ class ConvoyManager extends EventEmitter {
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
     this._emit(groupId, 'WAIT_REQUESTS', { waitRequests: room.meta.waitRequests });
-    return this.sendMessage(groupId, { userId: 'SYSTEM', name: user.name }, {
-      text: '⏱️ Requested a 2-minute pull-over stop. Please regroup safely.', isQuickCard: true, cardType: 'WAIT_2MIN',
+    // A system card in the chat (SYSTEM is not a rider, so it is posted directly; requestedBy lets
+    // account deletion find it).
+    return this._postMessage(room, {
+      messageId: `MSG-${shortId(4)}`, senderId: 'SYSTEM', senderName: user.name, requestedBy: user.userId,
+      text: WAIT_MESSAGE, timestamp: now(), isQuickCard: true, cardType: 'WAIT_2MIN',
     }).catch(() => null);
   }
 
-  async raiseSos(groupId, user, { lat, lng, type, alertType }) {
+  /**
+   * Raises an SOS. Idempotent per (rider, clientId): a phone that retries an SOS after a
+   * dead zone (it never saw the echo) gets the existing alert back instead of a second one.
+   * Returns { alert, duplicate }.
+   */
+  async raiseSos(groupId, user, { lat, lng, type, alertType, clientId } = {}) {
     type = alertType || type || 'EMERGENCY';
     const room = await this.getRoom(groupId);
     if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    const cid = clientId === undefined || clientId === null ? '' : String(clientId).slice(0, 64);
+    if (cid) {
+      for (const a of room.alerts.values()) {
+        if (a.userId === user.userId && a.clientId === cid) return { alert: a, duplicate: true };
+      }
+      // Already resolved and no longer in memory: still the same SOS, never a new one.
+      const stored = await this.repo.findAlertByClientId(groupId, user.userId, cid);
+      if (stored) return { alert: stripKey(stored), duplicate: true };
+    }
     const alert = {
       alertId: `SOS-${crypto.randomUUID()}`, userId: user.userId, userName: user.name,
       lat: clampLat(lat), lng: clampLng(lng), alertType: String(type).slice(0, 24), timestamp: now(), resolved: false,
+      ...(cid ? { clientId: cid } : {}),
     };
     room.alerts.set(alert.alertId, alert);
     await this.repo.addAlert(groupId, alert);
     this._emit(groupId, 'ALERT', { alert });
     this.emit('fleet');
-    return alert;
+    return { alert, duplicate: false };
   }
 
   async resolveSos(groupId, user, alertId) {
@@ -588,6 +622,35 @@ class ConvoyManager extends EventEmitter {
     this._emit(groupId, 'CONFIG', { distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled, speedLimitKmh: room.meta.speedLimitKmh || 0 });
   }
 
+  /**
+   * Account deletion: removes the rider from every convoy loaded in memory (name, ids and
+   * contact details replaced, their messages, wait card and SOS alerts dropped) and saves
+   * those convoys, so a later flush can never write the old details back.
+   * Returns the groupIds of all loaded convoys (their metadata in memory is authoritative).
+   */
+  async forgetUser(id) {
+    const live = new Set();
+    for (const room of this.rooms.values()) {
+      live.add(room.groupId);
+      const uid = id.userId;
+      const before = room.messages.length;
+      room.messages = room.messages.filter((m) => m.senderId !== uid && !(m.senderId === 'SYSTEM' && (m.requestedBy === uid || (id.name && m.senderName === id.name))));
+      let touched = room.messages.length !== before;
+      for (const [alertId, a] of [...room.alerts.entries()]) {
+        if (a.userId === uid) { room.alerts.delete(alertId); touched = true; } else if (mentions(a, id)) { room.alerts.set(alertId, scrub(a, id)); touched = true; }
+      }
+      for (const [rid, r] of [...room.riders.entries()]) {
+        if (mentions(r, id)) { room.riders.set(rid, scrub(r, id)); room.dirty.add(rid); touched = true; }
+      }
+      if (mentions(room.meta, id)) { room.meta = scrubConvoyMeta(room.meta, id); touched = true; }
+      if (touched) {
+        await this.repo.saveConvoyMeta(room.meta);
+        await this.flushRoom(room).catch(() => {});
+      }
+    }
+    return live;
+  }
+
   // ---------------------------------------------------------------- admin
   async fleet() {
     const metas = await this.repo.listActiveConvoyMeta();
@@ -679,6 +742,43 @@ function sanitizePlace(p) {
   return { lat: clampLat(lat), lng: clampLng(lng), name: String(p.name || '').slice(0, 120) };
 }
 
+/** Typed copy of the telemetry fields present in a client message (unknown fields are dropped). */
+function sanitizeTelemetry(patch) {
+  const out = {};
+  if (!patch || typeof patch !== 'object') return out;
+  const has = (k) => patch[k] !== undefined && patch[k] !== null;
+  if (has('lat')) out.lat = clampLat(patch.lat);
+  if (has('lng')) out.lng = clampLng(patch.lng);
+  if (has('speedKmh')) out.speedKmh = Math.max(0, Math.min(300, num(patch.speedKmh)));
+  if (has('heading')) out.heading = ((num(patch.heading) % 360) + 360) % 360;
+  if (has('batteryLevel')) out.batteryLevel = Math.max(0, Math.min(100, Math.round(num(patch.batteryLevel, 100))));
+  if (has('isCharging')) out.isCharging = !!patch.isCharging;
+  if (has('statusReason')) out.statusReason = String(patch.statusReason).slice(0, 24);
+  if (has('statusMessage')) out.statusMessage = String(patch.statusMessage).slice(0, 140);
+  if (has('stoppedSince')) out.stoppedSince = Math.max(0, Math.min(now() + 60000, Math.round(num(patch.stoppedSince))));
+  return out;
+}
+
+/** Profile fields shown to convoy-mates, always from the users table (never from the client). */
+function profileOf(u) {
+  if (!u) return {};
+  const pillion = (u.vehicleType || '').trim().toLowerCase() === 'pillion rider' || (u.vehicleNo || '').trim().toUpperCase() === 'PILLION';
+  return {
+    phone: String(u.phone || ''),
+    vehicleType: pillion ? 'Pillion Rider' : String(u.vehicleType || 'Motorcycle'),
+    vehicleNo: pillion ? 'PILLION' : String(u.vehicleNo || ''),
+    emergencyContact: String(u.emergencyContact || ''),
+    emergencyContactName: String(u.emergencyContactName || ''),
+  };
+}
+
+/** What a client may send about itself when creating or joining: position, heading, battery and bike colour. */
+function clientRiderInput(p) {
+  const out = sanitizeTelemetry({ lat: p?.lat, lng: p?.lng, heading: p?.heading, batteryLevel: p?.batteryLevel, isCharging: p?.isCharging });
+  if (p && p.vehicleColor !== undefined && p.vehicleColor !== null) out.vehicleColor = String(p.vehicleColor).slice(0, 20);
+  return out;
+}
+
 function stripKey(o) { const { key, ...rest } = o; return rest; }
 
 function publicRider(r) {
@@ -713,4 +813,4 @@ function sanitizeBreadcrumbs(list) {
     .map((p) => ({ lat: clampLat(p.lat), lng: clampLng(p.lng) }));
 }
 
-module.exports = { ConvoyManager, ConvoyError, publicRider };
+module.exports = { ConvoyManager, ConvoyError, publicRider, sanitizeTelemetry, TELEMETRY_FIELDS, TRUSTED_FIELDS, WAIT_MESSAGE };

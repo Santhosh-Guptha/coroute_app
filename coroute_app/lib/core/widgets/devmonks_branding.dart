@@ -119,6 +119,8 @@ class CoRouteHeaderLogo extends StatelessWidget {
                   'assets/branding/coroute_icon.png',
                   width: 44 * scale,
                   height: 44 * scale,
+                  // Decode the 1024 px icon at about 3x its drawn size (not full size) to save memory.
+                  cacheWidth: (44 * scale * 3).round(),
                   filterQuality: FilterQuality.medium,
                 ),
               ),

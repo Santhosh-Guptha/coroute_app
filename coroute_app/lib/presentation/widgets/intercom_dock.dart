@@ -38,7 +38,7 @@ class IntercomDock extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (ic.isReceiving) _SpeakerBadge(name: ic.activeSpeakerName!, isPrivate: ic.activeSpeakerIsPrivate),
-            if (ic.busyWith != null) _InfoChip(icon: Icons.hourglass_top_rounded, text: '${ic.busyWith} is talking — wait for a gap', color: AppTheme.hyperAmber),
+            if (ic.busyWith != null) _InfoChip(icon: Icons.hourglass_top_rounded, text: '${ic.busyWith} is talking, wait for a gap', color: AppTheme.hyperAmber),
             if (!ic.isOnline) _InfoChip(icon: Icons.cloud_off_rounded, text: 'Reconnecting to convoy radio…', color: AppTheme.textMuted),
             Row(
               children: [
@@ -65,16 +65,22 @@ class IntercomDock extends StatelessWidget {
                 Expanded(child: ic.mode == IntercomMode.ptt ? _PttButton(ic: ic) : _VoxButton(ic: ic)),
                 if (onSos != null) ...[
                   const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: onSos,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.laserRed,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      minimumSize: const Size(56, 44),
+                  Semantics(
+                    button: true,
+                    label: sosSemanticsLabel,
+                    onTap: onSos,
+                    excludeSemantics: true,
+                    child: ElevatedButton(
+                      onPressed: onSos,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.laserRed,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        minimumSize: const Size(56, 44),
+                      ),
+                      child: const Text('SOS', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
                     ),
-                    child: const Text('SOS', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
                   ),
                 ],
               ],
@@ -96,7 +102,7 @@ class _SpeakerBadge extends StatelessWidget {
     final color = isPrivate ? AppTheme.devmonksPurple : AppTheme.neonCyan;
     return _InfoChip(
       icon: isPrivate ? Icons.lock_rounded : Icons.graphic_eq_rounded,
-      text: isPrivate ? '$name — private to you' : '$name is speaking',
+      text: isPrivate ? '$name, private to you' : '$name is speaking',
       color: color,
     );
   }
@@ -290,7 +296,21 @@ class _PttButton extends StatelessWidget {
     final tx = ic.isTransmitting;
     final private = ic.isPrivateTalk;
     final activeColor = private ? AppTheme.devmonksPurple : AppTheme.emeraldSafe;
-    return Listener(
+    // Screen readers cannot hold a finger down: for them a double tap starts talking and
+    // another double tap stops.
+    return Semantics(
+      button: true,
+      label: pttSemanticsLabel(private ? ic.talkTargetName : null),
+      hint: tx ? 'Double tap to stop talking' : 'Double tap to start talking',
+      excludeSemantics: true,
+      onTap: () {
+        if (ic.isTransmitting) {
+          ic.endTransmission();
+        } else if (!ic.isMicMuted) {
+          ic.beginTransmission();
+        }
+      },
+      child: Listener(
       onPointerDown: (_) async {
         if (ic.isMicMuted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Microphone is muted.'), duration: Duration(seconds: 1)));
@@ -324,7 +344,7 @@ class _PttButton extends StatelessWidget {
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
-                  tx ? (private ? 'PRIVATE — TALKING…' : 'TRANSMITTING…') : 'HOLD TO TALK',
+                  tx ? (private ? 'PRIVATE, TALKING…' : 'TRANSMITTING…') : 'HOLD TO TALK',
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: tx ? Colors.black : AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
                 ),
@@ -332,6 +352,7 @@ class _PttButton extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -365,7 +386,7 @@ class _VoxButton extends StatelessWidget {
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
-                  tx ? 'VOX — SENDING' : (armed ? 'VOX ARMED (tap to stop)' : 'VOX OFF (tap to arm)'),
+                  tx ? 'VOX, SENDING' : (armed ? 'VOX ARMED (tap to stop)' : 'VOX OFF (tap to arm)'),
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 11),
                 ),
@@ -377,3 +398,10 @@ class _VoxButton extends StatelessWidget {
     );
   }
 }
+
+/// What TalkBack reads for the SOS button.
+const String sosSemanticsLabel = 'Send SOS to your convoy';
+
+/// What TalkBack reads for the talk button: who will hear you.
+String pttSemanticsLabel(String? privateTarget) =>
+    'Hold to talk to ${privateTarget == null || privateTarget.isEmpty ? 'everyone' : privateTarget}';

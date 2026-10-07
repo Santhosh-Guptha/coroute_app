@@ -13,6 +13,7 @@
  *             • track_chunks (uploaded GPS points) older than TRACK_RETENTION_DAYS
  *             • lat/lng on trip_events older than TRACK_RETENTION_DAYS (the entry, its
  *               times, durations and place name are KEPT)
+ *             • lat/lng on SOS alerts older than TRACK_RETENTION_DAYS (who, when and type are KEPT)
  *             • voice_log entries older than RETENTION_VOICE_LOG_DAYS (metadata only; audio is never stored)
  *             • geo_cache entries older than GEO_CACHE_DAYS
  *   AUTO-END: active convoys with no activity for RETENTION_STALE_CONVOY_HOURS.
@@ -46,7 +47,7 @@ class Retention {
   }
 
   async runOnce(nowMs = Date.now()) {
-    const stats = { autoEnded: 0, convoysStripped: 0, riderDocsRemoved: 0, tripsStripped: 0, voiceLogsRemoved: 0, trackChunksRemoved: 0, eventsStripped: 0, geoCacheRemoved: 0 };
+    const stats = { autoEnded: 0, convoysStripped: 0, riderDocsRemoved: 0, tripsStripped: 0, voiceLogsRemoved: 0, trackChunksRemoved: 0, eventsStripped: 0, alertsStripped: 0, geoCacheRemoved: 0 };
 
     // 1. End convoys nobody has touched for a long time (phones died, app uninstalled, ...).
     stats.autoEnded = await this.convoys.autoEndStaleConvoys(nowMs - config.retentionStaleConvoyHours * 3600000);
@@ -80,6 +81,16 @@ class Retention {
       for (const { key, value } of rows) {
         await this.soda.replace(COLLECTIONS.events, key, { ...value, lat: null, lng: null, coordsStripped: true });
         stats.eventsStripped++;
+      }
+      if (rows.length < 500) break;
+    }
+    // SOS alerts keep who, when and the type; their exact position goes like every other coordinate.
+    for (let round = 0; round < 20; round++) {
+      const rows = await this.soda.query(COLLECTIONS.alerts, { timestamp: { $lt: trackCutoff }, coordsStripped: { $exists: false } }, { limit: 500 });
+      if (!rows.length) break;
+      for (const { key, value } of rows) {
+        await this.soda.replace(COLLECTIONS.alerts, key, { ...value, lat: null, lng: null, coordsStripped: true });
+        stats.alertsStripped++;
       }
       if (rows.length < 500) break;
     }

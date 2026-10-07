@@ -1,13 +1,16 @@
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 /// Keeps CoRoute alive while a convoy is active and the phone is in a pocket or
 /// mounted with the screen locked.
 ///
 /// Android stops background GPS, microphone and network for apps that are not
 /// visible unless they run a *foreground service*. This class runs one service
-/// (types: location + microphone + dataSync) with a persistent notification
+/// (type location, plus microphone only when the rider allowed the microphone:
+/// Android 14+ refuses a microphone-type service without that permission, which
+/// would leave the rider with no background location at all) with a persistent notification
 /// that shows the convoy name and offers two actions riders can use without
 /// unlocking the phone: SOS and Leave. The Dart code of the app keeps running
 /// in the main isolate; the service's own isolate only forwards button taps.
@@ -18,6 +21,26 @@ class BackgroundService {
   static const String buttonSos = 'sos';
   static const String buttonLeave = 'leave';
   static bool _initialised = false;
+  static bool _runningWithMic = false;
+  static String _convoyName = '';
+  static int _riderCount = 0;
+
+  /// Service types for this phone. Location always; microphone only when granted.
+  /// (dataSync is not used: location already keeps the connection alive, and Android 15
+  /// limits dataSync services to 6 hours a day.)
+  @visibleForTesting
+  static List<ForegroundServiceTypes> serviceTypesFor({required bool micGranted}) => [
+        ForegroundServiceTypes.location,
+        if (micGranted) ForegroundServiceTypes.microphone,
+      ];
+
+  static Future<bool> _micGranted() async {
+    try {
+      return await Permission.microphone.isGranted;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// Must be called once in main() before runApp (sets up the isolate port).
   static void initCommunicationPort() {
@@ -57,17 +80,18 @@ class BackgroundService {
   static Future<bool> start({required String convoyName, required int riderCount}) async {
     if (!_isAndroidOrIos) return false;
     _ensureInit();
+    _convoyName = convoyName;
+    _riderCount = riderCount;
     final text = '$riderCount rider${riderCount == 1 ? '' : 's'} connected. Position sharing and intercom are on.';
     try {
       if (await FlutterForegroundTask.isRunningService) {
         final r = await FlutterForegroundTask.updateService(notificationTitle: 'Convoy: $convoyName', notificationText: text);
         return r is ServiceRequestSuccess;
       }
+      final mic = Platform.isAndroid && await _micGranted();
       final r = await FlutterForegroundTask.startService(
         serviceId: _serviceId,
-        serviceTypes: Platform.isAndroid
-            ? [ForegroundServiceTypes.location, ForegroundServiceTypes.microphone, ForegroundServiceTypes.dataSync]
-            : null,
+        serviceTypes: Platform.isAndroid ? serviceTypesFor(micGranted: mic) : null,
         notificationTitle: 'Convoy: $convoyName',
         notificationText: text,
         notificationButtons: const [
@@ -77,10 +101,26 @@ class BackgroundService {
         callback: coRouteForegroundCallback,
       );
       if (r is ServiceRequestFailure) debugPrint('Foreground service start failed: ${r.error}');
+      if (r is ServiceRequestSuccess) _runningWithMic = mic;
       return r is ServiceRequestSuccess;
     } catch (e) {
       debugPrint('Foreground service note: $e');
       return false;
+    }
+  }
+
+  /// The rider allowed the microphone during a ride: restart the service once with the
+  /// microphone type, so the intercom also works with the screen off. Does nothing when
+  /// the running service already has it, or when no service runs.
+  static Future<void> ensureMicrophoneType() async {
+    if (kIsWeb || !Platform.isAndroid || _runningWithMic) return;
+    try {
+      if (!await FlutterForegroundTask.isRunningService) return;
+      if (!await _micGranted()) return;
+      await FlutterForegroundTask.stopService();
+      await start(convoyName: _convoyName, riderCount: _riderCount);
+    } catch (e) {
+      debugPrint('Foreground service mic note: $e');
     }
   }
 
@@ -102,6 +142,7 @@ class BackgroundService {
     if (!_isAndroidOrIos) return;
     try {
       if (await FlutterForegroundTask.isRunningService) await FlutterForegroundTask.stopService();
+      _runningWithMic = false;
     } catch (e) {
       debugPrint('Foreground service stop note: $e');
     }

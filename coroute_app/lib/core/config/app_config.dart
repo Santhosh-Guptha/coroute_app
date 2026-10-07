@@ -38,6 +38,11 @@ class AppConfig {
   // --- Battery-aware telemetry tuning (client side) ---
   /// Minimum interval between two telemetry pushes while moving.
   static const Duration telemetryMinInterval = Duration(milliseconds: 2500);
+  /// The same in data saver mode (fewer radio wake-ups and less data; GPS settings unchanged).
+  static const Duration telemetryMinIntervalLowData = Duration(seconds: 5);
+
+  /// Telemetry interval for the rider's data setting.
+  static Duration telemetryInterval(bool lowData) => lowData ? telemetryMinIntervalLowData : telemetryMinInterval;
   /// While stationary we still send a heartbeat so mates see "last seen".
   static const Duration telemetryIdleInterval = Duration(seconds: 30);
   /// GPS distance filter in metres while moving / while stopped.
@@ -46,6 +51,14 @@ class AppConfig {
 
   // --- Intercom audio ---
   static const int audioSampleRate = 16000;
+  /// Data saver: 8 kHz PCM16 is half the data of 16 kHz and still clear for speech.
+  static const int audioSampleRateLowData = 8000;
+
+  /// Transmit sample rate for the rider's data setting.
+  static int sampleRateFor(bool lowData) => lowData ? audioSampleRateLowData : audioSampleRate;
+
+  /// Bytes of one 20 ms PCM16 mono frame at [sampleRate] (640 at 16 kHz, 320 at 8 kHz).
+  static int frameBytesFor(int sampleRate) => sampleRate * 2 * 20 ~/ 1000;
   /// 20 ms of PCM16 mono at 16 kHz = 640 bytes per frame.
   static const int audioFrameBytes = 640;
 }

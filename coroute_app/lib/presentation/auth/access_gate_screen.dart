@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/app_config.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/devmonks_branding.dart';
 import '../../core/widgets/glass_card.dart';
@@ -60,6 +62,21 @@ class _AccessGateScreenState extends State<AccessGateScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    // If the server ended the last session (account on hold, blocked or deleted, or the
+    // password was changed elsewhere), say why once.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        final auth = context.read<AuthService>();
+        final reason = auth.lastSignOutReason;
+        if (reason != null && reason.isNotEmpty) {
+          setState(() => _errorMessage = reason);
+          auth.clearSignOutReason();
+        }
+      } on ProviderNotFoundException catch (_) {
+        // No account service above this screen (isolated widget tests).
+      }
+    });
   }
 
   @override
@@ -224,7 +241,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
     if (res['success'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('🎉 Welcome to CoRoute, $name! Account registered.'),
+          content: Text('Welcome to CoRoute, $name. Your account is ready.'),
           backgroundColor: AppTheme.emeraldSafe,
         ),
       );
@@ -405,6 +422,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         const SizedBox(height: 6),
         TextField(
           controller: _loginIdentifierController,
+          inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxEmailLength)],
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
           decoration: InputDecoration(
             prefixIcon: Icon(Icons.person_outline, color: AppTheme.neonCyan, size: 20),
@@ -561,6 +579,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         const SizedBox(height: 4),
         TextField(
           controller: _regNameController,
+          inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxCallsignLength)],
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
           decoration: InputDecoration(
             prefixIcon: Icon(Icons.person, color: AppTheme.neonCyan, size: 18),
@@ -582,6 +601,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         const SizedBox(height: 4),
         TextField(
           controller: _regEmailController,
+          inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxEmailLength)],
           keyboardType: TextInputType.emailAddress,
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
           decoration: InputDecoration(
@@ -604,6 +624,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         const SizedBox(height: 4),
         TextField(
           controller: _regPhoneController,
+          inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
           keyboardType: TextInputType.phone,
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
           decoration: InputDecoration(
@@ -779,6 +800,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                     const SizedBox(height: 4),
                     TextField(
                       controller: _regVehicleNoController,
+                      inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxVehicleNoLength)],
                       textCapitalization: TextCapitalization.characters,
                       style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, letterSpacing: 1.1),
                       decoration: InputDecoration(
@@ -831,6 +853,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
             Expanded(
               child: TextField(
                 controller: _regEmergencyNameController,
+                inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxContactNameLength)],
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                 decoration: InputDecoration(
                   prefixIcon: Icon(Icons.person_pin, color: AppTheme.laserRed, size: 18),
@@ -846,6 +869,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
             Expanded(
               child: TextField(
                 controller: _regEmergencyPhoneController,
+                inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
                 keyboardType: TextInputType.phone,
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                 decoration: InputDecoration(

@@ -383,7 +383,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
             ),
             if (from.isNotEmpty || to.isNotEmpty)
               Text(
-                '${from.isEmpty ? 'Start' : from}  ➔  ${to.isEmpty ? 'Destination' : to}',
+                '${from.isEmpty ? 'Start' : from} to ${to.isEmpty ? 'Destination' : to}',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
@@ -414,7 +414,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
                         border: Border.all(color: AppTheme.laserRed.withOpacity(0.6)),
                       ),
                       child: Text(
-                        '⚠️ Approaching retention: ${daysRemaining ?? 0} days remaining',
+                        'Approaching retention: ${daysRemaining ?? 0} days left',
                         style: TextStyle(color: AppTheme.laserRed, fontSize: 10, fontWeight: FontWeight.bold),
                       ),
                     )

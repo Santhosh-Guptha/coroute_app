@@ -50,9 +50,52 @@ test('privacy, terms, 404 page, robots, sitemap, static assets, download redirec
   const al = await fetch(base + '/.well-known/assetlinks.json');
   assert.equal(al.status, 200);
   assert.equal((await al.json())[0].target.package_name, 'space.devmonks.coroute_app');
+  // Without PLAY_STORE_URL / APK_URL the download is the APK this server hosts.
   const dl = await fetch(base + '/download', { redirect: 'manual' });
   assert.equal(dl.status, 302);
-  assert.match(dl.headers.get('location'), /github\.com\/.*releases/);
+  assert.equal(dl.headers.get('location'), `${base}/coroute.apk`);
+  const dl32 = await fetch(base + '/download/32bit', { redirect: 'manual' });
+  assert.equal(dl32.status, 302);
+  assert.equal(dl32.headers.get('location'), `${base}/coroute-32bit.apk`);
+});
+
+test('internal documentation is not served; public pages follow the site rules', async () => {
+  for (const p of ['/docs', '/docs.html', '/architecture', '/COROUTE_SYSTEM_DOCUMENTATION.html']) {
+    assert.equal((await fetch(base + p, { redirect: 'manual' })).status, 404, p);
+  }
+  const fs = require('fs');
+  const path = require('path');
+  const dir = path.join(__dirname, '..', 'public');
+  const pages = fs.readdirSync(dir).filter((f) => f.endsWith('.html'));
+  assert.ok(pages.length >= 5);
+  for (const f of pages) {
+    const html = fs.readFileSync(path.join(dir, f), 'utf8');
+    assert.ok(!/[\u2013\u2014]/.test(html), `${f}: en or em dash`);
+    assert.ok(!/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/u.test(html), `${f}: emoji`);
+    assert.ok(!/\b(?:\d{1,3}\.){3}\d{1,3}\b/.test(html), `${f}: IPv4 address`);
+    assert.ok(!/oraclecloudapps/i.test(html), `${f}: database host name`);
+  }
+  // The convoy size on the home page comes from the gateway's configuration.
+  const home = await (await fetch(base + '/')).text();
+  const config = require('../src/config');
+  assert.ok(home.includes(`Up to ${config.maxConvoyRiders} riders`), 'max riders from config');
+  assert.ok(!home.includes('__MAX_RIDERS__'));
+  assert.ok(home.includes('/download/32bit'));
+});
+
+test('APKs served from public/ are never cached under the same name', async () => {
+  const fs = require('fs');
+  const path = require('path');
+  const apk = path.join(__dirname, '..', 'public', 'coroute-test-only.apk');
+  fs.writeFileSync(apk, 'PK');
+  try {
+    const r = await fetch(base + '/coroute-test-only.apk');
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('cache-control'), 'no-cache');
+    assert.match(r.headers.get('content-type'), /android\.package-archive/);
+  } finally {
+    fs.unlinkSync(apk);
+  }
 });
 
 test('feedback form: validation, honeypot, timing, storage', async () => {
@@ -89,7 +132,7 @@ test('page-view beacon counts per day/path with no identifiers; admin can read a
   assert.equal(home.referrers['forum.example.com'], 3);
   assert.ok(!('ip' in home) && !('userAgent' in home));
 
-  const reg = await fetch(base + '/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Admin', email: 'admin@coroute.test', password: 'Password#123', phone: '1' }) });
+  const reg = await fetch(base + '/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Admin', email: 'admin@coroute.test', password: 'Password#123', phone: '9999999999' }) });
   const { token } = await reg.json();
   const a = await fetch(base + '/api/admin/analytics?days=7', { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(a.status, 200);
@@ -109,7 +152,7 @@ test('meta endpoint, join link page, account deletion and admin password reset',
   assert.ok(jh.includes('coroute://join/483921') && jh.includes('483921'));
   assert.equal((await fetch(base + '/join/<script>', { redirect: 'manual' })).status, 302);
 
-  const reg = async (name, email) => (await (await fetch(base + '/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password: 'Password#123', phone: '1' }) })).json());
+  const reg = async (name, email) => (await (await fetch(base + '/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password: 'Password#123', phone: '9999999999', vehicleNo: 'TS09AB1234', emergencyContact: '+919000000001', emergencyContactName: 'Family Contact' }) })).json());
   const admin = (await (await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: 'admin@coroute.test', password: 'Password#123' }) })).json());
   const u = await reg('Delete Me', 'deleteme@coroute.test');
   const H = (t) => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${t}` });
@@ -125,7 +168,11 @@ test('meta endpoint, join link page, account deletion and admin password reset',
   assert.ok(reset.temporaryPassword.length >= 10);
   const tmpLogin = await (await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: 'deleteme@coroute.test', password: reset.temporaryPassword }) })).json();
   assert.equal(tmpLogin.user.mustChangePassword, true);
-  assert.equal((await fetch(base + '/api/me/password', { method: 'POST', headers: H(tmpLogin.token), body: JSON.stringify({ newPassword: 'Fresh#Password9' }) })).status, 200);
+  const changed = await fetch(base + '/api/me/password', { method: 'POST', headers: H(tmpLogin.token), body: JSON.stringify({ newPassword: 'Fresh#Password9' }) });
+  assert.equal(changed.status, 200);
+  // The device that changed the password gets a fresh token; the old one is ended.
+  tmpLogin.token = (await changed.json()).token;
+  assert.ok(tmpLogin.token);
 
   // delete account: user, memberships and trips are gone; token stops working
   await fetch(base + '/api/convoys', { method: 'POST', headers: H(tmpLogin.token), body: JSON.stringify({ name: 'Doomed convoy' }) });

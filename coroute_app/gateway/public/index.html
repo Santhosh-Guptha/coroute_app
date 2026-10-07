@@ -47,7 +47,7 @@
   a{color:var(--accent)}
   .wrap{max-width:1080px;margin:0 auto;padding-inline:20px}
   h1,h2,h3{font-family:var(--display);line-height:1.02;letter-spacing:.005em;text-wrap:balance;margin:0}
-  h1{font-size:clamp(32px,4.6vw,50px);font-weight:700}
+  h1{font-size:clamp(28px,4vw,40px);font-weight:700}
   h3{font-family:var(--body);font-size:19px;font-weight:600}
   h2{font-size:clamp(24px,3.2vw,34px);font-weight:700}
   p{margin:0}
@@ -251,7 +251,7 @@
         <article class="card">
           <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 18h.01"/></svg></div>
           <h3>SOS that reaches everyone</h3>
-          <p>One tap sends an alert with your position to the whole convoy and keeps it on every screen until someone marks it resolved.</p>
+          <p>One tap sends an alert with your position to the whole convoy and keeps it on every screen until someone marks it resolved. If there is no signal, the SOS is sent as soon as the phone reconnects. Call or text your emergency contact from the same screen.</p>
           <div class="spec">Medical, breakdown, crash or a custom reason.</div>
         </article>
         <article class="card">
@@ -290,6 +290,18 @@
           <p>A light theme for bright sun and a dark one for night riding, switching by itself at sunrise and sunset where you are, or by the phone's light sensor.</p>
           <div class="spec">Worked out on the phone, works without signal.</div>
         </article>
+        <article class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h4V14H2zM9 20h4V9H9zM16 20h4V4h-4z"/></svg></div>
+          <h3>Data saver</h3>
+          <p>One switch for prepaid plans and weak signal in the hills: the intercom uses half the data, and your position is sent every 5 seconds instead of every 2.5.</p>
+          <div class="spec">Riders with and without data saver hear each other normally.</div>
+        </article>
+        <article class="card">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg></div>
+          <h3>Pre-ride checklist</h3>
+          <p>Before each ride: location and notification permissions, battery, your emergency contact, and a short kit list for fuel, gear and papers.</p>
+          <div class="spec">It stays on your phone. Nothing is sent.</div>
+        </article>
       </div>
     </div>
   </section>
@@ -315,7 +327,8 @@
         <h2 style="font-size:clamp(22px,3vw,28px);margin-top:10px">Run as a public service for riders</h2>
         <p class="muted" style="margin-top:12px">CoRoute is made by riders at devmonks.space and runs on free-tier cloud infrastructure, so it costs nothing to use. There is no premium tier and no advertising.</p>
         <ul>
-          <li><b>Free forever</b> for every rider and every group size.</li>
+          <li><b>Free forever</b> for every rider.</li>
+          <li><b>Up to __MAX_RIDERS__ riders</b> in one convoy.</li>
           <li><b>No account selling, no analytics SDKs</b>, no third-party trackers.</li>
           <li><b>Feedback is welcome</b> by e-mail; the address is in the footer.</li>
         </ul>
@@ -367,10 +380,11 @@
       <div>
         <p class="eyebrow">Get CoRoute</p>
         <h2>Available for Android</h2>
-        <p class="muted" style="margin-top:12px;max-width:38em">Requires Android 6.0 or newer, location and microphone permissions, and an e-mail address or Google account to register. An iOS version is planned.</p>
+        <p class="muted" style="margin-top:12px;max-width:38em">Requires Android 6.0 or newer, location permission, and an account with your phone number, your bike number (or pillion), and an emergency contact. The microphone is needed only for the intercom. An iOS version is planned.</p>
       </div>
       <div class="cta">
         <a class="btn primary" href="/download">Download for Android</a>
+        <p class="muted" style="margin-top:10px;font-size:14px">If the app does not install on an older phone, use the <a href="/download/32bit">32-bit download</a>.</p>
       </div>
     </div>
   </section>

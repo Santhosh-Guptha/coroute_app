@@ -15,8 +15,24 @@ class AuthService extends ChangeNotifier {
 
   /// The API client dropped the token because the gateway ended the session.
   void _onApiChanged() {
-    if (!_api.hasToken && _userId != null && !_isLoading) _clearSession().ignore();
+    if (!_api.hasToken && _userId != null && !_isLoading) {
+      _lastSignOutReason = _api.lastSessionEndMessage ?? _lastSignOutReason;
+      _clearSession().ignore();
+    }
   }
+
+  String? _lastSignOutReason;
+
+  /// Why the gateway ended the last session (hold, block, deleted, signed out elsewhere).
+  /// Shown once on the sign-in screen, then cleared with [clearSignOutReason].
+  String? get lastSignOutReason => _lastSignOutReason;
+  void clearSignOutReason() {
+    _lastSignOutReason = null;
+    _api.lastSessionEndMessage = null;
+  }
+
+  /// Admin rights come only from the role the server stored for this account.
+  static bool roleIsAdmin(String? role) => role == AppConstants.adminRole;
 
   @override
   void dispose() {
@@ -53,9 +69,7 @@ class AuthService extends ChangeNotifier {
   String? get vehicleNo => _vehicleNo;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _api.hasToken && _userId != null;
-  bool get isMasterAdmin =>
-      _role == AppConstants.adminRole ||
-      (_email != null && _email!.trim().toLowerCase() == AppConstants.masterAdminEmail.toLowerCase());
+  bool get isMasterAdmin => roleIsAdmin(_role);
 
   /// True if the user is registered or designated as a pillion passenger.
   bool get isPillion =>
@@ -84,12 +98,7 @@ class AuthService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _userId = prefs.getString(AppConstants.keyUserId);
     _email = prefs.getString(AppConstants.keyUserEmail);
-    final cleanEmail = _email?.trim().toLowerCase();
-    if (cleanEmail != null && cleanEmail == AppConstants.masterAdminEmail.toLowerCase()) {
-      _role = AppConstants.adminRole;
-    } else {
-      _role = prefs.getString(AppConstants.keyUserRole);
-    }
+    _role = prefs.getString(AppConstants.keyUserRole);
     _name = prefs.getString(AppConstants.keyUserName);
     _vehicleType = prefs.getString(AppConstants.keyVehicleType) ?? 'Motorcycle';
     _phone = prefs.getString(AppConstants.keyPhone) ?? '';
@@ -105,7 +114,11 @@ class AuthService extends ChangeNotifier {
         final me = await _api.get('/me');
         if (me is Map) await _applyUser(Map<String, dynamic>.from(me));
       } on ApiException catch (e) {
-        if (e.endsSession) await _clearSession(); // revoked token or deleted account, as stated by the gateway
+        if (e.endsSession) {
+          // Revoked token, deleted, held or blocked account, as stated by the gateway.
+          _lastSignOutReason = e.message;
+          await _clearSession();
+        }
       } catch (_) {}
     }
   }
@@ -118,19 +131,17 @@ class AuthService extends ChangeNotifier {
       final me = await _api.get('/me');
       if (me is Map) await _applyUser(Map<String, dynamic>.from(me));
     } on ApiException catch (e) {
-      if (e.endsSession) await _clearSession();
+      if (e.endsSession) {
+        _lastSignOutReason = e.message;
+        await _clearSession();
+      }
     } catch (_) {}
   }
 
   Future<void> _applyUser(Map<String, dynamic> u) async {
     _userId = u['userId']?.toString();
     _email = u['email']?.toString();
-    final cleanEmail = _email?.trim().toLowerCase();
-    if (cleanEmail != null && cleanEmail == AppConstants.masterAdminEmail.toLowerCase()) {
-      _role = AppConstants.adminRole;
-    } else {
-      _role = u['role']?.toString() ?? AppConstants.riderRole;
-    }
+    _role = u['role']?.toString() ?? AppConstants.riderRole;
     _name = u['name']?.toString();
     _vehicleType = u['vehicleType']?.toString() ?? 'Motorcycle';
     _phone = u['phone']?.toString() ?? '';
@@ -162,6 +173,7 @@ class AuthService extends ChangeNotifier {
     if (res is! Map || res['token'] == null || res['user'] is! Map) {
       return {'success': false, 'error': 'Unexpected server response.'};
     }
+    clearSignOutReason();
     await _api.setToken(res['token'].toString());
     await _applyUser(Map<String, dynamic>.from(res['user'] as Map));
     return _ok();
@@ -226,6 +238,12 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  String? _lastProfileError;
+
+  /// The server's reason the last profile update was refused (for example "That callsign is
+  /// taken."), or null when it failed for network reasons or succeeded.
+  String? get lastProfileError => _lastProfileError;
+
   /// Update rider profile details (server is the source of truth).
   Future<bool> updateProfile({
     required String phone,
@@ -246,11 +264,18 @@ class AuthService extends ChangeNotifier {
       if (name != null && name.trim().isNotEmpty) {
         payload['name'] = name.trim();
       }
+      _lastProfileError = null;
       final res = await _api.patch('/me', payload);
       if (res is Map) await _applyUser(Map<String, dynamic>.from(res));
       return true;
+    } on ApiException catch (e) {
+      debugPrint('updateProfile note: $e');
+      // Validation answers (422 / 409) carry a message for the rider; outages do not.
+      _lastProfileError = (e.statusCode >= 400 && e.statusCode < 500 && !e.isUnauthorized) ? e.message : null;
+      return false;
     } catch (e) {
       debugPrint('updateProfile note: $e');
+      _lastProfileError = null;
       return false;
     }
   }
@@ -258,7 +283,10 @@ class AuthService extends ChangeNotifier {
   /// Change password. [currentPassword] may be empty when the server issued a temporary one.
   Future<Map<String, dynamic>> changePassword({required String currentPassword, required String newPassword}) async {
     try {
-      await _api.post('/me/password', {'currentPassword': currentPassword, 'newPassword': newPassword});
+      final res = await _api.post('/me/password', {'currentPassword': currentPassword, 'newPassword': newPassword});
+      // The server ends every other session and hands this phone a fresh token.
+      final fresh = res is Map ? res['token']?.toString() : null;
+      if (fresh != null && fresh.isNotEmpty) await _api.setToken(fresh);
       _mustChangePassword = false;
       notifyListeners();
       return {'success': true};

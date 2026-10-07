@@ -136,7 +136,7 @@ class SodaClient {
    * Query-by-example. Returns [{key, value}].
    * @param {string} collection
    * @param {object} filter QBE filter (e.g. {groupId:'GRP-1', timestamp:{$gt: 123}})
-   * @param {{orderBy?:Array<{path:string,datatype?:string,order?:'asc'|'desc'}>, limit?:number, offset?:number}} opts
+   * @param {{orderBy?:Array<{path:string,datatype?:string,order?:'asc'|'desc'}>, limit?:number, offset?:number, fields?:'id'}} opts
    */
   async query(collection, filter, opts = {}) {
     const limit = Math.min(Math.max(opts.limit || 100, 1), 1000);
@@ -144,9 +144,11 @@ class SodaClient {
     const qbe = opts.orderBy
       ? { $query: filter, $orderby: opts.orderBy.map((o) => ({ datatype: 'string', order: 'asc', ...o })) }
       : filter;
+    // fields=id returns keys only (for counting without loading documents).
+    const fields = opts.fields === 'id' ? '&fields=id' : '';
     const r = await this._request(
       'POST',
-      `/${encodeURIComponent(collection)}?action=query&limit=${limit}&offset=${offset}`,
+      `/${encodeURIComponent(collection)}?action=query&limit=${limit}&offset=${offset}${fields}`,
       qbe,
     );
     return (r?.items || []).map((it) => ({ key: it.id, value: it.value }));

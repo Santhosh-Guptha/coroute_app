@@ -24,7 +24,12 @@ class VoicePacket {
   String get fromName => header['fromName']?.toString() ?? 'Rider';
   String? get to => header['to']?.toString();
   bool get isPrivate => to != null && to!.isNotEmpty;
-  int get sampleRate => (header['sampleRate'] as num?)?.toInt() ?? AppConfig.audioSampleRate;
+  /// The sender's sample rate: 16 kHz, or 8 kHz from a phone in data saver mode. Anything
+  /// else is treated as 16 kHz (the player is never set up at an arbitrary rate).
+  int get sampleRate {
+    final r = (header['sampleRate'] as num?)?.toInt();
+    return (r == AppConfig.audioSampleRate || r == AppConfig.audioSampleRateLowData) ? r! : AppConfig.audioSampleRate;
+  }
 }
 
 enum RealtimeState { disconnected, connecting, connected }
@@ -34,7 +39,7 @@ enum RealtimeState { disconnected, connecting, connected }
 /// Design goals: a single socket per app (battery), automatic reconnect with
 /// backoff, automatic re-JOIN of the active convoy after a reconnect, and a
 /// hard guarantee that no event or audio frame from a previous group is ever
-/// delivered after [leaveRoom] — the gateway enforces membership, and this
+/// delivered after [leaveRoom]: the gateway enforces membership, and this
 /// class additionally drops anything that is not for the current room.
 class RealtimeService extends ChangeNotifier {
   WebSocketChannel? _channel;
@@ -59,19 +64,44 @@ class RealtimeService extends ChangeNotifier {
   String? get groupId => _groupId;
 
   // ------------------------------------------------------------ lifecycle
-  /// Called when the gateway refused the socket's token (close code 4401).
-  /// The app then asks the server whether the session is really over.
+  /// Called when the gateway refused the socket's account (close code 4401: signed out or
+  /// deleted, 4403: on hold or blocked). The app then asks the server whether the session
+  /// is really over.
   VoidCallback? onAuthRejected;
+
+  /// Close codes the gateway uses for a refused account.
+  static const int closeSignedOut = 4401;
+  static const int closeAccountRefused = 4403;
+
+  /// True after a 4403 close: no reconnect until a new token is set (retrying would only
+  /// be refused again and cost battery).
+  bool _refused = false;
+  bool get isRefused => _refused;
+
+  /// Decides what a socket close means: whether to tell the app, and whether to reconnect.
+  @visibleForTesting
+  static ({bool authRejected, bool reconnect}) closeOutcome(int? closeCode) {
+    if (closeCode == closeAccountRefused) return (authRejected: true, reconnect: false);
+    if (closeCode == closeSignedOut) return (authRejected: true, reconnect: true);
+    return (authRejected: false, reconnect: true);
+  }
 
   /// Use a refreshed token for the next (re)connect; the open socket stays as it is.
   void updateToken(String? token) {
-    if (token != null && token.isNotEmpty) _token = token;
+    if (token == null || token.isEmpty || token == _token) return;
+    _token = token;
+    if (_refused) {
+      _refused = false;
+      _attempt = 0;
+      _scheduleReconnect();
+    }
   }
 
   void connect(String token, {bool adminMode = false}) {
     _token = token;
     _adminMode = adminMode;
     _wantConnection = true;
+    _refused = false;
     _attempt = 0;
     _open();
   }
@@ -132,7 +162,7 @@ class RealtimeService extends ChangeNotifier {
 
   // ------------------------------------------------------------ internals
   void _open() {
-    if (!_wantConnection || _token == null) return;
+    if (!_wantConnection || _token == null || _refused) return;
     _closeChannel();
     _setState(RealtimeState.connecting);
     try {
@@ -140,8 +170,16 @@ class RealtimeService extends ChangeNotifier {
       final ch = WebSocketChannel.connect(uri);
       _channel = ch;
       _sub = ch.stream.listen(_onData, onError: (_) => _scheduleReconnect(), onDone: () {
-        if (ch.closeCode == 4401) onAuthRejected?.call();
-        _scheduleReconnect();
+        final outcome = closeOutcome(ch.closeCode);
+        if (!outcome.reconnect) {
+          _refused = true;
+          _reconnectTimer?.cancel();
+          _staleTimer?.cancel();
+          _closeChannel();
+          _setState(RealtimeState.disconnected);
+        }
+        if (outcome.authRejected) onAuthRejected?.call();
+        if (outcome.reconnect) _scheduleReconnect();
       }, cancelOnError: true);
       _lastMessageAt = DateTime.now();
       _staleTimer?.cancel();
@@ -209,11 +247,11 @@ class RealtimeService extends ChangeNotifier {
   }
 
   void _scheduleReconnect() {
-    if (!_wantConnection) return;
+    if (!_wantConnection || _refused) return;
     if (_reconnectTimer?.isActive == true) return;
     _closeChannel();
     _setState(RealtimeState.disconnected);
-    // 1s, 2s, 4s ... capped at 30s, with jitter — gentle on battery and server.
+    // 1s, 2s, 4s ... capped at 30s, with jitter, gentle on battery and server.
     final base = math.min(30000, 1000 * math.pow(2, math.min(_attempt, 5)).toInt());
     final jitter = math.Random().nextInt(500);
     _attempt++;

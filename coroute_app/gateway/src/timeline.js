@@ -22,6 +22,7 @@ const crypto = require('crypto');
 const config = require('./config');
 const { haversine, distanceToPolyline, medianCentre, decodePolyline } = require('./geo_math');
 const { buildTripReport } = require('./report');
+const { scrub, mentions } = require('./anonymise');
 
 const INTERVAL_TYPES = new Set(['STOPPED', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'SOS', 'CORIDE', 'MOVING', 'STOP_REACHED', 'DESTINATION_REACHED', 'OVERSPEED']);
 const FRESH_MS = 2 * 60000;
@@ -74,6 +75,22 @@ class TimelineEngine {
     const t = setTimeout(() => { this.rebuilds.delete(gid); this._guard(this.finishTrip(gid)); }, config.reportRebuildMs);
     if (t.unref) t.unref();
     this.rebuilds.set(gid, t);
+  }
+
+  /**
+   * Account deletion: drops the rider's in-memory state, so nothing is written for them later.
+   * Open entries are written again when they close: the rider's own (an open SOS, a stop) are
+   * dropped, and other riders' entries that name them (a co-ride with them) are anonymised
+   * with the same `id` the database erase uses.
+   */
+  forgetUser(userId, id = null) {
+    for (const st of this.states.values()) {
+      st.riders.delete(userId);
+      for (const [slot, ev] of [...st.open.entries()]) {
+        if (slot.endsWith(`:${userId}`) || ev.userId === userId) st.open.delete(slot);
+        else if (id && mentions(ev, id)) st.open.set(slot, scrub(ev, id));
+      }
+    }
   }
 
   /** Waits for all in-flight work (tests, graceful shutdown). */

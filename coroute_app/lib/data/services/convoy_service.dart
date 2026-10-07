@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,6 +11,7 @@ import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
 import '../models/convoy_model.dart';
 import '../models/group_message_model.dart';
+import '../models/pending_sos.dart';
 import '../models/rider_model.dart';
 import '../models/route_model.dart';
 import '../models/sos_alert_model.dart';
@@ -22,6 +24,7 @@ import 'api_client.dart';
 import 'background_service.dart';
 import 'geo_service.dart';
 import 'realtime_service.dart';
+import 'settings_service.dart';
 import 'timeline_service.dart';
 import 'track_recorder.dart';
 import 'trip_storage_service.dart';
@@ -32,12 +35,24 @@ import 'trip_storage_service.dart';
 /// active convoy that is updated by push events over one WebSocket (no polling),
 /// and sends the rider's own telemetry with battery-aware throttling.
 class ConvoyService extends ChangeNotifier {
-  ConvoyService(this._api, this._rt, this._trips, {this.recorder, this.timeline}) {
+  ConvoyService(this._api, this._rt, this._trips, {this.recorder, this.timeline, this.settings}) {
     _eventSub = _rt.events.listen(_onEvent);
     BackgroundService.addButtonListener(_onNotificationButton);
     _rt.addListener(_onConnectionChanged);
     _initBatteryTracking();
+    _loadPendingSos();
+    // The compass only feeds the heading shown on screen: off while the app is not visible.
+    try {
+      _lifecycle = AppLifecycleListener(onHide: _pauseCompass, onPause: _pauseCompass, onResume: _resumeCompass, onShow: _resumeCompass);
+    } catch (e) {
+      debugPrint('lifecycle listener note: $e'); // no Flutter binding (plain unit tests)
+    }
   }
+
+  /// Data saver setting (optional: tests and older call sites work without it).
+  final SettingsService? settings;
+  AppLifecycleListener? _lifecycle;
+  bool _compassPaused = false;
 
   final ApiClient _api;
   final RealtimeService _rt;
@@ -71,6 +86,10 @@ class ConvoyService extends ChangeNotifier {
   bool _isCharging = false;
   double? _deviceCompassHeading;
   bool _adminWatching = false;
+  PendingSos? _pendingSos;
+  String? _deliveredSosAlertId;
+  String? _sosOkNotice;
+  Timer? _sosOkClear;
 
   // ------------------------------------------------------------- getters
   Map<String, ConvoyModel> get allConvoys => Map.unmodifiable(_allConvoys);
@@ -95,6 +114,27 @@ class ConvoyService extends ChangeNotifier {
   }
   bool get isRealGpsActive => _isRealGpsActive;
   bool get isOnline => _rt.isConnected;
+
+  /// An SOS this phone raised that the convoy has not confirmed yet (no signal, or not echoed yet).
+  PendingSos? get pendingSos => _pendingSos;
+
+  /// The server id of this rider's own open SOS, if any (so it can be resolved from any screen).
+  String? get myOpenSosAlertId {
+    final c = activeConvoy;
+    final uid = _myUserId;
+    if (c != null && uid != null) {
+      for (final a in c.activeAlerts.reversed) {
+        if (a.userId == uid && !a.resolved) return a.alertId;
+      }
+    }
+    return null;
+  }
+
+  /// "`<name>` says they are OK": shown for a short while when a rider resolves their own SOS.
+  String? get sosOkNotice => _sosOkNotice;
+
+  /// Recorded GPS points still waiting on the phone for upload (no polling; refreshed on events).
+  int get pendingTrackPoints => recorder?.pendingPoints ?? 0;
   int get currentBatteryLevel => _currentBatteryLevel;
   bool get isCharging => _isCharging;
   String? get myUserId => _myUserId;
@@ -110,6 +150,8 @@ class ConvoyService extends ChangeNotifier {
 
   /// Call on sign-out.
   Future<void> endSession() async {
+    _clearPendingSos(); // never carried over to the next account on this phone
+    _deliveredSosAlertId = null;
     _stopStatus();
     recorder?.stop().ignore();
     timeline?.detach();
@@ -131,6 +173,9 @@ class ConvoyService extends ChangeNotifier {
         _activate(convoy);
         return;
       }
+      // The server says there is no active convoy: an SOS still waiting on the phone has no
+      // convoy to go to any more (an offline answer never gets here, so it is kept then).
+      if (res is Map) _clearPendingSos();
     } on ApiException catch (e) {
       debugPrint('restore active convoy note: ${e.message}');
     } catch (e) {
@@ -141,6 +186,8 @@ class ConvoyService extends ChangeNotifier {
   }
 
   void _activate(ConvoyModel convoy) {
+    // An SOS waiting for another (old) convoy can no longer be delivered there.
+    if (_pendingSos != null && _pendingSos!.groupId != convoy.groupId) _clearPendingSos();
     _allConvoys[convoy.groupId] = convoy;
     _activeGroupId = convoy.groupId;
     _rt.joinRoom(convoy.groupId);
@@ -240,7 +287,12 @@ class ConvoyService extends ChangeNotifier {
   }
 
   void _onConnectionChanged() {
-    if (_rt.isConnected) recorder?.uploadNow(); // send what was recorded in the dead zone
+    if (_rt.isConnected) {
+      recorder?.uploadNow(); // send what was recorded in the dead zone
+    } else {
+      recorder?.refreshPendingCount().ignore();
+    }
+    // A pending SOS is sent again after the SNAPSHOT that follows the re-JOIN (see _onEvent).
     notifyListeners();
   }
 
@@ -288,6 +340,8 @@ class ConvoyService extends ChangeNotifier {
         if (e['convoy'] is Map) {
           _allConvoys[gid] = ConvoyModel.fromJson(Map<String, dynamic>.from(e['convoy'] as Map));
         }
+        // Back in the room after a dead zone or a restart: send the SOS that is still waiting.
+        _sendPendingSos();
         break;
       case 'RIDER_UPDATE':
         if (convoy == null || e['rider'] is! Map) return;
@@ -313,12 +367,28 @@ class ConvoyService extends ChangeNotifier {
       case 'ALERT':
         if (convoy == null || e['alert'] is! Map) return;
         final alert = SosAlertModel.fromJson(Map<String, dynamic>.from(e['alert'] as Map));
-        final alerts = List<SosAlertModel>.from(convoy.activeAlerts.where((a) => a.alertId != alert.alertId))..add(alert);
+        final pending = _pendingSos;
+        if (pending != null && pending.matches(alert.clientId)) {
+          // The server has it: delivered to the convoy. Never shown as delivered before this echo.
+          _pendingSos = null;
+          _deliveredSosAlertId = alert.alertId;
+          PendingSosStore.clear().ignore();
+        }
+        final others = convoy.activeAlerts.where((a) => a.alertId != alert.alertId);
+        final alerts = alert.resolved ? others.toList() : (List<SosAlertModel>.from(others)..add(alert));
         _allConvoys[gid] = convoy.copyWith(activeAlerts: alerts);
         break;
       case 'ALERT_RESOLVED':
         if (convoy == null) return;
-        _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != e['alertId']).toList());
+        final resolvedId = e['alertId']?.toString();
+        final by = e['by']?.toString();
+        for (final a in convoy.activeAlerts) {
+          if (a.alertId == resolvedId && by != null && by == a.userId && a.userId != _myUserId) {
+            _showSosOk('${a.userName.isNotEmpty ? a.userName : 'The rider'} says they are OK.');
+          }
+        }
+        if (resolvedId != null && resolvedId == _deliveredSosAlertId) _deliveredSosAlertId = null;
+        _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != resolvedId).toList());
         break;
       case 'STOPS':
         if (convoy == null || e['stopPoints'] is! List) return;
@@ -418,6 +488,7 @@ class ConvoyService extends ChangeNotifier {
 
   void _dropActiveConvoyLocally() {
     final gid = _activeGroupId;
+    _clearPendingSos();
     _stopStatus();
     recorder?.stop().ignore();
     timeline?.detach();
@@ -432,6 +503,7 @@ class ConvoyService extends ChangeNotifier {
   }
 
   void _onTripEnded(ConvoyModel convoy) {
+    _clearPendingSos();
     if (_myUserId != null && convoy.riders.containsKey(_myUserId)) {
       _trips.saveTrip(buildTripHistory(convoy, userId: _myUserId), userId: _myUserId).ignore();
     }
@@ -535,6 +607,7 @@ class ConvoyService extends ChangeNotifier {
   Future<void> leaveActiveConvoy(String userId) async {
     final gid = _activeGroupId;
     if (gid == null) return;
+    _clearPendingSos();
     final convoy = _allConvoys[gid];
     if (convoy != null && convoy.riders.isNotEmpty) {
       _trips.saveTrip(buildTripHistory(convoy, userId: userId), userId: userId).ignore();
@@ -687,7 +760,7 @@ class ConvoyService extends ChangeNotifier {
     final since = DateTime.now().difference(_lastTelemetryPush);
     final movedFar = current == null ||
         Geolocator.distanceBetween(current.lat, current.lng, position.latitude, position.longitude) > 40;
-    if (since >= AppConfig.telemetryMinInterval || movedFar || (isMoving && wasStopped)) {
+    if (since >= AppConfig.telemetryInterval(settings?.lowData ?? false) || movedFar || (isMoving && wasStopped)) {
       _pushTelemetry(updated);
     }
   }
@@ -731,8 +804,23 @@ class ConvoyService extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------ compass
+  void _pauseCompass() {
+    if (_compassSub == null) return;
+    _compassPaused = true;
+    _compassSub?.cancel();
+    _compassSub = null;
+    _deviceCompassHeading = null; // stale once the phone moved in a pocket
+  }
+
+  void _resumeCompass() {
+    if (!_compassPaused) return;
+    _compassPaused = false;
+    if (_activeGroupId != null && _compassSub == null) _initCompassTracking();
+  }
+
   void _initCompassTracking() {
     _compassSub?.cancel();
+    _compassPaused = false;
     try {
       _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
         if (event.heading == null) return;
@@ -749,11 +837,13 @@ class ConvoyService extends ChangeNotifier {
   Future<void> _initBatteryTracking() async {
     await _refreshBatteryLevel();
     _batteryStateSub?.cancel();
-    _batteryStateSub = _battery.onBatteryStateChanged.listen((state) async {
-      _isCharging = state == BatteryState.charging || state == BatteryState.full;
-      await _refreshBatteryLevel();
-      notifyListeners();
-    });
+    try {
+      _batteryStateSub = _battery.onBatteryStateChanged.listen((state) async {
+        _isCharging = state == BatteryState.charging || state == BatteryState.full;
+        await _refreshBatteryLevel();
+        notifyListeners();
+      }, onError: (_) {});
+    } catch (_) {}
     _batteryRefresh?.cancel();
     _batteryRefresh = Timer.periodic(const Duration(seconds: 60), (_) => _refreshBatteryLevel());
   }
@@ -873,9 +963,75 @@ class ConvoyService extends ChangeNotifier {
     _rt.send(payload);
   }
 
-  void triggerSosAlert({required String userId, required String userName, required double lat, required double lng, String type = 'EMERGENCY'}) {
-    if (_activeGroupId == null) return;
-    _rt.send({'type': 'SOS', 'lat': lat, 'lng': lng, 'alertType': type});
+  /// Raises an SOS for the active convoy. It is kept on the phone (memory and disk) until
+  /// the server echoes it back, and sent again after every reconnect with the same
+  /// clientId, so it is never lost in a dead zone and never delivered twice.
+  SosDelivery triggerSosAlert({required String userId, required String userName, required double lat, required double lng, String type = 'EMERGENCY'}) {
+    final gid = _activeGroupId;
+    if (gid == null) return SosDelivery.notInConvoy;
+    final existing = _pendingSos;
+    final pending = (existing != null && existing.groupId == gid)
+        // Still the same emergency (not confirmed yet): keep its id, use the newer position.
+        ? existing.copyWith(lat: lat, lng: lng)
+        : PendingSos(
+            clientId: '${userId.isNotEmpty ? userId : (_myUserId ?? 'rider')}-${DateTime.now().millisecondsSinceEpoch}',
+            groupId: gid,
+            lat: lat,
+            lng: lng,
+            type: type,
+            createdAt: DateTime.now().millisecondsSinceEpoch,
+          );
+    _pendingSos = pending;
+    PendingSosStore.save(pending).ignore();
+    final sent = _sendPendingSos();
+    notifyListeners();
+    return sent ? SosDelivery.sent : SosDelivery.queued;
+  }
+
+  /// Sends the waiting SOS if there is one for the active convoy. Event-driven only (no timer).
+  bool _sendPendingSos() {
+    final p = _pendingSos;
+    if (p == null || p.groupId != _activeGroupId) return false;
+    return _rt.send(p.toMessage());
+  }
+
+  Future<void> _loadPendingSos() async {
+    final stored = await PendingSosStore.load();
+    if (stored == null || _pendingSos != null) return;
+    _pendingSos = stored;
+    if (_activeGroupId != null && stored.groupId != _activeGroupId) {
+      _clearPendingSos();
+      return;
+    }
+    _sendPendingSos();
+    notifyListeners();
+  }
+
+  void _clearPendingSos() {
+    if (_pendingSos == null) return;
+    _pendingSos = null;
+    PendingSosStore.clear().ignore();
+  }
+
+  void _showSosOk(String text) {
+    _sosOkNotice = text;
+    _sosOkClear?.cancel();
+    _sosOkClear = Timer(const Duration(seconds: 15), () {
+      _sosOkNotice = null;
+      notifyListeners();
+    });
+  }
+
+  /// Cancels this rider's own SOS: resolves it on the server if it was delivered, and drops
+  /// it from the phone if it is still waiting to be sent.
+  void cancelMySos() {
+    final waiting = _pendingSos;
+    if (waiting != null) {
+      _clearPendingSos();
+      notifyListeners();
+    }
+    final id = myOpenSosAlertId ?? _deliveredSosAlertId;
+    if (id != null) resolveSosAlert(id);
   }
 
   void resolveSosAlert(String alertId) {
@@ -948,6 +1104,7 @@ class ConvoyService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _lifecycle?.dispose();
     _eventSub?.cancel();
     _rt.removeListener(_onConnectionChanged);
     _batteryStateSub?.cancel();
@@ -956,6 +1113,7 @@ class ConvoyService extends ChangeNotifier {
     _gpsSub?.cancel();
     _idleHeartbeat?.cancel();
     _broadcastClear?.cancel();
+    _sosOkClear?.cancel();
     _statusTimer?.cancel();
     super.dispose();
   }

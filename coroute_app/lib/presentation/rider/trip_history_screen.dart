@@ -9,6 +9,8 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/trip_history_model.dart';
+import '../../data/services/api_client.dart';
+import '../../data/services/settings_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../data/services/auth_service.dart';
 import '../../domain/timeline/timeline_text.dart';
@@ -240,7 +242,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
   }
 }
 
-class TripReplayDetailScreen extends StatelessWidget {
+class TripReplayDetailScreen extends StatefulWidget {
   final TripHistoryModel trip;
 
   const TripReplayDetailScreen({super.key, required this.trip});
@@ -259,16 +261,104 @@ class TripReplayDetailScreen extends StatelessWidget {
         '  <trk><name>${esc(trip.tripName)}</name><trkseg>\n$pts\n  </trkseg></trk>\n</gpx>\n';
   }
 
+  @override
+  State<TripReplayDetailScreen> createState() => _TripReplayDetailScreenState();
+}
+
+class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
+  late TripHistoryModel trip;
+  bool _loading = false;
+  String? _loadError;
+
+  @override
+  void initState() {
+    super.initState();
+    trip = widget.trip;
+    if (trip.trailOnServerOnly) {
+      final cached = context.read<TripStorageService>().cachedFull(trip.tripId);
+      if (cached != null) {
+        trip = cached;
+      } else if (!_waitForTap()) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _loadRoute());
+      }
+    }
+  }
+
+  /// In data saver mode the route is downloaded only when the rider asks for it.
+  bool _waitForTap() {
+    try {
+      return context.read<SettingsService>().lowData;
+    } on ProviderNotFoundException catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _loadRoute() async {
+    if (_loading || !mounted) return;
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+    try {
+      final full = await context.read<TripStorageService>().loadFull(trip.tripId);
+      if (!mounted) return;
+      setState(() {
+        trip = full;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = e.isOffline ? 'Route not available offline.' : 'Could not load the route. Try again later.';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = 'Could not load the route. Try again later.';
+      });
+    }
+  }
+
   Future<void> _share(BuildContext context) async {
     final safe = trip.tripName.replaceAll(RegExp(r'[^A-Za-z0-9 _-]'), '').trim().replaceAll(RegExp(r'\s+'), '_');
     try {
       await SharePlus.instance.share(ShareParams(
-        files: [XFile.fromData(utf8.encode(gpx(trip)), mimeType: 'application/gpx+xml', name: '${safe.isEmpty ? 'coroute_trip' : safe}.gpx')],
+        files: [XFile.fromData(utf8.encode(TripReplayDetailScreen.gpx(trip)), mimeType: 'application/gpx+xml', name: '${safe.isEmpty ? 'coroute_trip' : safe}.gpx')],
         subject: 'CoRoute trip: ${trip.tripName}',
       ));
     } catch (_) {
       if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not share the route.')));
     }
+  }
+
+  /// Shown over the map while the route is missing on this phone.
+  Widget? _routeNotice() {
+    if (!trip.trailOnServerOnly) return null;
+    final Widget child;
+    if (_loading) {
+      child = Row(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan)),
+        const SizedBox(width: 10),
+        Text('Loading the route...', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+      ]);
+    } else if (_loadError != null) {
+      child = Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(_loadError!, textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+        TextButton(onPressed: _loadRoute, child: Text('Try again', style: TextStyle(color: AppTheme.neonCyan))),
+      ]);
+    } else {
+      child = ElevatedButton.icon(onPressed: _loadRoute, icon: const Icon(Icons.download_rounded), label: const Text('Load route'));
+    }
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.all(24),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(color: AppTheme.slateCard.withOpacity(0.95), borderRadius: BorderRadius.circular(12)),
+        child: child,
+      ),
+    );
   }
 
   @override
@@ -327,6 +417,8 @@ class TripReplayDetailScreen extends StatelessWidget {
       appBar: AppBar(title: Text(trip.tripName, overflow: TextOverflow.ellipsis)),
       body: LayoutBuilder(builder: (context, c) {
         final map = FlutterMap(
+          // A new map (and camera fit) once a trail loaded on demand arrives.
+          key: ValueKey('trail-${points.length}'),
           options: MapOptions(
             initialCenter: center,
             initialZoom: points.isEmpty ? 5 : 13.0,
@@ -349,11 +441,13 @@ class TripReplayDetailScreen extends StatelessWidget {
               ),
           ],
         );
+        final notice = _routeNotice();
+        final mapArea = notice == null ? map : Stack(children: [map, notice]);
         if (c.maxWidth > c.maxHeight && c.maxWidth > 700) {
-          return Row(children: [Expanded(child: map), SizedBox(width: 360, child: SingleChildScrollView(child: details))]);
+          return Row(children: [Expanded(child: mapArea), SizedBox(width: 360, child: SingleChildScrollView(child: details))]);
         }
         return Column(children: [
-          Expanded(child: map),
+          Expanded(child: mapArea),
           ConstrainedBox(constraints: BoxConstraints(maxHeight: c.maxHeight * 0.5), child: SingleChildScrollView(child: details)),
         ]);
       }),

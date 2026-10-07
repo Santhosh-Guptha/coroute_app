@@ -15,6 +15,7 @@ import '../../domain/timeline/timeline_text.dart';
 import '../map_picker/map_picker_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../rider/convoy_dashboard_screen.dart';
+import '../widgets/pre_ride_checklist_sheet.dart';
 import '../../core/theme/map_tiles.dart';
 
 /// Plan a trip before starting it: name, start, destination and any number
@@ -151,6 +152,9 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     final auth = context.read<AuthService>();
     final convoys = context.read<ConvoyService>();
     if (!await PermissionsScreen.ensure(context)) return;
+    if (!mounted) return;
+    // Pre-ride checklist (never blocks; closing it without starting cancels the launch).
+    if (!await PreRideChecklistSheet.show(context)) return;
     if (!mounted) return;
     setState(() => _launching = true);
     final ConvoyModel convoy;

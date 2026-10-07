@@ -1,7 +1,7 @@
 # CoRoute — Google Play Store Release Checklist & Launch Runbook
 
 > **Target App:** CoRoute: Group Ride Convoy (`space.devmonks.coroute_app`)  
-> **Production API:** `https://coroute.duckdns.org` (Oracle Cloud VM `152.67.181.198`)  
+> **Production API:** `https://coroute.duckdns.org` (Oracle Cloud VM `<vm-public-ip>`)  
 > **Maintainer Contact:** `santhoshbukka5@gmail.com`  
 > **Current Version:** `3.8.0+68`
 
@@ -102,9 +102,11 @@ Upload an unlisted YouTube or Google Drive video showing:
 ### 4.2 Build Android App Bundle (AAB)
 Run the release build command:
 ```powershell
-& "C:\Users\santhosh\flutter\bin\flutter.bat" build appbundle --release --dart-define=COROUTE_API=https://coroute.duckdns.org
+& "C:\Users\santhosh\flutter\bin\flutter.bat" build appbundle --release --obfuscate --split-debug-info=build/symbols --dart-define=COROUTE_API=https://coroute.duckdns.org
 ```
-- [ ] Output artifact generated: `build/app/outputs/bundle/release/app-release.aab`
+- [ ] Output artifact generated: `build/app/outputs/bundle/release/app-release.aab` (Play splits it per phone, so riders download only their CPU's code)
+- [ ] Website APKs (same release): `flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --obfuscate --split-debug-info=build/symbols`, then copy `app-arm64-v8a-release.apk` to `/opt/coroute/gateway/public/coroute.apk` and `app-armeabi-v7a-release.apk` to `/opt/coroute/gateway/public/coroute-32bit.apk` on the VM (see `gateway/deploy/RUNBOOK.md` section 4)
+- [ ] R8 smoke test on a real phone: Google sign-in, ride start, lock-screen notification with SOS and Leave, one local alert, push-to-talk
 - [ ] Size verification: typically ~25–35 MB.
 
 ---

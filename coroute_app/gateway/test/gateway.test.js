@@ -33,7 +33,11 @@ async function api(method, path, body, token) {
 }
 
 async function register(name, email, password = 'Password#123') {
-  const r = await api('POST', '/auth/register', { name, email, password, phone: '9999999999', vehicleType: 'Motorcycle' });
+  // A complete safety profile: every rider needs one before creating or joining a convoy.
+  const r = await api('POST', '/auth/register', {
+    name, email, password, phone: '9999999999', vehicleType: 'Motorcycle', vehicleNo: 'TS09AB1234',
+    emergencyContact: '+919000000001', emergencyContactName: 'Family Contact',
+  });
   assert.equal(r.status, 201, JSON.stringify(r.json));
   return r.json;
 }
@@ -81,7 +85,7 @@ test('register / login / token / profile; passwords are hashed; admin role by al
   assert.ok(stored.value.passwordHash.startsWith('$2'));
   assert.equal(stored.value.password, undefined);
 
-  const dup = await api('POST', '/auth/register', { name: 'Alice Two', email: 'alice@coroute.test', password: 'Password#123', phone: '1' });
+  const dup = await api('POST', '/auth/register', { name: 'Alice Two', email: 'alice@coroute.test', password: 'Password#123', phone: '9999999999' });
   assert.equal(dup.status, 409);
 
   const bad = await api('POST', '/auth/login', { identifier: 'alice@coroute.test', password: 'nope' });
@@ -118,9 +122,12 @@ test('register / login / token / profile; passwords are hashed; admin role by al
   assert.equal(users.json.users[0].passwordHash, undefined);
 });
 
-test('duplicate callsigns get unique userIds', async () => {
+test('callsigns are unique; callsigns with the same slug get unique userIds', async () => {
   const b1 = await register('Bob', 'bob1@coroute.test');
-  const b2 = await register('Bob', 'bob2@coroute.test');
+  const taken = await api('POST', '/auth/register', { name: 'bob', email: 'bob3@coroute.test', password: 'Password#123', phone: '9999999999' });
+  assert.equal(taken.status, 409);
+  assert.equal(taken.json.code, 'CALLSIGN_TAKEN');
+  const b2 = await register('Bob.', 'bob2@coroute.test');
   assert.equal(b1.user.userId, 'usr_bob');
   assert.notEqual(b2.user.userId, 'usr_bob');
   assert.ok(b2.user.userId.startsWith('usr_bob_'));

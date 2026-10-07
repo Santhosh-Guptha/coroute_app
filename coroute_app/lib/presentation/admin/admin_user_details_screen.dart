@@ -429,7 +429,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                '⚠️ Cannot change status while rider is in an active convoy.',
+                'Cannot change status while the rider is in an active convoy.',
                 style: TextStyle(color: AppTheme.hyperAmber, fontSize: 12),
               ),
             ),
@@ -552,7 +552,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
             if (from.isNotEmpty || to.isNotEmpty) ...[
               const SizedBox(height: 2),
               Text(
-                '${from.isEmpty ? "Start" : from}  ➔  ${to.isEmpty ? "Destination" : to}',
+                '${from.isEmpty ? "Start" : from} to ${to.isEmpty ? "Destination" : to}',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                 overflow: TextOverflow.ellipsis,
               ),

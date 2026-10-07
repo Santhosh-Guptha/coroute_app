@@ -56,11 +56,21 @@ android {
         release {
             // Falls back to the debug key when key.properties is absent so `flutter run --release` still works locally.
             signingConfig = if (signingValue("storeFile", "COROUTE_STORE_FILE") != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
-            // Code shrinking is left off for predictable releases; flip both to true once you have
-            // smoke-tested a shrunk build on a device (proguard-rules.pro already keeps Flutter + Google auth).
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // R8 shrinks the Java/Kotlin code and unused resources. proguard-rules.pro keeps the
+            // plugins that use reflection (notifications, foreground service, recorder, Google auth).
+            // If a plugin misbehaves on a device, set both back to false: split-per-abi below and
+            // compressed native libraries give most of the size saving on their own.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    // Store native libraries compressed in the sideloaded APK (minSdk 23 would leave them
+    // uncompressed, which is most of the APK size). Build with --split-per-abi for one APK per CPU.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 }

@@ -40,12 +40,12 @@ test('admin management: groups, retention, user hold/block/delete, active convoy
 
   const rider1 = (await api('POST', '/auth/register', {
     name: 'Active Rider', email: 'rider1@coroute.test', password: 'Password#123',
-    phone: '+919876543211', vehicleType: 'Motorcycle',
+    phone: '+919876543211', vehicleType: 'Motorcycle', vehicleNo: 'TS09AB1234', emergencyContact: '+919000000001', emergencyContactName: 'Family Contact',
   })).json;
 
   const rider2 = (await api('POST', '/auth/register', {
     name: 'Idle Rider', email: 'rider2@coroute.test', password: 'Password#123',
-    phone: '+919876543212', vehicleType: 'Motorcycle',
+    phone: '+919876543212', vehicleType: 'Motorcycle', vehicleNo: 'TS09AB1234', emergencyContact: '+919000000001', emergencyContactName: 'Family Contact',
   })).json;
 
   // 2. Rider 1 creates a convoy and rides in it

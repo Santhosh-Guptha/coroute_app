@@ -2,6 +2,8 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { requireAuth, requireAdmin, AuthError } = require('./auth');
+const { ValidationError, tripRecord, sitePath } = require('./validate');
+const { identity } = require('./anonymise');
 const { ConvoyError } = require('./convoys');
 const config = require('./config');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
@@ -12,7 +14,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate }) {
   const r = express.Router();
 
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again later.' } });
@@ -57,12 +59,13 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.post('/pv', siteLimiter, express.text({ type: '*/*', limit: '2kb' }), wrap(async (req, res) => {
     let body = {};
     try { body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {}); } catch { body = {}; }
-    const path = String(body.path || '/').slice(0, 120);
-    if (!/^\/[A-Za-z0-9/_.-]*$/.test(path)) return res.status(204).end();
+    // Only the site's own pages are counted (anything else would grow the table without limit).
+    const path = sitePath(body.path);
+    if (!path) return res.status(204).end();
     let refHost = '';
     try { if (body.ref) refHost = new URL(String(body.ref)).hostname.slice(0, 80); } catch { /* ignore */ }
     const day = new Date().toISOString().slice(0, 10);
-    repo.countPageview(day, path, refHost).catch(() => {});
+    repo.countPageview(day, path, refHost, config.pvMaxReferrers).catch(() => {});
     res.status(204).end();
   }));
 
@@ -92,35 +95,45 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   }));
 
   // ---- authenticated ----
-  r.use(requireAuth, apiLimiter);
+  r.use(requireAuth(gate), apiLimiter);
 
   r.get('/me', wrap(async (req, res) => {
     const me = await auth.me(req.user.userId, { appBuild: parseInt(req.get('X-CoRoute-Build') || '0', 10) });
     // Sliding session: a rider who opens the app at least once a month is never signed out.
     // The new token is built from the database user, so role changes take effect too.
     if (Date.now() - (req.tokenIssuedAt || 0) > config.tokenRefreshAfterHours * 3600000) {
-      res.set('X-CoRoute-Token', auth.issueToken(me));
+      // Signed from the database document so the token carries the current password version.
+      res.set('X-CoRoute-Token', auth.issueToken(req.dbUser || me));
     }
     res.json(me);
   }));
   r.patch('/me', wrap(async (req, res) => res.json(await auth.updateProfile(req.user.userId, req.body || {}))));
+  /**
+   * Before an account is erased: leave every convoy, let a trip that just ended finish writing,
+   * then remove the rider from convoys loaded in memory (so a later save cannot bring the name back).
+   */
+  async function prepareErase(user) {
+    // Close the rider's sockets first, so nothing they send can be written during the erase.
+    if (hub) hub.disconnectUser(user.userId, 4401, 'ACCOUNT_GONE');
+    await convoys.leaveAll(user.userId);
+    if (timeline) await timeline.idle();
+    const id = identity(user);
+    const skipGroups = await convoys.forgetUser(id);
+    if (timeline) timeline.forgetUser(user.userId, id);
+    return { id, skipGroups };
+  }
   r.post('/me/password', wrap(async (req, res) => res.json(await auth.changePassword(req.user.userId, req.body || {}))));
   r.delete('/me', wrap(async (req, res) => {
-    await convoys.leaveAll(req.user.userId);
-    if (timeline) await timeline.idle(); // let a trip that just ended finish writing before we erase
-    res.json(await auth.deleteAccount(req.user.userId));
+    const out = await auth.deleteAccount(req.user.userId, { prepare: prepareErase });
+    if (hub) hub.disconnectUser(req.user.userId, 4401, 'ACCOUNT_GONE');
+    res.json(out);
   }));
 
   // Convoys
+  // Every rider (not only new app builds) needs the safety profile before riding in a group.
   const ensureProfileComplete = async (req) => {
     if (req.user?.role === 'MASTER_ADMIN') return;
-    const isEnforce = Boolean(
-      req.get('X-CoRoute-Build') ||
-      req.get('X-CoRoute-Enforce-Profile') ||
-      req.body?.enforceProfile
-    );
-    if (!isEnforce) return;
-    const u = await repo.findUserById(req.user.userId);
+    const u = req.dbUser || await repo.findUserById(req.user.userId);
     if (!u) return;
     const isPillion = (u.vehicleType || '').trim().toLowerCase() === 'pillion rider' || (u.vehicleNo || '').trim().toUpperCase() === 'PILLION';
     const complete = Boolean(
@@ -131,10 +144,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       (u.emergencyContactName || '').trim().length >= 2
     );
     if (!complete) {
-      const err = new Error('Mandatory profile details missing. Please complete your phone, vehicle/pillion, and emergency contact details before creating or joining a convoy.');
-      err.status = 400;
-      err.code = 'PROFILE_INCOMPLETE';
-      throw err;
+      // (An AuthError, so the error handler answers 400 with the code; a plain Error became a 500.)
+      throw new AuthError('Add your phone number, bike number (or pillion) and emergency contact in your profile before creating or joining a convoy.', 400, 'PROFILE_INCOMPLETE');
     }
   };
 
@@ -142,7 +153,17 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     await ensureProfileComplete(req);
     res.status(201).json(await convoys.createConvoy(req.user, req.body || {}));
   }));
-  r.post('/convoys/join', wrap(async (req, res) => {
+  // Join codes are short, so wrong codes are limited per rider and per network; correct joins do not count.
+  const joinMessage = { error: `Too many wrong codes. Try again in ${config.joinWindowMin} minutes.`, code: 'TOO_MANY_ATTEMPTS' };
+  const joinLimiterUser = rateLimit({
+    windowMs: config.joinWindowMin * 60000, limit: config.joinMaxFailures, skipSuccessfulRequests: true,
+    standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: (req) => `u:${req.user.userId}`, message: joinMessage,
+  });
+  const joinLimiterIp = rateLimit({
+    windowMs: config.joinWindowMin * 60000, limit: config.joinMaxFailuresPerIp, skipSuccessfulRequests: true,
+    standardHeaders: false, legacyHeaders: false, message: joinMessage,
+  });
+  r.post('/convoys/join', joinLimiterIp, joinLimiterUser, wrap(async (req, res) => {
     await ensureProfileComplete(req);
     res.json(await convoys.joinByCode(req.user, req.body?.code, req.body?.rider || {}));
   }));
@@ -169,15 +190,36 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   }));
 
   // Trips (summary records are kept forever; GPS trails are trimmed by retention)
-  r.get('/trips', wrap(async (req, res) => res.json({ trips: await repo.listTripsForUser(req.user.userId) })));
+  // ?summary=1: the list without GPS trails (each trail is fetched on demand with GET /trips/:tripId).
+  // Older app builds call without the flag and still get the trails.
+  r.get('/trips', wrap(async (req, res) => {
+    const trips = await repo.listTripsForUser(req.user.userId);
+    if (String(req.query.summary || '') !== '1') return res.json({ trips });
+    res.json({
+      trips: trips.map(({ breadcrumbTrail, ...rest }) => ({ ...rest, trailPoints: Array.isArray(breadcrumbTrail) ? breadcrumbTrail.length : 0 })),
+    });
+  }));
+  r.get('/trips/:tripId', wrap(async (req, res) => {
+    const trip = await repo.getTrip(String(req.params.tripId));
+    if (!trip || trip.userId !== req.user.userId) return res.status(404).json({ error: 'Trip not found.' });
+    res.json({ trip: { ...trip, trailPoints: Array.isArray(trip.breadcrumbTrail) ? trip.breadcrumbTrail.length : 0 } });
+  }));
   r.post('/trips', wrap(async (req, res) => {
-    const t = req.body || {};
-    if (!t.tripId || typeof t.tripId !== 'string') return res.status(400).json({ error: 'tripId required' });
+    const size = Number(req.get('content-length')) || 0;
+    if (size > config.tripMaxBytes) return res.status(413).json({ error: 'This trip is too large to save.', code: 'TRIP_TOO_LARGE' });
+    // Known fields only, with types and sizes enforced (no free-form JSON is stored).
+    const t = tripRecord(req.body);
     // Trips built by the server from the real tracks are authoritative; a phone's estimate never replaces them.
     const existing = await repo.getTrip(t.tripId);
     if (existing && (existing.source === 'server' || existing.userId !== req.user.userId)) return res.status(200).json({ ok: true, kept: 'server' });
+    if (!existing) {
+      let count = 0;
+      try { count = await repo.countTripsForUser(req.user.userId, config.maxTripsPerUser); } catch { count = 0; }
+      if (count >= config.maxTripsPerUser) {
+        return res.status(409).json({ error: `You can keep up to ${config.maxTripsPerUser} trips. Delete old trips to save new ones.`, code: 'TOO_MANY_TRIPS' });
+      }
+    }
     const trip = { ...t, source: 'device', userId: req.user.userId, savedAt: Date.now() };
-    if (Array.isArray(trip.breadcrumbTrail) && trip.breadcrumbTrail.length > 20000) trip.breadcrumbTrail = trip.breadcrumbTrail.slice(-20000);
     await repo.saveTrip(trip);
     res.status(201).json({ ok: true });
   }));
@@ -524,6 +566,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     }
 
     const updated = await auth.setUserStatus(req.user, userId, status, reason);
+    if (status !== 'ACTIVE' && hub) hub.disconnectUser(userId, 4403, status === 'BLOCKED' ? 'ACCOUNT_BLOCKED' : 'ACCOUNT_ON_HOLD');
     res.json({ user: updated });
   }));
 
@@ -534,8 +577,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     if (target.role === 'MASTER_ADMIN') {
       return res.status(403).json({ error: 'Cannot delete the master administrator account.' });
     }
-    await convoys.leaveAll(userId);
-    await repo.deleteUserCascade(target);
+    // Same steps as DELETE /me: no report write may follow the erase.
+    await repo.deleteUserCascade(target, await prepareErase(target));
+    if (gate) gate.invalidate(userId);
+    if (hub) hub.disconnectUser(userId, 4401, 'ACCOUNT_GONE');
     res.json({ ok: true, userId });
   }));
 
@@ -547,6 +592,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // eslint-disable-next-line no-unused-vars
   r.use((err, req, res, next) => {
     if (err instanceof AuthError) return res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
+    if (err instanceof ValidationError) return res.status(err.status).json({ error: err.message, code: err.code, fields: err.fields });
     if (err instanceof ConvoyError) return res.status(err.status).json({ error: err.message, ...(err.reason ? { code: err.reason } : {}) });
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Malformed JSON' });
     console.error('[api]', err);

@@ -16,6 +16,8 @@
  *   trip_events     group timeline entries     unique: eventId; kept forever, coordinates removed after TRACK_RETENTION_DAYS
  *   geo_cache       place search / route cache unique: k; removed after GEO_CACHE_DAYS
  */
+const { identity, scrub, scrubConvoyMeta, mentions, FORMER_RIDER } = require('../anonymise');
+
 const C = {
   users: 'users',
   convoys: 'convoys',
@@ -85,20 +87,101 @@ class Repo {
     const r = await this.soda.findOne(C.users, { nameLower: name.toLowerCase() });
     return r ? { ...r.value, key: r.key } : null;
   }
+  /** True when a convoy still refers to this userId (member or creator), even without an account. */
+  async userIdReferenced(userId) {
+    const asMember = await this.soda.query(C.convoys, { [`members.${userId}`]: { $exists: true } }, { limit: 1 });
+    if (asMember.length) return true;
+    return (await this.soda.query(C.convoys, { createdByUserId: userId }, { limit: 1 })).length > 0;
+  }
   async createUser(user) {
     const doc = { ...user, nameLower: user.name.toLowerCase(), email: user.email.toLowerCase() };
     const key = await this.soda.insert(C.users, doc);
     return { key, ...doc };
   }
-  /** Removes the account and everything tied to it. Trip records are personal data, so they go too. */
-  async deleteUserCascade(user) {
-    await this.soda.removeWhere(C.riders, { userId: user.userId });
-    await this.soda.removeWhere(C.trips, { userId: user.userId });
-    await this.soda.removeWhere(C.trackChunks, { userId: user.userId });
-    await this.soda.removeWhere(C.events, { userId: user.userId });
-    if (user.email) await this.soda.removeWhere(C.feedback, { email: user.email });
-    await this.soda.removeWhere(C.users, { userId: user.userId });
+  /** Every groupId the rider ever appeared in (trips, memberships, timeline, convoys, chat, SOS). */
+  async groupsOfUser(user) {
+    const uid = user.userId;
+    const groups = new Set();
+    const collect = async (coll, filter) => {
+      for (let offset = 0; offset < 20000; offset += 1000) {
+        const rows = await this.soda.query(coll, filter, { limit: 1000, offset });
+        for (const r of rows) if (r.value?.groupId) groups.add(r.value.groupId);
+        if (rows.length < 1000) break;
+      }
+    };
+    await collect(C.trips, { userId: uid });
+    await collect(C.riders, { userId: uid });
+    await collect(C.events, { userId: uid });
+    await collect(C.convoys, { createdByUserId: uid });
+    await collect(C.convoys, { [`members.${uid}`]: { $exists: true } });
+    await collect(C.messages, { senderId: uid });
+    await collect(C.alerts, { userId: uid });
+    return groups;
   }
+
+  /** Rewrites every document of `coll` matching filter that still mentions the rider. */
+  async _scrubWhere(coll, filter, id, { skip = () => false, rewrite = scrub, mentioned = mentions } = {}) {
+    let n = 0;
+    for (let offset = 0; offset < 50000; offset += 1000) {
+      const rows = await this.soda.query(coll, filter, { limit: 1000, offset });
+      for (const r of rows) {
+        if (skip(r.value) || !mentioned(r.value, id)) continue;
+        await this.soda.replace(coll, r.key, rewrite(r.value, id));
+        n++;
+      }
+      if (rows.length < 1000) break;
+    }
+    return n;
+  }
+
+  /**
+   * Removes the account and everything tied to it. Trip records are personal data, so they go too.
+   * Shared records keep their shape for the other riders but lose every trace of this rider
+   * (see anonymise.js): convoy metadata, reports, other riders' timeline entries and trips.
+   * `skipGroups`: convoys loaded in memory, whose metadata ConvoyManager.forgetUser already rewrote.
+   */
+  async deleteUserCascade(user, { id = identity(user), skipGroups = new Set() } = {}) {
+    const uid = user.userId;
+    const groups = await this.groupsOfUser(user);
+
+    // The rider's own records.
+    await this.soda.removeWhere(C.riders, { userId: uid });
+    await this.soda.removeWhere(C.trips, { userId: uid });
+    await this.soda.removeWhere(C.trackChunks, { userId: uid });
+    await this.soda.removeWhere(C.events, { userId: uid });
+    await this.soda.removeWhere(C.messages, { senderId: uid });
+    await this.soda.removeWhere(C.messages, { senderId: 'SYSTEM', requestedBy: uid });
+    await this.soda.removeWhere(C.alerts, { userId: uid });
+    await this.soda.removeWhere(C.voiceLog, { from: uid });
+    await this.soda.removeWhere(C.voiceLog, { to: uid });
+    if (user.email) await this.soda.removeWhere(C.feedback, { email: user.email });
+
+    // Shared records in every convoy the rider was part of.
+    for (const gid of groups) {
+      if (id.name) await this.soda.removeWhere(C.messages, { groupId: gid, senderId: 'SYSTEM', senderName: id.name }); // older wait cards
+      // Other riders' trip records carry the creator's name without the creator's id
+      // (possibly a name used before a rename), so they are matched through the convoy.
+      const meta = await this.getConvoyMeta(gid);
+      const creator = !!meta && (meta.createdByUserId === uid || meta.createdByUserId === id.anonId);
+      const tripScrub = creator ? {
+        mentioned: (doc, i) => mentions(doc, i) || (!!doc.createdByUserName && doc.createdByUserName !== FORMER_RIDER),
+        rewrite: (doc, i) => ({ ...scrub(doc, i), createdByUserName: FORMER_RIDER }),
+      } : {};
+      if (!skipGroups.has(gid)) {
+        // Keep updatedAt as it is, so retention timing does not change.
+        await this._scrubWhere(C.convoys, { groupId: gid }, id, { rewrite: scrubConvoyMeta });
+      }
+      await this._scrubWhere(C.riders, { groupId: gid }, id); // e.g. another rider co-riding with them
+      await this._scrubWhere(C.events, { groupId: gid }, id);
+      await this._scrubWhere(C.trips, { groupId: gid }, id, tripScrub);
+      await this._scrubWhere(C.alerts, { groupId: gid }, id);
+      await this._scrubWhere(C.messages, { groupId: gid }, id);
+    }
+    await this._scrubWhere(C.broadcasts, { byUserId: uid }, id);
+    await this.soda.removeWhere(C.users, { userId: uid });
+    return { groups: groups.size };
+  }
+
   async listUsers(limit = 500) {
     const rows = await this.soda.query(C.users, {}, { orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }], limit });
     return rows.map((r) => ({ ...r.value, key: r.key }));
@@ -223,6 +306,10 @@ class Repo {
     await this.soda.insert(C.alerts, { ...alert, groupId, resolved: false });
     return alert;
   }
+  async findAlertByClientId(groupId, userId, clientId) {
+    const r = await this.soda.findOne(C.alerts, { groupId, userId, clientId });
+    return r ? { ...r.value, key: r.key } : null;
+  }
   async resolveAlert(groupId, alertId, byUserId) {
     const r = await this.soda.findOne(C.alerts, { groupId, alertId });
     if (!r) return false;
@@ -246,6 +333,10 @@ class Repo {
     });
     return rows.map((r) => r.value);
   }
+  /** How many trips a rider has (up to `max`), reading keys only. */
+  async countTripsForUser(userId, max = 500) {
+    return (await this.soda.query(C.trips, { userId }, { limit: max, fields: 'id' })).length;
+  }
   async deleteTrip(tripId, userId) {
     return this.soda.removeWhere(C.trips, { tripId, userId });
   }
@@ -259,12 +350,16 @@ class Repo {
   }
 
   // ---------- website: first-party analytics (no cookies, no personal data) ----------
-  async countPageview(day, path, referrerHost) {
+  async countPageview(day, path, referrerHost, maxReferrers = 50) {
     const existing = await this.soda.findOne(C.pageviews, { day, path });
     if (existing) {
       const v = existing.value;
       const refs = { ...(v.referrers || {}) };
-      if (referrerHost) refs[referrerHost] = (refs[referrerHost] || 0) + 1;
+      if (referrerHost) {
+        // A bounded map: new hosts beyond the cap are counted together under "other".
+        const key = refs[referrerHost] !== undefined || Object.keys(refs).filter((k) => k !== 'other').length < maxReferrers ? referrerHost : 'other';
+        refs[key] = (refs[key] || 0) + 1;
+      }
       await this.soda.replace(C.pageviews, existing.key, { ...v, count: (v.count || 0) + 1, referrers: refs });
     } else {
       await this.soda.insert(C.pageviews, { day, path, count: 1, referrers: referrerHost ? { [referrerHost]: 1 } : {} });

@@ -46,7 +46,7 @@ function wsConnect(token) {
 }
 
 test('the app is told exactly when a session really ended, and never otherwise', async () => {
-  const reg = await api('POST', '/auth/register', { name: 'Session Sam', email: 'sam@coroute.test', password: 'Password#123', phone: '9999999999' });
+  const reg = await api('POST', '/auth/register', { name: 'Session Sam', email: 'sam@coroute.test', password: 'Password#123', phone: '9999999999', vehicleNo: 'TS09AB1234', emergencyContact: '+919000000001', emergencyContactName: 'Family Contact' });
   assert.equal(reg.status, 201);
 
   // Invalid token: 401 with the SESSION_INVALID code (the only 401 the app signs out on).
@@ -63,6 +63,10 @@ test('the app is told exactly when a session really ended, and never otherwise',
   const fresh = await api('GET', '/me', null, reg.json.token);
   assert.equal(fresh.status, 200);
   assert.equal(fresh.headers.get('x-coroute-token'), null);
+  // (The account must be older than the token: a token older than its account is refused.)
+  const stored = await gw.repo.findUserById(reg.json.user.userId);
+  await gw.repo.updateUser(stored.key, { createdAt: Date.now() - 3 * 86400000 });
+  gw.gate.invalidate(reg.json.user.userId);
   const old = jwt.sign({ sub: reg.json.user.userId, name: 'Session Sam', role: 'RIDER', email: 'sam@coroute.test', iat: Math.floor(Date.now() / 1000) - 2 * 86400 },
     config.jwtSecret, { expiresIn: '28d', issuer: 'coroute-gateway' });
   const refreshed = await api('GET', '/me', null, old);

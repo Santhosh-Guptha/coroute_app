@@ -16,7 +16,9 @@ import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/settings_service.dart';
 import '../../data/services/trip_storage_service.dart';
+import '../widgets/connection_banner.dart';
 import '../widgets/emergency_sos_sheet.dart';
 import '../widgets/intercom_dock.dart';
 import '../widgets/rider_status_sheet.dart';
@@ -26,6 +28,7 @@ import '../trip_planner/route_stops_panel.dart';
 import '../../data/models/stop_point_model.dart';
 import '../../core/theme/map_tiles.dart';
 import '../timeline/live_timeline_screen.dart';
+import '../../domain/timeline/timeline_text.dart';
 
 class LiveCockpitMapScreen extends StatefulWidget {
   final String convoyId;
@@ -42,33 +45,53 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   bool _keepScreenOn = false;
   final Set<String> _dismissedAlertIds = {};
   StreamSubscription<CompassEvent>? _compassSub;
-  double? _deviceCompassHeading;
+
+  /// Device facing from the compass. Only my marker and the HUD listen to it, so a
+  /// compass change never rebuilds the map, the other markers or the dock.
+  final ValueNotifier<double?> _compassHeading = ValueNotifier<double?>(null);
+  double? _lastCompassRaw;
   DateTime _lastCompassPaint = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // The planned route as map points, rebuilt only when the convoy's route changes.
+  List<LatLng> _routePoints = const [];
+  Object? _routeKey;
+  Object? _breadcrumbKey;
 
   @override
   void initState() {
     super.initState();
-    // Hardware compass (device facing). Repaint at most ~4×/s and only on a real change,
-    // so the map is not rebuilt on every magnetometer sample.
+    // Hardware compass (device facing). Publish at most ~4 times a second and only on a real change.
     _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
       if (event.heading == null || !mounted) return;
       double h = event.heading!;
       if (h < 0) h += 360.0;
-      final prev = _deviceCompassHeading;
+      final prev = _lastCompassRaw;
       final now = DateTime.now();
       final delta = prev == null ? 999.0 : ((h - prev).abs() % 360);
       if (delta >= 2.0 && now.difference(_lastCompassPaint).inMilliseconds >= 250) {
         _lastCompassPaint = now;
-        setState(() => _deviceCompassHeading = h);
-      } else {
-        _deviceCompassHeading = h;
+        _lastCompassRaw = h;
+        _compassHeading.value = h;
       }
     });
+  }
+
+  /// Heading to draw for me: the compass while slow (GPS course is unreliable below 10 km/h).
+  static double myHeading(RiderModel me, double? compass) => (me.speedKmh < 10.0 && compass != null) ? compass : me.heading;
+
+  List<LatLng> _routeFor(ConvoyModel convoy) {
+    if (!identical(convoy.route, _routeKey) || !identical(convoy.routeBreadcrumbs, _breadcrumbKey)) {
+      _routeKey = convoy.route;
+      _breadcrumbKey = convoy.routeBreadcrumbs;
+      _routePoints = [for (final (lat, lng) in convoy.routeLine) LatLng(lat, lng)];
+    }
+    return _routePoints;
   }
 
   @override
   void dispose() {
     _compassSub?.cancel();
+    _compassHeading.dispose();
     if (_keepScreenOn) WakelockPlus.disable();
     super.dispose();
   }
@@ -119,7 +142,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(child: Text(
-                    '🏍️ Convoy Pack (${riders.length} Riders)',
+                    'Riders (${riders.length})',
                     style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
                   IconButton(
                     icon: Icon(Icons.close, color: AppTheme.textMuted, size: 20),
@@ -134,7 +157,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   separatorBuilder: (context, index) => Divider(color: AppTheme.glassBorder, height: 1),
                   itemBuilder: (context, idx) {
                     final r = riders[idx];
-                    final isMe = r.userId == myRider.userId || r.name == myRider.name;
+                    final isMe = isMeRider(r, myRider.userId);
                     final isOffline = !isMe && r.lastSeenEpochMs > 0 && (DateTime.now().millisecondsSinceEpoch - r.lastSeenEpochMs) > 60000;
                     final minutesAgo = isOffline ? ((DateTime.now().millisecondsSinceEpoch - r.lastSeenEpochMs) / 60000).round() : 0;
                     Color roleColor = isOffline ? AppTheme.hyperAmber : AppTheme.neonCyan;
@@ -229,7 +252,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                             Padding(
                               padding: const EdgeInsets.only(top: 2),
                               child: Text(
-                                '⚠️ Last captured location · ${minutesAgo <= 1 ? "1m" : "${minutesAgo}m"} ago',
+                                'Last known position, ${minutesAgo <= 1 ? "1 min" : "$minutesAgo min"} ago',
                                 style: TextStyle(color: AppTheme.hyperAmber, fontSize: 10, fontWeight: FontWeight.bold),
                               ),
                             ),
@@ -301,7 +324,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Expanded(child: Text(
-                          '💬 Convoy Live Chat (${messages.length})',
+                          'Chat (${messages.length})',
                           style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
                         IconButton(
                           icon: Icon(Icons.close, color: AppTheme.textMuted, size: 20),
@@ -314,23 +337,25 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                       scrollDirection: Axis.horizontal,
                       child: Row(
                         children: [
-                          {'emoji': '⛽', 'text': 'Need Fuel Stop'},
-                          {'emoji': '☕', 'text': 'Tea / Rest Break'},
-                          {'emoji': '⚠️', 'text': 'Road Hazard Ahead'},
-                          {'emoji': '🛑', 'text': 'Regroup Here'},
-                          {'emoji': '👍', 'text': 'All Good / Moving'},
+                          (Icons.local_gas_station_rounded, 'Need a fuel stop'),
+                          (Icons.free_breakfast_rounded, 'Tea or rest break'),
+                          (Icons.warning_amber_rounded, 'Road hazard ahead'),
+                          (Icons.pan_tool_rounded, 'Regroup here'),
+                          (Icons.thumb_up_alt_rounded, 'All good, moving'),
                         ].map((q) {
+                          final (icon, text) = q;
                           return Padding(
                             padding: const EdgeInsets.only(right: 6, bottom: 8),
                             child: ActionChip(
                               backgroundColor: AppTheme.elevatedCard,
-                              label: Text('${q['emoji']} ${q['text']}', style: TextStyle(color: AppTheme.textPrimary, fontSize: 11)),
+                              avatar: Icon(icon, size: 16, color: AppTheme.neonCyan),
+                              label: Text(text, style: TextStyle(color: AppTheme.textPrimary, fontSize: 11)),
                               side: BorderSide(color: AppTheme.glassBorder),
                               onPressed: () {
                                 convoyService.sendGroupMessage(
                                   senderId: myRider.userId,
                                   senderName: myRider.name,
-                                  text: '${q['emoji']} ${q['text']}',
+                                  text: text,
                                   isQuickCard: true,
                                 );
                                 setModalState(() {});
@@ -351,7 +376,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                               itemCount: messages.length,
                               itemBuilder: (context, i) {
                                 final msg = messages[i];
-                                final isMe = msg.senderId == myRider.userId || msg.senderName == myRider.name;
+                                final isMe = msg.senderId == myRider.userId;
                                 return Align(
                                   alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                                   child: Container(
@@ -634,6 +659,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
     final myUserId = myRider?.userId ?? auth.currentUserId ?? '';
 
+    // Kept on the phone and sent again after reconnecting if there is no signal; the sheet
+    // shows whether the convoy has it.
     convoyService.triggerSosAlert(
       userId: myUserId,
       userName: currentUserName,
@@ -697,6 +724,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
     final riders = convoy.riders.values.toList();
     final metrics = TelemetryUtils.calculateConvoyMetrics(riders);
+    final routePoints = _routeFor(convoy);
+    final lowData = context.select<SettingsService?, bool>((s) => s?.lowData ?? false);
 
     // Current user rider reference
     final myRider = convoy.riders[auth.currentUserId ?? ''] ??
@@ -727,13 +756,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 tileBuilder: mapTileBuilder,
                 urlTemplate: AppConstants.osmTileUrl,
                 userAgentPackageName: AppConstants.osmUserAgent,
+                // Data saver: no extra ring of tiles around the screen.
+                panBuffer: lowData ? 0 : 1,
               ),
 
               // Planned route through every stop.
-              if (convoy.routeLine.length >= 2)
+              if (routePoints.length >= 2)
                 PolylineLayer(polylines: [
                   Polyline(
-                    points: [for (final (lat, lng) in convoy.routeLine) LatLng(lat, lng)],
+                    points: routePoints,
                     strokeWidth: 5,
                     color: (convoy.route?.approximate ?? false) ? AppTheme.neonCyan.withOpacity(0.45) : AppTheme.neonCyan.withOpacity(0.75),
                   ),
@@ -762,26 +793,24 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               // Rider Markers with Directional Rotating Chevrons
               MarkerLayer(
                 markers: riders.where((r) => r.lat != 0.0 && r.lng != 0.0).map((r) {
-                  final isMe = r.userId == myRider.userId || r.name.toLowerCase() == myRider.name.toLowerCase();
+                  final isMe = isMeRider(r, myRider.userId);
                   final isOffline = !isMe && r.lastSeenEpochMs > 0 && (DateTime.now().millisecondsSinceEpoch - r.lastSeenEpochMs) > 60000;
                   Color roleColor = isOffline ? AppTheme.hyperAmber : AppTheme.neonCyan;
                   if (!isOffline && r.role == 'LEAD') roleColor = AppTheme.hyperAmber;
                   if (!isOffline && r.role == 'SWEEPER') roleColor = AppTheme.electricBlue;
 
-                  // Heading calculation with Compass Sensor Fusion
-                  final effectiveHeading = isMe
-                      ? ((r.speedKmh < 10.0 && _deviceCompassHeading != null) ? _deviceCompassHeading! : r.heading)
-                      : r.heading;
-
                   final hasStatus = r.statusReason.isNotEmpty;
-                  final statusEmoji = hasStatus ? RiderStatusSheet.getStatusEmoji(r.statusReason) : '';
                   final statusLabel = hasStatus ? RiderStatusSheet.getStatusLabel(r.statusReason) : '';
 
                   return Marker(
                     point: LatLng(r.lat, r.lng),
                     width: 112,
                     height: 64,
-                    child: Column(
+                    child: Semantics(
+                      label: riderSemanticsLabel(r, isMe: isMe, statusLabel: statusLabel),
+                      container: true,
+                      child: ExcludeSemantics(
+                        child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         // Rider name & speed tag / status badge
@@ -797,7 +826,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                             isOffline
                                 ? '${r.name.split(' ').first} · last seen ${((DateTime.now().millisecondsSinceEpoch - r.lastSeenEpochMs) ~/ 60000).clamp(1, 999)}m'
                                 : (hasStatus
-                                    ? '$statusEmoji ${isMe ? "You" : r.name.split(' ').first} · $statusLabel'
+                                    ? '${isMe ? "You" : r.name.split(' ').first} · $statusLabel'
                                     : '${isMe ? "You" : r.name.split(' ').first} · ${r.speedKmh.toStringAsFixed(0)} km/h'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -810,9 +839,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         ),
                         const SizedBox(height: 2),
 
-                        // Directional Chevron Pointer / Last Location Marker
-                        Transform.rotate(
-                          angle: effectiveHeading * (math.pi / 180.0),
+                        // Directional Chevron Pointer / Last Location Marker.
+                        // My marker turns with the compass without rebuilding anything else.
+                        ValueListenableBuilder<double?>(
+                          valueListenable: _compassHeading,
+                          builder: (context, compass, child) => Transform.rotate(
+                            angle: (isMe ? myHeading(r, compass) : r.heading) * (math.pi / 180.0),
+                            child: child,
+                          ),
                           child: Container(
                             width: 32,
                             height: 32,
@@ -839,6 +873,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         ),
                       ],
                     ),
+                      ),
+                    ),
                   );
                 }).toList(),
               ),
@@ -852,6 +888,32 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             right: 12,
             child: Column(
               children: [
+                // No connection: says so, with what is waiting on the phone (points, SOS).
+                ClipRRect(borderRadius: BorderRadius.circular(10), child: const ConnectionBanner()),
+                const SizedBox(height: 4),
+                // A rider resolved their own SOS: tell everyone they are OK.
+                if (convoyService.sosOkNotice != null) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.emeraldSafe,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            convoyService.sosOkNotice!,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 // Global Emergency Safety Broadcast Banner (if active)
                 if (convoyService.systemBroadcastMessage != null) ...[
                   Container(
@@ -921,11 +983,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    '🚨 YOUR SOS IS ACTIVE',
+                                    'Your SOS is on',
                                     style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12),
                                   ),
                                   Text(
-                                    'Convoy members have your live coordinates',
+                                    'Your convoy can see where you are.',
                                     style: TextStyle(color: Colors.black87, fontSize: 10),
                                   ),
                                 ],
@@ -934,8 +996,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                             ElevatedButton(
                               onPressed: () {
                                 convoyService.resolveSosAlert(alert.alertId);
+                                convoyService.cancelMySos();
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Your SOS emergency has been cancelled.')),
+                                  const SnackBar(content: Text('SOS cancelled. Your convoy sees that you are OK.')),
                                 );
                               },
                               style: ElevatedButton.styleFrom(
@@ -945,7 +1008,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                                 minimumSize: Size.zero,
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
-                              child: const Text('CANCEL SOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10)),
+                              child: const Text('I am safe', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10)),
                             ),
                           ],
                         ),
@@ -979,11 +1042,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    '🚨 SOS: ${lastSos.userName} NEEDS HELP!',
+                                    'SOS: ${lastSos.userName} needs help',
                                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                                   ),
                                   Text(
-                                    'Type: ${lastSos.alertType}',
+                                    TimelineText.reason(lastSos.alertType),
                                     style: TextStyle(color: Colors.white70, fontSize: 10),
                                   ),
                                 ],
@@ -991,7 +1054,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                             ),
                             if (lastSos.lat != 0.0 && lastSos.lng != 0.0)
                               IconButton(
-                                tooltip: 'Focus on Map',
+                                tooltip: 'Show on the map',
                                 icon: Icon(Icons.location_searching, color: AppTheme.textPrimary, size: 18),
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints(),
@@ -1002,7 +1065,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                               ),
                             const SizedBox(width: 8),
                             IconButton(
-                              tooltip: 'Acknowledge & Dismiss',
+                              tooltip: 'Mark as handled',
                               icon: Icon(Icons.check_circle_outline, color: AppTheme.textPrimary, size: 20),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
@@ -1072,7 +1135,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     ),
                     child: Row(
                       children: [
-                        Text(RiderStatusSheet.getStatusEmoji(myRider.statusReason), style: const TextStyle(fontSize: 14)),
+                        Icon(Icons.info_outline_rounded, color: AppTheme.hyperAmber, size: 16),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
@@ -1145,7 +1208,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                       IconButton(
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
-                        tooltip: 'End Ride',
+                        tooltip: 'End the ride',
                         icon: Icon(Icons.flag_circle, color: AppTheme.hyperAmber, size: 22),
                         onPressed: () => _showEndTripDialog(context, convoy),
                       ),
@@ -1160,12 +1223,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     Flexible(
                       child: Align(
                         alignment: Alignment.topLeft,
-                        child: CockpitHud(
-                          speedKmh: myRider.speedKmh,
-                          heading: (myRider.speedKmh < 10.0 && _deviceCompassHeading != null) ? _deviceCompassHeading! : myRider.heading,
-                          batteryLevel: myRider.batteryLevel,
-                          isCharging: myRider.isCharging,
-                          speedLimitKmh: convoy.speedLimitKmh,
+                        child: ValueListenableBuilder<double?>(
+                          valueListenable: _compassHeading,
+                          builder: (context, compass, _) => CockpitHud(
+                            speedKmh: myRider.speedKmh,
+                            heading: myHeading(myRider, compass),
+                            batteryLevel: myRider.batteryLevel,
+                            isCharging: myRider.isCharging,
+                            speedLimitKmh: convoy.speedLimitKmh,
+                          ),
                         ),
                       ),
                     ),
@@ -1200,7 +1266,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                           icon: Icons.timeline_rounded,
                           badgeText: null,
                           badgeColor: AppTheme.neonCyan,
-                          tooltip: 'Live Timeline',
+                          tooltip: 'Timeline',
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: convoy.groupId)),
@@ -1249,12 +1315,19 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           Positioned(
             left: 14,
             bottom: 120,
-            child: FloatingActionButton(
-              heroTag: 'sos_btn',
-              backgroundColor: AppTheme.laserRed,
-              foregroundColor: Colors.white,
-              onPressed: () => _triggerSos(context, convoyService, auth),
-              child: const Icon(Icons.sos, size: 28),
+            child: Semantics(
+              button: true,
+              label: 'Send SOS to your convoy',
+              excludeSemantics: true,
+              onTap: () => _triggerSos(context, convoyService, auth),
+              child: FloatingActionButton(
+                heroTag: 'sos_btn',
+                tooltip: 'Send SOS to your convoy',
+                backgroundColor: AppTheme.laserRed,
+                foregroundColor: Colors.white,
+                onPressed: () => _triggerSos(context, convoyService, auth),
+                child: const Icon(Icons.sos, size: 28),
+              ),
             ),
           ),
 
@@ -1269,4 +1342,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       ),
     );
   }
+}
+
+/// "Is this rider me?" by account id only (two riders may share a name).
+bool isMeRider(RiderModel r, String myUserId) => myUserId.isNotEmpty && r.userId == myUserId;
+
+/// What TalkBack reads for a rider marker.
+String riderSemanticsLabel(RiderModel r, {required bool isMe, String statusLabel = ''}) {
+  final who = isMe ? 'You' : r.name;
+  final speed = '${r.speedKmh.round()} km per hour';
+  return statusLabel.isEmpty ? '$who, $speed' : '$who, $speed, stopped: $statusLabel';
 }

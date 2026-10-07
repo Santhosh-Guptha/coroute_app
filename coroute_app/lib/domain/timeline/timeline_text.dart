@@ -159,7 +159,13 @@ class TimelineText {
           parts.add('open for ${duration(e.durationAt(nowMs))}');
         } else {
           final by = e.dataString('resolvedByName');
-          parts.add('resolved${by.isEmpty ? '' : ' by $by'} after ${duration(e.durationAt(nowMs))}');
+          final byId = e.dataString('resolvedBy');
+          if (byId.isNotEmpty && byId == e.userId) {
+            // The rider resolved their own SOS: an "I am OK" check-in.
+            parts.add('said they are OK after ${duration(e.durationAt(nowMs))}');
+          } else {
+            parts.add('resolved${by.isEmpty ? '' : ' by $by'} after ${duration(e.durationAt(nowMs))}');
+          }
         }
         break;
       case 'OVERSPEED':

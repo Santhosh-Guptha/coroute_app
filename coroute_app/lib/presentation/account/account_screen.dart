@@ -12,6 +12,7 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/meta_service.dart';
 import '../auth/access_gate_screen.dart';
 import '../onboarding/permissions_screen.dart';
+import '../widgets/data_saver_tile.dart';
 import 'appearance_sheet.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
@@ -94,6 +95,12 @@ class AccountScreen extends StatelessWidget {
               const _SectionLabel('Appearance'),
               tile(theme.isLight ? Icons.light_mode_rounded : Icons.dark_mode_rounded, 'Theme', AppearanceSheet.summary(theme),
                   () => AppearanceSheet.show(context)),
+              const SizedBox(height: 8),
+              const _SectionLabel('Mobile data'),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: GlassCard(padding: EdgeInsets.zero, child: const DataSaverTile()),
+              ),
               const SizedBox(height: 8),
               const _SectionLabel('Security'),
               tile(Icons.password_rounded, 'Change password', 'Use at least 8 characters.',

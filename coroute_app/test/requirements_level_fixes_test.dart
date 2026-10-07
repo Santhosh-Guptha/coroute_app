@@ -16,12 +16,12 @@ import 'package:coroute_app/presentation/widgets/rider_status_sheet.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('Master Admin Elevation Invariant (Rule 3)', () {
+  group('Admin role comes only from the server', () {
     setUp(() {
       SharedPreferences.setMockInitialValues({});
     });
 
-    test('Auto-elevates santhoshbukka5@gmail.com to MASTER_ADMIN even if server sends RIDER role', () async {
+    test('The former hard-coded e-mail with role RIDER from the server is not an admin', () async {
       final client = MockClient((request) async {
         if (request.url.path.contains('/auth/login')) {
           return http.Response(
@@ -31,7 +31,7 @@ void main() {
                 'userId': 'usr_admin_1',
                 'email': 'santhoshbukka5@gmail.com',
                 'name': 'Santhosh Bukka',
-                'role': 'RIDER', // Server returns RIDER, but invariant must elevate to MASTER_ADMIN
+                'role': 'RIDER', // The server decides; the app never elevates anyone
                 'phone': '+91 99999 88888',
                 'vehicleType': 'Motorcycle (Adv)',
               },
@@ -51,9 +51,9 @@ void main() {
       );
 
       expect(result['success'], true);
-      expect(result['isAdmin'], true);
-      expect(auth.isMasterAdmin, true);
-      expect(auth.currentUserRole, AppConstants.adminRole);
+      expect(result['isAdmin'], false);
+      expect(auth.isMasterAdmin, false);
+      expect(auth.currentUserRole, AppConstants.riderRole);
     });
 
     test('Regular rider does not get elevated to MASTER_ADMIN', () async {
@@ -91,24 +91,26 @@ void main() {
   });
 
   group('Rider Status Sheet Specification Tests (Section 5.5)', () {
-    test('Resolves all 10 stop category emojis and labels accurately', () {
-      final testCases = {
-        'FUELING': {'emoji': '⛽', 'label': 'Fueling'},
-        'REST_BREAK': {'emoji': '☕', 'label': 'Rest Break'},
-        'MECHANICAL': {'emoji': '🔧', 'label': 'Mechanical Issue'},
-        'FLAT_TIRE': {'emoji': '🛞', 'label': 'Flat Tire'},
-        'TRAFFIC': {'emoji': '🚦', 'label': 'Traffic Delay'},
-        'RAIN_DELAY': {'emoji': '🌧️', 'label': 'Weather Delay'},
-        'PHOTO_STOP': {'emoji': '📸', 'label': 'Photo Stop'},
-        'MEDICAL': {'emoji': '🏥', 'label': 'Medical Emergency'},
-        'REGROUP': {'emoji': '🛑', 'label': 'Regroup Wait'},
-        'CUSTOM': {'emoji': '💬', 'label': 'Custom Reason'},
+    test('Resolves all 10 stop category icons and labels accurately (no emoji)', () {
+      final testCases = <String, (IconData, String)>{
+        'FUELING': (Icons.local_gas_station_rounded, 'Fueling'),
+        'REST_BREAK': (Icons.free_breakfast_rounded, 'Rest Break'),
+        'MECHANICAL': (Icons.build_rounded, 'Mechanical Issue'),
+        'FLAT_TIRE': (Icons.tire_repair_rounded, 'Flat Tire'),
+        'TRAFFIC': (Icons.traffic_rounded, 'Traffic Delay'),
+        'RAIN_DELAY': (Icons.umbrella_rounded, 'Weather Delay'),
+        'PHOTO_STOP': (Icons.photo_camera_rounded, 'Photo Stop'),
+        'MEDICAL': (Icons.medical_services_rounded, 'Medical Emergency'),
+        'REGROUP': (Icons.groups_rounded, 'Regroup Wait'),
+        'CUSTOM': (Icons.chat_bubble_outline_rounded, 'Custom Reason'),
       };
 
       for (final entry in testCases.entries) {
-        expect(RiderStatusSheet.getStatusEmoji(entry.key), entry.value['emoji']);
-        expect(RiderStatusSheet.getStatusLabel(entry.key), entry.value['label']);
+        expect(RiderStatusSheet.getStatusIcon(entry.key), entry.value.$1);
+        expect(RiderStatusSheet.getStatusLabel(entry.key), entry.value.$2);
       }
+      expect(RiderStatusSheet.getStatusIcon('UNKNOWN'), Icons.info_outline_rounded);
+      expect(RiderStatusSheet.getStatusLabel('UNKNOWN'), 'UNKNOWN');
     });
   });
 
@@ -124,7 +126,7 @@ void main() {
       });
     });
 
-    testWidgets('Renders SOS distress beacon banner, coordinates, ICE actions and 112 button', (tester) async {
+    testWidgets('Renders the SOS header, coordinates, ICE actions and 112 button', (tester) async {
       final client = MockClient((request) async {
         if (request.url.path.contains('/auth/login')) {
           return http.Response(
@@ -167,18 +169,18 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(seconds: 4));
 
-      // Verify Distress Beacon header
-      expect(find.textContaining('SOS DISTRESS BEACON ACTIVE'), findsOneWidget);
+      // Header: without a convoy service the sheet cannot know delivery, so it says nothing it cannot back.
+      expect(find.text('Emergency help'), findsOneWidget);
 
       // Verify Coordinate display
       expect(find.textContaining('12.97160, 77.59456'), findsOneWidget);
 
       // Verify ICE Contact Actions
       expect(find.textContaining('Call Brother'), findsOneWidget);
-      expect(find.textContaining('Send SMS with Location'), findsOneWidget);
+      expect(find.textContaining('Text my location'), findsOneWidget);
 
       // Verify 112 National Emergency button
-      expect(find.textContaining('Dial 112 National Emergency Services'), findsOneWidget);
+      expect(find.textContaining('Dial 112'), findsOneWidget);
     });
   });
 

@@ -45,6 +45,25 @@ const config = {
   googleClientIds: list('GOOGLE_CLIENT_IDS'),
   // Seeds the first admin account(s) only; roles are then managed in the database.
   adminEmails: list('BOOTSTRAP_ADMIN_EMAILS', list('ADMIN_EMAILS')),
+  // Account gate: how long a users document is trusted before it is read again (status, role, password change).
+  userGateTtlMs: int('USER_GATE_TTL_MS', 30000),
+
+  // Joining by code: failed attempts allowed per window, per rider and per network (brute-force guard).
+  joinWindowMin: int('JOIN_WINDOW_MIN', 15),
+  joinMaxFailures: int('JOIN_MAX_FAILURES', 10),
+  joinMaxFailuresPerIp: int('JOIN_MAX_FAILURES_PER_IP', 30),
+  // Riders in one convoy (live fan-out is per rider per second; this keeps the small VM healthy).
+  maxConvoyRiders: int('MAX_CONVOY_RIDERS', 50),
+
+  // Trip records sent by phones: trail points kept per trip, trips per rider, request size.
+  tripMaxTrailPoints: int('TRIP_MAX_TRAIL_POINTS', 4000),
+  maxTripsPerUser: int('MAX_TRIPS_PER_USER', 500),
+  tripMaxBytes: int('TRIP_MAX_BYTES', 1048576),
+  // Website analytics: referrer hosts kept per page per day (the rest are counted as "other").
+  pvMaxReferrers: int('PV_MAX_REFERRERS', 50),
+  // Socket actions: route, status and settings messages per second; WAIT and SOS per 10 seconds.
+  wsActionsPerSec: int('WS_ACTIONS_PER_SEC', 10),
+  wsAlarmsPer10s: int('WS_ALARMS_PER_10S', 3),
 
   // Persistence / retention (zero-maintenance housekeeping)
   riderPersistIntervalMs: int('RIDER_PERSIST_INTERVAL_MS', 5000),
@@ -94,14 +113,18 @@ const config = {
   geoCacheDays: int('GEO_CACHE_DAYS', 30),
   geoMinIntervalMs: int('GEO_MIN_INTERVAL_MS', 1100),
 
-  // Website: where the "Download" button sends people. Play Store URL once the listing is live,
-  // otherwise the GitHub release page. Changing these needs no rebuild of the site.
+  // Website: where the "Download" buttons send people. Play Store URL once the listing is live,
+  // otherwise the APKs served by this gateway from public/ (see deploy/RUNBOOK.md section 4).
+  // Empty APK_URL / APK_ARM32_URL mean <origin>/coroute.apk and <origin>/coroute-32bit.apk.
   playStoreUrl: (process.env.PLAY_STORE_URL || '').trim(),
-  apkUrl: (process.env.APK_URL || 'https://github.com/Santhosh-Guptha/coroute_app/releases/latest').trim(),
+  apkUrl: (process.env.APK_URL || '').trim(),
+  apkArm32Url: (process.env.APK_ARM32_URL || '').trim(),
+  apkPath: '/coroute.apk',
+  apkArm32Path: '/coroute-32bit.apk',
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
-  latestAppBuild: int('LATEST_APP_BUILD', 68),
+  latestAppBuild: int('LATEST_APP_BUILD', 71),
   supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
 
   // CORS: comma separated origins or empty for same-origin/mobile only

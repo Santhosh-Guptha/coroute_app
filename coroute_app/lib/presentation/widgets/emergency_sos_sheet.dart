@@ -6,13 +6,16 @@ import '../../core/theme/app_theme.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 
-/// Interactive Emergency SOS Action Sheet triggered when SOS is activated.
+/// What the SOS sheet tells the rider about delivery.
+enum SosSheetStatus { delivered, sending, waitingForSignal, unknown }
+
+/// The SOS sheet, shown right after the rider pressed SOS.
 ///
-/// Implements Section 5.4 of CoRoute Architectural Specifications:
-/// * Real-time distress beacon broadcast over WebSocket to entire convoy.
-/// * Direct phone dialer trigger to designated emergency contact via `url_launcher`.
-/// * Direct emergency SMS trigger with live Google Maps coordinate link (`https://maps.google.com/?q=lat,lng`).
-/// * Rapid 112 emergency services dispatch button.
+/// * Says honestly whether the convoy has the SOS: delivered (the server echoed it),
+///   sending, or waiting for signal (kept on the phone and sent on reconnect).
+/// * Calls or texts the rider's emergency contact (with a map link to the position).
+/// * Dials 112.
+/// * "I am safe" cancels the rider's own SOS from any screen.
 class EmergencySosSheet extends StatelessWidget {
   final double lat;
   final double lng;
@@ -53,6 +56,29 @@ class EmergencySosSheet extends StatelessWidget {
     );
   }
 
+  /// Delivery state from what the phone knows (pure, for tests).
+  static SosSheetStatus statusFor({required bool hasService, required bool pending, required bool online, required bool hasOpenAlert}) {
+    if (!hasService) return SosSheetStatus.unknown;
+    if (pending) return online ? SosSheetStatus.sending : SosSheetStatus.waitingForSignal;
+    return hasOpenAlert ? SosSheetStatus.delivered : SosSheetStatus.unknown;
+  }
+
+  static (String, String) textFor(SosSheetStatus status) {
+    switch (status) {
+      case SosSheetStatus.delivered:
+        return ('SOS delivered to your convoy', 'Your convoy can see where you are. You can also call or text your emergency contact.');
+      case SosSheetStatus.sending:
+        return ('Sending your SOS to the convoy...', 'Keep the app open. You can also call or text your emergency contact below.');
+      case SosSheetStatus.waitingForSignal:
+        return (
+          'No signal. SOS not sent yet',
+          'Your SOS will be sent as soon as the phone is back online. Call or text your emergency contact below.',
+        );
+      case SosSheetStatus.unknown:
+        return ('Emergency help', 'Call or text your emergency contact, or dial 112.');
+    }
+  }
+
   Future<void> _makeCall(BuildContext context, String phone) async {
     final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
     if (clean.isEmpty) return;
@@ -69,7 +95,7 @@ class EmergencySosSheet extends StatelessWidget {
   Future<void> _sendSms(BuildContext context, String phone, double lat, double lng) async {
     final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
     final mapsLink = 'https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng.toStringAsFixed(6)}';
-    final body = 'EMERGENCY! I need immediate help. My live GPS location: $mapsLink';
+    final body = 'Emergency. I need help. My location: $mapsLink';
     final uri = Uri(
       scheme: 'sms',
       path: clean,
@@ -88,6 +114,13 @@ class EmergencySosSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final convoyService = Provider.of<ConvoyService?>(context, listen: false);
+    // Rebuilds only when the delivery state changes (not on every position update).
+    final (hasService, pending, online, openAlertId) = context.select<ConvoyService?, (bool, bool, bool, String?)>(
+      (s) => (s != null, s?.pendingSos != null, s?.isOnline ?? false, s?.myOpenSosAlertId),
+    );
+    final status = statusFor(hasService: hasService, pending: pending, online: online, hasOpenAlert: openAlertId != null || alertId != null);
+    final (title, subtitle) = textFor(status);
+    final headerColor = status == SosSheetStatus.delivered ? AppTheme.emeraldSafe : AppTheme.laserRed;
     final emergencyPhone = auth.emergencyContact?.trim() ?? '';
     final emergencyName = auth.emergencyContactName?.trim() ?? '';
     final hasEmergencyContact = emergencyPhone.isNotEmpty;
@@ -114,41 +147,51 @@ class EmergencySosSheet extends StatelessWidget {
             const SizedBox(height: 12),
 
             // Header Banner
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: AppTheme.laserRed.withOpacity(0.16),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.laserRed.withOpacity(0.7)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: AppTheme.laserRed,
+            Semantics(
+              liveRegion: true,
+              container: true,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: headerColor.withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: headerColor.withOpacity(0.7)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: headerColor,
+                      ),
+                      child: Icon(
+                        status == SosSheetStatus.delivered
+                            ? Icons.check_rounded
+                            : (status == SosSheetStatus.waitingForSignal ? Icons.signal_cellular_off_rounded : Icons.warning_amber_rounded),
+                        color: Colors.white,
+                        size: 22,
+                      ),
                     ),
-                    child: const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 22),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '🚨 SOS DISTRESS BEACON ACTIVE',
-                          style: TextStyle(color: AppTheme.laserRed, fontWeight: FontWeight.w900, fontSize: 13),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Broadcasted to all convoy riders on live map radar.',
-                          style: TextStyle(color: AppTheme.textPrimary.withOpacity(0.9), fontSize: 11),
-                        ),
-                      ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(color: headerColor, fontWeight: FontWeight.w900, fontSize: 14),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle,
+                            style: TextStyle(color: AppTheme.textPrimary.withOpacity(0.9), fontSize: 12),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 12),
@@ -167,7 +210,7 @@ class EmergencySosSheet extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'GPS: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+                      'Position: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
                       style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontFamily: 'monospace'),
                     ),
                   ),
@@ -175,12 +218,12 @@ class EmergencySosSheet extends StatelessWidget {
                     onTap: () {
                       Clipboard.setData(ClipboardData(text: mapsUrl));
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Coordinates link copied to clipboard!')),
+                        const SnackBar(content: Text('Map link copied.')),
                       );
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(4),
-                      child: Text('COPY LINK', style: TextStyle(color: AppTheme.neonCyan, fontSize: 10, fontWeight: FontWeight.bold)),
+                      child: Text('Copy link', style: TextStyle(color: AppTheme.neonCyan, fontSize: 10, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],
@@ -194,7 +237,7 @@ class EmergencySosSheet extends StatelessWidget {
                 onPressed: () => _makeCall(context, emergencyPhone),
                 icon: const Icon(Icons.phone_in_talk_rounded, color: Colors.white),
                 label: Text(
-                  'Call ${emergencyName.isNotEmpty ? emergencyName : "Emergency Contact"} ($emergencyPhone)',
+                  'Call ${emergencyName.isNotEmpty ? emergencyName : "emergency contact"} ($emergencyPhone)',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 ),
                 style: ElevatedButton.styleFrom(
@@ -211,7 +254,7 @@ class EmergencySosSheet extends StatelessWidget {
                 onPressed: () => _sendSms(context, emergencyPhone, lat, lng),
                 icon: const Icon(Icons.sms_rounded, color: Colors.black),
                 label: Text(
-                  'Send SMS with Location to $emergencyPhone',
+                  'Text my location to $emergencyPhone',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black),
                 ),
                 style: ElevatedButton.styleFrom(
@@ -229,7 +272,7 @@ class EmergencySosSheet extends StatelessWidget {
               onPressed: () => _makeCall(context, '112'),
               icon: Icon(Icons.local_hospital_rounded, color: AppTheme.laserRed),
               label: Text(
-                'Dial 112 National Emergency Services',
+                'Dial 112 (emergency services)',
                 style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.laserRed, fontSize: 13),
               ),
               style: OutlinedButton.styleFrom(
@@ -246,21 +289,26 @@ class EmergencySosSheet extends StatelessWidget {
                 Expanded(
                   child: TextButton(
                     onPressed: () {
-                      if (alertId != null) {
-                        convoyService?.resolveSosAlert(alertId!);
+                      // Resolves this rider's own open SOS on the server (also when the sheet was
+                      // opened without an alert id) and drops one that is still waiting to be sent.
+                      if (convoyService != null) {
+                        final known = alertId;
+                        if (known != null && known != convoyService.myOpenSosAlertId) convoyService.resolveSosAlert(known);
+                        convoyService.cancelMySos();
                       }
                       onResolved?.call();
+                      final messenger = ScaffoldMessenger.maybeOf(context);
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('SOS Alert resolved.')),
+                      messenger?.showSnackBar(
+                        const SnackBar(content: Text('SOS cancelled. Your convoy sees that you are OK.')),
                       );
                     },
-                    child: Text('Cancel / Resolve SOS', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                    child: Text('I am safe, cancel the SOS', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
                   ),
                 ),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: Text('Keep Active', style: TextStyle(color: AppTheme.neonCyan, fontSize: 12, fontWeight: FontWeight.bold)),
+                  child: Text('Keep it on', style: TextStyle(color: AppTheme.neonCyan, fontSize: 12, fontWeight: FontWeight.bold)),
                 ),
               ],
             ),

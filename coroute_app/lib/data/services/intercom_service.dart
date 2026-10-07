@@ -6,28 +6,38 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 import 'package:record/record.dart';
 import '../../core/config/app_config.dart';
+import 'background_service.dart';
 import 'realtime_service.dart';
+import 'settings_service.dart';
 
 enum IntercomMode { ptt, vox }
 
 /// Live voice intercom over the gateway WebSocket.
 ///
-/// Sender: microphone → PCM16 16 kHz mono stream → 40 ms binary frames → gateway.
+/// Sender: microphone → PCM16 mono stream (16 kHz, or 8 kHz in data saver mode, half the
+/// data) → 40 ms binary frames → gateway. The START header carries the rate, so every
+/// receiver plays every sender at the right speed.
 /// Receiver: gateway → jitter buffer → PCM playback.  End-to-end latency is the
 /// network round trip plus ~100 ms of buffering, instead of the former
 /// record-file → base64 → database → poll cycle that took several seconds.
 ///
 /// * Group talk ("Everyone") or private 1:1 talk ([talkTargetUserId]).
 /// * PTT (hold to talk) or VOX (open mic that only transmits while you speak,
-///   so the radio stays idle — and the battery lasts — while you are quiet).
+///   so the radio stays idle, and the battery lasts, while you are quiet).
 /// * Mute (don't transmit) and Deafen (don't play) switches.
 class IntercomService extends ChangeNotifier {
-  IntercomService(this._rt) {
+  IntercomService(this._rt, {this.settings}) {
     _voiceSub = _rt.voice.listen(_onVoicePacket);
     _eventSub = _rt.events.listen(_onEvent);
   }
 
   final RealtimeService _rt;
+
+  /// Data saver setting (optional so the service also works without it, as in tests).
+  final SettingsService? settings;
+
+  /// Rate the next transmission uses.
+  int get txSampleRate => AppConfig.sampleRateFor(settings?.lowData ?? false);
   AudioRecorder? _recorderInstance;
   // Created on first use so constructing the service never touches the platform (keeps tests and web safe).
   AudioRecorder get _recorder => _recorderInstance ??= AudioRecorder();
@@ -44,6 +54,7 @@ class IntercomService extends ChangeNotifier {
   String? _talkTargetUserId; // null == everyone
   String? _talkTargetName;
   int _seq = 0;
+  int _micRate = AppConfig.audioSampleRate; // rate the open microphone records at
   final BytesBuilder _pending = BytesBuilder(copy: false);
   Timer? _voxSilenceTimer;
   DateTime? _txStartedAt;
@@ -52,6 +63,8 @@ class IntercomService extends ChangeNotifier {
 
   // ---- receive state ----
   bool _playerReady = false;
+  int? _playerRate; // rate the player was set up with
+  Future<void>? _playerSetup;
   String? _activeStreamId;
   String? _activeSpeakerId;
   String? _activeSpeakerName;
@@ -112,7 +125,10 @@ class IntercomService extends ChangeNotifier {
   // ------------------------------------------------------------- transmit
   Future<bool> _ensurePermission() async {
     try {
-      return await _recorder.hasPermission();
+      final ok = await _recorder.hasPermission();
+      // Allowed during the ride: give the background service the microphone type too.
+      if (ok) BackgroundService.ensureMicrophoneType().ignore();
+      return ok;
     } catch (_) {
       return false;
     }
@@ -153,15 +169,17 @@ class IntercomService extends ChangeNotifier {
   Future<bool> _openMic() async {
     if (_micOpen) return true;
     try {
-      final stream = await _recorder.startStream(const RecordConfig(
+      final rate = txSampleRate;
+      final stream = await _recorder.startStream(RecordConfig(
         encoder: AudioEncoder.pcm16bits,
-        sampleRate: AppConfig.audioSampleRate,
+        sampleRate: rate,
         numChannels: 1,
         echoCancel: true,
         noiseSuppress: true,
         autoGain: true,
       ));
       _micOpen = true;
+      _micRate = rate;
       _micSub = stream.listen(_onMicData, onError: (e) => debugPrint('mic error: $e'), onDone: () => _micOpen = false);
       notifyListeners();
       return true;
@@ -189,7 +207,7 @@ class IntercomService extends ChangeNotifier {
     _txStartedAt = DateTime.now();
     _rt.sendVoice(VoiceKind.start, {
       'to': _talkTargetUserId,
-      'sampleRate': AppConfig.audioSampleRate,
+      'sampleRate': _micRate,
       'codec': 'pcm16',
     });
     notifyListeners();
@@ -205,7 +223,7 @@ class IntercomService extends ChangeNotifier {
   // VOX tuning
   static const double _voxOpenRms = 0.045; // ~ -27 dBFS: normal speech into a helmet mic
   static const Duration _voxHangover = Duration(milliseconds: 900);
-  static const int _txFrameBytes = AppConfig.audioFrameBytes * 2; // 40 ms
+  int get _txFrameBytes => AppConfig.frameBytesFor(_micRate) * 2; // 40 ms
 
   void _onMicData(Uint8List chunk) {
     if (!_micOpen || _micMuted) return;
@@ -231,10 +249,11 @@ class IntercomService extends ChangeNotifier {
     }
 
     _pending.add(chunk);
-    while (_pending.length >= _txFrameBytes) {
+    final frameBytes = _txFrameBytes;
+    while (_pending.length >= frameBytes) {
       final all = _pending.takeBytes();
-      final frame = Uint8List.sublistView(all, 0, _txFrameBytes);
-      if (all.length > _txFrameBytes) _pending.add(Uint8List.sublistView(all, _txFrameBytes));
+      final frame = Uint8List.sublistView(all, 0, frameBytes);
+      if (all.length > frameBytes) _pending.add(Uint8List.sublistView(all, frameBytes));
       _rt.sendVoice(VoiceKind.frame, {'to': _talkTargetUserId, 'seq': _seq++}, frame);
     }
   }
@@ -252,13 +271,38 @@ class IntercomService extends ChangeNotifier {
   }
 
   // -------------------------------------------------------------- receive
-  Future<void> _ensurePlayer(int sampleRate) async {
-    if (_playerReady) return;
+  /// True when the player must be (re)created for a stream at [incoming] Hz.
+  @visibleForTesting
+  static bool needsPlayerSetup({required bool ready, required int? currentRate, required int incoming}) =>
+      !ready || currentRate != incoming;
+
+  /// Bytes of 20 ms of audio at the rate being played.
+  int get _rxFrameBytes => AppConfig.frameBytesFor(_playerRate ?? AppConfig.audioSampleRate);
+
+  /// Sets the player up for [sampleRate]. A stream at another rate (a rider in data saver
+  /// mode, or back to normal) re-creates it, so nobody plays at the wrong speed.
+  Future<void> _ensurePlayer(int sampleRate) {
+    final running = _playerSetup;
+    if (running != null) return running.then((_) => _ensurePlayer(sampleRate));
+    if (!needsPlayerSetup(ready: _playerReady, currentRate: _playerRate, incoming: sampleRate)) return Future.value();
+    // Stop feeding the old player at once: frames of the new stream wait in the jitter buffer.
+    final release = _playerReady;
+    _playerReady = false;
+    final f = _setupPlayer(sampleRate, release: release);
+    _playerSetup = f;
+    return f.whenComplete(() {
+      if (identical(_playerSetup, f)) _playerSetup = null;
+    });
+  }
+
+  Future<void> _setupPlayer(int sampleRate, {required bool release}) async {
     try {
+      if (release) await FlutterPcmSound.release();
       await FlutterPcmSound.setup(sampleRate: sampleRate, channelCount: 1);
       // Ask for more data when < 60 ms is left; we top up from the jitter buffer.
       await FlutterPcmSound.setFeedThreshold(sampleRate ~/ 16);
       FlutterPcmSound.setFeedCallback(_onFeed);
+      _playerRate = sampleRate;
       _playerReady = true;
     } catch (e) {
       debugPrint('Intercom player setup note: $e');
@@ -274,7 +318,7 @@ class IntercomService extends ChangeNotifier {
     _draining = true;
     try {
       // Feed up to ~200 ms at a time so the native buffer stays small (low latency).
-      var budget = AppConfig.audioFrameBytes * 10;
+      var budget = _rxFrameBytes * 10;
       while (_jitter.isNotEmpty && budget > 0) {
         final bytes = _jitter.removeFirst();
         _queuedBytes -= bytes.length;
@@ -304,7 +348,7 @@ class IntercomService extends ChangeNotifier {
         _jitter.clear();
         _queuedBytes = 0;
         _lastRxAt = DateTime.now();
-        _ensurePlayer(p.sampleRate);
+        _ensurePlayer(p.sampleRate).ignore();
         notifyListeners();
         break;
       case VoiceKind.frame:
@@ -315,7 +359,7 @@ class IntercomService extends ChangeNotifier {
           _activeSpeakerId = p.from;
           _activeSpeakerName = p.fromName;
           _activeIsPrivate = p.isPrivate;
-          _ensurePlayer(p.sampleRate);
+          _ensurePlayer(p.sampleRate).ignore();
           notifyListeners();
         }
         _lastRxAt = DateTime.now();
@@ -323,10 +367,10 @@ class IntercomService extends ChangeNotifier {
         // Cap the jitter buffer at ~600 ms; drop the oldest to keep latency bounded.
         _jitter.addLast(Uint8List.fromList(p.payload));
         _queuedBytes += p.payload.length;
-        while (_queuedBytes > AppConfig.audioFrameBytes * 30 && _jitter.length > 1) {
+        while (_queuedBytes > _rxFrameBytes * 30 && _jitter.length > 1) {
           _queuedBytes -= _jitter.removeFirst().length;
         }
-        if (_playerReady && _queuedBytes >= AppConfig.audioFrameBytes * 2) {
+        if (_playerReady && _queuedBytes >= _rxFrameBytes * 2) {
           _drain();
           try {
             FlutterPcmSound.start(); // primes the feed loop if it had drained

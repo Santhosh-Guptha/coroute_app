@@ -78,6 +78,21 @@ class SqfliteTrackQueue implements TrackQueue {
   }
 
   @override
+  Future<int> countPending(String groupId) async {
+    // Points still in the write buffer count too; the buffer is not flushed for this (no extra disk write).
+    final buffered = _buffer.where((r) => r.$1 == groupId).length;
+    try {
+      final db = await _open();
+      final rows = await db.rawQuery('SELECT COUNT(*) AS n FROM points WHERE gid = ? AND up = 0', [groupId]);
+      final n = rows.isEmpty ? 0 : ((rows.first['n'] as num?)?.toInt() ?? 0);
+      return n + buffered;
+    } catch (e) {
+      debugPrint('track queue count note: $e');
+      return buffered;
+    }
+  }
+
+  @override
   Future<List<String>> groupsWithPending() async {
     await flushBuffer();
     final db = await _open();

@@ -10,15 +10,64 @@ import '../report/replay_screen.dart';
 import 'member_colors.dart';
 import 'timeline_list.dart';
 
-/// The active convoy's shared timeline, updating live.
-class LiveTimelineScreen extends StatelessWidget {
+/// A convoy's shared timeline, updating live. Opened for the rider's own convoy, or by
+/// an admin for any convoy (then it follows that convoy while open, and goes back to the
+/// rider's own convoy when closed).
+class LiveTimelineScreen extends StatefulWidget {
   final String groupId;
   const LiveTimelineScreen({super.key, required this.groupId});
 
   @override
+  State<LiveTimelineScreen> createState() => _LiveTimelineScreenState();
+}
+
+class _LiveTimelineScreenState extends State<LiveTimelineScreen> {
+  TimelineService? _timeline;
+  ConvoyService? _convoys;
+  bool _attachedHere = false;
+
+  String get groupId => widget.groupId;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final t = context.read<TimelineService>();
+      _timeline = t;
+      _convoys = context.read<ConvoyService>();
+      if (t.groupId != groupId) {
+        _attachedHere = true;
+        t.attach(groupId).ignore();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    final t = _timeline;
+    final active = _convoys?.activeGroupId;
+    if (_attachedHere && t != null && active != groupId) {
+      // After the frame: listeners must not be notified while the tree is being torn down.
+      Future.microtask(() {
+        if (t.groupId != groupId) return; // something else attached meanwhile
+        t.detach();
+        if (active != null) t.attach(active).ignore();
+      });
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final timeline = context.watch<TimelineService>();
-    final convoy = context.watch<ConvoyService>().allConvoys[groupId];
+    // Only the convoy name and member names matter here, not positions.
+    context.select<ConvoyService, String>((s) {
+      final c = s.allConvoys[groupId];
+      if (c == null) return '';
+      return '${c.name}\u0001${c.riders.values.map((r) => '${r.userId}\u0002${r.name}').join('\u0001')}';
+    });
+    final convoy = context.read<ConvoyService>().allConvoys[groupId];
     final events = timeline.groupId == groupId ? timeline.events : const <TimelineEventModel>[];
 
     // Colours in join order; names from the convoy plus anyone who already left.

@@ -127,7 +127,7 @@ async function api(method, path, body, token) {
 }
 
 async function register(name, email) {
-  const r = await api('POST', '/auth/register', { name, email, password: 'Password#123', phone: '9999999999', vehicleType: 'Motorcycle' });
+  const r = await api('POST', '/auth/register', { name, email, password: 'Password#123', phone: '9999999999', vehicleType: 'Motorcycle', vehicleNo: 'TS09AB1234', emergencyContact: '+919000000001', emergencyContactName: 'Family Contact' });
   assert.equal(r.status, 201, JSON.stringify(r.json));
   return r.json;
 }

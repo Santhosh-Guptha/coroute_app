@@ -247,7 +247,7 @@ class AdminConvoyInspector extends StatelessWidget {
                             style: TextStyle(color: AppTheme.neonCyan, fontSize: 16, fontWeight: FontWeight.bold),
                           ),
                           Text(
-                            '🧭 ${r.heading.round()}° $cardinal',
+                            'Heading ${r.heading.round()}° $cardinal',
                             style: TextStyle(color: AppTheme.textSecondary, fontSize: 10),
                           ),
                         ],

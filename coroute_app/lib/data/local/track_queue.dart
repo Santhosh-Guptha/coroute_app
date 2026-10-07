@@ -13,6 +13,9 @@ abstract class TrackQueue {
   Future<List<QueuedPoint>> pending(String groupId, {int limit = 2400});
 
   Future<List<String>> groupsWithPending();
+
+  /// How many points of one group are still waiting for upload (one COUNT query, no rows loaded).
+  Future<int> countPending(String groupId);
   Future<void> markUploaded(List<int> ids);
 
   /// Forgets a group entirely (server refused it: not a member or trip closed).
@@ -41,6 +44,9 @@ class MemoryTrackQueue implements TrackQueue {
   @override
   Future<List<QueuedPoint>> pending(String groupId, {int limit = 2400}) async =>
       _rows.where((r) => r.groupId == groupId && !r.uploaded).take(limit).map((r) => QueuedPoint(r.id, r.groupId, r.point)).toList();
+
+  @override
+  Future<int> countPending(String groupId) async => pendingCount(groupId);
 
   @override
   Future<List<String>> groupsWithPending() async => _rows.where((r) => !r.uploaded).map((r) => r.groupId).toSet().toList();

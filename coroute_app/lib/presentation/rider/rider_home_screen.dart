@@ -6,8 +6,10 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
+import '../../data/models/trip_history_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/meta_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../account/account_screen.dart';
 import '../account/appearance_sheet.dart';
@@ -18,6 +20,8 @@ import '../auth/complete_profile_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../timeline/live_timeline_screen.dart';
 import '../trip_planner/trip_planner_screen.dart';
+import '../widgets/data_saver_tile.dart';
+import '../widgets/pre_ride_checklist_sheet.dart';
 import 'convoy_dashboard_screen.dart';
 import 'live_cockpit_map_screen.dart';
 import 'trip_history_screen.dart';
@@ -69,7 +73,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Mandatory Safety Details Required',
+                'Add your safety details',
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ),
@@ -80,11 +84,11 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'CoRoute is a live convoy tracking platform designed around rider safety. To protect all riders in the convoy, you must provide:\n\n'
-              '• Verified Mobile Number\n'
-              '• Bike Registration Number (or select Pillion Rider)\n'
-              '• Emergency (ICE) Contact Name & Phone\n\n'
-              'Creating or joining convoys is restricted until these mandatory details are updated.',
+              'Your convoy needs a way to reach you and your family in an emergency. Please add:\n\n'
+              '• Your mobile number\n'
+              '• Your bike number (or choose pillion rider)\n'
+              '• An emergency contact name and phone number\n\n'
+              'You can create or join a convoy once these are added.',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
             ),
           ],
@@ -92,7 +96,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Remind Me Later', style: TextStyle(color: AppTheme.textMuted)),
+            child: Text('Later', style: TextStyle(color: AppTheme.textMuted)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -103,7 +107,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
               Navigator.pop(ctx);
               _openCompleteProfile(context);
             },
-            child: const Text('Update Details Now', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text('Add details', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -185,7 +189,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: const Text('⚠️ Convoy joining locked! Mandatory safety details required.'),
+                      content: const Text('Add your safety details to join a convoy.'),
                       backgroundColor: AppTheme.laserRed,
                       action: SnackBarAction(label: 'Update', textColor: Colors.white, onPressed: () => _openCompleteProfile(context)),
                     ),
@@ -235,6 +239,10 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                 if (joined != null) {
                   _joinCodeController.clear();
                   Navigator.pop(ctx);
+                  if (!context.mounted) return;
+                  // Pre-ride checklist before the ride screen (already joined, so the screen opens either way).
+                  await PreRideChecklistSheet.show(context);
+                  if (!context.mounted) return;
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => ConvoyDashboardScreen(groupId: joined.groupId)),
@@ -253,46 +261,39 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     ).whenComplete(() => _joinDialogOpen = false);
   }
 
+  HomeAnalytics? _analytics;
+  int _analyticsRevision = -1;
+
+  /// Ride totals, computed again only when the trip list changed.
+  HomeAnalytics _analyticsFor(TripStorageService storage) {
+    final cached = _analytics;
+    if (cached != null && _analyticsRevision == storage.revision) return cached;
+    _analyticsRevision = storage.revision;
+    return _analytics = HomeAnalytics.of(storage.trips);
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
-    final convoyService = context.watch<ConvoyService>();
+    final convoy = context.select<ConvoyService, HomeConvoyFacts>((s) => homeConvoyFacts(s.activeConvoy));
     final tripStorage = context.watch<TripStorageService>();
-    final activeConvoy = convoyService.activeConvoy;
     final trips = tripStorage.trips;
+    final a = _analyticsFor(tripStorage);
+    final activeGroupId = convoy.groupId;
 
-    // Compute advanced analytics from collected trip and tracking data
-    double totalDistanceKm = 0.0;
-    int totalDurationMinutes = 0;
-    double maxSpeedKmh = 0.0;
-    double sumAvgSpeed = 0.0;
-    int totalRidersInConvoys = 0;
-    int totalMovingMs = 0;
-    int totalRestMs = 0;
-
-    for (final t in trips) {
-      totalDistanceKm += t.totalDistanceKm;
-      totalDurationMinutes += t.durationMinutes;
-      if (t.topSpeedKmh > maxSpeedKmh) maxSpeedKmh = t.topSpeedKmh;
-      sumAvgSpeed += t.avgSpeedKmh;
-      totalRidersInConvoys += t.riderCount;
-      totalMovingMs += t.movingMs;
-      totalRestMs += t.restMs;
-    }
-
-    final int completedRidesCount = trips.length;
-    final double overallAvgSpeed = completedRidesCount > 0 ? (sumAvgSpeed / completedRidesCount) : 0.0;
-    final double avgRidersPerConvoy = completedRidesCount > 0 ? (totalRidersInConvoys / completedRidesCount) : 0.0;
-    final double avgDistancePerRide = completedRidesCount > 0 ? (totalDistanceKm / completedRidesCount) : 0.0;
-    final int hoursRidden = totalDurationMinutes ~/ 60;
-    final int minutesRidden = totalDurationMinutes % 60;
-    final double movingRatio = (totalMovingMs + totalRestMs) > 0
-        ? (totalMovingMs / (totalMovingMs + totalRestMs)) * 100
-        : 100.0;
+    final double totalDistanceKm = a.totalDistanceKm;
+    final double maxSpeedKmh = a.maxSpeedKmh;
+    final int completedRidesCount = a.rides;
+    final double overallAvgSpeed = a.avgSpeedKmh;
+    final double avgRidersPerConvoy = a.avgRiders;
+    final double avgDistancePerRide = a.avgDistanceKm;
+    final int hoursRidden = a.totalMinutes ~/ 60;
+    final int minutesRidden = a.totalMinutes % 60;
+    final double movingRatio = a.movingPercent;
 
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
-      drawer: _buildDrawer(context, auth, convoyService, activeConvoy),
+      drawer: _buildDrawer(context, auth, activeGroupId),
       appBar: AppBar(
         leading: Builder(
           builder: (ctx) => IconButton(
@@ -409,9 +410,9 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Mandatory Safety Details Required', style: TextStyle(color: AppTheme.laserRed, fontWeight: FontWeight.bold, fontSize: 13)),
+                          Text('Add your safety details', style: TextStyle(color: AppTheme.laserRed, fontWeight: FontWeight.bold, fontSize: 13)),
                           const SizedBox(height: 2),
-                          Text('Creating or joining convoys is locked until your phone, bike/pillion details, and emergency contacts are provided.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                          Text('You can create or join a convoy once your phone, bike number (or pillion) and emergency contact are added.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
                         ],
                       ),
                     ),
@@ -431,7 +432,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
             ],
 
             // Active Convoy Quick Resume Banner (if in session)
-            if (activeConvoy != null) ...[
+            if (activeGroupId != null) ...[
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -476,7 +477,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            'Code: ${activeConvoy.joinCode}',
+                            'Code: ${convoy.joinCode}',
                             style: TextStyle(color: AppTheme.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
                           ),
                         ),
@@ -484,7 +485,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      activeConvoy.name,
+                      convoy.name,
                       style: TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: 18,
@@ -492,7 +493,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                       ),
                     ),
                     Text(
-                      '${activeConvoy.riders.length} teammates tracking live · ${activeConvoy.destinationName}',
+                      '${convoy.riders} ${convoy.riders == 1 ? 'rider' : 'riders'} sharing their position${convoy.destination.isNotEmpty ? ' · ${convoy.destination}' : ''}',
                       style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                     ),
                     const SizedBox(height: 14),
@@ -504,7 +505,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => ConvoyDashboardScreen(groupId: activeConvoy.groupId),
+                              builder: (_) => ConvoyDashboardScreen(groupId: activeGroupId),
                             ),
                           );
                         },
@@ -530,7 +531,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                       if (!auth.isProfileComplete && !auth.isMasterAdmin) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: const Text('⚠️ Convoy creation locked! Mandatory safety details required.'),
+                            content: const Text('Add your safety details to create a convoy.'),
                             backgroundColor: AppTheme.laserRed,
                             action: SnackBarAction(label: 'Update', textColor: Colors.white, onPressed: () => _openCompleteProfile(context)),
                           ),
@@ -579,7 +580,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                       if (!auth.isProfileComplete && !auth.isMasterAdmin) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: const Text('⚠️ Convoy joining locked! Mandatory safety details required.'),
+                            content: const Text('Add your safety details to join a convoy.'),
                             backgroundColor: AppTheme.laserRed,
                             action: SnackBarAction(label: 'Update', textColor: Colors.white, onPressed: () => _openCompleteProfile(context)),
                           ),
@@ -849,7 +850,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                               ),
                               const SizedBox(height: 3),
                               Text(
-                                '${trip.startLocationName.isNotEmpty ? trip.startLocationName : "Start"} → ${trip.destinationName.isNotEmpty ? trip.destinationName : "Destination"}',
+                                '${trip.startLocationName.isNotEmpty ? trip.startLocationName : "Start"} to ${trip.destinationName.isNotEmpty ? trip.destinationName : "Destination"}',
                                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -896,7 +897,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   void _showIncompleteProfileAlert(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('⚠️ Mandatory safety profile incomplete! Please update your details.'),
+        content: const Text('Add your safety details first: phone, bike number (or pillion) and emergency contact.'),
         backgroundColor: AppTheme.laserRed,
         action: SnackBarAction(
           label: 'Update',
@@ -973,8 +974,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   Widget _buildDrawer(
     BuildContext context,
     AuthService auth,
-    ConvoyService convoyService,
-    ConvoyModel? activeConvoy,
+    String? activeGroupId,
   ) {
     return Drawer(
       backgroundColor: AppTheme.obsidianVoid,
@@ -1030,7 +1030,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                             ),
                           ),
                           child: Text(
-                            auth.isProfileComplete ? 'Profile Verified' : 'Incomplete Profile ⚠️',
+                            auth.isProfileComplete ? 'Profile complete' : 'Profile incomplete',
                             style: TextStyle(
                               color: auth.isProfileComplete ? AppTheme.emeraldSafe : AppTheme.laserRed,
                               fontSize: 10,
@@ -1081,15 +1081,15 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                     _showJoinConvoyDialog(context);
                   },
                 ),
-                if (activeConvoy != null)
+                if (activeGroupId != null)
                   _drawerTile(
                     icon: Icons.navigation_rounded,
-                    title: 'Live Cockpit HUD',
-                    subtitle: 'Resume radar, telemetry & audio',
+                    title: 'Ride map',
+                    subtitle: 'Back to the live map and intercom',
                     accentColor: AppTheme.emeraldSafe,
                     onTap: () {
                       Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => LiveCockpitMapScreen(convoyId: activeConvoy.groupId)));
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => LiveCockpitMapScreen(convoyId: activeGroupId)));
                     },
                   ),
 
@@ -1105,7 +1105,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const TripHistoryScreen()));
                   },
                 ),
-                if (activeConvoy != null)
+                if (activeGroupId != null)
                   _drawerTile(
                     icon: Icons.timeline_rounded,
                     title: 'Live Group Timeline',
@@ -1113,7 +1113,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                     accentColor: AppTheme.hyperAmber,
                     onTap: () {
                       Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: activeConvoy.groupId)));
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: activeGroupId)));
                     },
                   ),
 
@@ -1129,6 +1129,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfileScreen()));
                   },
                 ),
+                const DataSaverTile(dense: true),
                 _drawerTile(
                   icon: Icons.palette_outlined,
                   title: 'Theme & Appearance',
@@ -1165,8 +1166,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
                   _drawerSectionHeader('ADMINISTRATION'),
                   _drawerTile(
                     icon: Icons.admin_panel_settings_rounded,
-                    title: 'Master Admin Console',
-                    subtitle: 'Fleet radar, retention & users',
+                    title: 'Admin',
+                    subtitle: 'Live convoys, rides and users',
                     accentColor: AppTheme.devmonksPurple,
                     onTap: () {
                       Navigator.pop(context);
@@ -1188,7 +1189,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    'CoRoute v3.9',
+                    'CoRoute ${MetaService.currentVersion}',
                     style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                   ),
                 ),
@@ -1242,6 +1243,62 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
       subtitle: Text(subtitle, style: TextStyle(color: AppTheme.textMuted, fontSize: 11)),
       trailing: Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted, size: 16),
       onTap: onTap,
+    );
+  }
+}
+
+/// What the home screen shows about the active convoy.
+typedef HomeConvoyFacts = ({String? groupId, String name, int riders, String joinCode, String destination});
+
+/// The few convoy facts the home screen shows. A record compares by value, so the home
+/// screen rebuilds only when one of these changes, never on a rider's position update.
+HomeConvoyFacts homeConvoyFacts(ConvoyModel? c) =>
+    (groupId: c?.groupId, name: c?.name ?? '', riders: c?.riders.length ?? 0, joinCode: c?.joinCode ?? '', destination: c?.destinationName ?? '');
+
+/// Ride totals over the trip history, for the home screen.
+class HomeAnalytics {
+  final int rides;
+  final double totalDistanceKm;
+  final int totalMinutes;
+  final double maxSpeedKmh;
+  final double avgSpeedKmh;
+  final double avgRiders;
+  final double avgDistanceKm;
+  final double movingPercent;
+
+  const HomeAnalytics({
+    required this.rides,
+    required this.totalDistanceKm,
+    required this.totalMinutes,
+    required this.maxSpeedKmh,
+    required this.avgSpeedKmh,
+    required this.avgRiders,
+    required this.avgDistanceKm,
+    required this.movingPercent,
+  });
+
+  factory HomeAnalytics.of(List<TripHistoryModel> trips) {
+    double distance = 0, maxSpeed = 0, sumAvg = 0;
+    int minutes = 0, riders = 0, moving = 0, rest = 0;
+    for (final t in trips) {
+      distance += t.totalDistanceKm;
+      minutes += t.durationMinutes;
+      if (t.topSpeedKmh > maxSpeed) maxSpeed = t.topSpeedKmh;
+      sumAvg += t.avgSpeedKmh;
+      riders += t.riderCount;
+      moving += t.movingMs;
+      rest += t.restMs;
+    }
+    final n = trips.length;
+    return HomeAnalytics(
+      rides: n,
+      totalDistanceKm: distance,
+      totalMinutes: minutes,
+      maxSpeedKmh: maxSpeed,
+      avgSpeedKmh: n > 0 ? sumAvg / n : 0.0,
+      avgRiders: n > 0 ? riders / n : 0.0,
+      avgDistanceKm: n > 0 ? distance / n : 0.0,
+      movingPercent: (moving + rest) > 0 ? moving / (moving + rest) * 100 : 100.0,
     );
   }
 }

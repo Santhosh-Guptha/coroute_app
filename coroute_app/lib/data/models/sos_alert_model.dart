@@ -8,6 +8,9 @@ class SosAlertModel {
   final int timestamp;
   final bool resolved;
 
+  /// Set by the phone that raised it, so a retried SOS is recognised (empty for older alerts).
+  final String clientId;
+
   SosAlertModel({
     required this.alertId,
     required this.userId,
@@ -17,6 +20,7 @@ class SosAlertModel {
     this.alertType = 'EMERGENCY',
     required this.timestamp,
     this.resolved = false,
+    this.clientId = '',
   });
 
   SosAlertModel copyWith({
@@ -28,6 +32,7 @@ class SosAlertModel {
     String? alertType,
     int? timestamp,
     bool? resolved,
+    String? clientId,
   }) {
     return SosAlertModel(
       alertId: alertId ?? this.alertId,
@@ -38,6 +43,7 @@ class SosAlertModel {
       alertType: alertType ?? this.alertType,
       timestamp: timestamp ?? this.timestamp,
       resolved: resolved ?? this.resolved,
+      clientId: clientId ?? this.clientId,
     );
   }
 
@@ -51,6 +57,7 @@ class SosAlertModel {
       'alertType': alertType,
       'timestamp': timestamp,
       'resolved': resolved,
+      if (clientId.isNotEmpty) 'clientId': clientId,
     };
   }
 
@@ -63,7 +70,8 @@ class SosAlertModel {
       lng: (json['lng'] as num?)?.toDouble() ?? 0.0,
       alertType: json['alertType'] ?? 'EMERGENCY',
       timestamp: (json['timestamp'] as num?)?.toInt() ?? 0,
-      resolved: json['resolved'] ?? false,
+      resolved: json['resolved'] == true,
+      clientId: json['clientId']?.toString() ?? '',
     );
   }
 }

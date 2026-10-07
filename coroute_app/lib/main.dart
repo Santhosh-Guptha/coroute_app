@@ -16,6 +16,7 @@ import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
 import 'data/local/sqflite_track_queue.dart';
 import 'data/services/realtime_service.dart';
+import 'data/services/settings_service.dart';
 import 'data/services/timeline_service.dart';
 import 'data/services/track_recorder.dart';
 import 'data/services/track_uploader.dart';
@@ -35,19 +36,24 @@ void main() async {
   await MetaService.readPackageInfo();
   final theme = ThemeController();
   await theme.load();
+  // Data saver is known before the first frame, so the first ride already uses it.
+  final settings = SettingsService();
+  await settings.load();
   SystemChrome.setSystemUIOverlayStyle(AppTheme.overlayStyle);
-  runApp(CoRouteApp(theme: theme));
+  runApp(CoRouteApp(theme: theme, settings: settings));
 }
 
 class CoRouteApp extends StatelessWidget {
   final ThemeController theme;
-  const CoRouteApp({super.key, required this.theme});
+  final SettingsService? settings;
+  const CoRouteApp({super.key, required this.theme, this.settings});
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<ThemeController>.value(value: theme),
+        ChangeNotifierProvider<SettingsService>(create: (_) => settings ?? (SettingsService()..load())),
         ChangeNotifierProvider(create: (_) => ApiClient()),
         ChangeNotifierProvider(create: (ctx) {
           final api = ctx.read<ApiClient>();
@@ -75,9 +81,10 @@ class CoRouteApp extends StatelessWidget {
             ctx.read<TripStorageService>(),
             recorder: ctx.read<TrackRecorder>(),
             timeline: ctx.read<TimelineService>(),
+            settings: ctx.read<SettingsService>(),
           )..addListener(() => _notePosition(ctx)),
         ),
-        ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>())),
+        ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>(), settings: ctx.read<SettingsService>())),
         // Trip alerts (SOS, stopped, separated, no signal, arrivals), separate from the ongoing status.
         Provider<AlertService>(
           lazy: false,
@@ -148,7 +155,7 @@ class _UpdateGate extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Image.asset('assets/branding/coroute_icon.png', width: 72, height: 72),
+                Image.asset('assets/branding/coroute_icon.png', width: 72, height: 72, cacheWidth: 216),
                 const SizedBox(height: 18),
                 Text('Update required', style: TextStyle(color: AppTheme.textPrimary, fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),

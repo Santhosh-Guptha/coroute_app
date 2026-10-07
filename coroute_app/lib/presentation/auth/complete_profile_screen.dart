@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/services/auth_service.dart';
@@ -139,8 +141,9 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       );
       Navigator.pop(context, true);
     } else {
+      final serverError = auth.lastProfileError;
       setState(() {
-        _errorMessage = 'Could not update profile. Please verify your connection.';
+        _errorMessage = serverError ?? 'Could not save your profile. Check your connection and try again.';
       });
     }
   }
@@ -262,6 +265,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                           const SizedBox(height: 6),
                           TextField(
                             controller: _nameController,
+                            inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxCallsignLength)],
                             style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                             decoration: InputDecoration(
                               prefixIcon: Icon(Icons.person_outline, color: AppTheme.neonCyan, size: 18),
@@ -276,6 +280,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                           const SizedBox(height: 6),
                           TextField(
                             controller: _phoneController,
+                            inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
                             keyboardType: TextInputType.phone,
                             style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                             decoration: InputDecoration(
@@ -384,6 +389,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                             const SizedBox(height: 6),
                             TextField(
                               controller: _vehicleNoController,
+                              inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxVehicleNoLength)],
                               textCapitalization: TextCapitalization.characters,
                               style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, letterSpacing: 1.2),
                               decoration: InputDecoration(
@@ -434,6 +440,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                           const SizedBox(height: 6),
                           TextField(
                             controller: _iceNameController,
+                            inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxContactNameLength)],
                             style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                             decoration: InputDecoration(
                               prefixIcon: Icon(Icons.contact_emergency, color: AppTheme.laserRed, size: 18),
@@ -448,6 +455,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                           const SizedBox(height: 6),
                           TextField(
                             controller: _icePhoneController,
+                            inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
                             keyboardType: TextInputType.phone,
                             style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
                             decoration: InputDecoration(

@@ -56,6 +56,13 @@ class TripHistoryModel {
   /// 'device': the phone's own record, kept until the server's arrives.
   final String source;
 
+  /// How many trail points the server holds for this trip. The trip list is synced without
+  /// trails (data and memory on low-end phones); a trail is loaded when the trip is opened.
+  final int trailPoints;
+
+  /// The route exists on the server but is not on this phone yet.
+  bool get trailOnServerOnly => breadcrumbTrail.isEmpty && trailPoints > 0;
+
   bool get hasReport => groupId.isNotEmpty;
 
   /// A convoy trip whose exact report has not reached this phone yet.
@@ -80,7 +87,8 @@ class TripHistoryModel {
     this.movingMs = 0,
     this.restMs = 0,
     this.source = 'device',
-  });
+    int? trailPoints,
+  }) : trailPoints = trailPoints ?? breadcrumbTrail.length;
 
   int get durationMinutes {
     final diff = endTimeEpochMs - startTimeEpochMs;
@@ -107,8 +115,35 @@ class TripHistoryModel {
       'source': source,
       'movingMs': movingMs,
       'restMs': restMs,
+      'trailPoints': trailPoints,
     };
   }
+
+  /// What is kept on the phone for the history list: everything except the trail.
+  Map<String, dynamic> toStorageJson() => {...toJson(), 'breadcrumbTrail': const <Map<String, dynamic>>[]};
+
+  /// The same trip with its trail (loaded from the server or kept from memory).
+  TripHistoryModel withTrail(List<TripBreadcrumbPoint> trail) => TripHistoryModel(
+        tripId: tripId,
+        tripName: tripName,
+        startLocationName: startLocationName,
+        destinationName: destinationName,
+        startTimeEpochMs: startTimeEpochMs,
+        endTimeEpochMs: endTimeEpochMs,
+        totalDistanceKm: totalDistanceKm,
+        topSpeedKmh: topSpeedKmh,
+        avgSpeedKmh: avgSpeedKmh,
+        riderCount: riderCount,
+        stopCount: stopCount,
+        breadcrumbTrail: trail,
+        userId: userId,
+        createdByUserName: createdByUserName,
+        groupId: groupId,
+        movingMs: movingMs,
+        restMs: restMs,
+        source: source,
+        trailPoints: trail.isNotEmpty ? trail.length : trailPoints,
+      );
 
   factory TripHistoryModel.fromJson(Map<String, dynamic> json) {
     final rawPoints = json['breadcrumbTrail'] as List<dynamic>? ?? [];
@@ -136,6 +171,7 @@ class TripHistoryModel {
       source: json['source']?.toString() == 'server' ? 'server' : 'device',
       movingMs: (json['movingMs'] as num?)?.toInt() ?? 0,
       restMs: (json['restMs'] as num?)?.toInt() ?? 0,
+      trailPoints: (json['trailPoints'] as num?)?.toInt(),
     );
   }
 }

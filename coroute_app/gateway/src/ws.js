@@ -22,12 +22,26 @@
 const { WebSocketServer, WebSocket } = require('ws');
 const crypto = require('crypto');
 const config = require('./config');
-const { verifyToken, ROLE_ADMIN } = require('./auth');
-const { ConvoyError } = require('./convoys');
+const { verifyToken, ROLE_ADMIN, AuthError, identityOf } = require('./auth');
+const { ConvoyError, publicRider } = require('./convoys');
 const { validateChunk, TrackError, uploadPermission } = require('./tracks');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 
 const VOICE_START = 0x01, VOICE_FRAME = 0x02, VOICE_END = 0x03;
+
+/** Intercom sample rates: 16 kHz, and 8 kHz from phones in data saver mode. */
+const VOICE_RATES = new Set([8000, 16000]);
+
+/** Socket messages limited by the per-second action budget. */
+const ACTION_TYPES = new Set([
+  'STATUS', 'CORIDER', 'STOP_ADD', 'STOP_SUGGEST', 'STOP_ACCEPT', 'STOP_DECLINE', 'STOP_REMOVE', 'STOP_SKIP', 'STOP_REORDER',
+  'STOP_VISITED', 'ROUTE_SET', 'CONFIG', 'TIMELINE_SINCE', 'SOS_RESOLVE', 'TRIP_STATUS',
+  // These read the database too (membership, convoy load, fleet).
+  'JOIN', 'LEAVE', 'ADMIN_SUBSCRIBE',
+]);
+/** Socket messages that alert the whole convoy: a few per 10 seconds, each type with its own budget
+ * (a rider who just asked the group to wait must still be able to raise an SOS). */
+const ALARM_TYPES = new Set(['WAIT', 'SOS']);
 
 function encodeVoice(kind, header, payload) {
   const h = Buffer.from(JSON.stringify(header), 'utf8');
@@ -51,8 +65,8 @@ class Hub {
   /**
    * @param {{server: import('http').Server, convoys: import('./convoys').ConvoyManager, repo: any, logger?: any}} deps
    */
-  constructor({ server, convoys, repo, tracks = null, timeline = null, logger = console, path = '/ws' }) {
-    this.convoys = convoys; this.repo = repo; this.tracks = tracks; this.timeline = timeline; this.log = logger;
+  constructor({ server, convoys, repo, tracks = null, timeline = null, logger = console, path = '/ws', gate = null }) {
+    this.convoys = convoys; this.repo = repo; this.tracks = tracks; this.timeline = timeline; this.log = logger; this.gate = gate;
     this.rooms = new Map(); // groupId -> Set<ws>
     this.admins = new Set();
     this.voice = new Map(); // groupId -> { group: stream|null, private: Map<from, stream> }
@@ -111,9 +125,13 @@ class Hub {
   }
   async _pushFleet() {
     if (this.admins.size === 0) return;
+    // Every subscriber passes the (cached) account gate again: a demoted, blocked or deleted
+    // admin whose socket sends nothing must not keep receiving every convoy's live positions.
+    await Promise.all([...this.admins].map((ws) => this._gateCheck(ws)));
+    if (this.admins.size === 0) return;
     const fleet = await this.convoys.fleet();
     const msg = JSON.stringify({ type: 'FLEET', convoys: fleet, ts: Date.now() });
-    for (const ws of this.admins) if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    for (const ws of this.admins) if (ws.readyState === WebSocket.OPEN && ws.allowed && ws.user.role === ROLE_ADMIN) ws.send(msg);
   }
 
   // ---------------------------------------------------------- connection
@@ -130,18 +148,69 @@ class Hub {
     const claims = token && verifyToken(token);
     if (!claims) { ws.close(4401, 'Unauthorized'); return; }
 
+    ws.claims = claims;
     ws.user = { userId: claims.sub, name: claims.name, role: claims.role, email: claims.email };
     ws.isAlive = true;
     ws.groupId = null;
-    ws.rate = { telemetry: 0, chat: 0, track: 0, windowStart: Date.now() };
+    ws.allowed = false; // nothing (JSON or voice) is acted on until the account gate passed
+    ws.rate = { telemetry: 0, chat: 0, track: 0, action: 0, windowStart: Date.now() };
+    ws.alarms = { WAIT: [], SOS: [] };
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('message', (data, isBinary) => {
-      if (isBinary) this._onVoice(ws, data);
-      else this._onJson(ws, data).catch((e) => this._handleError(ws, e));
+      if (isBinary) { if (ws.allowed) this._onVoice(ws, data); return; }
+      this._onJson(ws, data).catch((e) => this._handleError(ws, e));
     });
     ws.on('close', () => { this._unbind(ws); this.admins.delete(ws); });
     ws.on('error', () => { /* close handler runs */ });
-    this.send(ws, { type: 'HELLO', userId: ws.user.userId, serverTime: Date.now(), heartbeatSec: 30 });
+    ws.ready = this._gateCheck(ws).then((ok) => {
+      if (ok) this.send(ws, { type: 'HELLO', userId: ws.user.userId, serverTime: Date.now(), heartbeatSec: 30 });
+      return ok;
+    });
+  }
+
+  /** Close code for an account the gate refused: 4403 hold/block (do not retry), 4401 gone or signed out. */
+  static closeCodeFor(e) {
+    return e && (e.code === 'ACCOUNT_ON_HOLD' || e.code === 'ACCOUNT_BLOCKED') ? 4403 : 4401;
+  }
+
+  /** Runs the account gate for a socket; refreshes its identity or closes it. Resolves to true when allowed. */
+  async _gateCheck(ws) {
+    if (!this.gate) { ws.allowed = true; return true; }
+    try {
+      const user = await this.gate.check(ws.claims);
+      ws.user = identityOf(user);
+      if (ws.user.role !== ROLE_ADMIN) this.admins.delete(ws);
+      ws.allowed = true;
+      return true;
+    } catch (e) {
+      ws.allowed = false;
+      if (e instanceof AuthError) {
+        this._kick(ws, Hub.closeCodeFor(e), e.code || 'Unauthorized');
+      } else {
+        this.log.warn('[ws] account check failed', e.message);
+        this._kick(ws, 1011, 'Try again');
+      }
+      return false;
+    }
+  }
+
+  _kick(ws, code, reason) {
+    ws.allowed = false;
+    this._unbind(ws);
+    this.admins.delete(ws);
+    try { ws.close(code, String(reason).slice(0, 100)); } catch { /* already closing */ }
+    // A peer that never answers the close handshake is dropped anyway.
+    const t = setTimeout(() => { try { ws.terminate(); } catch { /* gone */ } }, 2000);
+    if (t.unref) t.unref();
+  }
+
+  /** Ends every socket of one account at once (hold, block, delete). */
+  disconnectUser(userId, code = 4401, reason = 'ACCOUNT_GONE') {
+    let n = 0;
+    for (const ws of this.wss.clients) {
+      if (ws.user && ws.user.userId === userId) { this._kick(ws, code, reason); n++; }
+    }
+    return n;
   }
 
   _handleError(ws, e) {
@@ -152,8 +221,18 @@ class Hub {
 
   _allow(ws, bucket, limitPerSec) {
     const t = Date.now();
-    if (t - ws.rate.windowStart >= 1000) { ws.rate.windowStart = t; ws.rate.telemetry = 0; ws.rate.chat = 0; ws.rate.track = 0; }
+    if (t - ws.rate.windowStart >= 1000) { ws.rate.windowStart = t; ws.rate.telemetry = 0; ws.rate.chat = 0; ws.rate.track = 0; ws.rate.action = 0; }
     return ++ws.rate[bucket] <= limitPerSec;
+  }
+
+  /** WAIT and SOS: a few per 10 seconds (each writes to the database and alerts everyone). */
+  _allowAlarm(ws, type) {
+    const t = Date.now();
+    const recent = (ws.alarms[type] || []).filter((x) => t - x < 10000);
+    ws.alarms[type] = recent;
+    if (recent.length >= config.wsAlarmsPer10s) return false;
+    recent.push(t);
+    return true;
   }
 
   _requireRoom(ws) {
@@ -162,9 +241,17 @@ class Hub {
   }
 
   async _onJson(ws, data) {
+    if (!(await ws.ready)) return;
+    // Re-check the account through the cached gate (no DB read inside the TTL): a hold, block,
+    // delete, demotion or password change applies to an open socket too.
+    if (!(await this._gateCheck(ws))) return;
     let msg;
     try { msg = JSON.parse(data.toString()); } catch { return this.sendError(ws, 400, 'Malformed JSON'); }
     const u = ws.user;
+    if (!msg || typeof msg !== 'object') return this.sendError(ws, 400, 'Malformed JSON');
+    // Every message that writes to the database has a budget per socket.
+    if (ACTION_TYPES.has(msg.type) && !this._allow(ws, 'action', config.wsActionsPerSec)) throw new ConvoyError('Slow down.', 429);
+    if (ALARM_TYPES.has(msg.type) && !this._allowAlarm(ws, msg.type)) throw new ConvoyError('Slow down.', 429);
     switch (msg.type) {
       case 'PING': return this.send(ws, { type: 'PONG', ts: Date.now() });
 
@@ -186,8 +273,9 @@ class Hub {
         const gid = this._requireRoom(ws);
         if (!this._allow(ws, 'telemetry', 3)) return; // silently drop bursts
         const room = await this.convoys.getRoom(gid);
+        // Only telemetry fields are applied (never role or profile); see ConvoyManager.patchRider.
         const rider = this.convoys.patchRider(room, u.userId, msg, { emit: false });
-        return this.broadcast(gid, { type: 'RIDER_UPDATE', rider, ts: Date.now() }, { except: ws });
+        return this.broadcast(gid, { type: 'RIDER_UPDATE', rider: publicRider(rider), ts: Date.now() }, { except: ws });
       }
       case 'STATUS': {
         const gid = this._requireRoom(ws);
@@ -207,7 +295,7 @@ class Hub {
         const driver = String(msg.ridingWithUserId || '');
         if (driver && !room.riders.has(driver)) throw new ConvoyError('Driver is not in this convoy.');
         const was = room.riders.get(u.userId)?.ridingWithUserId || '';
-        this.convoys.patchRider(room, u.userId, { isCoRiding: !!driver, ridingWithUserId: driver });
+        this.convoys.patchRider(room, u.userId, { isCoRiding: !!driver, ridingWithUserId: driver }, { trusted: true });
         if (was !== driver) this.convoys.emit('activity', gid, { type: 'CORIDE', user: u, withUserId: driver });
         return;
       }
@@ -218,7 +306,13 @@ class Hub {
         return;
       }
       case 'WAIT': return void await this.convoys.requestWait(this._requireRoom(ws), u);
-      case 'SOS': return void await this.convoys.raiseSos(this._requireRoom(ws), u, msg);
+      case 'SOS': {
+        const gid = this._requireRoom(ws);
+        const r = await this.convoys.raiseSos(gid, u, msg);
+        // A retried SOS: only the sender hears it again, so the phone can mark it delivered.
+        if (r.duplicate) this.send(ws, { type: 'ALERT', alert: r.alert, duplicate: true, ts: Date.now() });
+        return;
+      }
       case 'SOS_RESOLVE': return void await this.convoys.resolveSos(this._requireRoom(ws), u, String(msg.alertId || ''));
       case 'STOP_ADD': return void await this.convoys.addStop(this._requireRoom(ws), u, msg);
       case 'STOP_SUGGEST': return void await this.convoys.suggestStop(this._requireRoom(ws), u, msg);
@@ -307,7 +401,7 @@ class Hub {
       }
       const stream = {
         streamId: crypto.randomBytes(6).toString('hex'), ws, from: ws.user.userId, fromName: ws.user.name, to,
-        startedAt: t, lastAt: t, frames: 0, sampleRate: Number(pkt.header.sampleRate) || 16000, codec: String(pkt.header.codec || 'pcm16'),
+        startedAt: t, lastAt: t, frames: 0, sampleRate: VOICE_RATES.has(Number(pkt.header.sampleRate)) ? Number(pkt.header.sampleRate) : 16000, codec: String(pkt.header.codec || 'pcm16').slice(0, 16),
       };
       if (to) state.private.set(ws.user.userId, stream); else state.group = stream;
       ws.voiceStream = stream;

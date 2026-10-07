@@ -57,8 +57,8 @@ function wsConnect(token) {
 }
 
 test('trip planned on the map: route through every stop, suggestions, reorder, skip, fallback', async () => {
-  const lead = (await api('POST', '/auth/register', { name: 'Lead Lata', email: 'lata@coroute.test', password: 'Password#123', phone: '9999999999' })).json;
-  const mem = (await api('POST', '/auth/register', { name: 'Member Mani', email: 'mani@coroute.test', password: 'Password#123', phone: '9999999999' })).json;
+  const lead = (await api('POST', '/auth/register', { name: 'Lead Lata', email: 'lata@coroute.test', password: 'Password#123', phone: '9999999999', vehicleNo: 'TS09AB1234', emergencyContact: '+919000000001', emergencyContactName: 'Family Contact' })).json;
+  const mem = (await api('POST', '/auth/register', { name: 'Member Mani', email: 'mani@coroute.test', password: 'Password#123', phone: '9999999999', vehicleNo: 'TS09AB1234', emergencyContact: '+919000000001', emergencyContactName: 'Family Contact' })).json;
 
   const created = await api('POST', '/convoys', {
     name: 'Coast run',

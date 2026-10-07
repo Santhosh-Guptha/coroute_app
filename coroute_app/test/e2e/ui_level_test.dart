@@ -371,7 +371,7 @@ void main() {
       expect(find.text('Riders (3)'), findsOneWidget);
       expect(find.text('Chat (0)'), findsOneWidget);
       expect(find.text('Stops (2)'), findsOneWidget);
-      expect(find.text('⚙️ Settings'), findsOneWidget);
+      expect(find.text('Settings'), findsOneWidget);
 
       // Verify Intercom Dock
       expect(find.text('Talk to: Everyone'), findsOneWidget);

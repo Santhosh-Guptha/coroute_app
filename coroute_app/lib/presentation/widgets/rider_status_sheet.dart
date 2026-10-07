@@ -5,39 +5,45 @@ import '../../data/services/convoy_service.dart';
 
 /// Reusable Rider Status Sheet for selecting reasons for being stationary.
 ///
-/// Implements Section 5.5 of CoRoute Specifications:
-/// * ⛽ Fueling
-/// * ☕ Rest Break
-/// * 🔧 Mechanical Issue
-/// * 🛞 Flat Tire
-/// * 🚦 Traffic Delay
-/// * 🌧️ Weather Delay
-/// * 📸 Photo Stop
-/// * 🏥 Medical Emergency
-/// * 🛑 Regroup Request
-/// * 💬 Custom Reason
+/// Implements Section 5.5 of CoRoute Specifications: fueling, rest break, mechanical issue,
+/// flat tyre, traffic, weather, photo stop, medical emergency, regroup, or a custom reason.
+/// Each reason has a Material icon (no emoji in the app).
 class RiderStatusSheet {
   static const List<Map<String, String>> statusReasons = [
-    {'code': 'FUELING', 'label': 'Fueling', 'emoji': '⛽'},
-    {'code': 'REST_BREAK', 'label': 'Rest Break', 'emoji': '☕'},
-    {'code': 'MECHANICAL', 'label': 'Mechanical Issue', 'emoji': '🔧'},
-    {'code': 'FLAT_TIRE', 'label': 'Flat Tire', 'emoji': '🛞'},
-    {'code': 'TRAFFIC', 'label': 'Traffic Delay', 'emoji': '🚦'},
-    {'code': 'RAIN_DELAY', 'label': 'Weather Delay', 'emoji': '🌧️'},
-    {'code': 'PHOTO_STOP', 'label': 'Photo Stop', 'emoji': '📸'},
-    {'code': 'MEDICAL', 'label': 'Medical Emergency', 'emoji': '🏥'},
-    {'code': 'REGROUP', 'label': 'Regroup Wait', 'emoji': '🛑'},
-    {'code': 'CUSTOM', 'label': 'Custom Reason', 'emoji': '💬'},
+    {'code': 'FUELING', 'label': 'Fueling'},
+    {'code': 'REST_BREAK', 'label': 'Rest Break'},
+    {'code': 'MECHANICAL', 'label': 'Mechanical Issue'},
+    {'code': 'FLAT_TIRE', 'label': 'Flat Tire'},
+    {'code': 'TRAFFIC', 'label': 'Traffic Delay'},
+    {'code': 'RAIN_DELAY', 'label': 'Weather Delay'},
+    {'code': 'PHOTO_STOP', 'label': 'Photo Stop'},
+    {'code': 'MEDICAL', 'label': 'Medical Emergency'},
+    {'code': 'REGROUP', 'label': 'Regroup Wait'},
+    {'code': 'CUSTOM', 'label': 'Custom Reason'},
   ];
+
+  /// Icon for each reason code.
+  static const Map<String, IconData> statusIcons = {
+    'FUELING': Icons.local_gas_station_rounded,
+    'REST_BREAK': Icons.free_breakfast_rounded,
+    'MECHANICAL': Icons.build_rounded,
+    'FLAT_TIRE': Icons.tire_repair_rounded,
+    'TRAFFIC': Icons.traffic_rounded,
+    'RAIN_DELAY': Icons.umbrella_rounded,
+    'PHOTO_STOP': Icons.photo_camera_rounded,
+    'MEDICAL': Icons.medical_services_rounded,
+    'REGROUP': Icons.groups_rounded,
+    'CUSTOM': Icons.chat_bubble_outline_rounded,
+  };
 
   static Map<String, String> getStatusInfo(String code) {
     return statusReasons.firstWhere(
       (r) => r['code'] == code,
-      orElse: () => {'code': code, 'label': code, 'emoji': '⚠️'},
+      orElse: () => {'code': code, 'label': code},
     );
   }
 
-  static String getStatusEmoji(String code) => getStatusInfo(code)['emoji'] ?? '⚠️';
+  static IconData getStatusIcon(String code) => statusIcons[code] ?? Icons.info_outline_rounded;
   static String getStatusLabel(String code) => getStatusInfo(code)['label'] ?? code;
 
   static void show(
@@ -80,7 +86,7 @@ class RiderStatusSheet {
                 children: [
                   for (final r in statusReasons)
                     ActionChip(
-                      avatar: Text(r['emoji']!),
+                      avatar: Icon(getStatusIcon(r['code']!), size: 18, color: AppTheme.neonCyan),
                       label: Text(r['label']!, style: TextStyle(fontSize: 12, color: AppTheme.textPrimary)),
                       backgroundColor: AppTheme.elevatedCard,
                       side: BorderSide(color: AppTheme.glassBorder),
@@ -108,7 +114,7 @@ class RiderStatusSheet {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.slateCard,
-        title: Text('💬 Custom Stop Reason', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+        title: Text('Custom stop reason', style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
         content: TextField(
           controller: customCtrl,
           autofocus: true,

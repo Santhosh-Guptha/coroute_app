@@ -19,6 +19,7 @@ import '../widgets/rider_status_sheet.dart';
 import 'live_cockpit_map_screen.dart';
 import '../timeline/live_timeline_screen.dart';
 import '../trip_planner/route_stops_panel.dart';
+import '../../domain/timeline/timeline_text.dart';
 
 class ConvoyDashboardScreen extends StatefulWidget {
   final String groupId;
@@ -46,7 +47,6 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
     return {
       'code': code,
       'label': RiderStatusSheet.getStatusLabel(code),
-      'emoji': RiderStatusSheet.getStatusEmoji(code),
     };
   }
 
@@ -403,7 +403,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
             Tab(text: 'Riders (${convoy.riders.length})'),
             Tab(text: 'Chat (${convoy.messages.length})'),
             Tab(text: 'Stops (${convoy.stopPoints.length})'),
-            const Tab(text: '⚙️ Settings'),
+            const Tab(text: 'Settings'),
           ],
         ),
       ),
@@ -443,11 +443,11 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '🚨 YOUR SOS IS ACTIVE',
+                          'Your SOS is on',
                           style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                         Text(
-                          'Convoy members have your live coordinates',
+                          'Your convoy can see where you are.',
                           style: TextStyle(color: Colors.black87, fontSize: 11),
                         ),
                       ],
@@ -457,8 +457,9 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                     onPressed: () {
                       final alertId = myActiveSosAlerts.last.alertId;
                       convoyService.resolveSosAlert(alertId);
+                      convoyService.cancelMySos();
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Your SOS emergency alert has been cancelled.')),
+                        const SnackBar(content: Text('SOS cancelled. Your convoy sees that you are OK.')),
                       );
                     },
                     style: ElevatedButton.styleFrom(
@@ -466,7 +467,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     ),
-                    child: const Text('CANCEL SOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    child: const Text('I am safe', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                   ),
                 ],
               ),
@@ -486,11 +487,11 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '🚨 SOS: ${otherSosAlerts.last.userName} NEEDS HELP!',
+                          'SOS: ${otherSosAlerts.last.userName} needs help',
                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                         Text(
-                          'Emergency Type: ${otherSosAlerts.last.alertType}',
+                          TimelineText.reason(otherSosAlerts.last.alertType),
                           style: TextStyle(color: Colors.white70, fontSize: 11),
                         ),
                       ],
@@ -514,11 +515,11 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                       foregroundColor: AppTheme.laserRed,
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     ),
-                    child: const Text('NAVIGATE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    child: const Text('Show on map', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                   ),
                   IconButton(
                     icon: Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
-                    tooltip: 'Acknowledge & Dismiss Alert',
+                    tooltip: 'Mark as handled',
                     onPressed: () {
                       final alertId = otherSosAlerts.last.alertId;
                       setState(() {
@@ -580,7 +581,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
               ),
               child: Row(
                 children: [
-                  Text(_getStatusInfo(currentRider.statusReason)['emoji'] ?? '⚠️', style: const TextStyle(fontSize: 16)),
+                  Icon(Icons.info_outline_rounded, size: 18, color: currentRider.statusReason == 'MEDICAL' ? AppTheme.laserRed : AppTheme.hyperAmber),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -668,7 +669,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                     context: context,
                     builder: (ctx) => AlertDialog(
                       backgroundColor: AppTheme.slateCard,
-                      title: Text('🛑 End Convoy Ride?', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
+                      title: Text('End the ride for everyone?', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold)),
                       content: Text(
                         'This will conclude the active ride for all members and save the journey to everyone\'s trip history.',
                         style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
@@ -783,7 +784,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                                     border: Border.all(color: Color(rel.colorHex)),
                                   ),
                                   child: Text(
-                                    '${rel.symbol} ${rel.label} (${rel.formattedDistance})',
+                                    '${rel.label} (${rel.formattedDistance})',
                                     style: TextStyle(
                                       color: Color(rel.colorHex),
                                       fontSize: 10,
@@ -846,7 +847,7 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
                                     border: Border.all(color: badgeColor.withOpacity(0.6)),
                                   ),
                                   child: Text(
-                                    '${info['emoji']} ${info['label']}${member.statusMessage.isNotEmpty ? ": ${member.statusMessage}" : ""}',
+                                    '${info['label']}${member.statusMessage.isNotEmpty ? ": ${member.statusMessage}" : ""}',
                                     style: TextStyle(color: badgeColor, fontSize: 10, fontWeight: FontWeight.bold),
                                   ),
                                 );
@@ -908,30 +909,30 @@ class _ConvoyDashboardScreenState extends State<ConvoyDashboardScreen>
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _buildQuickCardBtn('⏱️ Wait 2 min', () => service.requestWait(myLoc.name)),
-                _buildQuickCardBtn('⛽ Need Fuel', () {
+                _buildQuickCardBtn('Wait 2 min', () => service.requestWait(myLoc.name)),
+                _buildQuickCardBtn('Need fuel', () {
                   service.sendGroupMessage(
                     senderId: myLoc.userId,
                     senderName: myLoc.name,
-                    text: '⛽ Looking for a fuel station soon.',
+                    text: 'Looking for a fuel station soon.',
                     isQuickCard: true,
                     cardType: 'FUEL',
                   );
                 }),
-                _buildQuickCardBtn('🛑 Regroup', () {
+                _buildQuickCardBtn('Regroup', () {
                   service.sendGroupMessage(
                     senderId: myLoc.userId,
                     senderName: myLoc.name,
-                    text: '🛑 Regroup at next available toll or stop.',
+                    text: 'Regroup at the next toll or stop.',
                     isQuickCard: true,
                     cardType: 'REGROUP',
                   );
                 }),
-                _buildQuickCardBtn('🔧 Issue', () {
+                _buildQuickCardBtn('Bike issue', () {
                   service.sendGroupMessage(
                     senderId: myLoc.userId,
                     senderName: myLoc.name,
-                    text: '🔧 Minor mechanical/bike issue, slowing down.',
+                    text: 'Small bike problem, slowing down.',
                     isQuickCard: true,
                     cardType: 'MECHANICAL',
                   );

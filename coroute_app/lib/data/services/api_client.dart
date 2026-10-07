@@ -18,9 +18,13 @@ class ApiException implements Exception {
   bool get isUnauthorized => statusCode == 401;
   bool get isOffline => statusCode == 0;
 
-  /// True only when the gateway itself says the session is over. Network trouble,
-  /// timeouts, server restarts and Wi-Fi login pages never count.
-  bool get endsSession => code == 'SESSION_INVALID' || code == 'ACCOUNT_GONE';
+  /// Gateway codes that end the session on this phone.
+  static const sessionEndingCodes = {'SESSION_INVALID', 'ACCOUNT_GONE', 'ACCOUNT_ON_HOLD', 'ACCOUNT_BLOCKED'};
+
+  /// True only when the gateway itself says the session is over (signed out elsewhere,
+  /// account deleted, on hold or blocked). Network trouble, timeouts, server restarts
+  /// and Wi-Fi login pages never count.
+  bool get endsSession => code != null && sessionEndingCodes.contains(code);
 
   @override
   String toString() => 'ApiException($statusCode): $message';
@@ -48,6 +52,10 @@ class ApiClient extends ChangeNotifier {
 
   String? get token => _token;
   bool get hasToken => _token != null && _token!.isNotEmpty;
+
+  /// The gateway's message when it last ended the session (for example "Your account has
+  /// been blocked by the administrator."), so the sign-in screen can say why.
+  String? lastSessionEndMessage;
 
   static const _sessionHeader = 'x-coroute-token';
 
@@ -165,6 +173,7 @@ class ApiClient extends ChangeNotifier {
     final error = ApiException(res.statusCode, message, code);
     if (error.endsSession && hasToken) {
       // Only the gateway saying so ends the session; bad networks never sign anyone out.
+      lastSessionEndMessage = message;
       await setToken(null);
     }
     throw error;

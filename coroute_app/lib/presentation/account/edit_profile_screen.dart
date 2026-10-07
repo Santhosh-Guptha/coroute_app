@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/glass_card.dart';
 import '../../data/services/auth_service.dart';
@@ -138,8 +140,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
       Navigator.pop(context, true);
     } else {
+      final serverError = context.read<AuthService>().lastProfileError;
       setState(() {
-        _error = 'Failed to update profile. Please verify your connection.';
+        _error = serverError ?? 'Could not save your profile. Check your connection and try again.';
       });
     }
   }
@@ -221,6 +224,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               _sectionHeader('Contact Information'),
               TextField(
                 controller: _phoneController,
+                inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
                 keyboardType: TextInputType.phone,
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
                 decoration: _inputDec(
@@ -285,6 +289,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         const SizedBox(height: 6),
                         TextField(
                           controller: _vehicleNoController,
+                          inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxVehicleNoLength)],
                           enabled: _selectedVehicle != 'Pillion Rider',
                           textCapitalization: TextCapitalization.characters,
                           style: TextStyle(
@@ -330,6 +335,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
               TextField(
                 controller: _iceNameController,
+                inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxContactNameLength)],
                 textCapitalization: TextCapitalization.words,
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
                 decoration: _inputDec(
@@ -341,6 +347,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               const SizedBox(height: 12),
               TextField(
                 controller: _icePhoneController,
+                inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
                 keyboardType: TextInputType.phone,
                 style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
                 decoration: _inputDec(

@@ -1,6 +1,6 @@
 # CoRoute Gateway — Deployment Runbook (OCI Always Free, ₹0/month)
 
-Target: the existing Oracle Cloud VM (`152.67.181.198`, Ubuntu) + the Always Free
+Target: the existing Oracle Cloud VM (`<vm-public-ip>`, Ubuntu) + the Always Free
 Autonomous Database. Everything below is one-time; afterwards the service
 restarts itself, renews its own TLS certificate, rotates its own logs and prunes
 its own data.
@@ -10,7 +10,7 @@ its own data.
 ## 0. Prerequisites (10 min)
 
 1. A hostname for the API. **Free option (used by default): DuckDNS.** Go to https://www.duckdns.org, sign in
-   (GitHub/Google), create the subdomain **`coroute`** (→ `coroute.duckdns.org`) and set its IP to `152.67.181.198`.
+   (GitHub/Google), create the subdomain **`coroute`** (→ `coroute.duckdns.org`) and set its IP to `<vm-public-ip>`.
    Copy your DuckDNS *token*; the installer can re-point the record for you (`DUCKDNS_TOKEN=…`).
    If `coroute` is taken, pick another name and build the app with `--dart-define=COROUTE_API=https://<name>.duckdns.org`.
    (Let's Encrypt needs a hostname; the OCI public IP is static, so the record never needs updating.)
@@ -22,7 +22,7 @@ its own data.
 
 The DuckDNS name is for testing. Before launch, point your own domain at the VM and let Caddy issue its certificate:
 
-1. At your DNS provider (for devmonks.space, or whichever domain you choose) add **A record** `coroute` → `152.67.181.198` (giving `coroute.devmonks.space`).
+1. At your DNS provider (for devmonks.space, or whichever domain you choose) add **A record** `coroute` → `<vm-public-ip>` (giving `coroute.devmonks.space`).
 2. On the VM, re-run the installer with both hostnames so existing test builds keep working while the new one takes over:
    `sudo API_HOST="coroute.devmonks.space, coroute.duckdns.org" bash gateway/deploy/install.sh`
    (Caddy accepts a comma-separated list of site addresses; certificates are issued for each.)
@@ -38,7 +38,7 @@ Resulting SODA URL: `https://<adb-host>.adb.ap-hyderabad-1.oraclecloudapps.com/o
 
 ## 2. Install the gateway (10 min)
 
-**Fast path — one command.** Copy the repo to the VM (`scp -r coroute_app ubuntu@152.67.181.198:~/` or `git clone`), then:
+**Fast path — one command.** Copy the repo to the VM (`scp -r coroute_app ubuntu@<vm-public-ip>:~/` or `git clone`), then:
 ```bash
 cd ~/coroute_app && sudo API_HOST=coroute.duckdns.org DUCKDNS_TOKEN=<your-token> bash gateway/deploy/install.sh
 ```
@@ -87,11 +87,39 @@ curl -s https://coroute.duckdns.org/api/health
 
 ## 4. Build the app against it
 
+One APK per CPU type keeps the download small (most phones need only the 64-bit one), and
+the Play Store gets an app bundle (Play splits it per phone by itself).
+
 ```bash
 flutter pub get
-flutter build apk --release --dart-define=COROUTE_API=https://coroute.duckdns.org
+# APKs for the website download (64-bit and 32-bit ARM phones)
+flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 \
+  --obfuscate --split-debug-info=build/symbols --dart-define=COROUTE_API=https://coroute.duckdns.org
+# App bundle for the Play Store
+flutter build appbundle --release --obfuscate --split-debug-info=build/symbols --dart-define=COROUTE_API=https://coroute.duckdns.org
 ```
-(`COROUTE_API` defaults to `https://coroute.duckdns.org` in `lib/core/config/app_config.dart`, so the flag is optional unless you chose another hostname.)
+(`COROUTE_API` defaults to `https://coroute.duckdns.org` in `lib/core/config/app_config.dart`, so the flag is optional unless you chose another hostname. Keep `build/symbols` for reading crash stack traces; it is not committed.)
+
+Publish the APKs on the gateway (the website's Download button and `GET /download` serve them;
+no other hosting is needed):
+
+```bash
+scp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   ubuntu@<vm-public-ip>:/tmp/coroute.apk
+scp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk ubuntu@<vm-public-ip>:/tmp/coroute-32bit.apk
+# on the VM
+sudo install -o coroute -g coroute -m 644 /tmp/coroute.apk       /opt/coroute/gateway/public/coroute.apk
+sudo install -o coroute -g coroute -m 644 /tmp/coroute-32bit.apk /opt/coroute/gateway/public/coroute-32bit.apk
+```
+`/download` sends people to `PLAY_STORE_URL` when it is set, otherwise to `APK_URL` (default: `<origin>/coroute.apk`).
+`/download/32bit` sends them to `APK_ARM32_URL` (default: `<origin>/coroute-32bit.apk`) for older 32-bit phones.
+If `/etc/coroute/gateway.env` still has an old `APK_URL=` line (for example a GitHub releases page), remove it so the
+default above is used. The `rsync --delete` in section 7 would remove the APKs: run it with
+`--exclude 'coroute*.apk'`, or copy the APKs again after upgrading.
+
+After the first release with R8 enabled, smoke-test on a real phone: Google sign-in, start a ride, the lock-screen
+notification with its SOS and Leave buttons, one local alert notification, and push-to-talk. If one of them fails,
+set `isMinifyEnabled` and `isShrinkResources` back to `false` in `android/app/build.gradle.kts` (split APKs and
+compressed native libraries keep most of the size saving).
 
 ## 5. First admin
 
@@ -119,7 +147,7 @@ Health: `GET /api/health` → `{"status":"HEALTHY","db":"UP",…}` (503 if the D
 ## 7. Upgrading the gateway
 
 ```bash
-sudo rsync -a --delete --exclude node_modules gateway/ /opt/coroute/gateway/
+sudo rsync -a --delete --exclude node_modules --exclude 'coroute*.apk' gateway/ /opt/coroute/gateway/
 cd /opt/coroute/gateway && sudo npm ci --omit=dev && sudo chown -R coroute:coroute /opt/coroute
 sudo systemctl restart coroute-gateway
 ```
@@ -127,7 +155,7 @@ On `SIGTERM` the gateway flushes in-memory telemetry to Oracle before exiting; c
 
 ## Free-tier capacity notes
 
-* Voice is PCM16 @ 16 kHz: 32 KB/s per *active speaker*. A convoy of 10 where one person speaks = 32 KB/s in, 288 KB/s out — trivial for the VM; OCI Always Free includes 10 TB/month egress.
+* Voice is PCM16 @ 16 kHz: 32 KB/s per *active speaker* (16 KB/s from a phone in data saver mode, 8 kHz). A convoy of 10 where one person speaks = 32 KB/s in, 288 KB/s out — trivial for the VM; OCI Always Free includes 10 TB/month egress.
 * The Always Free ADB allows 20 GB. A rider document is ~1 KB; a convoy's full GPS history is never stored (only the latest position per rider) and trip trails are trimmed by retention, so storage stays flat in the tens of MB.
 * Always Free compute: either VM.Standard.E2.1.Micro (1 OCPU / 1 GB) or up to 4 OCPU / 24 GB of Ampere A1. The gateway is I/O-bound and comfortably serves hundreds of concurrent riders on the Micro shape; move to A1 for thousands.
 

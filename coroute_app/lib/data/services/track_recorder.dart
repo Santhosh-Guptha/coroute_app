@@ -27,8 +27,24 @@ class TrackRecorder extends ChangeNotifier {
   int _sinceUpload = 0;
   int _recorded = 0;
   TrackPoint? _lastFix;
+  int _pendingPoints = 0;
 
   String? get groupId => _groupId;
+
+  /// Points of the current trip still waiting on the phone for upload. Read from the queue
+  /// when the connection changes and after each upload; counted up locally in between
+  /// (no polling, and no rebuild per GPS fix).
+  int get pendingPoints => _pendingPoints;
+
+  /// Re-reads [pendingPoints] from the queue (one COUNT query).
+  Future<void> refreshPendingCount() async {
+    final gid = _groupId;
+    final n = gid == null ? 0 : await _queue.countPending(gid);
+    if (n != _pendingPoints) {
+      _pendingPoints = n;
+      notifyListeners();
+    }
+  }
   bool get isRecording => _groupId != null;
   int get recordedPoints => _recorded;
 
@@ -45,6 +61,7 @@ class TrackRecorder extends ChangeNotifier {
     _sinceUpload = 0;
     _recorded = 0;
     _lastFix = null;
+    _pendingPoints = 0;
     _timer?.cancel();
     _timer = Timer.periodic(uploadEvery, (_) => _upload());
     _uploader.flush().ignore();
@@ -76,6 +93,7 @@ class TrackRecorder extends ChangeNotifier {
     if (!_filter.accept(p)) return;
     _lastFix = p;
     _recorded++;
+    _pendingPoints++;
     _queue.add(gid, p).ignore();
     final ev = _stops.add(p);
     if (ev != null) notifyListeners();
@@ -96,7 +114,7 @@ class TrackRecorder extends ChangeNotifier {
 
   void _upload() {
     _sinceUpload = 0;
-    _queue.flushBuffer().then((_) => _uploader.flush()).ignore();
+    _queue.flushBuffer().then((_) => _uploader.flush()).then((_) => refreshPendingCount()).ignore();
   }
 
   @override

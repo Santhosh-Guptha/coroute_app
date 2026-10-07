@@ -153,7 +153,6 @@ class TelemetryUtils {
         label: 'Nearby',
         distanceMeters: distanceMeters,
         colorHex: 0xFF94A3B8,
-        symbol: '⚪',
       );
     }
 
@@ -170,14 +169,12 @@ class TelemetryUtils {
         label: 'Ahead',
         distanceMeters: distanceMeters,
         colorHex: 0xFF00E676,
-        symbol: '🟢',
       );
     } else {
       return RelativePositionResult(
         label: 'Behind',
         distanceMeters: distanceMeters,
         colorHex: 0xFFFF1744,
-        symbol: '🔴',
       );
     }
   }
@@ -187,13 +184,11 @@ class RelativePositionResult {
   final String label; // 'Ahead', 'Behind', 'Nearby'
   final double distanceMeters;
   final int colorHex;
-  final String symbol;
 
   RelativePositionResult({
     required this.label,
     required this.distanceMeters,
     required this.colorHex,
-    required this.symbol,
   });
 
   String get formattedDistance {
