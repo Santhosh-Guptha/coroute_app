@@ -13,6 +13,93 @@ import '../ride/incident_view.dart';
 import '../ride/navigate_to.dart';
 import 'admin_ui.dart';
 
+/// What the Rider Safety Network does for one emergency (admin view, 3.15).
+class AdminNetSummary {
+  /// OFF, SEARCHING, REQUESTED, ASSIGNED, NONE_FOUND (wire names).
+  final String state;
+  final int stage;
+  final int notified;
+  final List<({String name, String status, int? etaS})> responders;
+
+  const AdminNetSummary({this.state = '', this.stage = 0, this.notified = 0, this.responders = const []});
+
+  static AdminNetSummary? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    int i(Object? v) => v is num ? v.toInt() : 0;
+    final rs = raw['responders'];
+    return AdminNetSummary(
+      state: raw['state']?.toString() ?? '',
+      stage: i(raw['stage']),
+      notified: i(raw['notified']),
+      responders: [
+        if (rs is List)
+          for (final r in rs)
+            if (r is Map) (name: r['name']?.toString() ?? '', status: r['status']?.toString() ?? '', etaS: r['etaS'] is num ? (r['etaS'] as num).toInt() : null),
+      ],
+    );
+  }
+
+  /// "Nearby help: Arjun en route, ETA 3 min" / "Nearby help: asking riders, 2 asked" / ..., or empty.
+  String get text {
+    final active = responders.where((r) => const {'ACCEPTED', 'EN_ROUTE', 'ARRIVING', 'ARRIVED'}.contains(r.status.toUpperCase())).toList();
+    if (active.isNotEmpty) {
+      final r = active.first;
+      final eta = r.etaS == null || r.status.toUpperCase() == 'ARRIVED' ? '' : ', ETA ${TimelineText.duration(Duration(minutes: (r.etaS! / 60).ceil().clamp(1, 1 << 20).toInt()))}';
+      final name = r.name.trim().isEmpty ? 'A nearby rider' : r.name.trim();
+      return 'Nearby help: $name ${adminResponderWords(r.status)}$eta';
+    }
+    switch (state.toUpperCase()) {
+      case 'SEARCHING':
+      case 'REQUESTED':
+        return notified > 0 ? 'Nearby help: asking riders, $notified asked' : 'Nearby help: searching';
+      case 'NONE_FOUND':
+        return 'Nearby help: no nearby riders found';
+      case 'ASSIGNED':
+        return 'Nearby help: a rider accepted';
+      default:
+        return '';
+    }
+  }
+}
+
+/// "en route", "arriving", "on scene" for a responder status (wire name).
+String adminResponderWords(String status) {
+  switch (status.toUpperCase()) {
+    case 'ACCEPTED':
+      return 'accepted';
+    case 'EN_ROUTE':
+      return 'en route';
+    case 'ARRIVING':
+      return 'arriving';
+    case 'ARRIVED':
+      return 'on scene';
+    case 'UNABLE_TO_REACH':
+      return 'unable to reach';
+    case 'CANCELLED':
+      return 'cancelled';
+    case 'DECLINED':
+      return 'declined';
+    default:
+      return status.toLowerCase().replaceAll('_', ' ');
+  }
+}
+
+/// "Assistance requested", "Responder assigned", ... for an emergency status (wire name), or empty.
+String adminStatusWords(String status) {
+  switch (status.toUpperCase()) {
+    case 'CONFIRMED_ACCIDENT':
+      return 'Accident confirmed';
+    case 'ASSISTANCE_REQUESTED':
+      return 'Assistance requested';
+    case 'RESPONDER_ASSIGNED':
+      return 'Responder assigned';
+    case 'ASSISTANCE_ARRIVED':
+      return 'Help on scene';
+    default:
+      return '';
+  }
+}
+
 /// One open SOS or crash alert, from `GET /admin/emergencies` or the live
 /// fleet. Never carries medical info or phone numbers.
 class AdminEmergency {
@@ -36,6 +123,15 @@ class AdminEmergency {
   final String leadName;
   final List<SosResponder> responders;
 
+  /// Emergency status wire name (3.15), empty from an older gateway.
+  final String status;
+
+  /// The nearby assistance summary (3.15), or null.
+  final AdminNetSummary? network;
+
+  /// False alarms of this rider in the last 30 days (3.15), 0 when unknown.
+  final int falseAlarms30d;
+
   const AdminEmergency({
     required this.groupId,
     this.convoyName = '',
@@ -54,6 +150,9 @@ class AdminEmergency {
     this.leadId = '',
     this.leadName = '',
     this.responders = const [],
+    this.status = '',
+    this.network,
+    this.falseAlarms30d = 0,
   });
 
   factory AdminEmergency.fromJson(Map<String, dynamic> j) {
@@ -79,6 +178,9 @@ class AdminEmergency {
       leadId: lead is Map ? (lead['userId']?.toString() ?? '') : '',
       leadName: lead is Map ? (lead['name']?.toString() ?? '') : '',
       responders: rs is List ? [for (final r in rs) if (r is Map) SosResponder.fromJson(Map<String, dynamic>.from(r))] : const [],
+      status: j['status']?.toString() ?? '',
+      network: AdminNetSummary.fromJson(j['network']),
+      falseAlarms30d: i(j['falseAlarms30d']),
     );
   }
 
@@ -104,10 +206,24 @@ class AdminEmergency {
       leadId: c.createdByUserId,
       leadName: c.createdByUserName.isNotEmpty ? c.createdByUserName : (lead?.name ?? ''),
       responders: a.responders,
+      status: a.status?.wire ?? '',
+      network: _netOf(a),
     );
   }
 
-  AdminEmergency withLive({List<SosResponder>? responders, String? presence, int? lastSeenAt, int? riders}) => AdminEmergency(
+  static AdminNetSummary? _netOf(SosAlertModel a) {
+    final n = a.network;
+    if (n == null) return null;
+    return AdminNetSummary(
+      state: n.state.wire,
+      stage: n.stage,
+      notified: n.notified,
+      responders: [for (final r in n.responders) (name: r.name, status: r.status.wire, etaS: r.etaS)],
+    );
+  }
+
+  AdminEmergency withLive({List<SosResponder>? responders, String? presence, int? lastSeenAt, int? riders, String? status, AdminNetSummary? network}) =>
+      AdminEmergency(
         groupId: groupId,
         convoyName: convoyName,
         alertId: alertId,
@@ -125,6 +241,9 @@ class AdminEmergency {
         leadId: leadId,
         leadName: leadName,
         responders: responders ?? this.responders,
+        status: (status == null || status.isEmpty) ? this.status : status,
+        network: network ?? this.network,
+        falseAlarms30d: falseAlarms30d,
       );
 
   bool get isCrash => alertType.toUpperCase() == SosTypes.crash;
@@ -185,6 +304,8 @@ List<AdminEmergency> mergeEmergencies(List<AdminEmergency> rest, Iterable<Convoy
       presence: (r?.presence ?? '').isEmpty ? null : r?.presence,
       lastSeenAt: r == null || r.lastSeenEpochMs <= 0 ? null : r.lastSeenEpochMs,
       riders: c.riders.length,
+      status: a.status?.wire,
+      network: AdminEmergency._netOf(a),
     ));
   }
   for (final entry in open.entries) {
@@ -398,6 +519,23 @@ class AdminEmergenciesPanelState extends State<AdminEmergenciesPanel> {
   }
 }
 
+/// Clears a rider's false alarm counter (after a confirm). External requests for them are no longer limited.
+Future<void> _resetFalseAlarms(BuildContext context, AdminEmergency e) async {
+  final ok = await confirmAction(
+    context,
+    title: 'Reset false alarms?',
+    message: 'Nearby riders of other groups can be asked to help ${e.who} again without a limit.',
+    confirmLabel: 'Reset',
+  );
+  if (!ok || !context.mounted) return;
+  try {
+    await context.read<ApiClient>().post('/admin/users/${Uri.encodeComponent(e.userId)}/false-alarms/reset', const <String, dynamic>{});
+    if (context.mounted) adminSnack(context, 'False alarms reset.');
+  } catch (_) {
+    if (context.mounted) adminSnack(context, 'Could not reset. Try again.');
+  }
+}
+
 class _EmergencyCard extends StatelessWidget {
   final AdminEmergency emergency;
   final int nowMs;
@@ -429,6 +567,9 @@ class _EmergencyCard extends StatelessWidget {
       [if (presence.isNotEmpty) presence, if (seen.isNotEmpty) seen].join(', '),
       if (e.hasPosition) 'At ${e.lat.toStringAsFixed(5)}, ${e.lng.toStringAsFixed(5)}',
       'Helping: $who',
+      adminStatusWords(e.status),
+      e.network?.text ?? '',
+      if (e.falseAlarms30d > 0) 'False alarms in 30 days: ${e.falseAlarms30d}',
     ].where((l) => l.isNotEmpty).toList();
 
     return Semantics(
@@ -476,6 +617,13 @@ class _EmergencyCard extends StatelessWidget {
                       onPressed: onOpenRide,
                       icon: const Icon(Icons.two_wheeler_rounded),
                       label: const Text('Open ride'),
+                    ),
+                  if (e.falseAlarms30d > 0 && e.userId.isNotEmpty)
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(foregroundColor: fg, side: BorderSide(color: fg), minimumSize: const Size(48, 48)),
+                      onPressed: () => _resetFalseAlarms(context, e),
+                      icon: const Icon(Icons.restart_alt_rounded),
+                      label: const Text('Reset false alarms'),
                     ),
                 ],
               ),

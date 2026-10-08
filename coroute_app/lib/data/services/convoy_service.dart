@@ -10,11 +10,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/net_constants.dart';
+import '../../core/constants/network_constants.dart';
 import '../local/outbox_store.dart';
 import '../local/roster_store.dart';
 import '../models/convoy_model.dart';
 import '../models/emergency_roster.dart';
 import '../models/group_message_model.dart';
+import '../models/network_models.dart';
+import '../models/network_wire.dart';
 import '../models/outbox_item.dart';
 import '../models/pending_sos.dart';
 import '../models/rider_model.dart';
@@ -153,6 +156,21 @@ class ConvoyService extends ChangeNotifier {
   bool _smsFallbackWas = false;
   bool _disposed = false;
 
+  // 3.15 Rider Safety Network and Rider Discovery Network: memory only, never persisted,
+  // cleared with the ride. On a reconnect requests and warnings stay until the server sends them
+  // again (a responder's navigation must not stop when they ride out of a dead zone); those not
+  // sent again within [NetworkConstants.resendGrace] were closed meanwhile and are left out.
+  final Map<String, AssistRequest> _assists = {};
+  final List<AssistNotice> _assistNotices = [];
+  final Map<String, HazardWarning> _hazards = {};
+  final Map<String, Encounter> _encounters = {};
+  final Map<String, EncounterType> _ignoredEncounters = {};
+  final Set<String> _falseReported = {};
+  final Set<String> _netUnconfirmed = {};
+  int _netReconnectAt = 0;
+  int _networkRevision = 0;
+  bool _wasConnected = false;
+
   // ------------------------------------------------------------- getters
   Map<String, ConvoyModel> get allConvoys => Map.unmodifiable(_allConvoys);
   String? get activeGroupId => _activeGroupId;
@@ -232,6 +250,71 @@ class ConvoyService extends ChangeNotifier {
   bool get isCharging => _isCharging;
   String? get myUserId => _myUserId;
 
+  // ------------------------------------------------ 3.15 safety network getters
+  /// Changes whenever a network or discovery list, or an emergency's status, changed
+  /// (cheap change check for listeners that should not rebuild on every GPS fix).
+  int get networkRevision => _networkRevision;
+
+  bool get _netOn => _rt.supports(ProtocolFeatures.safetyNet);
+  bool get _discoveryOn => _rt.supports(ProtocolFeatures.discovery);
+
+  static bool _dismissed(ResponderStatus s) =>
+      s == ResponderStatus.declined || s == ResponderStatus.cancelled || s == ResponderStatus.unableToReach;
+
+  /// Kept over a reconnect but not sent again by the server within the grace: closed meanwhile.
+  bool _netGone(String id) =>
+      _netUnconfirmed.contains(id) && _clock() - _netReconnectAt > NetworkConstants.resendGrace.inMilliseconds;
+
+  /// Open requests to help a rider of another group, newest first. Requests I declined,
+  /// cancelled or could not reach are left out (the server may still close them later).
+  List<AssistRequest> get assistRequests {
+    if (!_netOn) return const [];
+    final list = _assists.values.where((r) => !_dismissed(r.myStatus) && !_netGone(r.incidentId)).toList()
+      ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+    return List.unmodifiable(list);
+  }
+
+  /// The request I accepted (on the way or with the rider), at most one.
+  AssistRequest? get activeAssist {
+    if (!_netOn) return null;
+    AssistRequest? best;
+    for (final r in _assists.values) {
+      if (!r.myStatus.isActive || _netGone(r.incidentId)) continue;
+      if (best == null || r.receivedAt > best.receivedAt) best = r;
+    }
+    return best;
+  }
+
+  /// "Another nearby rider is responding" notices, shown for [NetworkConstants.assistTakenShowFor].
+  List<AssistNotice> get assistNotices {
+    if (!_netOn) return const [];
+    final now = _clock();
+    return List.unmodifiable(_assistNotices.where((n) => now - n.at <= NetworkConstants.assistTakenShowFor.inMilliseconds).toList().reversed);
+  }
+
+  /// Accident warnings on my route, newest first. Empty while "Accident warnings on my
+  /// route" is off (they are still kept, so switching it on shows them again).
+  List<HazardWarning> get hazards {
+    if (!_netOn || settings?.hazardAlerts == false) return const [];
+    final now = _clock();
+    final list = _hazards.values
+        .where((h) => now - h.receivedAt <= NetworkConstants.hazardStaleAfter.inMilliseconds && !_netGone(h.hazardId))
+        .toList()
+      ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+    return List.unmodifiable(list);
+  }
+
+  /// Public riding groups nearby that I did not ignore, newest first.
+  List<Encounter> get encounters {
+    if (!_discoveryOn) return const [];
+    final now = _clock();
+    final list = _encounters.values
+        .where((e) => !_ignoredEncounters.containsKey(e.encounterId) && now - e.at <= NetworkConstants.encounterStaleAfter.inMilliseconds)
+        .toList()
+      ..sort((a, b) => b.at.compareTo(a.at));
+    return List.unmodifiable(list);
+  }
+
   // ---------------------------------------------------------- lifecycle
   /// Call after sign-in. Opens the socket and restores an active convoy if any.
   Future<void> startSession({required String token, required String userId, bool admin = false}) async {
@@ -302,6 +385,7 @@ class ConvoyService extends ChangeNotifier {
     _clearPendingSos(); // never carried over to the next account on this phone
     _clearOutbox();
     _clearRoster();
+    _clearNetwork();
     _deliveredSosAlertId = null;
     _stopStatus();
     recorder?.stop().ignore();
@@ -345,6 +429,7 @@ class ConvoyService extends ChangeNotifier {
     if (_pendingSos != null && _pendingSos!.groupId != convoy.groupId) _clearPendingSos();
     _dropOutboxOfOtherGroups(convoy.groupId);
     if (_roster != null && _roster!.groupId != convoy.groupId) _clearRoster();
+    if (_activeGroupId != convoy.groupId) _clearNetwork();
     _allConvoys[convoy.groupId] = convoy;
     _activeGroupId = convoy.groupId;
     if (_killedLastTime) {
@@ -391,6 +476,11 @@ class ConvoyService extends ChangeNotifier {
     final convoy = activeConvoy;
     final uid = _myUserId;
     if (convoy == null || uid == null || _statusTimer == null) return;
+    // 3.15: the large ride notification owns the ongoing notification; a plain update would replace it.
+    if (BackgroundService.richActive) {
+      _lastStatus = ''; // post the plain text again at once if the large one falls back
+      return;
+    }
     final me = convoy.riders[uid];
     final now = DateTime.now().millisecondsSinceEpoch;
     final route = convoy.routeLine;
@@ -443,17 +533,33 @@ class ConvoyService extends ChangeNotifier {
     if (id == BackgroundService.buttonLeave && _myUserId != null) {
       leaveActiveConvoy(_myUserId!).ignore();
     } else if (id == BackgroundService.buttonSos) {
-      final me = activeConvoy?.riders[_myUserId];
-      if (me != null) {
-        // Raise immediately (speed matters in an emergency); the UI shows it and can resolve it.
-        triggerSosAlert(userId: me.userId, userName: me.name, lat: me.lat, lng: me.lng, type: 'CRASH_OR_EMERGENCY');
-      }
-      _sosRequestedFromNotification = true;
-      notifyListeners();
+      // 3.15: never a one-tap send. The app opens the hold-to-send SOS screen.
+      openSosFromNotification();
     }
   }
 
+  @visibleForTesting
+  void debugNotificationButton(String id) => _onNotificationButton(id);
+
+  /// SOS pressed on a notification: asks the UI to show the hold-to-send SOS screen.
+  /// Never raises an SOS by itself.
+  void openSosFromNotification() {
+    _sosRequestedFromNotification = true;
+    notifyListeners();
+  }
+
+  /// "Wait for me" pressed on the ride notification (during an active ride only).
+  void requestWaitFromNotification() {
+    final uid = _myUserId;
+    if (_activeGroupId == null || uid == null) return;
+    requestWait(activeConvoy?.riders[uid]?.name ?? 'Rider');
+  }
+
   void _onConnectionChanged() {
+    final up = _rt.isConnected && !_wasConnected;
+    _wasConnected = _rt.isConnected;
+    // Back online (HELLO, before the re-JOIN): the server sends again what is still open.
+    if (up) _markNetworkUnconfirmed();
     if (_rt.isConnected) {
       recorder?.uploadNow(); // send what was recorded in the dead zone
       // The roster could not be fetched before HELLO named the gateway's features, or it is
@@ -587,6 +693,7 @@ class ConvoyService extends ChangeNotifier {
         final others = convoy.activeAlerts.where((a) => a.alertId != alert.alertId);
         final alerts = alert.resolved ? others.toList() : (List<SosAlertModel>.from(others)..add(alert));
         _allConvoys[gid] = convoy.copyWith(activeAlerts: alerts);
+        _networkRevision++;
         break;
       case 'ALERT_RESOLVED':
         if (convoy == null) return;
@@ -599,6 +706,49 @@ class ConvoyService extends ChangeNotifier {
         }
         if (resolvedId != null && resolvedId == _deliveredSosAlertId) _deliveredSosAlertId = null;
         _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != resolvedId).toList());
+        _networkRevision++;
+        break;
+      case 'EMERGENCY_UPDATE':
+        if (convoy == null) return;
+        final id = e['alertId']?.toString();
+        if (id == null || !convoy.activeAlerts.any((a) => a.alertId == id)) return;
+        _allConvoys[gid] = convoy.copyWith(activeAlerts: [for (final a in convoy.activeAlerts) a.alertId == id ? _patchEmergency(a, e) : a]);
+        _networkRevision++;
+        break;
+      case 'ASSIST_REQUEST':
+        if (!_onAssistRequest(e)) return;
+        break;
+      case 'ASSIST_UPDATE':
+        if (!_onAssistUpdate(e)) return;
+        break;
+      case 'ASSIST_CLOSED':
+        final id = e['incidentId']?.toString();
+        if (id == null || _assists.remove(id) == null) return; // subject, medical and position go with it
+        if (AssistClosedReason.fromWire(e['reason']?.toString()) == AssistClosedReason.taken) {
+          _addAssistNotice(id, AssistClosedReason.taken);
+        }
+        _networkRevision++;
+        break;
+      case 'HAZARD':
+        final h = HazardWarning.fromJson(e, receivedAt: _clock());
+        if (h == null) return;
+        _netUnconfirmed.remove(h.hazardId);
+        _hazards[h.hazardId] = h;
+        _networkRevision++;
+        break;
+      case 'HAZARD_CLEAR':
+        if (_hazards.remove(e['hazardId']?.toString()) == null) return;
+        _networkRevision++;
+        break;
+      case 'DISCOVERY':
+        if (!_onDiscovery(e)) return;
+        break;
+      case 'WAVED':
+        final id = e['encounterId']?.toString();
+        final enc = id == null ? null : _encounters[id];
+        if (enc == null) return;
+        _encounters[id!] = enc.copyWith(theyWavedAt: _clock()); // local time: shown for a few seconds
+        _networkRevision++;
         break;
       case 'STOPS':
         if (convoy == null || e['stopPoints'] is! List) return;
@@ -644,6 +794,9 @@ class ConvoyService extends ChangeNotifier {
           stopThresholdSeconds: (e['stopThresholdSeconds'] as num?)?.toInt(),
           voiceGuidanceEnabled: e['voiceGuidanceEnabled'] as bool?,
           speedLimitKmh: (e['speedLimitKmh'] as num?)?.toInt(),
+          visibility: e['visibility'] is String ? GroupVisibility.fromWire(e['visibility'] as String) : null,
+          discovery: e['discovery'] is bool ? e['discovery'] as bool : null,
+          assistDefault: e['assistDefault'] is bool ? e['assistDefault'] as bool : null,
         );
         break;
       case 'TRIP_STATUS':
@@ -705,6 +858,7 @@ class ConvoyService extends ChangeNotifier {
     _clearPendingSos();
     _clearOutbox();
     _clearRoster();
+    _clearNetwork();
     _writeRideAlive(false);
     _stopStatus();
     recorder?.stop().ignore();
@@ -723,6 +877,7 @@ class ConvoyService extends ChangeNotifier {
     _clearPendingSos();
     _clearOutbox();
     _clearRoster();
+    _clearNetwork();
     _writeRideAlive(false);
     if (_myUserId != null && convoy.riders.containsKey(_myUserId)) {
       _trips.saveTrip(buildTripHistory(convoy, userId: _myUserId), userId: _myUserId).ignore();
@@ -830,6 +985,7 @@ class ConvoyService extends ChangeNotifier {
     _clearPendingSos();
     _clearOutbox();
     _clearRoster();
+    _clearNetwork();
     _writeRideAlive(false);
     final convoy = _allConvoys[gid];
     if (convoy != null && convoy.riders.isNotEmpty) {
@@ -1222,8 +1378,19 @@ class ConvoyService extends ChangeNotifier {
     double? speedBeforeKmh,
     double? impactG,
     int? occurredAtMs,
+    EmergencySource? source,
   }) =>
-      _raise(type: type, lat: lat, lng: lng, auto: auto, speedBeforeKmh: speedBeforeKmh, impactG: impactG, occurredAtMs: occurredAtMs);
+      _raise(
+        type: type,
+        lat: lat,
+        lng: lng,
+        auto: auto,
+        speedBeforeKmh: speedBeforeKmh,
+        impactG: impactG,
+        occurredAtMs: occurredAtMs,
+        // An automatic crash SOS without an explicit source is a crash detection, not a button press.
+        source: source ?? (auto ? EmergencySource.crashAuto : EmergencySource.manual),
+      );
 
   SosDelivery _raise({
     String? idHint,
@@ -1234,11 +1401,20 @@ class ConvoyService extends ChangeNotifier {
     double? speedBeforeKmh,
     double? impactG,
     int? occurredAtMs,
+    EmergencySource source = EmergencySource.manual,
   }) {
     final gid = _activeGroupId;
     if (gid == null) return SosDelivery.notInConvoy;
     final existing = _pendingSos;
     final now = _clock();
+    // My last fix (no new GPS request): heading, speed and accuracy go with the SOS.
+    final me = _myUserId == null ? null : _allConvoys[gid]?.riders[_myUserId];
+    double? heading, speed;
+    if (me != null && (me.lat != 0 || me.lng != 0)) {
+      heading = me.heading.isFinite ? me.heading : null;
+      speed = me.speedKmh.isFinite ? me.speedKmh : null;
+    }
+    final accuracy = _lastFixAccuracyM;
     final PendingSos pending;
     if (existing != null && existing.groupId == gid) {
       // Still the same emergency (not confirmed yet): keep its id, use the newer position.
@@ -1252,8 +1428,20 @@ class ConvoyService extends ChangeNotifier {
               speedBeforeKmh: speedBeforeKmh,
               impactG: impactG,
               createdAt: occurredAtMs ?? existing.createdAt,
+              source: source,
+              heading: heading,
+              speedKmh: speed,
+              accuracyM: accuracy,
             )
-          : existing.copyWith(lat: lat, lng: lng);
+          : existing.copyWith(
+              lat: lat,
+              lng: lng,
+              // A manual press never downgrades crash detection; an automatic one upgrades a manual SOS.
+              source: existing.source == EmergencySource.manual ? source : null,
+              heading: heading,
+              speedKmh: speed,
+              accuracyM: accuracy,
+            );
     } else {
       final who = (idHint != null && idHint.isNotEmpty) ? idHint : (_myUserId ?? 'rider');
       pending = PendingSos(
@@ -1266,6 +1454,10 @@ class ConvoyService extends ChangeNotifier {
         auto: auto,
         speedBeforeKmh: speedBeforeKmh,
         impactG: impactG,
+        source: source,
+        heading: heading,
+        speedKmh: speed,
+        accuracyM: accuracy,
       );
     }
     _pendingSos = pending;
@@ -1371,12 +1563,14 @@ class ConvoyService extends ChangeNotifier {
       if (_outbox.length != before) _persistOutbox();
       return;
     }
-    // Dropped at send time: another ride, too old, or a WAIT nobody needs any more.
+    // Dropped at send time: another ride, too old, or a WAIT or WAVE nobody needs any more.
+    // "I Can Help" and "Arrived" are never dropped for age within the ride.
     _outbox.removeWhere((i) =>
         i.state == OutboxState.waiting &&
         (i.groupId != gid ||
-            now - i.createdAt > NetConstants.outboxMaxAge.inMilliseconds ||
-            (i.type == 'WAIT' && now - i.createdAt > NetConstants.outboxWaitMaxAge.inMilliseconds)));
+            (now - i.createdAt > NetConstants.outboxMaxAge.inMilliseconds && !_keepForRide(i)) ||
+            (i.type == 'WAIT' && now - i.createdAt > NetConstants.outboxWaitMaxAge.inMilliseconds) ||
+            (i.type == 'WAVE' && now - i.createdAt > NetworkConstants.waveMaxAge.inMilliseconds)));
     changed = _outbox.length != before;
     final wall = DateTime.now().millisecondsSinceEpoch;
     if (wall - _burstStartMs >= 1000) {
@@ -1412,6 +1606,12 @@ class ConvoyService extends ChangeNotifier {
     }
   }
 
+  static bool _keepForRide(OutboxItem i) {
+    if (i.type != 'ASSIST_ANSWER') return false;
+    final a = i.payload['answer'];
+    return a == AssistAnswer.accept.wire || a == AssistAnswer.arrived.wire;
+  }
+
   void _onAck(String? clientId) {
     if (clientId == null || clientId.isEmpty) return;
     final before = _outbox.length;
@@ -1428,7 +1628,17 @@ class ConvoyService extends ChangeNotifier {
     if (idx < 0) return;
     final c = code ?? 500;
     if (c >= 400 && c < 500 && c != 429) {
-      _outbox[idx] = _outbox[idx].copyWith(state: OutboxState.failed, error: message ?? 'Not sent', failedAt: _clock());
+      final item = _outbox[idx];
+      _outbox[idx] = item.copyWith(state: OutboxState.failed, error: message ?? 'Not sent', failedAt: _clock());
+      if (item.type == 'ASSIST_ANSWER' && (c == 404 || c == 409)) {
+        // Closed (404) or someone else is already responding (409): the request is over for me.
+        final id = item.payload['incidentId']?.toString();
+        if (id != null && _assists.remove(id) != null) {
+          if (c == 409) _addAssistNotice(id, AssistClosedReason.taken);
+          _networkRevision++;
+          notifyListeners();
+        }
+      }
     } else {
       _outbox[idx] = _outbox[idx].copyWith(state: OutboxState.waiting);
       if (c == 429 && _rt.isConnected && _outboxTimer == null) {
@@ -1604,17 +1814,19 @@ class ConvoyService extends ChangeNotifier {
 
   /// Cancels this rider's own SOS: resolves it on the server if it was delivered, and drops
   /// it from the phone if it is still waiting to be sent.
-  void cancelMySos() {
+  /// [reason]: false alarm by default ("I am safe"); "Help reached me" passes [ResolveReason.resolved].
+  void cancelMySos({ResolveReason reason = ResolveReason.falseAlarm}) {
     final waiting = _pendingSos;
     if (waiting != null) {
       _clearPendingSos();
       notifyListeners();
     }
     final id = myOpenSosAlertId ?? _deliveredSosAlertId;
-    if (id != null) resolveSosAlert(id);
+    if (id != null) resolveSosAlert(id, reason: reason);
   }
 
-  void resolveSosAlert(String alertId) {
+  /// Closes an SOS. The [reason] goes to a gateway with the safety network only.
+  void resolveSosAlert(String alertId, {ResolveReason reason = ResolveReason.resolved}) {
     final gid = _activeGroupId;
     if (gid == null) return;
     final convoy = _allConvoys[gid];
@@ -1622,7 +1834,205 @@ class ConvoyService extends ChangeNotifier {
       _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != alertId).toList());
       notifyListeners();
     }
-    _rt.send({'type': 'SOS_RESOLVE', 'alertId': alertId});
+    _rt.send({'type': 'SOS_RESOLVE', 'alertId': alertId, if (_netOn) 'reason': reason.wire});
+  }
+
+  // ------------------------------------------------- 3.15 safety network
+  SosAlertModel _patchEmergency(SosAlertModel a, Map<String, dynamic> e) {
+    double? d(Object? v) => v is num && v.isFinite ? v.toDouble() : null;
+    final lat = d(e['lat']), lng = d(e['lng']);
+    final hasPos = lat != null && lng != null && (lat != 0 || lng != 0);
+    final lu = d(e['lastUpdateAt']);
+    return a.copyWith(
+      status: EmergencyStatus.fromWire(e['status']?.toString()),
+      lastUpdateAt: lu?.toInt(),
+      lat: hasPos ? lat : null,
+      lng: hasPos ? lng : null,
+      network: EmergencyNetwork.fromJson(e['network']),
+      ownNearest: OwnNearest.fromJson(e['ownNearest']),
+      clearOwnNearest: e.containsKey('ownNearest') && e['ownNearest'] == null,
+    );
+  }
+
+  /// True while an ASSIST_ANSWER for [incidentId] waits in the outbox (my newer answer wins).
+  bool _answerPending(String incidentId) =>
+      _outbox.any((i) => i.type == 'ASSIST_ANSWER' && i.isPending && i.payload['incidentId'] == incidentId);
+
+  bool _onAssistRequest(Map<String, dynamic> e) {
+    final r = AssistRequest.fromJson(e, receivedAt: _clock());
+    if (r == null) return false;
+    _netUnconfirmed.remove(r.incidentId);
+    // Asked again after "another rider is responding" (that rider dropped out): the notice goes.
+    _assistNotices.removeWhere((n) => n.incidentId == r.incidentId);
+    final old = _assists[r.incidentId];
+    _assists[r.incidentId] = old == null
+        ? r
+        : r.copyWith(
+            // A request sent again (reconnect) carries no answer: keep mine.
+            myStatus: old.myStatus != ResponderStatus.requested ? old.myStatus : null,
+            incidentStatus: old.incidentStatus,
+            subject: old.subject,
+            medical: old.medical,
+            arrivalCheck: old.arrivalCheck,
+          );
+    _networkRevision++;
+    return true;
+  }
+
+  bool _onAssistUpdate(Map<String, dynamic> e) {
+    final id = e['incidentId']?.toString();
+    if (id == null || id.isEmpty) return false;
+    final old = _assists[id];
+    AssistRequest? next;
+    if (old == null) {
+      next = AssistRequest.fromJson(e, receivedAt: _clock()); // sent again after a reconnect
+    } else {
+      next = old.merge(e);
+      if (_answerPending(id)) next = next.copyWith(myStatus: old.myStatus);
+    }
+    if (next == null) return false;
+    _netUnconfirmed.remove(id);
+    _assists[id] = next;
+    _networkRevision++;
+    return true;
+  }
+
+  void _addAssistNotice(String incidentId, AssistClosedReason reason) {
+    final now = _clock();
+    _assistNotices.removeWhere((n) => n.incidentId == incidentId || now - n.at > NetworkConstants.assistTakenShowFor.inMilliseconds);
+    _assistNotices.add(AssistNotice(incidentId: incidentId, reason: reason, at: now));
+  }
+
+  bool _onDiscovery(Map<String, dynamic> e) {
+    final id = e['encounterId']?.toString();
+    if (id == null || id.isEmpty) return false;
+    if (e['state']?.toString().toUpperCase() == 'END') {
+      _ignoredEncounters.remove(id);
+      if (_encounters.remove(id) == null) return false;
+      _networkRevision++;
+      return true;
+    }
+    final enc = Encounter.fromJson(e, at: _clock());
+    if (enc == null) return false;
+    final old = _encounters[id];
+    // Ignored until it ends or the way the groups meet changes.
+    if (_ignoredEncounters[id] != null && _ignoredEncounters[id] != enc.type) _ignoredEncounters.remove(id);
+    _encounters[id] = old == null ? enc : enc.copyWith(iWaved: old.iWaved, theyWavedAt: old.theyWavedAt);
+    _networkRevision++;
+    return true;
+  }
+
+  /// Back online: requests and warnings stay (the responder keeps navigating) until the server
+  /// sends them again; what it does not send again within [NetworkConstants.resendGrace] was
+  /// closed while I had no signal and is left out by the getters. Discovery starts over.
+  void _markNetworkUnconfirmed() {
+    _netUnconfirmed
+      ..clear()
+      ..addAll(_assists.keys)
+      ..addAll(_hazards.keys);
+    _netReconnectAt = _clock();
+    _assistNotices.clear();
+    _encounters.clear();
+    _ignoredEncounters.clear();
+    _networkRevision++;
+  }
+
+  /// Everything of the safety and discovery networks goes (subject, medical, positions).
+  void _clearNetwork() {
+    _netUnconfirmed.clear();
+    if (_assists.isEmpty && _assistNotices.isEmpty && _hazards.isEmpty && _encounters.isEmpty && _ignoredEncounters.isEmpty && _falseReported.isEmpty) return;
+    _assists.clear();
+    _assistNotices.clear();
+    _hazards.clear();
+    _encounters.clear();
+    _ignoredEncounters.clear();
+    _falseReported.clear();
+    _networkRevision++;
+  }
+
+  /// Answers a request to help a nearby rider (I Can Help, Can't Assist, Arrived...).
+  /// Goes through the outbox; my status changes at once. False when the gateway has no
+  /// safety network or the request is unknown (closed).
+  bool answerAssist(String incidentId, AssistAnswer answer) {
+    final r = _assists[incidentId];
+    if (!_netOn || r == null) return false;
+    final item = _enqueue('ASSIST_ANSWER', {'incidentId': incidentId, 'answer': answer.wire});
+    if (item == null) return false;
+    final done = answer == AssistAnswer.arrived || answer == AssistAnswer.notFound;
+    _assists[incidentId] = r.copyWith(myStatus: answer.resultingStatus, arrivalCheck: done ? false : null);
+    _networkRevision++;
+    notifyListeners();
+    return true;
+  }
+
+  /// "Report false alert" for a request or an accident warning I received; once per id.
+  bool reportFalseAlert(String incidentId) {
+    if (!_netOn || _falseReported.contains(incidentId)) return false;
+    if (!_assists.containsKey(incidentId) && !_hazards.containsKey(incidentId)) return false;
+    if (_enqueue('NET_REPORT_FALSE', {'incidentId': incidentId}) == null) return false;
+    _falseReported.add(incidentId);
+    return true;
+  }
+
+  /// True after [reportFalseAlert] for this id.
+  bool falseAlertReported(String incidentId) => _falseReported.contains(incidentId);
+
+  /// "Rider down here": [subjectUserId] for a rider of my group, none for someone who is
+  /// not in my group (I am at the scene). Goes through the outbox.
+  bool reportRiderDown({required double lat, required double lng, String? subjectUserId}) {
+    if (!_netOn || _activeGroupId == null) return false;
+    if (!lat.isFinite || !lng.isFinite || (lat == 0 && lng == 0)) return false;
+    final subject = (subjectUserId == null || subjectUserId.isEmpty) ? null : subjectUserId;
+    if (subject != null && subject == _myUserId) return false;
+    final me = _myUserId == null ? null : activeConvoy?.riders[_myUserId];
+    final heading = me != null && (me.lat != 0 || me.lng != 0) && me.heading.isFinite ? me.heading.round() % 360 : null;
+    return _enqueue('REPORT_DOWN', {'lat': lat, 'lng': lng, 'subjectUserId': ?subject, 'heading': ?heading}) != null;
+  }
+
+  /// Waves to a nearby public group (one tap; the server limits how often).
+  bool wave(String encounterId) {
+    final enc = _encounters[encounterId];
+    if (!_discoveryOn || enc == null || enc.iWaved) return false;
+    if (_enqueue('WAVE', {'encounterId': encounterId}) == null) return false;
+    _encounters[encounterId] = enc.copyWith(iWaved: true);
+    _networkRevision++;
+    notifyListeners();
+    return true;
+  }
+
+  /// Hides a nearby group card on this phone until the encounter ends or changes type.
+  void ignoreEncounter(String encounterId) {
+    final enc = _encounters[encounterId];
+    if (enc == null) return;
+    _ignoredEncounters[encounterId] = enc.type;
+    _networkRevision++;
+    notifyListeners();
+  }
+
+  /// Lead: group visibility and discovery (social, needs a `discovery1` gateway) and the
+  /// group default for asking nearby riders to help (`net1`). False when not the lead,
+  /// nothing supported was given, or there is no connection.
+  bool setGroupVisibility({GroupVisibility? visibility, bool? discovery, bool? assistDefault}) {
+    final gid = _activeGroupId;
+    if (gid == null || !canEditRoute) return false;
+    final msg = <String, dynamic>{'type': 'CONFIG'};
+    if (_discoveryOn) {
+      if (visibility != null) msg['visibility'] = visibility.wire;
+      if (discovery != null) msg['discovery'] = discovery;
+    }
+    if (_netOn && assistDefault != null) msg['assistDefault'] = assistDefault;
+    if (msg.length == 1) return false;
+    if (!_sendRoute(msg)) return false;
+    final c = _allConvoys[gid];
+    if (c != null) {
+      _allConvoys[gid] = c.copyWith(
+        visibility: msg.containsKey('visibility') ? visibility : null,
+        discovery: msg.containsKey('discovery') ? discovery : null,
+        assistDefault: msg.containsKey('assistDefault') ? assistDefault : null,
+      );
+      notifyListeners();
+    }
+    return true;
   }
 
   // ------------------------------------------------------------------ admin

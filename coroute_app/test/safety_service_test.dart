@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/core/constants/safety_constants.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/emergency_roster.dart';
+import 'package:coroute_app/data/models/network_wire.dart';
 import 'package:coroute_app/data/models/pending_sos.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/models/safety_wire.dart';
@@ -18,7 +19,7 @@ import 'package:coroute_app/domain/tracking/track_point.dart';
 
 const int t0 = 1700000000000;
 
-class FakePort extends ChangeNotifier implements SafetyPort {
+class FakePort extends ChangeNotifier implements SafetyPort, SafetySourcePort {
   FakePort(this.clock);
   final int Function() clock;
 
@@ -68,6 +69,23 @@ class FakePort extends ChangeNotifier implements SafetyPort {
     pending = PendingSos(clientId: 'me-${clock()}', groupId: 'G', lat: lat, lng: lng, type: type, createdAt: clock(), auto: auto);
     notifyListeners();
     return SosDelivery.queued;
+  }
+
+  /// 3.15: the crash alarm says where the SOS came from (Need Help or no answer).
+  @override
+  SosDelivery raiseSosFrom(
+    EmergencySource source, {
+    required String type,
+    required double lat,
+    required double lng,
+    bool auto = false,
+    double? speedBeforeKmh,
+    double? impactG,
+    int? occurredAtMs,
+  }) {
+    final r = raiseSos(type: type, lat: lat, lng: lng, auto: auto, speedBeforeKmh: speedBeforeKmh, impactG: impactG, occurredAtMs: occurredAtMs);
+    raised.last['source'] = source;
+    return r;
   }
 
   @override
@@ -251,14 +269,18 @@ void main() {
   });
 
   group('crash alarm', () {
-    testWidgets('counts down from 30; I\'m OK closes it and sends nothing', (tester) async {
+    test('the countdown is 15 s (3.15, was 30 s)', () {
+      expect(SafetyConstants.crashCountdown, const Duration(seconds: 15));
+    });
+
+    testWidgets('counts down from 15; I\'m OK closes it and sends nothing', (tester) async {
       await setUp0(tester);
       port.convoy = convoyWith({});
       port.changed();
       safety.debugRaiseCrash(crash);
       expect(safety.alarm?.secondsLeft, SafetyConstants.crashCountdown.inSeconds);
       await wait(tester, const Duration(seconds: 10));
-      expect(safety.alarm?.secondsLeft, 20);
+      expect(safety.alarm?.secondsLeft, SafetyConstants.crashCountdown.inSeconds - 10);
       safety.alarmImOk();
       expect(safety.alarm, isNull);
       await wait(tester, const Duration(seconds: 40));
@@ -266,18 +288,19 @@ void main() {
       await tearDown0(tester);
     });
 
-    testWidgets('no answer in 30 s raises an automatic CRASH SOS with the details', (tester) async {
+    testWidgets('no answer in 15 s raises an automatic CRASH SOS with the details (CRASH_AUTO)', (tester) async {
       await setUp0(tester);
       port.convoy = convoyWith({});
       port.changed();
       safety.debugRaiseCrash(crash);
-      await wait(tester, const Duration(seconds: 29));
+      await wait(tester, SafetyConstants.crashCountdown - const Duration(seconds: 1));
       expect(port.raised, isEmpty);
       await wait(tester, const Duration(seconds: 1));
       expect(port.raised, hasLength(1));
       final sos = port.raised.single;
       expect(sos['type'], SosTypes.crash);
       expect(sos['auto'], isTrue);
+      expect(sos['source'], EmergencySource.crashAuto);
       expect(sos['speed'], 58);
       expect(sos['impactG'], 6.2);
       expect(sos['occurredAt'], crash.impactAtMs);
@@ -287,13 +310,14 @@ void main() {
       await tearDown0(tester);
     });
 
-    testWidgets('Send now sends at once; no second alarm while an SOS is open', (tester) async {
+    testWidgets('Need Help sends at once; no second alarm while an SOS is open', (tester) async {
       await setUp0(tester);
       port.convoy = convoyWith({});
       port.changed();
       safety.debugRaiseCrash(crash);
       safety.alarmSendNow();
       expect(port.raised, hasLength(1));
+      expect(port.raised.single['source'], EmergencySource.needHelp, reason: '"Need Help" is the rider answering');
       safety.closeAlarm();
       safety.debugRaiseCrash(crash);
       expect(safety.alarm, isNull, reason: 'my SOS is already open');

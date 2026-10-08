@@ -5,11 +5,13 @@ import '../../data/models/trip_history_model.dart';
 import '../../data/services/background_service.dart';
 import '../../core/ui/ride_alert.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/ride_notification_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/timeline_service.dart';
 import '../account/account_screen.dart';
 import '../alerts/alerts_screen.dart';
 import '../home/ride_start_view.dart';
+import '../ride/emergency_guidance.dart';
 import '../ride/map_focus.dart';
 import 'live_cockpit_map_screen.dart';
 import 'trip_history_screen.dart';
@@ -67,6 +69,9 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   /// "Show on map" requests from the Alerts tab to the ride map.
   final MapFocus _mapFocus = MapFocus();
 
+  /// Taps on the big ride notification (Open map, SOS, Navigate to emergency).
+  RideNotificationService? _rideNotif;
+
   @override
   void initState() {
     super.initState();
@@ -78,12 +83,43 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
       _lastGroupId = s.activeGroupId;
       s.addListener(_onConvoyChanged);
       _onConvoyChanged();
+      final rn = Provider.of<RideNotificationService?>(context, listen: false);
+      _rideNotif = rn;
+      rn?.pendingUiAction.addListener(_onRideNotifAction);
+      _onRideNotifAction();
     });
+  }
+
+  /// A tap on the ride notification: show the ride map; SOS opens the hold
+  /// screen there (the ride screen does it, nothing is sent by the tap);
+  /// "Navigate to emergency" starts the in-app guidance.
+  void _onRideNotifAction() {
+    final rn = _rideNotif;
+    final action = rn?.pendingUiAction.value;
+    if (rn == null || action == null || !mounted) return;
+    rn.clearUiAction();
+    _select(HomeTab.ride);
+    switch (action.kind) {
+      case RideNotifActionKind.openMap:
+      case RideNotifActionKind.sos:
+      case RideNotifActionKind.wait:
+        break;
+      case RideNotifActionKind.navigateEmergency:
+      case RideNotifActionKind.assistAccept:
+        final ref = action.ref;
+        final guidance = Provider.of<EmergencyGuidance?>(context, listen: false);
+        if (ref == null || ref.isEmpty || guidance == null) break;
+        final convoy = _convoys?.activeConvoy;
+        final own = convoy?.activeAlerts.any((a) => a.alertId == ref && !a.resolved) ?? false;
+        guidance.start(NavTarget(kind: own ? NavTargetKind.groupEmergency : NavTargetKind.assist, ref: ref)).ignore();
+        break;
+    }
   }
 
   @override
   void dispose() {
     _convoys?.removeListener(_onConvoyChanged);
+    _rideNotif?.pendingUiAction.removeListener(_onRideNotifAction);
     _mapFocus.dispose();
     if (RiderHomeScreen._current == this) RiderHomeScreen._current = null;
     super.dispose();
@@ -199,7 +235,9 @@ class _AlertsNavIcon extends StatelessWidget {
     final timeline = context.watch<TimelineService>();
     // This phone's own safety prompts ("Are you OK?") count too; "Time for a break" does not.
     final prompts = context.select<SafetyService?, int>((s) => s?.prompts.where((p) => p.tier != AlertTier.normal).length ?? 0);
-    final n = alertsBadgeCount(facts, timeline) + prompts;
+    // Assistance requests from other groups and accidents reported ahead count too (never social).
+    final network = context.select<ConvoyService, int>((s) => s.assistRequests.length + s.hazards.length);
+    final n = alertsBadgeCount(facts, timeline) + prompts + network;
     return Semantics(
       label: n > 0 ? '$n alerts need attention' : null,
       child: Badge.count(

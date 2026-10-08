@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const config = require('./config');
-const { profileFields, ValidationError } = require('./validate');
+const { profileFields, ValidationError, SWITCHES } = require('./validate');
 
 const ROLE_ADMIN = 'MASTER_ADMIN';
 const ROLE_RIDER = 'RIDER';
@@ -78,11 +78,18 @@ function selfUser(u) {
     allergies: u.allergies || '',
     medicalNotes: u.medicalNotes || '',
     smsOptOut: !!u.smsOptOut,
+    // Nearby-rider assistance (3.15): owner only, never in publicUser.
+    assistHelp: u.assistHelp !== false,
+    assistAsk: u.assistAsk !== false,
+    responderMedical: u.responderMedical === true,
+    netConsentAt: Number(u.netConsentAt) || 0,
   };
 }
 
 /** Profile keys that change what the ride group's SMS roster holds. */
 const ROSTER_KEYS = ['phone', 'emergencyContact', 'emergencyContactName', 'smsOptOut'];
+/** Profile keys the safety network reads from the live rider record (3.15, server only, no ROSTER_CHANGED). */
+const ASSIST_KEYS = ['assistHelp', 'assistAsk', 'responderMedical'];
 
 function signToken(user) {
   return jwt.sign(
@@ -356,10 +363,14 @@ class AuthService {
       const same = k === 'vehicleNo' || k === 'bloodGroup' ? next.toUpperCase() === current.toUpperCase() : next === current;
       if (!same) changed[k] = patch[k];
     }
-    if (patch.smsOptOut !== undefined && patch.smsOptOut !== null) {
-      // Type checked even when unchanged, so a wrong client learns about it.
-      if (typeof patch.smsOptOut !== 'boolean') throw new ValidationError('This field must be on or off.', { smsOptOut: 'This field must be on or off.' });
-      if (patch.smsOptOut !== !!user.smsOptOut) changed.smsOptOut = patch.smsOptOut;
+    // On/off switches (smsOptOut, 3.15 assistHelp / assistAsk / responderMedical).
+    // Type checked even when unchanged, so a wrong client learns about it.
+    const defaults = { smsOptOut: false, assistHelp: true, assistAsk: true, responderMedical: false };
+    for (const k of SWITCHES) {
+      if (patch[k] === undefined || patch[k] === null) continue;
+      if (typeof patch[k] !== 'boolean') throw new ValidationError('This field must be on or off.', { [k]: 'This field must be on or off.' });
+      const current = typeof user[k] === 'boolean' ? user[k] : defaults[k];
+      if (patch[k] !== current) changed[k] = patch[k];
     }
     if (changed.name !== undefined && !String(changed.name).trim()) {
       throw new ValidationError('Your callsign cannot be empty.', { name: 'Your callsign cannot be empty.' });
@@ -384,11 +395,13 @@ class AuthService {
         clean.vehicleNo = 'PILLION';
       }
     }
+    // Consent to the nearby-rider network (3.15): only `true` counts, it stores when.
+    if (patch.netConsent === true) clean.netConsentAt = Date.now();
     const updated = Object.keys(clean).length ? await this.repo.updateUser(user.key, clean) : user;
     this._invalidate(userId);
-    const rosterKeys = ROSTER_KEYS.filter((k) => clean[k] !== undefined && clean[k] !== user[k]);
-    if (rosterKeys.length && updated && this.onProfileChanged) {
-      try { await this.onProfileChanged(updated, rosterKeys); } catch { /* the profile is saved; the ride catches up on the next join */ }
+    const keys = [...ROSTER_KEYS, ...ASSIST_KEYS].filter((k) => clean[k] !== undefined && clean[k] !== user[k]);
+    if (keys.length && updated && this.onProfileChanged) {
+      try { await this.onProfileChanged(updated, keys); } catch { /* the profile is saved; the ride catches up on the next join */ }
     }
     return selfUser(updated);
   }
@@ -508,4 +521,4 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { AuthService, AuthError, UserGate, identityOf, requireAuth, requireAdmin, signToken, verifyToken, publicUser, selfUser, ROLE_ADMIN, ROLE_RIDER, slug };
+module.exports = { ROSTER_KEYS, ASSIST_KEYS, AuthService, AuthError, UserGate, identityOf, requireAuth, requireAdmin, signToken, verifyToken, publicUser, selfUser, ROLE_ADMIN, ROLE_RIDER, slug };

@@ -10,6 +10,7 @@ import '../../data/services/permissions_service.dart';
 import '../../data/services/safety_native.dart';
 import '../../data/services/settings_service.dart';
 import '../account/edit_profile_screen.dart';
+import '../ride/network_consent_sheet.dart';
 import '../safety/oem_battery_guide.dart';
 import '../safety/safety_settings_sheet.dart';
 
@@ -181,8 +182,12 @@ class PreRideChecklistSheet extends StatefulWidget {
   const PreRideChecklistSheet({super.key, required this.checks, this.requestPermission});
 
   /// Opens the checklist unless it was skipped in the last 24 hours. Returns true to continue,
-  /// false when the rider closed it without starting.
+  /// false when the rider closed it without starting. Before it, once, the
+  /// "Riders helping riders" explanation ([NetworkConsentSheet], also when
+  /// the checklist itself is skipped).
   static Future<bool> show(BuildContext context) async {
+    await NetworkConsentSheet.maybeShow(context);
+    if (!context.mounted) return true;
     if (await PreRideChecklist.skipActive()) return true;
     if (!context.mounted) return true;
     final convoys = Provider.of<ConvoyService?>(context, listen: false);

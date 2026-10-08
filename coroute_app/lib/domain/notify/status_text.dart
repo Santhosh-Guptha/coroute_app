@@ -63,6 +63,15 @@ class StatusText {
     return '$n ${_relation(m)}';
   }
 
+  /// Short flag for a rider in the big ride notification: "No signal",
+  /// "Stopped 5 min", or '' when nothing is worth flagging.
+  static String flagFor(StatusMember m) {
+    if (m.noSignal) return 'No signal';
+    final stopped = m.stoppedFor;
+    if (stopped != null && stopped >= const Duration(minutes: 1)) return 'Stopped ${TimelineText.duration(stopped)}';
+    return '';
+  }
+
   static String _ago(Duration d) {
     if (d.inSeconds < 15) return 'now';
     if (d.inMinutes < 1) return '${(d.inSeconds / 10).round() * 10} s ago';

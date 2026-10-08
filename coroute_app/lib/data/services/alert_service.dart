@@ -3,11 +3,13 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import '../../core/constants/network_constants.dart';
 import '../../domain/notify/alert_policy.dart';
 import '../models/timeline_event_model.dart';
 import 'alarm_notifier.dart';
 import 'convoy_service.dart';
 import 'timeline_service.dart';
+import 'voice_service.dart';
 
 /// Shows trip alerts as notifications, separate from the ongoing trip status.
 ///
@@ -15,8 +17,12 @@ import 'timeline_service.dart';
 /// be showing, posts what is new and removes what is no longer true. Alerts
 /// are grouped per trip. While CoRoute is open on screen only SOS alerts are
 /// posted (the rider is already looking at the timeline).
+///
+/// 3.15: also the safety network (assistance requests, accident warnings) and
+/// discovery alerts from [ConvoyService], and each alert with a spoken line is
+/// spoken once through [VoiceService] (foreground or background).
 class AlertService with WidgetsBindingObserver {
-  AlertService(this._convoys, this._timeline, {FlutterLocalNotificationsPlugin? plugin, AlertPolicy? policy})
+  AlertService(this._convoys, this._timeline, {FlutterLocalNotificationsPlugin? plugin, AlertPolicy? policy, this._voice})
       : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
         _policy = policy ?? AlertPolicy() {
     _timeline.addListener(_onTimeline);
@@ -28,6 +34,7 @@ class AlertService with WidgetsBindingObserver {
   final TimelineService _timeline;
   final FlutterLocalNotificationsPlugin _plugin;
   final AlertPolicy _policy;
+  final VoiceService? _voice;
 
   bool _ready = false;
   bool _foreground = true;
@@ -36,12 +43,17 @@ class AlertService with WidgetsBindingObserver {
   final Map<String, AlertSpec> _shown = {};
   final Set<String> _oneShotsSeen = {};
   int _lastEventCount = 0;
+  final Set<String> _spoken = {};
+  int _networkRevision = -1;
+  bool? _groupVoice;
 
   static const _channels = {
     AlertChannel.sos: ('coroute_sos', 'SOS alerts', 'A rider in your convoy needs help.', Importance.max),
     AlertChannel.alerts: ('coroute_alerts', 'Group alerts', 'A rider stopped for long, fell behind or lost signal.', Importance.high),
     AlertChannel.updates: ('coroute_updates', 'Trip updates', 'Stops reached, destination reached, route suggestions.', Importance.defaultImportance),
     AlertChannel.activity: ('coroute_activity', 'Convoy activity', 'Riders joining and leaving, route changes.', Importance.low),
+    AlertChannel.hazard: (NetworkConstants.channelHazard, 'Accident warnings', 'An accident was reported ahead on your route.', Importance.high),
+    AlertChannel.social: (NetworkConstants.channelSocial, 'Riding groups nearby', 'Other public riding groups on your way.', Importance.low),
   };
 
   bool get _supported => !kIsWeb && Platform.isAndroid;
@@ -64,10 +76,25 @@ class AlertService with WidgetsBindingObserver {
 
   void _onConvoy() {
     final gid = _convoys.activeGroupId;
-    if (gid == _groupId) return;
+    final groupVoice = _convoys.activeConvoy?.voiceGuidanceEnabled;
+    if (groupVoice != null && groupVoice != _groupVoice) {
+      _groupVoice = groupVoice;
+      _voice?.setGroupVoice(groupVoice);
+    }
+    if (gid == _groupId) {
+      // Network state changed (request, hazard, emergency update): show it now, not at the next tick.
+      final rev = _convoys.networkRevision;
+      if (rev != _networkRevision) {
+        _networkRevision = rev;
+        _reconcile();
+      }
+      return;
+    }
     _groupId = gid;
     _oneShotsSeen.clear();
+    _spoken.clear();
     _lastEventCount = 0;
+    _networkRevision = _convoys.networkRevision;
     _clearAll();
     _tick?.cancel();
     if (gid != null) {
@@ -96,19 +123,41 @@ class AlertService with WidgetsBindingObserver {
       isSweeper: role == 'SWEEPER',
       lat: me?.lat,
       lng: me?.lng,
+      route: c.routeLine,
     );
   }
 
+  static bool _isNetworkKey(String k) =>
+      k.startsWith(AlertPolicy.assistPrefix) || k.startsWith(AlertPolicy.assistTakenPrefix) || k.startsWith(AlertPolicy.hazardPrefix) || k.startsWith(AlertPolicy.encounterPrefix);
+
   void _reconcile() {
-    if (!_ready || _groupId == null || _timeline.groupId != _groupId) return;
+    if (_groupId == null) return;
     final me = _viewer();
     if (me == null) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    final events = _timeline.events;
+    final timelineReady = _timeline.groupId == _groupId;
+    final events = timelineReady ? _timeline.events : const <TimelineEventModel>[];
+    final alerts = _convoys.activeConvoy?.activeAlerts ?? const [];
 
     // Standing alerts: show new or changed, remove resolved.
-    final want = {for (final a in _policy.standing(events, me, nowMs: now)) a.key: a};
+    final want = <String, AlertSpec>{
+      for (final a in _policy.standing(events, me, nowMs: now, alerts: alerts)) a.key: a,
+      for (final a in _policy.network(
+        assists: _convoys.assistRequests,
+        notices: _convoys.assistNotices,
+        hazards: _convoys.hazards,
+        encounters: _convoys.encounters,
+        me: me,
+        nowMs: now,
+        anyEmergency: alerts.any((a) => !a.resolved),
+      ))
+        a.key: a,
+    };
+    _speak(want.values); // also where notifications are not available
+    if (!_ready) return;
     for (final key in _shown.keys.toList()) {
+      // Timeline not loaded yet for this ride: keep its alerts until it is.
+      if (!timelineReady && !_isNetworkKey(key)) continue;
       if (!want.containsKey(key) && !key.startsWith('EV:')) {
         _plugin.cancel(_shown.remove(key)!.id).ignore();
       }
@@ -121,7 +170,7 @@ class AlertService with WidgetsBindingObserver {
     }
 
     // One-time alerts: only for entries that arrived live and are recent.
-    if (events.length != _lastEventCount) {
+    if (timelineReady && events.length != _lastEventCount) {
       final firstLoad = _lastEventCount == 0;
       _lastEventCount = events.length;
       for (final TimelineEventModel e in events) {
@@ -135,15 +184,30 @@ class AlertService with WidgetsBindingObserver {
     }
   }
 
+  /// Speaks each alert's line once (critical ones interrupt; the voice service applies the settings).
+  void _speak(Iterable<AlertSpec> specs) {
+    final voice = _voice;
+    if (voice == null) return;
+    for (final a in specs) {
+      final line = a.speech;
+      if (line == null || line.isEmpty || !_spoken.add(a.key)) continue;
+      final critical = a.channel == AlertChannel.sos;
+      voice.speak(line, priority: critical ? VoicePriority.critical : VoicePriority.warning, key: a.key).ignore();
+    }
+  }
+
   void _show(AlertSpec a, {bool sticky = false, Duration? timeout, bool update = false}) {
     final (channelId, channelName, desc, importance) = _channels[a.channel]!;
     final sos = a.channel == AlertChannel.sos;
+    final social = a.channel == AlertChannel.social;
     final details = AndroidNotificationDetails(
       channelId,
       channelName,
       channelDescription: desc,
       importance: importance,
-      priority: sos ? Priority.max : (a.channel == AlertChannel.alerts ? Priority.high : Priority.defaultPriority),
+      priority: sos ? Priority.max : ((a.channel == AlertChannel.alerts || a.channel == AlertChannel.hazard) ? Priority.high : (social ? Priority.low : Priority.defaultPriority)),
+      playSound: !social,
+      enableVibration: !social,
       category: sos ? AndroidNotificationCategory.alarm : AndroidNotificationCategory.status,
       visibility: NotificationVisibility.public, // names only; no coordinates are ever in the text
       groupKey: 'trip_${_groupId ?? ''}',

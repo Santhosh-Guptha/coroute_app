@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Big ride notification (3.15), light notification shade. Text colours of plain lines come
+     from the system notification text appearances; these are for buttons and tones only. -->
+<resources>
+    <color name="ride_notif_accent">#1565C0</color>
+    <color name="ride_notif_critical">#C62828</color>
+    <color name="ride_notif_warning">#A35A00</color>
+    <color name="ride_notif_positive">#2E7D32</color>
+    <color name="ride_notif_btn_bg">#E3E8EE</color>
+    <color name="ride_notif_btn_text">#101418</color>
+    <color name="ride_notif_sos_bg">#C62828</color>
+    <color name="ride_notif_sos_text">#FFFFFF</color>
+</resources>

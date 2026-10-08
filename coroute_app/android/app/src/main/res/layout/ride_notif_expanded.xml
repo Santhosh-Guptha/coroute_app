@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Big ride notification, expanded (DecoratedCustomViewStyle, at most 256 dp).
+     Title, convoy line, up to 2 riders ahead and 2 behind, group status line, and a row of
+     large buttons (48 dp high): SOS, Wait for me, Open map, context action.
+     RemoteViews: only LinearLayout, TextView and Button here. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/ride_notif_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
+        android:textSize="17sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/ride_notif_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification"
+        android:textSize="13sp" />
+
+    <LinearLayout
+        android:id="@+id/ride_notif_rows"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingTop="4dp">
+
+        <LinearLayout
+            android:id="@+id/ride_notif_row0"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="22dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/ride_notif_row0_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/ride_notif_row0_detail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textAppearance="@android:style/TextAppearance.Material.Notification"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/ride_notif_row0_flag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:paddingStart="8dp"
+                android:textColor="@color/ride_notif_warning"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/ride_notif_row1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="22dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/ride_notif_row1_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/ride_notif_row1_detail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textAppearance="@android:style/TextAppearance.Material.Notification"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/ride_notif_row1_flag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:paddingStart="8dp"
+                android:textColor="@color/ride_notif_warning"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/ride_notif_row2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="22dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/ride_notif_row2_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/ride_notif_row2_detail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textAppearance="@android:style/TextAppearance.Material.Notification"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/ride_notif_row2_flag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:paddingStart="8dp"
+                android:textColor="@color/ride_notif_warning"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/ride_notif_row3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="22dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/ride_notif_row3_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/ride_notif_row3_detail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textAppearance="@android:style/TextAppearance.Material.Notification"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/ride_notif_row3_flag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:paddingStart="8dp"
+                android:textColor="@color/ride_notif_warning"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/ride_notif_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:paddingTop="4dp"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification"
+        android:textSize="14sp" />
+
+    <LinearLayout
+        android:id="@+id/ride_notif_buttons"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/ride_notif_btn_sos"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/ride_notif_btn_sos"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:minWidth="0dp"
+            android:minHeight="48dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textAllCaps="false"
+            android:textColor="@color/ride_notif_sos_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/ride_notif_btn_wait"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/ride_notif_btn"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:minWidth="0dp"
+            android:minHeight="48dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textAllCaps="false"
+            android:textColor="@color/ride_notif_btn_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/ride_notif_btn_map"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/ride_notif_btn"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:minWidth="0dp"
+            android:minHeight="48dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textAllCaps="false"
+            android:textColor="@color/ride_notif_btn_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/ride_notif_btn_context"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:background="@drawable/ride_notif_btn"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2"
+            android:minWidth="0dp"
+            android:minHeight="48dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textAllCaps="false"
+            android:textColor="@color/ride_notif_btn_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,23 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../core/constants/emergency_nav_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/medical_info.dart';
+import '../../data/models/network_wire.dart';
 import '../../data/models/outbox_item.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/models/safety_wire.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/timeline_service.dart';
+import '../../domain/notify/relation.dart';
+import '../../domain/tracking/geo_math.dart';
 import '../alerts/alert_tiers.dart';
+import 'emergency_guidance.dart';
 import 'incident_banner.dart';
 import 'incident_view.dart';
 import 'navigate_to.dart';
 
 /// Opens the incident sheet for [subjectUserId] (and [alertId] for an SOS or
-/// crash): where they are, Navigate, Call, "I'm going" / "I'm with them",
-/// who is already helping, medical info while the alert is open, and
-/// "Mark as handled". For my own incident it offers "I'm OK" / "I am safe".
+/// crash): where they are, my distance and ETA, the nearest member, nearby
+/// assistance from other groups, Navigate (in the app), Call, "I'm going" /
+/// "I'm with them", who is already helping, medical info while the alert is
+/// open, "Open in Google Maps" and "Mark as handled". For my own SOS it
+/// offers "Help reached me" / "False alarm"; for an automatic check "I'm OK".
 Future<void> showIncidentSheet(
   BuildContext context, {
   required String convoyId,
@@ -45,17 +51,7 @@ class IncidentSheetBody extends StatelessWidget {
 
   const IncidentSheetBody({super.key, required this.convoyId, required this.subjectUserId, this.alertId, this.nowMs});
 
-  static Future<void> _dial(BuildContext context, String phone) async {
-    final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
-    if (clean.isEmpty) return;
-    var ok = false;
-    try {
-      ok = await launchUrl(Uri(scheme: 'tel', path: clean));
-    } catch (_) {}
-    if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the phone app.')));
-    }
-  }
+  static Future<void> _dial(BuildContext context, String phone) => dialNumber(context, phone);
 
   static String _first(String name) {
     final n = name.trim();
@@ -94,7 +90,18 @@ class IncidentSheetBody extends StatelessWidget {
     final id = inc.alertId;
     final canRespond = inc.isAlert && !inc.isMe && id != null && service.supports(ProtocolFeatures.respond);
 
-    final header = _Header(incident: inc, what: ago == null ? inc.what : '${inc.what}, $ago', where: where);
+    final emergency = inc.isAlert && !inc.isMe;
+    final relation = emergency ? incidentRelationText(inc, myLat: me?.lat, myLng: me?.lng, route: convoy?.routeLine ?? const []) : null;
+    final updated = (inc.isAlert && inc.positionAt > 0) ? Relation.lastUpdate(inc.positionAt, now) : null;
+    final header = emergency
+        ? _Header(
+            incident: inc,
+            title: 'EMERGENCY',
+            what: [inc.summary, if (inc.auto) 'Automatic alert', if (inc.reportedByName.trim().isNotEmpty) 'Reported by ${inc.reportedByName.trim()}'].join('. '),
+            where: relation ?? where,
+            updated: updated,
+          )
+        : _Header(incident: inc, what: ago == null ? inc.what : '${inc.what}, $ago', where: where, updated: updated);
 
     if (inc.isMe) {
       return Column(
@@ -104,14 +111,25 @@ class IncidentSheetBody extends StatelessWidget {
           header,
           const SizedBox(height: Space.s16),
           if (inc.isAlert) ...[
+            NetworkStatusLines(incident: inc, forMe: true),
             _Responders(responders: inc.responders, now: now, forMe: true),
             const SizedBox(height: Space.s16),
             _BigButton(
               icon: Icons.check_circle_rounded,
-              label: 'I am safe',
+              label: 'Help reached me',
               color: StatusColors.success,
               onPressed: () {
-                service.cancelMySos();
+                service.cancelMySos(reason: ResolveReason.resolved);
+                Navigator.of(context).maybePop();
+              },
+            ),
+            const SizedBox(height: Space.s8),
+            _BigButton(
+              icon: Icons.do_not_disturb_on_rounded,
+              label: 'False alarm',
+              outlined: true,
+              onPressed: () {
+                service.cancelMySos(reason: ResolveReason.falseAlarm);
                 Navigator.of(context).maybePop();
               },
             ),
@@ -147,22 +165,36 @@ class IncidentSheetBody extends StatelessWidget {
     final responders = inc.isAlert ? _Responders(responders: inc.responders, now: now) : null;
     final medical = inc.isAlert ? inc.medical : null;
 
+    Future<void> openMaps() async {
+      final ok = await navigateTo(inc.lat, inc.lng, label: inc.who);
+      if (!ok && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No map app found on this phone.')));
+      }
+    }
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         header,
         const SizedBox(height: Space.s16),
+        if (emergency) ...[
+          _DistanceEta(incident: inc, myLat: me?.lat, myLng: me?.lng, relation: relation),
+          NetworkStatusLines(incident: inc, myUserId: myId),
+          const SizedBox(height: Space.s8),
+        ],
         if (inc.hasPosition)
           _BigButton(
             icon: Icons.navigation_rounded,
-            label: 'Navigate',
-            onPressed: () async {
-              final ok = await navigateTo(inc.lat, inc.lng, label: inc.who);
-              if (!ok && context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No map app found on this phone.')));
-              }
-            },
+            label: emergency ? 'Navigate to ${_first(inc.who)}' : 'Navigate',
+            onPressed: emergency
+                ? () => navigateToEmergency(
+                      context,
+                      NavTarget(kind: NavTargetKind.groupEmergency, ref: id ?? inc.subjectUserId, label: _first(inc.who)),
+                      inc.lat,
+                      inc.lng,
+                    )
+                : openMaps,
           ),
         if (phone.isNotEmpty) ...[
           const SizedBox(height: Space.s8),
@@ -180,6 +212,15 @@ class IncidentSheetBody extends StatelessWidget {
             label: 'Call their emergency contact',
             outlined: true,
             onPressed: () => _dial(context, contact),
+          ),
+        ],
+        if (emergency && inc.hasPosition) ...[
+          const SizedBox(height: Space.s8),
+          TextButton.icon(
+            style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.textPrimary),
+            onPressed: openMaps,
+            icon: const Icon(Icons.map_rounded),
+            label: const Text('Open in Google Maps', maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         ],
         if (inc.isAlert && id != null) ...[
@@ -238,12 +279,15 @@ class _Header extends StatelessWidget {
   final IncidentView incident;
   final String what;
   final String? where;
+  final String? title;
+  final String? updated;
 
-  const _Header({required this.incident, required this.what, this.where});
+  const _Header({required this.incident, required this.what, this.where, this.title, this.updated});
 
   @override
   Widget build(BuildContext context) {
     final w = where;
+    final u = updated;
     final Color accent = incident.isMe && !incident.isAlert ? StatusColors.warning : StatusColors.critical;
     return Semantics(
       container: true,
@@ -265,11 +309,12 @@ class _Header extends StatelessWidget {
               children: [
                 Semantics(
                   header: true,
-                  child: Text(incident.title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontWeight: FontWeight.w700)),
+                  child: Text(title ?? incident.title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontWeight: FontWeight.w700)),
                 ),
                 const SizedBox(height: 2),
-                Text(what, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: accent)),
-                if (w != null) Text(w, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                Text(what, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: accent)),
+                if (w != null) Text(w, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                if (u != null) Text(u, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
                 if (incident.placeName.isNotEmpty)
                   Text('Near ${incident.placeName}', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
               ],
@@ -544,6 +589,146 @@ class MedicalCard extends StatelessWidget {
           for (final l in lines) Text(l, maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.body),
           const SizedBox(height: Space.s4),
           Text('Shown only while this alert is open.', style: AppText.caption),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Your distance: 4.8 km behind your location" and "Your ETA: about 9 min"
+/// (from the in-app navigation when it leads there, else a rough guess).
+class _DistanceEta extends StatelessWidget {
+  final IncidentView incident;
+  final double? myLat;
+  final double? myLng;
+  final String? relation;
+
+  const _DistanceEta({required this.incident, this.myLat, this.myLng, this.relation});
+
+  @override
+  Widget build(BuildContext context) {
+    final guidance = context.watch<EmergencyGuidance?>();
+    final la = myLat, ln = myLng;
+    final id = incident.alertId;
+    Duration? eta;
+    if (guidance != null && id != null && guidance.isTarget(NavTargetKind.groupEmergency, id)) eta = guidance.eta;
+    if (eta == null && la != null && ln != null && (la != 0 || ln != 0) && incident.hasPosition) {
+      final m = GeoMath.haversine(la, ln, incident.lat, incident.lng);
+      if (m.isFinite) {
+        eta = Duration(seconds: (m * EmergencyNavConstants.straightDetourFactor / (EmergencyNavConstants.straightSpeedKmh / 3.6)).round());
+      }
+    }
+    final r = relation;
+    final e = eta;
+    if (r == null && e == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.s8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (r != null) InfoLine(icon: Icons.social_distance_rounded, text: 'Your distance: $r'),
+          if (e != null) InfoLine(icon: Icons.schedule_rounded, text: 'Your ETA: about ${formatDuration(Duration(minutes: e.inSeconds <= 60 ? 1 : (e.inSeconds / 60).round()))}'),
+        ],
+      ),
+    );
+  }
+}
+
+/// One plain line with an icon (status never by colour alone).
+class InfoLine extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final Color? color;
+  const InfoLine({super.key, required this.icon, required this.text, this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? AppTheme.textSecondary;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.s4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: c),
+          const SizedBox(width: Space.s8),
+          Expanded(child: Text(text, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body)),
+        ],
+      ),
+    );
+  }
+}
+
+/// The safety network lines of an open group emergency: the nearest member
+/// ("Nearest member: Arjun, ETA 9 min"), nearby assistance from another
+/// group (green: "Nearby assistance: Arjun, ETA 3 min, En route", never the
+/// other group's name), "Asking nearby riders" / "No nearby riders found",
+/// and "A nearby rider reported they are at the scene".
+class NetworkStatusLines extends StatelessWidget {
+  final IncidentView incident;
+  final String myUserId;
+
+  /// My own SOS: the lines speak to me ("A nearby rider is responding").
+  final bool forMe;
+
+  const NetworkStatusLines({super.key, required this.incident, this.myUserId = '', this.forMe = false});
+
+  static String _clock(BuildContext context, int ms) {
+    final t = TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(ms));
+    return MaterialLocalizations.of(context).formatTimeOfDay(t, alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final net = incident.network;
+    final own = incident.ownNearest;
+    final lines = <Widget>[];
+    if (own != null && !forMe) {
+      final eta = etaWords(own.etaS);
+      final who = own.userId == myUserId ? 'You' : (own.name.trim().isEmpty ? 'A rider' : own.name.trim());
+      lines.add(InfoLine(
+        icon: Icons.groups_rounded,
+        text: who == 'You' ? 'You are the nearest member${eta == null ? '' : ', $eta'}' : 'Nearest member: $who${eta == null ? '' : ', $eta'}',
+      ));
+    }
+    if (net != null) {
+      final r = net.activeResponder;
+      if (r != null) {
+        final name = r.name.trim().isEmpty ? 'A nearby rider' : r.name.trim();
+        if (r.status == ResponderStatus.arrived) {
+          final at = r.arrivedAt > 0 ? '. Reached ${_clock(context, r.arrivedAt)}' : '';
+          lines.add(PositiveLine(
+            text: forMe ? 'A nearby rider has reached you' : 'Nearby rider has reached ${incident.firstName}',
+            detail: 'Responder: $name$at',
+          ));
+        } else {
+          final parts = <String>[
+            forMe ? 'A nearby rider is responding' : 'Nearby assistance: $name',
+            ?etaWords(r.etaS),
+            responderStatusWords(r.status),
+          ];
+          lines.add(PositiveLine(text: parts.join(', '), detail: forMe ? null : '$name from a nearby riding group'));
+        }
+      } else {
+        final words = networkStateWords(net.state);
+        if (words != null) lines.add(InfoLine(icon: Icons.person_search_rounded, text: words));
+      }
+      for (final x in net.responders) {
+        if (x.status == ResponderStatus.unableToReach && x.reason == 'NOT_FOUND') {
+          final name = x.name.trim().isEmpty ? 'A nearby rider' : x.name.trim();
+          lines.add(InfoLine(icon: Icons.location_searching_rounded, text: '$name could not find ${forMe ? 'you' : incident.firstName}'));
+        }
+      }
+      if (net.onScene) lines.add(InfoLine(icon: Icons.place_rounded, text: 'A nearby rider reported they are at the scene'));
+    }
+    if (lines.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.s8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final l in lines) Padding(padding: const EdgeInsets.only(bottom: Space.s4), child: l),
         ],
       ),
     );

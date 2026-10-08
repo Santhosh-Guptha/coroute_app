@@ -5,9 +5,10 @@ import '../../core/ui/ui.dart';
 import '../../data/services/safety_service.dart';
 import '../widgets/emergency_sos_sheet.dart';
 
-/// Full-screen crash alarm, shown by [CrashAlarmHost] while
-/// [SafetyService.alarm] is open. Counting down: red screen, "I'm OK" and
-/// "Send now". After the SOS went out: the SOS sheet content (call, text, 112,
+/// Full-screen crash alarm (POSSIBLE_ACCIDENT), shown by [CrashAlarmHost]
+/// while [SafetyService.alarm] is open. Counting down: red screen, "Possible
+/// accident detected. Are you okay?", **I'm OK** (green, nothing is sent)
+/// and **Need Help** (sends at once). After the SOS went out: the SOS sheet content (call, text, 112,
 /// "I am safe") until the rider closes it.
 class CrashAlarmScreen extends StatelessWidget {
   const CrashAlarmScreen({super.key});
@@ -56,6 +57,10 @@ class CrashAlarmScreen extends StatelessWidget {
 
 /// The red countdown screen itself (pure, for tests).
 class CrashAlarmView extends StatelessWidget {
+  static const String title = 'Possible accident detected. Are you okay?';
+  static const String okLabel = 'I\'m OK';
+  static const String helpLabel = 'Need Help';
+
   final int secondsLeft;
   final VoidCallback onImOk;
   final VoidCallback onSendNow;
@@ -85,8 +90,8 @@ class CrashAlarmView extends StatelessWidget {
           header: true,
           liveRegion: true,
           child: Text(
-            'Did you crash?',
-            style: AppText.metric.copyWith(color: onRed, fontSize: 34, height: 1.1),
+            title,
+            style: AppText.metric.copyWith(color: onRed, fontSize: 30, height: 1.15),
           ),
         ),
         const SizedBox(height: Space.s8),
@@ -119,7 +124,7 @@ class CrashAlarmView extends StatelessWidget {
           textStyle: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
         ),
         icon: const Icon(Icons.check_circle_rounded, size: 30),
-        label: const Text('I\'m OK', maxLines: 1, overflow: TextOverflow.ellipsis),
+        label: const Text(okLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
     final send = SizedBox(
@@ -134,7 +139,7 @@ class CrashAlarmView extends StatelessWidget {
           textStyle: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
         ),
         icon: const Icon(Icons.sos_rounded, size: 30),
-        label: const Text('Send now', maxLines: 1, overflow: TextOverflow.ellipsis),
+        label: const Text(helpLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
 

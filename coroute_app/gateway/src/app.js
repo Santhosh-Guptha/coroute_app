@@ -19,6 +19,10 @@ const { buildRouter } = require('./routes');
 const { TrackStore } = require('./tracks');
 const { GeoProxy } = require('./geo');
 const { TimelineEngine } = require('./timeline');
+const { SafetyNetwork } = require('./safety_network');
+const { Discovery } = require('./discovery');
+const { SafetyAudit } = require('./safety_audit');
+const { RouteIndexCache, gridSize } = require('./net_geo');
 
 function createSoda() {
   if (config.sodaUrl === 'memory' || config.sodaUrl === 'http://mock') return new MemorySoda();
@@ -32,12 +36,22 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const gate = new UserGate(repo);
   const auth = new AuthService(repo, { googleVerifier, gate });
   const convoys = new ConvoyManager(repo, { logger });
-  // A phone number or emergency-text opt-out change reaches the rider's live ride (SMS roster).
-  auth.onProfileChanged = (user) => convoys.applyProfile(user.userId, user);
+  // A phone number, emergency-text opt-out or nearby-assistance switch change reaches the rider's live ride.
+  auth.onProfileChanged = (user, keys) => convoys.applyProfile(user.userId, user, keys);
   const tracks = new TrackStore(repo);
   const geo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
   convoys.router = (wp) => geo.route(wp);
   const timeline = new TimelineEngine({ convoys, repo, tracks, geo, logger, ...(clock ? { clock } : {}) });
+  // 3.15: rider safety network and rider discovery (separate modules; they share only route geometry).
+  const audit = new SafetyAudit({ repo, logger });
+  const routes = new RouteIndexCache({ simplifyM: config.netRouteSimplifyM, maxPoints: config.netRouteMaxPoints, G: gridSize(config.netGridMillideg) });
+  const network = new SafetyNetwork({ convoys, geo, audit, logger, routes });
+  const discovery = new Discovery({ convoys, network, audit, logger, routes });
+  convoys.network = network;
+  convoys.on('emergency', (gid, alert, kind, ctx) => network.onEmergency(gid, alert, kind, ctx));
+  convoys.on('telemetry', (gid, rider) => network.onTelemetry(gid, rider));
+  convoys.on('roomLoaded', (gid) => network.onRoomLoaded(gid));
+  convoys.on('roomEnded', (gid, room) => { network.onRoomEnded(gid, room); discovery.onRoomEnded(gid); });
 
   const app = express();
   app.disable('x-powered-by');
@@ -48,7 +62,9 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
 
   const server = http.createServer(app);
   const startedAt = Date.now();
-  const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate });
+  const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate, network, discovery });
+  network.attach(hub);
+  discovery.attach(hub);
   // ---- Public website, served from here so no extra hosting is needed ----
   const path = require('path');
   const fs = require('fs');
@@ -94,7 +110,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       }
     },
   }));
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate }));
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate, network, audit }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -106,14 +122,18 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   async function shutdown() {
     retention.stop();
     timeline.stop();
+    network.stop();
+    discovery.stop();
+    audit.stop();
     hub.close();
     for (const ws of hub.wss.clients) ws.terminate();
     await convoys.flushAll();
     await timeline.idle();
+    await audit.flush().catch(() => {});
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { app, server, hub, repo, soda, auth, gate, convoys, retention, tracks, timeline, geo, shutdown };
+  return { app, server, hub, repo, soda, auth, gate, convoys, retention, tracks, timeline, geo, network, discovery, audit, routes, shutdown };
 }
 
 module.exports = { createApp, createSoda };

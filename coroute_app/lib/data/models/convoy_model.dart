@@ -1,3 +1,4 @@
+import 'network_wire.dart';
 import 'rider_model.dart';
 import 'sos_alert_model.dart';
 import 'group_message_model.dart';
@@ -32,6 +33,15 @@ class ConvoyModel {
   final Map<String, StopArrival> destinationArrivals;
   final double? startLat;
   final double? startLng;
+
+  /// Social discovery (3.15, lead only): PRIVATE by default. Safety never depends on it.
+  final GroupVisibility visibility;
+
+  /// "Nearby group discovery": only works while [visibility] is public (both groups).
+  final bool discovery;
+
+  /// Group default for "Ask nearby riders to help our riders" (a rider's own switch wins).
+  final bool assistDefault;
 
   /// The route line to draw and measure against: the planned route when there is one.
   List<(double, double)> get routeLine {
@@ -73,6 +83,9 @@ class ConvoyModel {
     this.destinationArrivals = const {},
     this.startLat,
     this.startLng,
+    this.visibility = GroupVisibility.private,
+    this.discovery = false,
+    this.assistDefault = true,
   });
 
   ConvoyModel copyWith({
@@ -103,6 +116,9 @@ class ConvoyModel {
     Map<String, StopArrival>? destinationArrivals,
     double? startLat,
     double? startLng,
+    GroupVisibility? visibility,
+    bool? discovery,
+    bool? assistDefault,
   }) {
     return ConvoyModel(
       groupId: groupId ?? this.groupId,
@@ -131,6 +147,9 @@ class ConvoyModel {
       destinationArrivals: destinationArrivals ?? this.destinationArrivals,
       startLat: startLat ?? this.startLat,
       startLng: startLng ?? this.startLng,
+      visibility: visibility ?? this.visibility,
+      discovery: discovery ?? this.discovery,
+      assistDefault: assistDefault ?? this.assistDefault,
     );
   }
 
@@ -161,6 +180,9 @@ class ConvoyModel {
       if (route != null) 'route': route!.toJson(),
       'destinationArrivals': destinationArrivals.map((k, v) => MapEntry(k, v.toJson())),
       if (startLat != null && startLng != null) 'start': {'lat': startLat, 'lng': startLng, 'name': startLocationName},
+      'visibility': visibility.wire,
+      'discovery': discovery,
+      'assistDefault': assistDefault,
     };
   }
 
@@ -235,6 +257,9 @@ class ConvoyModel {
       destinationArrivals: StopArrival.mapFrom(json['destinationArrivals']),
       startLat: json['start'] is Map ? ((json['start'] as Map)['lat'] as num?)?.toDouble() : null,
       startLng: json['start'] is Map ? ((json['start'] as Map)['lng'] as num?)?.toDouble() : null,
+      visibility: GroupVisibility.fromWire(json['visibility']?.toString()),
+      discovery: json['discovery'] == true,
+      assistDefault: json['assistDefault'] != false,
     );
   }
 }

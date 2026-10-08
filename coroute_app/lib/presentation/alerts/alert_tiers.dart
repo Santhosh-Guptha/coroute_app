@@ -1,7 +1,9 @@
 import '../../core/ui/ride_alert.dart';
 import '../../data/models/convoy_model.dart';
+import '../../data/models/sos_alert_model.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../domain/notify/alert_policy.dart';
+import '../../domain/notify/alert_priority.dart';
 
 /// How urgent an alert from [AlertPolicy] is in the app.
 ///
@@ -12,8 +14,13 @@ import '../../domain/notify/alert_policy.dart';
 /// * `STOPPED:*`, `OFF_ROUTE:*`, `CLOSED:*`, `NO_REPLY:*`, my own possible incident, the meeting
 ///   point and the `alerts` channel (over the speed limit) are important;
 /// * the `updates` and `activity` channels are normal (SOS responses).
+/// 3.15: `ASSIST:*` (a request to help a nearby rider) is critical, `HAZARD:*` (accident
+/// ahead, amber) important, `ASSIST_TAKEN:*` and `MEET:*` (other groups) normal.
 AlertTier tierFor(AlertSpec spec) {
   final k = spec.key;
+  if (k.startsWith(AlertPolicy.assistTakenPrefix) || k.startsWith(AlertPolicy.encounterPrefix)) return AlertTier.normal;
+  if (k.startsWith(AlertPolicy.assistPrefix)) return AlertTier.critical;
+  if (k.startsWith(AlertPolicy.hazardPrefix)) return AlertTier.important;
   if (k.startsWith(AlertPolicy.incidentPrefix)) return spec.aboutMe ? AlertTier.important : AlertTier.critical;
   if (k.startsWith(AlertPolicy.sosPrefix) || k.startsWith('OFFLINE:') || k.startsWith(AlertPolicy.noSignalPrefix) || k.startsWith('SEPARATED:')) {
     return AlertTier.critical;
@@ -25,6 +32,8 @@ AlertTier tierFor(AlertSpec spec) {
     AlertChannel.alerts => AlertTier.important,
     AlertChannel.updates => AlertTier.normal,
     AlertChannel.activity => AlertTier.normal,
+    AlertChannel.hazard => AlertTier.important,
+    AlertChannel.social => AlertTier.normal,
   };
 }
 
@@ -40,6 +49,7 @@ AlertViewer? alertViewerFor(ConvoyModel? convoy, String? userId) {
     isSweeper: role == 'SWEEPER',
     lat: me?.lat,
     lng: me?.lng,
+    route: convoy.routeLine,
   );
 }
 
@@ -64,8 +74,11 @@ class InAppAlert {
 /// now (standing) plus one-time events from the last [recent], newest first.
 ///
 /// Each situation appears once (keyed like the notification), so nothing is
-/// shown twice. Sorted critical first, then important, then normal; within a
-/// tier the newest first. Pure: no timers, safe to call from build.
+/// shown twice. Sorted by [AlertPriority] first (SOS, assistance request, hazard,
+/// group safety, route, social), then critical, important, normal; within that the
+/// newest first. [extra] (3.15: `AlertPolicy.network` specs) are merged, deduped by
+/// key; [alerts] are the convoy's live SOS alerts (EMERGENCY form, see
+/// `AlertPolicy.standing`). Pure: no timers, safe to call from build.
 List<InAppAlert> inAppAlerts(
   Iterable<TimelineEventModel> events,
   AlertViewer viewer, {
@@ -73,13 +86,15 @@ List<InAppAlert> inAppAlerts(
   AlertPolicy? policy,
   Duration recent = const Duration(minutes: 15),
   int maxRecent = 10,
+  List<AlertSpec> extra = const [],
+  Iterable<SosAlertModel> alerts = const [],
 }) {
   final p = policy ?? AlertPolicy();
   final byKey = <String, InAppAlert>{};
   final oneShots = <InAppAlert>[];
   for (final e in events) {
     if (e.open) {
-      for (final spec in p.standing([e], viewer, nowMs: nowMs)) {
+      for (final spec in p.standing([e], viewer, nowMs: nowMs, alerts: alerts)) {
         byKey[spec.key] = InAppAlert(spec: spec, tier: tierFor(spec), event: e);
       }
     }
@@ -91,12 +106,17 @@ List<InAppAlert> inAppAlerts(
   }
   oneShots.sort((a, b) => b.at.compareTo(a.at));
   // One row per key: a newer one-time alert with the same key (a new meeting point) replaces the older.
+  for (final spec in extra) {
+    byKey.putIfAbsent(spec.key, () => InAppAlert(spec: spec, tier: tierFor(spec)));
+  }
   final seen = <String>{...byKey.keys};
   final out = <InAppAlert>[
     ...byKey.values,
     ...oneShots.where((a) => seen.add(a.key)).take(maxRecent),
   ];
   out.sort((a, b) {
+    final pr = priorityForKey(a.key, channel: a.spec.channel).index.compareTo(priorityForKey(b.key, channel: b.spec.channel).index);
+    if (pr != 0) return pr;
     final t = a.tier.index.compareTo(b.tier.index);
     return t != 0 ? t : b.at.compareTo(a.at);
   });

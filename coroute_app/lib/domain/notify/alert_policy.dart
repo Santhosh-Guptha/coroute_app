@@ -1,10 +1,18 @@
+import '../../core/constants/network_constants.dart';
+import '../../data/models/network_models.dart';
+import '../../data/models/network_wire.dart';
+import '../../data/models/safety_wire.dart';
+import '../../data/models/sos_alert_model.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../timeline/timeline_text.dart';
 import '../tracking/bearing.dart';
 import '../tracking/geo_math.dart';
+import 'alert_priority.dart';
+import 'relation.dart';
 
-/// Which notification channel an alert uses.
-enum AlertChannel { sos, alerts, updates, activity }
+/// Which notification channel an alert uses. [hazard]: accident warnings on my route
+/// (amber); [social]: other riding groups nearby (silent).
+enum AlertChannel { sos, alerts, updates, activity, hazard, social }
 
 /// One notification the phone should be showing.
 class AlertSpec {
@@ -18,7 +26,10 @@ class AlertSpec {
   /// True when the alert is about the viewer themself (for example "Your group was
   /// asked to check on you"): same key family, gentler tier than the group's copy.
   final bool aboutMe;
-  const AlertSpec(this.key, this.channel, this.title, this.body, {this.aboutMe = false});
+
+  /// Spoken once per [key] when the alert first appears (null: not spoken).
+  final String? speech;
+  const AlertSpec(this.key, this.channel, this.title, this.body, {this.aboutMe = false, this.speech});
 
   /// Android notification id derived from [key] (positive 31-bit, stable across runs).
   int get id {
@@ -31,10 +42,17 @@ class AlertSpec {
   }
 
   @override
-  bool operator ==(Object other) => other is AlertSpec && other.key == key && other.title == title && other.body == body && other.channel == channel && other.aboutMe == aboutMe;
+  bool operator ==(Object other) =>
+      other is AlertSpec &&
+      other.key == key &&
+      other.title == title &&
+      other.body == body &&
+      other.channel == channel &&
+      other.aboutMe == aboutMe &&
+      other.speech == speech;
 
   @override
-  int get hashCode => Object.hash(key, title, body, channel, aboutMe);
+  int get hashCode => Object.hash(key, title, body, channel, aboutMe, speech);
 }
 
 /// Who this phone belongs to, for deciding who gets which alert.
@@ -46,7 +64,15 @@ class AlertViewer {
   /// My last known position (for "3.4 km from you"); null when unknown.
   final double? lat;
   final double? lng;
-  const AlertViewer({required this.userId, this.isLead = false, this.isSweeper = false, this.lat, this.lng});
+
+  /// My group's route line (for "ahead on your route" / "behind your location"); empty when none.
+  final List<(double, double)> route;
+  const AlertViewer({required this.userId, this.isLead = false, this.isSweeper = false, this.lat, this.lng, this.route = const []});
+
+  bool get hasPosition {
+    final la = lat, ln = lng;
+    return la != null && ln != null && (la != 0 || ln != 0);
+  }
 }
 
 /// Turns the group timeline into notifications.
@@ -68,6 +94,12 @@ class AlertPolicy {
   static const String noSignalPrefix = 'NO_SIGNAL:';
   static const String closedPrefix = 'CLOSED:';
   static const String noReplyPrefix = 'NO_REPLY:';
+
+  /// Key prefixes of the 3.15 safety network and discovery alerts.
+  static const String assistPrefix = 'ASSIST:';
+  static const String assistTakenPrefix = 'ASSIST_TAKEN:';
+  static const String hazardPrefix = 'HAZARD:';
+  static const String encounterPrefix = 'MEET:';
 
   /// Keys of the rider-only prompts shown by the safety service.
   static const String localFatigueKey = 'LOCAL:FATIGUE';
@@ -114,8 +146,14 @@ class AlertPolicy {
   final Duration checkInFarFor;
 
   /// Alerts that should be visible right now, from the open timeline entries.
-  List<AlertSpec> standing(Iterable<TimelineEventModel> events, AlertViewer me, {required int nowMs}) {
+  ///
+  /// [alerts] (optional, 3.15) are the convoy's live SOS alerts: when an open SOS entry
+  /// has its live alert here (or the entry carries a 3.15 status), it is shown in the
+  /// EMERGENCY form with the latest position, "Last location update" and the nearby
+  /// assistance state.
+  List<AlertSpec> standing(Iterable<TimelineEventModel> events, AlertViewer me, {required int nowMs, Iterable<SosAlertModel> alerts = const []}) {
     final out = <AlertSpec>[];
+    final live = <String, SosAlertModel>{for (final a in alerts) a.alertId: a};
     for (final e in events) {
       if (!e.open || e.userId == null) continue;
       final mine = e.userId == me.userId;
@@ -127,6 +165,11 @@ class AlertPolicy {
           if (mine) break; // the sender already knows
           final kind = e.dataString('alertType');
           final key = '$sosPrefix${e.dataString('alertId').isEmpty ? e.eventId : e.dataString('alertId')}';
+          final a = live[e.dataString('alertId')];
+          if (a != null || e.data.containsKey('status') || e.data.containsKey('source') || (kind == SosTypes.crash && e.data['auto'] == true) || kind == SosTypes.riderDown) {
+            out.add(emergency(key, who: who, event: e, alert: a, me: me, nowMs: nowMs));
+            break;
+          }
           final dir = directionFromMe(me, e.lat, e.lng);
           if (kind == 'CRASH' && e.data['auto'] == true) {
             out.add(AlertSpec(key, AlertChannel.sos, 'Crash detected: $who',
@@ -263,4 +306,189 @@ class AlertPolicy {
   }
 
   static String _cap(String s) => s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
+
+  // ------------------------------------------------------------------ 3.15
+
+  /// "ETA 3 min" (at least 1 min).
+  static String etaText(int seconds) => 'ETA ${seconds <= 60 ? 1 : (seconds / 60).round()} min';
+
+  /// The own-group EMERGENCY alert for someone else's open SOS (crash, RIDER_DOWN, manual).
+  /// [alert] is the live alert when known (latest position, network state).
+  static AlertSpec emergency(String key, {required String who, required TimelineEventModel event, SosAlertModel? alert, required AlertViewer me, required int nowMs}) {
+    final a = alert;
+    final kind = a?.alertType ?? event.dataString('alertType');
+    final source = a?.effectiveSource ?? EmergencySource.fromWire(event.dataString('source'));
+    final auto = a?.auto ?? (event.data['auto'] == true);
+    final accident = a?.isAccident ??
+        (kind == SosTypes.crash || kind == SosTypes.riderDown || source == EmergencySource.crashAuto || source == EmergencySource.needHelp);
+    final lat = a?.lat ?? event.lat, lng = a?.lng ?? event.lng;
+    final atMs = a?.lastKnownAt ?? event.startedAt;
+    final String what;
+    if (accident) {
+      what = '$who may have met with an accident';
+    } else if (kind.isEmpty || kind == SosTypes.emergency || kind == SosTypes.crashOrEmergency) {
+      what = '$who needs help';
+    } else {
+      what = '$who needs help (${TimelineText.reason(kind)})';
+    }
+    final automatic = source == EmergencySource.crashAuto || (kind == SosTypes.crash && auto);
+    var rel = '', spoken = '';
+    if (me.hasPosition && lat != null && lng != null) {
+      rel = Relation.text(myLat: me.lat!, myLng: me.lng!, lat: lat, lng: lng, route: me.route);
+      spoken = Relation.spoken(myLat: me.lat!, myLng: me.lng!, lat: lat, lng: lng, route: me.route);
+    }
+    final speech = accident
+        ? 'Emergency. $what${spoken.isEmpty ? '' : ' $spoken'}.'
+        : 'Emergency. $what${spoken.isEmpty ? '' : ', $spoken'}.';
+
+    final net = a?.network;
+    final responder = net?.activeResponder;
+    final String body;
+    if (responder != null) {
+      final rName = responder.name.isEmpty ? 'A nearby rider' : responder.name;
+      if (responder.status == ResponderStatus.arrived) {
+        body = 'Nearby rider has reached $who. Responder: $rName from a nearby riding group.';
+      } else {
+        final own = a?.ownNearest;
+        body = [
+          'Nearby assistance accepted. A nearby rider is responding.',
+          if (responder.etaS != null) 'Responder ${etaText(responder.etaS!)}.',
+          if (own != null) 'Your nearest group rider ${etaText(own.etaS)}.',
+        ].join(' ');
+      }
+    } else {
+      body = [
+        '$what.',
+        if (automatic) 'Automatic alert.',
+        if (rel.isNotEmpty) '${_cap(rel)}.',
+        '${Relation.lastUpdate(atMs, nowMs)}.',
+        if (net != null && net.onScene) 'A nearby rider reported they are at the scene.',
+      ].join(' ');
+    }
+    return AlertSpec(key, AlertChannel.sos, 'EMERGENCY', body, speech: speech);
+  }
+
+  /// Where a point is for assistance and hazard texts: live from my position when known,
+  /// else the server's distance ("1.6 km ahead on your route").
+  static (String text, String spoken) _where(AlertViewer me, double lat, double lng, {required double fallbackM, required bool onRoute}) {
+    if (me.hasPosition) {
+      final t = Relation.text(myLat: me.lat!, myLng: me.lng!, lat: lat, lng: lng, route: me.route);
+      final s = Relation.spoken(myLat: me.lat!, myLng: me.lng!, lat: lat, lng: lng, route: me.route);
+      if (t.isNotEmpty) return (t, s);
+    }
+    return (
+      '${Relation.distanceText(fallbackM)} ${onRoute ? 'ahead on your route' : 'away'}',
+      '${Relation.spokenDistance(fallbackM)} ${onRoute ? 'ahead' : 'away'}',
+    );
+  }
+
+  /// Safety network and discovery alerts (3.15): assistance requests to me, "another
+  /// rider is responding" notices, accident warnings on my route and nearby groups.
+  /// Social items are left out while any emergency, request or hazard is active.
+  List<AlertSpec> network({
+    required List<AssistRequest> assists,
+    List<AssistNotice> notices = const [],
+    List<HazardWarning> hazards = const [],
+    List<Encounter> encounters = const [],
+    required AlertViewer me,
+    required int nowMs,
+    bool anyEmergency = false,
+  }) {
+    final out = <AlertSpec>[];
+    var anyAssist = false;
+    for (final r in assists) {
+      final st = r.myStatus;
+      if (st == ResponderStatus.declined || st == ResponderStatus.cancelled || st == ResponderStatus.unableToReach) continue;
+      anyAssist = true;
+      final key = '$assistPrefix${r.incidentId}';
+      final (where, spoken) = _where(me, r.lat, r.lng, fallbackM: r.distanceM, onRoute: r.aheadOnRoute);
+      if (st == ResponderStatus.arrived) {
+        out.add(AlertSpec(key, AlertChannel.sos, 'You reached the rider', 'Call emergency services 112 if they need more help.'));
+      } else if (r.accepted) {
+        out.add(AlertSpec(key, AlertChannel.sos, 'You are responding', [
+          'Rider emergency $where.',
+          if (r.etaS != null) '${etaText(r.etaS!)}.',
+          if (r.arrivalCheck) 'Have you reached the rider?',
+        ].join(' ')));
+      } else {
+        final what = r.isAccident ? 'A rider from another group may have met with an accident.' : 'A rider from another group needs help.';
+        out.add(AlertSpec(
+          key,
+          AlertChannel.sos,
+          'Rider emergency nearby',
+          [
+            what,
+            '${_cap(where)}.',
+            if (r.fasterThanGroup) 'Your group may be able to reach them before their own group.',
+          ].join(' '),
+          speech: r.isAccident
+              ? 'Emergency alert. A rider may have had an accident $spoken. Your group may be the closest riders.'
+              : 'Emergency alert. A rider needs help $spoken. Your group may be the closest riders.',
+        ));
+      }
+    }
+    for (final n in notices) {
+      if (n.reason != AssistClosedReason.taken || nowMs - n.at > NetworkConstants.assistTakenShowFor.inMilliseconds) continue;
+      out.add(AlertSpec('$assistTakenPrefix${n.incidentId}', AlertChannel.updates, 'Another nearby rider is responding', 'No assistance is currently required.'));
+    }
+    final assistIds = {
+      for (final r in assists)
+        if (r.myStatus != ResponderStatus.declined && r.myStatus != ResponderStatus.cancelled && r.myStatus != ResponderStatus.unableToReach) r.incidentId,
+    };
+    for (final h in hazards) {
+      // Asked to help with this very accident (hazardId = incidentId): one alert, one voice line.
+      if (assistIds.contains(h.hazardId)) continue;
+      double? ahead;
+      if (me.hasPosition) {
+        final d = Relation.alongDelta(myLat: me.lat!, myLng: me.lng!, lat: h.lat, lng: h.lng, route: me.route);
+        if (d != null && d >= 0) ahead = d;
+      }
+      final onRoute = ahead != null || h.onRoute;
+      final dist = ahead ?? h.aheadM ?? (me.hasPosition ? GeoMath.haversine(me.lat!, me.lng!, h.lat, h.lng) : null);
+      final where = dist == null ? 'nearby' : '${Relation.distanceText(dist)} ahead${onRoute ? ' on your route' : ''}';
+      final level = switch (h.level) {
+        HazardLevel.active => '',
+        HazardLevel.responderArriving => ' Help is on the way to the rider.',
+        HazardLevel.onScene => ' Help is at the scene.',
+      };
+      out.add(AlertSpec(
+        '$hazardPrefix${h.hazardId}',
+        AlertChannel.hazard,
+        'Caution',
+        'Rider accident reported $where.$level Reduce speed and stay alert.',
+        speech: dist == null ? 'Caution. Rider accident reported nearby.' : 'Caution. Rider accident reported ${Relation.spokenDistance(dist)} ahead.',
+      ));
+    }
+    if (AlertArbiter.socialAllowed(anyEmergency: anyEmergency, anyAssist: anyAssist, anyHazard: hazards.isNotEmpty)) {
+      for (final e in encounters) {
+        out.add(encounter(e));
+        final waved = e.theyWavedAt;
+        if (waved != null && nowMs - waved <= NetworkConstants.waveNotifyFor.inMilliseconds) {
+          out.add(AlertSpec('$encounterPrefix${e.encounterId}:WAVE', AlertChannel.social, '${_groupName(e)} waved', ''));
+        }
+      }
+    }
+    return out;
+  }
+
+  static String _groupName(Encounter e) => e.groupName.trim().isEmpty ? 'A riding group' : e.groupName.trim();
+
+  /// "Weekend Riders nearby" / "6 riders, about 4.7 km. Travelling on the same route."
+  static AlertSpec encounter(Encounter e) {
+    final key = '$encounterPrefix${e.encounterId}';
+    final title = '${_groupName(e)} nearby';
+    final dist = Relation.distanceText(e.distanceM);
+    if (e.type == EncounterType.oppositeDirection) {
+      return AlertSpec(key, AlertChannel.social, title, 'Another riding group is approaching from the opposite direction. $dist away.');
+    }
+    final riders = e.riders <= 0 ? '' : '${e.riders} rider${e.riders == 1 ? '' : 's'}, ';
+    final meet = e.meetingS == null ? '' : ' Meeting in about ${(e.meetingS! / 60).round() < 1 ? 1 : (e.meetingS! / 60).round()} min.';
+    final how = switch (e.type) {
+      EncounterType.sameDirection => e.sameRoute ? 'Travelling on the same route.' : 'Travelling in the same direction.',
+      EncounterType.converging => 'Joining your route ahead.',
+      EncounterType.crossing => 'Crossing your route ahead.',
+      EncounterType.oppositeDirection => '',
+    };
+    return AlertSpec(key, AlertChannel.social, title, '${riders.isEmpty ? 'About' : '${riders}about'} $dist. $how$meet');
+  }
 }

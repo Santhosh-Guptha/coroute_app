@@ -21,6 +21,8 @@ import 'package:coroute_app/presentation/safety/crash_alarm_host.dart';
 import 'package:coroute_app/presentation/safety/crash_alarm_screen.dart';
 import 'package:coroute_app/presentation/safety/oem_battery_guide.dart';
 import 'package:coroute_app/presentation/safety/safety_settings_sheet.dart';
+import 'package:coroute_app/presentation/safety/sos_hold_screen.dart';
+import 'package:coroute_app/core/ui/sos_button.dart';
 
 class _Port extends ChangeNotifier implements SafetyPort {
   final StreamController<TrackPoint> fixes = StreamController<TrackPoint>.broadcast();
@@ -116,11 +118,11 @@ void main() {
         ));
         await tester.pump();
         expect(tester.takeException(), isNull);
-        expect(find.text('Did you crash?'), findsOneWidget);
+        expect(find.text(CrashAlarmView.title), findsOneWidget);
         expect(find.text('Sending SOS to your group in 27 seconds.'), findsOneWidget);
         expect(find.text('Automatic alert'), findsOneWidget);
         final okButton = find.text('I\'m OK');
-        final sendButton = find.text('Send now');
+        final sendButton = find.text('Need Help');
         await tester.ensureVisible(okButton);
         final okBox = find.ancestor(of: okButton, matching: find.byWidgetPredicate((w) => w is FilledButton));
         expect(tester.getSize(okBox).height, greaterThanOrEqualTo(CrashAlarmView.buttonHeight));
@@ -141,10 +143,10 @@ void main() {
     final handle = tester.ensureSemantics();
     await screen(tester, const Size(360, 740));
     await tester.pumpWidget(host(CrashAlarmView(secondsLeft: 1, onImOk: () {}, onSendNow: () {}), AppPalette.dark));
-    expect(find.bySemanticsLabel('Did you crash?'), findsOneWidget);
+    expect(find.bySemanticsLabel(CrashAlarmView.title), findsOneWidget);
     expect(find.text('Sending SOS to your group in 1 second.'), findsOneWidget);
     expect(find.bySemanticsLabel(RegExp('I\'m OK')), findsWidgets);
-    expect(find.bySemanticsLabel(RegExp('Send now')), findsWidgets);
+    expect(find.bySemanticsLabel(RegExp('Need Help')), findsWidgets);
     handle.dispose();
   });
 
@@ -166,21 +168,22 @@ void main() {
       ),
     ));
     await tester.pump();
-    expect(find.text('Did you crash?'), findsNothing);
+    expect(find.text(CrashAlarmView.title), findsNothing);
 
     safety.debugRaiseCrash(const CrashEvent(impactAtMs: 1700000000000, impactG: 6, speedBeforeKmh: 50, lat: 12.97, lng: 77.59));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('Did you crash?'), findsOneWidget);
+    expect(find.text(CrashAlarmView.title), findsOneWidget);
 
     now += 5000;
     await tester.pump(const Duration(seconds: 1));
-    expect(find.textContaining('in 25 seconds'), findsOneWidget);
+    final left = SafetyConstants.crashCountdown.inSeconds - 5;
+    expect(find.textContaining('in $left seconds'), findsOneWidget);
 
     await tester.tap(find.text('I\'m OK'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('Did you crash?'), findsNothing);
+    expect(find.text(CrashAlarmView.title), findsNothing);
     expect(find.text('Ride screen'), findsOneWidget);
     expect(port.raised, isEmpty);
 
@@ -189,7 +192,7 @@ void main() {
     port.dispose();
   });
 
-  testWidgets('safety settings sheet: four switches, SMS asks for the permission first', (tester) async {
+  testWidgets('safety settings sheet: ride safety, accident warnings, voice and notification switches; SMS asks for the permission first', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final settings = SettingsService();
     await settings.load();
@@ -210,7 +213,8 @@ void main() {
     ));
     await tester.pump();
     expect(tester.takeException(), isNull);
-    expect(find.byType(Switch), findsNWidgets(4));
+    // 4 ride safety + accident warnings + 2 voice + 2 notification (the nearby riders switches need AuthService).
+    expect(find.byType(Switch), findsNWidgets(9));
     expect(find.text(SafetyTexts.crashTitle), findsOneWidget);
     await tester.tap(find.text(SafetyTexts.smsTitle));
     await tester.pump();
@@ -226,6 +230,29 @@ void main() {
     expect(settings.crashDetection, isFalse);
     expect(SafetySettingsSheet.summary(settings), 'Texts, break reminder, check-in on');
   });
+
+  for (final size in [const Size(320, 568), const Size(568, 320)]) {
+    testWidgets('SOS hold screen ${size.width.round()}x${size.height.round()} x1.3: a tap sends nothing, the hold sends, Cancel closes', (tester) async {
+      await screen(tester, size);
+      var sent = 0, cancelled = 0;
+      await tester.pumpWidget(host(SosHoldScreen(onSend: () => sent++, onCancel: () => cancelled++), AppPalette.dark));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Hold to send SOS'), findsOneWidget);
+      await tester.tap(find.byType(SOSButton));
+      await tester.pump(const Duration(seconds: 2));
+      expect(sent, 0, reason: 'a tap never sends');
+      final hold = await tester.startGesture(tester.getCenter(find.byType(SOSButton)));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(seconds: 2));
+      await hold.up();
+      await tester.pump();
+      expect(sent, 1);
+      await tester.ensureVisible(find.text('Cancel'));
+      await tester.tap(find.text('Cancel'));
+      expect(cancelled, 1);
+    });
+  }
 
   test('brand guide: brand from the manufacturer, steps for each brand', () {
     expect(OemBatteryGuide.brandFor('Xiaomi'), OemBrand.xiaomi);

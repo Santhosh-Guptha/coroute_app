@@ -13,7 +13,7 @@ const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const config = require('./config');
 const { ACTIVE_STATUSES } = require('./oracle/repo');
-const { haversine, encodePolyline } = require('./geo_math');
+const { haversine, encodePolyline, decodePolyline, pointToSegment } = require('./geo_math');
 const { scrub, scrubConvoyMeta, mentions } = require('./anonymise');
 const { validPhone } = require('./validate');
 
@@ -26,6 +26,41 @@ const SOS_TYPES = ['EMERGENCY', 'CRASH_OR_EMERGENCY', 'CRASH', 'MEDICAL', 'MECHA
 const RESPONSE_KINDS = new Set(['GOING', 'WITH_THEM', 'CANCEL']);
 const PRESENCE = new Set(['ONLINE', 'NO_SIGNAL', 'APP_CLOSED']);
 const LIVE_STATUSES = ['STARTED', 'PAUSED'];
+
+// ---- EmergencyEvent (3.15): the SOS alert doc, extended ----
+const EMERGENCY_OPEN = ['CONFIRMED_ACCIDENT', 'ASSISTANCE_REQUESTED', 'RESPONDER_ASSIGNED', 'ASSISTANCE_ARRIVED'];
+const EMERGENCY_TERMINAL = ['RESOLVED', 'FALSE_ALARM', 'CANCELLED', 'EXPIRED'];
+const EMERGENCY_SOURCES = new Set(['MANUAL', 'CRASH_AUTO', 'NEED_HELP', 'NOTIFICATION', 'MEMBER_REPORT', 'NEARBY_REPORT', 'WEARABLE']);
+const RESOLVE_REASONS = new Set(['RESOLVED', 'FALSE_ALARM', 'CANCELLED']);
+const HIGH_TYPES = new Set(['EMERGENCY', 'CRASH_OR_EMERGENCY', 'CRASH', 'MEDICAL', 'RIDER_DOWN']);
+/** Allowed transitions: next status -> statuses it may come from (1.2 table). Who may ask is checked by the callers. */
+const TRANSITIONS = {
+  ASSISTANCE_REQUESTED: ['CONFIRMED_ACCIDENT', 'RESPONDER_ASSIGNED'],
+  RESPONDER_ASSIGNED: ['CONFIRMED_ACCIDENT', 'ASSISTANCE_REQUESTED'],
+  ASSISTANCE_ARRIVED: ['CONFIRMED_ACCIDENT', 'ASSISTANCE_REQUESTED', 'RESPONDER_ASSIGNED'],
+  RESOLVED: EMERGENCY_OPEN, FALSE_ALARM: EMERGENCY_OPEN, CANCELLED: EMERGENCY_OPEN, EXPIRED: EMERGENCY_OPEN,
+};
+/** Rider profile keys the safety network reads from the live rider record (server only). */
+const ASSIST_RIDER_KEYS = ['assistHelp', 'assistAsk', 'responderMedical'];
+
+/** Status of an alert; docs written before 3.15 have none. */
+function statusOf(a) {
+  if (a && typeof a.status === 'string' && (EMERGENCY_OPEN.includes(a.status) || EMERGENCY_TERMINAL.includes(a.status))) {
+    // A resolved doc always reads as closed (old gateway resolving a 3.15 doc, or the reverse).
+    if (a.resolved && EMERGENCY_OPEN.includes(a.status)) return 'RESOLVED';
+    return a.status;
+  }
+  return a && a.resolved ? 'RESOLVED' : 'ASSISTANCE_REQUESTED';
+}
+function sourceOf(a) {
+  if (a && EMERGENCY_SOURCES.has(a.source)) return a.source;
+  return a && a.auto ? 'CRASH_AUTO' : 'MANUAL';
+}
+function severityOf(alertType, source) {
+  if (source === 'CRASH_AUTO') return 'CRITICAL';
+  return HIGH_TYPES.has(alertType) ? 'HIGH' : 'LOW';
+}
+function isOpenStatus(st) { return EMERGENCY_OPEN.includes(st); }
 
 class ConvoyError extends Error {
   /** reason: machine-readable cause. The app leaves a convoy only for NOT_MEMBER / CONVOY_GONE, never for other errors. */
@@ -83,6 +118,8 @@ class ConvoyManager extends EventEmitter {
       persistTimer: null,
     };
     this.rooms.set(groupId, room);
+    // 3.15: the safety network rebuilds its incidents from open alerts of a room loaded after a restart.
+    this.emit('roomLoaded', groupId);
     return room;
   }
 
@@ -113,7 +150,7 @@ class ConvoyManager extends EventEmitter {
       createdAtEpochMs: m.createdAtEpochMs,
       endedAtEpochMs: m.endedAtEpochMs || 0,
       riders: Object.fromEntries([...room.riders.entries()].map(([k, v]) => [k, publicRider(v)])),
-      activeAlerts: [...room.alerts.values()].filter((a) => !a.resolved).map((a) => publicAlert(a, { medical: !admin })),
+      activeAlerts: [...room.alerts.values()].filter((a) => !a.resolved).map((a) => publicAlert(a, { medical: !admin, summary: this._summary(room.groupId, a.alertId) })),
       messages: room.messages.slice(-200),
       stopPoints: m.stopPoints || [],
       pendingMembers: {},
@@ -127,7 +164,16 @@ class ConvoyManager extends EventEmitter {
       route: m.route ? publicRoute(m.route) : null,
       destinationArrivals: m.destinationArrivals || {},
       members: Object.values(m.members || {}).map((x) => ({ userId: x.userId, name: x.name, role: x.role, joinedAt: x.joinedAt, leftAt: x.leftAt || 0 })),
+      // 3.15: social visibility (group's choice) and the group default for nearby assistance.
+      visibility: m.visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
+      discovery: m.discovery === true,
+      assistDefault: m.assistDefault !== false,
     };
+  }
+
+  /** { network, ownNearest } of an alert from the safety network (memory only), or null. */
+  _summary(groupId, alertId) {
+    try { return this.network ? this.network.summaryFor(groupId, alertId) : null; } catch { return null; }
   }
 
   async getSnapshot(groupId, opts = {}) { return this.snapshot(await this.getRoom(groupId), opts); }
@@ -267,6 +313,8 @@ class ConvoyManager extends EventEmitter {
     if (status === 'ENDED') {
       clearTimeout(room.persistTimer);
       this.rooms.delete(groupId);
+      // 3.15: the safety network and discovery close everything of this room (no DB change).
+      this.emit('roomEnded', groupId, room);
       // Medical info lives only as long as the ride.
       for (const a of room.alerts.values()) delete a.medical;
       await this.repo.stripAlertMedical(groupId).catch((e) => this.log.warn('[convoys] medical strip failed', e.message));
@@ -417,33 +465,220 @@ class ConvoyManager extends EventEmitter {
     if (speed !== null) details.speedBeforeKmh = speed;
     const impact = boundedNumber(msg.impactG, 0, 50);
     if (impact !== null) details.impactG = impact;
+    // 3.15: where it came from (old apps send nothing: crash alerts read as CRASH_AUTO, the rest MANUAL).
+    const src = typeof msg.source === 'string' && EMERGENCY_SOURCES.has(msg.source) && !['MEMBER_REPORT', 'NEARBY_REPORT'].includes(msg.source)
+      ? msg.source : (msg.auto === true ? 'CRASH_AUTO' : 'MANUAL');
+    const auto = msg.auto === true || src === 'CRASH_AUTO';
+    const kind = sosType(alertType || (type === 'SOS' ? '' : type));
     const alert = {
       alertId: `SOS-${crypto.randomUUID()}`, userId: user.userId, userName: user.name,
-      lat: clampLat(lat), lng: clampLng(lng), alertType: sosType(alertType || (type === 'SOS' ? '' : type)), timestamp: t, resolved: false,
+      lat: clampLat(lat), lng: clampLng(lng), alertType: kind, timestamp: t, resolved: false,
       ...(cid ? { clientId: cid } : {}),
-      auto: msg.auto === true,
+      auto,
       details,
       occurredAt: clampTime(msg.occurredAt, t - 6 * 3600000, t + 60000, t),
       responders: {},
+      ...this._emergencyFields(room, { lat: clampLat(lat), lng: clampLng(lng), msg, source: src, alertType: kind, t }),
     };
-    const medical = medicalOf(await withTimeout(this.repo.findUserById(user.userId), 1500).catch(() => null));
-    if (medical) alert.medical = medical;
-    room.alerts.set(alert.alertId, alert);
-    await this.repo.addAlert(groupId, alert);
-    this._emit(groupId, 'ALERT', { alert: publicAlert(alert) });
-    this.emit('fleet');
-    return { alert, duplicate: false };
+    const ownerDoc = await withTimeout(this.repo.findUserById(user.userId), 1500).catch(() => null);
+    return { alert: await this._storeAlert(room, alert, ownerDoc), duplicate: false };
   }
 
-  async resolveSos(groupId, user, alertId) {
+  /** The 3.15 EmergencyEvent fields of a new alert. */
+  _emergencyFields(room, { lat, lng, msg = {}, source, alertType, t, status }) {
+    const out = {
+      status: status || (source === 'CRASH_AUTO' ? 'CONFIRMED_ACCIDENT' : 'ASSISTANCE_REQUESTED'),
+      source,
+      severity: severityOf(alertType, source),
+      confirmedAt: t,
+      lastUpdateAt: t,
+      routeIndex: routeIndexOf(room.meta, lat, lng),
+    };
+    const heading = boundedNumber(msg.heading, -100000, 100000);
+    if (heading !== null) out.heading = Math.round((((heading % 360) + 360) % 360) * 10) / 10;
+    const sp = boundedNumber(msg.speedKmh, 0, 300);
+    if (sp !== null) out.speedKmh = sp;
+    const acc = boundedNumber(msg.accuracyM, 0, 5000);
+    if (acc !== null) out.accuracyM = Math.round(acc);
+    return out;
+  }
+
+  /**
+   * Stores a new alert, tells the room (ALERT, never throttled, before any network work) and hands
+   * it to the safety network ('emergency' RAISED, not awaited). `ownerDoc`: the subject's users doc
+   * (medical info for the group; assistance settings and false alarm history for the network).
+   */
+  async _storeAlert(room, alert, ownerDoc) {
+    const medical = medicalOf(ownerDoc);
+    if (medical) alert.medical = medical;
+    room.alerts.set(alert.alertId, alert);
+    await this.repo.addAlert(room.groupId, alert);
+    this._emit(room.groupId, 'ALERT', { alert: publicAlert(alert, { summary: this._summary(room.groupId, alert.alertId) }) });
+    this.emit('fleet');
+    try {
+      this.emit('emergency', room.groupId, alert, 'RAISED', { owner: ownerInfo(ownerDoc) });
+    } catch (e) { this.log.warn('[convoys] emergency hook failed', e.message); }
+    return alert;
+  }
+
+  /**
+   * Closes or cancels an SOS. `reason` (3.15): RESOLVED (default), FALSE_ALARM, CANCELLED.
+   * Any member or an admin resolves; FALSE_ALARM / CANCELLED count only from the owner (the
+   * subject) or an admin, otherwise it is RESOLVED. The owner's cancel within
+   * EMERGENCY_CANCEL_GRACE_S while nobody outside the group was asked is CANCELLED, later FALSE_ALARM.
+   */
+  async resolveSos(groupId, user, alertId, reason = 'RESOLVED') {
     const room = await this.getRoom(groupId);
     if (!room.riders.has(user.userId) && user.role !== 'MASTER_ADMIN') throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const a = room.alerts.get(alertId);
-    if (a) { a.resolved = true; a.resolvedAt = now(); a.resolvedBy = user.userId; delete a.medical; }
-    await this.repo.resolveAlert(groupId, alertId, user.userId);
-    this._emit(groupId, 'ALERT_RESOLVED', { alertId, by: user.userId });
-    this.emit('fleet');
+    if (!a || a.resolved) {
+      // Unknown here or already closed: answered as before (idempotent for the phones).
+      if (a) { delete a.medical; }
+      await this.repo.resolveAlert(groupId, alertId, user.userId);
+      this._emit(groupId, 'ALERT_RESOLVED', { alertId, by: user.userId, status: a ? statusOf(a) : 'RESOLVED' });
+      this.emit('fleet');
+      return true;
+    }
+    const r = typeof reason === 'string' && RESOLVE_REASONS.has(reason.toUpperCase()) ? reason.toUpperCase() : 'RESOLVED';
+    let next = 'RESOLVED';
+    if (r !== 'RESOLVED') {
+      const owner = a.userId === user.userId;
+      if (owner) {
+        const notified = this.network ? this.network.notifiedCount(groupId, alertId) : 0;
+        const within = now() - (a.confirmedAt || a.timestamp || 0) <= config.emergencyCancelGraceS * 1000;
+        next = within && notified === 0 ? 'CANCELLED' : 'FALSE_ALARM';
+      } else if (user.role === 'MASTER_ADMIN') {
+        next = 'FALSE_ALARM';
+      }
+    }
+    await this.setEmergencyStatus(groupId, alertId, next, { by: user.userId });
     return true;
+  }
+
+  /**
+   * The only writer of EmergencyEvent status changes (3.15). Checks the transition table, persists,
+   * updates the alert's SOS timeline entry, tells the safety network and the room. Terminal states
+   * close the alert like 3.14 did (resolved, medical removed, ALERT_RESOLVED + status).
+   * Returns the alert, or null when the change is not allowed (closed, unknown, same status).
+   */
+  async setEmergencyStatus(groupId, alertId, next, { by = 'SYSTEM' } = {}) {
+    // Live convoys only (every caller already has the room in memory; an ended ride is never loaded back).
+    const room = this.rooms.get(groupId);
+    const a = room?.alerts.get(alertId);
+    if (!a || a.resolved) return null;
+    const cur = statusOf(a);
+    if (!TRANSITIONS[next] || !TRANSITIONS[next].includes(cur)) return null;
+    const t = now();
+    a.status = next;
+    a.lastUpdateAt = t;
+    if (EMERGENCY_TERMINAL.includes(next)) {
+      a.resolved = true; a.resolvedAt = t; a.resolvedBy = by; a.resolveReason = next === 'EXPIRED' ? 'EXPIRED' : next;
+      delete a.medical;
+      await this.repo.resolveAlert(groupId, alertId, by, { status: next, resolveReason: a.resolveReason, lastUpdateAt: t, ...(a.netResponders ? { netResponders: a.netResponders } : {}) })
+        .catch((e) => this.log.warn('[convoys] resolve failed', e.message));
+      this.emit('activity', groupId, { type: 'EMERGENCY_STATUS', alert: a });
+      this._emit(groupId, 'ALERT_RESOLVED', { alertId, by, status: next });
+      this.emit('fleet');
+      this._hook('RESOLVED', groupId, a);
+      return a;
+    }
+    await this.repo.updateAlert(groupId, alertId, { status: next, lastUpdateAt: t }).catch((e) => this.log.warn('[convoys] status save failed', e.message));
+    this.emit('activity', groupId, { type: 'EMERGENCY_STATUS', alert: a });
+    this._hook('STATUS', groupId, a);
+    this.emitEmergencyUpdate(groupId, alertId);
+    this.emit('fleet');
+    return a;
+  }
+
+  _hook(kind, groupId, a) {
+    try { this.emit('emergency', groupId, a, kind, {}); } catch (e) { this.log.warn('[convoys] emergency hook failed', e.message); }
+  }
+
+  /**
+   * EMERGENCY_UPDATE to the room's 3.15 sockets (cap net1): status, latest known position, the
+   * nearby assistance summary and the nearest own member. Old apps never get it.
+   */
+  emitEmergencyUpdate(groupId, alertId) {
+    const room = this.rooms.get(groupId);
+    const a = room?.alerts.get(alertId);
+    if (!a) return false;
+    const sum = this._summary(groupId, alertId) || {};
+    const pos = sum.position || { lat: a.lat, lng: a.lng };
+    this.emit('capEvent', groupId, 'net1', {
+      type: 'EMERGENCY_UPDATE', alertId, status: statusOf(a), lastUpdateAt: a.lastUpdateAt || a.timestamp || 0,
+      lat: pos.lat, lng: pos.lng,
+      network: sum.network || { state: 'OFF', stage: 0, notified: 0, onScene: false, responders: [] },
+      ownNearest: sum.ownNearest || null,
+      ts: now(),
+    });
+    return true;
+  }
+
+  /**
+   * "Rider down here" (3.15 REPORT_DOWN). With subjectUserId (a rider of my room, not me): a member
+   * report for that rider (their open alert is returned when there is one). Without: a nearby
+   * report (someone outside the group) as an alert in my room, the reporter on scene.
+   * The point must be within NET_REPORT_MAX_M of my last position. Returns { alert, duplicate }.
+   */
+  async reportDown(groupId, user, msg = {}) {
+    const room = await this.getRoom(groupId);
+    const me = room.riders.get(user.userId);
+    if (!me) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    const lat = Number(msg.lat), lng = Number(msg.lng);
+    if (msg.lat === null || msg.lng === null || typeof msg.lat === 'boolean' || typeof msg.lng === 'boolean' ||
+        !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) {
+      throw new ConvoyError('Send the position of the rider.', 400, 'BAD_POSITION');
+    }
+    let subject = null;
+    if (msg.subjectUserId !== undefined && msg.subjectUserId !== null && msg.subjectUserId !== '') {
+      const sid = typeof msg.subjectUserId === 'string' && msg.subjectUserId.length <= 64 ? msg.subjectUserId : '';
+      subject = sid && sid !== user.userId ? room.riders.get(sid) : null;
+      if (!subject) throw new ConvoyError('That rider is not in your group.', 403, 'NOT_ALLOWED');
+    }
+    if (!(me.lat || me.lng) || haversine(me.lat, me.lng, lat, lng) > config.netReportMaxM) {
+      throw new ConvoyError('You can report a rider only near your own position.', 422, 'TOO_FAR');
+    }
+    const t = now();
+    const log = this.reportDownLog || (this.reportDownLog = new Map());
+    const recent = (log.get(user.userId) || []).filter((x) => t - x < 600000);
+    if (recent.length >= config.reportDownPer10Min) throw new ConvoyError('Slow down.', 429);
+    recent.push(t);
+    log.set(user.userId, recent);
+    if (log.size > 5000) for (const [k, v] of log) if (!v.some((x) => t - x < 600000)) log.delete(k);
+
+    if (subject) {
+      const open = [...room.alerts.values()].find((a) => a.userId === subject.userId && !a.resolved);
+      if (open) {
+        if (!open.reportedBy) {
+          open.reportedBy = user.userId; open.reportedByName = user.name;
+          await this.repo.updateAlert(groupId, open.alertId, { reportedBy: user.userId, reportedByName: user.name }).catch(() => {});
+        }
+        return { alert: open, duplicate: true };
+      }
+    }
+    const base = {
+      alertId: `SOS-${crypto.randomUUID()}`, lat: clampLat(lat), lng: clampLng(lng), alertType: 'RIDER_DOWN', timestamp: t, resolved: false,
+      auto: false, details: {}, occurredAt: t, responders: {}, reportedBy: user.userId, reportedByName: user.name,
+    };
+    if (subject) {
+      const alert = {
+        ...base, userId: subject.userId, userName: subject.name,
+        ...this._emergencyFields(room, { lat: base.lat, lng: base.lng, msg: { heading: msg.heading }, source: 'MEMBER_REPORT', alertType: 'RIDER_DOWN', t, status: 'ASSISTANCE_REQUESTED' }),
+      };
+      const doc = await withTimeout(this.repo.findUserById(subject.userId), 1500).catch(() => null);
+      return { alert: await this._storeAlert(room, alert, doc), duplicate: false };
+    }
+    const alert = {
+      ...base, userId: user.userId, userName: user.name,
+      ...this._emergencyFields(room, { lat: base.lat, lng: base.lng, msg: { heading: msg.heading }, source: 'NEARBY_REPORT', alertType: 'RIDER_DOWN', t, status: 'ASSISTANCE_ARRIVED' }),
+    };
+    // The injured person is not the reporter: no medical info of the reporter is attached.
+    room.alerts.set(alert.alertId, alert);
+    await this.repo.addAlert(groupId, alert);
+    this._emit(groupId, 'ALERT', { alert: publicAlert(alert, { summary: this._summary(groupId, alert.alertId) }) });
+    this.emit('fleet');
+    try { this.emit('emergency', groupId, alert, 'RAISED', { owner: null }); } catch (e) { this.log.warn('[convoys] emergency hook failed', e.message); }
+    return { alert, duplicate: false };
   }
 
   /**
@@ -475,6 +710,16 @@ class ConvoyManager extends EventEmitter {
     this._emit(groupId, 'SOS_RESPONSE', { alertId: a.alertId, userId: user.userId, name: user.name, kind: k === 'CANCEL' ? null : k, at: t, responders });
     this.emit('activity', groupId, { type: 'SOS_RESPONSE', user, alert: a, kind: k, at: t, responders });
     this.emit('fleet');
+    // 3.15 lifecycle: own-group responders move the emergency too.
+    const st = statusOf(a);
+    if (k === 'GOING' && (st === 'CONFIRMED_ACCIDENT' || st === 'ASSISTANCE_REQUESTED')) {
+      await this.setEmergencyStatus(groupId, a.alertId, 'RESPONDER_ASSIGNED', { by: user.userId });
+    } else if (k === 'WITH_THEM' && st !== 'ASSISTANCE_ARRIVED') {
+      await this.setEmergencyStatus(groupId, a.alertId, 'ASSISTANCE_ARRIVED', { by: user.userId });
+    } else if (k === 'CANCEL' && st === 'RESPONDER_ASSIGNED' && !Object.values(map).some((x) => x && x.kind === 'GOING')
+      && !(this.network && this.network.hasActiveResponder(groupId, a.alertId))) {
+      await this.setEmergencyStatus(groupId, a.alertId, 'ASSISTANCE_REQUESTED', { by: user.userId });
+    }
     return { changed: true, responders };
   }
 
@@ -503,7 +748,7 @@ class ConvoyManager extends EventEmitter {
    * The rider changed their phone, emergency contact or emergency-text opt-out: update their record
    * in the live ride (the opt-out stays server side) and tell the room to fetch the SMS roster again.
    */
-  async applyProfile(userId, user) {
+  async applyProfile(userId, user, keys = null) {
     const rooms = [...this.rooms.values()].filter((r) => r.riders.has(userId));
     if (!rooms.length) {
       const meta = await this.repo.findActiveMembership(userId).catch(() => null);
@@ -511,16 +756,21 @@ class ConvoyManager extends EventEmitter {
       if (room && room.riders.has(userId)) rooms.push(room);
     }
     const p = profileOf(user);
+    // 3.15: only the nearby-assistance switches changed: no roster refresh for the room.
+    const rosterChange = !Array.isArray(keys) || keys.some((k) => !ASSIST_RIDER_KEYS.includes(k));
     for (const room of rooms) {
       const cur = room.riders.get(userId);
-      const next = { ...cur, phone: p.phone, emergencyContact: p.emergencyContact, emergencyContactName: p.emergencyContactName, smsOptOut: p.smsOptOut };
+      const next = {
+        ...cur, phone: p.phone, emergencyContact: p.emergencyContact, emergencyContactName: p.emergencyContactName, smsOptOut: p.smsOptOut,
+        assistHelp: p.assistHelp, assistAsk: p.assistAsk, responderMedical: p.responderMedical,
+      };
       room.riders.set(userId, next);
       room.dirty.add(userId);
       this._schedulePersist(room);
       if (cur.phone !== next.phone || cur.emergencyContact !== next.emergencyContact || cur.emergencyContactName !== next.emergencyContactName) {
         this._emit(room.groupId, 'RIDER_UPDATE', { rider: publicRider(next) });
       }
-      this._emit(room.groupId, 'ROSTER_CHANGED', {});
+      if (rosterChange) this._emit(room.groupId, 'ROSTER_CHANGED', {});
     }
     return rooms.length;
   }
@@ -611,7 +861,15 @@ class ConvoyManager extends EventEmitter {
       for (const a of room.alerts.values()) {
         if (a.resolved) continue;
         const rider = room.riders.get(a.userId);
+        const sum = this._summary(room.groupId, a.alertId);
+        const net = sum?.network;
+        const u = await this.repo.findUserById(a.userId).catch(() => null);
         out.push({
+          status: statusOf(a), source: sourceOf(a), severity: a.severity || severityOf(a.alertType, sourceOf(a)),
+          network: net
+            ? { state: net.state, stage: net.stage, notified: net.notified, responders: net.responders.map((x) => ({ name: x.name, status: x.status, etaS: x.etaS ?? null })) }
+            : { state: 'OFF', stage: 0, notified: 0, responders: [] },
+          falseAlarms30d: falseAlarmCount(u, now()),
           groupId: room.groupId, convoyName: room.meta.name || '', alertId: a.alertId, alertType: a.alertType || 'EMERGENCY', auto: !!a.auto,
           userId: a.userId, userName: a.userName || rider?.name || '', lat: a.lat || 0, lng: a.lng || 0,
           startedAt: a.timestamp || 0, occurredAt: a.occurredAt || a.timestamp || 0,
@@ -855,10 +1113,17 @@ class ConvoyManager extends EventEmitter {
     if (patch.stopThresholdSeconds !== undefined) room.meta.stopThresholdSeconds = Math.max(30, Math.min(3600, num(patch.stopThresholdSeconds, 180)));
     if (patch.voiceGuidanceEnabled !== undefined) room.meta.voiceGuidanceEnabled = !!patch.voiceGuidanceEnabled;
     if (patch.speedLimitKmh !== undefined) room.meta.speedLimitKmh = speedLimit(patch.speedLimitKmh);
+    // 3.15: social visibility and the group default for nearby assistance (wrong types are ignored).
+    if (patch.visibility === 'PUBLIC' || patch.visibility === 'PRIVATE') room.meta.visibility = patch.visibility;
+    if (typeof patch.discovery === 'boolean') room.meta.discovery = patch.discovery;
+    if (typeof patch.assistDefault === 'boolean') room.meta.assistDefault = patch.assistDefault;
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
     const { distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled } = room.meta;
-    this._emit(groupId, 'CONFIG', { distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled, speedLimitKmh: room.meta.speedLimitKmh || 0 });
+    this._emit(groupId, 'CONFIG', {
+      distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled, speedLimitKmh: room.meta.speedLimitKmh || 0,
+      visibility: room.meta.visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE', discovery: room.meta.discovery === true, assistDefault: room.meta.assistDefault !== false,
+    });
   }
 
   /**
@@ -908,6 +1173,7 @@ class ConvoyManager extends EventEmitter {
       this._emit(groupId, 'DISSOLVED', {});
       clearTimeout(room.persistTimer);
       this.rooms.delete(groupId);
+      this.emit('roomEnded', groupId, room);
     }
     await this.repo.deleteConvoyCascade(groupId);
     this.emit('fleet');
@@ -1010,7 +1276,41 @@ function profileOf(u) {
     emergencyContact: String(u.emergencyContact || ''),
     emergencyContactName: String(u.emergencyContactName || ''),
     smsOptOut: !!u.smsOptOut, // server only: never in publicRider
+    // 3.15 nearby assistance, server only (never in publicRider).
+    assistHelp: u.assistHelp !== false,
+    assistAsk: u.assistAsk !== false,
+    responderMedical: u.responderMedical === true,
   };
+}
+
+/** What the safety network needs from the subject's users doc at raise (memory only). */
+function ownerInfo(u) {
+  if (!u) return null;
+  return {
+    assistAsk: typeof u.assistAsk === 'boolean' ? u.assistAsk : undefined,
+    responderMedical: u.responderMedical === true,
+    falseAlarmAt: Array.isArray(u.falseAlarmAt) ? u.falseAlarmAt.filter(Number.isFinite) : [],
+  };
+}
+
+/** False alarms of a user within ABUSE_WINDOW_D. */
+function falseAlarmCount(u, t) {
+  const list = u && Array.isArray(u.falseAlarmAt) ? u.falseAlarmAt : [];
+  return list.filter((x) => Number.isFinite(x) && t - x <= config.abuseWindowD * 86400000).length;
+}
+
+/** Segment index of the point on the group's route polyline (within NET_ON_ROUTE_M), or null. */
+function routeIndexOf(meta, lat, lng) {
+  const poly = meta && meta.route && meta.route.polyline;
+  if (typeof poly !== 'string' || !poly || !(lat || lng)) return null;
+  const line = decodePolyline(poly, 50000);
+  if (!line || line.length < 2) return null;
+  let best = null;
+  for (let i = 0; i < line.length - 1; i++) {
+    const d = pointToSegment({ lat, lng }, line[i], line[i + 1]).dist;
+    if (!best || d < best.d) best = { d, i };
+  }
+  return best && best.d <= config.netOnRouteM ? best.i : null;
 }
 
 /** What a client may send about itself when creating or joining: position, heading, battery and bike colour. */
@@ -1046,6 +1346,9 @@ function buildRider(user, p, t) {
     }),
     joinedAt: p.joinedAt || t,
     smsOptOut: !!p.smsOptOut,
+    assistHelp: p.assistHelp !== false,
+    assistAsk: p.assistAsk !== false,
+    responderMedical: p.responderMedical === true,
   };
 }
 
@@ -1090,9 +1393,24 @@ function respondersList(map) {
  * An alert as sent on the wire: responders as a list; medical info only for the convoy room
  * (`medical: false` for admins and the fleet feed), and only while the alert is open.
  */
-function publicAlert(a, { medical = true } = {}) {
-  const { key, groupId, medical: med, responders, ...rest } = a;
-  const out = { ...rest, auto: !!a.auto, details: a.details || {}, occurredAt: a.occurredAt || a.timestamp || 0, responders: respondersList(responders) };
+function publicAlert(a, { medical = true, summary = null } = {}) {
+  const { key, groupId, medical: med, responders, network, ownNearest, ...rest } = a;
+  const source = sourceOf(a);
+  const out = {
+    ...rest, auto: !!a.auto, details: a.details || {}, occurredAt: a.occurredAt || a.timestamp || 0, responders: respondersList(responders),
+    // 3.15 EmergencyEvent fields (old docs get derived values; old apps ignore them).
+    status: statusOf(a), source, severity: a.severity || severityOf(a.alertType, source),
+    heading: Number.isFinite(a.heading) ? a.heading : null,
+    speedKmh: Number.isFinite(a.speedKmh) ? a.speedKmh : null,
+    accuracyM: Number.isFinite(a.accuracyM) ? a.accuracyM : null,
+    routeIndex: Number.isInteger(a.routeIndex) ? a.routeIndex : null,
+    confirmedAt: a.confirmedAt || a.timestamp || 0,
+    lastUpdateAt: a.lastUpdateAt || a.timestamp || 0,
+    reportedBy: a.reportedBy || '', reportedByName: a.reportedByName || '',
+    resolveReason: a.resolveReason || null,
+  };
+  if (summary && summary.network) out.network = summary.network;
+  if (summary && summary.ownNearest !== undefined) out.ownNearest = summary.ownNearest;
   if (medical && med && !a.resolved) out.medical = med;
   return out;
 }
@@ -1112,4 +1430,7 @@ function sanitizeBreadcrumbs(list) {
     .map((p) => ({ lat: clampLat(p.lat), lng: clampLng(p.lng) }));
 }
 
-module.exports = { ConvoyManager, ConvoyError, publicRider, publicAlert, sanitizeTelemetry, TELEMETRY_FIELDS, TRUSTED_FIELDS, WAIT_MESSAGE, SOS_TYPES, LIVE_STATUSES };
+module.exports = {
+  ConvoyManager, ConvoyError, publicRider, publicAlert, sanitizeTelemetry, TELEMETRY_FIELDS, TRUSTED_FIELDS, WAIT_MESSAGE, SOS_TYPES, LIVE_STATUSES,
+  statusOf, sourceOf, severityOf, isOpenStatus, falseAlarmCount, ownerInfo, EMERGENCY_OPEN, EMERGENCY_TERMINAL, EMERGENCY_SOURCES,
+};

@@ -29,8 +29,9 @@ class SafetyConstants {
   /// The first seconds after the stop are not judged for stillness (the slide ends, GPS speed lags).
   static const Duration crashSettle = Duration(seconds: 2);
 
-  /// The alarm counts down this long before the SOS is sent.
-  static const Duration crashCountdown = Duration(seconds: 30);
+  /// The alarm ("Possible accident detected. Are you okay?") counts down this long before
+  /// the SOS is sent (3.15: 15 s, was 30 s).
+  static const Duration crashCountdown = Duration(seconds: 15);
 
   /// No new alarm for this long after an alarm was answered.
   static const Duration crashCooldown = Duration(minutes: 2);

@@ -2,18 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/constants/network_constants.dart';
 import '../../core/ui/ui.dart';
+import '../../data/models/network_models.dart';
+import '../../data/models/network_wire.dart';
 import '../../data/models/safety_wire.dart';
 import '../../data/models/sos_alert_model.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/timeline_service.dart';
 import '../../domain/notify/alert_policy.dart';
+import '../../domain/notify/alert_priority.dart';
+import '../ride/assist_banner.dart';
+import '../ride/discovery_card.dart';
+import '../ride/emergency_guidance.dart';
+import '../ride/hazard_marker.dart';
 import '../ride/incident_banner.dart';
 import '../ride/incident_sheet.dart';
 import '../ride/incident_view.dart';
 import '../rider/rider_home_screen.dart';
 import '../timeline/live_timeline_screen.dart';
+import '../widgets/emergency_sos_sheet.dart';
 import 'alert_tiers.dart';
 
 /// The ride facts the alerts depend on. A record compares by value, so a
@@ -54,6 +63,27 @@ String safetyPromptsSignature(SafetyService? s) =>
 List<SafetyPrompt> safetyPromptsOf(BuildContext context) {
   context.select<SafetyService?, String>(safetyPromptsSignature);
   return context.read<SafetyService?>()?.prompts ?? const <SafetyPrompt>[];
+}
+
+/// What the Alerts tab shows from the safety and discovery networks; a
+/// value that changes only when one of them changes (not on positions).
+String networkAlertsSignature(ConvoyService s) {
+  final b = StringBuffer();
+  final active = s.activeAssist;
+  if (active != null) b.write('A${active.incidentId}:${active.myStatus.name}:${active.arrivalCheck};');
+  for (final a in s.assistRequests) {
+    b.write('R${a.incidentId}:${a.myStatus.name}:${a.arrivalCheck}:${a.lastUpdateAt};');
+  }
+  for (final h in s.hazards) {
+    b.write('H${h.hazardId}:${h.level.name};');
+  }
+  for (final n in s.assistNotices) {
+    b.write('N${n.incidentId}:${n.at};');
+  }
+  for (final e in s.encounters) {
+    b.write('E${e.encounterId}:${e.type.name}:${e.riders}:${e.distanceM.round()}:${e.iWaved}:${e.theyWavedAt};');
+  }
+  return b.toString();
 }
 
 /// Critical and important alerts, for the badge on the Alerts tab.
@@ -142,6 +172,19 @@ class _AlertsList extends StatelessWidget {
     }
   }
 
+  /// My accepted request first, then the others (closed ones left out).
+  static List<AssistRequest> _assists(ConvoyService s) {
+    final out = <AssistRequest>[];
+    final active = s.activeAssist;
+    if (active != null) out.add(active);
+    for (final a in s.assistRequests) {
+      if (active != null && a.incidentId == active.incidentId) continue;
+      if (assistStageOf(a) == AssistStage.closed) continue;
+      out.add(a);
+    }
+    return out;
+  }
+
   static void _imOk(BuildContext context) {
     final ok = context.read<ConvoyService>().sendCheckIn(CheckInResult.ok);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -155,6 +198,9 @@ class _AlertsList extends StatelessWidget {
     final timeline = context.watch<TimelineService>();
     // Open SOS and crash alerts (responders, medical) change this list; positions do not.
     context.select<ConvoyService, List<SosAlertModel>>((s) => s.activeConvoy?.activeAlerts ?? const <SosAlertModel>[]);
+    // Assistance requests, accidents ahead, notices and nearby groups change it too.
+    context.select<ConvoyService, String>(networkAlertsSignature);
+    final guidance = context.watch<EmergencyGuidance?>();
     final prompts = safetyPromptsOf(context);
     // My position only for "km from you" text: read, not watched (no rebuild on every fix).
     final service = context.read<ConvoyService>();
@@ -177,6 +223,8 @@ class _AlertsList extends StatelessWidget {
           myLat: mePos?.lat,
           myLng: mePos?.lng,
           nowMs: now,
+          route: convoy?.routeLine ?? const [],
+          phone: convoy?.riders[i.subjectUserId]?.phone ?? '',
           onOpen: () => showIncidentSheet(context, convoyId: convoy?.groupId ?? '', subjectUserId: i.subjectUserId, alertId: i.alertId),
         ),
       if (facts.mySosOpen)
@@ -184,16 +232,25 @@ class _AlertsList extends StatelessWidget {
           tier: AlertTier.critical,
           title: 'Your SOS is on',
           message: 'Your group can see where you are.',
-          actionLabel: 'I am safe',
-          onAction: () => context.read<ConvoyService>().cancelMySos(),
+          actionLabel: 'View SOS',
+          onAction: () => EmergencySosSheet.show(context, lat: mePos?.lat ?? 0.0, lng: mePos?.lng ?? 0.0),
         )
       else if (facts.sosWaiting)
         RideAlert(
           tier: AlertTier.critical,
           title: 'SOS waiting for signal',
           message: 'It is sent as soon as the phone is back online.',
-          actionLabel: 'I am safe',
-          onAction: () => context.read<ConvoyService>().cancelMySos(),
+          actionLabel: 'View SOS',
+          onAction: () => EmergencySosSheet.show(context, lat: mePos?.lat ?? 0.0, lng: mePos?.lng ?? 0.0),
+        ),
+      // Assistance requests from other groups (also after "Can't assist": I can still help).
+      for (final a in _assists(service))
+        AssistBanner(
+          request: a,
+          myLat: mePos?.lat,
+          myLng: mePos?.lng,
+          route: convoy?.routeLine ?? const [],
+          nowMs: now,
         ),
     ];
 
@@ -206,7 +263,11 @@ class _AlertsList extends StatelessWidget {
           onAction: () => context.read<SafetyService>().answerPrompt(p.key),
           onDismiss: p.secondaryLabel == null ? null : () => context.read<SafetyService>().answerPrompt(p.key, primary: false),
         );
+    final hazardViews = <String, HazardView>{for (final v in guidance?.hazards ?? const <HazardView>[]) v.hazard.hazardId: v};
     final localImportant = <Widget>[
+      for (final h in service.hazards)
+        if (guidance == null || hazardViews.containsKey(h.hazardId))
+          HazardBanner(hazard: h, view: hazardViews[h.hazardId], onTap: () => RiderHomeScreen.selectTab(context, HomeTab.ride)),
       for (final i in incidents.where((x) => x.isMe && !x.isAlert))
         RideAlert(
           tier: AlertTier.important,
@@ -217,8 +278,24 @@ class _AlertsList extends StatelessWidget {
         ),
       for (final p in prompts.where((p) => p.tier != AlertTier.normal)) prompt(p),
     ];
+    final social = AlertArbiter.socialAllowed(
+      anyEmergency: incidents.any((i) => i.isAlert) || facts.mySosOpen || facts.sosWaiting,
+      anyAssist: service.assistRequests.isNotEmpty || service.activeAssist != null,
+      anyHazard: service.hazards.isNotEmpty,
+    );
     final localNormal = <Widget>[
+      for (final n in service.assistNotices)
+        if (n.reason == AssistClosedReason.taken && now < n.at + NetworkConstants.assistTakenShowFor.inMilliseconds)
+          const RideAlert(tier: AlertTier.normal, title: AssistTexts.takenTitle, message: AssistTexts.takenBody),
       for (final p in prompts.where((p) => p.tier == AlertTier.normal)) prompt(p),
+      if (social)
+        for (final e in service.encounters)
+          DiscoveryCard(
+            encounter: e,
+            onView: () => showDiscoverySheet(context, e, onWave: () => service.wave(e.encounterId)),
+            onWave: () => service.wave(e.encounterId),
+            onIgnore: () => service.ignoreEncounter(e.encounterId),
+          ),
     ];
 
     if (alerts.isEmpty && local.isEmpty && localImportant.isEmpty && localNormal.isEmpty) {

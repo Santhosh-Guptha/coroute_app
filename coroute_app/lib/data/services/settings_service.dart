@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
 
 /// Rider settings kept on the phone: data saver ("low data") mode and the ride
@@ -26,6 +27,15 @@ class SettingsService extends ChangeNotifier {
   bool _oemGuideSeen = false;
   bool _loaded = false;
 
+  // 3.15: voice, accident warnings, ride notification, nearby riders consent.
+  bool _voiceCritical = true;
+  bool _voiceWarnings = true;
+  bool _hazardAlerts = true;
+  bool _rideOnLockScreen = true;
+  bool _richNotification = true;
+  bool _netConsentSeen = false;
+  int _netConsentPrompts = 0;
+
   bool get lowData => _lowData;
   bool get crashDetection => _crashDetection;
   bool get smsFallback => _smsFallback;
@@ -33,6 +43,27 @@ class SettingsService extends ChangeNotifier {
   bool get soloCheckIn => _soloCheckIn;
   bool get oemGuideSeen => _oemGuideSeen;
   bool get isLoaded => _loaded;
+
+  /// Speak emergency alerts (on by default).
+  bool get voiceCritical => _voiceCritical;
+
+  /// Speak warnings and directions (on by default; also needs the group's voice switch).
+  bool get voiceWarnings => _voiceWarnings;
+
+  /// Accident warnings on my route (on by default).
+  bool get hazardAlerts => _hazardAlerts;
+
+  /// Show the ride on the lock screen (on by default).
+  bool get rideOnLockScreen => _rideOnLockScreen;
+
+  /// Large ride notification (on by default; off = the plain one-line notification).
+  bool get richNotification => _richNotification;
+
+  /// The nearby riders consent sheet was answered with Continue.
+  bool get netConsentSeen => _netConsentSeen;
+
+  /// How many times the consent sheet was put off with Later.
+  int get netConsentPrompts => _netConsentPrompts;
 
   Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
 
@@ -46,6 +77,13 @@ class SettingsService extends ChangeNotifier {
       _fatigueReminder = prefs.getBool(SafetyConstants.keyFatigueReminder) ?? true;
       _soloCheckIn = prefs.getBool(SafetyConstants.keySoloCheckIn) ?? true;
       _oemGuideSeen = prefs.getBool(SafetyConstants.keyOemGuideSeen) ?? false;
+      _voiceCritical = prefs.getBool(NetworkConstants.keyVoiceCritical) ?? true;
+      _voiceWarnings = prefs.getBool(NetworkConstants.keyVoiceWarnings) ?? true;
+      _hazardAlerts = prefs.getBool(NetworkConstants.keyHazardAlerts) ?? true;
+      _rideOnLockScreen = prefs.getBool(NetworkConstants.keyRideOnLockScreen) ?? true;
+      _richNotification = prefs.getBool(NetworkConstants.keyRichNotification) ?? true;
+      _netConsentSeen = prefs.getBool(NetworkConstants.keyNetConsentSeen) ?? false;
+      _netConsentPrompts = prefs.getInt(NetworkConstants.keyNetConsentPrompts) ?? 0;
     } catch (e) {
       debugPrint('settings load note: $e');
     }
@@ -96,6 +134,60 @@ class SettingsService extends ChangeNotifier {
     _soloCheckIn = value;
     notifyListeners();
     await _save(SafetyConstants.keySoloCheckIn, value);
+  }
+
+  Future<void> setVoiceCritical(bool value) async {
+    if (value == _voiceCritical) return;
+    _voiceCritical = value;
+    notifyListeners();
+    await _save(NetworkConstants.keyVoiceCritical, value);
+  }
+
+  Future<void> setVoiceWarnings(bool value) async {
+    if (value == _voiceWarnings) return;
+    _voiceWarnings = value;
+    notifyListeners();
+    await _save(NetworkConstants.keyVoiceWarnings, value);
+  }
+
+  Future<void> setHazardAlerts(bool value) async {
+    if (value == _hazardAlerts) return;
+    _hazardAlerts = value;
+    notifyListeners();
+    await _save(NetworkConstants.keyHazardAlerts, value);
+  }
+
+  Future<void> setRideOnLockScreen(bool value) async {
+    if (value == _rideOnLockScreen) return;
+    _rideOnLockScreen = value;
+    notifyListeners();
+    await _save(NetworkConstants.keyRideOnLockScreen, value);
+  }
+
+  Future<void> setRichNotification(bool value) async {
+    if (value == _richNotification) return;
+    _richNotification = value;
+    notifyListeners();
+    await _save(NetworkConstants.keyRichNotification, value);
+  }
+
+  Future<void> markNetConsentSeen() async {
+    if (_netConsentSeen) return;
+    _netConsentSeen = true;
+    notifyListeners();
+    await _save(NetworkConstants.keyNetConsentSeen, true);
+  }
+
+  /// The consent sheet was put off ("Later"); it is offered at most [NetworkConstants.netConsentMaxPrompts] times.
+  Future<void> bumpNetConsentPrompts() async {
+    _netConsentPrompts++;
+    notifyListeners();
+    try {
+      final prefs = await _p();
+      await prefs.setInt(NetworkConstants.keyNetConsentPrompts, _netConsentPrompts);
+    } catch (e) {
+      debugPrint('settings save note: $e');
+    }
   }
 
   Future<void> markOemGuideSeen() async {

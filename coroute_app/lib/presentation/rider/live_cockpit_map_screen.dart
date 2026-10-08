@@ -9,11 +9,14 @@ import 'package:share_plus/share_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/constants/network_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/map_tiles.dart';
 import '../../core/ui/ui.dart';
 import '../../core/widgets/cockpit_hud.dart';
 import '../../data/models/convoy_model.dart';
+import '../../data/models/network_models.dart';
+import '../../data/models/network_wire.dart';
 import '../../data/models/outbox_item.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/models/safety_wire.dart';
@@ -28,6 +31,7 @@ import '../../data/services/safety_service.dart';
 import '../../data/services/settings_service.dart';
 import '../../data/services/timeline_service.dart';
 import '../../domain/notify/alert_policy.dart';
+import '../../domain/notify/alert_priority.dart';
 import '../../domain/ride/ride_facts.dart';
 import '../../domain/route/route_plan.dart';
 import '../../domain/route/route_progress.dart';
@@ -35,7 +39,12 @@ import '../../domain/tracking/geo_math.dart';
 import '../alerts/alert_tiers.dart';
 import '../alerts/alerts_screen.dart';
 import '../map_picker/map_picker_screen.dart';
+import '../ride/assist_banner.dart';
+import '../ride/assist_sheet.dart';
+import '../ride/discovery_card.dart';
+import '../ride/emergency_guidance.dart';
 import '../ride/group_settings_sheet.dart';
+import '../ride/hazard_marker.dart';
 import '../ride/incident_banner.dart';
 import '../ride/incident_sheet.dart';
 import '../ride/incident_view.dart';
@@ -46,6 +55,7 @@ import '../ride/ride_sheet.dart';
 import '../ride/rider_card_sheet.dart';
 import '../ride/riders_ladder.dart';
 import '../ride/route_guide.dart';
+import '../safety/sos_hold_screen.dart';
 import '../timeline/member_colors.dart';
 import '../trip_planner/route_stops_panel.dart';
 import '../widgets/connection_banner.dart';
@@ -97,7 +107,16 @@ class _Slot {
   /// Runs instead of hiding the slot on this screen (a prompt answered "Later").
   final VoidCallback? onDismiss;
 
-  const _Slot({
+  /// Where it ranks (3.15): SOS, assistance request, hazard, group safety, route info, social.
+  final AlertPriority priority;
+
+  /// Within a priority: larger first (then the order added).
+  final int order;
+
+  /// A banner of its own (incident, assistance, hazard, discovery) instead of a [RideAlert].
+  final Widget? child;
+
+  _Slot({
     required this.key,
     required this.tier,
     required this.title,
@@ -106,7 +125,11 @@ class _Slot {
     this.onAction,
     this.dismissible = false,
     this.onDismiss,
-  });
+    AlertPriority? priority,
+    int? order,
+    this.child,
+  })  : priority = priority ?? (tier == AlertTier.normal ? AlertPriority.routeInfo : AlertPriority.groupSafety),
+        order = order ?? (tier == AlertTier.critical ? 300 : (tier == AlertTier.important ? 200 : 100));
 }
 
 class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
@@ -141,6 +164,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   Timer? _waitTimer;
   int _waitTimerAt = 0;
   Timer? _staleTimer;
+
+  // One-shot: hides "Another nearby rider is responding" and "X waved" when their time is up.
+  Timer? _hideTimer;
+  int _hideTimerAt = 0;
 
   // Route following: fed with my own fixes by the convoy listener (never by a timer).
   late final RouteGuide _guide = RouteGuide(fetchRoute: _fetchRoute);
@@ -290,6 +317,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     _guide.dispose();
     _waitTimer?.cancel();
     _staleTimer?.cancel();
+    _hideTimer?.cancel();
     _sheetTop.dispose();
     if (_keepScreenOn) WakelockPlus.disable();
     super.dispose();
@@ -310,6 +338,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   }
 
   // ---------------------------------------------------------------- actions
+
+  /// The SOS from the ride notification: the hold screen (also over the lock
+  /// screen); nothing is sent unless the rider holds SOS there.
+  Future<void> _openSosHold(ConvoyService service, AuthService auth) async {
+    final send = await SosHoldScreen.show(context);
+    if (!send || !mounted) return;
+    await _triggerSos(service, auth);
+  }
 
   /// The one SOS path: my position (or a 5 s GPS fallback when I have none),
   /// type CRASH_OR_EMERGENCY, kept on the phone and re-sent after a dead zone
@@ -528,6 +564,24 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     showIncidentSheet(context, convoyId: widget.convoyId, subjectUserId: i.subjectUserId, alertId: i.alertId);
   }
 
+  void _openAssist(AssistRequest a) {
+    _focus(a.lat, a.lng);
+    showAssistSheet(context, incidentId: a.incidentId);
+  }
+
+  /// Rebuilds once when the earliest short notice ([NetworkConstants.assistTakenShowFor],
+  /// [NetworkConstants.waveShowFor]) should go. One-shot; nothing while idle.
+  void _armHideTimer(int atMs, int nowMs) {
+    if (_hideTimer != null && _hideTimerAt <= atMs && _hideTimerAt > nowMs) return;
+    _hideTimer?.cancel();
+    _hideTimerAt = atMs;
+    _hideTimer = Timer(Duration(milliseconds: (atMs - nowMs).clamp(0, 600000).toInt() + 300), () {
+      _hideTimer = null;
+      _hideTimerAt = 0;
+      if (mounted) setState(() {});
+    });
+  }
+
   // ------------------------------------------------------------- alert slot
 
   List<_Slot> _slots({
@@ -539,6 +593,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     required List<IncidentView> incidents,
     required List<SafetyPrompt> prompts,
     required int nowMs,
+    EmergencyGuidance? guidance,
   }) {
     final out = <_Slot>[];
     final incidentKeys = {for (final i in incidents) i.key};
@@ -551,11 +606,93 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         tier: AlertTier.critical,
         title: delivered ? 'Your SOS is on' : (service.isOnline ? 'Sending your SOS' : 'SOS waiting to send'),
         message: delivered ? 'Your group can see where you are.' : 'It is kept on the phone and sent as soon as there is signal.',
-        actionLabel: 'I am safe',
-        onAction: () => service.cancelMySos(),
+        actionLabel: 'View SOS',
+        onAction: () => EmergencySosSheet.show(context, lat: me.lat, lng: me.lng),
+        priority: AlertPriority.sos,
+        order: 1000,
       ));
     }
-    // Someone else's SOS, crash or possible incident is the incident banner above the slot.
+    // Someone else's emergency in my group: the big incident banner (SOS and crash first).
+    final myPos = RideFacts.hasPosition(me);
+    for (final i in incidents.where((x) => !x.isMe)) {
+      out.add(_Slot(
+        key: i.key,
+        tier: AlertTier.critical,
+        title: i.title,
+        priority: i.isAlert ? AlertPriority.sos : AlertPriority.groupSafety,
+        order: 900,
+        child: IncidentBanner(
+          incident: i,
+          myLat: myPos ? me.lat : null,
+          myLng: myPos ? me.lng : null,
+          nowMs: nowMs,
+          route: convoy.routeLine,
+          phone: convoy.riders[i.subjectUserId]?.phone ?? '',
+          onOpen: () => _openIncident(i),
+        ),
+      ));
+    }
+    // Assistance requests from other groups (mine first). After "Can't assist" only the Alerts tab keeps it.
+    final assists = <AssistRequest>[];
+    final active = service.activeAssist;
+    if (active != null) assists.add(active);
+    for (final a in service.assistRequests) {
+      if (active != null && a.incidentId == active.incidentId) continue;
+      if (a.myStatus == ResponderStatus.declined || assistStageOf(a) == AssistStage.closed) continue;
+      assists.add(a);
+    }
+    for (var k = 0; k < assists.length; k++) {
+      final a = assists[k];
+      out.add(_Slot(
+        key: 'ASSIST:${a.incidentId}',
+        tier: AlertTier.critical,
+        title: AssistTexts.requestTitle,
+        priority: AlertPriority.assistRequest,
+        order: 900 - k,
+        child: AssistBanner(
+          request: a,
+          myLat: myPos ? me.lat : null,
+          myLng: myPos ? me.lng : null,
+          route: convoy.routeLine,
+          nowMs: nowMs,
+          onOpen: () => _openAssist(a),
+        ),
+      ));
+    }
+    // Accidents reported ahead (amber, never red).
+    final views = <String, HazardView>{for (final v in guidance?.hazards ?? const <HazardView>[]) v.hazard.hazardId: v};
+    for (final h in service.hazards) {
+      if (guidance != null && !views.containsKey(h.hazardId)) continue; // passed
+      final key = 'HAZARD:${h.hazardId}';
+      out.add(_Slot(
+        key: key,
+        tier: AlertTier.important,
+        title: 'CAUTION',
+        priority: AlertPriority.hazard,
+        dismissible: true,
+        child: HazardBanner(
+          hazard: h,
+          view: views[h.hazardId],
+          onTap: () => _focus(h.lat, h.lng),
+          onDismiss: () => setState(() => _dismissed.add(key)),
+        ),
+      ));
+    }
+    // "Another nearby rider is responding": neutral, hides by itself.
+    for (final n in service.assistNotices) {
+      if (n.reason != AssistClosedReason.taken) continue;
+      final until = n.at + NetworkConstants.assistTakenShowFor.inMilliseconds;
+      if (nowMs >= until) continue;
+      _armHideTimer(until, nowMs);
+      out.add(_Slot(
+        key: 'ASSIST_TAKEN:${n.incidentId}',
+        tier: AlertTier.normal,
+        title: AssistTexts.takenTitle,
+        message: AssistTexts.takenBody,
+        priority: AlertPriority.routeInfo,
+        dismissible: true,
+      ));
+    }
     // About me: the group was asked to check on me (or my lead heard no reply): one tap says I'm OK.
     for (final i in incidents.where((x) => x.isMe && !x.isAlert)) {
       out.add(_Slot(
@@ -591,9 +728,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       if (a.key == 'OFF_ROUTE:$uid' && _guide.handlesOffRoute) continue;
       if (!a.standing && a.tier == AlertTier.normal) continue;
       final r = a.userId == null ? null : convoy.riders[a.userId];
+      final routeInfo = a.key.startsWith('OFF_ROUTE:') || a.key == AlertPolicy.meetingKey;
       out.add(_Slot(
         key: a.key,
         tier: a.tier,
+        priority: routeInfo ? AlertPriority.routeInfo : null,
         title: a.spec.title,
         message: a.spec.body.isEmpty ? null : a.spec.body,
         actionLabel: (r != null && r.userId != uid) ? 'Show on map' : null,
@@ -640,12 +779,49 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         dismissible: true,
       ));
     }
+    // Other public groups nearby (social): only when nothing safety related is open.
+    final anyEmergency = out.any((s) => s.priority == AlertPriority.sos);
+    final social = AlertArbiter.socialAllowed(
+      anyEmergency: anyEmergency,
+      anyAssist: service.assistRequests.isNotEmpty || service.activeAssist != null,
+      anyHazard: service.hazards.isNotEmpty,
+    );
+    if (social) {
+      for (final e in service.encounters) {
+        final waved = e.theyWavedAt;
+        if (waved != null) {
+          final until = waved + NetworkConstants.waveShowFor.inMilliseconds;
+          if (nowMs < until) {
+            _armHideTimer(until, nowMs);
+            out.add(_Slot(
+              key: 'MEET:${e.encounterId}:WAVE:$waved',
+              tier: AlertTier.normal,
+              title: DiscoveryTexts.waved(e),
+              priority: AlertPriority.social,
+              order: 200,
+              child: WavedLine(encounter: e),
+            ));
+          }
+        }
+        out.add(_Slot(
+          key: 'MEET:${e.encounterId}',
+          tier: AlertTier.normal,
+          title: DiscoveryTexts.title(e),
+          priority: AlertPriority.social,
+          order: 100,
+          child: DiscoveryCard(
+            encounter: e,
+            onView: () => showDiscoverySheet(context, e, onWave: () => service.wave(e.encounterId)),
+            onWave: () => service.wave(e.encounterId),
+            onIgnore: () => service.ignoreEncounter(e.encounterId),
+          ),
+        ));
+      }
+    }
     final visible = out.where((s) => !_dismissed.contains(s.key)).toList();
-    // Stable: critical first, then important, then normal; within a tier the order above.
-    final ordered = <_Slot>[
-      for (final t in AlertTier.values) ...visible.where((s) => s.tier == t),
-    ];
-    return ordered;
+    // Priority first (SOS, assistance, hazard, group safety, route, social), then
+    // critical before important before normal; within that the order above (stable).
+    return AlertArbiter.arrange<_Slot>(visible, (s) => s.priority, newest: (s) => s.order);
   }
 
   // ------------------------------------------------------------------ build
@@ -656,6 +832,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     final service = context.watch<ConvoyService>();
     final rtState = context.select<RealtimeService?, RealtimeState>((r) => r?.state ?? RealtimeState.connected);
     final timeline = context.watch<TimelineService?>();
+    final guidance = context.watch<EmergencyGuidance?>();
     final lowData = context.select<SettingsService?, bool>((s) => s?.lowData ?? false);
     // This phone's ride safety prompts ("Are you OK?", "Time for a break").
     final prompts = safetyPromptsOf(context);
@@ -685,14 +862,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     final stoppedFor = RideFacts.stoppedFor(me, nowMs: now, thresholdSeconds: convoy.stopThresholdSeconds);
     final lead = service.canEditRoute;
 
-    // Notification SOS: ConvoyService already raised it; show the SOS sheet so it can be resolved.
+    // SOS from the ride notification: nothing was sent; the hold screen asks for the hold first.
     if (service.sosRequestedFromNotification && !_sosNoticeScheduled) {
       _sosNoticeScheduled = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _sosNoticeScheduled = false;
         if (!mounted) return;
         service.clearSosRequest();
-        EmergencySosSheet.show(context, lat: me.lat, lng: me.lng);
+        if (!SosHoldScreen.isOpen) _openSosHold(service, auth);
       });
     }
 
@@ -720,10 +897,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       nowMs: now,
     );
 
-    // Open emergencies: someone else's goes into the big incident banner (most urgent first),
-    // an automatic check about me into the alert slot.
+    // One top slot, by priority: my SOS, my group's emergency (the big incident banner), an
+    // assistance request, an accident ahead, group safety, route info, then other groups nearby.
     final incidents = incidentsFor(convoy, timeline, uid, now);
-    final others = incidents.where((i) => !i.isMe).toList();
     final slots = _slots(
       convoy: convoy,
       service: service,
@@ -733,11 +909,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       incidents: incidents,
       prompts: prompts,
       nowMs: now,
+      guidance: guidance,
     );
-    // My own SOS stays first (I need to know if it went out); otherwise the incident banner leads.
-    final mySosFirst = slots.isNotEmpty && slots.first.key == 'MY_SOS';
-    final IncidentView? topIncident = (!mySosFirst && others.isNotEmpty) ? others.first : null;
-    final extra = slots.length + others.length - 1;
+    final topSlot = slots.isEmpty ? null : slots.first;
+    final extra = slots.length - 1;
     // Why other riders' positions are old, and who has a possible incident (ladder words and chip).
     final offlinePlaces = <String, String>{};
     final possible = <String>{};
@@ -767,7 +942,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         const sosRing = 56.0 + 12.0; // RideSosButton: 56 dp button plus its hold ring
         return Stack(
           children: [
-            _map(convoy, service, me, uid, routePoints, colors, statuses, lowData, now),
+            _map(convoy, service, me, uid, routePoints, colors, statuses, lowData, now, guidance: guidance, incidents: incidents),
             // Top: one compact bar, the alert slot, and my speed when near or over the group limit.
             Positioned(
               top: MediaQuery.paddingOf(context).top + Space.s8,
@@ -781,29 +956,22 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     title: _topTitle(convoy, snap),
                     connection: connection,
                     gps: gps,
-                    route: _guide.statusLine,
+                    route: guidance?.statusLine ?? _guide.statusLine,
+                    emergencyRoute: guidance?.statusLine != null,
+                    onStopNavigation: guidance?.target == null ? null : guidance?.stop,
                     onBack: widget.embedded ? null : () => Navigator.of(context).maybePop(),
                   ),
-                  if (topIncident != null) ...[
+                  if (topSlot != null) ...[
                     const SizedBox(height: Space.s8),
-                    IncidentBanner(
-                      incident: topIncident,
-                      myLat: RideFacts.hasPosition(me) ? me.lat : null,
-                      myLng: RideFacts.hasPosition(me) ? me.lng : null,
-                      nowMs: now,
-                      onOpen: () => _openIncident(topIncident),
-                    ),
-                  ] else if (slots.isNotEmpty) ...[
-                    const SizedBox(height: Space.s8),
-                    RideAlert(
-                      tier: slots.first.tier,
-                      title: slots.first.title,
-                      message: slots.first.message,
-                      actionLabel: slots.first.actionLabel,
-                      onAction: slots.first.onAction,
-                      onDismiss: slots.first.onDismiss ??
-                          (slots.first.dismissible ? () => setState(() => _dismissed.add(slots.first.key)) : null),
-                    ),
+                    topSlot.child ??
+                        RideAlert(
+                          tier: topSlot.tier,
+                          title: topSlot.title,
+                          message: topSlot.message,
+                          actionLabel: topSlot.actionLabel,
+                          onAction: topSlot.onAction,
+                          onDismiss: topSlot.onDismiss ?? (topSlot.dismissible ? () => setState(() => _dismissed.add(topSlot.key)) : null),
+                        ),
                   ],
                   if (extra > 0)
                     Align(
@@ -1157,8 +1325,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     Map<String, Color> colors,
     Map<String, RiderStatus> statuses,
     bool lowData,
-    int now,
-  ) {
+    int now, {
+    EmergencyGuidance? guidance,
+    List<IncidentView> incidents = const [],
+  }) {
+    final navLine = [for (final (lat, lng) in guidance?.remainingLine ?? const <(double, double)>[]) LatLng(lat, lng)];
     return FlutterMap(
       mapController: _mapController,
       options: MapOptions(
@@ -1191,6 +1362,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   ? AppTheme.neonCyan.withOpacity(0.45)
                   : AppTheme.neonCyan.withOpacity(0.75),
             ),
+          ]),
+        // The way to an emergency I navigate to (red), above the group route.
+        if (navLine.length >= 2)
+          PolylineLayer(polylines: [
+            Polyline(points: navLine, strokeWidth: 5, color: StatusColors.critical.withOpacity(0.85)),
           ]),
         MarkerLayer(markers: [
           for (final s in convoy.plannedStops) _stopMarker(s),
@@ -1233,8 +1409,86 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 ),
               ),
         ]),
+        MarkerLayer(markers: _safetyMarkers(convoy, service, me, now, guidance: guidance, incidents: incidents)),
       ],
     );
+  }
+
+  /// Small safety markers: accidents reported ahead (amber), the point of an
+  /// emergency (red, the last known position, never dropped while open), and
+  /// a nearby responder while on the way (green). Never other groups' riders.
+  List<Marker> _safetyMarkers(
+    ConvoyModel convoy,
+    ConvoyService service,
+    RiderModel me,
+    int now, {
+    EmergencyGuidance? guidance,
+    List<IncidentView> incidents = const [],
+  }) {
+    final out = <Marker>[];
+    final myPos = RideFacts.hasPosition(me);
+    final views = guidance?.hazards;
+    if (views != null) {
+      for (final v in views) {
+        out.add(Marker(
+          point: LatLng(v.hazard.lat, v.hazard.lng),
+          width: HazardMarker.width,
+          height: HazardMarker.height,
+          child: HazardMarker(label: v.label, level: v.hazard.level),
+        ));
+      }
+    } else {
+      for (final h in service.hazards) {
+        final d = h.aheadM ?? (myPos ? GeoMath.haversine(me.lat, me.lng, h.lat, h.lng) : null);
+        out.add(Marker(
+          point: LatLng(h.lat, h.lng),
+          width: HazardMarker.width,
+          height: HazardMarker.height,
+          child: HazardMarker(label: d == null ? 'Accident reported' : 'Accident reported ${formatDistanceRounded(d)} ahead', level: h.level),
+        ));
+      }
+    }
+    // My group's open emergencies: the point where it is, unless the rider's own marker is already there.
+    for (final i in incidents) {
+      if (i.isMe || !i.isAlert || !i.hasPosition) continue;
+      final r = convoy.riders[i.subjectUserId];
+      final drawn = r != null && RideFacts.hasPosition(r) && GeoMath.haversine(r.lat, r.lng, i.lat, i.lng) < 30;
+      if (!drawn) {
+        final age = i.positionAt > 0 ? now - i.positionAt : 0;
+        out.add(Marker(
+          point: LatLng(i.lat, i.lng),
+          width: EmergencyPointMarker.width,
+          height: EmergencyPointMarker.height,
+          child: EmergencyPointMarker(label: i.firstName, detail: age >= 60000 ? formatAgo(Duration(milliseconds: age)) : null),
+        ));
+      }
+      final resp = i.network?.activeResponder;
+      final rLat = resp?.lat, rLng = resp?.lng;
+      if (resp != null && rLat != null && rLng != null && (rLat != 0 || rLng != 0) &&
+          (resp.status == ResponderStatus.accepted || resp.status == ResponderStatus.enRoute || resp.status == ResponderStatus.arriving)) {
+        out.add(Marker(
+          point: LatLng(rLat, rLng),
+          width: ResponderMarker.width,
+          height: ResponderMarker.height,
+          child: ResponderMarker(name: resp.name),
+        ));
+      }
+    }
+    // Assistance requests to me: only the emergency point, no names.
+    final seen = <String>{};
+    final active = service.activeAssist;
+    for (final a in [?active, ...service.assistRequests]) {
+      if (!seen.add(a.incidentId) || assistStageOf(a) == AssistStage.closed) continue;
+      if (a.lat == 0 && a.lng == 0) continue;
+      final d = myPos ? GeoMath.haversine(me.lat, me.lng, a.lat, a.lng) : a.distanceM;
+      out.add(Marker(
+        point: LatLng(a.lat, a.lng),
+        width: EmergencyPointMarker.width,
+        height: EmergencyPointMarker.height,
+        child: EmergencyPointMarker(label: 'Rider emergency', detail: formatDistanceRounded(d)),
+      ));
+    }
+    return out;
   }
 
   Marker _stopMarker(StopPointModel s) {
@@ -1269,14 +1523,29 @@ class _TopBar extends StatelessWidget {
   final GpsState gps;
   final VoidCallback? onBack;
 
-  /// The quiet route status ("New route, 42 km"), or null.
+  /// The quiet route status ("New route, 42 km"), or the way to an emergency, or null.
   final String? route;
 
-  const _TopBar({required this.title, required this.connection, required this.gps, this.onBack, this.route});
+  /// [route] is the in-app navigation to an emergency (red icon, Stop button).
+  final bool emergencyRoute;
+
+  /// Stops the navigation to an emergency.
+  final VoidCallback? onStopNavigation;
+
+  const _TopBar({
+    required this.title,
+    required this.connection,
+    required this.gps,
+    this.onBack,
+    this.route,
+    this.emergencyRoute = false,
+    this.onStopNavigation,
+  });
 
   @override
   Widget build(BuildContext context) {
     final back = onBack;
+    final stop = onStopNavigation;
     final c = connection;
     final words = <String>[
       ?c,
@@ -1325,7 +1594,11 @@ class _TopBar extends StatelessWidget {
                         liveRegion: true,
                         child: Row(
                           children: [
-                            Icon(Icons.alt_route_rounded, size: 16, color: StatusColors.info),
+                            Icon(
+                              emergencyRoute ? Icons.emergency_rounded : Icons.alt_route_rounded,
+                              size: 16,
+                              color: emergencyRoute ? StatusColors.critical : StatusColors.info,
+                            ),
                             const SizedBox(width: Space.s4),
                             Expanded(
                               child: Text(r, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
@@ -1336,6 +1609,12 @@ class _TopBar extends StatelessWidget {
                   ],
                 ),
               ),
+              if (stop != null)
+                IconButton(
+                  tooltip: 'Stop navigation',
+                  icon: Icon(Icons.close_rounded, color: AppTheme.textPrimary),
+                  onPressed: stop,
+                ),
             ],
           ),
         ),

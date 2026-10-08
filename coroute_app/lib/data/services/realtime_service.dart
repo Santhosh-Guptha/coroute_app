@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/net_constants.dart';
+import '../../core/constants/network_constants.dart';
 import '../models/safety_wire.dart';
 
 /// Binary voice packet kinds (must match gateway/src/ws.js).
@@ -213,6 +214,8 @@ class RealtimeService extends ChangeNotifier {
     final msg = <String, dynamic>{'type': 'JOIN', 'groupId': gid};
     final extras = _joinExtras;
     if (extras != null && supports(ProtocolFeatures.presence)) msg.addAll(extras);
+    // 3.15: say what this app understands, on every JOIN, only to a gateway that has the safety network.
+    if (supports(ProtocolFeatures.safetyNet)) msg['caps'] = List<String>.of(NetworkConstants.clientCaps);
     if (_send(msg)) _joinExtras = null;
   }
 
@@ -351,6 +354,8 @@ class RealtimeService extends ChangeNotifier {
         'WAIT_REQUESTS', 'CONFIG', 'TRIP_STATUS', 'DISSOLVED', 'VOICE_BUSY',
         'TIMELINE', 'TIMELINE_UPDATE', 'TIMELINE_BATCH', 'REPORT_READY',
         'SOS_RESPONSE', 'PRESENCE', 'ROSTER_CHANGED',
+        // 3.15 safety and discovery networks.
+        'EMERGENCY_UPDATE', 'ASSIST_REQUEST', 'ASSIST_UPDATE', 'ASSIST_CLOSED', 'HAZARD', 'HAZARD_CLEAR', 'DISCOVERY', 'WAVED',
       };
       if (roomScoped.contains(type) && _groupId == null) return;
       if (type == 'SNAPSHOT' && msg['convoy'] is Map && msg['convoy']['groupId'] != _groupId) return;

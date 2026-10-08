@@ -4,7 +4,7 @@ const rateLimit = require('express-rate-limit');
 const { requireAuth, requireAdmin, AuthError } = require('./auth');
 const { ValidationError, tripRecord, sitePath } = require('./validate');
 const { identity } = require('./anonymise');
-const { ConvoyError } = require('./convoys');
+const { ConvoyError, falseAlarmCount } = require('./convoys');
 const config = require('./config');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 const { toWire, toGpx, filterPoints, validateChunk, uploadPermission, TrackError } = require('./tracks');
@@ -14,7 +14,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate, network = null, audit = null }) {
   const r = express.Router();
 
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again later.' } });
@@ -115,6 +115,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   async function prepareErase(user) {
     // Close the rider's sockets first, so nothing they send can be written during the erase.
     if (hub) hub.disconnectUser(user.userId, 4401, 'ACCOUNT_GONE');
+    // 3.15: out of every safety network incident (their own ones close; queued audit rows dropped).
+    if (network) network.forgetUser(user.userId);
     await convoys.leaveAll(user.userId);
     if (timeline) await timeline.idle();
     const id = identity(user);
@@ -375,6 +377,28 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // Every open SOS and crash alert across convoys (3.14). No medical info, no phone numbers.
   r.get('/admin/emergencies', requireAdmin, wrap(async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ serverTime: Date.now(), emergencies: await convoys.emergencies() });
+  }));
+  // Rider safety network (3.15): open incidents, users with false alarms, the latest audit rows.
+  r.get('/admin/safety', requireAdmin, wrap(async (req, res) => {
+    const t = Date.now();
+    const users = await repo.listFalseAlarmUsers().catch(() => []);
+    const falseAlarmUsers = users.map((u) => {
+      const count30d = falseAlarmCount(u, t);
+      return { userId: u.userId, name: u.name || '', count30d, throttled: count30d >= config.abuseFalseAlarms, lastAt: Math.max(0, ...u.falseAlarmAt.filter(Number.isFinite)) };
+    }).filter((x) => x.count30d > 0).sort((a, b) => (b.count30d - a.count30d) || (b.lastAt - a.lastAt)).slice(0, 50);
+    if (audit) await audit.flush().catch(() => {});
+    res.set('Cache-Control', 'no-store').json({
+      serverTime: t,
+      incidents: network ? network.adminView() : [],
+      falseAlarmUsers,
+      audit: await repo.listAudit({ limit: 100 }).catch(() => []),
+    });
+  }));
+  r.post('/admin/users/:userId/false-alarms/reset', requireAdmin, wrap(async (req, res) => {
+    const userId = String(req.params.userId || '');
+    if (!(await repo.resetFalseAlarms(userId))) return res.status(404).json({ error: 'User not found.' });
+    if (audit) audit.add({ kind: 'RESET', actorId: req.user.userId, subjectId: userId, detail: 'FALSE_ALARMS' });
+    res.json({ ok: true });
   }));
   r.post('/admin/broadcast', requireAdmin, wrap(async (req, res) => res.json(await convoys.adminBroadcast(req.user, req.body?.message))));
   r.get('/admin/analytics', requireAdmin, wrap(async (req, res) => {

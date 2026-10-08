@@ -32,7 +32,7 @@ test('HELLO offers protocol 2 and the 3.14 features', async () => {
   const ws = await t.connect(u.token);
   const hello = await ws.next((m) => m.type === 'HELLO');
   assert.equal(hello.protocol, 2);
-  assert.deepEqual(hello.features, ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster']);
+  assert.deepEqual(hello.features.slice(0, 6), ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster']);
   assert.equal(hello.heartbeatSec, 30, 'old fields unchanged');
   ws.close();
 });

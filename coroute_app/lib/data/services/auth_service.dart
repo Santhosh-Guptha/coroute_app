@@ -65,6 +65,13 @@ class AuthService extends ChangeNotifier {
   bool _smsOptOut = false;
   bool _medicalLoaded = false;
 
+  // Rider Safety Network switches (3.15): memory only, from /me.
+  bool _assistHelp = true;
+  bool _assistAsk = true;
+  bool _responderMedical = false;
+  int _netConsentAt = 0;
+  bool _netLoaded = false;
+
   String? get currentUserId => _userId;
   String? get currentUserRole => _role;
   String? get currentUserEmail => _email;
@@ -82,6 +89,21 @@ class AuthService extends ChangeNotifier {
 
   /// True when I asked not to receive emergency texts from my ride group.
   bool get smsOptOut => _smsOptOut;
+
+  /// Get a request when a rider from another group may need help on my route (default on).
+  bool get assistHelp => _assistHelp;
+
+  /// Let nearby riders of other groups be asked to help me (default on).
+  bool get assistAsk => _assistAsk;
+
+  /// Share my medical info with a rider from another group who comes to help me (default off).
+  bool get responderMedical => _responderMedical;
+
+  /// When I agreed to the nearby riders explanation (epoch ms), 0 = not yet.
+  int get netConsentAt => _netConsentAt;
+
+  /// True once a 3.15 gateway sent the switches above.
+  bool get netLoaded => _netLoaded;
 
   /// True once the server sent the medical fields (a 3.14 gateway answered /me or a sign-in).
   /// Until then the form only sends the medical fields the rider actually changed.
@@ -174,6 +196,12 @@ class AuthService extends ChangeNotifier {
     if (u.containsKey('medicalNotes')) _medicalNotes = u['medicalNotes']?.toString() ?? '';
     if (u.containsKey('smsOptOut')) _smsOptOut = u['smsOptOut'] == true;
     if (u.containsKey('bloodGroup') || u.containsKey('smsOptOut')) _medicalLoaded = true;
+    if (u.containsKey('assistHelp')) _assistHelp = u['assistHelp'] != false;
+    if (u.containsKey('assistAsk')) _assistAsk = u['assistAsk'] != false;
+    if (u.containsKey('responderMedical')) _responderMedical = u['responderMedical'] == true;
+    final consent = u['netConsentAt'];
+    if (consent is num) _netConsentAt = consent.toInt();
+    if (u.containsKey('assistHelp') || u.containsKey('assistAsk') || u.containsKey('responderMedical')) _netLoaded = true;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(AppConstants.keyUserId, _userId ?? '');
@@ -283,6 +311,10 @@ class AuthService extends ChangeNotifier {
     String? allergies,
     String? medicalNotes,
     bool? smsOptOut,
+    bool? assistHelp,
+    bool? assistAsk,
+    bool? responderMedical,
+    bool? netConsent,
   }) async {
     try {
       final payload = <String, dynamic>{
@@ -299,6 +331,10 @@ class AuthService extends ChangeNotifier {
       if (allergies != null) payload['allergies'] = allergies.trim();
       if (medicalNotes != null) payload['medicalNotes'] = medicalNotes.trim();
       if (smsOptOut != null) payload['smsOptOut'] = smsOptOut;
+      if (assistHelp != null) payload['assistHelp'] = assistHelp;
+      if (assistAsk != null) payload['assistAsk'] = assistAsk;
+      if (responderMedical != null) payload['responderMedical'] = responderMedical;
+      if (netConsent == true) payload['netConsent'] = true;
       _lastProfileError = null;
       final res = await _api.patch('/me', payload);
       if (res is Map) await _applyUser(Map<String, dynamic>.from(res));
@@ -311,6 +347,42 @@ class AuthService extends ChangeNotifier {
     } catch (e) {
       debugPrint('updateProfile note: $e');
       _lastProfileError = null;
+      return false;
+    }
+  }
+
+  /// Saves only the nearby riders switches (and the consent) without the rest
+  /// of the profile. Shown at once; put back when the server refuses or
+  /// cannot be reached. True when saved.
+  Future<bool> updateNetworkPrefs({bool? assistHelp, bool? assistAsk, bool? responderMedical, bool netConsent = false}) async {
+    final helpBefore = _assistHelp, askBefore = _assistAsk, medicalBefore = _responderMedical;
+    final payload = <String, dynamic>{
+      'assistHelp': ?assistHelp,
+      'assistAsk': ?assistAsk,
+      'responderMedical': ?responderMedical,
+      if (netConsent) 'netConsent': true,
+    };
+    if (payload.isEmpty) return true;
+    if (assistHelp != null) _assistHelp = assistHelp;
+    if (assistAsk != null) _assistAsk = assistAsk;
+    if (responderMedical != null) _responderMedical = responderMedical;
+    notifyListeners();
+    try {
+      _lastProfileError = null;
+      final res = await _api.patch('/me', payload);
+      if (res is Map) await _applyUser(Map<String, dynamic>.from(res));
+      if (netConsent && _netConsentAt == 0) {
+        // An older gateway does not echo the consent time: remember it for this session.
+        _netConsentAt = DateTime.now().millisecondsSinceEpoch;
+        notifyListeners();
+      }
+      return true;
+    } catch (e) {
+      debugPrint('updateNetworkPrefs note: $e');
+      _assistHelp = helpBefore;
+      _assistAsk = askBefore;
+      _responderMedical = medicalBefore;
+      notifyListeners();
       return false;
     }
   }
@@ -369,6 +441,11 @@ class AuthService extends ChangeNotifier {
     _medicalNotes = '';
     _smsOptOut = false;
     _medicalLoaded = false;
+    _assistHelp = true;
+    _assistAsk = true;
+    _responderMedical = false;
+    _netConsentAt = 0;
+    _netLoaded = false;
     final prefs = await SharedPreferences.getInstance();
     for (final k in [
       AppConstants.keyUserId, AppConstants.keyUserRole, AppConstants.keyUserEmail, AppConstants.keyUserName,

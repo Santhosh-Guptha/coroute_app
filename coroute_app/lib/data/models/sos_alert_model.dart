@@ -1,4 +1,6 @@
 import 'medical_info.dart';
+import 'network_models.dart';
+import 'network_wire.dart';
 import 'safety_wire.dart';
 
 class SosAlertModel {
@@ -32,6 +34,30 @@ class SosAlertModel {
   /// The rider's medical details, sent by the gateway only while the alert is open.
   final MedicalInfo? medical;
 
+  // ---- 3.15 EmergencyEvent fields (all optional; a 3.14 gateway sends none of them).
+  /// Server status; null from an older gateway (see [effectiveStatus]).
+  final EmergencyStatus? status;
+  final EmergencySource? source;
+  final EmergencySeverity? severity;
+
+  /// Last known heading (degrees), speed (km/h) and GPS accuracy (m) of the rider.
+  final double? heading;
+  final double? speedKmh;
+  final double? accuracyM;
+
+  /// Last time the rider's position or the status changed (epoch ms).
+  final int? lastUpdateAt;
+
+  /// Who reported it, for a "Rider down" report by another rider ('' otherwise).
+  final String reportedBy;
+  final String reportedByName;
+
+  /// The search for nearby riders (memory only on the server, sent while open).
+  final EmergencyNetwork? network;
+
+  /// The nearest rider of my group to the emergency.
+  final OwnNearest? ownNearest;
+
   SosAlertModel({
     required this.alertId,
     required this.userId,
@@ -48,9 +74,33 @@ class SosAlertModel {
     int? occurredAt,
     this.responders = const [],
     this.medical,
+    this.status,
+    this.source,
+    this.severity,
+    this.heading,
+    this.speedKmh,
+    this.accuracyM,
+    this.lastUpdateAt,
+    this.reportedBy = '',
+    this.reportedByName = '',
+    this.network,
+    this.ownNearest,
   }) : occurredAt = occurredAt ?? timestamp;
 
   bool get isCrash => alertType == SosTypes.crash;
+
+  /// The status, or for an alert from an older gateway: resolved, else assistance requested.
+  EmergencyStatus get effectiveStatus => status ?? (resolved ? EmergencyStatus.resolved : EmergencyStatus.assistanceRequested);
+
+  /// Where it came from; for an older alert: crash detection when automatic, else manual.
+  EmergencySource get effectiveSource => source ?? (auto ? EmergencySource.crashAuto : EmergencySource.manual);
+
+  /// Most recent known time of the rider's position ([lastUpdateAt], else the raise time).
+  int get lastKnownAt => lastUpdateAt ?? timestamp;
+
+  /// A (possible) accident: crash, crash detection or a rider reported down.
+  bool get isAccident =>
+      alertType == SosTypes.crash || alertType == SosTypes.riderDown || effectiveSource == EmergencySource.crashAuto || effectiveSource == EmergencySource.needHelp;
 
   SosAlertModel copyWith({
     String? alertId,
@@ -69,6 +119,18 @@ class SosAlertModel {
     List<SosResponder>? responders,
     MedicalInfo? medical,
     bool clearMedical = false,
+    EmergencyStatus? status,
+    EmergencySource? source,
+    EmergencySeverity? severity,
+    double? heading,
+    double? speedKmh,
+    double? accuracyM,
+    int? lastUpdateAt,
+    String? reportedBy,
+    String? reportedByName,
+    EmergencyNetwork? network,
+    OwnNearest? ownNearest,
+    bool clearOwnNearest = false,
   }) {
     return SosAlertModel(
       alertId: alertId ?? this.alertId,
@@ -86,6 +148,17 @@ class SosAlertModel {
       occurredAt: occurredAt ?? this.occurredAt,
       responders: responders ?? this.responders,
       medical: clearMedical ? null : (medical ?? this.medical),
+      status: status ?? this.status,
+      source: source ?? this.source,
+      severity: severity ?? this.severity,
+      heading: heading ?? this.heading,
+      speedKmh: speedKmh ?? this.speedKmh,
+      accuracyM: accuracyM ?? this.accuracyM,
+      lastUpdateAt: lastUpdateAt ?? this.lastUpdateAt,
+      reportedBy: reportedBy ?? this.reportedBy,
+      reportedByName: reportedByName ?? this.reportedByName,
+      network: network ?? this.network,
+      ownNearest: clearOwnNearest ? null : (ownNearest ?? this.ownNearest),
     );
   }
 
@@ -107,6 +180,17 @@ class SosAlertModel {
       'occurredAt': occurredAt,
       if (responders.isNotEmpty) 'responders': [for (final r in responders) r.toJson()],
       if (med != null && !med.isEmpty) 'medical': med.toJson(),
+      'status': ?status?.wire,
+      'source': ?source?.wire,
+      'severity': ?severity?.wire,
+      'heading': ?heading,
+      'speedKmh': ?speedKmh,
+      'accuracyM': ?accuracyM,
+      'lastUpdateAt': ?lastUpdateAt,
+      if (reportedBy.isNotEmpty) 'reportedBy': reportedBy,
+      if (reportedByName.isNotEmpty) 'reportedByName': reportedByName,
+      'network': ?network?.toJson(),
+      'ownNearest': ?ownNearest?.toJson(),
     };
   }
 
@@ -130,6 +214,17 @@ class SosAlertModel {
       occurredAt: (json['occurredAt'] as num?)?.toInt() ?? timestamp,
       responders: SosResponder.listFrom(json['responders']),
       medical: MedicalInfo.fromJson(json['medical']),
+      status: EmergencyStatus.fromWire(json['status']?.toString()),
+      source: EmergencySource.fromWire(json['source']?.toString()),
+      severity: EmergencySeverity.fromWire(json['severity']?.toString()),
+      heading: toD(json['heading']),
+      speedKmh: toD(json['speedKmh']),
+      accuracyM: toD(json['accuracyM']),
+      lastUpdateAt: toD(json['lastUpdateAt'])?.toInt(),
+      reportedBy: json['reportedBy']?.toString() ?? '',
+      reportedByName: json['reportedByName']?.toString() ?? '',
+      network: EmergencyNetwork.fromJson(json['network']),
+      ownNearest: OwnNearest.fromJson(json['ownNearest']),
     );
   }
 }

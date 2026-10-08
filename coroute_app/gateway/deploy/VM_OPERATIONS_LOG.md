@@ -40,3 +40,24 @@
   7. Service reload: `coroute-gateway.service` restarted and verified `HEALTHY`.
   8. OS Account Provisioning: Created users `santhosh` and `antigravity` with SSH and sudo configuration.
   9. Deployment Authentication: Configured all future remote tasks to run under user `antigravity` using password authentication with zero key files and zero usage of personal user credentials.
+
+### Release 3.14.0+74 (2026-10-08)
+- **Operator User**: `antigravity` (password authentication only, zero key files)
+- **Activities**:
+  1. Automated test suites executed: Flutter (538/538 passed) & Gateway (107/107 passed).
+  2. Release split APKs compiled: `app-arm64-v8a-release.apk` (10.7 MB), `app-armeabi-v7a-release.apk` (10.4 MB).
+  3. Git remote sync: Commit `42ba9bb` ("3.14.0+74: rider safety") pushed to `origin/main`.
+  4. Gateway deployment: Synced updated gateway codebase to `/opt/coroute/gateway/`.
+  5. Environment configuration: Updated `/etc/coroute/gateway.env` (`LATEST_APP_BUILD=74`).
+  6. APK publication: Installed release binaries in `/opt/coroute/gateway/public/`.
+  7. Service reload: `coroute-gateway.service` restarted and verified.
+
+### Release 3.15.0+75 (2026-10-08)
+- **Operator User**: `antigravity` (password authentication only, zero key files)
+- **Activities**:
+  1. Automated test suites executed: Flutter (683/683 passed) & Gateway (175/175 passed).
+  2. Release split APKs compiled: `app-arm64-v8a-release.apk` (10.9 MB), `app-armeabi-v7a-release.apk` (10.5 MB).
+  3. Gateway deployment: Synced updated gateway codebase to `/opt/coroute/gateway/`.
+  4. Environment configuration: Updated `/etc/coroute/gateway.env` (`LATEST_APP_BUILD=75`).
+  5. APK publication: Installed release binaries in `/opt/coroute/gateway/public/`.
+  6. Service reload: `coroute-gateway.service` restarted and verified `latestBuild: 75`, `version: 3.15.0`.

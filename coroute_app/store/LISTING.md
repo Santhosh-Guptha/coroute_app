@@ -12,18 +12,28 @@ CoRoute keeps a group of riders together. The lead creates a convoy and shares a
 ON THE RIDE
 - Live convoy map with the planned route, stops and destination
 - Voice intercom: hold to talk or hands-free, to the whole group or privately to one rider; nothing is recorded
-- One-tap SOS that stays on every rider's screen until someone resolves it, with distance, direction and a Navigate button
-- Riders can answer an SOS with "I'm going" or "I'm with them", and the group sees who is on the way
-- Crash detection during a ride: the phone rings first and counts down for 30 seconds, so you can cancel with "I'm OK"; you can switch it off
+- SOS that stays on every rider's screen until resolved, with distance, direction and a Navigate button
+- Answer an SOS with "I'm going" or "I'm with them"; the group sees who is on the way
+- Crash detection during a ride: the phone asks "Possible accident detected. Are you okay?" and counts down for 15 seconds, so you can cancel with "I'm OK" or send at once with "Need Help"; you can switch it off
 - If there is no internet, your phone can text your emergency contact, your lead and the nearest riders with a map link (you switch this on, up to 10 people)
 - Optional medical info (blood group, allergies, notes) shown to your group only while your SOS is open
-- A gentle break reminder after about 2 hours of riding, and an "Are you OK?" check when you have been far from the group for a long time
+- A break reminder after about 2 hours, and an "Are you OK?" check when you are far from the group for long
 - The group sees the difference between "no signal" and "app closed"
 - Status cards for fuel, rest, photo stop or a short regroup
-- Each rider is marked as they reach a planned stop, and the stop is done when the whole group is there
-- A group speed limit set by the lead: riding over it is logged and the group is told once
-- The lock screen shows how far each rider is from you
-- Light theme for bright sun and dark theme for night, switching by itself at sunrise and sunset
+- Each rider is marked as they reach a planned stop
+- A group speed limit set by the lead; riding over it is logged
+- A large ride notification on the home and lock screen: riders ahead and behind with distance, and SOS (hold to send), Wait for me, Open map
+- In-app navigation to a rider in trouble, with spoken distances; spoken alerts can be switched off
+- Light and dark themes that switch at sunrise and sunset
+
+HELP FROM NEARBY RIDERS
+- After an accident your group is alerted first. A few riders of other groups already riding toward it on the same road can be asked to help if they may arrive sooner
+- They see only where and how far until they agree, then the first name and vehicle; never phone numbers or the group
+- Riders heading toward an accident on the same road get a short caution
+- You can switch off being asked, or others being asked for you
+
+GROUPS NEARBY (OPTIONAL)
+- Only when both leads make their group Public with discovery on: group name, rider count and rounded distance, and a wave. Never positions or names
 
 AFTER THE RIDE
 - A trip report for every rider: distance, riding time, stops and top speed
@@ -32,16 +42,16 @@ AFTER THE RIDE
 - A replay of the whole ride and a GPX file of your own route
 
 BATTERY AND SIGNAL
-GPS slows down when you stop, audio is sent only while someone talks, and the app keeps a single connection. When there is no signal your route is kept on the phone and sent when the connection returns.
+GPS slows down when you stop and audio is sent only while someone talks. Without signal your route is kept on the phone and sent later.
 
 FREE AND NON-PROFIT
 CoRoute is made by riders at devmonks.space as a public service. There is no subscription, no advertising, no trackers and no sale of data.
 
 PRIVACY
-Your position is shared only with the convoy you are in, and only while you are in it. Voice is relayed live and never stored. Recorded routes are deleted after 90 days; your account and ride summaries stay until you delete them, which you can do in the app. Full policy: https://coroute.duckdns.org/privacy
+Your position is shared only with the convoy you are in, and only while you are in it. In an emergency you raise, riders of other groups who are asked to help see the emergency point only. Voice is relayed live and never stored. Recorded routes are deleted after 90 days; your account and ride summaries stay until you delete them, which you can do in the app. Full policy: https://coroute.duckdns.org/privacy
 
 PERMISSIONS
-Location, including in the background, so your convoy still sees you with the phone in your pocket. Microphone for the intercom. Both are used only while you are in an active convoy. SMS, only if you switch on emergency texts: used only to text for help when your SOS cannot be sent. Full-screen alarm, so the crash alarm can ring on the lock screen. The motion sensor is read on your phone only, during a ride.
+Location, including in the background, so your convoy still sees you with the phone in your pocket. Microphone for the intercom. Both are used only while you are in an active convoy. SMS, only if you switch on emergency texts: used only to text for help when your SOS cannot be sent. Full-screen alarm, so the crash alarm and the hold-to-send SOS screen can open on the lock screen. The motion sensor is read on your phone only, during a ride. Spoken alerts use your phone's own text-to-speech; no extra permission.
 
 **Category:** Maps & Navigation
 **Tags:** motorcycle, group ride, convoy, intercom, touring
@@ -72,6 +82,11 @@ Use real rides with real riders who agreed to be shown. Do not stage numbers.
 - Fill in the SMS Permissions Declaration Form (use case: emergency / safety alerts) and the full-screen intent declaration in Play Console. Wording, video steps and the fallback if Play refuses are in `gateway/deploy/PLAY_STORE_CHECKLIST.md`.
 - Update the Data safety form: phone numbers of other users processed on the device only, optional health info, motion sensor on the device only (same file).
 - Upgrade the gateway to 3.14.0 before publishing the app (see `gateway/deploy/RUNBOOK.md`, "Release order for 3.14").
+
+## Before the release with the nearby rider network (3.15)
+- Upgrade the gateway to 3.15.0 before publishing build 75 (see `gateway/deploy/RUNBOOK.md`, "Release order for 3.15").
+- Update the Data safety form (rows marked 3.15 in `gateway/deploy/PLAY_STORE_CHECKLIST.md`) and the full-screen intent description (15 second countdown, hold-to-send SOS screen).
+- Optional new screenshots: the large ride notification on the lock screen, and the "Rider emergency nearby" request. Only from real rides or a test with riders who agreed; do not stage numbers.
 
 ## After the listing is live
 1. Copy the Play Store link (https://play.google.com/store/apps/details?id=space.devmonks.coroute_app).

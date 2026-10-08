@@ -4,6 +4,9 @@
 class SosTypes {
   SosTypes._();
   static const String emergency = 'EMERGENCY', crashOrEmergency = 'CRASH_OR_EMERGENCY', crash = 'CRASH';
+
+  /// "Rider down here" reported by another rider (3.15).
+  static const String riderDown = 'RIDER_DOWN';
 }
 
 /// Timeline entry types added in 3.14.
@@ -112,4 +115,10 @@ class SosResponder {
 class ProtocolFeatures {
   ProtocolFeatures._();
   static const String ack = 'ack', sos2 = 'sos2', respond = 'respond', presence = 'presence', checkIn = 'checkin', roster = 'roster';
+
+  /// 3.15: Rider Safety Network (assistance requests, hazards, emergency status).
+  static const String safetyNet = 'net1';
+
+  /// 3.15: Rider Discovery Network (public groups nearby, wave).
+  static const String discovery = 'discovery1';
 }

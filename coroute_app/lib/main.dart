@@ -13,17 +13,21 @@ import 'data/services/api_client.dart';
 import 'data/services/auth_service.dart';
 import 'data/services/background_service.dart';
 import 'data/services/convoy_service.dart';
+import 'data/services/geo_service.dart';
 import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
 import 'data/local/sqflite_track_queue.dart';
 import 'data/services/realtime_service.dart';
+import 'data/services/ride_notification_service.dart';
 import 'data/services/safety_service.dart';
 import 'data/services/settings_service.dart';
 import 'data/services/timeline_service.dart';
 import 'data/services/track_recorder.dart';
 import 'data/services/track_uploader.dart';
 import 'data/services/trip_storage_service.dart';
+import 'data/services/voice_service.dart';
 import 'presentation/auth/access_gate_screen.dart';
+import 'presentation/ride/emergency_guidance.dart';
 import 'presentation/safety/crash_alarm_host.dart';
 import 'presentation/splash/splash_screen.dart';
 
@@ -88,10 +92,21 @@ class CoRouteApp extends StatelessWidget {
           )..addListener(() => _notePosition(ctx)),
         ),
         ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>(), settings: ctx.read<SettingsService>())),
+        // Spoken alerts (phone text-to-speech). The engine starts with the first alert of a
+        // ride and is released when the ride ends (nothing runs at idle).
+        ChangeNotifierProvider<VoiceService>(create: (ctx) {
+          final voice = VoiceService(ctx.read<SettingsService>());
+          final convoys = ctx.read<ConvoyService>();
+          convoys.addListener(() {
+            final c = convoys.activeConvoy;
+            if ((c == null || c.tripStatus == 'ENDED') && voice.started) voice.release().ignore();
+          });
+          return voice;
+        }),
         // Trip alerts (SOS, stopped, separated, no signal, arrivals), separate from the ongoing status.
         Provider<AlertService>(
           lazy: false,
-          create: (ctx) => AlertService(ctx.read<ConvoyService>(), ctx.read<TimelineService>()),
+          create: (ctx) => AlertService(ctx.read<ConvoyService>(), ctx.read<TimelineService>(), voice: ctx.read<VoiceService>()),
           dispose: (_, a) => a.dispose(),
         ),
         // Rider safety: crash alarm, emergency texts, break reminder, "Are you OK?" check-in.
@@ -99,6 +114,26 @@ class CoRouteApp extends StatelessWidget {
         ChangeNotifierProvider<SafetyService>(
           lazy: false,
           create: (ctx) => SafetyService(ctx.read<ConvoyService>(), ctx.read<SettingsService>(), ctx.read<AuthService>()),
+        ),
+        // In-app navigation to an emergency and accident warnings on my route (voice works with
+        // the screen off, from fixes the ride already has).
+        ChangeNotifierProvider<EmergencyGuidance>(
+          lazy: false,
+          create: (ctx) {
+            final geo = GeoService(ctx.read<ApiClient>());
+            return EmergencyGuidance(
+              ctx.read<ConvoyService>(),
+              ctx.read<VoiceService>(),
+              ctx.read<SettingsService>(),
+              fetchRoute: (wp) => geo.route(wp),
+            );
+          },
+        ),
+        // The big ride notification on the home and lock screen (replaces the plain one in place).
+        Provider<RideNotificationService>(
+          lazy: false,
+          create: (ctx) => RideNotificationService(ctx.read<ConvoyService>(), ctx.read<TimelineService>(), ctx.read<SettingsService>()),
+          dispose: (_, n) => n.dispose(),
         ),
       ],
       child: const _SessionBinder(

@@ -449,7 +449,9 @@ class TimelineEngine {
       }
       case 'ALERT_RESOLVED': {
         const st = await this._state(gid);
-        await this._close(gid, st, `SOS:${payload.alertId}`, this.now(), { data: { resolvedBy: payload.by, resolvedByName: this._name(gid, payload.by) } });
+        await this._close(gid, st, `SOS:${payload.alertId}`, this.now(), {
+          data: { resolvedBy: payload.by, resolvedByName: this._name(gid, payload.by), ...(payload.status ? { status: payload.status } : {}) },
+        });
         return;
       }
       case 'TRIP_STATUS': {
@@ -503,6 +505,17 @@ class TimelineEngine {
           await this.repo.upsertEvent(open).catch((e) => this.log.warn('[timeline] save failed', e.message));
           this.convoys._emit(gid, 'TIMELINE_UPDATE', { event: publicEvent(open) });
         }
+        return null;
+      }
+      // 3.15: the emergency's status and the nearby responder (first name, status, ETA) on the open SOS entry.
+      case 'EMERGENCY_STATUS':
+      case 'EMERGENCY_NETWORK': {
+        const open = act.alert && st.open.get(`SOS:${act.alert.alertId}`);
+        if (!open) return null;
+        const data = { ...(open.data || {}), status: act.alert.status || open.data?.status };
+        if (act.type === 'EMERGENCY_NETWORK' && act.network) data.network = { name: String(act.network.name || ''), status: act.network.status, etaS: act.network.etaS ?? null };
+        open.data = data;
+        await this._update(gid, open);
         return null;
       }
       case 'CORIDE': {

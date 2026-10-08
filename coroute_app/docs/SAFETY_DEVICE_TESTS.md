@@ -1,4 +1,4 @@
-# Rider safety: device tests (CoRoute 3.14)
+# Rider safety: device tests (CoRoute 3.14 and 3.15)
 
 How to check crash detection, the crash alarm, emergency texts, the break
 reminder and the "Are you OK?" check-in on real phones, safely, without a real
@@ -90,20 +90,23 @@ mock route at once (speed 0) and leave A lying still for 20 s. A plain drop on a
 soft cushion may stay under 4 g; a drop onto a bed or a firm sofa usually
 reaches it. A drop while the mock speed is 0 must never ring (never armed).
 
-Expected on A, about 20 s after the stop:
-- full screen red "Did you crash?", "Automatic alert", "Sending SOS to your
-  group in 30 seconds.", counting down, big green "I'm OK" and red "Send now";
+Expected on A, about 20 s after the stop (3.15 texts):
+- full screen red "Possible accident detected. Are you okay?", "Sending SOS to
+  your group in 15 seconds.", counting down, big green "I'm OK" and red "Need Help";
 - loud repeating sound at alarm volume and vibration (also in silent mode on most
   phones, because it uses the alarm stream; Do Not Disturb may block it unless
   alarms are allowed);
-- a notification "Did you crash?" with the buttons "I'm OK" and "Send now".
+- a notification "Possible accident detected" ("Are you okay? Sending SOS to your
+  group in 15 seconds.") with the buttons "I'm OK" and "Send now" (the button
+  label of the notification is still "Send now" in 3.15; it does the same as Need Help).
 
 Check each answer:
 - "I'm OK" (screen or notification): alarm stops, nothing reaches B, the timeline
   shows nothing. No new alarm for 2 minutes.
-- "Send now": B gets "Crash detected: <A>" with "Automatic alert", the distance
-  and direction; A's screen switches to the SOS sheet. Cancel with "I am safe".
-- No answer: after 30 s the same SOS is sent automatically.
+- "Need Help" (or "Send now" on the notification): B gets the emergency at once
+  (server source NEED_HELP); A's screen switches to the SOS sheet.
+- No answer: after 15 s the same SOS is sent automatically (source CRASH_AUTO,
+  shown to the group as an automatic alert).
 - Walk around with A in the hand during the 20 s (mock speed 3 to 5 km/h): the
   alarm still comes; answer "I'm OK".
 - Pick the phone up and ride on (mock speed above 15 km/h within the 20 s): no alarm.
@@ -211,6 +214,68 @@ under 2 % of the battery over 2 hours), because the sensor runs only above
 25 km/h, in 2-second hardware batches, reduced to one small message per second.
 Note the phone model (phones without sensor batching deliver samples directly and
 may use a little more).
+
+## 10. Big ride notification on the home and lock screen (3.15)
+
+During a ride the plain "Convoy: ..." notification is replaced in place by a large
+one: destination, km left and ETA; up to 2 riders ahead and 2 behind with
+distances and flags ("No signal", "Stopped 5 min"); a group status line; buttons
+SOS, Wait for me, Open map, and Navigate / I Can Help during an emergency.
+Settings > Ride safety: "Large ride notification" (on) and "Show ride on lock
+screen" (on).
+
+Phones: at least one each of Pixel or Android One, Samsung (One UI), Xiaomi or
+Redmi (MIUI / HyperOS), Oppo or Realme (ColorOS), on Android 8, 10, 12 and 14.
+Use two phones in one convoy (A and B), B riding ahead (mock route) by 1 to 3 km.
+
+| Check | Expected |
+|---|---|
+| Start the ride, pull down the shade | ONE ongoing CoRoute notification (never two). Collapsed: "Goa, 42 km, ETA 4:35 PM" and "Arjun 1.2 km ahead". Expanded: the ladder, status line and 3 large buttons |
+| `adb shell dumpsys notification --noredact \| grep -A3 coroute` | one entry with id 1001 on channel coroute_convoy (if the plugin used another id or channel, two entries show: report it, see DEV_NATIVE.md "Plugin id and channel") |
+| Dark mode on, then off | text readable on both shades; SOS red with white text; other buttons visible on both |
+| Font size largest (Settings > Display) | lines cut with "...", nothing overlaps, buttons still 48 dp high |
+| Move B 400 m | the distance changes within about 10 s, not more often |
+| B stops for 5 min / turns data off for 3 min | "Stopped 5 min" / "No signal" next to B |
+| B raises SOS | A's notification turns red at once: "EMERGENCY: <B> needs help" (or "may have met with an accident"), "4.8 km ahead, updated 10:42", button "Navigate to <B>" |
+| Tap Wait for me on the lock screen (phone locked with a PIN) | no unlock asked; within about 10 s the status line says "You asked the group to wait"; B sees the wait request |
+| Tap SOS on the lock screen (PIN set) | the hold-to-send SOS screen opens OVER the lock screen without the PIN; nothing is sent until the button is held; Cancel goes back to the lock screen and the app no longer shows over it |
+| Tap Open map on the lock screen | Android asks to unlock, then the ride map opens |
+| "Show ride on lock screen" on (default), phone set to "Hide sensitive content" | the full large notification still shows on the lock screen (the rider chose it); never phone numbers |
+| "Show ride on lock screen" off, phone set to "Hide sensitive content" (or "Show sensitive content only when unlocked") | locked: "CoRoute ride active" only (during an emergency "Rider emergency nearby, open CoRoute"), no names, no distances |
+| "Show ride on lock screen" off, phone set to "Show all content" | Android shows private notifications in full in this mode; note what the brand shows |
+| "Large ride notification" off | the plain one-line notification comes back within 10 s and keeps updating |
+| Android 14: swipe the notification away | it comes back within about 10 s (plain or large) |
+| Turn the intercom microphone permission on during the ride (service restart) | after the restart the large notification is back within 3 s |
+| Notifications for CoRoute turned off in system settings | ride continues; no crash; turning them on again shows the large one |
+
+Brand quirks to note (not failures): MIUI may show custom layouts only after
+"Notification shade > Use Android style"; some ColorOS versions crop the
+expanded view at 3 riders; One UI may colour the background.
+
+## 11. Spoken alerts (3.15)
+
+Spoken through the phone's text-to-speech engine (no download by CoRoute),
+Indian English when installed, else US or UK English. Settings > Ride safety >
+Voice: "Speak emergency alerts" (on) and "Speak warnings and directions" (on,
+also needs the group's voice guidance switch).
+
+| Check | Expected |
+|---|---|
+| B raises SOS, A in a pocket with the screen off | A hears once: "Emergency. <B> may have met with an accident 4.8 kilometers behind you." Music on A ducks while it speaks and comes back |
+| Same SOS again within 10 min (reconnect) | not spoken again |
+| Bluetooth helmet intercom paired to A | the voice comes through the helmet like map directions; the CoRoute intercom continues afterwards |
+| Settings > System > Languages: Hindi as the phone language | still spoken in English (Indian English voice if installed) |
+| Text-to-speech engine disabled (Settings > Apps > Speech Services by Google > Disable) or a phone without one | no voice, no error, banners and notifications still show |
+| "Speak emergency alerts" off | silent, banner still shows |
+| Group voice guidance off | warnings and directions silent, emergencies still spoken |
+| `adb logcat \| grep -i coroute` while speaking | no spoken text in the log |
+
+## 12. Battery with the large notification (3.15)
+
+Same as section 9 over 2 hours, screen off: "Large ride notification" on vs off.
+Expected: no measurable difference (it redraws at most every 10 s from data the
+app already has; no extra GPS or network). `adb shell dumpsys notification`
+should show the CoRoute notification updated at most about 6 times a minute.
 
 ## What to send back
 

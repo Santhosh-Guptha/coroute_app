@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
+import 'network_wire.dart';
 
 /// What happened when the rider pressed SOS.
 ///
@@ -30,6 +31,14 @@ class PendingSos {
   /// Impact strength in g (crash only).
   final double? impactG;
 
+  /// 3.15: where it came from (manual, crash detection, "Need Help", the notification...).
+  final EmergencySource source;
+
+  /// 3.15: my last known heading (degrees), speed (km/h) and GPS accuracy (m), when known.
+  final double? heading;
+  final double? speedKmh;
+  final double? accuracyM;
+
   const PendingSos({
     required this.clientId,
     required this.groupId,
@@ -40,10 +49,27 @@ class PendingSos {
     this.auto = false,
     this.speedBeforeKmh,
     this.impactG,
+    this.source = EmergencySource.manual,
+    this.heading,
+    this.speedKmh,
+    this.accuracyM,
   });
 
   /// The same SOS (same [clientId]) with a newer position, or upgraded to a crash.
-  PendingSos copyWith({double? lat, double? lng, String? type, int? createdAt, bool? auto, double? speedBeforeKmh, double? impactG}) => PendingSos(
+  PendingSos copyWith({
+    double? lat,
+    double? lng,
+    String? type,
+    int? createdAt,
+    bool? auto,
+    double? speedBeforeKmh,
+    double? impactG,
+    EmergencySource? source,
+    double? heading,
+    double? speedKmh,
+    double? accuracyM,
+  }) =>
+      PendingSos(
         clientId: clientId,
         groupId: groupId,
         lat: lat ?? this.lat,
@@ -53,6 +79,10 @@ class PendingSos {
         auto: auto ?? this.auto,
         speedBeforeKmh: speedBeforeKmh ?? this.speedBeforeKmh,
         impactG: impactG ?? this.impactG,
+        source: source ?? this.source,
+        heading: heading ?? this.heading,
+        speedKmh: speedKmh ?? this.speedKmh,
+        accuracyM: accuracyM ?? this.accuracyM,
       );
 
   /// The message the gateway expects. Older gateways ignore the extra fields.
@@ -66,6 +96,10 @@ class PendingSos {
         'occurredAt': createdAt,
         'speedBeforeKmh': ?speedBeforeKmh,
         'impactG': ?impactG,
+        'source': source.wire,
+        if (heading != null) 'heading': heading!.round() % 360,
+        if (speedKmh != null) 'speedKmh': double.parse(speedKmh!.clamp(0.0, 300.0).toStringAsFixed(1)),
+        if (accuracyM != null) 'accuracyM': accuracyM!.round().clamp(0, 5000),
       };
 
   Map<String, dynamic> toJson() => {
@@ -78,6 +112,10 @@ class PendingSos {
         if (auto) 'auto': true,
         'speedBeforeKmh': ?speedBeforeKmh,
         'impactG': ?impactG,
+        if (source != EmergencySource.manual) 'source': source.wire,
+        'heading': ?heading,
+        'speedKmh': ?speedKmh,
+        'accuracyM': ?accuracyM,
       };
 
   static PendingSos? fromJson(Object? json) {
@@ -95,6 +133,10 @@ class PendingSos {
       auto: json['auto'] == true,
       speedBeforeKmh: (json['speedBeforeKmh'] as num?)?.toDouble(),
       impactG: (json['impactG'] as num?)?.toDouble(),
+      source: EmergencySource.fromWire(json['source']?.toString()) ?? EmergencySource.manual,
+      heading: (json['heading'] as num?)?.toDouble(),
+      speedKmh: (json['speedKmh'] as num?)?.toDouble(),
+      accuracyM: (json['accuracyM'] as num?)?.toDouble(),
     );
   }
 

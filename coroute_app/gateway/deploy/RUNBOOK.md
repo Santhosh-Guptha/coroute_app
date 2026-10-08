@@ -177,6 +177,46 @@ Privacy notes for operators: phone numbers in the emergency roster and medical i
 Medical info is removed from an SOS alert when it is resolved and when the trip ends (retention also removes any
 left over on resolved alerts). Admin screens never show it.
 
+## Release order for 3.15 (rider safety network, discovery): gateway first, then the app
+
+The 3.15 app (build 75) sends new socket messages (`REPORT_DOWN`, `ASSIST_ANSWER`, `NET_REPORT_FALSE`, `WAVE`, and
+`caps: ["net1"]` with every JOIN) only when the gateway's HELLO lists `net1` / `discovery1`. A 3.14 gateway answers
+those messages with `ERROR 400`, so the app must not be released before the gateway. Everything new the gateway sends
+(`EMERGENCY_UPDATE`, `ASSIST_*`, `HAZARD*`, `DISCOVERY`, `WAVED`) goes only to sockets that announced `net1`, so 3.11
+to 3.14 apps are unaffected; they only see extra fields on `ALERT`, `ALERT_RESOLVED`, `CONFIG` and the snapshot, which
+they ignore. Their SOS alerts are still searched for by the network (server side), they are never asked to help.
+
+1. Upgrade the gateway (section 7). Check: `curl -s https://coroute.duckdns.org/api/health` shows `"version":"3.15.0"`,
+   `./deploy/smoke_test.sh https://coroute.duckdns.org` passes, and the log shows no `[net]` or `[discovery]` warnings.
+2. In `/etc/coroute/gateway.env` set `LATEST_APP_BUILD=75` (the default is already 75) and restart.
+3. Only then publish the app (APKs on the gateway, section 4, and the Play release; see `PLAY_STORE_CHECKLIST.md` for
+   the Data safety and listing changes).
+4. Do not raise `MIN_APP_BUILD` for this release.
+5. A new collection `safety_audit` is created at boot (`migrate()`, idempotent). Nothing to run by hand.
+
+Switches: `SAFETY_NET_ENABLED=0` stops requests to other groups and accident warnings (own-group SOS, statuses and
+expiry keep working); `DISCOVERY_ENABLED=0` turns off "groups nearby". Both remove their HELLO feature, so 3.15 apps hide
+the related controls. All other settings are optional (`deploy/.env.example`, section "3.15").
+
+Load and the free OSRM server: matching uses only memory (live convoys, route geometry already stored with each convoy);
+one timer every 15 s for the network and one every 60 s for discovery, both idle when nothing is open. The OSRM table
+service is used only for riders without a planned route, at most 2 calls per emergency and 6 per minute for the whole
+gateway, through the same polite queue as routes, with a 3 s timeout; a request to a rider on a planned route is never
+held up by it. A test with 200 live convoys, 2000 riders and 50 open emergencies on dense 3000-point routes took about
+25 ms per network tick (350 ms once for building the route indexes).
+
+Operations:
+* Admin view: `GET /api/admin/safety` (open incidents, riders with false alarms in the last 30 days, the latest 100
+  audit rows). Reset a rider's false alarm count with `POST /api/admin/users/<userId>/false-alarms/reset`.
+* A rider with 3 false alarms (that riders of other groups were asked to help with) in 30 days is "throttled": their own
+  group is alerted as always, other groups get at most one request, 60 s later, and no accident warning unless it was an
+  automatic crash alert.
+* After a restart, open emergencies get their network search back when their convoy is loaded again (a candidate may be
+  asked once more; harmless).
+* Privacy notes: the safety log holds ids and short codes only (no positions, names or text) and is purged after
+  `AUDIT_RETENTION_DAYS` (180) and on account deletion. The network summary (responders, ETAs) lives in memory only;
+  an alert stores just the responders' first names, statuses and times (`netResponders`).
+
 ## Free-tier capacity notes
 
 * Voice is PCM16 @ 16 kHz: 32 KB/s per *active speaker* (16 KB/s from a phone in data saver mode, 8 kHz). A convoy of 10 where one person speaks = 32 KB/s in, 288 KB/s out — trivial for the VM; OCI Always Free includes 10 TB/month egress.

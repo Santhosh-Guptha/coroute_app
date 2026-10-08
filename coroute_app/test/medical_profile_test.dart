@@ -91,13 +91,15 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.scrollUntilVisible(find.text('Medical info (optional)'), 200, scrollable: find.byType(Scrollable).first);
       expect(find.text('Shown to your ride group only while your SOS or crash alert is open.'), findsOneWidget);
-      await tester.scrollUntilVisible(find.byKey(const ValueKey('medicalNotes')), 200, scrollable: find.byType(Scrollable).first);
-
       // Limits: the fields stop at 120 and 200 characters.
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('allergies')), 200, scrollable: find.byType(Scrollable).first);
       await tester.enterText(find.byKey(const ValueKey('allergies')), 'a' * 150);
-      await tester.enterText(find.byKey(const ValueKey('medicalNotes')), 'b' * 250);
       await tester.pump();
       expect(tester.widget<TextField>(find.byKey(const ValueKey('allergies'))).controller!.text.length, 120);
+
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('medicalNotes')), 200, scrollable: find.byType(Scrollable).first);
+      await tester.enterText(find.byKey(const ValueKey('medicalNotes')), 'b' * 250);
+      await tester.pump();
       expect(tester.widget<TextField>(find.byKey(const ValueKey('medicalNotes'))).controller!.text.length, 200);
 
       await tester.scrollUntilVisible(find.text('Receive emergency texts from my ride group'), 200, scrollable: find.byType(Scrollable).first);
@@ -135,6 +137,8 @@ void main() {
     await tester.pump();
 
     await tester.scrollUntilVisible(find.text('Save'), 200, scrollable: find.byType(Scrollable).first);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));

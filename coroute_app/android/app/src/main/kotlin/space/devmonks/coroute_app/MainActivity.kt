@@ -1,10 +1,12 @@
 package space.devmonks.coroute_app
 
 import android.content.Context
+import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -13,6 +15,8 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var accelStream: AccelStream? = null
     private var smsChannel: SmsChannel? = null
+    private var rideNotification: RideNotification? = null
+    private var ttsChannel: TtsChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -29,6 +33,29 @@ class MainActivity : FlutterActivity() {
         val sms = SmsChannel(applicationContext)
         smsChannel = sms
         MethodChannel(messenger, "coroute/sms").setMethodCallHandler(sms)
+
+        // 3.15: the big ride notification (replaces the foreground service notification in
+        // place) and spoken alerts with the phone's text-to-speech engine.
+        val rideChannel = MethodChannel(messenger, "coroute/ride_notification")
+        val ride = RideNotification(this, rideChannel)
+        ride.register()
+        rideNotification = ride
+        rideChannel.setMethodCallHandler(ride)
+        val tts = TtsChannel(applicationContext)
+        ttsChannel = tts
+        MethodChannel(messenger, "coroute/tts").setMethodCallHandler(tts)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // A ride notification button started the app: kept until Dart asks (takeLaunchAction).
+        if (savedInstanceState == null) rideNotification?.handleActivityIntent(intent, coldStart = true)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        rideNotification?.handleActivityIntent(intent, coldStart = false)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -41,6 +68,12 @@ class MainActivity : FlutterActivity() {
         EventChannel(messenger, "coroute/accel").setStreamHandler(null)
         MethodChannel(messenger, "coroute/safety").setMethodCallHandler(null)
         MethodChannel(messenger, "coroute/sms").setMethodCallHandler(null)
+        rideNotification?.dispose()
+        rideNotification = null
+        MethodChannel(messenger, "coroute/ride_notification").setMethodCallHandler(null)
+        ttsChannel?.release()
+        ttsChannel = null
+        MethodChannel(messenger, "coroute/tts").setMethodCallHandler(null)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

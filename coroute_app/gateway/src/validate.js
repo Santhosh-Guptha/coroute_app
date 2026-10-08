@@ -87,8 +87,8 @@ const BLOOD_GROUPS = new Set(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'])
 
 /** Fields that may be empty when written (everything else must pass its rule). */
 const MAY_BE_EMPTY = new Set(['vehicleType', 'vehicleNo', 'bloodGroup', 'allergies', 'medicalNotes']);
-/** On/off fields: must be a real boolean. */
-const SWITCHES = ['smsOptOut'];
+/** On/off fields: must be a real boolean. 3.15: the nearby-rider assistance switches. */
+const SWITCHES = ['smsOptOut', 'assistHelp', 'assistAsk', 'responderMedical'];
 
 /**
  * Validates the given profile fields. Only keys present in `input` (and not
@@ -183,4 +183,4 @@ function validPhone(v) {
 const CLIENT_ID = /^[A-Za-z0-9_.:-]{1,64}$/;
 function clientIdOf(v) { return typeof v === 'string' && CLIENT_ID.test(v) ? v : ''; }
 
-module.exports = { ValidationError, profileFields, tripRecord, sitePath, cleanPhone, downsample, validPhone, clientIdOf, BLOOD_GROUPS };
+module.exports = { ValidationError, SWITCHES, profileFields, tripRecord, sitePath, cleanPhone, downsample, validPhone, clientIdOf, BLOOD_GROUPS };

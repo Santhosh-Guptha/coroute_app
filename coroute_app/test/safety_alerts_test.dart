@@ -66,18 +66,20 @@ void main() {
   group('Crash and SOS', () {
     final crash = ev('e1', 'SOS', user: 'k', name: 'Kiran', open: true, lat: 12.9115, lng: 77.5115, data: {'alertId': 'A1', 'alertType': 'CRASH', 'auto': true});
 
-    test('automatic crash: everyone but the rider, critical, says automatic with distance and direction', () {
+    // 3.15: an automatic crash is shown in the EMERGENCY form (was "Crash detected: Kiran").
+    test('automatic crash: everyone but the rider, critical, EMERGENCY with automatic, distance, direction and last update', () {
       final a = policy.standing([crash], lead, nowMs: t0 + min).single;
       expect(a.key, 'SOS:A1');
       expect(a.key.startsWith(AlertPolicy.sosPrefix), isTrue);
       expect(a.channel, AlertChannel.sos);
-      expect(a.title, 'Crash detected: Kiran');
-      expect(a.body, startsWith('Automatic alert. 1.8 km north-east of you.'));
-      expect(a.body, endsWith('Open CoRoute to see where.'));
+      expect(a.title, 'EMERGENCY');
+      expect(a.body, 'Kiran may have met with an accident. Automatic alert. 1.8 km north-east of you. Last location update: 1 min ago.');
+      expect(a.speech, 'Emergency. Kiran may have met with an accident 1.8 kilometers north-east of you.');
       expect(tierFor(a), AlertTier.critical);
       expect(policy.standing([crash], kiran, nowMs: t0 + min), isEmpty);
       // Position of the viewer unknown: no distance.
-      expect(policy.standing([crash], pack, nowMs: t0 + min).single.body, 'Automatic alert. Open CoRoute to see where.');
+      expect(policy.standing([crash], pack, nowMs: t0 + min).single.body,
+          'Kiran may have met with an accident. Automatic alert. Last location update: 1 min ago.');
     });
 
     test('manual SOS: as before, plus distance and direction', () {

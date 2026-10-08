@@ -16,6 +16,7 @@ import '../../domain/tracking/geo_math.dart';
 import '../../domain/tracking/track_point.dart';
 import '../models/convoy_model.dart';
 import '../models/emergency_roster.dart';
+import '../models/network_wire.dart';
 import '../models/pending_sos.dart';
 import '../models/safety_wire.dart';
 import 'accel_source.dart';
@@ -172,8 +173,24 @@ abstract class SafetyPort implements Listenable {
   bool sendCheckIn(CheckInResult result, {double? awayM});
 }
 
+/// Optional extension of [SafetyPort] (3.15): raise with the emergency source, so the
+/// server can tell "Need Help" (the rider answered) from no answer (CRASH_AUTO).
+/// Ports that do not implement it get the 3.14 call (the server derives the source).
+abstract class SafetySourcePort {
+  SosDelivery raiseSosFrom(
+    EmergencySource source, {
+    required String type,
+    required double lat,
+    required double lng,
+    bool auto = false,
+    double? speedBeforeKmh,
+    double? impactG,
+    int? occurredAtMs,
+  });
+}
+
 /// Adapts the real ConvoyService and AuthService.
-class ConvoySafetyPort implements SafetyPort {
+class ConvoySafetyPort implements SafetyPort, SafetySourcePort {
   ConvoySafetyPort(this._convoys, this._auth);
 
   final ConvoyService _convoys;
@@ -240,10 +257,33 @@ class ConvoySafetyPort implements SafetyPort {
       );
 
   @override
+  SosDelivery raiseSosFrom(
+    EmergencySource source, {
+    required String type,
+    required double lat,
+    required double lng,
+    bool auto = false,
+    double? speedBeforeKmh,
+    double? impactG,
+    int? occurredAtMs,
+  }) =>
+      _convoys.raiseSos(
+        type: type,
+        lat: lat,
+        lng: lng,
+        auto: auto,
+        speedBeforeKmh: speedBeforeKmh,
+        impactG: impactG,
+        occurredAtMs: occurredAtMs,
+        source: source,
+      );
+
+  @override
   bool sendCheckIn(CheckInResult result, {double? awayM}) => _convoys.sendCheckIn(result, awayM: awayM);
 }
 
-/// Rider safety on the phone: crash detection with a 30 s alarm, emergency texts
+/// Rider safety on the phone: crash detection with a 15 s alarm ("Possible accident
+/// detected. Are you okay?", [SafetyConstants.crashCountdown]), emergency texts
 /// when an SOS cannot reach the group, the break reminder and the "Are you OK?"
 /// check-in. Battery: the accelerometer runs only during a ride, only while the
 /// rider was faster than 25 km/h in the last 30 s (or an impact is being
@@ -341,11 +381,12 @@ class SafetyService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// "Send now" on the alarm (also what happens at 0 s).
+  /// "Need Help" on the alarm: the SOS goes out at once (source NEED_HELP).
+  /// At 0 s without an answer the same happens with source CRASH_AUTO.
   void alarmSendNow() {
     final a = _alarm;
     if (a == null || a.sent) return;
-    _sendCrash();
+    _sendCrash(EmergencySource.needHelp);
   }
 
   /// Closes the alarm screen after the SOS was sent (the SOS itself stays open).
@@ -521,8 +562,8 @@ class SafetyService extends ChangeNotifier {
     if (_native) {
       SafetyNative.alarmWindow(true).ignore();
       AlarmNotifier.showCrashAlarm(
-        title: 'Did you crash?',
-        body: 'Automatic alert. Sending SOS to your group in $seconds seconds. Tap I\'m OK if you are fine.',
+        title: 'Possible accident detected',
+        body: 'Are you okay? Sending SOS to your group in $seconds seconds. Tap I\'m OK if you are fine.',
       ).ignore();
     }
     _haptic();
@@ -539,7 +580,7 @@ class SafetyService extends ChangeNotifier {
     final elapsed = _now() - a.startedAtMs;
     final left = ((SafetyConstants.crashCountdown.inMilliseconds - elapsed) / 1000).ceil();
     if (left <= 0) {
-      _sendCrash();
+      _sendCrash(EmergencySource.crashAuto);
       return;
     }
     if (left != a.secondsLeft) {
@@ -549,21 +590,35 @@ class SafetyService extends ChangeNotifier {
     }
   }
 
-  void _sendCrash() {
+  void _sendCrash(EmergencySource source) {
     final a = _alarm;
     final e = _alarmEvent;
     _alarmTimer?.cancel();
     _alarmTimer = null;
     if (a == null || e == null) return;
-    _port.raiseSos(
-      type: SosTypes.crash,
-      lat: e.lat,
-      lng: e.lng,
-      auto: true,
-      speedBeforeKmh: e.speedBeforeKmh,
-      impactG: e.impactG,
-      occurredAtMs: e.impactAtMs,
-    );
+    final port = _port;
+    if (port is SafetySourcePort) {
+      (port as SafetySourcePort).raiseSosFrom(
+        source,
+        type: SosTypes.crash,
+        lat: e.lat,
+        lng: e.lng,
+        auto: true,
+        speedBeforeKmh: e.speedBeforeKmh,
+        impactG: e.impactG,
+        occurredAtMs: e.impactAtMs,
+      );
+    } else {
+      port.raiseSos(
+        type: SosTypes.crash,
+        lat: e.lat,
+        lng: e.lng,
+        auto: true,
+        speedBeforeKmh: e.speedBeforeKmh,
+        impactG: e.impactG,
+        occurredAtMs: e.impactAtMs,
+      );
+    }
     _alarm = a.copyWith(sent: true, secondsLeft: 0);
     _detector.cooldown(_now());
     _endAlarmNative();

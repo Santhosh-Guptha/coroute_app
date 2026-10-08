@@ -15,6 +15,7 @@
  *   track_chunks    uploaded GPS points        unique: (groupId,userId,seq); removed after TRACK_RETENTION_DAYS
  *   trip_events     group timeline entries     unique: eventId; kept forever, coordinates removed after TRACK_RETENTION_DAYS
  *   geo_cache       place search / route cache unique: k; removed after GEO_CACHE_DAYS
+ *   safety_audit    safety network audit rows  indexed: at, actorId; removed after AUDIT_RETENTION_DAYS (3.15)
  */
 const { identity, scrub, scrubConvoyMeta, mentions, FORMER_RIDER } = require('../anonymise');
 
@@ -32,7 +33,17 @@ const C = {
   trackChunks: 'track_chunks',
   events: 'trip_events',
   geoCache: 'geo_cache',
+  audit: 'safety_audit',
 };
+
+/** Alert fields that live in memory only (filled by the safety network) and are never stored. */
+const MEMORY_ONLY_ALERT_FIELDS = ['network', 'ownNearest'];
+function storableAlert(a) {
+  const out = { ...a };
+  for (const k of MEMORY_ONLY_ALERT_FIELDS) delete out[k];
+  delete out.key;
+  return out;
+}
 
 const ACTIVE_STATUSES = ['PLANNING', 'STARTED', 'PAUSED'];
 
@@ -40,6 +51,17 @@ class Repo {
   /** @param {import('./soda').SodaClient} soda */
   constructor(soda) {
     this.soda = soda;
+    this.alertChains = new Map(); // alertId -> tail of its write chain (read-modify-write is never interleaved)
+  }
+
+  /** Runs one read-modify-write of an alert after the previous one for the same alert finished. */
+  _alertSerial(alertId, fn) {
+    const prev = this.alertChains.get(alertId) || Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.catch(() => {});
+    this.alertChains.set(alertId, tail);
+    tail.then(() => { if (this.alertChains.get(alertId) === tail) this.alertChains.delete(alertId); });
+    return run;
   }
 
   /** Creates collections + indexes. Safe to run on every boot. */
@@ -72,6 +94,8 @@ class Repo {
     await idx(C.events, 'events_user_ix', ['userId']);
     await idx(C.geoCache, 'geo_k_ux', ['k'], true);
     await idx(C.geoCache, 'geo_created_ix', [{ path: 'createdAt', datatype: 'number' }]);
+    await idx(C.audit, 'audit_at_ix', [{ path: 'at', datatype: 'number' }]);
+    await idx(C.audit, 'audit_actor_ix', ['actorId']);
   }
 
   // ---------- users ----------
@@ -155,6 +179,9 @@ class Repo {
     await this.soda.removeWhere(C.voiceLog, { from: uid });
     await this.soda.removeWhere(C.voiceLog, { to: uid });
     if (user.email) await this.soda.removeWhere(C.feedback, { email: user.email });
+    // The safety log is not kept for deleted accounts (3.15).
+    await this.soda.removeWhere(C.audit, { actorId: uid });
+    await this.soda.removeWhere(C.audit, { subjectId: uid });
 
     // Shared records in every convoy the rider was part of.
     for (const gid of groups) {
@@ -303,27 +330,35 @@ class Repo {
     return rows.map((r) => ({ ...r.value, key: r.key }));
   }
   async addAlert(groupId, alert) {
-    await this.soda.insert(C.alerts, { ...alert, groupId, resolved: false });
+    await this.soda.insert(C.alerts, { ...storableAlert(alert), groupId, resolved: false });
     return alert;
   }
   async findAlertByClientId(groupId, userId, clientId) {
     const r = await this.soda.findOne(C.alerts, { groupId, userId, clientId });
     return r ? { ...r.value, key: r.key } : null;
   }
-  async resolveAlert(groupId, alertId, byUserId) {
-    const r = await this.soda.findOne(C.alerts, { groupId, alertId });
-    if (!r) return false;
-    // Medical info is shown only while the alert is open: it is not kept after it.
-    const { medical, ...rest } = r.value;
-    await this.soda.replace(C.alerts, r.key, { ...rest, resolved: true, resolvedAt: Date.now(), resolvedBy: byUserId });
-    return true;
+  /** `extra`: 3.15 fields written with the resolve (status, resolveReason, resolvedAt). */
+  async resolveAlert(groupId, alertId, byUserId, extra = {}) {
+    return this._alertSerial(alertId, async () => {
+      const r = await this.soda.findOne(C.alerts, { groupId, alertId });
+      if (!r) return false;
+      // Medical info is shown only while the alert is open: it is not kept after it.
+      const { medical, ...rest } = r.value;
+      await this.soda.replace(C.alerts, r.key, { ...rest, resolved: true, resolvedAt: Date.now(), resolvedBy: byUserId, ...storableAlert(extra) });
+      return true;
+    });
   }
-  /** Merges `patch` into one stored alert (responders). */
+  /** Merges `patch` into one stored alert (responders, 3.15 status fields). Memory-only fields are dropped. */
   async updateAlert(groupId, alertId, patch) {
-    const r = await this.soda.findOne(C.alerts, { groupId, alertId });
-    if (!r) return false;
-    await this.soda.replace(C.alerts, r.key, { ...r.value, ...patch });
-    return true;
+    return this._alertSerial(alertId, async () => {
+      const r = await this.soda.findOne(C.alerts, { groupId, alertId });
+      if (!r) return false;
+      // A closed alert keeps its closing status: a late open-status write never reopens it.
+      const next = { ...r.value, ...storableAlert(patch) };
+      if (r.value.resolved) { next.resolved = true; if (r.value.status) next.status = r.value.status; }
+      await this.soda.replace(C.alerts, r.key, next);
+      return true;
+    });
   }
   /** Trip end: removes the medical info from every alert of the convoy (open or not). */
   async stripAlertMedical(groupId) {
@@ -446,6 +481,33 @@ class Repo {
     return this.soda.upsertBy(C.geoCache, { k }, { k, value, createdAt: Date.now() });
   }
 
+  // ---------- safety network (3.15) ----------
+  async addAudit(row) { return this.soda.insert(C.audit, row); }
+  /** Newest first. */
+  async listAudit({ limit = 100, actorId } = {}) {
+    const rows = await this.soda.query(C.audit, actorId ? { actorId } : {}, { orderBy: [{ path: 'at', datatype: 'number', order: 'desc' }], limit: Math.min(1000, Math.max(1, limit)) });
+    return rows.map((r) => r.value);
+  }
+  /** Appends a false alarm time to the user (last 10 kept, server only). */
+  async addFalseAlarm(userId, at) {
+    const r = await this.soda.findOne(C.users, { userId });
+    if (!r) return null;
+    const list = [...(Array.isArray(r.value.falseAlarmAt) ? r.value.falseAlarmAt : []), at].filter(Number.isFinite).slice(-10);
+    await this.soda.replace(C.users, r.key, { ...r.value, falseAlarmAt: list });
+    return list;
+  }
+  async resetFalseAlarms(userId) {
+    const r = await this.soda.findOne(C.users, { userId });
+    if (!r) return false;
+    await this.soda.replace(C.users, r.key, { ...r.value, falseAlarmAt: [] });
+    return true;
+  }
+  /** Users with any false alarm recorded (admin view). */
+  async listFalseAlarmUsers(limit = 500) {
+    const rows = await this.soda.query(C.users, { falseAlarmAt: { $exists: true } }, { limit });
+    return rows.map((r) => r.value).filter((u) => Array.isArray(u.falseAlarmAt) && u.falseAlarmAt.length);
+  }
+
   // ---------- housekeeping ----------
   async purgeOlderThan(collection, path, cutoffMs) {
     return this.soda.removeWhere(collection, { [path]: { $lt: cutoffMs } });
@@ -460,4 +522,4 @@ class Repo {
   }
 }
 
-module.exports = { Repo, COLLECTIONS: C, ACTIVE_STATUSES };
+module.exports = { Repo, COLLECTIONS: C, ACTIVE_STATUSES, storableAlert };

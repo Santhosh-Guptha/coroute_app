@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../core/constants/ride_notification_constants.dart';
 
 /// Keeps CoRoute alive while a convoy is active and the phone is in a pocket or
 /// mounted with the screen locked.
@@ -14,16 +15,76 @@ import 'package:permission_handler/permission_handler.dart';
 /// that shows the convoy name and offers two actions riders can use without
 /// unlocking the phone: SOS and Leave. The Dart code of the app keeps running
 /// in the main isolate; the service's own isolate only forwards button taps.
+///
+/// 3.15: during a ride RideNotificationService replaces this plain notification
+/// in place with the big ride notification (same id [NotifConstants.serviceNotificationId],
+/// same channel [NotifConstants.channelId]). While it is shown ([richActive]) nothing here
+/// re-posts the plain one; when it is given up, the last plain text is posted again.
 class BackgroundService {
   BackgroundService._();
 
-  static const int _serviceId = 1001;
+  static const int _serviceId = NotifConstants.serviceNotificationId;
   static const String buttonSos = 'sos';
   static const String buttonLeave = 'leave';
   static bool _initialised = false;
   static bool _runningWithMic = false;
   static String _convoyName = '';
   static int _riderCount = 0;
+
+  static bool _richActive = false;
+  static String? _plainTitle;
+  static String? _plainText;
+
+  /// The big ride notification currently replaces the plain one. While true,
+  /// [updateStatus] and a repeated [start] do not touch the notification.
+  static bool get richActive => _richActive;
+
+  /// Called after every successful [start] of the service (first start and the
+  /// microphone restart), so the big ride notification can be posted again at once.
+  static VoidCallback? onServiceStarted;
+
+  /// Set by RideNotificationService only. Switching off posts the last plain
+  /// status again (the big notification would otherwise stay until the next change).
+  static Future<void> setRichActive(bool value) async {
+    if (_richActive == value) return;
+    _richActive = value;
+    if (value) return;
+    final title = _plainTitle, text = _plainText;
+    if (title == null || text == null) return;
+    await updateStatus(title: title, text: text);
+  }
+
+  @visibleForTesting
+  static void debugReset() {
+    _richActive = false;
+    _plainTitle = null;
+    _plainText = null;
+    onServiceStarted = null;
+  }
+
+  /// The last plain title and text asked for (shown again when the big notification is given up).
+  @visibleForTesting
+  static ({String? title, String? text}) get lastPlain => (title: _plainTitle, text: _plainText);
+
+  /// Whether the foreground service runs (false off Android/iOS or on any error).
+  static Future<bool> isRunning() async {
+    if (!_isAndroidOrIos) return false;
+    try {
+      return await FlutterForegroundTask.isRunningService;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static void _notifyStarted() {
+    final cb = onServiceStarted;
+    if (cb == null) return;
+    try {
+      cb();
+    } catch (e) {
+      debugPrint('ride notification restart note: $e');
+    }
+  }
 
   /// Service types for this phone. Location always; microphone only when granted.
   /// (dataSync is not used: location already keeps the connection alive, and Android 15
@@ -83,8 +144,12 @@ class BackgroundService {
     _convoyName = convoyName;
     _riderCount = riderCount;
     final text = '$riderCount rider${riderCount == 1 ? '' : 's'} connected. Position sharing and intercom are on.';
+    _plainTitle = 'Convoy: $convoyName';
+    _plainText = text;
     try {
       if (await FlutterForegroundTask.isRunningService) {
+        // The big ride notification is showing: re-posting the plain one would replace it.
+        if (_richActive) return true;
         final r = await FlutterForegroundTask.updateService(notificationTitle: 'Convoy: $convoyName', notificationText: text);
         return r is ServiceRequestSuccess;
       }
@@ -101,7 +166,11 @@ class BackgroundService {
         callback: coRouteForegroundCallback,
       );
       if (r is ServiceRequestFailure) debugPrint('Foreground service start failed: ${r.error}');
-      if (r is ServiceRequestSuccess) _runningWithMic = mic;
+      if (r is ServiceRequestSuccess) {
+        _runningWithMic = mic;
+        // The plugin posted its plain notification: the big one goes back up at once.
+        _notifyStarted();
+      }
       return r is ServiceRequestSuccess;
     } catch (e) {
       debugPrint('Foreground service note: $e');
@@ -129,6 +198,10 @@ class BackgroundService {
   /// notification shows; the expanded one shows every line.
   static Future<void> updateStatus({required String title, required String text}) async {
     if (!_isAndroidOrIos) return;
+    _plainTitle = title;
+    _plainText = text;
+    // The big ride notification replaces this one; updating would put the plain one back.
+    if (_richActive) return;
     try {
       if (await FlutterForegroundTask.isRunningService) {
         await FlutterForegroundTask.updateService(notificationTitle: title, notificationText: text);
@@ -143,6 +216,8 @@ class BackgroundService {
     try {
       if (await FlutterForegroundTask.isRunningService) await FlutterForegroundTask.stopService();
       _runningWithMic = false;
+      // The service removes its notification (ours too: same id).
+      _richActive = false;
     } catch (e) {
       debugPrint('Foreground service stop note: $e');
     }

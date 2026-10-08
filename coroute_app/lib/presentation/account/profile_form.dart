@@ -103,6 +103,9 @@ class _ProfileFormState extends State<ProfileForm> {
   bool _medicalLoaded = false;
   String _initialBlood = '', _initialAllergies = '', _initialNotes = '';
   bool _initialOptOut = false;
+  bool _responderMedical = false;
+  bool _initialResponderMedical = false;
+  bool _netLoaded = false;
   late List<String> _bloodChoices;
 
   late List<String> _types;
@@ -142,6 +145,9 @@ class _ProfileFormState extends State<ProfileForm> {
     _allergies.text = _initialAllergies;
     _notes.text = _initialNotes;
     _smsOptOut = _initialOptOut;
+    _netLoaded = auth.netLoaded;
+    _initialResponderMedical = auth.responderMedical;
+    _responderMedical = _initialResponderMedical;
   }
 
   @override
@@ -196,6 +202,8 @@ class _ProfileFormState extends State<ProfileForm> {
       allergies: medical.allergies,
       medicalNotes: medical.medicalNotes,
       smsOptOut: medical.smsOptOut,
+      // Sent when the server knows the switch, or when the rider changed it (older callers never clear it).
+      responderMedical: (_netLoaded || _responderMedical != _initialResponderMedical) ? _responderMedical : null,
     );
     if (!mounted) return;
     setState(() => _busy = false);
@@ -356,6 +364,14 @@ class _ProfileFormState extends State<ProfileForm> {
           textCapitalization: TextCapitalization.sentences,
           style: AppText.body,
           decoration: _dec('Notes for helpers', Icons.medical_information_rounded, hint: 'e.g. diabetic, carries insulin'),
+        ),
+        SwitchListTile(
+          key: const ValueKey('responderMedical'),
+          contentPadding: EdgeInsets.zero,
+          value: _responderMedical,
+          onChanged: _busy ? null : (v) => setState(() => _responderMedical = v),
+          title: Text('Share with a rider from another group who comes to help me', style: AppText.body),
+          subtitle: Text('Only after they accept to help, only while your alert is open. Off by default.', style: AppText.caption),
         ),
         _section('Emergency texts'),
         // Shown as a positive choice (on = receive); stored as the gateway's smsOptOut.

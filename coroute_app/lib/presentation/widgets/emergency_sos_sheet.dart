@@ -5,10 +5,13 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/app_bottom_sheet.dart';
 import '../../core/ui/ui_tokens.dart';
+import '../../data/models/network_wire.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/settings_service.dart';
+import '../ride/incident_banner.dart' show PositiveLine;
+import '../ride/incident_view.dart' show etaWords, networkStateWords;
 
 /// What the SOS sheet tells the rider about delivery.
 enum SosSheetStatus { delivered, sending, waitingForSignal, unknown }
@@ -19,7 +22,8 @@ enum SosSheetStatus { delivered, sending, waitingForSignal, unknown }
 ///   sending, or waiting for signal (kept on the phone and sent on reconnect).
 /// * Calls or texts the rider's emergency contact (with a map link to the position).
 /// * Dials 112.
-/// * "I am safe" cancels the rider's own SOS from any screen.
+/// * Says whether nearby riders of other groups are being asked or one is coming (3.15).
+/// * "Help reached me" or "False alarm" closes the rider's own SOS from any screen.
 class EmergencySosSheet extends StatelessWidget {
   final double lat;
   final double lng;
@@ -79,6 +83,42 @@ class EmergencySosSheet extends StatelessWidget {
     }
   }
 
+  /// What the safety network does for my open SOS: (text, positive), or (null, false).
+  static (String?, bool) networkLineOf(ConvoyService? s) {
+    final c = s?.activeConvoy;
+    final id = s?.myOpenSosAlertId;
+    if (c == null || id == null) return (null, false);
+    for (final a in c.activeAlerts) {
+      if (a.alertId != id) continue;
+      final net = a.network;
+      if (net == null) return (null, false);
+      final r = net.activeResponder;
+      if (r != null) {
+        if (r.status == ResponderStatus.arrived) return ('A nearby rider has reached you', true);
+        final eta = etaWords(r.etaS);
+        return (eta == null ? 'A nearby rider is responding' : 'A nearby rider is responding, $eta', true);
+      }
+      return (networkStateWords(net.state), false);
+    }
+    return (null, false);
+  }
+
+  void _close(BuildContext context, ConvoyService? convoyService, ResolveReason reason) {
+    // Resolves this rider's own open SOS on the server (also when the sheet was
+    // opened without an alert id) and drops one that is still waiting to be sent.
+    if (convoyService != null) {
+      final known = alertId;
+      if (known != null && known != convoyService.myOpenSosAlertId) convoyService.resolveSosAlert(known, reason: reason);
+      convoyService.cancelMySos(reason: reason);
+    }
+    onResolved?.call();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    Navigator.pop(context);
+    messenger?.showSnackBar(SnackBar(
+      content: Text(reason == ResolveReason.falseAlarm ? 'SOS cancelled. Your convoy sees that it was a false alarm.' : 'SOS closed. Your convoy sees that help reached you.'),
+    ));
+  }
+
   Future<void> _makeCall(BuildContext context, String phone) async {
     final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
     if (clean.isEmpty) return;
@@ -132,6 +172,7 @@ class EmergencySosSheet extends StatelessWidget {
     );
     final smsLine = smsStatus?.text ?? '';
     final showSmsButton = smsOn && pending && status != SosSheetStatus.delivered;
+    final (netLine, netPositive) = context.select<ConvoyService?, (String?, bool)>(networkLineOf);
 
     return Column(
           mainAxisSize: MainAxisSize.min,
@@ -186,6 +227,22 @@ class EmergencySosSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
+            if (netLine != null) ...[
+              if (netPositive)
+                PositiveLine(text: netLine)
+              else
+                Semantics(
+                  liveRegion: true,
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_search_rounded, size: 18, color: AppTheme.textSecondary),
+                      const SizedBox(width: Space.s8),
+                      Expanded(child: Text(netLine, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.textPrimary))),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: Space.s12),
+            ],
 
             // Location Box
             Container(
@@ -316,31 +373,29 @@ class EmergencySosSheet extends StatelessWidget {
             ),
             const SizedBox(height: 12),
 
-            // Resolve / Cancel Button: full width, then "Keep it on".
+            // Close my SOS: help reached me, or it was a false alarm. Then "Keep it on".
             FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.elevatedCard,
-                      foregroundColor: AppTheme.textPrimary,
-                      minimumSize: const Size.fromHeight(56),
-                      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
-                    ),
-                    icon: Icon(Icons.verified_user_rounded, color: AppTheme.emeraldSafe),
-                    onPressed: () {
-                      // Resolves this rider's own open SOS on the server (also when the sheet was
-                      // opened without an alert id) and drops one that is still waiting to be sent.
-                      if (convoyService != null) {
-                        final known = alertId;
-                        if (known != null && known != convoyService.myOpenSosAlertId) convoyService.resolveSosAlert(known);
-                        convoyService.cancelMySos();
-                      }
-                      onResolved?.call();
-                      final messenger = ScaffoldMessenger.maybeOf(context);
-                      Navigator.pop(context);
-                      messenger?.showSnackBar(
-                        const SnackBar(content: Text('SOS cancelled. Your convoy sees that you are OK.')),
-                      );
-                    },
-                    label: const Text('I am safe, cancel the SOS', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.emeraldSafe,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(56),
+                shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+              ),
+              icon: const Icon(Icons.verified_user_rounded),
+              onPressed: () => _close(context, convoyService, ResolveReason.resolved),
+              label: const Text('Help reached me', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            ),
+            const SizedBox(height: Space.s8),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.elevatedCard,
+                foregroundColor: AppTheme.textPrimary,
+                minimumSize: const Size.fromHeight(56),
+                shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
+              ),
+              icon: const Icon(Icons.do_not_disturb_on_rounded),
+              onPressed: () => _close(context, convoyService, ResolveReason.falseAlarm),
+              label: const Text('False alarm', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
             ),
             const SizedBox(height: Space.s4),
             TextButton(

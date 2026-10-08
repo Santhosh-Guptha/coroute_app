@@ -41,15 +41,23 @@ const ACTION_TYPES = new Set([
   'JOIN', 'LEAVE', 'ADMIN_SUBSCRIBE',
   // 3.14
   'SOS_RESPOND', 'BYE',
+  // 3.15
+  'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE',
 ]);
 /** Socket messages that alert the whole convoy: a few per 10 seconds, each type with its own budget
  * (a rider who just asked the group to wait must still be able to raise an SOS). */
-const ALARM_TYPES = new Set(['WAIT', 'SOS', 'CHECK_IN']);
+const ALARM_TYPES = new Set(['WAIT', 'SOS', 'CHECK_IN', 'REPORT_DOWN']);
 /** Messages that may carry a clientId (phone outbox): applied once, answered with ACK. */
-const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN']);
+const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN', 'REPORT_DOWN', 'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE']);
 const BYE_REASONS = new Set(['APP_CLOSED', 'SIGN_OUT', 'LEFT']);
 /** Protocol features this gateway offers (HELLO.features); 3.14 apps use a feature only when listed. */
-const FEATURES = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster'];
+const FEATURES_314 = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster'];
+/** 3.15: safety network and discovery, appended when switched on. */
+const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : [])];
+/** Client capabilities a 3.15 app sends with JOIN. Server-to-client types added in 3.15 go only to sockets with 'net1'. */
+const CAP = /^[a-z0-9]{1,16}$/;
+const INCIDENT_ID = /^NET-[0-9A-F]{12}$/;
+const ENCOUNTER_ID = /^ENC-[0-9A-F]{12}$/;
 
 function encodeVoice(kind, header, payload) {
   const h = Buffer.from(JSON.stringify(header), 'utf8');
@@ -73,9 +81,11 @@ class Hub {
   /**
    * @param {{server: import('http').Server, convoys: import('./convoys').ConvoyManager, repo: any, logger?: any}} deps
    */
-  constructor({ server, convoys, repo, tracks = null, timeline = null, logger = console, path = '/ws', gate = null }) {
+  constructor({ server, convoys, repo, tracks = null, timeline = null, logger = console, path = '/ws', gate = null, network = null, discovery = null }) {
     this.convoys = convoys; this.repo = repo; this.tracks = tracks; this.timeline = timeline; this.log = logger; this.gate = gate;
+    this.network = network; this.discovery = discovery;
     this.rooms = new Map(); // groupId -> Set<ws>
+    this.byUser = new Map(); // userId -> Set<ws> (3.15 personal messages)
     this.admins = new Set();
     this.voice = new Map(); // groupId -> { group: stream|null, private: Map<from, stream> }
     this.wss = new WebSocketServer({ server, path, maxPayload: 256 * 1024 });
@@ -84,6 +94,8 @@ class Hub {
     convoys.on('event', (groupId, payload) => this.broadcast(groupId, payload));
     convoys.on('broadcast', (entry) => this.broadcastAll({ type: 'BROADCAST', message: entry.message, ts: entry.timestamp }));
     convoys.on('fleet', () => this._scheduleFleet());
+    // 3.15: room messages only 3.15 apps understand (EMERGENCY_UPDATE).
+    convoys.on('capEvent', (groupId, cap, payload) => this.broadcastCap(groupId, cap, payload));
 
     this.heartbeat = setInterval(() => {
       for (const ws of this.wss.clients) {
@@ -114,6 +126,46 @@ class Hub {
     const msg = JSON.stringify(payload);
     for (const ws of set) if (ws !== except && ws.readyState === WebSocket.OPEN) ws.send(msg);
   }
+  /** Room broadcast to sockets that announced `cap` in their JOIN (3.15 types never reach older apps). */
+  broadcastCap(groupId, cap, payload) {
+    const set = this.rooms.get(groupId);
+    if (!set) return 0;
+    const msg = JSON.stringify({ ts: Date.now(), ...payload });
+    let n = 0;
+    for (const ws of set) if (ws.caps && ws.caps.has(cap) && ws.readyState === WebSocket.OPEN) { ws.send(msg); n++; }
+    return n;
+  }
+  /** Personal message to every open socket of a user that announced `cap`. Returns how many got it. */
+  sendToUser(userId, payload, cap) {
+    const set = this.byUser.get(userId);
+    if (!set) return 0;
+    const msg = JSON.stringify({ ts: Date.now(), ...payload });
+    let n = 0;
+    for (const ws of set) if ((!cap || (ws.caps && ws.caps.has(cap))) && ws.allowed && ws.readyState === WebSocket.OPEN) { ws.send(msg); n++; }
+    return n;
+  }
+  /** True when the user has an open, allowed socket with `cap` bound to a room. */
+  online(userId, cap) {
+    const set = this.byUser.get(userId);
+    if (!set) return false;
+    for (const ws of set) if ((!cap || (ws.caps && ws.caps.has(cap))) && ws.allowed && ws.groupId && ws.readyState === WebSocket.OPEN) return true;
+    return false;
+  }
+  _index(ws) {
+    const uid = ws.user && ws.user.userId;
+    if (!uid) return;
+    let set = this.byUser.get(uid);
+    if (!set) { set = new Set(); this.byUser.set(uid, set); }
+    set.add(ws);
+  }
+  _unindex(ws) {
+    const uid = ws.user && ws.user.userId;
+    const set = uid && this.byUser.get(uid);
+    if (!set) return;
+    set.delete(ws);
+    if (!set.size) this.byUser.delete(uid);
+  }
+
   broadcastAll(payload) {
     const msg = JSON.stringify(payload);
     for (const ws of this.wss.clients) if (ws.readyState === WebSocket.OPEN) ws.send(msg);
@@ -168,8 +220,9 @@ class Hub {
     ws.groupId = null;
     ws.allowed = false; // nothing (JSON or voice) is acted on until the account gate passed
     ws.rate = { telemetry: 0, chat: 0, track: 0, action: 0, windowStart: Date.now() };
-    ws.alarms = { WAIT: [], SOS: [], CHECK_IN: [] };
+    ws.alarms = { WAIT: [], SOS: [], CHECK_IN: [], REPORT_DOWN: [] };
     ws.byeReason = null;
+    ws.caps = new Set();
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('message', (data, isBinary) => {
       if (isBinary) { if (ws.allowed) this._onVoice(ws, data); return; }
@@ -178,11 +231,13 @@ class Hub {
     ws.on('close', () => {
       const gid = ws.groupId;
       this._unbind(ws);
+      this._unindex(ws);
       this.admins.delete(ws);
       if (gid) this._presenceOnClose(ws, gid);
     });
     ws.on('error', () => { /* close handler runs */ });
     ws.ready = this._gateCheck(ws).then((ok) => {
+      if (ok && ws.readyState === WebSocket.OPEN) this._index(ws);
       if (ok) this.send(ws, { type: 'HELLO', userId: ws.user.userId, serverTime: Date.now(), heartbeatSec: 30, protocol: 2, features: FEATURES });
       return ok;
     });
@@ -320,8 +375,13 @@ class Hub {
         if (!(await this.convoys.isMember(groupId, u.userId))) throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER');
         this._bind(ws, groupId);
         ws.byeReason = null;
+        // 3.15 client capabilities, on every JOIN (array of at most 8 short words, unknown ones ignored).
+        ws.caps = new Set(Array.isArray(msg.caps) ? msg.caps.slice(0, 8).filter((c) => typeof c === 'string' && CAP.test(c)) : []);
         const room = await this.convoys.getRoom(groupId);
         this.send(ws, { type: 'SNAPSHOT', convoy: this.convoys.snapshot(room), ts: Date.now() });
+        if (ws.caps.has('net1') && this.network) {
+          try { this.network.resend(u.userId); } catch (e) { this.log.warn('[ws] resend failed', e.message); }
+        }
         // 3.14: the phone says Android closed the app last time (no clean exit).
         if (msg.prevExit === 'KILLED' && this.timeline) {
           const t = Date.now();
@@ -397,7 +457,38 @@ class Hub {
         if (!this.timeline) throw new ConvoyError('Check-in is not available.', 503);
         return this._once(ws, cid, 'CHECK_IN', () => this.timeline.checkIn(gid, u, msg));
       }
-      case 'SOS_RESOLVE': return void await this.convoys.resolveSos(this._requireRoom(ws), u, String(msg.alertId || ''));
+      case 'SOS_RESOLVE': return void await this.convoys.resolveSos(this._requireRoom(ws), u, String(msg.alertId || ''), msg.reason);
+      // ---- 3.15 safety network and discovery ----
+      case 'REPORT_DOWN': {
+        if (!this.network) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
+        const gid = this._requireRoom(ws);
+        return this._once(ws, cid, 'REPORT_DOWN', async () => {
+          const r = await this.convoys.reportDown(gid, u, msg);
+          // The reporter's own echo of an existing alert, so the phone sees it is known.
+          if (r.duplicate) this.send(ws, { type: 'ALERT', alert: publicAlert(r.alert), duplicate: true, ts: Date.now() });
+        });
+      }
+      case 'ASSIST_ANSWER': {
+        if (!this.network) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
+        this._requireRoom(ws);
+        const incidentId = typeof msg.incidentId === 'string' && INCIDENT_ID.test(msg.incidentId) ? msg.incidentId : '';
+        if (!incidentId) throw new ConvoyError('This emergency is closed.', 404, 'INCIDENT_CLOSED');
+        return this._once(ws, cid, 'ASSIST_ANSWER', async () => { this.network.answer(u, { incidentId, answer: msg.answer }); });
+      }
+      case 'NET_REPORT_FALSE': {
+        if (!this.network) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
+        this._requireRoom(ws);
+        const incidentId = typeof msg.incidentId === 'string' && INCIDENT_ID.test(msg.incidentId) ? msg.incidentId : '';
+        if (!incidentId) throw new ConvoyError('This emergency is closed.', 404, 'INCIDENT_CLOSED');
+        return this._once(ws, cid, 'NET_REPORT_FALSE', async () => { this.network.reportFalse(u, { incidentId }); });
+      }
+      case 'WAVE': {
+        if (!this.discovery || !config.discoveryEnabled) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
+        const gid = this._requireRoom(ws);
+        const encounterId = typeof msg.encounterId === 'string' && ENCOUNTER_ID.test(msg.encounterId) ? msg.encounterId : '';
+        if (!encounterId) throw new ConvoyError('That group is no longer nearby.', 404, 'ENCOUNTER_CLOSED');
+        return this._once(ws, cid, 'WAVE', async () => { this.discovery.wave(u, gid, encounterId); });
+      }
       case 'STOP_ADD': return void await this.convoys.addStop(this._requireRoom(ws), u, msg);
       case 'STOP_SUGGEST': return void await this.convoys.suggestStop(this._requireRoom(ws), u, msg);
       case 'STOP_ACCEPT': return void await this.convoys.decideStop(this._requireRoom(ws), u, String(msg.stopId || ''), true);
@@ -407,7 +498,12 @@ class Hub {
       case 'STOP_REORDER': return void await this.convoys.reorderStops(this._requireRoom(ws), u, msg.order);
       case 'ROUTE_SET': return void await this.convoys.setRoute(this._requireRoom(ws), u, msg);
       case 'STOP_VISITED': return this._once(ws, cid, 'STOP_VISITED', () => this.convoys.setStopVisited(this._requireRoom(ws), u, String(msg.stopId || ''), !!msg.isVisited));
-      case 'CONFIG': return void await this.convoys.updateConfig(this._requireRoom(ws), u, msg);
+      case 'CONFIG': {
+        const gid = this._requireRoom(ws);
+        await this.convoys.updateConfig(gid, u, msg);
+        if (this.discovery) this.discovery.onConfig(gid);
+        return;
+      }
       case 'TRIP_STATUS': {
         const gid = this._requireRoom(ws);
         const room = await this.convoys.getRoom(gid);
@@ -539,4 +635,4 @@ class Hub {
   }
 }
 
-module.exports = { Hub, encodeVoice, decodeVoice, VOICE_START, VOICE_FRAME, VOICE_END, FEATURES };
+module.exports = { Hub, encodeVoice, decodeVoice, VOICE_START, VOICE_FRAME, VOICE_END, FEATURES, FEATURES_314 };

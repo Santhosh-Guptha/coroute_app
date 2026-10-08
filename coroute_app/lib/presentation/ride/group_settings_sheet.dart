@@ -3,11 +3,15 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../data/models/network_wire.dart';
+import '../../data/models/safety_wire.dart';
 import '../../data/services/convoy_service.dart';
 
-/// Opens the group settings: separation limit, stop alert, speed limit and
-/// spoken alerts (the lead changes them, everyone else sees them), and
-/// whether my location is being shared.
+/// Opens the group settings: separation limit, stop alert, speed limit,
+/// spoken alerts, group visibility (Private / Public), nearby group
+/// discovery and the group default for asking nearby riders to help (the
+/// lead changes them, everyone else sees them), and whether my location is
+/// being shared.
 Future<void> showGroupSettings(BuildContext context, {required String convoyId}) {
   return showAppSheet<void>(
     context,
@@ -115,6 +119,21 @@ class GroupSettingsView extends StatelessWidget {
             value: convoy.voiceGuidanceEnabled,
             onChanged: lead ? (v) => service.updateGroupConfig(voiceGuidanceEnabled: v) : null,
           ),
+          if (service.supports(ProtocolFeatures.safetyNet) || service.supports(ProtocolFeatures.discovery))
+            GroupNetworkSettings(
+              visibility: convoy.visibility,
+              discovery: convoy.discovery,
+              assistDefault: convoy.assistDefault,
+              lead: lead,
+              discoveryAvailable: service.supports(ProtocolFeatures.discovery),
+              assistAvailable: service.supports(ProtocolFeatures.safetyNet),
+              onChanged: ({GroupVisibility? visibility, bool? discovery, bool? assistDefault}) {
+                final ok = service.setGroupVisibility(visibility: visibility, discovery: discovery, assistDefault: assistDefault);
+                if (!ok) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not change this now. Try again with signal.')));
+                }
+              },
+            ),
           const Divider(),
           ListTile(
             contentPadding: EdgeInsets.zero,
@@ -132,6 +151,93 @@ class GroupSettingsView extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Changes a group network setting.
+typedef GroupNetworkChange = void Function({GroupVisibility? visibility, bool? discovery, bool? assistDefault});
+
+/// Group visibility and discovery (SOCIAL, under the group's control) and
+/// the group default for nearby assistance (SAFETY, never depends on
+/// visibility). The lead changes them; everyone else sees them.
+class GroupNetworkSettings extends StatelessWidget {
+  final GroupVisibility visibility;
+  final bool discovery;
+  final bool assistDefault;
+  final bool lead;
+  final bool discoveryAvailable;
+  final bool assistAvailable;
+  final GroupNetworkChange onChanged;
+
+  const GroupNetworkSettings({
+    super.key,
+    required this.visibility,
+    required this.discovery,
+    required this.assistDefault,
+    required this.lead,
+    required this.onChanged,
+    this.discoveryAvailable = true,
+    this.assistAvailable = true,
+  });
+
+  static const String visibilityTitle = 'Group visibility';
+  static const String discoveryTitle = 'Nearby group discovery';
+  static const String discoveryExplain =
+      'Only groups that are also Public with discovery on can see your group name and rider count. Never your positions.';
+  static const String privateExplain = 'Private: no other group can see this group. Emergency help still works.';
+  static const String assistTitle = 'Ask nearby riders to help our riders by default';
+  static const String assistExplain =
+      'In an accident, riders of other groups who may reach the rider faster can be asked to help. Each rider can change this for themselves.';
+
+  @override
+  Widget build(BuildContext context) {
+    final public = visibility == GroupVisibility.public;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(),
+        if (discoveryAvailable) ...[
+          Padding(
+            padding: const EdgeInsets.only(top: Space.s8, bottom: Space.s8),
+            child: Semantics(header: true, child: Text(visibilityTitle, style: AppText.body.copyWith(fontWeight: FontWeight.w600))),
+          ),
+          SegmentedButton<GroupVisibility>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(minimumSize: WidgetStatePropertyAll(Size(0, 48))),
+            segments: const [
+              ButtonSegment(value: GroupVisibility.private, label: Text('Private', maxLines: 1), icon: Icon(Icons.lock_rounded)),
+              ButtonSegment(value: GroupVisibility.public, label: Text('Public', maxLines: 1), icon: Icon(Icons.public_rounded)),
+            ],
+            selected: {visibility},
+            onSelectionChanged: lead
+                ? (sel) {
+                    final v = sel.first;
+                    // Private also turns discovery off: never seen by other groups.
+                    onChanged(visibility: v, discovery: v == GroupVisibility.private ? false : null);
+                  }
+                : null,
+          ),
+          const SizedBox(height: Space.s4),
+          Text(public ? 'Public: other public groups nearby may see your group name and rider count.' : privateExplain, style: AppText.caption),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(discoveryTitle, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+            subtitle: Text(discoveryExplain, style: AppText.caption),
+            value: public && discovery,
+            onChanged: (lead && public) ? (v) => onChanged(discovery: v) : null,
+          ),
+        ],
+        if (assistAvailable)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(assistTitle, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+            subtitle: Text(assistExplain, style: AppText.caption),
+            value: assistDefault,
+            onChanged: lead ? (v) => onChanged(assistDefault: v) : null,
+          ),
+      ],
     );
   }
 }

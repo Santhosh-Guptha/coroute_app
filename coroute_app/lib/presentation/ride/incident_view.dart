@@ -1,10 +1,13 @@
 import '../../data/models/convoy_model.dart';
 import '../../data/models/medical_info.dart';
+import '../../data/models/network_models.dart';
+import '../../data/models/network_wire.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/models/safety_wire.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../data/services/timeline_service.dart';
 import '../../domain/notify/alert_policy.dart';
+import '../../domain/timeline/timeline_text.dart';
 
 /// What kind of emergency an [IncidentView] is, most urgent first.
 enum IncidentKind {
@@ -62,6 +65,24 @@ class IncidentView {
   /// The SOS reason code (alertType) for sos and crash, empty otherwise.
   final String alertType;
 
+  /// Emergency lifecycle (3.15), null for an older gateway or a non-alert incident.
+  final EmergencyStatus? status;
+
+  /// How the emergency was raised (3.15), null when unknown.
+  final EmergencySource? source;
+
+  /// Nearby assistance from other groups (3.15), null when the gateway has no safety network.
+  final EmergencyNetwork? network;
+
+  /// The nearest member of my group (computed by the server), or null.
+  final OwnNearest? ownNearest;
+
+  /// When the position shown was last updated (epoch ms), 0 when unknown.
+  final int positionAt;
+
+  /// Who reported it (a member report "Rider down"), empty otherwise.
+  final String reportedByName;
+
   const IncidentView({
     required this.kind,
     required this.subjectUserId,
@@ -77,12 +98,42 @@ class IncidentView {
     this.fromKmh,
     this.placeName = '',
     this.alertType = '',
+    this.status,
+    this.source,
+    this.network,
+    this.ownNearest,
+    this.positionAt = 0,
+    this.reportedByName = '',
   });
 
   /// True for an SOS or a crash alert (the group can answer it).
   bool get isAlert => kind == IncidentKind.sos || kind == IncidentKind.crash;
 
   bool get hasPosition => lat != 0 || lng != 0;
+
+  /// A crash, a rider reported down, or an automatic or "Need Help" alert after a possible accident.
+  bool get isAccident =>
+      kind == IncidentKind.crash ||
+      alertType == SosTypes.crash ||
+      alertType == riderDownType ||
+      source == EmergencySource.crashAuto ||
+      source == EmergencySource.needHelp ||
+      source == EmergencySource.memberReport ||
+      source == EmergencySource.nearbyReport;
+
+  /// Alert type of a member report ("Rider down").
+  static const String riderDownType = 'RIDER_DOWN';
+
+  /// First word of the name, or "the rider".
+  String get firstName {
+    final n = subjectName.trim();
+    if (n.isEmpty) return 'the rider';
+    final i = n.indexOf(' ');
+    return i > 0 ? n.substring(0, i) : n;
+  }
+
+  /// "Rahul may have met with an accident" / "Rahul needs help" (own group emergency, 3.15 wording).
+  String get summary => isAccident ? '$who may have met with an accident' : '$who needs help';
 
   /// The same key as the notification and the Alerts tab row, so nothing shows twice.
   String get key {
@@ -172,12 +223,12 @@ List<IncidentView> incidentsFromEvents(ConvoyModel c, Iterable<TimelineEventMode
   final out = <IncidentView>[];
   final withSos = <String>{};
 
-  (double, double) where(String uid, double lat, double lng, int at) {
+  (double, double, int) whereAt(String uid, double lat, double lng, int at) {
     final r = c.riders[uid];
     // The rider's own newer position beats the place of the alert (they may have been moved).
-    if (r != null && (r.lat != 0 || r.lng != 0) && r.lastSeenEpochMs > at) return (r.lat, r.lng);
-    if (lat != 0 || lng != 0) return (lat, lng);
-    return (r?.lat ?? 0.0, r?.lng ?? 0.0);
+    if (r != null && (r.lat != 0 || r.lng != 0) && r.lastSeenEpochMs > at) return (r.lat, r.lng, r.lastSeenEpochMs);
+    if (lat != 0 || lng != 0) return (lat, lng, at);
+    return (r?.lat ?? 0.0, r?.lng ?? 0.0, r?.lastSeenEpochMs ?? 0);
   }
 
   String nameOf(String uid, String fallback) {
@@ -190,7 +241,8 @@ List<IncidentView> incidentsFromEvents(ConvoyModel c, Iterable<TimelineEventMode
     if (a.resolved) continue;
     withSos.add(a.userId);
     final at = a.occurredAt > 0 ? a.occurredAt : a.timestamp;
-    final (lat, lng) = where(a.userId, a.lat, a.lng, a.timestamp);
+    final updated = a.lastUpdateAt ?? a.timestamp;
+    final (lat, lng, posAt) = whereAt(a.userId, a.lat, a.lng, updated);
     final medical = a.medical;
     out.add(IncidentView(
       kind: a.isCrash ? IncidentKind.crash : IncidentKind.sos,
@@ -206,6 +258,12 @@ List<IncidentView> incidentsFromEvents(ConvoyModel c, Iterable<TimelineEventMode
       isMe: a.userId == myUid,
       fromKmh: a.speedBeforeKmh,
       alertType: a.alertType,
+      status: a.status,
+      source: a.source,
+      network: a.network,
+      ownNearest: a.ownNearest,
+      positionAt: posAt,
+      reportedByName: a.reportedByName,
     ));
   }
 
@@ -237,8 +295,9 @@ List<IncidentView> incidentsFromEvents(ConvoyModel c, Iterable<TimelineEventMode
     }
     final k = kind;
     if (k == null) continue;
-    final (lat, lng) = where(uid, e.lat ?? 0.0, e.lng ?? 0.0, e.startedAt);
+    final (lat, lng, posAt) = whereAt(uid, e.lat ?? 0.0, e.lng ?? 0.0, e.startedAt);
     out.add(IncidentView(
+      positionAt: posAt,
       kind: k,
       subjectUserId: uid,
       subjectName: nameOf(uid, e.userName),
@@ -285,4 +344,52 @@ String responderWords(SosResponseKind k) {
     case SosResponseKind.cancel:
       return 'no longer going';
   }
+}
+
+/// "En route", "Arriving", "On scene" for a responder from another group.
+String responderStatusWords(ResponderStatus s) {
+  switch (s) {
+    case ResponderStatus.requested:
+      return 'Asked';
+    case ResponderStatus.accepted:
+      return 'Accepted';
+    case ResponderStatus.enRoute:
+      return 'En route';
+    case ResponderStatus.arriving:
+      return 'Arriving';
+    case ResponderStatus.arrived:
+      return 'On scene';
+    case ResponderStatus.unableToReach:
+      return 'Unable to reach';
+    case ResponderStatus.cancelled:
+      return 'Cancelled';
+    case ResponderStatus.declined:
+      return 'Declined';
+    case ResponderStatus.timeout:
+      return 'No answer';
+  }
+}
+
+/// "Asking nearby riders" / "No nearby riders found", or null when there is nothing to say
+/// (off, or a responder is shown instead).
+String? networkStateWords(NetworkState s) {
+  switch (s) {
+    case NetworkState.searching:
+    case NetworkState.requested:
+      return 'Asking nearby riders';
+    case NetworkState.noneFound:
+      return 'No nearby riders found';
+    case NetworkState.assigned:
+    case NetworkState.off:
+      return null;
+  }
+}
+
+/// "ETA 3 min", "ETA 1 h 5 min", or null when unknown.
+String? etaWords(int? etaS) {
+  final s = etaS;
+  if (s == null || s < 0) return null;
+  final minutes = s <= 0 ? 0 : (s / 60).ceil();
+  if (minutes < 1) return 'ETA under 1 min';
+  return 'ETA ${TimelineText.duration(Duration(minutes: minutes))}';
 }

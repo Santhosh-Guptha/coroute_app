@@ -17,6 +17,7 @@
  *             • voice_log entries older than RETENTION_VOICE_LOG_DAYS (metadata only; audio is never stored)
  *             • geo_cache entries older than GEO_CACHE_DAYS
  *             • medical info left on resolved SOS alerts (safety net: it is removed on resolve and at trip end)
+ *             • safety_audit rows older than AUDIT_RETENTION_DAYS (3.15; ids and codes only, no coordinates)
  *   AUTO-END: active convoys with no activity for RETENTION_STALE_CONVOY_HOURS.
  *   KEEPALIVE: a tiny read keeps an Always-Free Autonomous DB from being auto-paused.
  */
@@ -48,7 +49,7 @@ class Retention {
   }
 
   async runOnce(nowMs = Date.now()) {
-    const stats = { autoEnded: 0, convoysStripped: 0, riderDocsRemoved: 0, tripsStripped: 0, voiceLogsRemoved: 0, trackChunksRemoved: 0, eventsStripped: 0, alertsStripped: 0, geoCacheRemoved: 0, medicalStripped: 0 };
+    const stats = { autoEnded: 0, convoysStripped: 0, riderDocsRemoved: 0, tripsStripped: 0, voiceLogsRemoved: 0, trackChunksRemoved: 0, eventsStripped: 0, alertsStripped: 0, geoCacheRemoved: 0, medicalStripped: 0, auditRemoved: 0 };
 
     // 1. End convoys nobody has touched for a long time (phones died, app uninstalled, ...).
     stats.autoEnded = await this.convoys.autoEndStaleConvoys(nowMs - config.retentionStaleConvoyHours * 3600000);
@@ -103,6 +104,9 @@ class Retention {
       stats.medicalStripped++;
     }
     stats.geoCacheRemoved = await this.repo.purgeOlderThan(COLLECTIONS.geoCache, 'createdAt', nowMs - config.geoCacheDays * DAY);
+
+    // Safety network audit trail (3.15).
+    stats.auditRemoved = await this.repo.purgeOlderThan(COLLECTIONS.audit, 'at', nowMs - config.auditRetentionDays * DAY);
 
     // 5. Voice session metadata is operational only.
     stats.voiceLogsRemoved = await this.repo.purgeOlderThan(COLLECTIONS.voiceLog, 'startedAt', nowMs - config.retentionVoiceLogDays * DAY);

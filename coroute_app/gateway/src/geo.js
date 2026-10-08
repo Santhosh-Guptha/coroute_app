@@ -22,6 +22,8 @@ class GeoProxy {
     this.chain = Promise.resolve();
     this.lastCallAt = 0;
     this.inflight = new Map();
+    this.queued = 0; // upstream calls waiting in or running through _queued
+    this.tableCache = new Map(); // "lat,lng>lat,lng" (3 dp) -> { at, value } (memory LRU, never in geo_cache)
   }
 
   get searchEnabled() { return !!config.geoSearchUrl; }
@@ -29,14 +31,22 @@ class GeoProxy {
 
   /** Serialises upstream calls and spaces them out. */
   _queued(fn) {
+    this.queued++;
     const run = this.chain.then(async () => {
       const wait = this.lastCallAt + config.geoMinIntervalMs - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       this.lastCallAt = Date.now();
       return fn();
-    });
+    }).finally(() => { this.queued--; });
     this.chain = run.catch(() => {});
     return run;
+  }
+
+  /** Rough time (ms) a new upstream call would wait in the polite queue before it starts. */
+  queueWaitMs() {
+    const spacing = config.geoMinIntervalMs;
+    const own = Math.max(0, this.lastCallAt + spacing - Date.now());
+    return own + this.queued * Math.max(spacing, 250);
   }
 
   async _cached(k, ttlDays, producer) {
@@ -157,6 +167,60 @@ class GeoProxy {
         };
       } catch (e) { this.log.warn('[geo] route failed', e.message); return null; }
     });
+  }
+
+  /**
+   * Road distance and time from 1 to 3 sources to one destination (OSRM table service), for the
+   * safety network's "can they really get there" check. Through the same polite queue, with its
+   * own timeout. Answers are kept in a small memory LRU (3 dp keys, NET_OSRM_CACHE_MIN), never in
+   * geo_cache. Returns [{distanceM, durationS} | null] per source, or null when routing is
+   * disabled or the call failed / timed out.
+   */
+  async table(sources, dest, { timeoutMs = config.netOsrmTimeoutMs } = {}) {
+    if (!this.routeEnabled || !Array.isArray(sources) || sources.length < 1 || sources.length > 3 || !dest) return null;
+    const ok = (p) => p && Math.abs(Number(p.lat)) <= 90 && Math.abs(Number(p.lng)) <= 180;
+    if (!ok(dest) || !sources.every(ok)) return null;
+    const key = (p) => `${round(Number(p.lat), 3)},${round(Number(p.lng), 3)}`;
+    const dk = key(dest);
+    const ttl = config.netOsrmCacheMin * 60000;
+    const out = new Array(sources.length).fill(undefined);
+    const missing = [];
+    sources.forEach((s, i) => {
+      const k = `${key(s)}>${dk}`;
+      const hit = this.tableCache.get(k);
+      if (hit && Date.now() - hit.at < ttl) {
+        this.tableCache.delete(k); this.tableCache.set(k, hit); // LRU touch
+        out[i] = hit.value;
+      } else {
+        missing.push(i);
+      }
+    });
+    if (!missing.length) return out;
+    const pts = [...missing.map((i) => sources[i]), dest].map((p) => `${round(Number(p.lng), 5)},${round(Number(p.lat), 5)}`).join(';');
+    const srcIdx = missing.map((_, i) => i).join(';');
+    const url = `${config.geoRouteUrl}/table/v1/driving/${pts}?sources=${srcIdx}&destinations=${missing.length}&annotations=distance,duration`;
+    let j = null;
+    try {
+      j = await this._queued(async () => {
+        const res = await this.fetch(url, { headers: { 'User-Agent': UA(), Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
+        if (!res.ok) throw new Error(`upstream ${res.status}`);
+        return res.json();
+      });
+    } catch (e) {
+      this.log.warn('[geo] table failed', e.message);
+      return null;
+    }
+    if (!j || (j.code && j.code !== 'Ok') || !Array.isArray(j.distances)) return null;
+    missing.forEach((srcI, row) => {
+      const d = Number(j.distances?.[row]?.[0]);
+      const t = Number(j.durations?.[row]?.[0]);
+      const value = Number.isFinite(d) && j.distances[row][0] !== null ? { distanceM: Math.round(d), durationS: Number.isFinite(t) ? Math.round(t) : null } : null;
+      out[srcI] = value;
+      const k = `${key(sources[srcI])}>${dk}`;
+      this.tableCache.set(k, { at: Date.now(), value });
+      while (this.tableCache.size > config.netOsrmCache) this.tableCache.delete(this.tableCache.keys().next().value);
+    });
+    return out.map((v) => (v === undefined ? null : v));
   }
 }
 
