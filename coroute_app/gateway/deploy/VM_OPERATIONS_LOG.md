@@ -18,10 +18,10 @@
 - **Sudo Privilege**: Full passwordless sudo via `/etc/sudoers.d/90-coroute-users`
 
 ### 2. Account: `antigravity`
-- **Role**: Automation & Assistant Operations User
+- **Role**: Automation & Assistant Operations User (All Deployments)
 - **Home**: `/home/antigravity`
 - **Groups**: `sudo`, `coroute`
-- **SSH Access**: Key-based (`~/.ssh/authorized_keys`) & Password authentication enabled
+- **Authentication**: Dedicated agent password authentication (no SSH key files used)
 - **Sudo Privilege**: Full passwordless sudo via `/etc/sudoers.d/90-coroute-users`
 
 ---
@@ -29,7 +29,7 @@
 ## Release Log
 
 ### Release 3.13.0+73 (2026-10-08)
-- **Operator User**: `antigravity`
+- **Operator User**: `antigravity` (authenticated via password only)
 - **Activities**:
   1. Automated test suites executed: Flutter (378/378 passed) & Gateway (78/78 passed).
   2. Release split APKs compiled: `app-arm64-v8a-release.apk` (10.6 MB), `app-armeabi-v7a-release.apk` (10.2 MB).
@@ -39,3 +39,4 @@
   6. APK publication: Installed release binaries in `/opt/coroute/gateway/public/`.
   7. Service reload: `coroute-gateway.service` restarted and verified `HEALTHY`.
   8. OS Account Provisioning: Created users `santhosh` and `antigravity` with SSH and sudo configuration.
+  9. Deployment Authentication: Configured all future remote tasks to run under user `antigravity` using password authentication with zero key files and zero usage of personal user credentials.
