@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/background_service.dart';
+import '../../core/ui/ride_alert.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/safety_service.dart';
 import '../../data/services/timeline_service.dart';
 import '../account/account_screen.dart';
 import '../alerts/alerts_screen.dart';
@@ -195,7 +197,9 @@ class _AlertsNavIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final facts = context.select<ConvoyService, AlertFacts>(alertFactsOf);
     final timeline = context.watch<TimelineService>();
-    final n = alertsBadgeCount(facts, timeline);
+    // This phone's own safety prompts ("Are you OK?") count too; "Time for a break" does not.
+    final prompts = context.select<SafetyService?, int>((s) => s?.prompts.where((p) => p.tier != AlertTier.normal).length ?? 0);
+    final n = alertsBadgeCount(facts, timeline) + prompts;
     return Semantics(
       label: n > 0 ? '$n alerts need attention' : null,
       child: Badge.count(

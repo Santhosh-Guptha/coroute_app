@@ -14,6 +14,12 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <!-- Rider safety: emergency texts from the rider's own phone when an SOS cannot be sent
+         over the internet (opt-in in the pre-ride checklist), and the crash alarm over the lock screen. -->
+    <uses-permission android:name="android.permission.SEND_SMS"/>
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <!-- SEND_SMS would otherwise make Play hide CoRoute from tablets without a SIM. -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false"/>
 
     <application
         android:label="CoRoute"
@@ -58,6 +64,11 @@
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:foregroundServiceType="location|microphone"
             android:exported="false"/>
+        <!-- flutter_local_notifications: lets the crash alarm buttons (I'm OK / Send now) work on the
+             lock screen without unlocking. Not exported: only the system notification can call it. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
+            android:exported="false"/>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
@@ -66,6 +77,27 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- url_launcher on Android 11+: call, text, open a map, navigate. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="tel"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="sms"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="google.navigation"/>
         </intent>
     </queries>
 </manifest>

@@ -1,3 +1,5 @@
+import 'safety_wire.dart';
+
 class RiderModel {
   final String userId;
   final String name;
@@ -21,6 +23,14 @@ class RiderModel {
   final String ridingWithUserId;
   final int stoppedSince;
 
+  /// Server presence: '', ONLINE, NO_SIGNAL or APP_CLOSED (empty from older gateways).
+  final String presence;
+
+  /// When [presence] last changed (epoch ms, 0 when unknown).
+  final int presenceAt;
+
+  RiderPresence get presenceState => RiderPresence.fromWire(presence);
+
   RiderModel({
     required this.userId,
     required this.name,
@@ -43,6 +53,8 @@ class RiderModel {
     this.isCoRiding = false,
     this.ridingWithUserId = '',
     this.stoppedSince = 0,
+    this.presence = '',
+    this.presenceAt = 0,
   });
 
   RiderModel copyWith({
@@ -67,6 +79,8 @@ class RiderModel {
     bool? isCoRiding,
     String? ridingWithUserId,
     int? stoppedSince,
+    String? presence,
+    int? presenceAt,
   }) {
     return RiderModel(
       userId: userId ?? this.userId,
@@ -90,6 +104,8 @@ class RiderModel {
       isCoRiding: isCoRiding ?? this.isCoRiding,
       ridingWithUserId: ridingWithUserId ?? this.ridingWithUserId,
       stoppedSince: stoppedSince ?? this.stoppedSince,
+      presence: presence ?? this.presence,
+      presenceAt: presenceAt ?? this.presenceAt,
     );
   }
 
@@ -116,6 +132,8 @@ class RiderModel {
       'isCoRiding': isCoRiding,
       'ridingWithUserId': ridingWithUserId,
       'stoppedSince': stoppedSince,
+      if (presence.isNotEmpty) 'presence': presence,
+      if (presenceAt > 0) 'presenceAt': presenceAt,
     };
   }
 
@@ -142,6 +160,8 @@ class RiderModel {
       isCoRiding: json['isCoRiding'] ?? false,
       ridingWithUserId: json['ridingWithUserId'] ?? '',
       stoppedSince: (json['stoppedSince'] as num?)?.toInt() ?? 0,
+      presence: json['presence']?.toString() ?? '',
+      presenceAt: (json['presenceAt'] as num?)?.toInt() ?? 0,
     );
   }
 }

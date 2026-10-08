@@ -1,5 +1,6 @@
 import '../../data/models/timeline_event_model.dart';
 import '../timeline/timeline_text.dart';
+import '../tracking/bearing.dart';
 import '../tracking/geo_math.dart';
 
 /// Which notification channel an alert uses.
@@ -13,7 +14,11 @@ class AlertSpec {
   final AlertChannel channel;
   final String title;
   final String body;
-  const AlertSpec(this.key, this.channel, this.title, this.body);
+
+  /// True when the alert is about the viewer themself (for example "Your group was
+  /// asked to check on you"): same key family, gentler tier than the group's copy.
+  final bool aboutMe;
+  const AlertSpec(this.key, this.channel, this.title, this.body, {this.aboutMe = false});
 
   /// Android notification id derived from [key] (positive 31-bit, stable across runs).
   int get id {
@@ -26,10 +31,10 @@ class AlertSpec {
   }
 
   @override
-  bool operator ==(Object other) => other is AlertSpec && other.key == key && other.title == title && other.body == body && other.channel == channel;
+  bool operator ==(Object other) => other is AlertSpec && other.key == key && other.title == title && other.body == body && other.channel == channel && other.aboutMe == aboutMe;
 
   @override
-  int get hashCode => Object.hash(key, title, body, channel);
+  int get hashCode => Object.hash(key, title, body, channel, aboutMe);
 }
 
 /// Who this phone belongs to, for deciding who gets which alert.
@@ -57,6 +62,25 @@ class AlertPolicy {
   /// replaces the older alert (same notification, one row in the app).
   static const String meetingKey = 'EV:MEETING';
 
+  /// Key prefixes of the 3.14 safety alerts (the UI and the tiers use them).
+  static const String sosPrefix = 'SOS:';
+  static const String incidentPrefix = 'INCIDENT:';
+  static const String noSignalPrefix = 'NO_SIGNAL:';
+  static const String closedPrefix = 'CLOSED:';
+  static const String noReplyPrefix = 'NO_REPLY:';
+
+  /// Keys of the rider-only prompts shown by the safety service.
+  static const String localFatigueKey = 'LOCAL:FATIGUE';
+  static const String localCheckInKey = 'LOCAL:CHECK_IN';
+
+  /// "1.8 km north-east of you" from the viewer to a point, or '' when either position is unknown.
+  static String directionFromMe(AlertViewer me, double? lat, double? lng) {
+    final myLat = me.lat, myLng = me.lng;
+    if (lat == null || lng == null || myLat == null || myLng == null) return '';
+    if ((myLat == 0 && myLng == 0) || (lat == 0 && lng == 0)) return '';
+    return Bearing.fromMe(GeoMath.haversine(myLat, myLng, lat, lng), Bearing.degrees(myLat, myLng, lat, lng));
+  }
+
   /// Alerts that are shown as a notification even while CoRoute is open:
   /// safety alerts (the alerts channel). The meeting point already shows in
   /// the ride alert slot, so it is not posted twice while the app is open.
@@ -77,10 +101,17 @@ class AlertPolicy {
     return AlertSpec(meetingKey, AlertChannel.alerts, 'Meeting point changed', body.isEmpty ? '' : '$body.');
   }
 
-  AlertPolicy({this.stationaryAlert = const Duration(minutes: 20), this.offlineAlert = const Duration(minutes: 5)});
+  AlertPolicy({
+    this.stationaryAlert = const Duration(minutes: 20),
+    this.offlineAlert = const Duration(minutes: 5),
+    this.checkInFarFor = const Duration(minutes: 15),
+  });
 
   final Duration stationaryAlert;
   final Duration offlineAlert;
+
+  /// How long a rider was far from the group before the "Are you OK?" check (for the NO_REPLY text).
+  final Duration checkInFarFor;
 
   /// Alerts that should be visible right now, from the open timeline entries.
   List<AlertSpec> standing(Iterable<TimelineEventModel> events, AlertViewer me, {required int nowMs}) {
@@ -95,8 +126,33 @@ class AlertPolicy {
         case 'SOS':
           if (mine) break; // the sender already knows
           final kind = e.dataString('alertType');
-          out.add(AlertSpec('SOS:${e.dataString('alertId').isEmpty ? e.eventId : e.dataString('alertId')}', AlertChannel.sos,
-              'SOS from $who', '${kind.isEmpty ? 'Needs help' : TimelineText.reason(kind)}$where. Open CoRoute to see where.'));
+          final key = '$sosPrefix${e.dataString('alertId').isEmpty ? e.eventId : e.dataString('alertId')}';
+          final dir = directionFromMe(me, e.lat, e.lng);
+          if (kind == 'CRASH' && e.data['auto'] == true) {
+            out.add(AlertSpec(key, AlertChannel.sos, 'Crash detected: $who',
+                'Automatic alert.${dir.isEmpty ? '' : ' ${_cap(dir)}.'} Open CoRoute to see where.'));
+            break;
+          }
+          out.add(AlertSpec(key, AlertChannel.sos, 'SOS from $who',
+              '${kind.isEmpty ? 'Needs help' : TimelineText.reason(kind)}$where.${dir.isEmpty ? '' : ' ${_cap(dir)}.'} Open CoRoute to see where.'));
+          break;
+        case 'POSSIBLE_INCIDENT':
+          if (mine) {
+            out.add(AlertSpec('$incidentPrefix${e.userId}', AlertChannel.alerts, 'Your group was asked to check on you',
+                "You stopped suddenly. Tap I'm OK if you are fine.", aboutMe: true));
+            break;
+          }
+          final notify = e.data['notify'];
+          final told = notify is List && notify.map((x) => x.toString()).contains(me.userId);
+          if (!(told || me.isLead || me.isSweeper)) break;
+          final from = e.dataNum('fromKmh');
+          out.add(AlertSpec('$incidentPrefix${e.userId}', AlertChannel.alerts, 'Possible incident: check on $who',
+              'Automatic alert. Stopped suddenly${from == null ? '' : ' from ${from.round()} km/h'}$where.'));
+          break;
+        case 'NO_REPLY':
+          if (mine || !(me.isLead || me.isSweeper)) break;
+          out.add(AlertSpec('$noReplyPrefix${e.userId}', AlertChannel.alerts, 'No reply from $who',
+              'Far from the group for ${TimelineText.duration(checkInFarFor)} and did not answer Are you OK. Automatic check.'));
           break;
         case 'STOPPED':
           if (mine || dur < stationaryAlert || !(me.isLead || me.isSweeper)) break;
@@ -113,9 +169,27 @@ class AlertPolicy {
           }
           break;
         case 'OFFLINE':
-          if (mine || !me.isLead || dur < offlineAlert) break;
+          if (mine) break;
+          final cause = e.dataString('cause');
+          if (cause == 'APP_CLOSED') {
+            if (!me.isLead) break;
+            out.add(AlertSpec('$closedPrefix${e.userId}', AlertChannel.alerts, "CoRoute was closed on $who's phone",
+                'Their position stops until they open it again.'));
+            break;
+          }
+          if (e.data['escalated'] == true) {
+            // Replaces the plain OFFLINE alert: a fast rider silent for long, away from any stop.
+            if (!(me.isLead || me.isSweeper)) break;
+            final kmh = e.dataNum('lastKmh');
+            out.add(AlertSpec('$noSignalPrefix${e.userId}', AlertChannel.alerts, 'No signal from $who for ${TimelineText.duration(dur)}',
+                'Last seen$where${kmh == null ? '' : ' at ${kmh.round()} km/h'}. Automatic alert.'));
+            break;
+          }
+          if (!me.isLead || dur < offlineAlert) break;
           out.add(AlertSpec('OFFLINE:${e.userId}', AlertChannel.alerts, 'No signal from $who for ${TimelineText.duration(dur)}',
-              'Last seen$where. Their phone will catch up when it has signal again.'));
+              cause == 'KILLED'
+                  ? 'Last seen$where. The phone closed CoRoute.'
+                  : 'Last seen$where. Their phone will catch up when it has signal again.'));
           break;
         case 'OFF_ROUTE':
           if (mine) {
@@ -171,8 +245,22 @@ class AlertPolicy {
       case 'ROUTE_CHANGED':
         if (mine) return null;
         return AlertSpec('EV:${e.eventId}', AlertChannel.activity, TimelineText.title(e, nowMs: e.startedAt), 'The route on your map is updated.');
+      case 'SOS_RESPONSE':
+        // e.userId is the responder; forUserId the rider who raised the SOS.
+        if (mine) return null;
+        final kind = e.dataString('kind');
+        if (kind != 'GOING' && kind != 'WITH_THEM') return null;
+        final forMe = e.dataString('forUserId') == me.userId;
+        if (!forMe && !me.isLead) return null;
+        final forName = e.dataString('forUserName').isEmpty ? 'the rider' : e.dataString('forUserName');
+        final title = kind == 'GOING'
+            ? (forMe ? '$who is on the way to you' : '$who is going to $forName')
+            : (forMe ? '$who is with you' : '$who is with $forName');
+        return AlertSpec('EV:${e.eventId}', AlertChannel.updates, title, '');
       default:
         return null;
     }
   }
+
+  static String _cap(String s) => s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
 }

@@ -9,11 +9,17 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/constants/net_constants.dart';
+import '../local/outbox_store.dart';
+import '../local/roster_store.dart';
 import '../models/convoy_model.dart';
+import '../models/emergency_roster.dart';
 import '../models/group_message_model.dart';
+import '../models/outbox_item.dart';
 import '../models/pending_sos.dart';
 import '../models/rider_model.dart';
 import '../models/route_model.dart';
+import '../models/safety_wire.dart';
 import '../models/sos_alert_model.dart';
 import '../models/stop_point_model.dart';
 import '../models/trip_history_model.dart';
@@ -35,15 +41,39 @@ import 'trip_storage_service.dart';
 /// active convoy that is updated by push events over one WebSocket (no polling),
 /// and sends the rider's own telemetry with battery-aware throttling.
 class ConvoyService extends ChangeNotifier {
-  ConvoyService(this._api, this._rt, this._trips, {this.recorder, this.timeline, this.settings}) {
+  /// [outboxStore], [rosterStore], [clock] and [rosterDebounce] are for tests; the app uses the defaults.
+  ConvoyService(
+    this._api,
+    this._rt,
+    this._trips, {
+    this.recorder,
+    this.timeline,
+    this.settings,
+    OutboxStore? outboxStore,
+    RosterStore? rosterStore,
+    int Function()? clock,
+    this._rosterDebounce = NetConstants.rosterRefreshDebounce,
+  })  : _outboxStore = outboxStore ?? OutboxStore(),
+        _rosterStore = rosterStore ?? RosterStore(),
+        _clock = clock ?? _wallClock {
     _eventSub = _rt.events.listen(_onEvent);
     BackgroundService.addButtonListener(_onNotificationButton);
     _rt.addListener(_onConnectionChanged);
     _initBatteryTracking();
     _loadPendingSos();
+    _outboxReady = _loadOutbox();
+    _smsFallbackWas = _smsFallbackOn;
+    settings?.addListener(_onSettingsChanged);
     // The compass only feeds the heading shown on screen: off while the app is not visible.
+    // onDetach: the app is closing on purpose, so the group sees "App closed" rather than "No signal".
     try {
-      _lifecycle = AppLifecycleListener(onHide: _pauseCompass, onPause: _pauseCompass, onResume: _resumeCompass, onShow: _resumeCompass);
+      _lifecycle = AppLifecycleListener(
+        onHide: _pauseCompass,
+        onPause: _pauseCompass,
+        onResume: _resumeCompass,
+        onShow: _resumeCompass,
+        onDetach: _onDetach,
+      );
     } catch (e) {
       debugPrint('lifecycle listener note: $e'); // no Flutter binding (plain unit tests)
     }
@@ -92,6 +122,37 @@ class ConvoyService extends ChangeNotifier {
   String? _sosOkNotice;
   Timer? _sosOkClear;
 
+  static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
+  final int Function() _clock;
+
+  // Outbox (B4): chat, status, stops, WAIT, SOS replies and check-ins survive a dead zone and a restart.
+  final OutboxStore _outboxStore;
+  List<OutboxItem> _outbox = [];
+  late final Future<void> _outboxReady;
+  int _outboxEpoch = 0;
+  int _clientSeq = 0;
+  Timer? _outboxTimer;
+  int _burstStartMs = 0;
+  int _burstCount = 0;
+
+  // Presence (B1).
+  bool _killedLastTime = false;
+  int? _killedAliveAt;
+  int _lastAliveStampMs = 0;
+
+  // My own fixes for the safety features (crash detection, fatigue): no extra GPS.
+  final StreamController<TrackPoint> _myFixes = StreamController<TrackPoint>.broadcast();
+
+  // Emergency SMS roster (only while a ride is active and the rider opted in).
+  final RosterStore _rosterStore;
+  final Duration _rosterDebounce;
+  EmergencyRoster? _roster;
+  int _rosterEpoch = 0;
+  bool _rosterFetching = false;
+  Timer? _rosterTimer;
+  bool _smsFallbackWas = false;
+  bool _disposed = false;
+
   // ------------------------------------------------------------- getters
   Map<String, ConvoyModel> get allConvoys => Map.unmodifiable(_allConvoys);
   String? get activeGroupId => _activeGroupId;
@@ -122,6 +183,34 @@ class ConvoyService extends ChangeNotifier {
   /// An SOS this phone raised that the convoy has not confirmed yet (no signal, or not echoed yet).
   PendingSos? get pendingSos => _pendingSos;
 
+  /// The internet works but the CoRoute server does not answer (banner: "CoRoute server not reachable").
+  bool get serverUnreachable => _rt.serverUnreachable;
+
+  /// True when the connected gateway supports [feature] (see ProtocolFeatures).
+  bool supports(String feature) => _rt.supports(feature);
+
+  /// Every GPS fix of mine while a ride is active (the same fixes the map uses; no extra GPS).
+  Stream<TrackPoint> get myFixes => _myFixes.stream;
+
+  /// Items waiting to be sent or refused by the server, oldest first. Refused items
+  /// ("Not sent") stay visible for [NetConstants.outboxFailedShowFor].
+  List<OutboxItem> get outbox {
+    final now = _clock();
+    return List.unmodifiable(_outbox.where((i) => !_failedExpired(i, now)));
+  }
+
+  int get outboxCount => outbox.length;
+
+  /// True while the item is waiting for signal or for the server's answer.
+  bool isQueued(String clientId) => _outbox.any((i) => i.clientId == clientId && i.isPending);
+
+  /// Phone numbers for the no-internet SMS fallback of the active ride, or null.
+  EmergencyRoster? get emergencyRoster {
+    final r = _roster, gid = _activeGroupId;
+    if (r == null || gid == null || !r.isValidFor(gid, _clock())) return null;
+    return r;
+  }
+
   /// The server id of this rider's own open SOS, if any (so it can be resolved from any screen).
   String? get myOpenSosAlertId {
     final c = activeConvoy;
@@ -149,12 +238,70 @@ class ConvoyService extends ChangeNotifier {
     _myUserId = userId;
     _rt.connect(token, adminMode: admin);
     _adminWatching = admin;
+    await _readPreviousExit();
+    final cachedRoster = _smsFallbackOn ? await _rosterStore.load() : null;
+    final rosterEpoch = _rosterEpoch;
     await _restoreActiveConvoy();
+    _killedLastTime = false;
+    _killedAliveAt = null;
+    final gid = _activeGroupId;
+    if (cachedRoster != null) {
+      if (gid != null && cachedRoster.isValidFor(gid, _clock())) {
+        // Restored only for the same ride and while still valid (no internet after a restart).
+        // Not when a fetch already answered (a refusal clears it, an answer replaces it).
+        if (_roster == null && !_disposed && rosterEpoch == _rosterEpoch) {
+          _roster = cachedRoster;
+          notifyListeners();
+        }
+      } else {
+        _rosterStore.clear().ignore();
+      }
+    } else if (settings != null && settings!.isLoaded && !_smsFallbackOn) {
+      _rosterStore.clear().ignore();
+    }
+  }
+
+  /// Reads whether the last ride ended without a clean exit (Android killed the app).
+  Future<void> _readPreviousExit() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      _killedLastTime = p.getBool(NetConstants.keyRideAlive) ?? false;
+      final at = p.getInt(NetConstants.keyLastAliveAt);
+      _killedAliveAt = (at != null && at > 0) ? at : null;
+    } catch (_) {
+      _killedLastTime = false;
+      _killedAliveAt = null;
+    }
+  }
+
+  /// Marks the ride as running (true) or cleanly finished (false) on disk.
+  void _writeRideAlive(bool alive) {
+    final now = _clock();
+    if (alive) _lastAliveStampMs = now;
+    SharedPreferences.getInstance().then((p) async {
+      await p.setBool(NetConstants.keyRideAlive, alive);
+      if (alive) {
+        await p.setInt(NetConstants.keyLastAliveAt, now);
+      } else {
+        await p.remove(NetConstants.keyLastAliveAt);
+      }
+    }).catchError((Object _) {});
+  }
+
+  /// The app is closing on purpose: say BYE so the group sees "App closed", not "No signal".
+  void _onDetach() {
+    if (_activeGroupId == null) return;
+    _rt.sendBye('APP_CLOSED');
+    _writeRideAlive(false);
   }
 
   /// Call on sign-out.
   Future<void> endSession() async {
+    if (_activeGroupId != null) _rt.sendBye('SIGN_OUT');
+    _writeRideAlive(false);
     _clearPendingSos(); // never carried over to the next account on this phone
+    _clearOutbox();
+    _clearRoster();
     _deliveredSosAlertId = null;
     _stopStatus();
     recorder?.stop().ignore();
@@ -179,7 +326,11 @@ class ConvoyService extends ChangeNotifier {
       }
       // The server says there is no active convoy: an SOS still waiting on the phone has no
       // convoy to go to any more (an offline answer never gets here, so it is kept then).
-      if (res is Map) _clearPendingSos();
+      if (res is Map) {
+        _clearPendingSos();
+        _clearOutbox();
+        if (_killedLastTime) _writeRideAlive(false);
+      }
     } on ApiException catch (e) {
       debugPrint('restore active convoy note: ${e.message}');
     } catch (e) {
@@ -192,9 +343,19 @@ class ConvoyService extends ChangeNotifier {
   void _activate(ConvoyModel convoy) {
     // An SOS waiting for another (old) convoy can no longer be delivered there.
     if (_pendingSos != null && _pendingSos!.groupId != convoy.groupId) _clearPendingSos();
+    _dropOutboxOfOtherGroups(convoy.groupId);
+    if (_roster != null && _roster!.groupId != convoy.groupId) _clearRoster();
     _allConvoys[convoy.groupId] = convoy;
     _activeGroupId = convoy.groupId;
-    _rt.joinRoom(convoy.groupId);
+    if (_killedLastTime) {
+      // The phone closed CoRoute during this ride last time: tell the group once, with the next JOIN.
+      _rt.joinRoom(convoy.groupId, prevExit: 'KILLED', prevAliveAt: _killedAliveAt);
+      _killedLastTime = false;
+      _killedAliveAt = null;
+    } else {
+      _rt.joinRoom(convoy.groupId);
+    }
+    _writeRideAlive(true);
     SharedPreferences.getInstance().then((p) => p.setString(AppConstants.keyActiveGroupId, convoy.groupId)).ignore();
     _initCompassTracking();
     // Every member's route is recorded on their own phone and uploaded for the group timeline.
@@ -204,6 +365,8 @@ class ConvoyService extends ChangeNotifier {
     if (_myUserId != null) startRealGpsTracking(_myUserId!).ignore();
     // Foreground service: keeps GPS, intercom and the connection alive with the screen locked.
     BackgroundService.start(convoyName: convoy.name, riderCount: convoy.riders.length).ignore();
+    refreshEmergencyRoster(force: true).ignore();
+    _flushOutbox();
     notifyListeners();
   }
 
@@ -293,10 +456,18 @@ class ConvoyService extends ChangeNotifier {
   void _onConnectionChanged() {
     if (_rt.isConnected) {
       recorder?.uploadNow(); // send what was recorded in the dead zone
+      // The roster could not be fetched before HELLO named the gateway's features, or it is
+      // getting old (a long or multi-day ride): fetch while there is signal, since the texts
+      // are needed exactly when there is none.
+      if (_rosterWanted && _rosterStale) refreshEmergencyRoster(force: true).ignore();
     } else {
       recorder?.refreshPendingCount().ignore();
+      // Handed to a socket that is gone: waiting for signal again (sent after the next SNAPSHOT).
+      _outboxTimer?.cancel();
+      _outboxTimer = null;
+      _resetSendingItems();
     }
-    // A pending SOS is sent again after the SNAPSHOT that follows the re-JOIN (see _onEvent).
+    // A pending SOS and the outbox are sent again after the SNAPSHOT that follows the re-JOIN (see _onEvent).
     notifyListeners();
   }
 
@@ -323,7 +494,14 @@ class ConvoyService extends ChangeNotifier {
       _applyFleet(e['convoys']);
       return;
     }
+    if (type == 'ACK') {
+      _onAck(e['clientId']?.toString());
+      return;
+    }
     if (type == 'ERROR') {
+      final cid = e['clientId']?.toString();
+      final code = e['code'];
+      if (cid != null && cid.isNotEmpty) _onOutboxError(cid, code is num ? code.toInt() : int.tryParse('$code'), e['message']?.toString());
       _lastError = e['message']?.toString();
       debugPrint('gateway error ${e['code']}: ${e['message']}');
       // Leave the convoy only when the server says we are no longer in it, and only after
@@ -344,22 +522,50 @@ class ConvoyService extends ChangeNotifier {
         if (e['convoy'] is Map) {
           _allConvoys[gid] = ConvoyModel.fromJson(Map<String, dynamic>.from(e['convoy'] as Map));
         }
-        // Back in the room after a dead zone or a restart: send the SOS that is still waiting.
+        // Back in the room after a dead zone or a restart: send the SOS that is still waiting,
+        // then the outbox in order (the server ignores repeats by clientId).
         _sendPendingSos();
+        _resetSendingItems();
+        _flushOutbox();
         break;
       case 'RIDER_UPDATE':
         if (convoy == null || e['rider'] is! Map) return;
         final rider = RiderModel.fromJson(Map<String, dynamic>.from(e['rider'] as Map));
         final riders = Map<String, RiderModel>.from(convoy.riders)..[rider.userId] = rider;
         _allConvoys[gid] = convoy.copyWith(riders: riders);
-        if (e['joined'] == true) _refreshNotification();
+        if (e['joined'] == true) {
+          _refreshNotification();
+          _scheduleRosterRefresh();
+        }
         break;
       case 'RIDER_LEFT':
         if (convoy == null) return;
         final riders = Map<String, RiderModel>.from(convoy.riders)..remove(e['userId']?.toString());
         _allConvoys[gid] = convoy.copyWith(riders: riders);
         _refreshNotification();
+        _scheduleRosterRefresh();
         break;
+      case 'PRESENCE':
+        if (convoy == null) return;
+        final uid = e['userId']?.toString();
+        final r = uid == null ? null : convoy.riders[uid];
+        if (r == null) return;
+        final riders = Map<String, RiderModel>.from(convoy.riders)
+          ..[uid!] = r.copyWith(presence: e['presence']?.toString() ?? '', presenceAt: (e['at'] as num?)?.toInt() ?? _clock());
+        _allConvoys[gid] = convoy.copyWith(riders: riders);
+        break;
+      case 'SOS_RESPONSE':
+        if (convoy == null) return;
+        final alertId = e['alertId']?.toString();
+        if (alertId == null || !convoy.activeAlerts.any((a) => a.alertId == alertId)) return;
+        final list = SosResponder.listFrom(e['responders']);
+        _allConvoys[gid] = convoy.copyWith(
+          activeAlerts: [for (final a in convoy.activeAlerts) a.alertId == alertId ? a.copyWith(responders: list) : a],
+        );
+        break;
+      case 'ROSTER_CHANGED':
+        _scheduleRosterRefresh();
+        return;
       case 'MESSAGE':
         if (convoy == null || e['message'] is! Map) return;
         final msg = GroupMessageModel.fromJson(Map<String, dynamic>.from(e['message'] as Map));
@@ -444,7 +650,11 @@ class ConvoyService extends ChangeNotifier {
         if (convoy == null) return;
         final status = e['tripStatus']?.toString() ?? convoy.tripStatus;
         _allConvoys[gid] = convoy.copyWith(tripStatus: status);
-        if (status == 'ENDED') _onTripEnded(_allConvoys[gid]!);
+        if (status == 'ENDED') {
+          _onTripEnded(_allConvoys[gid]!);
+        } else if (status == 'STARTED' || status == 'PAUSED') {
+          refreshEmergencyRoster().ignore();
+        }
         break;
       case 'DISSOLVED':
         _dropActiveConvoyLocally();
@@ -493,6 +703,9 @@ class ConvoyService extends ChangeNotifier {
   void _dropActiveConvoyLocally() {
     final gid = _activeGroupId;
     _clearPendingSos();
+    _clearOutbox();
+    _clearRoster();
+    _writeRideAlive(false);
     _stopStatus();
     recorder?.stop().ignore();
     timeline?.detach();
@@ -508,6 +721,9 @@ class ConvoyService extends ChangeNotifier {
 
   void _onTripEnded(ConvoyModel convoy) {
     _clearPendingSos();
+    _clearOutbox();
+    _clearRoster();
+    _writeRideAlive(false);
     if (_myUserId != null && convoy.riders.containsKey(_myUserId)) {
       _trips.saveTrip(buildTripHistory(convoy, userId: _myUserId), userId: _myUserId).ignore();
     }
@@ -612,6 +828,9 @@ class ConvoyService extends ChangeNotifier {
     final gid = _activeGroupId;
     if (gid == null) return;
     _clearPendingSos();
+    _clearOutbox();
+    _clearRoster();
+    _writeRideAlive(false);
     final convoy = _allConvoys[gid];
     if (convoy != null && convoy.riders.isNotEmpty) {
       _trips.saveTrip(buildTripHistory(convoy, userId: userId), userId: userId).ignore();
@@ -709,13 +928,15 @@ class ConvoyService extends ChangeNotifier {
 
     final speedKmh = (position.speed.isFinite ? position.speed * 3.6 : 0.0).clamp(0.0, 300.0).toDouble();
     _lastFixAccuracyM = position.accuracy.isFinite ? position.accuracy : null;
-    recorder?.onFix(TrackPoint(
+    final fix = TrackPoint(
       ts: position.timestamp.millisecondsSinceEpoch,
       lat: position.latitude,
       lng: position.longitude,
       speedKmh: speedKmh,
       accuracyM: position.accuracy.isFinite ? position.accuracy : 999,
-    ));
+    );
+    recorder?.onFix(fix);
+    if (_myFixes.hasListener) _myFixes.add(fix);
     final gpsHeading = position.heading.isFinite ? position.heading.clamp(0.0, 360.0).toDouble() : 0.0;
     final isMoving = speedKmh >= 3.0;
 
@@ -780,6 +1001,13 @@ class ConvoyService extends ChangeNotifier {
 
   void _pushTelemetry(RiderModel r) {
     _lastTelemetryPush = DateTime.now();
+    final now = _clock();
+    if (_activeGroupId != null && now - _lastAliveStampMs >= NetConstants.aliveStampEvery.inMilliseconds) {
+      _lastAliveStampMs = now;
+      SharedPreferences.getInstance().then((p) => p.setInt(NetConstants.keyLastAliveAt, now)).catchError((Object _) => false);
+      // Same once-a-minute beat: renew the SMS roster before it expires (no extra timer).
+      if (_rt.isConnected && _rosterWanted && _rosterStale) refreshEmergencyRoster(force: true).ignore();
+    }
     _rt.send({
       'type': 'TELEMETRY',
       'lat': r.lat,
@@ -870,12 +1098,12 @@ class ConvoyService extends ChangeNotifier {
     String cardType = 'CUSTOM',
   }) {
     if (_activeGroupId == null || text.trim().isEmpty) return;
-    _rt.send({'type': 'CHAT', 'text': text.trim(), 'isQuickCard': isQuickCard, 'cardType': cardType});
+    _enqueue('CHAT', {'text': text.trim(), 'isQuickCard': isQuickCard, 'cardType': cardType, 'sentAt': _clock()});
   }
 
   void requestWait(String requesterName) {
     if (_activeGroupId == null) return;
-    _rt.send({'type': 'WAIT'});
+    _enqueue('WAIT', {});
   }
 
   void addStopPoint({required String name, required double lat, required double lng, String category = 'REST'}) {
@@ -944,7 +1172,7 @@ class ConvoyService extends ChangeNotifier {
 
   void toggleStopVisited(String stopId, bool isVisited) {
     if (_activeGroupId == null) return;
-    _rt.send({'type': 'STOP_VISITED', 'stopId': stopId, 'isVisited': isVisited});
+    _enqueue('STOP_VISITED', {'stopId': stopId, 'isVisited': isVisited});
   }
 
   void updateTripState(String state) {
@@ -958,7 +1186,7 @@ class ConvoyService extends ChangeNotifier {
     if (rider == null) return;
     final stoppedSince = reason.isEmpty ? 0 : DateTime.now().millisecondsSinceEpoch;
     _setMyRiderLocally(rider.copyWith(statusReason: reason, statusMessage: message, stoppedSince: stoppedSince));
-    _rt.send({'type': 'STATUS', 'statusReason': reason, 'statusMessage': message, 'stoppedSince': stoppedSince});
+    _enqueue('STATUS', {'statusReason': reason, 'statusMessage': message, 'stoppedSince': stoppedSince});
   }
 
   void setCoRiderDriver(String riderId, String driverId) {
@@ -981,26 +1209,363 @@ class ConvoyService extends ChangeNotifier {
   /// Raises an SOS for the active convoy. It is kept on the phone (memory and disk) until
   /// the server echoes it back, and sent again after every reconnect with the same
   /// clientId, so it is never lost in a dead zone and never delivered twice.
-  SosDelivery triggerSosAlert({required String userId, required String userName, required double lat, required double lng, String type = 'EMERGENCY'}) {
+  SosDelivery triggerSosAlert({required String userId, required String userName, required double lat, required double lng, String type = 'EMERGENCY'}) =>
+      _raise(idHint: userId, type: type, lat: lat, lng: lng);
+
+  /// Raises an SOS (manual or automatic). A pending SOS for the same convoy keeps its
+  /// clientId; a CRASH raise upgrades a pending one (type, automatic, details).
+  SosDelivery raiseSos({
+    required String type,
+    required double lat,
+    required double lng,
+    bool auto = false,
+    double? speedBeforeKmh,
+    double? impactG,
+    int? occurredAtMs,
+  }) =>
+      _raise(type: type, lat: lat, lng: lng, auto: auto, speedBeforeKmh: speedBeforeKmh, impactG: impactG, occurredAtMs: occurredAtMs);
+
+  SosDelivery _raise({
+    String? idHint,
+    required String type,
+    required double lat,
+    required double lng,
+    bool auto = false,
+    double? speedBeforeKmh,
+    double? impactG,
+    int? occurredAtMs,
+  }) {
     final gid = _activeGroupId;
     if (gid == null) return SosDelivery.notInConvoy;
     final existing = _pendingSos;
-    final pending = (existing != null && existing.groupId == gid)
-        // Still the same emergency (not confirmed yet): keep its id, use the newer position.
-        ? existing.copyWith(lat: lat, lng: lng)
-        : PendingSos(
-            clientId: '${userId.isNotEmpty ? userId : (_myUserId ?? 'rider')}-${DateTime.now().millisecondsSinceEpoch}',
-            groupId: gid,
-            lat: lat,
-            lng: lng,
-            type: type,
-            createdAt: DateTime.now().millisecondsSinceEpoch,
-          );
+    final now = _clock();
+    final PendingSos pending;
+    if (existing != null && existing.groupId == gid) {
+      // Still the same emergency (not confirmed yet): keep its id, use the newer position.
+      final upgrade = type == SosTypes.crash && existing.type != SosTypes.crash;
+      pending = upgrade
+          ? existing.copyWith(
+              lat: lat,
+              lng: lng,
+              type: type,
+              auto: auto,
+              speedBeforeKmh: speedBeforeKmh,
+              impactG: impactG,
+              createdAt: occurredAtMs ?? existing.createdAt,
+            )
+          : existing.copyWith(lat: lat, lng: lng);
+    } else {
+      final who = (idHint != null && idHint.isNotEmpty) ? idHint : (_myUserId ?? 'rider');
+      pending = PendingSos(
+        clientId: '$who-$now',
+        groupId: gid,
+        lat: lat,
+        lng: lng,
+        type: type,
+        createdAt: occurredAtMs ?? now,
+        auto: auto,
+        speedBeforeKmh: speedBeforeKmh,
+        impactG: impactG,
+      );
+    }
     _pendingSos = pending;
     PendingSosStore.save(pending).ignore();
     final sent = _sendPendingSos();
     notifyListeners();
     return sent ? SosDelivery.sent : SosDelivery.queued;
+  }
+
+  // ------------------------------------------------------ SOS replies, check-in
+  /// "I'm going" / "I'm with them" / "Not going" for someone else's SOS. Goes through
+  /// the outbox. False when not in a ride, for my own alert, or the gateway is too old.
+  bool respondToSos(String alertId, SosResponseKind kind) {
+    final c = activeConvoy;
+    final uid = _myUserId;
+    if (c == null || uid == null || alertId.isEmpty || !_rt.supports(ProtocolFeatures.respond)) return false;
+    for (final a in c.activeAlerts) {
+      if (a.alertId == alertId && a.userId == uid) return false;
+    }
+    // A newer answer replaces one still waiting for signal.
+    _outbox.removeWhere((i) => i.type == 'SOS_RESPOND' && i.state == OutboxState.waiting && i.payload['alertId'] == alertId);
+    return _enqueue('SOS_RESPOND', {'alertId': alertId, 'kind': kind.wire}) != null;
+  }
+
+  /// My answer to an alert: the newest one still queued, else what the server has.
+  SosResponseKind? myResponseTo(String alertId) {
+    for (final i in _outbox.reversed) {
+      if (i.type != 'SOS_RESPOND' || i.isFailed || i.payload['alertId'] != alertId) continue;
+      final k = SosResponseKind.fromWire(i.payload['kind']?.toString());
+      return k == SosResponseKind.cancel ? null : k;
+    }
+    final uid = _myUserId;
+    final c = activeConvoy;
+    if (uid == null || c == null) return null;
+    for (final a in c.activeAlerts) {
+      if (a.alertId != alertId) continue;
+      for (final r in a.responders) {
+        if (r.userId == uid) return r.kind == SosResponseKind.cancel ? null : r.kind;
+      }
+    }
+    return null;
+  }
+
+  /// Answer to the solo "Are you OK?" check (or no answer). Goes through the outbox.
+  /// False when not in a ride or the gateway is too old.
+  bool sendCheckIn(CheckInResult result, {double? awayM}) {
+    if (_activeGroupId == null || !_rt.supports(ProtocolFeatures.checkIn)) return false;
+    final me = _myUserId == null ? null : activeConvoy?.riders[_myUserId];
+    final lat = me?.lat ?? 0.0, lng = me?.lng ?? 0.0;
+    final hasPos = lat != 0 || lng != 0;
+    final payload = <String, dynamic>{'result': result.wire};
+    if (awayM != null && awayM.isFinite) payload['awayM'] = awayM.round().clamp(0, 500000);
+    if (hasPos) {
+      payload['lat'] = lat;
+      payload['lng'] = lng;
+    }
+    return _enqueue('CHECK_IN', payload) != null;
+  }
+
+  // ----------------------------------------------------------------- outbox
+  bool _failedExpired(OutboxItem i, int now) =>
+      i.isFailed && now - (i.failedAt ?? i.createdAt) > NetConstants.outboxFailedShowFor.inMilliseconds;
+
+  String _newClientId(int now) {
+    _clientSeq = (_clientSeq + 1) % 100000;
+    final salt = math.Random().nextInt(0xffff).toRadixString(16);
+    return 'o$now-$_clientSeq-$salt';
+  }
+
+  OutboxItem? _enqueue(String type, Map<String, dynamic> payload) {
+    final gid = _activeGroupId;
+    if (gid == null) return null;
+    final now = _clock();
+    final item = OutboxItem(clientId: _newClientId(now), groupId: gid, type: type, payload: payload, createdAt: now);
+    if (type == 'STATUS') {
+      // Only the newest status matters.
+      _outbox.removeWhere((i) => i.type == 'STATUS' && i.state == OutboxState.waiting);
+    }
+    _outbox.add(item);
+    while (_outbox.length > NetConstants.outboxMaxItems) {
+      final chat = _outbox.indexWhere((i) => i.type == 'CHAT');
+      _outbox.removeAt(chat >= 0 ? chat : 0);
+    }
+    _persistOutbox();
+    _flushOutbox();
+    notifyListeners();
+    return item;
+  }
+
+  /// Sends waiting items in order, at most [NetConstants.outboxSendPerSecond] per second.
+  /// Called on enqueue and after each SNAPSHOT; a one-shot timer only while items wait
+  /// and the socket is connected (no polling).
+  void _flushOutbox() {
+    _outboxTimer?.cancel();
+    _outboxTimer = null;
+    if (_outbox.isEmpty) return;
+    final now = _clock();
+    var changed = false;
+    final before = _outbox.length;
+    _outbox.removeWhere((i) => _failedExpired(i, now));
+    final gid = _activeGroupId;
+    if (gid == null || !_rt.isConnected) {
+      if (_outbox.length != before) _persistOutbox();
+      return;
+    }
+    // Dropped at send time: another ride, too old, or a WAIT nobody needs any more.
+    _outbox.removeWhere((i) =>
+        i.state == OutboxState.waiting &&
+        (i.groupId != gid ||
+            now - i.createdAt > NetConstants.outboxMaxAge.inMilliseconds ||
+            (i.type == 'WAIT' && now - i.createdAt > NetConstants.outboxWaitMaxAge.inMilliseconds)));
+    changed = _outbox.length != before;
+    final wall = DateTime.now().millisecondsSinceEpoch;
+    if (wall - _burstStartMs >= 1000) {
+      _burstStartMs = wall;
+      _burstCount = 0;
+    }
+    final ack = _rt.supports(ProtocolFeatures.ack);
+    var idx = 0;
+    while (idx < _outbox.length && _burstCount < NetConstants.outboxSendPerSecond) {
+      final item = _outbox[idx];
+      if (item.state != OutboxState.waiting) {
+        idx++;
+        continue;
+      }
+      if (!_rt.send(item.toMessage(withClientId: ack))) break;
+      _burstCount++;
+      changed = true;
+      if (ack) {
+        _outbox[idx] = item.copyWith(state: OutboxState.sending);
+        idx++;
+      } else {
+        // Older gateway (no ACK): done once handed to the socket, as in 3.13.
+        _outbox.removeAt(idx);
+      }
+    }
+    if (changed) {
+      _persistOutbox();
+      notifyListeners();
+    }
+    if (_rt.isConnected && _outbox.any((i) => i.state == OutboxState.waiting)) {
+      final wait = (1000 - (DateTime.now().millisecondsSinceEpoch - _burstStartMs)).clamp(50, 1000).toInt();
+      _outboxTimer = Timer(Duration(milliseconds: wait), _flushOutbox);
+    }
+  }
+
+  void _onAck(String? clientId) {
+    if (clientId == null || clientId.isEmpty) return;
+    final before = _outbox.length;
+    _outbox.removeWhere((i) => i.clientId == clientId);
+    if (_outbox.length == before) return;
+    _persistOutbox();
+    notifyListeners();
+  }
+
+  /// ERROR for an outbox item: 4xx (not 429) means the server refused it ("Not sent");
+  /// 429 and 5xx keep it for another try.
+  void _onOutboxError(String clientId, int? code, String? message) {
+    final idx = _outbox.indexWhere((i) => i.clientId == clientId);
+    if (idx < 0) return;
+    final c = code ?? 500;
+    if (c >= 400 && c < 500 && c != 429) {
+      _outbox[idx] = _outbox[idx].copyWith(state: OutboxState.failed, error: message ?? 'Not sent', failedAt: _clock());
+    } else {
+      _outbox[idx] = _outbox[idx].copyWith(state: OutboxState.waiting);
+      if (c == 429 && _rt.isConnected && _outboxTimer == null) {
+        _outboxTimer = Timer(const Duration(seconds: 1), _flushOutbox);
+      }
+    }
+    _persistOutbox();
+  }
+
+  void _resetSendingItems() {
+    var changed = false;
+    for (var i = 0; i < _outbox.length; i++) {
+      if (_outbox[i].state == OutboxState.sending) {
+        _outbox[i] = _outbox[i].copyWith(state: OutboxState.waiting);
+        changed = true;
+      }
+    }
+    if (changed) _persistOutbox();
+  }
+
+  void _dropOutboxOfOtherGroups(String groupId) {
+    final before = _outbox.length;
+    _outbox.removeWhere((i) => i.groupId != groupId);
+    if (_outbox.length != before) _persistOutbox();
+  }
+
+  void _persistOutbox() {
+    final epoch = _outboxEpoch;
+    _outboxReady.then((_) {
+      if (epoch != _outboxEpoch) return Future<void>.value();
+      return _outboxStore.save(List<OutboxItem>.of(_outbox));
+    }).ignore();
+  }
+
+  Future<void> _loadOutbox() async {
+    final epoch = _outboxEpoch;
+    final stored = await _outboxStore.load();
+    if (stored.isEmpty || epoch != _outboxEpoch || _disposed) return;
+    final have = {for (final i in _outbox) i.clientId};
+    _outbox = [
+      for (final i in stored)
+        if (!have.contains(i.clientId)) i.state == OutboxState.sending ? i.copyWith(state: OutboxState.waiting) : i,
+      ..._outbox,
+    ];
+    notifyListeners();
+    _flushOutbox();
+  }
+
+  /// Cleared with the ride (end, leave, dropped, sign-out), like the pending SOS.
+  void _clearOutbox() {
+    _outboxEpoch++;
+    _outboxTimer?.cancel();
+    _outboxTimer = null;
+    _outbox = [];
+    _outboxStore.clear().ignore();
+  }
+
+  // --------------------------------------------------------- SMS roster
+  bool get _smsFallbackOn => settings?.smsFallback == true;
+
+  bool get _rosterWanted => _smsFallbackOn && _activeGroupId != null && _rt.supports(ProtocolFeatures.roster);
+
+  /// No usable roster, or more than half of its validity is gone. An expired roster cannot be
+  /// renewed in a dead zone, and without it only the emergency contact would be texted.
+  bool get _rosterStale {
+    final r = _roster, gid = _activeGroupId;
+    if (gid == null) return false;
+    final now = _clock();
+    if (r == null || !r.isValidFor(gid, now)) return true;
+    final life = r.validUntil - r.fetchedAt;
+    return life > 0 && r.validUntil - now < life ~/ 2;
+  }
+
+  void _onSettingsChanged() {
+    final on = _smsFallbackOn;
+    if (on == _smsFallbackWas) return;
+    _smsFallbackWas = on;
+    if (on) {
+      refreshEmergencyRoster(force: true).ignore();
+    } else {
+      _clearRoster();
+      notifyListeners();
+    }
+  }
+
+  /// Fetches the phone numbers for the SMS fallback of the active ride. Only when the
+  /// rider opted in, the ride is running and the gateway supports it. Never logged.
+  Future<void> refreshEmergencyRoster({bool force = false}) async {
+    final gid = _activeGroupId;
+    if (gid == null || !_rosterWanted) return;
+    final status = _allConvoys[gid]?.tripStatus;
+    if (status != 'STARTED' && status != 'PAUSED') return;
+    if (!force && _roster?.isValidFor(gid, _clock()) == true) return;
+    if (_rosterFetching) return;
+    _rosterFetching = true;
+    final epoch = _rosterEpoch;
+    try {
+      final res = await _api.get('/convoys/$gid/emergency-roster');
+      if (_disposed || epoch != _rosterEpoch || _activeGroupId != gid || !_smsFallbackOn) return;
+      if (res is Map) {
+        final r = EmergencyRoster.fromJson(Map<String, dynamic>.from(res), fetchedAt: _clock());
+        if (r != null && r.groupId == gid) {
+          _roster = r;
+          await _rosterStore.save(r);
+          if (epoch != _rosterEpoch || _disposed) {
+            if (epoch != _rosterEpoch) _rosterStore.clear().ignore(); // cleared while saving
+            return;
+          }
+          notifyListeners();
+        }
+      }
+    } on ApiException catch (e) {
+      // Not a member any more, or the ride is not running: nothing may stay on the phone.
+      if (e.statusCode == 403 || e.statusCode == 409) _clearRoster();
+      debugPrint('emergency roster note: ${e.statusCode}');
+    } catch (_) {
+      debugPrint('emergency roster note: not fetched'); // offline: keep the stored copy
+    } finally {
+      _rosterFetching = false;
+    }
+  }
+
+  /// Riders joined, left or changed their opt-out: fetch again, at most once per debounce window.
+  void _scheduleRosterRefresh() {
+    if (!_rosterWanted || _rosterTimer?.isActive == true) return;
+    _rosterTimer = Timer(_rosterDebounce, () {
+      _rosterTimer = null;
+      refreshEmergencyRoster(force: true).ignore();
+    });
+  }
+
+  void _clearRoster() {
+    _rosterEpoch++;
+    _rosterTimer?.cancel();
+    _rosterTimer = null;
+    _roster = null;
+    _rosterStore.clear().ignore();
   }
 
   /// Sends the waiting SOS if there is one for the active convoy. Event-driven only (no timer).
@@ -1130,6 +1695,11 @@ class ConvoyService extends ChangeNotifier {
     _broadcastClear?.cancel();
     _sosOkClear?.cancel();
     _statusTimer?.cancel();
+    _disposed = true;
+    _outboxTimer?.cancel();
+    _rosterTimer?.cancel();
+    settings?.removeListener(_onSettingsChanged);
+    _myFixes.close();
     super.dispose();
   }
 }

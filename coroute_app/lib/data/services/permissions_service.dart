@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'background_service.dart';
+import 'safety_native.dart';
 
 /// One place for every runtime permission the app needs, with the reason for each.
 class PermissionItem {
@@ -30,6 +31,11 @@ class PermissionsService {
     final mic = await Permission.microphone.status;
     final notif = await Permission.notification.status;
     final battery = await BackgroundService.isIgnoringBatteryOptimizations();
+    final android = Platform.isAndroid;
+    final sms = android ? (await Permission.sms.status).isGranted : false;
+    // Full-screen alarms can be denied only on Android 14 (SDK 34) and newer.
+    final sdk = android ? (await SafetyNative.deviceInfo()).sdkInt : 0;
+    final fullScreen = sdk >= 34 ? await SafetyNative.canUseFullScreenIntent() : true;
     return [
       PermissionItem(key: 'location', title: 'Location while using the app', reason: 'We need your location so your riding group can see your position during an active ride.', required: true, granted: loc.isGranted),
       PermissionItem(key: 'locationAlways', title: 'Location in the background', reason: 'Keeps your group updated while the phone is in your pocket or the screen is locked, only during an active ride. Choose "Allow all the time".', required: true, granted: always.isGranted),
@@ -37,6 +43,10 @@ class PermissionsService {
       PermissionItem(key: 'notification', title: 'Notifications', reason: 'Enable ride alerts to receive group separation and emergency updates.', required: false, granted: notif.isGranted),
       if (Platform.isAndroid)
         PermissionItem(key: 'battery', title: 'Unrestricted battery use', reason: 'Stops the phone from closing CoRoute during long rides.', required: false, granted: battery),
+      if (android)
+        PermissionItem(key: 'sms', title: 'Send texts (SMS)', reason: 'Only if you switch on "Text the group if there is no internet": when an SOS cannot be sent, your phone texts your emergency contact and riders with a map link.', required: false, granted: sms),
+      if (sdk >= 34)
+        PermissionItem(key: 'fullScreen', title: 'Alarm on the lock screen', reason: 'Shows the crash alarm over the lock screen, so you can cancel it without unlocking.', required: false, granted: fullScreen),
     ];
   }
 
@@ -58,6 +68,16 @@ class PermissionsService {
         return (await Permission.notification.request()).isGranted;
       case 'battery':
         return BackgroundService.requestIgnoreBatteryOptimizations();
+      case 'sms':
+        if (!Platform.isAndroid) return false;
+        final r = await Permission.sms.request();
+        if (r.isPermanentlyDenied) await openAppSettings();
+        return r.isGranted;
+      case 'fullScreen':
+        // A system page: the result is read again when the rider comes back.
+        if (await SafetyNative.canUseFullScreenIntent()) return true;
+        await SafetyNative.openFullScreenIntentSettings();
+        return SafetyNative.canUseFullScreenIntent();
     }
     return false;
   }

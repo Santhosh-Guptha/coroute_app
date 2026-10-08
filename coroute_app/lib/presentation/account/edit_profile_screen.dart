@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import 'profile_form.dart';
 
-/// Edit your profile: name, mobile number, bike and emergency contact.
+/// Edit your profile: name, mobile number, bike, emergency contact, optional
+/// medical info and whether you receive emergency texts from your group.
 /// Opened from the Profile tab, the ride start alert and the pre-ride checklist.
 /// Pops with `true` after a successful save.
 class EditProfileScreen extends StatelessWidget {

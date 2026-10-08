@@ -65,10 +65,30 @@ const RULES = {
     if (s.length > 16 || !VEHICLE_NO.test(s)) return [null, 'Use letters, numbers, spaces or - for the bike number (at most 16).'];
     return [s];
   },
+  // Optional medical info (3.14): shown to the ride group only while the rider's SOS is open.
+  bloodGroup(v) {
+    const s = String(v ?? '').trim().toUpperCase().replace(/\s+/g, '');
+    if (s !== '' && !BLOOD_GROUPS.has(s)) return [null, 'Pick a blood group from the list.'];
+    return [s];
+  },
+  allergies(v) {
+    const s = String(v ?? '').trim().replace(/ +/g, ' ');
+    if (s.length > config.medicalAllergiesMax || CONTROL.test(s)) return [null, `Use at most ${config.medicalAllergiesMax} characters for allergies, on one line.`];
+    return [s];
+  },
+  medicalNotes(v) {
+    const s = String(v ?? '').trim().replace(/ +/g, ' ');
+    if (s.length > config.medicalNotesMax || CONTROL.test(s)) return [null, `Use at most ${config.medicalNotesMax} characters for medical notes, on one line.`];
+    return [s];
+  },
 };
 
+const BLOOD_GROUPS = new Set(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']);
+
 /** Fields that may be empty when written (everything else must pass its rule). */
-const MAY_BE_EMPTY = new Set(['vehicleType', 'vehicleNo']);
+const MAY_BE_EMPTY = new Set(['vehicleType', 'vehicleNo', 'bloodGroup', 'allergies', 'medicalNotes']);
+/** On/off fields: must be a real boolean. */
+const SWITCHES = ['smsOptOut'];
 
 /**
  * Validates the given profile fields. Only keys present in `input` (and not
@@ -79,6 +99,10 @@ function profileFields(input, { optionalEmpty = [] } = {}) {
   const out = {};
   const errors = {};
   const emptyOk = new Set([...MAY_BE_EMPTY, ...optionalEmpty]);
+  for (const key of SWITCHES) {
+    if (!input || input[key] === undefined || input[key] === null) continue;
+    if (typeof input[key] !== 'boolean') errors[key] = 'This field must be on or off.'; else out[key] = input[key];
+  }
   for (const [key, rule] of Object.entries(RULES)) {
     if (!input || input[key] === undefined || input[key] === null) continue;
     // Text (or a number for phone fields from older builds); never objects, arrays or booleans.
@@ -146,4 +170,17 @@ function sitePath(raw) {
   return SITE_PATHS.has(p) ? p : null;
 }
 
-module.exports = { ValidationError, profileFields, tripRecord, sitePath, cleanPhone, downsample };
+/** A phone number as stored, if it is a usable number (used for the SMS roster), else ''. */
+function validPhone(v) {
+  const s = cleanPhone(v);
+  return PHONE.test(s) ? s : '';
+}
+
+/**
+ * Optional clientId on socket messages (outbox dedupe): 1 to 64 of A-Z a-z 0-9 _ . : -
+ * Anything else is treated as absent (old behaviour).
+ */
+const CLIENT_ID = /^[A-Za-z0-9_.:-]{1,64}$/;
+function clientIdOf(v) { return typeof v === 'string' && CLIENT_ID.test(v) ? v : ''; }
+
+module.exports = { ValidationError, profileFields, tripRecord, sitePath, cleanPhone, downsample, validPhone, clientIdOf, BLOOD_GROUPS };

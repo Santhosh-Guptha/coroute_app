@@ -3,6 +3,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
+import '../../data/models/safety_wire.dart';
 import '../../domain/ride/ride_facts.dart';
 import '../widgets/rider_status_sheet.dart';
 
@@ -47,6 +48,83 @@ String? riderStatusDetail(RiderModel r, RiderStatus s, {required int nowMs}) {
   }
 }
 
+/// Why another rider's position stopped, in words, from the server's
+/// presence: "No signal since 10:42 near Hosur" (the link dropped: tunnel,
+/// dead zone, or the phone was killed) or "App closed on this phone" (the
+/// rider closed CoRoute). Null for me, for riders who are online, and when
+/// an older gateway sends no presence. [clock] formats epoch ms as a time of
+/// day ("10:42 AM"); [place] is the OFFLINE timeline place, may be empty.
+String? presenceLine(RiderModel r, {required bool isMe, String place = '', required String Function(int ms) clock}) {
+  if (isMe) return null;
+  switch (r.presenceState) {
+    case RiderPresence.noSignal:
+      final since = r.lastSeenEpochMs > 0 ? r.lastSeenEpochMs : r.presenceAt;
+      final near = place.trim().isEmpty ? '' : ' near ${place.trim()}';
+      return since > 0 ? 'No signal since ${clock(since)}$near' : 'No signal$near';
+    case RiderPresence.appClosed:
+      return 'App closed on this phone';
+    case RiderPresence.online:
+    case RiderPresence.unknown:
+      return null;
+  }
+}
+
+/// [presenceLine]'s clock: the device's own 12 or 24 hour format.
+String presenceClock(BuildContext context, int ms) => MaterialLocalizations.of(context).formatTimeOfDay(
+      TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(ms)),
+      alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+    );
+
+/// Icon for a presence line: no signal and app closed look different.
+IconData presenceIcon(RiderModel r) =>
+    r.presenceState == RiderPresence.appClosed ? Icons.phonelink_erase_rounded : Icons.signal_cellular_connected_no_internet_0_bar_rounded;
+
+/// "Possible incident" as a small red chip with an icon (never colour alone).
+class PossibleIncidentChip extends StatelessWidget {
+  const PossibleIncidentChip({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color c = StatusColors.critical;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
+      decoration: ShapeDecoration(
+        color: c.withOpacity(0.14),
+        shape: StadiumBorder(side: BorderSide(color: c.withOpacity(0.6))),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.report_rounded, size: 16, color: c),
+          const SizedBox(width: Space.s4),
+          Flexible(child: Text('Possible incident', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: c))),
+        ],
+      ),
+    );
+  }
+}
+
+/// A presence line with its icon, for the ladder and the rider card.
+class PresenceText extends StatelessWidget {
+  final RiderModel rider;
+  final String text;
+  const PresenceText({super.key, required this.rider, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color c = StatusColors.warning;
+    return Row(
+      children: [
+        Icon(presenceIcon(rider), size: 16, color: c),
+        const SizedBox(width: Space.s4),
+        Expanded(
+          child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.textPrimary)),
+        ),
+      ],
+    );
+  }
+}
+
 /// The stop reason a rider gave, as text ("Fueling", "Custom Reason: tyre").
 String riderReasonText(RiderModel r) {
   if (r.statusReason.isEmpty) return '';
@@ -64,6 +142,12 @@ class RidersLadder extends StatelessWidget {
   final int nowMs;
   final ValueChanged<RiderModel> onTap;
 
+  /// userId to the place of their open OFFLINE entry ("near Hosur"), for "No signal since".
+  final Map<String, String> offlinePlaces;
+
+  /// Riders with an open possible incident (shown as a chip).
+  final Set<String> possibleIncident;
+
   const RidersLadder({
     super.key,
     required this.rungs,
@@ -71,6 +155,8 @@ class RidersLadder extends StatelessWidget {
     required this.statuses,
     required this.nowMs,
     required this.onTap,
+    this.offlinePlaces = const {},
+    this.possibleIncident = const {},
   });
 
   @override
@@ -84,6 +170,8 @@ class RidersLadder extends StatelessWidget {
         color: colors[rung.rider.userId],
         status: statuses[rung.rider.userId] ?? RiderStatus.offline,
         nowMs: nowMs,
+        place: offlinePlaces[rung.rider.userId] ?? '',
+        incident: possibleIncident.contains(rung.rider.userId),
         onTap: () => onTap(rung.rider),
       ));
     }
@@ -131,13 +219,25 @@ class _RiderRow extends StatelessWidget {
   final RiderStatus status;
   final int nowMs;
   final VoidCallback onTap;
+  final String place;
+  final bool incident;
 
-  const _RiderRow({required this.rung, required this.color, required this.status, required this.nowMs, required this.onTap});
+  const _RiderRow({
+    required this.rung,
+    required this.color,
+    required this.status,
+    required this.nowMs,
+    required this.onTap,
+    this.place = '',
+    this.incident = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final r = rung.rider;
-    final detail = riderStatusDetail(r, status, nowMs: nowMs);
+    final presence = presenceLine(r, isMe: rung.isMe, place: place, clock: (ms) => presenceClock(context, ms));
+    // The presence line says why the position is old; the chip then needs no "last seen".
+    final detail = presence == null ? riderStatusDetail(r, status, nowMs: nowMs) : null;
     final reason = riderReasonText(r);
     final dist = rung.displayFromMeM;
     final lowBattery = r.batteryLevel > 0 && r.batteryLevel < 20;
@@ -151,6 +251,8 @@ class _RiderRow extends StatelessWidget {
     final semantic = [
       rung.isMe ? 'You' : r.name,
       detail == null ? status.label : '${status.label}, $detail',
+      ?presence,
+      if (incident) 'possible incident',
       if (distText.isNotEmpty) distText,
       if (rung.tooFarBehind) 'too far behind',
       if (extra.isNotEmpty) extra,
@@ -191,9 +293,15 @@ class _RiderRow extends StatelessWidget {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           RiderStatusChip(status: status, detail: detail),
+                          if (incident) const PossibleIncidentChip(),
                           if (dist != null && !rung.isMe) DistanceIndicator(meters: dist, ahead: rung.ahead, warn: rung.tooFarBehind),
                         ],
                       ),
+                      if (presence != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: Space.s4),
+                          child: PresenceText(rider: r, text: presence),
+                        ),
                       if (extra.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: Space.s4),

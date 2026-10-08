@@ -3,9 +3,15 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../data/models/safety_wire.dart';
+import '../../data/models/sos_alert_model.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/safety_service.dart';
 import '../../data/services/timeline_service.dart';
 import '../../domain/notify/alert_policy.dart';
+import '../ride/incident_banner.dart';
+import '../ride/incident_sheet.dart';
+import '../ride/incident_view.dart';
 import '../rider/rider_home_screen.dart';
 import '../timeline/live_timeline_screen.dart';
 import 'alert_tiers.dart';
@@ -36,6 +42,18 @@ List<InAppAlert> alertsFor(AlertFacts f, TimelineService timeline, {required int
     AlertViewer(userId: uid, isLead: f.isLead, isSweeper: f.isSweeper, lat: lat, lng: lng),
     nowMs: nowMs,
   );
+}
+
+/// What a widget showing ride safety prompts depends on. SafetyService also
+/// notifies every second while a crash alarm counts down; selecting this
+/// text (not the list) keeps those ticks from rebuilding the ride screen.
+String safetyPromptsSignature(SafetyService? s) =>
+    (s?.prompts ?? const <SafetyPrompt>[]).map((p) => '${p.key}|${p.title}|${p.message}|${p.primaryLabel}|${p.secondaryLabel}').join('\n');
+
+/// The prompts after selecting [safetyPromptsSignature] (null-safe when no SafetyService is provided).
+List<SafetyPrompt> safetyPromptsOf(BuildContext context) {
+  context.select<SafetyService?, String>(safetyPromptsSignature);
+  return context.read<SafetyService?>()?.prompts ?? const <SafetyPrompt>[];
 }
 
 /// Critical and important alerts, for the badge on the Alerts tab.
@@ -124,18 +142,43 @@ class _AlertsList extends StatelessWidget {
     }
   }
 
+  static void _imOk(BuildContext context) {
+    final ok = context.read<ConvoyService>().sendCheckIn(CheckInResult.ok);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok ? 'Your group knows you are OK.' : 'Could not tell the group right now. Riding on also closes this alert.'),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final facts = context.select<ConvoyService, AlertFacts>(alertFactsOf);
     final timeline = context.watch<TimelineService>();
+    // Open SOS and crash alerts (responders, medical) change this list; positions do not.
+    context.select<ConvoyService, List<SosAlertModel>>((s) => s.activeConvoy?.activeAlerts ?? const <SosAlertModel>[]);
+    final prompts = safetyPromptsOf(context);
     // My position only for "km from you" text: read, not watched (no rebuild on every fix).
     final service = context.read<ConvoyService>();
     final myUid = facts.userId;
     final mePos = myUid == null ? null : service.activeConvoy?.riders[myUid];
-    final alerts = alertsFor(facts, timeline, nowMs: DateTime.now().millisecondsSinceEpoch, lat: mePos?.lat, lng: mePos?.lng);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final alerts = alertsFor(facts, timeline, nowMs: now, lat: mePos?.lat, lng: mePos?.lng);
+    final convoy = service.activeConvoy;
+    // Emergencies (SOS, crash, possible incident, no signal, no reply) get the big incident card
+    // with Navigate and Open; the plain timeline row with the same key is then left out.
+    final incidents = (convoy == null || myUid == null) ? const <IncidentView>[] : incidentsFor(convoy, timeline, myUid, now);
+    final incidentKeys = {for (final i in incidents) i.key};
 
-    // Your own SOS comes first. The notification rules leave it out, because the sender knows.
+    // Someone else's emergency first, then my own SOS (the notification rules leave it out,
+    // because the sender knows).
     final local = <Widget>[
+      for (final i in incidents.where((x) => !x.isMe))
+        IncidentBanner(
+          incident: i,
+          myLat: mePos?.lat,
+          myLng: mePos?.lng,
+          nowMs: now,
+          onOpen: () => showIncidentSheet(context, convoyId: convoy?.groupId ?? '', subjectUserId: i.subjectUserId, alertId: i.alertId),
+        ),
       if (facts.mySosOpen)
         RideAlert(
           tier: AlertTier.critical,
@@ -154,7 +197,31 @@ class _AlertsList extends StatelessWidget {
         ),
     ];
 
-    if (alerts.isEmpty && local.isEmpty) {
+    // Automatic checks about me and this phone's own prompts ("Are you OK?", "Time for a break").
+    Widget prompt(SafetyPrompt p) => RideAlert(
+          tier: p.tier,
+          title: p.title,
+          message: p.message,
+          actionLabel: p.primaryLabel,
+          onAction: () => context.read<SafetyService>().answerPrompt(p.key),
+          onDismiss: p.secondaryLabel == null ? null : () => context.read<SafetyService>().answerPrompt(p.key, primary: false),
+        );
+    final localImportant = <Widget>[
+      for (final i in incidents.where((x) => x.isMe && !x.isAlert))
+        RideAlert(
+          tier: AlertTier.important,
+          title: i.title,
+          message: "Automatic check. Tap I'm OK if you are fine.",
+          actionLabel: "I'm OK",
+          onAction: () => _imOk(context),
+        ),
+      for (final p in prompts.where((p) => p.tier != AlertTier.normal)) prompt(p),
+    ];
+    final localNormal = <Widget>[
+      for (final p in prompts.where((p) => p.tier == AlertTier.normal)) prompt(p),
+    ];
+
+    if (alerts.isEmpty && local.isEmpty && localImportant.isEmpty && localNormal.isEmpty) {
       return EmptyState(
         icon: Icons.check_circle_outline_rounded,
         title: 'All clear',
@@ -170,9 +237,10 @@ class _AlertsList extends StatelessWidget {
           child: Semantics(header: true, child: Text(title, style: AppText.label)),
         ));
 
-    final critical = alerts.where((a) => a.tier == AlertTier.critical).toList();
-    final important = alerts.where((a) => a.tier == AlertTier.important).toList();
-    final normal = alerts.where((a) => a.tier == AlertTier.normal).toList();
+    final shown = alerts.where((a) => !incidentKeys.contains(a.key)).toList();
+    final critical = shown.where((a) => a.tier == AlertTier.critical).toList();
+    final important = shown.where((a) => a.tier == AlertTier.important).toList();
+    final normal = shown.where((a) => a.tier == AlertTier.normal).toList();
     final riders = service.activeConvoy?.riders ?? const {};
 
     Widget tile(InAppAlert a) {
@@ -216,12 +284,15 @@ class _AlertsList extends StatelessWidget {
       }
       children.addAll(critical.map(tile));
     }
-    if (important.isNotEmpty) {
+    Widget padded(Widget w) => Padding(padding: const EdgeInsets.only(bottom: Space.s8), child: w);
+    if (important.isNotEmpty || localImportant.isNotEmpty) {
       section('Important');
+      children.addAll(localImportant.map(padded));
       children.addAll(important.map(tile));
     }
-    if (normal.isNotEmpty) {
+    if (normal.isNotEmpty || localNormal.isNotEmpty) {
       section('Updates');
+      children.addAll(localNormal.map(padded));
       children.addAll(normal.map(tile));
     }
 

@@ -174,10 +174,21 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   }));
   r.get('/convoys/:groupId', wrap(async (req, res) => {
     const { groupId } = req.params;
-    if (!(await convoys.isMember(groupId, req.user.userId)) && req.user.role !== 'MASTER_ADMIN') {
+    const member = await convoys.isMember(groupId, req.user.userId);
+    if (!member && req.user.role !== 'MASTER_ADMIN') {
       return res.status(403).json({ error: 'Not a member of this convoy.' });
     }
-    res.json(await convoys.getSnapshot(groupId));
+    // Medical info goes to the ride group only, never to admins.
+    res.json(await convoys.getSnapshot(groupId, { admin: !member }));
+  }));
+  // Emergency SMS roster (3.14): phone numbers for the rider's own SMS fallback while a ride is live.
+  // Current riders of the convoy only, rate limited, never cached by anything in between.
+  const rosterLimiter = rateLimit({
+    windowMs: 60 * 1000, limit: config.rosterPerMin, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `roster:${req.user.userId}`, message: { error: 'Too many requests. Try again in a minute.', code: 'RATE_LIMITED' },
+  });
+  r.get('/convoys/:groupId/emergency-roster', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, rosterLimiter, wrap(async (req, res) => {
+    res.json(await convoys.emergencyRoster(String(req.params.groupId || ''), req.user.userId));
   }));
   r.post('/convoys/:groupId/leave', wrap(async (req, res) => { await convoys.leave(req.params.groupId, req.user.userId); res.json({ ok: true }); }));
   r.post('/convoys/:groupId/status', wrap(async (req, res) => {
@@ -361,6 +372,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
 
   // Admin
   r.get('/admin/fleet', requireAdmin, wrap(async (req, res) => res.json({ convoys: await convoys.fleet() })));
+  // Every open SOS and crash alert across convoys (3.14). No medical info, no phone numbers.
+  r.get('/admin/emergencies', requireAdmin, wrap(async (req, res) => {
+    res.set('Cache-Control', 'no-store').json({ serverTime: Date.now(), emergencies: await convoys.emergencies() });
+  }));
   r.post('/admin/broadcast', requireAdmin, wrap(async (req, res) => res.json(await convoys.adminBroadcast(req.user, req.body?.message))));
   r.get('/admin/analytics', requireAdmin, wrap(async (req, res) => {
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);

@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -12,23 +11,27 @@ import '../../data/models/sos_alert_model.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
-import '../../domain/timeline/timeline_text.dart';
 import '../auth/access_gate_screen.dart';
 import '../ride/riders_ladder.dart';
 import '../timeline/member_colors.dart';
 import 'admin_convoy_inspector.dart';
+import 'admin_emergencies_panel.dart';
 import 'admin_insights_screen.dart';
 import 'admin_ride_history_screen.dart';
 import 'admin_ui.dart';
 import 'admin_users_screen.dart';
 
-/// The admin home: what needs attention first (open SOS, live rides,
-/// accounts on hold), then the numbers, the fleet map and the admin tools.
+/// The admin home: what needs attention first (the Emergencies panel with
+/// every open SOS and crash and its alarm, live rides, accounts on hold),
+/// then the numbers, the fleet map and the admin tools.
 /// Every number comes from the server (live fleet over the socket, accounts
 /// from /admin/users); nothing is estimated. Pull down to refresh; what is on
 /// screen stays while it reloads.
 class MasterAdminDashboard extends StatefulWidget {
-  const MasterAdminDashboard({super.key});
+  /// The emergency alarm sound; tests pass a fake.
+  final AdminAlarm? alarm;
+
+  const MasterAdminDashboard({super.key, this.alarm});
 
   @override
   State<MasterAdminDashboard> createState() => _MasterAdminDashboardState();
@@ -38,6 +41,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
   /// Registered accounts, null until the first answer (then the counts show).
   List<Map<String, dynamic>>? _users;
   bool _loadingUsers = false;
+  final GlobalKey<AdminEmergenciesPanelState> _emergencies = GlobalKey<AdminEmergenciesPanelState>();
 
   @override
   void initState() {
@@ -64,7 +68,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
 
   Future<void> _refresh() async {
     context.read<ConvoyService>().startAdminFleetWatch();
-    await _loadUsers();
+    await Future.wait([_loadUsers(), _emergencies.currentState?.reload() ?? Future<void>.value()]);
   }
 
   void _push(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
@@ -123,26 +127,13 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
     final users = _users;
     final onHold = users?.where((u) => AccountStatus.fromCode(u['status']) == AccountStatus.onHold).length;
 
-    // 1. Open SOS.
+    // 1. Emergencies: every open SOS and crash, with the alarm while the console is open.
     final sosSection = <Widget>[
-      if (sos.isEmpty)
-        Padding(
-          padding: const EdgeInsets.only(top: Space.s8),
-          child: StatusLine(icon: Icons.check_circle_rounded, text: 'No open SOS', color: StatusColors.success),
-        )
-      else
-        for (final (c, a) in sos)
-          Padding(
-            padding: const EdgeInsets.only(bottom: Space.s8),
-            child: RideAlert(
-              tier: AlertTier.critical,
-              title: 'SOS: ${a.userName.isEmpty ? 'a rider' : a.userName} needs help',
-              message: '${c.name}. ${adminCapitalize(TimelineText.reason(a.alertType))}, '
-                  '${formatAgo(Duration(milliseconds: math.max(0, now - a.timestamp)))}',
-              actionLabel: 'Open ride',
-              onAction: () => _openConvoy(c),
-            ),
-          ),
+      AdminEmergenciesPanel(
+        key: _emergencies,
+        alarm: widget.alarm ?? const NotifierAdminAlarm(),
+        onOpenConvoy: _openConvoy,
+      ),
     ];
 
     // 2. Live rides.

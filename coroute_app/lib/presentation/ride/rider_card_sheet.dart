@@ -6,10 +6,13 @@ import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/intercom_service.dart';
+import '../../data/services/timeline_service.dart';
 import '../../domain/ride/ride_facts.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../../domain/timeline/timeline_text.dart';
 import '../timeline/member_colors.dart';
+import 'incident_sheet.dart';
+import 'incident_view.dart';
 import 'riders_ladder.dart';
 
 /// Opens the compact rider card (a sheet, never a new screen): name, status,
@@ -67,7 +70,20 @@ class RiderCard extends StatelessWidget {
     final now = DateTime.now().millisecondsSinceEpoch;
     final status = riderStatusOf(r, convoy,
         isMe: isMe, nowMs: now, online: service.isOnline, gpsActive: service.isRealGpsActive, myAccuracyM: service.myFixAccuracyM);
-    final detail = riderStatusDetail(r, status, nowMs: now);
+    // Why the position is old ("No signal since 10:42 near Hosur", "App closed on this phone"),
+    // and any open emergency about this rider (SOS, crash, possible incident, no signal, no reply).
+    final timeline = context.watch<TimelineService?>();
+    final offline = timeline?.groupId == convoy.groupId ? timeline?.openFor(r.userId, 'OFFLINE') : null;
+    final presence = presenceLine(r, isMe: isMe, place: offline?.placeName ?? '', clock: (ms) => presenceClock(context, ms));
+    final detail = presence == null ? riderStatusDetail(r, status, nowMs: now) : null;
+    IncidentView? incident;
+    for (final i in incidentsFor(convoy, timeline, myId, now)) {
+      if (i.subjectUserId == r.userId) {
+        incident = i;
+        break;
+      }
+    }
+    final inc = incident;
     final colors = MemberColors.assign(convoy.riders.keys);
     final line = convoy.routeLine;
 
@@ -141,12 +157,29 @@ class RiderCard extends StatelessWidget {
                     style: AppText.caption,
                   ),
                   const SizedBox(height: Space.s4),
-                  RiderStatusChip(status: status, detail: detail),
+                  Wrap(
+                    spacing: Space.s8,
+                    runSpacing: Space.s4,
+                    children: [
+                      RiderStatusChip(status: status, detail: detail),
+                      if (inc != null && inc.kind == IncidentKind.possibleIncident) const PossibleIncidentChip(),
+                    ],
+                  ),
                 ],
               ),
             ),
           ],
         ),
+        if (presence != null) ...[
+          const SizedBox(height: Space.s8),
+          PresenceText(rider: r, text: presence),
+        ],
+        if (inc != null && !isMe)
+          action(Icons.emergency_rounded, 'Open alert', () {
+            final nav = Navigator.of(context);
+            nav.pop();
+            showIncidentSheet(nav.context, convoyId: convoyId, subjectUserId: r.userId, alertId: inc.alertId);
+          }, primary: true),
         if (reason.isNotEmpty) ...[
           const SizedBox(height: Space.s8),
           Text('Reason: $reason', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body),

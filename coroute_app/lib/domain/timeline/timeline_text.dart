@@ -33,6 +33,7 @@ class TimelineText {
     'CUSTOM': 'custom stop',
     'CRASH_OR_EMERGENCY': 'emergency',
     'EMERGENCY': 'emergency',
+    'CRASH': 'crash',
   };
 
   static String ordinal(int n) {
@@ -80,10 +81,34 @@ class TimelineText {
       case 'OFF_ROUTE':
         return e.open ? '$who is off the route' : '$who went off the route';
       case 'OFFLINE':
-        return e.open ? '$who has no signal, $dur so far' : '$who had no signal for $dur';
+        switch (e.dataString('cause')) {
+          case 'APP_CLOSED':
+            return e.open ? "CoRoute was closed on $who's phone, $dur so far" : "CoRoute was closed on $who's phone for $dur";
+          case 'KILLED':
+            return e.open ? "The phone closed CoRoute on $who's phone, $dur so far" : "The phone closed CoRoute on $who's phone for $dur";
+          default:
+            return e.open ? '$who has no signal, $dur so far' : '$who had no signal for $dur';
+        }
       case 'SOS':
         final kind = e.dataString('alertType');
+        if (kind == 'CRASH' && e.data['auto'] == true) return '$who: crash detected (automatic alert)';
         return '$who raised an SOS${kind.isEmpty ? '' : ' (${reason(kind)})'}';
+      case 'POSSIBLE_INCIDENT':
+        return 'Possible incident: $who';
+      case 'NO_REPLY':
+        return e.open ? 'No reply from $who' : '$who did not answer Are you OK';
+      case 'SOS_RESPONSE':
+        final forName = e.dataString('forUserName').isEmpty ? 'the rider' : e.dataString('forUserName');
+        switch (e.dataString('kind')) {
+          case 'GOING':
+            return '$who is going to $forName';
+          case 'WITH_THEM':
+            return '$who is with $forName';
+          default:
+            return '$who is no longer going';
+        }
+      case 'CHECK_IN':
+        return '$who said they are OK';
       case 'STATUS':
         return '$who: ${reason(e.dataString('reason'))}';
       case 'STOP_ADDED':
@@ -154,7 +179,30 @@ class TimelineText {
         if (d != null) parts.add('${distance(d)} from the route');
         if (!e.open) parts.add('back after ${duration(e.durationAt(nowMs))}');
         break;
+      case 'POSSIBLE_INCIDENT':
+        if (e.open) {
+          final from = e.dataNum('fromKmh');
+          parts.add(from == null ? 'stopped suddenly, automatic' : 'stopped suddenly from ${from.round()} km/h, automatic');
+        } else {
+          parts.add(_closedWord(e.dataString('result'), e.durationAt(nowMs)));
+        }
+        break;
+      case 'NO_REPLY':
+        final away = e.dataNum('awayM');
+        if (away != null && away > 0) parts.add('${distance(away)} from the group');
+        if (e.open) {
+          parts.add('automatic check');
+        } else {
+          parts.add(_closedWord(e.dataString('result'), e.durationAt(nowMs)));
+        }
+        break;
+      case 'OFFLINE':
+        final kmh = e.dataNum('lastKmh');
+        if (e.data['escalated'] == true && kmh != null) parts.add('last seen at ${kmh.round()} km/h');
+        break;
       case 'SOS':
+        final going = e.data['responders'];
+        if (e.open && going is List && going.isNotEmpty) parts.add('${going.length} ${going.length == 1 ? 'rider' : 'riders'} responding');
         if (e.open) {
           parts.add('open for ${duration(e.durationAt(nowMs))}');
         } else {
@@ -184,5 +232,19 @@ class TimelineText {
         break;
     }
     return parts.join(' · ');
+  }
+
+  /// How an automatic check ended: "OK after 4 min", "moved on after 4 min", "SOS raised after 4 min".
+  static String _closedWord(String result, Duration d) {
+    switch (result) {
+      case 'OK':
+        return 'OK after ${duration(d)}';
+      case 'MOVED':
+        return 'moved on after ${duration(d)}';
+      case 'SOS':
+        return 'SOS raised after ${duration(d)}';
+      default:
+        return 'closed after ${duration(d)}';
+    }
   }
 }

@@ -10,9 +10,11 @@ import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/meta_service.dart';
+import '../../data/services/settings_service.dart';
 import '../admin/master_admin_dashboard.dart';
 import '../auth/access_gate_screen.dart';
 import '../onboarding/permissions_screen.dart';
+import '../safety/safety_settings_sheet.dart';
 import '../widgets/data_saver_tile.dart';
 import 'appearance_sheet.dart';
 import 'change_password_screen.dart';
@@ -41,6 +43,7 @@ class AccountScreen extends StatelessWidget {
     final auth = context.watch<AuthService>();
     final meta = context.watch<MetaService>().meta;
     final theme = context.watch<ThemeController>();
+    final settings = context.watch<SettingsService?>();
     final base = AppConfig.apiBaseUrl;
     final privacyUrl = meta?.privacyUrl.isNotEmpty == true ? meta!.privacyUrl : '$base/privacy';
     final termsUrl = meta?.termsUrl.isNotEmpty == true ? meta!.termsUrl : '$base/terms';
@@ -127,8 +130,11 @@ class AccountScreen extends StatelessWidget {
               row(theme.isLight ? Icons.light_mode_rounded : Icons.dark_mode_rounded, 'Theme',
                   subtitle: AppearanceSheet.summary(theme), onTap: () => AppearanceSheet.show(context)),
               const DataSaverTile(),
+              if (settings != null)
+                row(Icons.health_and_safety_rounded, 'Ride safety',
+                    subtitle: SafetySettingsSheet.summary(settings), onTap: () => SafetySettingsSheet.show(context)),
               row(Icons.verified_user_rounded, 'Permissions',
-                  subtitle: 'Location, microphone, notifications and battery', onTap: () => _push(context, const PermissionsScreen())),
+                  subtitle: 'Location, microphone, notifications, battery and texts', onTap: () => _push(context, const PermissionsScreen())),
               row(Icons.password_rounded, 'Change password', onTap: () => _push(context, const ChangePasswordScreen())),
               if (auth.isMasterAdmin) row(Icons.admin_panel_settings_rounded, 'Admin', subtitle: 'Live rides, history and users',
                   onTap: () => _push(context, const MasterAdminDashboard())),

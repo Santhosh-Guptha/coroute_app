@@ -16,6 +16,7 @@
  *             • lat/lng on SOS alerts older than TRACK_RETENTION_DAYS (who, when and type are KEPT)
  *             • voice_log entries older than RETENTION_VOICE_LOG_DAYS (metadata only; audio is never stored)
  *             • geo_cache entries older than GEO_CACHE_DAYS
+ *             • medical info left on resolved SOS alerts (safety net: it is removed on resolve and at trip end)
  *   AUTO-END: active convoys with no activity for RETENTION_STALE_CONVOY_HOURS.
  *   KEEPALIVE: a tiny read keeps an Always-Free Autonomous DB from being auto-paused.
  */
@@ -47,7 +48,7 @@ class Retention {
   }
 
   async runOnce(nowMs = Date.now()) {
-    const stats = { autoEnded: 0, convoysStripped: 0, riderDocsRemoved: 0, tripsStripped: 0, voiceLogsRemoved: 0, trackChunksRemoved: 0, eventsStripped: 0, alertsStripped: 0, geoCacheRemoved: 0 };
+    const stats = { autoEnded: 0, convoysStripped: 0, riderDocsRemoved: 0, tripsStripped: 0, voiceLogsRemoved: 0, trackChunksRemoved: 0, eventsStripped: 0, alertsStripped: 0, geoCacheRemoved: 0, medicalStripped: 0 };
 
     // 1. End convoys nobody has touched for a long time (phones died, app uninstalled, ...).
     stats.autoEnded = await this.convoys.autoEndStaleConvoys(nowMs - config.retentionStaleConvoyHours * 3600000);
@@ -93,6 +94,13 @@ class Retention {
         stats.alertsStripped++;
       }
       if (rows.length < 500) break;
+    }
+    // Medical info belongs to an open alert only (normally removed on resolve and at trip end).
+    const withMedical = await this.soda.query(COLLECTIONS.alerts, { resolved: true, medical: { $exists: true } }, { limit: 500 });
+    for (const { key, value } of withMedical) {
+      const { medical, ...rest } = value;
+      await this.soda.replace(COLLECTIONS.alerts, key, rest);
+      stats.medicalStripped++;
     }
     stats.geoCacheRemoved = await this.repo.purgeOlderThan(COLLECTIONS.geoCache, 'createdAt', nowMs - config.geoCacheDays * DAY);
 

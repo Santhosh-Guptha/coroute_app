@@ -17,12 +17,14 @@ import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
 import 'data/local/sqflite_track_queue.dart';
 import 'data/services/realtime_service.dart';
+import 'data/services/safety_service.dart';
 import 'data/services/settings_service.dart';
 import 'data/services/timeline_service.dart';
 import 'data/services/track_recorder.dart';
 import 'data/services/track_uploader.dart';
 import 'data/services/trip_storage_service.dart';
 import 'presentation/auth/access_gate_screen.dart';
+import 'presentation/safety/crash_alarm_host.dart';
 import 'presentation/splash/splash_screen.dart';
 
 /// Lets services navigate (sign-out on session expiry, deep links) without a BuildContext.
@@ -92,6 +94,12 @@ class CoRouteApp extends StatelessWidget {
           create: (ctx) => AlertService(ctx.read<ConvoyService>(), ctx.read<TimelineService>()),
           dispose: (_, a) => a.dispose(),
         ),
+        // Rider safety: crash alarm, emergency texts, break reminder, "Are you OK?" check-in.
+        // Created at start so a crash alarm can open without any screen asking for it.
+        ChangeNotifierProvider<SafetyService>(
+          lazy: false,
+          create: (ctx) => SafetyService(ctx.read<ConvoyService>(), ctx.read<SettingsService>(), ctx.read<AuthService>()),
+        ),
       ],
       child: const _SessionBinder(
         child: _DeepLinkListener(
@@ -129,7 +137,10 @@ class _App extends StatelessWidget {
         final mq = MediaQuery.of(context);
         return MediaQuery(
           data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1.0).clamp(0.85, 1.3).toDouble())),
-          child: _UpdateGate(child: child ?? const SizedBox.shrink()),
+          child: CrashAlarmHost(
+            navigatorKey: appNavigatorKey,
+            child: _UpdateGate(child: child ?? const SizedBox.shrink()),
+          ),
         );
       },
     );

@@ -15,7 +15,9 @@ class TimelineFilter {
   static const stops = TimelineFilter('Stops', {
     'STOPPED', 'STOP_REACHED', 'STOP_PASSED', 'STOP_ALL_REACHED', 'DESTINATION_REACHED', 'DESTINATION_ALL_REACHED', 'STATUS',
   });
-  static const alerts = TimelineFilter('Alerts', {'SOS', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'OVERSPEED'});
+  static const alerts = TimelineFilter('Alerts', {
+    'SOS', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'OVERSPEED', 'POSSIBLE_INCIDENT', 'NO_REPLY', 'SOS_RESPONSE', 'CHECK_IN',
+  });
   static const riding = TimelineFilter('Riding', {'MOVING', 'CORIDE'});
   static const group = TimelineFilter('Group', {
     'TRIP_STARTED', 'TRIP_PAUSED', 'TRIP_RESUMED', 'TRIP_ENDED', 'JOINED', 'LEFT',
@@ -88,17 +90,27 @@ class _TimelineListState extends State<TimelineList> {
     'OVERSPEED': Icons.speed_rounded,
     'STOP_ALL_REACHED': Icons.groups_rounded,
     'DESTINATION_ALL_REACHED': Icons.emoji_flags_rounded,
+    // 3.14 rider safety.
+    'POSSIBLE_INCIDENT': Icons.car_crash_rounded,
+    'NO_REPLY': Icons.help_outline_rounded,
+    'SOS_RESPONSE': Icons.directions_run_rounded,
+    'CHECK_IN': Icons.verified_user_rounded,
   };
 
   static Color _tone(TimelineEventModel e) {
     switch (e.type) {
       case 'SOS':
+      case 'POSSIBLE_INCIDENT':
         return StatusColors.critical;
+      case 'NO_REPLY':
       case 'SEPARATED':
       case 'OFF_ROUTE':
       case 'OFFLINE':
       case 'OVERSPEED':
         return StatusColors.warning;
+      case 'SOS_RESPONSE':
+        return StatusColors.info;
+      case 'CHECK_IN':
       case 'DESTINATION_REACHED':
       case 'STOP_REACHED':
       case 'STOP_ALL_REACHED':

@@ -7,7 +7,11 @@ import '../../core/ui/ui.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/permissions_service.dart';
+import '../../data/services/safety_native.dart';
+import '../../data/services/settings_service.dart';
 import '../account/edit_profile_screen.dart';
+import '../safety/oem_battery_guide.dart';
+import '../safety/safety_settings_sheet.dart';
 
 /// One automatic check on the pre-ride checklist (read once when the sheet opens).
 class AutoCheck {
@@ -20,7 +24,7 @@ class AutoCheck {
   /// Info only: shown, but never amber (for example the microphone).
   final bool infoOnly;
 
-  /// What "Fix" opens: a permission key of [PermissionsService], 'profile', or null (no fix button).
+  /// What "Fix" opens: a permission key of [PermissionsService], 'profile', 'oemGuide', or null (no fix button).
   final String? fix;
 
   const AutoCheck({
@@ -74,6 +78,8 @@ class PreRideChecklist {
     int? batteryLevel,
     bool isCharging = false,
     bool? hasEmergencyContact,
+    String? manufacturer,
+    bool oemGuideSeen = true,
   }) {
     PermissionItem? perm(String key) {
       for (final p in permissions) {
@@ -86,6 +92,8 @@ class PreRideChecklist {
     final notif = perm('notification');
     final battery = perm('battery');
     final mic = perm('microphone');
+    final fullScreen = perm('fullScreen');
+    final brand = (manufacturer ?? '').trim();
     return [
       if (always != null)
         AutoCheck(
@@ -122,6 +130,24 @@ class PreRideChecklist {
           ok: battery.granted,
           fix: 'battery',
         ),
+      if (fullScreen != null)
+        AutoCheck(
+          key: 'fullScreen',
+          title: 'Alarm on lock screen',
+          okText: 'A crash alarm shows over the lock screen.',
+          problemText: 'Allow it so you can stop a crash alarm without unlocking the phone.',
+          ok: fullScreen.granted,
+          fix: 'fullScreen',
+        ),
+      if (brand.isNotEmpty && !oemGuideSeen)
+        AutoCheck(
+          key: 'oemGuide',
+          title: OemBatteryGuide.rowTitle(brand),
+          okText: 'You have seen the steps.',
+          problemText: 'Some phones close CoRoute during a ride. See the steps that stop it.',
+          ok: false,
+          fix: 'oemGuide',
+        ),
       if (hasEmergencyContact != null)
         AutoCheck(
           key: 'emergencyContact',
@@ -149,7 +175,10 @@ class PreRideChecklist {
 /// items that need attention are amber with a "Fix" button.
 class PreRideChecklistSheet extends StatefulWidget {
   final List<AutoCheck> checks;
-  const PreRideChecklistSheet({super.key, required this.checks});
+
+  /// Asks for a permission (tests pass a fake); defaults to [PermissionsService.request].
+  final Future<bool> Function(String key)? requestPermission;
+  const PreRideChecklistSheet({super.key, required this.checks, this.requestPermission});
 
   /// Opens the checklist unless it was skipped in the last 24 hours. Returns true to continue,
   /// false when the rider closed it without starting.
@@ -158,9 +187,12 @@ class PreRideChecklistSheet extends StatefulWidget {
     if (!context.mounted) return true;
     final convoys = Provider.of<ConvoyService?>(context, listen: false);
     final auth = Provider.of<AuthService?>(context, listen: false);
+    final settings = Provider.of<SettingsService?>(context, listen: false);
     List<PermissionItem> permissions = const [];
+    var manufacturer = '';
     try {
       permissions = await PermissionsService.status();
+      manufacturer = (await SafetyNative.deviceInfo()).manufacturer;
     } catch (_) {}
     if (!context.mounted) return true;
     final checks = PreRideChecklist.checksFrom(
@@ -168,6 +200,8 @@ class PreRideChecklistSheet extends StatefulWidget {
       batteryLevel: convoys?.currentBatteryLevel,
       isCharging: convoys?.isCharging ?? false,
       hasEmergencyContact: auth == null ? null : (auth.emergencyContact ?? '').trim().isNotEmpty,
+      manufacturer: manufacturer,
+      oemGuideSeen: settings?.oemGuideSeen ?? true,
     );
     final result = await showAppSheet<bool>(
       context,
@@ -185,6 +219,9 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
   late List<AutoCheck> _checks;
   final Set<int> _ticked = {};
   bool _skip24h = false;
+  bool _smsDenied = false;
+
+  Future<bool> _request(String key) => (widget.requestPermission ?? PermissionsService.request)(key);
 
   @override
   void initState() {
@@ -202,11 +239,26 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
       if (!mounted) return;
       final auth = Provider.of<AuthService?>(context, listen: false);
       ok = (auth?.emergencyContact ?? '').trim().isNotEmpty;
+    } else if (fix == 'oemGuide') {
+      await OemBatteryGuide.show(context);
+      ok = true;
     } else {
-      ok = await PermissionsService.request(fix);
+      ok = await _request(fix);
     }
     if (!mounted) return;
     setState(() => _checks[index] = c.withOk(ok));
+  }
+
+  /// "Text the group if there is no internet": switching on asks for SEND_SMS first.
+  Future<void> _setSms(SettingsService s, bool on) async {
+    if (!on) {
+      await s.setSmsFallback(false);
+      return;
+    }
+    final ok = await _request('sms');
+    if (!mounted) return;
+    setState(() => _smsDenied = !ok);
+    if (ok) await s.setSmsFallback(true);
   }
 
   Future<void> _start() async {
@@ -231,6 +283,7 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
               padding: EdgeInsets.zero,
               children: [
                 for (var i = 0; i < _checks.length; i++) _autoRow(i),
+                ..._safetyRows(),
                 const Divider(),
                 for (var i = 0; i < PreRideChecklist.manualItems.length; i++)
                   CheckboxListTile(
@@ -267,6 +320,34 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
         ],
       ),
     );
+  }
+
+  /// The two safety switches (shown when the settings service is available).
+  List<Widget> _safetyRows() {
+    final s = Provider.of<SettingsService?>(context);
+    if (s == null) return const [];
+    return [
+      const Divider(),
+      Padding(
+        padding: const EdgeInsets.only(top: Space.s8),
+        child: Semantics(header: true, child: Text('Ride safety', style: AppText.label)),
+      ),
+      SafetySwitch(
+        icon: Icons.car_crash_rounded,
+        title: SafetyTexts.crashTitle,
+        subtitle: SafetyTexts.crashExplain,
+        value: s.crashDetection,
+        onChanged: (v) => s.setCrashDetection(v),
+      ),
+      SafetySwitch(
+        icon: Icons.sms_rounded,
+        title: SafetyTexts.smsTitle,
+        subtitle: SafetyTexts.smsExplain,
+        value: s.smsFallback,
+        onChanged: (v) => _setSms(s, v),
+        warning: _smsDenied ? SafetyTexts.smsDenied : null,
+      ),
+    ];
   }
 
   Widget _autoRow(int i) {

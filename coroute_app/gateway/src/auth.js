@@ -66,6 +66,24 @@ function publicUser(u) {
   };
 }
 
+/**
+ * What the account owner sees about themselves: the public profile plus the optional medical
+ * info and the emergency-text opt-out. Only for the owner (register, login, /me); admin lists and
+ * details keep publicUser (no medical info).
+ */
+function selfUser(u) {
+  return {
+    ...publicUser(u),
+    bloodGroup: u.bloodGroup || '',
+    allergies: u.allergies || '',
+    medicalNotes: u.medicalNotes || '',
+    smsOptOut: !!u.smsOptOut,
+  };
+}
+
+/** Profile keys that change what the ride group's SMS roster holds. */
+const ROSTER_KEYS = ['phone', 'emergencyContact', 'emergencyContactName', 'smsOptOut'];
+
 function signToken(user) {
   return jwt.sign(
     // pv: the password version this token was issued for; a later password change ends it.
@@ -172,6 +190,8 @@ class AuthService {
   constructor(repo, { googleVerifier, gate = null } = {}) {
     this.repo = repo;
     this.gate = gate;
+    /** (user, changedKeys) => void: set by app.js so a live ride hears about phone / opt-out changes. */
+    this.onProfileChanged = null;
     this.google = googleVerifier || (config.googleClientIds.length ? new OAuth2Client() : null);
   }
 
@@ -224,7 +244,7 @@ class AuthService {
       createdAt: Date.now(),
       lastLoginAt: Date.now(),
     });
-    return { token: signToken(user), user: publicUser(user) };
+    return { token: signToken(user), user: selfUser(user) };
   }
 
   async login({ identifier, password }) {
@@ -238,7 +258,7 @@ class AuthService {
     if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
     const role = bootstrapRoleFor(user.email, user.role);
     const updated = await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role }) || user;
-    return { token: signToken(updated), user: publicUser(updated) };
+    return { token: signToken(updated), user: selfUser(updated) };
   }
 
   async loginWithGoogle({ idToken }) {
@@ -272,7 +292,7 @@ class AuthService {
       if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
       user = await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role: bootstrapRoleFor(email, user.role), googleSub: payload.sub }) || user;
     }
-    return { token: signToken(user), user: publicUser(user) };
+    return { token: signToken(user), user: selfUser(user) };
   }
 
   async changePassword(userId, { currentPassword, newPassword }) {
@@ -323,17 +343,23 @@ class AuthService {
   async updateProfile(userId, patch) {
     const user = await this.repo.findUserById(userId);
     if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
-    patch = patch || {};
-    const allowed = ['name', 'phone', 'vehicleType', 'vehicleNo', 'emergencyContact', 'emergencyContactName'];
+    patch = patch && typeof patch === 'object' ? patch : {};
+    const allowed = ['name', 'phone', 'vehicleType', 'vehicleNo', 'emergencyContact', 'emergencyContactName', 'bloodGroup', 'allergies', 'medicalNotes'];
     // Only values that change are validated and written: a rider whose stored details predate
-    // a rule can still update any other field.
+    // a rule can still update any other field. Older apps never send the medical keys or the
+    // opt-out, so those are never cleared by them.
     const changed = {};
     for (const k of allowed) {
       if (patch[k] === undefined || patch[k] === null) continue;
       const next = String(patch[k]).trim();
       const current = String(user[k] ?? '').trim();
-      const same = k === 'vehicleNo' ? next.toUpperCase() === current.toUpperCase() : next === current;
+      const same = k === 'vehicleNo' || k === 'bloodGroup' ? next.toUpperCase() === current.toUpperCase() : next === current;
       if (!same) changed[k] = patch[k];
+    }
+    if (patch.smsOptOut !== undefined && patch.smsOptOut !== null) {
+      // Type checked even when unchanged, so a wrong client learns about it.
+      if (typeof patch.smsOptOut !== 'boolean') throw new ValidationError('This field must be on or off.', { smsOptOut: 'This field must be on or off.' });
+      if (patch.smsOptOut !== !!user.smsOptOut) changed.smsOptOut = patch.smsOptOut;
     }
     if (changed.name !== undefined && !String(changed.name).trim()) {
       throw new ValidationError('Your callsign cannot be empty.', { name: 'Your callsign cannot be empty.' });
@@ -360,7 +386,11 @@ class AuthService {
     }
     const updated = Object.keys(clean).length ? await this.repo.updateUser(user.key, clean) : user;
     this._invalidate(userId);
-    return publicUser(updated);
+    const rosterKeys = ROSTER_KEYS.filter((k) => clean[k] !== undefined && clean[k] !== user[k]);
+    if (rosterKeys.length && updated && this.onProfileChanged) {
+      try { await this.onProfileChanged(updated, rosterKeys); } catch { /* the profile is saved; the ride catches up on the next join */ }
+    }
+    return selfUser(updated);
   }
 
   // ---- admin user management (roles are data, not code) ----
@@ -421,7 +451,7 @@ class AuthService {
       await this.repo.updateUser(user.key, patch).catch(() => null);
       if (patch.role && this.gate) this.gate.invalidate(user.userId);
     }
-    return publicUser({ ...user, role });
+    return selfUser({ ...user, role });
   }
 
   /**
@@ -478,4 +508,4 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { AuthService, AuthError, UserGate, identityOf, requireAuth, requireAdmin, signToken, verifyToken, ROLE_ADMIN, ROLE_RIDER, slug };
+module.exports = { AuthService, AuthError, UserGate, identityOf, requireAuth, requireAdmin, signToken, verifyToken, publicUser, selfUser, ROLE_ADMIN, ROLE_RIDER, slug };

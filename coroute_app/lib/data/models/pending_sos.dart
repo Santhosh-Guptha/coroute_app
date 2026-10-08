@@ -21,6 +21,15 @@ class PendingSos {
   final String type;
   final int createdAt;
 
+  /// Raised automatically by crash detection.
+  final bool auto;
+
+  /// Speed just before the impact (crash only).
+  final double? speedBeforeKmh;
+
+  /// Impact strength in g (crash only).
+  final double? impactG;
+
   const PendingSos({
     required this.clientId,
     required this.groupId,
@@ -28,19 +37,36 @@ class PendingSos {
     required this.lng,
     required this.type,
     required this.createdAt,
+    this.auto = false,
+    this.speedBeforeKmh,
+    this.impactG,
   });
 
-  PendingSos copyWith({double? lat, double? lng}) => PendingSos(
+  /// The same SOS (same [clientId]) with a newer position, or upgraded to a crash.
+  PendingSos copyWith({double? lat, double? lng, String? type, int? createdAt, bool? auto, double? speedBeforeKmh, double? impactG}) => PendingSos(
         clientId: clientId,
         groupId: groupId,
         lat: lat ?? this.lat,
         lng: lng ?? this.lng,
-        type: type,
-        createdAt: createdAt,
+        type: type ?? this.type,
+        createdAt: createdAt ?? this.createdAt,
+        auto: auto ?? this.auto,
+        speedBeforeKmh: speedBeforeKmh ?? this.speedBeforeKmh,
+        impactG: impactG ?? this.impactG,
       );
 
-  /// The message the gateway expects.
-  Map<String, dynamic> toMessage() => {'type': 'SOS', 'lat': lat, 'lng': lng, 'alertType': type, 'clientId': clientId};
+  /// The message the gateway expects. Older gateways ignore the extra fields.
+  Map<String, dynamic> toMessage() => {
+        'type': 'SOS',
+        'lat': lat,
+        'lng': lng,
+        'alertType': type,
+        'clientId': clientId,
+        'auto': auto,
+        'occurredAt': createdAt,
+        'speedBeforeKmh': ?speedBeforeKmh,
+        'impactG': ?impactG,
+      };
 
   Map<String, dynamic> toJson() => {
         'clientId': clientId,
@@ -49,6 +75,9 @@ class PendingSos {
         'lng': lng,
         'type': type,
         'createdAt': createdAt,
+        if (auto) 'auto': true,
+        'speedBeforeKmh': ?speedBeforeKmh,
+        'impactG': ?impactG,
       };
 
   static PendingSos? fromJson(Object? json) {
@@ -63,6 +92,9 @@ class PendingSos {
       lng: (json['lng'] as num?)?.toDouble() ?? 0.0,
       type: json['type']?.toString() ?? 'EMERGENCY',
       createdAt: (json['createdAt'] as num?)?.toInt() ?? 0,
+      auto: json['auto'] == true,
+      speedBeforeKmh: (json['speedBeforeKmh'] as num?)?.toDouble(),
+      impactG: (json['impactG'] as num?)?.toDouble(),
     );
   }
 

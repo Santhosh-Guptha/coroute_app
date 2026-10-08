@@ -58,6 +58,13 @@ class AuthService extends ChangeNotifier {
   bool _isLoading = true;
   bool _mustChangePassword = false;
 
+  // Medical info and the emergency text opt-out: memory only, from /me (never in SharedPreferences).
+  String _bloodGroup = '';
+  String _allergies = '';
+  String _medicalNotes = '';
+  bool _smsOptOut = false;
+  bool _medicalLoaded = false;
+
   String? get currentUserId => _userId;
   String? get currentUserRole => _role;
   String? get currentUserEmail => _email;
@@ -67,6 +74,18 @@ class AuthService extends ChangeNotifier {
   String? get emergencyContact => _emergencyContact;
   String? get emergencyContactName => _emergencyContactName;
   String? get vehicleNo => _vehicleNo;
+
+  /// Optional medical info, shown to the ride group only while my SOS or crash alert is open.
+  String get bloodGroup => _bloodGroup;
+  String get allergies => _allergies;
+  String get medicalNotes => _medicalNotes;
+
+  /// True when I asked not to receive emergency texts from my ride group.
+  bool get smsOptOut => _smsOptOut;
+
+  /// True once the server sent the medical fields (a 3.14 gateway answered /me or a sign-in).
+  /// Until then the form only sends the medical fields the rider actually changed.
+  bool get medicalLoaded => _medicalLoaded;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _api.hasToken && _userId != null;
   bool get isMasterAdmin => roleIsAdmin(_role);
@@ -149,6 +168,12 @@ class AuthService extends ChangeNotifier {
     _emergencyContact = u['emergencyContact']?.toString() ?? '';
     _emergencyContactName = u['emergencyContactName']?.toString() ?? '';
     _mustChangePassword = u['mustChangePassword'] == true;
+    // Older gateways do not send these: keep what is known instead of clearing it.
+    if (u.containsKey('bloodGroup')) _bloodGroup = u['bloodGroup']?.toString() ?? '';
+    if (u.containsKey('allergies')) _allergies = u['allergies']?.toString() ?? '';
+    if (u.containsKey('medicalNotes')) _medicalNotes = u['medicalNotes']?.toString() ?? '';
+    if (u.containsKey('smsOptOut')) _smsOptOut = u['smsOptOut'] == true;
+    if (u.containsKey('bloodGroup') || u.containsKey('smsOptOut')) _medicalLoaded = true;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(AppConstants.keyUserId, _userId ?? '');
@@ -244,7 +269,9 @@ class AuthService extends ChangeNotifier {
   /// taken."), or null when it failed for network reasons or succeeded.
   String? get lastProfileError => _lastProfileError;
 
-  /// Update rider profile details (server is the source of truth).
+  /// Update rider profile details (server is the source of truth). The
+  /// medical fields and [smsOptOut] are sent only when given (older callers
+  /// never clear them).
   Future<bool> updateProfile({
     required String phone,
     required String vehicleType,
@@ -252,6 +279,10 @@ class AuthService extends ChangeNotifier {
     required String emergencyContact,
     required String emergencyContactName,
     String? name,
+    String? bloodGroup,
+    String? allergies,
+    String? medicalNotes,
+    bool? smsOptOut,
   }) async {
     try {
       final payload = <String, dynamic>{
@@ -264,6 +295,10 @@ class AuthService extends ChangeNotifier {
       if (name != null && name.trim().isNotEmpty) {
         payload['name'] = name.trim();
       }
+      if (bloodGroup != null) payload['bloodGroup'] = bloodGroup.trim();
+      if (allergies != null) payload['allergies'] = allergies.trim();
+      if (medicalNotes != null) payload['medicalNotes'] = medicalNotes.trim();
+      if (smsOptOut != null) payload['smsOptOut'] = smsOptOut;
       _lastProfileError = null;
       final res = await _api.patch('/me', payload);
       if (res is Map) await _applyUser(Map<String, dynamic>.from(res));
@@ -329,6 +364,11 @@ class AuthService extends ChangeNotifier {
     _emergencyContactName = null;
     _vehicleNo = null;
     _mustChangePassword = false;
+    _bloodGroup = '';
+    _allergies = '';
+    _medicalNotes = '';
+    _smsOptOut = false;
+    _medicalLoaded = false;
     final prefs = await SharedPreferences.getInstance();
     for (final k in [
       AppConstants.keyUserId, AppConstants.keyUserRole, AppConstants.keyUserEmail, AppConstants.keyUserName,

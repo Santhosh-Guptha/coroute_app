@@ -7,6 +7,8 @@ import '../../core/ui/app_bottom_sheet.dart';
 import '../../core/ui/ui_tokens.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/safety_service.dart';
+import '../../data/services/settings_service.dart';
 
 /// What the SOS sheet tells the rider about delivery.
 enum SosSheetStatus { delivered, sending, waitingForSignal, unknown }
@@ -123,6 +125,13 @@ class EmergencySosSheet extends StatelessWidget {
     final emergencyName = auth.emergencyContactName?.trim() ?? '';
     final hasEmergencyContact = emergencyPhone.isNotEmpty;
     final mapsUrl = 'https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng.toStringAsFixed(6)}';
+    // Emergency texts (opt-in): status line, and "Text the group now" while the SOS is not delivered.
+    final smsOn = context.select<SettingsService?, bool>((s) => s?.smsFallback ?? false);
+    final (smsStatus, smsAvailable) = context.select<SafetyService?, (SmsFallbackStatus?, bool)>(
+      (s) => (s?.smsStatus, s?.smsAvailable ?? false),
+    );
+    final smsLine = smsStatus?.text ?? '';
+    final showSmsButton = smsOn && pending && status != SosSheetStatus.delivered;
 
     return Column(
           mainAxisSize: MainAxisSize.min,
@@ -213,6 +222,47 @@ class EmergencySosSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
+
+            if (smsLine.isNotEmpty) ...[
+              Semantics(
+                liveRegion: true,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.sms_rounded, size: 18, color: AppTheme.textSecondary),
+                    const SizedBox(width: Space.s8),
+                    Expanded(
+                      child: Text(
+                        smsLine,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.label.copyWith(color: AppTheme.textPrimary, fontWeight: FontWeight.w400),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: Space.s12),
+            ],
+            if (showSmsButton) ...[
+              OutlinedButton.icon(
+                onPressed: smsAvailable ? () => Provider.of<SafetyService?>(context, listen: false)?.sendSmsNow() : null,
+                icon: const Icon(Icons.sms_rounded),
+                label: const Text(
+                  'Text the group now',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.textPrimary,
+                  side: BorderSide(color: AppTheme.subtleBorder),
+                  minimumSize: const Size.fromHeight(56),
+                  shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
 
             // Action 1: Call Emergency Contact
             if (hasEmergencyContact) ...[

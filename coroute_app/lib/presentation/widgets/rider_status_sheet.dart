@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/app_bottom_sheet.dart';
 import '../../core/ui/ui_tokens.dart';
+import '../../data/models/outbox_item.dart';
 import '../../data/services/convoy_service.dart';
+import '../ride/incident_sheet.dart';
 
 /// "Why are you stopped?": tells the group the reason for a stop.
 ///
@@ -66,18 +68,45 @@ class RiderStatusSheet {
       context,
       title: 'Why are you stopped?',
       isScrollControlled: true,
-      builder: (ctx) => StatusPicker(
-        currentCode: current,
-        onPick: (code, message) {
-          activeService.updateStatusReason(userId: userId, reason: code, message: message);
-          Navigator.pop(ctx);
-        },
-        onClear: () {
-          activeService.updateStatusReason(userId: userId, reason: '');
-          Navigator.pop(ctx);
-        },
-      ),
+      builder: (ctx) {
+        final queued = queuedStatus(activeService);
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // The last reason was set without signal: it goes out by itself when the phone is back online.
+            if (queued != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: Space.s8),
+                child: QueuedLine(what: 'Your stop reason', failed: queued.state == OutboxState.failed, sending: activeService.isOnline),
+              ),
+            Flexible(
+              child: StatusPicker(
+                currentCode: current,
+                onPick: (code, message) {
+                  activeService.updateStatusReason(userId: userId, reason: code, message: message);
+                  Navigator.pop(ctx);
+                },
+                onClear: () {
+                  activeService.updateStatusReason(userId: userId, reason: '');
+                  Navigator.pop(ctx);
+                },
+              ),
+            ),
+          ],
+        );
+      },
     );
+  }
+
+  /// My newest stop reason still waiting in the outbox for the active ride, or null.
+  static OutboxItem? queuedStatus(ConvoyService service) {
+    final gid = service.activeGroupId;
+    OutboxItem? last;
+    for (final o in service.outbox) {
+      if (o.type == 'STATUS' && o.groupId == gid) last = o;
+    }
+    return last;
   }
 }
 

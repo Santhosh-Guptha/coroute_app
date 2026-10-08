@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../domain/notify/alert_policy.dart';
 import '../models/timeline_event_model.dart';
+import 'alarm_notifier.dart';
 import 'convoy_service.dart';
 import 'timeline_service.dart';
 
@@ -48,7 +49,9 @@ class AlertService with WidgetsBindingObserver {
   Future<void> _init() async {
     if (_ready || !_supported) return;
     try {
-      await _plugin.initialize(const InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher')));
+      // One initialize() for the whole app, with the crash alarm's tap/action dispatcher:
+      // initialising here again would replace that callback.
+      if (!await AlarmNotifier.ensureInitialized(_plugin)) return;
       final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
       for (final (id, name, desc, importance) in _channels.values) {
         await android?.createNotificationChannel(AndroidNotificationChannel(id, name, description: desc, importance: importance));
@@ -113,7 +116,8 @@ class AlertService with WidgetsBindingObserver {
     for (final a in want.values) {
       final quiet = _foreground && a.channel != AlertChannel.sos;
       if (quiet || _shown[a.key] == a) continue;
-      _show(a, sticky: a.channel == AlertChannel.sos);
+      // Already showing (for example only the distance changed): update it without ringing again.
+      _show(a, sticky: a.channel == AlertChannel.sos, update: _shown.containsKey(a.key));
     }
 
     // One-time alerts: only for entries that arrived live and are recent.
@@ -131,7 +135,7 @@ class AlertService with WidgetsBindingObserver {
     }
   }
 
-  void _show(AlertSpec a, {bool sticky = false, Duration? timeout}) {
+  void _show(AlertSpec a, {bool sticky = false, Duration? timeout, bool update = false}) {
     final (channelId, channelName, desc, importance) = _channels[a.channel]!;
     final sos = a.channel == AlertChannel.sos;
     final details = AndroidNotificationDetails(
@@ -143,7 +147,7 @@ class AlertService with WidgetsBindingObserver {
       category: sos ? AndroidNotificationCategory.alarm : AndroidNotificationCategory.status,
       visibility: NotificationVisibility.public, // names only; no coordinates are ever in the text
       groupKey: 'trip_${_groupId ?? ''}',
-      onlyAlertOnce: !sos,
+      onlyAlertOnce: !sos || update,
       ongoing: sticky,
       autoCancel: !sticky,
       timeoutAfter: timeout?.inMilliseconds,

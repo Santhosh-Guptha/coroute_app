@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../data/models/group_message_model.dart';
+import '../../data/models/outbox_item.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/convoy_service.dart';
+import 'incident_sheet.dart';
 
 /// A quick reply: the words on the chip (also the chat text) and its card type.
 class QuickMessage {
@@ -42,7 +45,11 @@ class QuickReplyBar extends StatefulWidget {
   final QuickReplySend onSend;
   final List<QuickMessage> messages;
 
-  const QuickReplyBar({super.key, required this.onSend, this.messages = quickMessages});
+  /// True when a message that was accepted is only queued on the phone (no
+  /// signal): the line then says "Waiting for signal: ..." instead of "Sent".
+  final bool Function()? queued;
+
+  const QuickReplyBar({super.key, required this.onSend, this.messages = quickMessages, this.queued});
 
   /// A second tap on the same chip within this time is ignored.
   static const Duration cooldown = Duration(seconds: 2);
@@ -65,6 +72,7 @@ class _QuickReplyBarState extends State<QuickReplyBar> {
   Timer? _feedbackClear;
   String? _feedback;
   bool _feedbackOk = true;
+  bool _feedbackQueued = false;
 
   @override
   void dispose() {
@@ -85,16 +93,19 @@ class _QuickReplyBarState extends State<QuickReplyBar> {
     _feedbackClear = Timer(QuickReplyBar.feedbackFor, () {
       if (mounted) setState(() => _feedback = null);
     });
+    final waiting = ok && (widget.queued?.call() ?? false);
     setState(() {
       _feedbackOk = ok;
-      _feedback = ok ? 'Sent: ${q.text}' : 'Not sent, no connection';
+      _feedbackQueued = waiting;
+      _feedback = !ok ? 'Not sent, no connection' : (waiting ? 'Waiting for signal: ${q.text}' : 'Sent: ${q.text}');
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final feedback = _feedback;
-    final color = _feedbackOk ? StatusColors.success : StatusColors.warning;
+    final color = (_feedbackOk && !_feedbackQueued) ? StatusColors.success : StatusColors.warning;
+    final IconData icon = !_feedbackOk ? Icons.cloud_off_rounded : (_feedbackQueued ? Icons.schedule_rounded : Icons.check_circle_rounded);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -116,7 +127,7 @@ class _QuickReplyBarState extends State<QuickReplyBar> {
                     padding: const EdgeInsets.only(top: Space.s8),
                     child: Row(
                       children: [
-                        Icon(_feedbackOk ? Icons.check_circle_rounded : Icons.cloud_off_rounded, size: 16, color: color),
+                        Icon(icon, size: 16, color: color),
                         const SizedBox(width: Space.s4),
                         Flexible(
                           child: Text(feedback, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: color)),
@@ -201,15 +212,15 @@ class _MessagesViewState extends State<MessagesView> {
   }
 
   /// The same paths as before: a wait request, or a chat line marked as a quick card.
-  /// Offline both are dropped by the connection, so the bar says "Not sent".
+  /// Without signal both wait in the phone's outbox and go out in order when the
+  /// phone is back online, so the bar says "Waiting for signal".
   bool _sendQuick(ConvoyService service, QuickMessage q) {
-    final online = service.isOnline;
     if (q.isWait) {
       service.requestWait(widget.me.name);
     } else {
       service.sendGroupMessage(senderId: widget.me.userId, senderName: widget.me.name, text: q.text, isQuickCard: true, cardType: q.cardType);
     }
-    return online;
+    return true;
   }
 
   void _send(ConvoyService service) {
@@ -222,14 +233,23 @@ class _MessagesViewState extends State<MessagesView> {
   @override
   Widget build(BuildContext context) {
     final service = context.watch<ConvoyService>();
-    final messages = service.allConvoys[widget.convoyId]?.messages ?? const [];
+    final sent = service.allConvoys[widget.convoyId]?.messages ?? const <GroupMessageModel>[];
+    // My chat lines still in the outbox (no signal) follow the delivered ones, marked "Waiting for signal".
+    final queued = [
+      for (final o in service.outbox)
+        if (o.type == 'CHAT' && o.groupId == widget.convoyId) o,
+    ];
+    final messages = <(GroupMessageModel?, OutboxItem?)>[
+      for (final m in sent) (m, null),
+      for (final o in queued) (null, o),
+    ];
     final maxList = MediaQuery.sizeOf(context).height * 0.4;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        QuickReplyBar(onSend: (q) => _sendQuick(service, q)),
+        QuickReplyBar(onSend: (q) => _sendQuick(service, q), queued: () => !service.isOnline),
         const SizedBox(height: Space.s4),
         const Divider(height: 1),
         if (messages.isEmpty)
@@ -247,8 +267,9 @@ class _MessagesViewState extends State<MessagesView> {
                     padding: const EdgeInsets.symmetric(vertical: Space.s8),
                     itemCount: messages.length,
                     itemBuilder: (context, i) {
-                      final msg = messages[messages.length - 1 - i];
-                      final mine = msg.senderId == widget.me.userId;
+                      final (msg, item) = messages[messages.length - 1 - i];
+                      final mine = msg == null || msg.senderId == widget.me.userId;
+                      final text = msg?.text ?? item?.payload['text']?.toString() ?? '';
                       return Align(
                         alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
                         child: Container(
@@ -264,8 +285,10 @@ class _MessagesViewState extends State<MessagesView> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (!mine) Text(msg.senderName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
-                              Text(msg.text, style: AppText.body),
+                              if (!mine)
+                                Text(msg.senderName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
+                              Text(text, style: AppText.body),
+                              if (item != null) QueuedLine(failed: item.state == OutboxState.failed, sending: service.isOnline),
                             ],
                           ),
                         ),

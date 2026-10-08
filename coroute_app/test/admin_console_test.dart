@@ -18,9 +18,18 @@ import 'package:coroute_app/data/services/timeline_service.dart';
 import 'package:coroute_app/data/services/track_recorder.dart';
 import 'package:coroute_app/data/services/track_uploader.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
+import 'package:coroute_app/presentation/admin/admin_emergencies_panel.dart';
 import 'package:coroute_app/presentation/admin/admin_user_details_screen.dart';
 import 'package:coroute_app/presentation/admin/admin_users_screen.dart';
 import 'package:coroute_app/presentation/admin/master_admin_dashboard.dart';
+
+/// No sound in tests (3.14: the Emergencies panel rings for a new SOS).
+class _SilentAlarm implements AdminAlarm {
+  @override
+  Future<void> start({required String title, required String body}) async {}
+  @override
+  Future<void> stop() async {}
+}
 
 /// Admin console (3.13, WP-ADM): the admin home and the users list on a
 /// 320 dp phone at 1.3x text in both themes, the wide list + detail layout,
@@ -31,6 +40,7 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
+    AdminEmergenciesPanelState.resetAcknowledged();
   });
   tearDown(() => AppTheme.use(AppPalette.dark));
 
@@ -121,13 +131,15 @@ void main() {
 
     testWidgets('admin home at 320 dp, text x1.3, $theme: SOS, live rides, holds, then numbers', (tester) async {
       final calls = <http.Request>[];
-      await render(tester, size: const Size(320, 568), scale: 1.3, palette: palette, child: const MasterAdminDashboard(), calls: calls);
+      await render(tester, size: const Size(320, 568), scale: 1.3, palette: palette, child: MasterAdminDashboard(alarm: _SilentAlarm()), calls: calls);
       expect(tester.takeException(), isNull);
 
       // Real numbers come from the API: the fleet and the accounts.
       expect(calls.any((r) => r.url.path.endsWith('/admin/fleet')), isTrue);
       expect(calls.any((r) => r.url.path.endsWith('/admin/users')), isTrue);
 
+      // 3.14: open SOS moved into the Emergencies panel at the top (same title, plus the alarm).
+      expect(find.text('Emergencies (1)'), findsOneWidget);
       expect(find.text('SOS: Asha needs help'), findsOneWidget);
       expect(find.text('1 account on hold'), findsOneWidget);
       expect(find.text('Riders online'), findsOneWidget);
@@ -182,7 +194,7 @@ void main() {
 
   testWidgets('home "Review" opens the users list filtered to accounts on hold', (tester) async {
     final calls = <http.Request>[];
-    await render(tester, size: const Size(360, 740), scale: 1.0, palette: AppPalette.dark, child: const MasterAdminDashboard(), calls: calls);
+    await render(tester, size: const Size(360, 740), scale: 1.0, palette: AppPalette.dark, child: MasterAdminDashboard(alarm: _SilentAlarm()), calls: calls);
     await tester.ensureVisible(find.text('Review'));
     await tester.tap(find.text('Review'));
     await tester.pump();

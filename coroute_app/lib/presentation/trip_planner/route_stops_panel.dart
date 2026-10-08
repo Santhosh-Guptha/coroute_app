@@ -4,11 +4,13 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
+import '../../data/models/outbox_item.dart';
 import '../../data/models/stop_point_model.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/geo_service.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../map_picker/map_picker_screen.dart';
+import '../ride/incident_sheet.dart';
 
 /// The route during a ride: start, stops (with suggestions from members),
 /// destination and the route summary. The lead can add, reorder, skip and
@@ -42,6 +44,11 @@ class RouteStopsPanel extends StatelessWidget {
     final skipped = convoy.stopPoints.where((s) => s.isSkipped).toList();
     final suggestions = convoy.suggestedStops;
     final route = convoy.route;
+    // Visited ticks set without signal wait in the outbox ("Waiting for signal" under the stop).
+    final queuedVisits = <String, OutboxItem>{
+      for (final o in service.outbox)
+        if (o.type == 'STOP_VISITED' && o.groupId == convoy.groupId && o.payload['stopId'] != null) o.payload['stopId'].toString(): o,
+    };
 
     // Who has reached a stop (with the time), who rode past, who is still coming.
     final hhmm = DateFormat('HH:mm');
@@ -148,6 +155,8 @@ class RouteStopsPanel extends StatelessWidget {
               lead: lead,
               distance: s.isVisited ? '' : fromMe(s.lat, s.lng),
               arrivals: arrivalsLine(s.arrivals),
+              queued: queuedVisits[s.stopId],
+              online: service.isOnline,
               onVisited: (v) => service.toggleStopVisited(s.stopId, v),
               onSkip: () => service.skipStop(s.stopId),
               onRemove: () => service.removeStop(s.stopId),
@@ -284,6 +293,8 @@ class _StopTile extends StatelessWidget {
   final bool lead;
   final String distance;
   final String arrivals;
+  final OutboxItem? queued;
+  final bool online;
   final ValueChanged<bool> onVisited;
   final VoidCallback onSkip;
   final VoidCallback onRemove;
@@ -297,6 +308,8 @@ class _StopTile extends StatelessWidget {
     required this.lead,
     required this.distance,
     this.arrivals = '',
+    this.queued,
+    this.online = true,
     required this.onVisited,
     required this.onSkip,
     required this.onRemove,
@@ -306,6 +319,7 @@ class _StopTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = stop;
+    final q = queued;
     final details = [
       s.isVisited ? 'Visited' : 'Stop ${index + 1}',
       if (distance.isNotEmpty) distance,
@@ -367,6 +381,11 @@ class _StopTile extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(Space.s12, Space.s4, Space.s12, 0),
               child: Text(arrivals, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+            ),
+          if (q != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.s12, Space.s4, Space.s12, 0),
+              child: QueuedLine(what: 'Visited mark', failed: q.state == OutboxState.failed, sending: online),
             ),
         ],
       ),

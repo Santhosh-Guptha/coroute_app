@@ -4,9 +4,10 @@
  * group timeline (collection trip_events), shared by every member.
  *
  * Two kinds of entries:
- *   instant   JOINED, LEFT, STOP_ADDED, STATUS, STOP_PASSED, STOP_ALL_REACHED, DESTINATION_ALL_REACHED, TRIP_*
+ *   instant   JOINED, LEFT, STOP_ADDED, STATUS, STOP_PASSED, STOP_ALL_REACHED, DESTINATION_ALL_REACHED, TRIP_*,
+ *             SOS_RESPONSE (a rider going to / with an SOS rider), CHECK_IN (rider said they are OK)
  *   interval  STOPPED, SEPARATED, OFF_ROUTE, OFFLINE, SOS, CORIDE, MOVING, STOP_REACHED, DESTINATION_REACHED (time at the place),
- *             OVERSPEED (over the group speed limit)
+ *             OVERSPEED (over the group speed limit), POSSIBLE_INCIDENT (hard stop, then still), NO_REPLY (solo check-in)
  *             (open while it lasts; closed with endedAt/durationMs)
  *
  * Live entries are computed from telemetry the moment they happen
@@ -23,8 +24,9 @@ const config = require('./config');
 const { haversine, distanceToPolyline, medianCentre, decodePolyline } = require('./geo_math');
 const { buildTripReport } = require('./report');
 const { scrub, mentions } = require('./anonymise');
+const { ConvoyError } = require('./convoys');
 
-const INTERVAL_TYPES = new Set(['STOPPED', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'SOS', 'CORIDE', 'MOVING', 'STOP_REACHED', 'DESTINATION_REACHED', 'OVERSPEED']);
+const INTERVAL_TYPES = new Set(['STOPPED', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'SOS', 'CORIDE', 'MOVING', 'STOP_REACHED', 'DESTINATION_REACHED', 'OVERSPEED', 'POSSIBLE_INCIDENT', 'NO_REPLY']);
 const FRESH_MS = 2 * 60000;
 const HOLD_MS = 60000; // a condition must last this long before it becomes an entry
 const MAX_TS = Number.MAX_SAFE_INTEGER;
@@ -58,6 +60,7 @@ class TimelineEngine {
     convoys.on('telemetry', (gid, rider) => this._guard(this.onTelemetry(gid, rider)));
     convoys.on('event', (gid, payload) => this._guard(this.onConvoyEvent(gid, payload)));
     convoys.on('activity', (gid, act) => this._guard(this.onActivity(gid, act)));
+    convoys.on('presence', (gid, p) => this._guard(this.onPresence(gid, p)));
 
     this.timer = setInterval(() => this._guard(this.tick()), tickMs);
     if (this.timer.unref) this.timer.unref();
@@ -208,6 +211,9 @@ class TimelineEngine {
 
     // Back online?
     if (st.open.has(`OFFLINE:${rider.userId}`)) await this._close(gid, st, `OFFLINE:${rider.userId}`, t);
+
+    // Possible incident (hard stop, then still): server side, so riders on older apps get it too.
+    await this._incident(gid, st, rs, room, rider, t);
 
     // Stops (same rule as the report: stay inside the radius for the stop threshold).
     const minStopMs = (room.meta.stopThresholdSeconds ?? 180) * 1000;
@@ -402,8 +408,11 @@ class TimelineEngine {
         const last = r.lastSeenEpochMs || 0;
         const slot = `OFFLINE:${r.userId}`;
         if (last && t - last >= limit && !st.open.has(slot)) {
-          await this._open(gid, st, slot, { userId: r.userId, userName: r.name, type: 'OFFLINE', startedAt: last, lat: r.lat, lng: r.lng });
+          await this._open(gid, st, slot, { userId: r.userId, userName: r.name, type: 'OFFLINE', startedAt: last, lat: r.lat, lng: r.lng, data: { cause: 'NO_SIGNAL' } });
         }
+        await this._escalateOffline(gid, st, room, r, t);
+        const rsi = st.riders.get(r.userId);
+        if (rsi?.hardStop) await this._maybeOpenIncident(gid, st, rsi, room, r, t);
         // A rider who slowed down and then parked sends few fixes: end the episode here.
         const rs = st.riders.get(r.userId);
         const over = `OVERSPEED:${r.userId}`;
@@ -431,7 +440,11 @@ class TimelineEngine {
       case 'ALERT': {
         const a = payload.alert;
         const st = await this._state(gid);
-        await this._open(gid, st, `SOS:${a.alertId}`, { userId: a.userId, userName: a.userName, type: 'SOS', startedAt: a.timestamp, lat: a.lat, lng: a.lng, data: { alertId: a.alertId, alertType: a.alertType } });
+        const data = { alertId: a.alertId, alertType: a.alertType, auto: !!a.auto, responders: [] };
+        if (a.details && Number.isFinite(a.details.speedBeforeKmh)) data.speedBeforeKmh = a.details.speedBeforeKmh;
+        await this._open(gid, st, `SOS:${a.alertId}`, { userId: a.userId, userName: a.userName, type: 'SOS', startedAt: a.timestamp, lat: a.lat, lng: a.lng, data });
+        // An SOS replaces a possible incident of the same rider.
+        await this._close(gid, st, `INCIDENT:${a.userId}`, this.now(), { data: { result: 'SOS' } });
         return;
       }
       case 'ALERT_RESOLVED': {
@@ -477,6 +490,21 @@ class TimelineEngine {
         if (!act.reason) return null;
         return this._instant(gid, { ...who, type: 'STATUS', lat: act.lat, lng: act.lng, data: { reason: act.reason, message: act.message || '' } });
       }
+      case 'SOS_RESPONSE': {
+        const a = act.alert;
+        await this._instant(gid, {
+          ...who, type: 'SOS_RESPONSE', startedAt: act.at,
+          data: { alertId: a.alertId, kind: act.kind, forUserId: a.userId, forUserName: a.userName || this._name(gid, a.userId) },
+        });
+        const open = st.open.get(`SOS:${a.alertId}`);
+        if (open) {
+          open.data = { ...(open.data || {}), responders: act.responders };
+          open.updatedAt = this.now();
+          await this.repo.upsertEvent(open).catch((e) => this.log.warn('[timeline] save failed', e.message));
+          this.convoys._emit(gid, 'TIMELINE_UPDATE', { event: publicEvent(open) });
+        }
+        return null;
+      }
       case 'CORIDE': {
         const slot = `CORIDE:${act.user.userId}`;
         if (act.withUserId) return this._open(gid, st, slot, { ...who, type: 'CORIDE', startedAt: this.now(), data: { withUserId: act.withUserId, withName: this._name(gid, act.withUserId) } });
@@ -485,6 +513,169 @@ class TimelineEngine {
       default:
         return null;
     }
+  }
+
+  // ------------------------------------------------------- safety (3.14)
+  /** Saves an open entry's changed data and pushes it to the room. */
+  async _update(gid, ev) {
+    ev.updatedAt = this.now();
+    await this.repo.upsertEvent(ev).catch((e) => this.log.warn('[timeline] save failed', e.message));
+    this.convoys._emit(gid, 'TIMELINE_UPDATE', { event: publicEvent(ev) });
+  }
+
+  /** True when the point is within INCIDENT_STOP_NEAR_M of a planned stop or the destination. */
+  _nearPlannedStop(meta, lat, lng) {
+    const R = config.incidentStopNearM;
+    for (const s of meta.stopPoints || []) {
+      if (!s.lat || s.status === 'SUGGESTED' || s.status === 'SKIPPED') continue;
+      if (haversine(s.lat, s.lng, lat, lng) <= R) return true;
+    }
+    if ((meta.destinationLat || meta.destinationLng) && haversine(meta.destinationLat, meta.destinationLng, lat, lng) <= R) return true;
+    return false;
+  }
+
+  /**
+   * C3 possible incident: from INCIDENT_FROM_KMH or more to INCIDENT_STOP_KMH or less within
+   * INCIDENT_STOP_WITHIN_S marks a hard stop; still (slow, inside INCIDENT_STILL_RADIUS_M) for
+   * INCIDENT_STILL_S opens POSSIBLE_INCIDENT for the lead(s) and the nearest riders. Moving on closes it.
+   */
+  async _incident(gid, st, rs, room, rider, t) {
+    const speed = Number(rider.speedKmh) || 0;
+    const slot = `INCIDENT:${rider.userId}`;
+    const open = st.open.get(slot);
+    if (open && (speed >= 15 || (Number.isFinite(open.lat) && open.lat !== null && haversine(open.lat, open.lng, rider.lat, rider.lng) > 100))) {
+      await this._close(gid, st, slot, t, { data: { result: 'MOVED' } });
+    }
+    if (rs.hardStop && (speed > config.incidentStopKmh || haversine(rs.hardStop.lat, rs.hardStop.lng, rider.lat, rider.lng) > config.incidentStillRadiusM)) {
+      rs.hardStop = null;
+    }
+    if (speed >= config.incidentFromKmh) {
+      rs.fastAt = t; rs.fastKmh = speed;
+    } else if (speed <= config.incidentStopKmh && !rs.hardStop && rs.fastAt && t - rs.fastAt <= config.incidentStopWithinS * 1000) {
+      rs.hardStop = { at: t, lat: rider.lat, lng: rider.lng, fromKmh: Math.round(rs.fastKmh || 0), opened: false };
+      rs.fastAt = 0;
+    }
+    if (rs.hardStop) await this._maybeOpenIncident(gid, st, rs, room, rider, t);
+  }
+
+  async _maybeOpenIncident(gid, st, rs, room, rider, t) {
+    const hs = rs.hardStop;
+    if (!hs || hs.opened || t - hs.at < config.incidentStillS * 1000) return;
+    if (room.meta.tripStatus !== 'STARTED') return;
+    // The group stopped together (red light, toll queue, jam): every rider made the same hard stop.
+    // Wait longer before paging the lead; riders who stopped beside a fallen rider are already there.
+    if (t - hs.at < config.incidentStillGroupS * 1000 && this._stoppedWithOthers(room, rider.userId, hs, t)) return;
+    const slot = `INCIDENT:${rider.userId}`;
+    if (st.open.has(slot)) { hs.opened = true; return; }
+    const current = room.riders.get(rider.userId) || rider;
+    if (current.statusReason) return; // the rider said why they stopped
+    if ([...room.alerts.values()].some((a) => !a.resolved && a.userId === rider.userId)) return;
+    if (this._nearPlannedStop(room.meta, hs.lat, hs.lng)) { hs.opened = true; return; }
+    hs.opened = true;
+    await this._open(gid, st, slot, {
+      userId: rider.userId, userName: rider.name, type: 'POSSIBLE_INCIDENT', startedAt: hs.at, lat: hs.lat, lng: hs.lng,
+      data: { fromKmh: hs.fromKmh, reason: 'HARD_STOP', notify: this._incidentNotify(room, rider.userId, hs, t), auto: true },
+    });
+  }
+
+  /** True when another rider seen in the last 2 min is slow (15 km/h or less) within INCIDENT_GROUP_NEAR_M of the stop. */
+  _stoppedWithOthers(room, subjectId, at, t) {
+    for (const r of room.riders.values()) {
+      if (r.userId === subjectId || !(r.lat || r.lng) || t - (r.lastSeenEpochMs || 0) > FRESH_MS) continue;
+      if ((Number(r.speedKmh) || 0) > 15) continue;
+      if (haversine(at.lat, at.lng, r.lat, r.lng) <= config.incidentGroupNearM) return true;
+    }
+    return false;
+  }
+
+  /** Lead(s) and sweeper(s), plus the INCIDENT_NEAREST nearest other riders seen in the last 2 minutes. */
+  _incidentNotify(room, subjectId, at, t) {
+    const notify = [];
+    for (const r of room.riders.values()) {
+      if (r.userId === subjectId) continue;
+      if (r.role === 'LEAD' || r.role === 'SWEEPER' || room.meta.createdByUserId === r.userId) notify.push(r.userId);
+    }
+    const near = [...room.riders.values()]
+      .filter((r) => r.userId !== subjectId && !notify.includes(r.userId) && t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng))
+      .map((r) => ({ id: r.userId, d: haversine(at.lat, at.lng, r.lat, r.lng) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, Math.max(0, config.incidentNearest));
+    for (const n of near) notify.push(n.id);
+    return notify;
+  }
+
+  /**
+   * B3: offline for NO_SIGNAL_ESCALATE_MIN after riding at NO_SIGNAL_MIN_KMH or more, away from
+   * planned stops and not a clean app close: marked escalated (the lead is alerted by the apps).
+   */
+  async _escalateOffline(gid, st, room, r, t) {
+    const ev = st.open.get(`OFFLINE:${r.userId}`);
+    if (!ev || ev.data?.escalated || ev.data?.cause === 'APP_CLOSED') return;
+    if (t - ev.startedAt < config.noSignalEscalateMin * 60000) return;
+    const kmh = Number(r.speedKmh) || 0;
+    if (kmh < config.noSignalMinKmh) return;
+    if ((r.lat || r.lng) && this._nearPlannedStop(room.meta, r.lat, r.lng)) return;
+    ev.data = { ...(ev.data || {}), escalated: true, lastKmh: Math.round(kmh) };
+    await this._update(gid, ev);
+  }
+
+  /** Presence (BYE, socket close): a clean app close opens OFFLINE at once (no 5 min wait). */
+  async onPresence(gid, p) {
+    if (p.presence !== 'APP_CLOSED') return;
+    const room = this.convoys.rooms.get(gid);
+    if (!room || !['STARTED', 'PAUSED'].includes(room.meta.tripStatus)) return;
+    const st = await this._state(gid);
+    const r = p.rider || room.riders.get(p.userId);
+    if (!r) return;
+    const slot = `OFFLINE:${p.userId}`;
+    const open = st.open.get(slot);
+    if (open) {
+      if (open.data?.cause !== 'APP_CLOSED') { open.data = { ...(open.data || {}), cause: 'APP_CLOSED' }; await this._update(gid, open); }
+      return;
+    }
+    await this._open(gid, st, slot, {
+      userId: r.userId, userName: r.name, type: 'OFFLINE', startedAt: r.lastSeenEpochMs || this.now(), lat: r.lat, lng: r.lng, data: { cause: 'APP_CLOSED' },
+    });
+  }
+
+  /** JOIN with prevExit KILLED: Android closed the app; the open OFFLINE entry says so. */
+  async markKilled(gid, userId, downFrom) {
+    const st = await this._state(gid);
+    const ev = st.open.get(`OFFLINE:${userId}`);
+    if (!ev) return false;
+    ev.data = { ...(ev.data || {}), cause: 'KILLED', ...(downFrom ? { downFrom } : {}) };
+    await this._update(gid, ev);
+    return true;
+  }
+
+  /**
+   * CHECK_IN from the solo check-in. NO_REPLY opens NO_REPLY:<uid> (once while open).
+   * OK closes the rider's possible incident and no-reply entries and logs CHECK_IN when it closed one.
+   */
+  async checkIn(gid, user, msg = {}) {
+    const room = await this.convoys.getRoom(gid);
+    const rider = room.riders.get(user.userId);
+    if (!rider) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    const result = msg.result;
+    if (result !== 'OK' && result !== 'NO_REPLY') throw new ConvoyError('Check-in result must be OK or NO_REPLY.', 400);
+    const st = await this._state(gid);
+    const t = this.now();
+    const num = (v) => (v === null || v === undefined || typeof v === 'boolean' || v === '' ? NaN : Number(v));
+    const lat = Number.isFinite(num(msg.lat)) ? Math.max(-90, Math.min(90, num(msg.lat))) : rider.lat;
+    const lng = Number.isFinite(num(msg.lng)) ? Math.max(-180, Math.min(180, num(msg.lng))) : rider.lng;
+    if (result === 'NO_REPLY') {
+      const awayM = Number.isFinite(num(msg.awayM)) ? Math.round(Math.max(0, Math.min(500000, num(msg.awayM)))) : 0;
+      await this._open(gid, st, `NO_REPLY:${user.userId}`, { userId: user.userId, userName: rider.name, type: 'NO_REPLY', startedAt: t, lat, lng, data: { awayM } });
+      return { opened: true };
+    }
+    const rs = st.riders.get(user.userId);
+    if (rs) rs.hardStop = null;
+    let closed = 0;
+    for (const slot of [`INCIDENT:${user.userId}`, `NO_REPLY:${user.userId}`]) {
+      if (await this._close(gid, st, slot, t, { data: { result: 'OK' } })) closed++;
+    }
+    if (closed) await this._instant(gid, { userId: user.userId, userName: rider.name, type: 'CHECK_IN', startedAt: t, lat, lng, data: { result: 'OK' } });
+    return { closed };
   }
 
   // ------------------------------------------------------------- report

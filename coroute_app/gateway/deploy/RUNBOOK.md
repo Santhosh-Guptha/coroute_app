@@ -153,6 +153,30 @@ sudo systemctl restart coroute-gateway
 ```
 On `SIGTERM` the gateway flushes in-memory telemetry to Oracle before exiting; clients reconnect automatically and re-join their convoy.
 
+## Release order for 3.14 (rider safety): gateway first, then the app
+
+The 3.14 app (build 74) uses new socket messages (ACK, SOS_RESPOND, CHECK_IN, BYE, PRESENCE) and the
+`GET /api/convoys/:groupId/emergency-roster` endpoint. It only turns them on when the gateway's HELLO lists
+them (`protocol: 2`, `features: [...]`), so a 3.14 app on an older gateway keeps working as 3.13, but none of
+the new safety features work until the gateway is upgraded. Older apps (3.11 to 3.13) keep working on the new
+gateway unchanged.
+
+1. Upgrade the gateway (section 7). Check: `curl -s https://coroute.duckdns.org/api/health` shows `"version":"3.14.0"`,
+   and `./deploy/smoke_test.sh https://coroute.duckdns.org` passes.
+2. In `/etc/coroute/gateway.env` set `LATEST_APP_BUILD=74` (the default is already 74) and restart.
+3. Only then publish the app: the APKs on the gateway (section 4) and the Play release. The Play release also needs the
+   SMS permission declaration approved first (see `PLAY_STORE_CHECKLIST.md`, "Permissions declarations").
+4. Do not raise `MIN_APP_BUILD` for this release: riders on 3.11 to 3.13 still get the server safety net
+   (possible incident, no-signal escalation) and still receive emergency texts from 3.14 riders.
+
+New settings (all optional, defaults shown in `deploy/.env.example`): `INCIDENT_*`, `NO_SIGNAL_ESCALATE_MIN`,
+`NO_SIGNAL_MIN_KMH`, `ROSTER_PER_MIN`, `ROSTER_VALID_H`, `SMS_MAX_RECIPIENTS`, `CLIENT_ID_CACHE`, `CLIENT_ID_TTL_H`,
+`SOS_RESPONDERS_MAX`, `MEDICAL_ALLERGIES_MAX`, `MEDICAL_NOTES_MAX`. Nothing needs to be set for a normal install.
+
+Privacy notes for operators: phone numbers in the emergency roster and medical info are never written to the logs.
+Medical info is removed from an SOS alert when it is resolved and when the trip ends (retention also removes any
+left over on resolved alerts). Admin screens never show it.
+
 ## Free-tier capacity notes
 
 * Voice is PCM16 @ 16 kHz: 32 KB/s per *active speaker* (16 KB/s from a phone in data saver mode, 8 kHz). A convoy of 10 where one person speaks = 32 KB/s in, 288 KB/s out — trivial for the VM; OCI Always Free includes 10 TB/month egress.

@@ -1,0 +1,220 @@
+# Rider safety: device tests (CoRoute 3.14)
+
+How to check crash detection, the crash alarm, emergency texts, the break
+reminder and the "Are you OK?" check-in on real phones, safely, without a real
+crash. Unit tests cover the rules with synthetic sensor traces
+(`test/crash_detector_test.dart`, `test/safety_service_test.dart`,
+`test/sms_fallback_test.dart`, `test/fatigue_checkin_test.dart`); these notes
+cover what only a phone can show: sensors, the lock screen, SMS and battery.
+
+## Safety first
+
+- Never fall, brake hard or ride one-handed to "test" anything. Every test below
+  is done parked, walking, or as a pillion with someone else riding normally.
+- Drops are onto a cushion, sofa or bed, from about knee to waist height, with
+  the phone in its case.
+- Emergency texts go to real phones. Use your own second phone (or a friend who
+  knows it is a test) as the emergency contact, and tell the test group first.
+  Texts cost normal SMS charges.
+- Remove test SOS alerts with "I am safe, cancel the SOS" so nobody keeps
+  getting alarms.
+
+## What you need
+
+- Two Android phones (A = rider under test, B = lead / second rider), both on
+  3.14 (build 74), signed in to two accounts, in the same test ride. The gateway
+  must already run 3.14 (deploy it first; older gateways disable the new parts).
+- On phone A: Profile > Edit profile: emergency contact = phone B's number (or a
+  third phone). Profile > Ride safety: all four switches as each test says.
+- Optional: a PC with `adb` for the sensor and battery checks.
+- Useful phones: one Android 10 to 13, one Android 14 or newer, one Xiaomi or
+  Samsung (battery killers), one dual-SIM phone.
+
+## 1. Opt-in texts in the pre-ride checklist
+
+1. On A, start a ride so the checklist opens (or clear "Do not show for 24 hours").
+2. Under "Ride safety": "Crash detection" is on, "Text the group if there is no
+   internet" is off. Read both explanations: plain words, no jargon, they say
+   "up to 10", "map link" and "only during the ride".
+3. Switch "Text the group" on: Android asks for SMS permission. Deny: the switch
+   stays off and an amber line says texts need the SMS permission. Switch on
+   again and allow: the switch stays on.
+4. Android 14+: the row "Alarm on lock screen" is shown. If it is amber, tap Fix:
+   the system page "Full-screen notifications" opens for CoRoute.
+5. First time only: "Battery settings for <brand>" is shown. Tap Fix: the brand
+   guide opens; "Open settings" opens the brand page (Xiaomi: Autostart; Samsung:
+   Battery). After closing it, the row does not come back in the next checklist.
+
+Expected: nothing blocks "Start the ride".
+
+## 2. The accelerometer runs only when needed (battery)
+
+With `adb` connected to A, during a ride:
+
+```
+adb shell dumpsys sensorservice | grep -i -A2 "accelerometer"
+```
+
+Look at the "active connections" / "registrations" of `space.devmonks.coroute_app`.
+
+| Situation | Accelerometer registered by CoRoute |
+|---|---|
+| No ride, or ride but parked / walking | no |
+| Pillion, above 25 km/h | yes, with a batch latency of 2 s (`maxReportLatency` 2000000 us) |
+| 30 s after slowing below 25 km/h | no (removed on the next bucket) |
+| Crash detection switched off | no, at once |
+| Ride ended | no |
+
+The theme option "Light sensor" uses the light sensor, not the accelerometer;
+ignore it here.
+
+## 3. Crash alarm without crashing
+
+The rule: above 25 km/h in the last 30 s (and faster than 25 km/h in the 10 s
+before the jolt), a jolt of 4 g or more, then 5 km/h or less within 10 s, then
+20 s without riding on (no GPS speed above 15 km/h, not more than 80 m away).
+Getting up and walking about does NOT stop the alarm: the rider answers "I'm OK"
+(product decision 3.14). Only when the GPS gave no fix at all after the jolt must
+the phone also lie still for those 20 s (otherwise riding on in a tunnel with the
+GPS lost would look like a crash).
+
+Pillion test (recommended, spec test): someone else rides at about 30 km/h on an
+empty road. The pillion holds a cushion on the lap and drops A from about 30 cm
+onto it, hard, or slaps the phone down on the cushion. The rider then stops
+normally within 10 s and both stay still with A lying on the cushion for 20 s.
+
+Parked alternative (no riding at all): use a mock GPS app that plays a route with
+speed (for example "Lockito"; Developer options > Select mock location app).
+Play a route at 40 km/h, drop A onto a sofa cushion from waist height, stop the
+mock route at once (speed 0) and leave A lying still for 20 s. A plain drop on a
+soft cushion may stay under 4 g; a drop onto a bed or a firm sofa usually
+reaches it. A drop while the mock speed is 0 must never ring (never armed).
+
+Expected on A, about 20 s after the stop:
+- full screen red "Did you crash?", "Automatic alert", "Sending SOS to your
+  group in 30 seconds.", counting down, big green "I'm OK" and red "Send now";
+- loud repeating sound at alarm volume and vibration (also in silent mode on most
+  phones, because it uses the alarm stream; Do Not Disturb may block it unless
+  alarms are allowed);
+- a notification "Did you crash?" with the buttons "I'm OK" and "Send now".
+
+Check each answer:
+- "I'm OK" (screen or notification): alarm stops, nothing reaches B, the timeline
+  shows nothing. No new alarm for 2 minutes.
+- "Send now": B gets "Crash detected: <A>" with "Automatic alert", the distance
+  and direction; A's screen switches to the SOS sheet. Cancel with "I am safe".
+- No answer: after 30 s the same SOS is sent automatically.
+- Walk around with A in the hand during the 20 s (mock speed 3 to 5 km/h): the
+  alarm still comes; answer "I'm OK".
+- Pick the phone up and ride on (mock speed above 15 km/h within the 20 s): no alarm.
+- Mock route slowed to 3 km/h for 15 s first, then drop A (a phone dropped after
+  arriving at a stop): no alarm.
+
+## 4. Alarm on the lock screen (Android 10, 13, 14)
+
+Do test 3, but press the power button to lock A right after the drop.
+
+| Phone | Full-screen allowed | Expected |
+|---|---|---|
+| Android 10 to 13 | always | screen turns on, the red alarm shows over the lock screen; buttons work without unlocking |
+| Android 14+ | allowed (checklist row green) | same as above |
+| Android 14+ | denied (turn it off in Settings > Apps > CoRoute > Full-screen notifications) | no full screen, but a ringing heads-up notification; "I'm OK" and "Send now" on the notification work without unlocking; the countdown runs and the SOS is sent at 0 s |
+
+After the alarm ends (any answer), lock A again: CoRoute must not show over the
+lock screen any more (it does so only while the alarm is open).
+
+Also check: notifications switched off for CoRoute (Android 13+ permission
+denied). Expected: no sound from the notification, but the in-app screen and
+vibration still appear when CoRoute is open, and the SOS is still sent at 0 s.
+
+## 5. Emergency texts when there is no internet
+
+Setup: on A, "Text the group if there is no internet" on, SMS allowed, emergency
+contact set. B is the lead. Start the ride while online (A fetches the group's
+numbers; nothing is shown).
+
+Realistic test (no data, but phone signal): on A switch off mobile data and
+Wi-Fi (not airplane mode). Hold SOS on A.
+- The SOS sheet says "No signal. SOS not sent yet" and shows "Text the group now".
+- After 45 s (or at once with "Text the group now") A texts: the emergency
+  contact first, then the lead, then the nearest riders, at most 10.
+- The sheet says for example "Texted your emergency contact and 1 rider."
+- B's phone gets an SMS: "CoRoute SOS: <A> needs help (10:42). Map:
+  https://maps.google.com/?q=..." with 5 decimals. The link opens the right spot.
+- The text never contains other people's numbers.
+- Turn data back on: the SOS reaches the group as usual; no second round of texts
+  for the same SOS.
+
+Airplane mode (spec test): with airplane mode on there is no phone signal either,
+so the texts cannot go out. Expected: after 45 s the sheet says "The texts could
+not be sent. Call your emergency contact or 112." Turning airplane mode off later
+does not text again for that SOS; the SOS itself is sent when data returns.
+
+Crash SOS: repeat test 3 with data off and let the countdown run out. The text
+starts "CoRoute automatic alert: <A> may have crashed".
+
+Delivered SOS: with data on, hold SOS: no texts are sent (the group got it).
+
+Opt-out: on B, Profile > "Receive emergency texts from my ride group" off. Start a new ride
+(or wait for the group list to refresh): A's next text round skips B.
+
+Dual SIM: on a dual-SIM phone set Settings > SIM > SMS to "Ask every time". The
+texts go from the default SIM without a question. Note which SIM sent them. If
+nothing is sent, the sheet says so (report the phone model).
+
+Limit: Android asks the user after about 30 texts in 30 minutes. CoRoute sends at
+most 10 per SOS and 20 text parts in 30 minutes, so the system question should
+never appear. Report it if it does.
+
+## 6. Brand battery guide (Xiaomi, Samsung)
+
+1. In the checklist, tap Fix on "Battery settings for Xiaomi" (or Samsung).
+2. The steps match the phone. "Open settings" opens the brand page (Xiaomi:
+   Autostart list; Samsung: battery page) or, if that page does not exist on this
+   model, CoRoute's app settings.
+3. Follow the steps, then lock the phone for 30 minutes during a parked ride: B
+   must keep seeing A (not "App closed on this phone").
+
+## 7. Break reminder
+
+Needs a real ride of 2 hours without a stop of 10 minutes (stops under 10
+minutes do not count as a break). Expected: "Time for a break" for the rider
+only, once, then again after 60 minutes without a break; a 10-minute stop
+resets it. With CoRoute in the background a quiet notification appears. Profile
+> Ride safety > "Break reminder" off: never shown. The rule itself is unit tested.
+
+## 8. "Are you OK?" check-in
+
+1. B is the lead. In group settings set the separation distance to the lowest
+   value.
+2. Take A (riding pillion, driving with someone else, or simply leave A at home
+   while B travels) farther than that distance from the group for 15 minutes.
+   Other riders must have sent a position in the last 5 minutes.
+3. A shows "Are you OK?" with a sound and a notification. Do not answer.
+4. After 2 minutes B (lead) gets "No reply from <A>", labelled automatic.
+5. Tap "I'm OK" on A: the lead's alert closes. If A answers before the 2 minutes,
+   nothing is sent to anyone.
+6. Not asked again for 30 minutes. With the switch off, never asked.
+
+## 9. Battery over a 2-hour ride
+
+Compare two similar rides (same phone, same route type, screen off, intercom off):
+crash detection on vs off.
+
+```
+adb shell dumpsys batterystats --reset     # before the ride
+adb shell dumpsys batterystats space.devmonks.coroute_app > ride.txt   # after
+```
+
+Or Settings > Battery > App usage. Expected: the difference is small (target:
+under 2 % of the battery over 2 hours), because the sensor runs only above
+25 km/h, in 2-second hardware batches, reduced to one small message per second.
+Note the phone model (phones without sensor batching deliver samples directly and
+may use a little more).
+
+## What to send back
+
+For each test: phone model, Android version, pass or fail, and for a failure what
+the screen said. Do not paste phone numbers or the SMS text of other riders.
+`adb logcat` from CoRoute never contains numbers or texts; if you see one,
+report it as a bug.

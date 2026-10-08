@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show HttpException, SocketException, TlsException, WebSocketException;
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../../core/config/app_config.dart';
+import '../../core/constants/net_constants.dart';
+import '../models/safety_wire.dart';
 
 /// Binary voice packet kinds (must match gateway/src/ws.js).
 class VoiceKind {
@@ -34,6 +37,12 @@ class VoicePacket {
 
 enum RealtimeState { disconnected, connecting, connected }
 
+/// Why the socket is not connected, as far as the phone can tell:
+/// [noNetwork] (no signal, DNS fails, timeouts) or [serverUnreachable]
+/// (the internet works but the CoRoute server does not answer properly).
+/// [none] while connected or when nothing is known yet.
+enum LinkProblem { none, noNetwork, serverUnreachable }
+
 /// The one and only WebSocket to the gateway.
 ///
 /// Design goals: a single socket per app (battery), automatic reconnect with
@@ -62,6 +71,76 @@ class RealtimeService extends ChangeNotifier {
   RealtimeState get state => _state;
   bool get isConnected => _state == RealtimeState.connected;
   String? get groupId => _groupId;
+
+  // ------------------------------------------------- features and link state
+  Set<String> _features = const <String>{};
+  LinkProblem _linkProblem = LinkProblem.none;
+  int _unreachableFailures = 0;
+  Map<String, dynamic>? _joinExtras;
+  bool _helloOnChannel = false;
+  bool _readyOnChannel = false;
+  bool _failureNoted = false;
+  int _channelSeq = 0;
+
+  /// Features the gateway announced in its last HELLO; empty before that and on older gateways.
+  Set<String> get serverFeatures => _features;
+
+  /// True when the connected gateway supports [feature] (see ProtocolFeatures).
+  bool supports(String feature) => _features.contains(feature);
+
+  /// Why the link is down (notifies on change).
+  LinkProblem get linkProblem => _linkProblem;
+
+  /// The internet works but the CoRoute server did not answer (after
+  /// [NetConstants.serverUnreachableAfter] such failures in a row).
+  bool get serverUnreachable => _linkProblem == LinkProblem.serverUnreachable;
+
+  /// Sorts a failed connect into "no network" or "server not reachable".
+  @visibleForTesting
+  static LinkProblem classify(Object error) {
+    Object e = error;
+    if (e is WebSocketChannelException && e.inner != null) e = e.inner!;
+    if (e is TimeoutException) return LinkProblem.noNetwork;
+    // An HTTP answer that is not a WebSocket upgrade (for example the proxy's 502/503).
+    if (e is WebSocketException || e is HttpException) return LinkProblem.serverUnreachable;
+    if (e is SocketException) {
+      final code = e.osError?.errorCode;
+      final text = '${e.message} ${e.osError?.message ?? ''}'.toLowerCase();
+      // ECONNREFUSED: Linux/Android 111, macOS/iOS 61, Windows 10061.
+      if (text.contains('refused') || code == 111 || code == 61 || code == 10061) return LinkProblem.serverUnreachable;
+      return LinkProblem.noNetwork; // host lookup failed, ENETUNREACH, timed out, reset
+    }
+    if (e is TlsException) return LinkProblem.noNetwork; // captive portal, wrong clock
+    final text = e.toString().toLowerCase();
+    if (text.contains('not upgraded') || text.contains('connection refused')) return LinkProblem.serverUnreachable;
+    return LinkProblem.noNetwork;
+  }
+
+  void _noteConnectFailure(LinkProblem p) {
+    if (p == LinkProblem.serverUnreachable) {
+      _unreachableFailures++;
+      if (_unreachableFailures >= NetConstants.serverUnreachableAfter) _setLink(LinkProblem.serverUnreachable);
+    } else {
+      _unreachableFailures = 0;
+      _setLink(LinkProblem.noNetwork);
+    }
+  }
+
+  void _setLink(LinkProblem p) {
+    if (_linkProblem == p) return;
+    _linkProblem = p;
+    notifyListeners();
+  }
+
+  /// Test hooks: a fake socket sink and incoming frames (no network in unit tests).
+  @visibleForTesting
+  void Function(String json)? debugSink;
+
+  @visibleForTesting
+  void debugReceive(Object data) => _onData(data);
+
+  @visibleForTesting
+  void debugConnectFailed(Object error) => _noteConnectFailure(classify(error));
 
   // ------------------------------------------------------------ lifecycle
   /// Called when the gateway refused the socket's account (close code 4401: signed out or
@@ -109,6 +188,9 @@ class RealtimeService extends ChangeNotifier {
   void disconnect() {
     _wantConnection = false;
     _groupId = null;
+    _joinExtras = null;
+    _unreachableFailures = 0;
+    _linkProblem = LinkProblem.none;
     _reconnectTimer?.cancel();
     _staleTimer?.cancel();
     _closeChannel();
@@ -116,16 +198,36 @@ class RealtimeService extends ChangeNotifier {
   }
 
   /// Binds this socket to a convoy. Any previous room is left first.
-  void joinRoom(String groupId) {
+  /// [prevExit] / [prevAliveAt] ("the app was killed last time") go with the next JOIN only,
+  /// and only to a gateway that supports presence.
+  void joinRoom(String groupId, {String? prevExit, int? prevAliveAt}) {
     if (_groupId != null && _groupId != groupId) _send({'type': 'LEAVE'});
     _groupId = groupId;
-    if (isConnected) _send({'type': 'JOIN', 'groupId': groupId});
+    if (prevExit != null) _joinExtras = {'prevExit': prevExit, 'prevAliveAt': ?prevAliveAt};
+    if (isConnected) _sendJoin();
+  }
+
+  void _sendJoin() {
+    final gid = _groupId;
+    if (gid == null) return;
+    final msg = <String, dynamic>{'type': 'JOIN', 'groupId': gid};
+    final extras = _joinExtras;
+    if (extras != null && supports(ProtocolFeatures.presence)) msg.addAll(extras);
+    if (_send(msg)) _joinExtras = null;
   }
 
   void leaveRoom({bool leaveConvoy = false}) {
+    _joinExtras = null;
     if (_groupId == null) return;
     _send({'type': 'LEAVE', 'leaveConvoy': leaveConvoy});
     _groupId = null;
+  }
+
+  /// Tells the gateway this close is on purpose (APP_CLOSED, SIGN_OUT or LEFT), so the
+  /// group sees "App closed" instead of "No signal". Only to a gateway that supports it.
+  bool sendBye(String reason) {
+    if (!supports(ProtocolFeatures.presence)) return false;
+    return _send({'type': 'BYE', 'reason': reason});
   }
 
   // ------------------------------------------------------------- sending
@@ -151,6 +253,11 @@ class RealtimeService extends ChangeNotifier {
 
   bool _send(Map<String, dynamic> message) {
     if (!isConnected) return false;
+    final sink = debugSink;
+    if (sink != null) {
+      sink(jsonEncode(message));
+      return true;
+    }
     try {
       _channel?.sink.add(jsonEncode(message));
       return true;
@@ -169,7 +276,23 @@ class RealtimeService extends ChangeNotifier {
       final uri = Uri.parse('${AppConfig.wsUrl}?token=${Uri.encodeQueryComponent(_token!)}');
       final ch = WebSocketChannel.connect(uri);
       _channel = ch;
+      final seq = ++_channelSeq;
+      _helloOnChannel = false;
+      _readyOnChannel = false;
+      _failureNoted = false;
+      ch.ready.then((_) {
+        if (seq == _channelSeq) _readyOnChannel = true;
+      }, onError: (Object e) {
+        if (seq != _channelSeq || _failureNoted) return;
+        _failureNoted = true;
+        _noteConnectFailure(classify(e));
+      });
       _sub = ch.stream.listen(_onData, onError: (_) => _scheduleReconnect(), onDone: () {
+        // Connected at the TCP/TLS level, then closed before HELLO: the server is not answering properly.
+        if (seq == _channelSeq && _readyOnChannel && !_helloOnChannel && !_failureNoted && ch.closeCode != closeSignedOut && ch.closeCode != closeAccountRefused) {
+          _failureNoted = true;
+          _noteConnectFailure(LinkProblem.serverUnreachable);
+        }
         final outcome = closeOutcome(ch.closeCode);
         if (!outcome.reconnect) {
           _refused = true;
@@ -207,8 +330,16 @@ class RealtimeService extends ChangeNotifier {
       final type = msg['type']?.toString();
       if (type == 'HELLO') {
         _attempt = 0;
+        _helloOnChannel = true;
+        final f = msg['features'];
+        _features = f is List ? <String>{for (final x in f) x.toString()} : const <String>{};
+        _unreachableFailures = 0;
+        final linkChanged = _linkProblem != LinkProblem.none;
+        final wasConnected = isConnected;
+        _linkProblem = LinkProblem.none;
         _setState(RealtimeState.connected);
-        if (_groupId != null) _send({'type': 'JOIN', 'groupId': _groupId});
+        if (linkChanged && wasConnected) notifyListeners();
+        if (_groupId != null) _sendJoin();
         if (_adminMode) _send({'type': 'ADMIN_SUBSCRIBE'});
         return;
       }
@@ -219,6 +350,7 @@ class RealtimeService extends ChangeNotifier {
         'SNAPSHOT', 'RIDER_UPDATE', 'RIDER_LEFT', 'MESSAGE', 'ALERT', 'ALERT_RESOLVED', 'STOPS',
         'WAIT_REQUESTS', 'CONFIG', 'TRIP_STATUS', 'DISSOLVED', 'VOICE_BUSY',
         'TIMELINE', 'TIMELINE_UPDATE', 'TIMELINE_BATCH', 'REPORT_READY',
+        'SOS_RESPONSE', 'PRESENCE', 'ROSTER_CHANGED',
       };
       if (roomScoped.contains(type) && _groupId == null) return;
       if (type == 'SNAPSHOT' && msg['convoy'] is Map && msg['convoy']['groupId'] != _groupId) return;
@@ -259,6 +391,8 @@ class RealtimeService extends ChangeNotifier {
   }
 
   void _closeChannel() {
+    // A late `ready` error of a closed channel must not touch the link state (or a disposed service).
+    _channelSeq++;
     _sub?.cancel();
     _sub = null;
     try {

@@ -15,8 +15,12 @@ class ConnectionBanner extends StatelessWidget {
   const ConnectionBanner({super.key});
 
   /// The text lines of the banner (pure, for tests).
-  static List<String> lines({required bool connecting, required int pendingPoints, required bool sosWaiting}) => [
-        connecting ? 'Reconnecting to the convoy...' : 'Offline. Positions shown may be out of date.',
+  /// [serverUnreachable]: the phone has internet but the CoRoute server does not answer;
+  /// the ride is still recorded on the phone, so the text only talks about the server.
+  static List<String> lines({required bool connecting, required int pendingPoints, required bool sosWaiting, bool serverUnreachable = false}) => [
+        serverUnreachable
+            ? 'CoRoute server not reachable'
+            : (connecting ? 'Reconnecting to the convoy...' : 'Offline. Positions shown may be out of date.'),
         if (pendingPoints > 0) '$pendingPoints ${pendingPoints == 1 ? 'point' : 'points'} waiting to upload',
         if (sosWaiting) 'SOS waiting to send',
       ];
@@ -30,10 +34,12 @@ class ConnectionBanner extends StatelessWidget {
     int? lastUpdateMs,
     required int nowMs,
     bool sosWaiting = false,
+    bool serverUnreachable = false,
   }) {
     final connected = state == RealtimeState.connected;
     if (sosWaiting) return connected ? 'Sending your SOS' : 'SOS waiting to send';
     if (connected) return null;
+    if (serverUnreachable) return 'CoRoute server not reachable';
     final last = lastUpdateMs;
     final ago = (last == null || last <= 0) ? null : formatAgo(Duration(milliseconds: (nowMs - last).clamp(0, 1 << 40).toInt()));
     final head = state == RealtimeState.connecting ? 'Reconnecting' : 'Offline';
@@ -42,7 +48,8 @@ class ConnectionBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<RealtimeService>().state;
+    final rt = context.watch<RealtimeService>();
+    final state = rt.state;
     // ConvoyService is optional here (some screens and tests show the banner without it).
     final (sosWaiting, pendingPoints) = context.select<ConvoyService?, (bool, int)>(
       (s) => (s?.pendingSos != null, s?.pendingTrackPoints ?? 0),
@@ -57,7 +64,7 @@ class ConnectionBanner extends StatelessWidget {
       );
     }
     final connecting = state == RealtimeState.connecting;
-    final text = lines(connecting: connecting, pendingPoints: pendingPoints, sosWaiting: sosWaiting);
+    final text = lines(connecting: connecting, pendingPoints: pendingPoints, sosWaiting: sosWaiting, serverUnreachable: rt.serverUnreachable);
     return _strip(
       icon: SizedBox(
         width: 16,

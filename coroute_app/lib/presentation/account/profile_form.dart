@@ -4,11 +4,13 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../data/models/medical_info.dart';
 import '../../data/services/auth_service.dart';
 
-/// The one profile form: name, mobile number, bike (or pillion) and the
-/// emergency contact. Used by [EditProfileScreen] and by the forced
-/// CompleteProfileScreen after a Google sign-in.
+/// The one profile form: name, mobile number, bike (or pillion), the
+/// emergency contact, optional medical info and the emergency text opt-out.
+/// Used by [EditProfileScreen] and by the forced CompleteProfileScreen after
+/// a Google sign-in.
 ///
 /// It is a scrolling list itself, so place it directly in a Scaffold body.
 class ProfileForm extends StatefulWidget {
@@ -35,6 +37,36 @@ class ProfileForm extends StatefulWidget {
   /// Stored vehicle type for a pillion passenger (read by the gateway and AuthService.isPillion).
   static const String pillionType = 'Pillion Rider';
   static const String pillionPlate = 'PILLION';
+
+  /// Longest allergies and notes texts (same limits as the gateway).
+  static const int allergiesMax = 120;
+  static const int medicalNotesMax = 200;
+
+  /// Blood group choices: "" (not set) and the eight groups.
+  static List<String> get bloodGroupChoices => ['', ...MedicalInfo.bloodGroups];
+
+  /// What the profile form sends for medical info and the text opt-out. With
+  /// [loaded] (the server sent the current values) everything is sent; before
+  /// that only what the rider changed, so an outage never clears saved info.
+  static ({String? bloodGroup, String? allergies, String? medicalNotes, bool? smsOptOut}) medicalPatch({
+    required bool loaded,
+    required String bloodGroup,
+    required String allergies,
+    required String notes,
+    required bool smsOptOut,
+    String initialBloodGroup = '',
+    String initialAllergies = '',
+    String initialNotes = '',
+    bool initialSmsOptOut = false,
+  }) {
+    String? pick(String now, String before) => (loaded || now.trim() != before.trim()) ? now.trim() : null;
+    return (
+      bloodGroup: pick(bloodGroup, initialBloodGroup),
+      allergies: pick(allergies, initialAllergies),
+      medicalNotes: pick(notes, initialNotes),
+      smsOptOut: (loaded || smsOptOut != initialSmsOptOut) ? smsOptOut : null,
+    );
+  }
 
   /// The problem with the entered values, or null when they can be saved.
   static String? validate({
@@ -63,6 +95,15 @@ class _ProfileFormState extends State<ProfileForm> {
   final _vehicleNo = TextEditingController();
   final _contactName = TextEditingController();
   final _contactPhone = TextEditingController();
+  final _allergies = TextEditingController();
+  final _notes = TextEditingController();
+
+  String _bloodGroup = '';
+  bool _smsOptOut = false;
+  bool _medicalLoaded = false;
+  String _initialBlood = '', _initialAllergies = '', _initialNotes = '';
+  bool _initialOptOut = false;
+  late List<String> _bloodChoices;
 
   late List<String> _types;
   late String _vehicle;
@@ -89,6 +130,18 @@ class _ProfileFormState extends State<ProfileForm> {
       _types.insert(_types.length - 1, current);
     }
     _vehicle = _types.contains(current) ? current : _types.first;
+
+    _medicalLoaded = auth.medicalLoaded;
+    _initialBlood = auth.bloodGroup.trim();
+    _initialAllergies = auth.allergies;
+    _initialNotes = auth.medicalNotes;
+    _initialOptOut = auth.smsOptOut;
+    _bloodChoices = ProfileForm.bloodGroupChoices;
+    if (!_bloodChoices.contains(_initialBlood)) _bloodChoices = [..._bloodChoices, _initialBlood];
+    _bloodGroup = _initialBlood;
+    _allergies.text = _initialAllergies;
+    _notes.text = _initialNotes;
+    _smsOptOut = _initialOptOut;
   }
 
   @override
@@ -98,6 +151,8 @@ class _ProfileFormState extends State<ProfileForm> {
     _vehicleNo.dispose();
     _contactName.dispose();
     _contactPhone.dispose();
+    _allergies.dispose();
+    _notes.dispose();
     super.dispose();
   }
 
@@ -119,6 +174,17 @@ class _ProfileFormState extends State<ProfileForm> {
       _error = null;
     });
     final auth = context.read<AuthService>();
+    final medical = ProfileForm.medicalPatch(
+      loaded: _medicalLoaded,
+      bloodGroup: _bloodGroup,
+      allergies: _allergies.text,
+      notes: _notes.text,
+      smsOptOut: _smsOptOut,
+      initialBloodGroup: _initialBlood,
+      initialAllergies: _initialAllergies,
+      initialNotes: _initialNotes,
+      initialSmsOptOut: _initialOptOut,
+    );
     final ok = await auth.updateProfile(
       name: _name.text.trim(),
       phone: _phone.text.trim(),
@@ -126,6 +192,10 @@ class _ProfileFormState extends State<ProfileForm> {
       vehicleNo: _pillion ? ProfileForm.pillionPlate : _vehicleNo.text.trim().toUpperCase(),
       emergencyContact: _contactPhone.text.trim(),
       emergencyContactName: _contactName.text.trim(),
+      bloodGroup: medical.bloodGroup,
+      allergies: medical.allergies,
+      medicalNotes: medical.medicalNotes,
+      smsOptOut: medical.smsOptOut,
     );
     if (!mounted) return;
     setState(() => _busy = false);
@@ -146,9 +216,18 @@ class _ProfileFormState extends State<ProfileForm> {
         border: const OutlineInputBorder(borderRadius: Radii.mdAll),
       );
 
-  Widget _section(String text) => Padding(
+  Widget _section(String text, {String? subtitle}) => Padding(
         padding: const EdgeInsets.only(top: Space.s24, bottom: Space.s8),
-        child: Semantics(header: true, child: Text(text, style: AppText.label)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(header: true, child: Text(text, style: AppText.label)),
+            if (subtitle != null) ...[
+              const SizedBox(height: Space.s4),
+              Text(subtitle, style: AppText.caption),
+            ],
+          ],
+        ),
       );
 
   @override
@@ -234,6 +313,62 @@ class _ProfileFormState extends State<ProfileForm> {
           keyboardType: TextInputType.phone,
           style: AppText.body,
           decoration: _dec('Contact phone', Icons.phone_in_talk_rounded, hint: 'e.g. +91 91234 56780'),
+        ),
+        _section('Medical info (optional)', subtitle: 'Shown to your ride group only while your SOS or crash alert is open.'),
+        const SizedBox(height: Space.s12),
+        InputDecorator(
+          decoration: _dec('Blood group', Icons.bloodtype_rounded),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              key: const ValueKey('bloodGroup'),
+              value: _bloodGroup,
+              isDense: true,
+              isExpanded: true,
+              dropdownColor: AppTheme.slateCard,
+              style: AppText.body,
+              items: [
+                for (final g in _bloodChoices)
+                  DropdownMenuItem(value: g, child: Text(g.isEmpty ? 'Not set' : g, maxLines: 1, overflow: TextOverflow.ellipsis)),
+              ],
+              onChanged: _busy ? null : (v) => setState(() => _bloodGroup = v ?? ''),
+            ),
+          ),
+        ),
+        const SizedBox(height: Space.s12),
+        TextField(
+          key: const ValueKey('allergies'),
+          controller: _allergies,
+          maxLength: ProfileForm.allergiesMax,
+          inputFormatters: [FilteringTextInputFormatter.deny(RegExp(r'[\u0000-\u001F\u007F]'))],
+          textCapitalization: TextCapitalization.sentences,
+          style: AppText.body,
+          decoration: _dec('Allergies', Icons.warning_amber_rounded, hint: 'e.g. penicillin'),
+        ),
+        const SizedBox(height: Space.s8),
+        TextField(
+          key: const ValueKey('medicalNotes'),
+          controller: _notes,
+          maxLength: ProfileForm.medicalNotesMax,
+          minLines: 1,
+          maxLines: 3,
+          keyboardType: TextInputType.text,
+          inputFormatters: [FilteringTextInputFormatter.deny(RegExp(r'[\u0000-\u001F\u007F]'))],
+          textCapitalization: TextCapitalization.sentences,
+          style: AppText.body,
+          decoration: _dec('Notes for helpers', Icons.medical_information_rounded, hint: 'e.g. diabetic, carries insulin'),
+        ),
+        _section('Emergency texts'),
+        // Shown as a positive choice (on = receive); stored as the gateway's smsOptOut.
+        SwitchListTile(
+          key: const ValueKey('smsReceive'),
+          contentPadding: EdgeInsets.zero,
+          value: !_smsOptOut,
+          onChanged: _busy ? null : (v) => setState(() => _smsOptOut = !v),
+          title: Text('Receive emergency texts from my ride group', style: AppText.body),
+          subtitle: Text(
+            'A rider with no internet can text you where they are. When off, your number is not used for these texts.',
+            style: AppText.caption,
+          ),
         ),
         const SizedBox(height: Space.s24),
         FilledButton(

@@ -313,8 +313,28 @@ class Repo {
   async resolveAlert(groupId, alertId, byUserId) {
     const r = await this.soda.findOne(C.alerts, { groupId, alertId });
     if (!r) return false;
-    await this.soda.replace(C.alerts, r.key, { ...r.value, resolved: true, resolvedAt: Date.now(), resolvedBy: byUserId });
+    // Medical info is shown only while the alert is open: it is not kept after it.
+    const { medical, ...rest } = r.value;
+    await this.soda.replace(C.alerts, r.key, { ...rest, resolved: true, resolvedAt: Date.now(), resolvedBy: byUserId });
     return true;
+  }
+  /** Merges `patch` into one stored alert (responders). */
+  async updateAlert(groupId, alertId, patch) {
+    const r = await this.soda.findOne(C.alerts, { groupId, alertId });
+    if (!r) return false;
+    await this.soda.replace(C.alerts, r.key, { ...r.value, ...patch });
+    return true;
+  }
+  /** Trip end: removes the medical info from every alert of the convoy (open or not). */
+  async stripAlertMedical(groupId) {
+    let n = 0;
+    const rows = await this.soda.query(C.alerts, { groupId, medical: { $exists: true } }, { limit: 500 });
+    for (const r of rows) {
+      const { medical, ...rest } = r.value;
+      await this.soda.replace(C.alerts, r.key, rest);
+      n++;
+    }
+    return n;
   }
 
   // ---------- trips ----------

@@ -32,6 +32,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const gate = new UserGate(repo);
   const auth = new AuthService(repo, { googleVerifier, gate });
   const convoys = new ConvoyManager(repo, { logger });
+  // A phone number or emergency-text opt-out change reaches the rider's live ride (SMS roster).
+  auth.onProfileChanged = (user) => convoys.applyProfile(user.userId, user);
   const tracks = new TrackStore(repo);
   const geo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
   convoys.router = (wp) => geo.route(wp);

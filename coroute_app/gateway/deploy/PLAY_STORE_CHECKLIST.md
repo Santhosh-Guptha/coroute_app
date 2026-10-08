@@ -17,6 +17,9 @@
 | **Personal info → Other (vehicle, emergency contact)** | Collected, not shared. Purpose: App functionality. Optional. |
 | **Audio → Voice or sound recordings** | **Collected (ephemeral: processed in real time, never stored)**, not shared. Purpose: App functionality. |
 | **App activity → Other user-generated content** (chat/status messages) | Collected, not shared. Purpose: App functionality. |
+| **Personal info → Phone number of other users** (3.14 emergency texts) | Processed **on the device only** during a ride when the rider switched on emergency texts: the phone gets the other riders' numbers (no names), stores them encrypted, never shows them and deletes them when the ride ends. Not shared with third parties. Riders can opt out of being texted. |
+| **Health info → Health info** (3.14, optional blood group, allergies, medical notes) | Collected, optional, not shared with third parties. Purpose: App functionality (shown to the rider's own convoy only while their SOS is open). Users can clear it at any time. |
+| **App activity → Other actions** (3.14 crash detection) | The motion sensor is read **on the device only** during a ride above 25 km/h. Not collected, not sent. |
 | **App info and performance → Crash logs / Diagnostics** | Not collected (no analytics/crash SDK). |
 | **Device or other IDs** | Not collected. (The app build number is stored with the account so old builds can be retired safely; it is not a device ID.) |
 
@@ -24,6 +27,22 @@
 - `ACCESS_BACKGROUND_LOCATION`: Play requires a **declaration form + video**. Wording: *"CoRoute shares a rider's live position with the members of their convoy during a group ride so riders stay together and can respond to SOS alerts. Sharing continues while the phone is in a pocket/mounted with the screen off and stops when the rider leaves the convoy."* Video: show join convoy → position visible on a second phone → screen off → position still updating → leave convoy → sharing stops; show the persistent Android notification.
 - `RECORD_AUDIO`: used only while Talk is held / VOX armed (in-app prominent disclosure is the Talk button itself; the privacy page explains it).
 - `FOREGROUND_SERVICE_LOCATION`: tied to the background-location feature above.
+- `SEND_SMS` (3.14, restricted permission): needs the **Permissions Declaration Form** before the Play release, otherwise the
+  release is rejected. Core use case to pick: **"Emergency / safety alerts"** (send emergency SMS when a crash or SOS cannot be
+  delivered). Wording: *"When a rider's SOS or automatic crash alert cannot reach our server (no internet), and only if the rider
+  switched this on before the ride, the rider's own phone texts their emergency contact, the convoy lead and the nearest riders
+  (at most 10) with a map link to the position. The app never sends SMS for any other purpose and never reads SMS."* Video: pre-ride
+  checklist, switch on "Text the group if there is no internet", grant SMS, airplane mode with mobile signal on, raise SOS,
+  wait 45 seconds, show the text arriving on a second phone. If Play refuses: remove `SEND_SMS` from the Play build only; the
+  app then falls back to the existing SMS composer (the rider taps send), and the APK on the website keeps direct sending.
+- `USE_FULL_SCREEN_INTENT` (3.14): declare it in Play Console (App content, Full-screen intent) as an **alarm / safety alert**:
+  the crash alarm rings on the lock screen with a 30 second countdown before an automatic SOS. On Android 14+ the app also
+  asks the rider to allow it ("Alarm on lock screen" in the pre-ride checklist).
+- Telephony is declared `required="false"`, so tablets without SMS can still install the app.
+
+### Release order
+Upgrade the gateway to 3.14.0 **before** publishing build 74 (see `RUNBOOK.md`, "Release order for 3.14"). The app only uses
+the new safety messages when the gateway offers them, but nothing new works until it is upgraded.
 
 ## Build
 ```

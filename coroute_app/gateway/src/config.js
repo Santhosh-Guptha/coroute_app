@@ -99,6 +99,34 @@ const config = {
   reportRebuildMs: int('REPORT_REBUILD_MS', isTest ? 50 : 30000),
   trackUploadGraceMinutes: int('TRACK_UPLOAD_GRACE_MIN', 30),
 
+  // Rider safety (3.14). Possible incident: a hard stop from INCIDENT_FROM_KMH to INCIDENT_STOP_KMH
+  // within INCIDENT_STOP_WITHIN_S, then still (inside INCIDENT_STILL_RADIUS_M) for INCIDENT_STILL_S,
+  // away (INCIDENT_STOP_NEAR_M) from planned stops: lead(s) and the INCIDENT_NEAREST nearest riders are asked to check.
+  incidentFromKmh: int('INCIDENT_FROM_KMH', 40),
+  incidentStopKmh: int('INCIDENT_STOP_KMH', 5),
+  incidentStopWithinS: int('INCIDENT_STOP_WITHIN_S', 15),
+  incidentStillS: int('INCIDENT_STILL_S', 120),
+  incidentStillRadiusM: int('INCIDENT_STILL_RADIUS_M', 40),
+  incidentStopNearM: int('INCIDENT_STOP_NEAR_M', 300),
+  incidentNearest: int('INCIDENT_NEAREST', 2),
+  // Stopped together with other riders (fresh, slow, within INCIDENT_GROUP_NEAR_M): a red light, a
+  // toll queue or a jam, not a lone rider down. The still time is then INCIDENT_STILL_GROUP_S.
+  incidentGroupNearM: int('INCIDENT_GROUP_NEAR_M', 150),
+  incidentStillGroupS: int('INCIDENT_STILL_GROUP_S', 300),
+  // No signal for NO_SIGNAL_ESCALATE_MIN after riding at NO_SIGNAL_MIN_KMH or more: escalated to the lead.
+  noSignalEscalateMin: int('NO_SIGNAL_ESCALATE_MIN', 10),
+  noSignalMinKmh: int('NO_SIGNAL_MIN_KMH', 30),
+  // Emergency SMS roster (phone numbers for the phone's own SMS fallback).
+  rosterPerMin: int('ROSTER_PER_MIN', 6),
+  rosterValidH: int('ROSTER_VALID_H', 12),
+  smsMaxRecipients: int('SMS_MAX_RECIPIENTS', 10),
+  // Socket message dedupe (clientId) per convoy.
+  clientIdCache: int('CLIENT_ID_CACHE', 1000),
+  clientIdTtlH: int('CLIENT_ID_TTL_H', 6),
+  sosRespondersMax: int('SOS_RESPONDERS_MAX', 50),
+  medicalAllergiesMax: int('MEDICAL_ALLERGIES_MAX', 120),
+  medicalNotesMax: int('MEDICAL_NOTES_MAX', 200),
+
   // Free OpenStreetMap services, proxied and cached by the gateway (empty = disabled).
   geoSearchUrl: (process.env.GEO_SEARCH_URL ?? (isTest ? '' : 'https://nominatim.openstreetmap.org')).trim().replace(/\/+$/, ''),
   geoRouteUrl: (process.env.GEO_ROUTE_URL ?? (isTest ? '' : 'https://router.project-osrm.org')).trim().replace(/\/+$/, ''),
@@ -124,7 +152,7 @@ const config = {
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
-  latestAppBuild: int('LATEST_APP_BUILD', 73),
+  latestAppBuild: int('LATEST_APP_BUILD', 74),
   supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
 
   // CORS: comma separated origins or empty for same-origin/mobile only

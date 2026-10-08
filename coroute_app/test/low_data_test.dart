@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/core/config/app_config.dart';
 import 'package:coroute_app/core/constants/app_constants.dart';
+import 'package:coroute_app/core/constants/safety_constants.dart';
 import 'package:coroute_app/data/services/intercom_service.dart';
 import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
@@ -64,5 +65,36 @@ void main() {
     expect(p(44100).sampleRate, 16000);
     expect(p(1).sampleRate, 16000);
     expect(p(null).sampleRate, 16000);
+  });
+
+  test('ride safety settings: defaults (texts off until opted in) and they survive a restart', () async {
+    SharedPreferences.setMockInitialValues({});
+    final s = SettingsService();
+    await s.load();
+    expect(s.crashDetection, isTrue);
+    expect(s.smsFallback, isFalse);
+    expect(s.fatigueReminder, isTrue);
+    expect(s.soloCheckIn, isTrue);
+    expect(s.oemGuideSeen, isFalse);
+    var notified = 0;
+    s.addListener(() => notified++);
+    await s.setCrashDetection(false);
+    await s.setSmsFallback(true);
+    await s.setFatigueReminder(false);
+    await s.setSoloCheckIn(false);
+    await s.markOemGuideSeen();
+    await s.markOemGuideSeen();
+    expect(notified, 5, reason: 'no notification when nothing changes');
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool(SafetyConstants.keySmsFallback), isTrue);
+
+    final again = SettingsService();
+    await again.load();
+    expect(again.crashDetection, isFalse);
+    expect(again.smsFallback, isTrue);
+    expect(again.fatigueReminder, isFalse);
+    expect(again.soloCheckIn, isFalse);
+    expect(again.oemGuideSeen, isTrue);
+    expect(again.lowData, isFalse);
   });
 }

@@ -7,12 +7,18 @@ import '../../domain/notify/alert_policy.dart';
 ///
 /// Built on the same specs as the notifications, so the app and the
 /// notification shade never disagree:
-/// * `SOS:*`, `OFFLINE:*`, `SEPARATED:*` are critical;
-/// * `STOPPED:*`, `OFF_ROUTE:*`, the meeting point and the `alerts` channel (over the speed limit) are important;
-/// * the `updates` and `activity` channels are normal.
+/// * `SOS:*` (crash too), `OFFLINE:*`, `NO_SIGNAL:*`, `SEPARATED:*` and a possible incident
+///   about another rider (`INCIDENT:*`) are critical;
+/// * `STOPPED:*`, `OFF_ROUTE:*`, `CLOSED:*`, `NO_REPLY:*`, my own possible incident, the meeting
+///   point and the `alerts` channel (over the speed limit) are important;
+/// * the `updates` and `activity` channels are normal (SOS responses).
 AlertTier tierFor(AlertSpec spec) {
   final k = spec.key;
-  if (k.startsWith('SOS:') || k.startsWith('OFFLINE:') || k.startsWith('SEPARATED:')) return AlertTier.critical;
+  if (k.startsWith(AlertPolicy.incidentPrefix)) return spec.aboutMe ? AlertTier.important : AlertTier.critical;
+  if (k.startsWith(AlertPolicy.sosPrefix) || k.startsWith('OFFLINE:') || k.startsWith(AlertPolicy.noSignalPrefix) || k.startsWith('SEPARATED:')) {
+    return AlertTier.critical;
+  }
+  if (k.startsWith(AlertPolicy.closedPrefix) || k.startsWith(AlertPolicy.noReplyPrefix)) return AlertTier.important;
   if (k.startsWith('STOPPED:') || k.startsWith('OFF_ROUTE:') || k == AlertPolicy.meetingKey) return AlertTier.important;
   return switch (spec.channel) {
     AlertChannel.sos => AlertTier.critical,

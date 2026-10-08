@@ -18,7 +18,7 @@
 </head>
 <body><main>
 <h1>CoRoute Privacy Policy</h1>
-<p class="meta">Effective 5 October 2026 · CoRoute is a free, non-profit app for group riders, operated by devmonks.space.</p>
+<p class="meta">Effective 8 October 2026 · CoRoute is a free, non-profit app for group riders, operated by devmonks.space.</p>
 
 <p>CoRoute helps a group of riders stay together: it shows every member of your convoy on a map, lets you send quick status
 messages and SOS alerts, and provides a live voice intercom. This policy explains exactly what the app collects, why, how long
@@ -28,9 +28,12 @@ it is kept, and how to delete it. We do not sell data, we show no ads, and we ha
 <table>
 <tr><th>Data</th><th>Why</th><th>Kept for</th></tr>
 <tr><td><b>Account</b>: name/callsign, e-mail, phone, vehicle type &amp; number (or pillion), emergency contact name &amp; phone (required before you ride in a convoy), hashed password (or your Google account e-mail and name if you sign in with Google)</td><td>To identify you to your convoy and let your ride mates reach you; emergency contact is shown only to members of your convoy</td><td>Until you delete your account</td></tr>
+<tr><td><b>Medical info (optional)</b>: blood group, allergies and short medical notes, only if you fill them in</td><td>So the riders who reach you after a crash or SOS know what to tell a doctor</td><td>Until you clear the fields or delete your account. A copy goes with an SOS alert only while the alert is open, then it is removed</td></tr>
+<tr><td><b>Emergency text setting</b>: whether you agree to receive emergency texts from your ride group</td><td>To leave your number out of other riders' emergency texts if you say no</td><td>Until you change it or delete your account</td></tr>
 <tr><td><b>Live location</b> (latitude/longitude, speed, heading), battery level, stop status</td><td>Shown to the members of the convoy you are currently in, so the group can stay together and respond to an SOS</td><td>The latest position is kept while the convoy is active and removed 90 days after it ends</td></tr>
 <tr><td><b>Recorded route</b>: the GPS points your phone records during a convoy (time, position, speed, accuracy)</td><td>To show your route, measure distance, moving time and stops exactly, and to let your group replay the ride</td><td>Deleted 90 days after they were recorded</td></tr>
-<tr><td><b>Ride timeline</b>: who joined, stopped, fell behind, went off route, lost signal, went over the group speed limit, reached or rode past a planned stop, raised an SOS or arrived, with the time, how long it lasted and the place name</td><td>The shared trip timeline and trip report for the convoy</td><td>Kept as part of the trip history; the exact coordinates in it are removed after 90 days, the place name stays</td></tr>
+<tr><td><b>Ride timeline</b>: who joined, stopped, fell behind, went off route, lost signal, went over the group speed limit, reached or rode past a planned stop, raised an SOS or arrived, closed the app, stopped suddenly
+at speed, went to help a rider or said they are OK, with the time, how long it lasted and the place name</td><td>The shared trip timeline and trip report for the convoy</td><td>Kept as part of the trip history; the exact coordinates in it are removed after 90 days, the place name stays</td></tr>
 <tr><td><b>Convoy records</b>: convoy name, join code, members, start/end time, settings, planned stops, chat and quick-status messages, SOS alerts</td><td>To run the convoy and show your trip history</td><td>Kept as part of your trip history; GPS traces inside them and the exact position of SOS alerts are deleted after 90 days</td></tr>
 <tr><td><b>Trip history</b>: trip name, members, dates, distance and speed statistics, and the names of the places where each rider started and finished</td><td>Your personal ride log</td><td>Until you delete the trip or your account; the GPS trail of a trip is deleted after 90 days</td></tr>
 <tr><td><b>Voice</b></td><td>Live intercom between convoy members (group, or privately to one rider you choose)</td><td><b>Audio is never stored.</b> It is relayed in real time and discarded. We keep only who talked to whom and for how long, for 7 days, to detect abuse</td></tr>
@@ -46,16 +49,39 @@ connection returns.</p>
 <p>If the theme is set to Automatic, the app uses the last position your phone already knows to work out sunrise and sunset.
 This happens on your phone only; that position is not sent to us.</p>
 
+<h2>Crash detection and the motion sensor</h2>
+<p>During a ride, above 25 km/h, the app can read the phone's motion sensor to notice a crash. This happens on your phone only.
+Motion data is not sent to us and not stored. If the phone thinks you crashed, it rings and counts down for 30 seconds first.
+If you tap "I'm OK", nothing is sent. If you do not answer, an SOS marked as automatic goes to your convoy with your position,
+your speed before the impact and the time. You can switch crash detection off in the app.</p>
+<p>Our server also notices when a rider stops suddenly from high speed and does not move for 2 minutes, or loses signal right
+after riding fast. It then asks the lead and the nearest riders to check on that rider. This uses only the position and speed
+your convoy already sees.</p>
+
+<h2>Emergency texts when there is no internet</h2>
+<p>This is off until you switch it on. When it is on and your SOS cannot reach the server, your own phone sends a text
+message (SMS) with a map link to your position. It goes to your emergency contact, your lead and the nearest riders in your
+convoy, at most 10 people. The texts are sent from your phone and your SIM, not by us, and your carrier may charge for them.</p>
+<p>To make this work, your phone keeps the phone numbers of the other riders in your convoy during the ride. It gets only their
+numbers and their role in the ride, not their names. The numbers are stored encrypted on the phone, are never shown on screen,
+and are deleted when the ride ends, when you leave or sign out, or when you switch the setting off. They are used for nothing
+else.</p>
+<p>If you do not want to receive these texts, switch off "Receive emergency texts from my ride group" in your profile. Your number is then
+not given to other riders for texts. Your ride mates can still see your number on your rider card, as before.</p>
+
 <h2>Microphone</h2>
 <p>The microphone is used only while you hold the Talk button or have armed the hands-free (VOX) mode, and only inside an
 active convoy. Your voice is sent live to the members of your convoy (or to the single rider you selected) and is not recorded
 or stored by us.</p>
 
 <h2>Who can see your data</h2>
-<p>Members of the convoy you are in see your name, vehicle, phone, emergency contact, live position and messages. They can also see
+<p>Members of the convoy you are in see your name, vehicle, phone, emergency contact, live position and messages. If you
+filled in medical info, they see it only while your SOS or crash alert is open. Medical info is never shown to administrators,
+never written into the ride timeline and never put in notifications. They can also see
 your recorded route, stops and timeline entries, but only for the time they were in that convoy themselves. Nobody outside
 your convoy can see them. Service administrators can see active convoys for safety operations (for example to dissolve an
-abusive convoy or send a safety announcement); they cannot listen to intercom audio.</p>
+abusive convoy or send a safety announcement) and open SOS alerts with who raised them, where and who is going to help; they
+cannot see medical info or listen to intercom audio.</p>
 
 <h2>Where your data lives</h2>
 <p>Data is stored in an Oracle Cloud Autonomous Database and relayed by our server, both in the Oracle Cloud Hyderabad region
@@ -69,7 +95,8 @@ your timeline entries, and your chat messages, SOS alerts and voice log entries.
 riders' history, but your name there is replaced with "Former rider", and your phone, bike number and emergency contact are removed. If you can no longer sign in, e-mail
 <a href="mailto:santhoshbukka5@gmail.com">santhoshbukka5@gmail.com</a> from the address you registered with and we delete it
 within 30 days. You may also request a copy of your data. You can revoke location and microphone permissions at any time in
-your phone's settings; the app will then work in a limited mode.</p>
+your phone's settings; the app will then work in a limited mode. You can switch crash detection and emergency texts off at
+any time in the app.</p>
 
 <h2>Children</h2>
 <p>CoRoute is intended for licensed riders aged 18 and over. We do not knowingly collect data from children.</p>

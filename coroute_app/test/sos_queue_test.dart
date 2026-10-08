@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -7,7 +10,11 @@ import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/core/constants/app_constants.dart';
+import 'package:coroute_app/data/models/convoy_model.dart';
+import 'package:coroute_app/data/models/medical_info.dart';
 import 'package:coroute_app/data/models/pending_sos.dart';
+import 'package:coroute_app/data/models/rider_model.dart';
+import 'package:coroute_app/data/models/safety_wire.dart';
 import 'package:coroute_app/data/models/sos_alert_model.dart';
 import 'package:coroute_app/data/services/api_client.dart';
 import 'package:coroute_app/data/services/auth_service.dart';
@@ -16,6 +23,39 @@ import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
 import 'package:coroute_app/presentation/widgets/connection_banner.dart';
 import 'package:coroute_app/presentation/widgets/emergency_sos_sheet.dart';
+
+/// A realtime link without a network (records what is sent).
+class _FakeRt extends RealtimeService {
+  final List<Map<String, dynamic>> sent = [];
+  bool connected = true;
+  final StreamController<Map<String, dynamic>> _ctrl = StreamController<Map<String, dynamic>>.broadcast();
+
+  @override
+  Stream<Map<String, dynamic>> get events => _ctrl.stream;
+  @override
+  bool get isConnected => connected;
+  @override
+  RealtimeState get state => connected ? RealtimeState.connected : RealtimeState.disconnected;
+  @override
+  bool supports(String feature) => true;
+  @override
+  bool send(Map<String, dynamic> message) {
+    if (!connected) return false;
+    sent.add(message);
+    return true;
+  }
+
+  @override
+  void connect(String token, {bool adminMode = false}) {}
+  @override
+  void disconnect() {}
+  @override
+  void joinRoom(String groupId, {String? prevExit, int? prevAliveAt}) {}
+  @override
+  void leaveRoom({bool leaveConvoy = false}) {}
+
+  void emit(Map<String, dynamic> m) => _ctrl.add(m);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +86,69 @@ void main() {
       expect(sos.matches(echo.clientId), isTrue);
       expect(sos.matches(other.clientId), isFalse);
       expect(sos.matches(null), isFalse);
+    });
+
+    test('stored SOS from 3.13 (no crash fields) still decodes', () {
+      final old = PendingSos.decode('{"clientId":"usr_a-1","groupId":"GRP-1","lat":1.5,"lng":2.5,"type":"EMERGENCY","createdAt":5}');
+      expect(old, isNotNull);
+      expect(old!.auto, isFalse);
+      expect(old.speedBeforeKmh, isNull);
+      final m = old.toMessage();
+      expect(m['auto'], isFalse);
+      expect(m['occurredAt'], 5);
+      expect(m.containsKey('speedBeforeKmh'), isFalse);
+      expect(m.containsKey('impactG'), isFalse);
+    });
+
+    test('crash fields round-trip and go on the wire', () {
+      const crash = PendingSos(clientId: 'c-1', groupId: 'GRP-1', lat: 1, lng: 2, type: SosTypes.crash, createdAt: 77, auto: true, speedBeforeKmh: 55.5, impactG: 6.2);
+      final back = PendingSos.decode(crash.encode())!;
+      expect(back.auto, isTrue);
+      expect(back.speedBeforeKmh, 55.5);
+      expect(back.impactG, 6.2);
+      final m = back.toMessage();
+      expect(m['alertType'], 'CRASH');
+      expect(m['auto'], isTrue);
+      expect(m['speedBeforeKmh'], 55.5);
+      expect(m['impactG'], 6.2);
+      expect(m['occurredAt'], 77);
+    });
+
+    test('alerts: crash details, responders and medical info parse; old alerts keep defaults', () {
+      final a = SosAlertModel.fromJson({
+        'alertId': 'SOS-9',
+        'userId': 'usr_k',
+        'userName': 'Kiran',
+        'alertType': 'CRASH',
+        'timestamp': 100,
+        'auto': true,
+        'details': {'speedBeforeKmh': 55, 'impactG': 6.1},
+        'occurredAt': 90,
+        'responders': [
+          {'userId': 'usr_a', 'name': 'Arjun', 'kind': 'GOING', 'at': 101},
+          {'userId': 'usr_b', 'name': 'Bala', 'kind': 'WITH_THEM', 'at': 102},
+        ],
+        'medical': {'bloodGroup': 'O+', 'allergies': 'penicillin'},
+      });
+      expect(a.isCrash, isTrue);
+      expect(a.auto, isTrue);
+      expect(a.speedBeforeKmh, 55);
+      expect(a.impactG, 6.1);
+      expect(a.occurredAt, 90);
+      expect(a.responders.map((r) => r.kind).toList(), [SosResponseKind.going, SosResponseKind.withThem]);
+      expect(a.medical?.bloodGroup, 'O+');
+      expect(a.medical?.allergies, 'penicillin');
+      final again = SosAlertModel.fromJson(a.toJson());
+      expect(again.responders.length, 2);
+      expect(again.medical?.bloodGroup, 'O+');
+      expect(again.speedBeforeKmh, 55);
+
+      final old = SosAlertModel.fromJson({'alertId': 'SOS-1', 'userId': 'usr_a', 'timestamp': 7});
+      expect(old.auto, isFalse);
+      expect(old.occurredAt, 7);
+      expect(old.responders, isEmpty);
+      expect(old.medical, isNull);
+      expect(MedicalInfo.fromJson({'bloodGroup': '', 'allergies': ' '}), isNull);
     });
 
     test('a newer position keeps the same clientId', () {
@@ -155,6 +258,111 @@ void main() {
         expect(await PendingSosStore.load(), isNull);
       });
       await tearDownServices(tester);
+    });
+  });
+
+  group('3.14 SOS through the convoy service', () {
+    Future<(ConvoyService, _FakeRt)> start() async {
+      SharedPreferences.setMockInitialValues({});
+      FlutterSecureStorage.setMockInitialValues({});
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('dev.fluttercommunity.plus/charging'),
+        (call) async => null,
+      );
+      final convoy = ConvoyModel(
+        groupId: 'GRP-1',
+        name: 'Hill run',
+        joinCode: '123456',
+        createdByUserId: 'usr_me',
+        createdByUserName: 'Me',
+        createdAtEpochMs: 1,
+        riders: {
+          'usr_me': RiderModel(userId: 'usr_me', name: 'Me', lat: 12.9, lng: 77.5, lastSeenEpochMs: 1),
+          'usr_k': RiderModel(userId: 'usr_k', name: 'Kiran', lat: 12.95, lng: 77.55, lastSeenEpochMs: 1),
+        },
+        activeAlerts: [SosAlertModel(alertId: 'SOS-K', userId: 'usr_k', userName: 'Kiran', lat: 12.95, lng: 77.55, timestamp: 1)],
+      );
+      final api = ApiClient(
+        httpClient: MockClient((req) async {
+          if (req.url.path.endsWith('/convoys/active')) return http.Response(jsonEncode({'convoy': convoy.toJson()}), 200);
+          return http.Response('{}', 200);
+        }),
+        storage: const FlutterSecureStorage(),
+      );
+      final rt = _FakeRt();
+      final c = ConvoyService(api, rt, TripStorageService(api));
+      await c.startSession(token: 't', userId: 'usr_me');
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      return (c, rt);
+    }
+
+    test('raiseSos CRASH sends the automatic crash fields', () async {
+      final (c, rt) = await start();
+      final r = c.raiseSos(type: SosTypes.crash, lat: 12.9, lng: 77.5, auto: true, speedBeforeKmh: 55, impactG: 6.2, occurredAtMs: 1700000000000);
+      expect(r, SosDelivery.sent);
+      final m = rt.sent.lastWhere((x) => x['type'] == 'SOS');
+      expect(m['alertType'], 'CRASH');
+      expect(m['auto'], isTrue);
+      expect(m['speedBeforeKmh'], 55);
+      expect(m['impactG'], 6.2);
+      expect(m['occurredAt'], 1700000000000);
+      expect(m['clientId'], c.pendingSos!.clientId);
+      c.dispose();
+    });
+
+    test('a crash raise upgrades a pending manual SOS and keeps its clientId', () async {
+      final (c, rt) = await start();
+      rt.connected = false;
+      expect(c.triggerSosAlert(userId: 'usr_me', userName: 'Me', lat: 12.9, lng: 77.5, type: 'CRASH_OR_EMERGENCY'), SosDelivery.queued);
+      final id = c.pendingSos!.clientId;
+      c.raiseSos(type: SosTypes.crash, lat: 12.91, lng: 77.51, auto: true, speedBeforeKmh: 48, impactG: 5);
+      expect(c.pendingSos!.clientId, id);
+      expect(c.pendingSos!.type, 'CRASH');
+      expect(c.pendingSos!.auto, isTrue);
+      expect(c.pendingSos!.speedBeforeKmh, 48);
+      expect(c.pendingSos!.lat, 12.91);
+      // A later manual press never downgrades it.
+      c.triggerSosAlert(userId: 'usr_me', userName: 'Me', lat: 12.92, lng: 77.52);
+      expect(c.pendingSos!.type, 'CRASH');
+      expect(c.pendingSos!.clientId, id);
+      c.dispose();
+    });
+
+    test('SOS_RESPONSE updates the responders of the alert', () async {
+      final (c, rt) = await start();
+      rt.emit({
+        'type': 'SOS_RESPONSE',
+        'alertId': 'SOS-K',
+        'userId': 'usr_me',
+        'name': 'Me',
+        'kind': 'GOING',
+        'at': 5,
+        'responders': [
+          {'userId': 'usr_me', 'name': 'Me', 'kind': 'GOING', 'at': 5},
+        ],
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final a = c.activeConvoy!.activeAlerts.single;
+      expect(a.responders.single.name, 'Me');
+      expect(c.myResponseTo('SOS-K'), SosResponseKind.going);
+      rt.emit({'type': 'SOS_RESPONSE', 'alertId': 'SOS-K', 'userId': 'usr_me', 'kind': null, 'at': 6, 'responders': []});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(c.activeConvoy!.activeAlerts.single.responders, isEmpty);
+      expect(c.myResponseTo('SOS-K'), isNull);
+      c.dispose();
+    });
+
+    test('ALERT with medical info is kept with the alert', () async {
+      final (c, rt) = await start();
+      rt.emit({
+        'type': 'ALERT',
+        'alert': {'alertId': 'SOS-2', 'userId': 'usr_k', 'userName': 'Kiran', 'alertType': 'CRASH', 'auto': true, 'timestamp': 9, 'medical': {'bloodGroup': 'B+'}},
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final a = c.activeConvoy!.activeAlerts.firstWhere((x) => x.alertId == 'SOS-2');
+      expect(a.medical?.bloodGroup, 'B+');
+      expect(a.isCrash, isTrue);
+      c.dispose();
     });
   });
 }

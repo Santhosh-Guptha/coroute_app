@@ -23,7 +23,8 @@ const { WebSocketServer, WebSocket } = require('ws');
 const crypto = require('crypto');
 const config = require('./config');
 const { verifyToken, ROLE_ADMIN, AuthError, identityOf } = require('./auth');
-const { ConvoyError, publicRider } = require('./convoys');
+const { ConvoyError, publicRider, publicAlert } = require('./convoys');
+const { clientIdOf } = require('./validate');
 const { validateChunk, TrackError, uploadPermission } = require('./tracks');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 
@@ -38,10 +39,17 @@ const ACTION_TYPES = new Set([
   'STOP_VISITED', 'ROUTE_SET', 'CONFIG', 'TIMELINE_SINCE', 'SOS_RESOLVE', 'TRIP_STATUS',
   // These read the database too (membership, convoy load, fleet).
   'JOIN', 'LEAVE', 'ADMIN_SUBSCRIBE',
+  // 3.14
+  'SOS_RESPOND', 'BYE',
 ]);
 /** Socket messages that alert the whole convoy: a few per 10 seconds, each type with its own budget
  * (a rider who just asked the group to wait must still be able to raise an SOS). */
-const ALARM_TYPES = new Set(['WAIT', 'SOS']);
+const ALARM_TYPES = new Set(['WAIT', 'SOS', 'CHECK_IN']);
+/** Messages that may carry a clientId (phone outbox): applied once, answered with ACK. */
+const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN']);
+const BYE_REASONS = new Set(['APP_CLOSED', 'SIGN_OUT', 'LEFT']);
+/** Protocol features this gateway offers (HELLO.features); 3.14 apps use a feature only when listed. */
+const FEATURES = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster'];
 
 function encodeVoice(kind, header, payload) {
   const h = Buffer.from(JSON.stringify(header), 'utf8');
@@ -88,11 +96,17 @@ class Hub {
     if (this.fleetTimer.unref) this.fleetTimer.unref();
   }
 
-  close() { clearInterval(this.heartbeat); clearInterval(this.fleetTimer); this.wss.close(); }
+  close() {
+    // Sockets closed by a restart are not "no signal": presence is left as it was.
+    this.closing = true;
+    clearInterval(this.heartbeat); clearInterval(this.fleetTimer); this.wss.close();
+  }
 
   // ------------------------------------------------------------- helpers
   send(ws, obj) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
-  sendError(ws, code, message, reason) { this.send(ws, { type: 'ERROR', code, message, ...(reason ? { reason } : {}) }); }
+  sendError(ws, code, message, reason, clientId) {
+    this.send(ws, { type: 'ERROR', code, message, ...(reason ? { reason } : {}), ...(clientId ? { clientId } : {}) });
+  }
 
   broadcast(groupId, payload, { except } = {}) {
     const set = this.rooms.get(groupId);
@@ -154,16 +168,22 @@ class Hub {
     ws.groupId = null;
     ws.allowed = false; // nothing (JSON or voice) is acted on until the account gate passed
     ws.rate = { telemetry: 0, chat: 0, track: 0, action: 0, windowStart: Date.now() };
-    ws.alarms = { WAIT: [], SOS: [] };
+    ws.alarms = { WAIT: [], SOS: [], CHECK_IN: [] };
+    ws.byeReason = null;
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('message', (data, isBinary) => {
       if (isBinary) { if (ws.allowed) this._onVoice(ws, data); return; }
       this._onJson(ws, data).catch((e) => this._handleError(ws, e));
     });
-    ws.on('close', () => { this._unbind(ws); this.admins.delete(ws); });
+    ws.on('close', () => {
+      const gid = ws.groupId;
+      this._unbind(ws);
+      this.admins.delete(ws);
+      if (gid) this._presenceOnClose(ws, gid);
+    });
     ws.on('error', () => { /* close handler runs */ });
     ws.ready = this._gateCheck(ws).then((ok) => {
-      if (ok) this.send(ws, { type: 'HELLO', userId: ws.user.userId, serverTime: Date.now(), heartbeatSec: 30 });
+      if (ok) this.send(ws, { type: 'HELLO', userId: ws.user.userId, serverTime: Date.now(), heartbeatSec: 30, protocol: 2, features: FEATURES });
       return ok;
     });
   }
@@ -214,9 +234,24 @@ class Hub {
   }
 
   _handleError(ws, e) {
-    if (e instanceof ConvoyError || e instanceof TrackError) return this.sendError(ws, e.status, e.message, e.reason);
+    if (e instanceof ConvoyError || e instanceof TrackError) return this.sendError(ws, e.status, e.message, e.reason, e.clientId);
     this.log.warn('[ws] error', e.message);
-    this.sendError(ws, 500, 'Internal error');
+    this.sendError(ws, 500, 'Internal error', undefined, e && e.clientId);
+  }
+
+  /**
+   * Presence when a socket bound to a room closes (3.14): only when the rider has no other open
+   * socket in that room. A BYE before the close means the app was closed; no BYE means no signal
+   * (heartbeat timeout, network drop, process killed). LEFT: nothing (LEAVE handles it).
+   */
+  _presenceOnClose(ws, gid) {
+    if (this.closing || !ws.user || !ws.allowed) return;
+    const uid = ws.user.userId;
+    const set = this.rooms.get(gid);
+    if (set && [...set].some((c) => c !== ws && c.user && c.user.userId === uid && c.readyState === WebSocket.OPEN)) return;
+    if (ws.byeReason === 'LEFT') return;
+    const presence = ws.byeReason === 'APP_CLOSED' || ws.byeReason === 'SIGN_OUT' ? 'APP_CLOSED' : 'NO_SIGNAL';
+    try { this.convoys.setPresence(gid, uid, presence); } catch (e) { this.log.warn('[ws] presence failed', e.message); }
   }
 
   _allow(ws, bucket, limitPerSec) {
@@ -247,8 +282,33 @@ class Hub {
     if (!(await this._gateCheck(ws))) return;
     let msg;
     try { msg = JSON.parse(data.toString()); } catch { return this.sendError(ws, 400, 'Malformed JSON'); }
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return this.sendError(ws, 400, 'Malformed JSON');
+    // Outbox messages (3.14): a valid clientId makes the message idempotent and earns an ACK.
+    // An invalid clientId is treated as absent (old behaviour).
+    const cid = CLIENT_ID_TYPES.has(msg.type) ? clientIdOf(msg.clientId) : '';
+    try {
+      return await this._dispatch(ws, msg, cid);
+    } catch (e) {
+      if (cid && e && typeof e === 'object') e.clientId = cid;
+      throw e;
+    }
+  }
+
+  /** Runs an outbox message once per (rider, clientId) in the room, then ACKs it to the sender. */
+  async _once(ws, cid, type, apply) {
+    if (!cid) return apply();
+    const gid = this._requireRoom(ws);
+    const room = await this.convoys.getRoom(gid);
+    if (this.convoys.seenClientId(room, ws.user.userId, cid, type)) {
+      return this.send(ws, { type: 'ACK', clientId: cid, duplicate: true, ts: Date.now() });
+    }
+    await apply();
+    this.convoys.rememberClientId(room, ws.user.userId, cid);
+    return this.send(ws, { type: 'ACK', clientId: cid, duplicate: false, ts: Date.now() });
+  }
+
+  async _dispatch(ws, msg, cid) {
     const u = ws.user;
-    if (!msg || typeof msg !== 'object') return this.sendError(ws, 400, 'Malformed JSON');
     // Every message that writes to the database has a budget per socket.
     if (ACTION_TYPES.has(msg.type) && !this._allow(ws, 'action', config.wsActionsPerSec)) throw new ConvoyError('Slow down.', 429);
     if (ALARM_TYPES.has(msg.type) && !this._allowAlarm(ws, msg.type)) throw new ConvoyError('Slow down.', 429);
@@ -259,8 +319,23 @@ class Hub {
         const groupId = String(msg.groupId || '');
         if (!(await this.convoys.isMember(groupId, u.userId))) throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER');
         this._bind(ws, groupId);
+        ws.byeReason = null;
         const room = await this.convoys.getRoom(groupId);
-        return this.send(ws, { type: 'SNAPSHOT', convoy: this.convoys.snapshot(room), ts: Date.now() });
+        this.send(ws, { type: 'SNAPSHOT', convoy: this.convoys.snapshot(room), ts: Date.now() });
+        // 3.14: the phone says Android closed the app last time (no clean exit).
+        if (msg.prevExit === 'KILLED' && this.timeline) {
+          const t = Date.now();
+          const at = Number.isFinite(Number(msg.prevAliveAt)) && msg.prevAliveAt !== null && typeof msg.prevAliveAt !== 'boolean'
+            ? Math.round(Math.max(t - 48 * 3600000, Math.min(t, Number(msg.prevAliveAt)))) : 0;
+          await this.timeline.markKilled(groupId, u.userId, at);
+        }
+        this.convoys.setPresence(groupId, u.userId, 'ONLINE');
+        return;
+      }
+      case 'BYE': {
+        // Recorded only; presence changes when the socket closes. Repeats are ignored.
+        if (!ws.byeReason) ws.byeReason = BYE_REASONS.has(msg.reason) ? msg.reason : 'APP_CLOSED';
+        return;
       }
       case 'LEAVE': {
         const gid = ws.groupId;
@@ -277,7 +352,7 @@ class Hub {
         const rider = this.convoys.patchRider(room, u.userId, msg, { emit: false });
         return this.broadcast(gid, { type: 'RIDER_UPDATE', rider: publicRider(rider), ts: Date.now() }, { except: ws });
       }
-      case 'STATUS': {
+      case 'STATUS': return this._once(ws, cid, 'STATUS', async () => {
         const gid = this._requireRoom(ws);
         const room = await this.convoys.getRoom(gid);
         const patch = { statusReason: String(msg.statusReason ?? '').slice(0, 24), statusMessage: String(msg.statusMessage ?? '').slice(0, 140) };
@@ -287,8 +362,7 @@ class Hub {
         if (patch.statusReason !== prevReason) {
           this.convoys.emit('activity', gid, { type: 'STATUS', user: u, reason: patch.statusReason, message: patch.statusMessage, lat: next.lat, lng: next.lng });
         }
-        return;
-      }
+      });
       case 'CORIDER': {
         const gid = this._requireRoom(ws);
         const room = await this.convoys.getRoom(gid);
@@ -302,16 +376,26 @@ class Hub {
       case 'CHAT': {
         const gid = this._requireRoom(ws);
         if (!this._allow(ws, 'chat', 5)) throw new ConvoyError('Slow down.', 429);
-        await this.convoys.sendMessage(gid, u, msg);
-        return;
+        return this._once(ws, cid, 'CHAT', () => this.convoys.sendMessage(gid, u, {
+          text: msg.text, isQuickCard: msg.isQuickCard, cardType: msg.cardType, clientId: cid, sentAt: msg.sentAt,
+        }));
       }
-      case 'WAIT': return void await this.convoys.requestWait(this._requireRoom(ws), u);
+      case 'WAIT': return this._once(ws, cid, 'WAIT', () => this.convoys.requestWait(this._requireRoom(ws), u));
       case 'SOS': {
         const gid = this._requireRoom(ws);
         const r = await this.convoys.raiseSos(gid, u, msg);
         // A retried SOS: only the sender hears it again, so the phone can mark it delivered.
-        if (r.duplicate) this.send(ws, { type: 'ALERT', alert: r.alert, duplicate: true, ts: Date.now() });
+        if (r.duplicate) this.send(ws, { type: 'ALERT', alert: publicAlert(r.alert), duplicate: true, ts: Date.now() });
         return;
+      }
+      case 'SOS_RESPOND': {
+        const gid = this._requireRoom(ws);
+        return this._once(ws, cid, 'SOS_RESPOND', () => this.convoys.respondSos(gid, u, { alertId: msg.alertId, kind: msg.kind }));
+      }
+      case 'CHECK_IN': {
+        const gid = this._requireRoom(ws);
+        if (!this.timeline) throw new ConvoyError('Check-in is not available.', 503);
+        return this._once(ws, cid, 'CHECK_IN', () => this.timeline.checkIn(gid, u, msg));
       }
       case 'SOS_RESOLVE': return void await this.convoys.resolveSos(this._requireRoom(ws), u, String(msg.alertId || ''));
       case 'STOP_ADD': return void await this.convoys.addStop(this._requireRoom(ws), u, msg);
@@ -322,7 +406,7 @@ class Hub {
       case 'STOP_SKIP': return void await this.convoys.skipStop(this._requireRoom(ws), u, String(msg.stopId || ''));
       case 'STOP_REORDER': return void await this.convoys.reorderStops(this._requireRoom(ws), u, msg.order);
       case 'ROUTE_SET': return void await this.convoys.setRoute(this._requireRoom(ws), u, msg);
-      case 'STOP_VISITED': return void await this.convoys.setStopVisited(this._requireRoom(ws), u, String(msg.stopId || ''), !!msg.isVisited);
+      case 'STOP_VISITED': return this._once(ws, cid, 'STOP_VISITED', () => this.convoys.setStopVisited(this._requireRoom(ws), u, String(msg.stopId || ''), !!msg.isVisited));
       case 'CONFIG': return void await this.convoys.updateConfig(this._requireRoom(ws), u, msg);
       case 'TRIP_STATUS': {
         const gid = this._requireRoom(ws);
@@ -455,4 +539,4 @@ class Hub {
   }
 }
 
-module.exports = { Hub, encodeVoice, decodeVoice, VOICE_START, VOICE_FRAME, VOICE_END };
+module.exports = { Hub, encodeVoice, decodeVoice, VOICE_START, VOICE_FRAME, VOICE_END, FEATURES };
