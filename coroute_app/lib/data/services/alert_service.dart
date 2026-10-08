@@ -85,8 +85,15 @@ class AlertService with WidgetsBindingObserver {
     final c = _convoys.activeConvoy;
     final uid = _convoys.myUserId;
     if (c == null || uid == null) return null;
-    final role = c.riders[uid]?.role ?? 'PACK';
-    return AlertViewer(userId: uid, isLead: c.createdByUserId == uid || role == 'LEAD', isSweeper: role == 'SWEEPER');
+    final me = c.riders[uid];
+    final role = me?.role ?? 'PACK';
+    return AlertViewer(
+      userId: uid,
+      isLead: c.createdByUserId == uid || role == 'LEAD',
+      isSweeper: role == 'SWEEPER',
+      lat: me?.lat,
+      lng: me?.lng,
+    );
   }
 
   void _reconcile() {
@@ -118,7 +125,7 @@ class AlertService with WidgetsBindingObserver {
         if (firstLoad || now - e.startedAt > const Duration(minutes: 2).inMilliseconds) continue;
         final a = _policy.oneShot(e, me);
         // Safety alerts (the alerts channel) show even while the app is open; the rest only in the background.
-        if (a == null || (_foreground && a.channel != AlertChannel.alerts)) continue;
+        if (a == null || (_foreground && !AlertPolicy.showWhileOpen(a))) continue;
         _show(a, timeout: const Duration(minutes: 10));
       }
     }

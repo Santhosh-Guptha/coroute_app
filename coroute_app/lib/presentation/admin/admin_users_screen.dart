@@ -2,16 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/glass_card.dart';
+import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
+import 'admin_ui.dart';
 import 'admin_user_details_screen.dart';
 
-/// Master admin: Registered Users directory.
-/// Lists every registered account with live status, and opens detailed profile,
-/// account hold/block controls, and all trips with fellow group members.
+/// Which users the list shows.
+enum AdminUserFilter { all, active, onHold, blocked, riding }
+
+/// Master admin: every registered account with its status. Search and filter
+/// sit in one row; tapping a user opens the details (beside the list on a
+/// tablet, as a new screen on a phone). Pull down to refresh; the list stays
+/// visible while it reloads.
 class AdminUsersScreen extends StatefulWidget {
-  const AdminUsersScreen({super.key});
+  /// The filter the list opens with (the admin home opens "On hold").
+  final AdminUserFilter initialFilter;
+
+  const AdminUsersScreen({super.key, this.initialFilter = AdminUserFilter.all});
 
   @override
   State<AdminUsersScreen> createState() => _AdminUsersScreenState();
@@ -19,10 +27,12 @@ class AdminUsersScreen extends StatefulWidget {
 
 class _AdminUsersScreenState extends State<AdminUsersScreen> {
   List<Map<String, dynamic>> _users = [];
+  bool _loaded = false;
   bool _loading = true;
   String? _error;
   String _query = '';
-  String _filter = 'ALL'; // ALL, ACTIVE, ON_HOLD, BLOCKED, RIDING
+  late AdminUserFilter _filter = widget.initialFilter;
+  String? _selectedId; // wide layout only
 
   @override
   void initState() {
@@ -35,263 +45,251 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
       _loading = true;
       _error = null;
     });
+    String? error;
     try {
       final res = await context.read<ApiClient>().get('/admin/users');
-      final list = (res is Map ? res['users'] : null);
-      _users = (list is List) ? list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : [];
+      _users = adminMapList(res is Map ? res['users'] : null);
+      _loaded = true;
     } on ApiException catch (e) {
-      _error = e.message;
+      error = e.message;
     } catch (_) {
-      _error = 'Could not load users.';
+      error = 'Could not load users.';
     }
-    if (mounted) setState(() => _loading = false);
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _error = error;
+    });
+    if (error != null && _loaded) adminSnack(context, error, error: true);
   }
 
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'ON_HOLD':
-        return AppTheme.hyperAmber;
-      case 'BLOCKED':
-        return AppTheme.laserRed;
-      default:
-        return AppTheme.emeraldSafe;
+  static AccountStatus _statusOf(Map<String, dynamic> u) => AccountStatus.fromCode(u['status'] ?? 'ACTIVE');
+  static bool _isRiding(Map<String, dynamic> u) => u['isInActiveConvoy'] == true;
+
+  bool _matches(Map<String, dynamic> u, AdminUserFilter f) {
+    switch (f) {
+      case AdminUserFilter.all:
+        return true;
+      case AdminUserFilter.active:
+        return _statusOf(u) == AccountStatus.active;
+      case AdminUserFilter.onHold:
+        return _statusOf(u) == AccountStatus.onHold;
+      case AdminUserFilter.blocked:
+        return _statusOf(u) == AccountStatus.blocked;
+      case AdminUserFilter.riding:
+        return _isRiding(u);
     }
   }
 
-  void _openUserDetails(Map<String, dynamic> u) async {
+  static String _filterLabel(AdminUserFilter f) {
+    switch (f) {
+      case AdminUserFilter.all:
+        return 'All';
+      case AdminUserFilter.active:
+        return 'Active';
+      case AdminUserFilter.onHold:
+        return 'On hold';
+      case AdminUserFilter.blocked:
+        return 'Blocked';
+      case AdminUserFilter.riding:
+        return 'Riding now';
+    }
+  }
+
+  List<Map<String, dynamic>> _visible() {
+    final q = _query.trim().toLowerCase();
+    return _users.where((u) {
+      if (!_matches(u, _filter)) return false;
+      if (q.isEmpty) return true;
+      for (final k in const ['name', 'email', 'phone', 'vehicleNo']) {
+        if ((u[k]?.toString() ?? '').toLowerCase().contains(q)) return true;
+      }
+      return false;
+    }).toList()
+      ..sort((a, b) {
+        // Riders in a live ride first, then by name.
+        final ra = _isRiding(a) ? 0 : 1;
+        final rb = _isRiding(b) ? 0 : 1;
+        if (ra != rb) return ra - rb;
+        return (a['name']?.toString() ?? '').compareTo(b['name']?.toString() ?? '');
+      });
+  }
+
+  Future<void> _open(Map<String, dynamic> u, bool wide) async {
     final userId = u['userId']?.toString() ?? '';
     if (userId.isEmpty) return;
+    if (wide) {
+      setState(() => _selectedId = userId);
+      return;
+    }
     await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => AdminUserDetailsScreen(userId: userId, initialUser: u),
-      ),
+      MaterialPageRoute(builder: (_) => AdminUserDetailsScreen(userId: userId, initialUser: u)),
     );
-    _load();
+    if (mounted) _load();
   }
 
   @override
   Widget build(BuildContext context) {
     final me = context.watch<AuthService>().currentUserId;
-    final q = _query.trim().toLowerCase();
+    final visible = _visible();
 
-    final visible = _users.where((u) {
-      final status = (u['status']?.toString() ?? 'ACTIVE').toUpperCase();
-      final isRiding = u['isInActiveConvoy'] == true;
-
-      if (_filter == 'ACTIVE' && status != 'ACTIVE') return false;
-      if (_filter == 'ON_HOLD' && status != 'ON_HOLD') return false;
-      if (_filter == 'BLOCKED' && status != 'BLOCKED') return false;
-      if (_filter == 'RIDING' && !isRiding) return false;
-
-      if (q.isNotEmpty) {
-        final name = (u['name']?.toString() ?? '').toLowerCase();
-        final email = (u['email']?.toString() ?? '').toLowerCase();
-        final phone = (u['phone']?.toString() ?? '').toLowerCase();
-        final vehicle = (u['vehicleNo']?.toString() ?? '').toLowerCase();
-        if (!name.contains(q) && !email.contains(q) && !phone.contains(q) && !vehicle.contains(q)) {
-          return false;
-        }
-      }
-      return true;
-    }).toList()
-      ..sort((a, b) {
-        // Active riders first, then by name
-        final ra = a['isInActiveConvoy'] == true ? 0 : 1;
-        final rb = b['isInActiveConvoy'] == true ? 0 : 1;
-        if (ra != rb) return ra - rb;
-        return (a['name']?.toString() ?? '').compareTo(b['name']?.toString() ?? '');
-      });
-
-    final activeCount = _users.where((u) => (u['status']?.toString() ?? 'ACTIVE').toUpperCase() == 'ACTIVE').length;
-    final onHoldCount = _users.where((u) => u['status'] == 'ON_HOLD').length;
-    final blockedCount = _users.where((u) => u['status'] == 'BLOCKED').length;
-    final ridingCount = _users.where((u) => u['isInActiveConvoy'] == true).length;
+    final filter = AdminFilterButton<AdminUserFilter>(
+      value: _filter,
+      label: _filterLabel(_filter),
+      options: [
+        for (final f in AdminUserFilter.values) (f, '${_filterLabel(f)} (${_users.where((u) => _matches(u, f)).length})'),
+      ],
+      onSelected: (f) => setState(() => _filter = f),
+    );
 
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
       appBar: AppBar(
-        title: const Text('Registered Users'),
+        title: const Text('Users'),
         actions: [IconButton(icon: const Icon(Icons.refresh_rounded), tooltip: 'Refresh', onPressed: _load)],
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-                child: TextField(
-                  onChanged: (v) => setState(() => _query = v),
-                  style: TextStyle(color: AppTheme.textPrimary),
-                  decoration: InputDecoration(
-                    hintText: 'Search by name, email, phone or vehicle no',
-                    prefixIcon: Icon(Icons.search_rounded, color: AppTheme.textMuted),
-                  ),
-                ),
-              ),
-
-              // Filter Chips
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: Row(
-                  children: [
-                    _filterChip('All (${_users.length})', 'ALL'),
-                    const SizedBox(width: 6),
-                    _filterChip('Active ($activeCount)', 'ACTIVE', color: AppTheme.emeraldSafe),
-                    const SizedBox(width: 6),
-                    _filterChip('On Hold ($onHoldCount)', 'ON_HOLD', color: AppTheme.hyperAmber),
-                    const SizedBox(width: 6),
-                    _filterChip('Blocked ($blockedCount)', 'BLOCKED', color: AppTheme.laserRed),
-                    const SizedBox(width: 6),
-                    _filterChip('Riding Now ($ridingCount)', 'RIDING', color: AppTheme.neonCyan),
-                  ],
-                ),
-              ),
-
-              Expanded(
-                child: _loading
-                    ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
-                    : _error != null
-                        ? Center(child: Text(_error!, style: TextStyle(color: AppTheme.laserRed)))
-                        : RefreshIndicator(
-                            color: AppTheme.neonCyan,
-                            onRefresh: _load,
-                            child: visible.isEmpty
-                                ? Center(
-                                    child: Text('No users found.', style: TextStyle(color: AppTheme.textMuted)),
-                                  )
-                                : ListView.builder(
-                                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                                    itemCount: visible.length,
-                                    itemBuilder: (ctx, i) {
-                                      final u = visible[i];
-                                      final isAdmin = u['role'] == AppConstants.adminRole;
-                                      final isMe = u['userId'] == me;
-                                      final status = (u['status']?.toString() ?? 'ACTIVE').toUpperCase();
-                                      final statusColor = _statusColor(status);
-                                      final isRiding = u['isInActiveConvoy'] == true;
-                                      final activeGroup = u['activeGroup'] as Map?;
-
-                                      return Padding(
-                                        padding: const EdgeInsets.only(bottom: 8),
-                                        child: GlassCard(
-                                          onTap: () => _openUserDetails(u),
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                          child: Row(
-                                            children: [
-                                              CircleAvatar(
-                                                radius: 20,
-                                                backgroundColor: (isAdmin ? AppTheme.infoBlue : statusColor).withOpacity(0.2),
-                                                child: Icon(
-                                                  isAdmin ? Icons.shield_rounded : Icons.person_rounded,
-                                                  color: isAdmin ? AppTheme.infoBlue : statusColor,
-                                                  size: 20,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 12),
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    Row(
-                                                      children: [
-                                                        Flexible(
-                                                          child: Text(
-                                                            '${u['name'] ?? ''}${isMe ? ' (you)' : ''}',
-                                                            overflow: TextOverflow.ellipsis,
-                                                            style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
-                                                          ),
-                                                        ),
-                                                        const SizedBox(width: 6),
-                                                        if (isAdmin)
-                                                          Container(
-                                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                                            decoration: BoxDecoration(
-                                                              color: AppTheme.infoBlue.withOpacity(0.2),
-                                                              borderRadius: BorderRadius.circular(4),
-                                                              border: Border.all(color: AppTheme.infoBlue),
-                                                            ),
-                                                            child: Text('ADMIN', style: TextStyle(color: AppTheme.infoBlue, fontSize: 12, fontWeight: FontWeight.bold)),
-                                                          )
-                                                        else if (status != 'ACTIVE')
-                                                          Container(
-                                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                                            decoration: BoxDecoration(
-                                                              color: statusColor.withOpacity(0.2),
-                                                              borderRadius: BorderRadius.circular(4),
-                                                              border: Border.all(color: statusColor),
-                                                            ),
-                                                            child: Text(status.replaceAll('_', ' '), style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.bold)),
-                                                          ),
-                                                      ],
-                                                    ),
-                                                    const SizedBox(height: 2),
-                                                    Text(
-                                                      '${u['email'] ?? ''} ${u['phone'] != null && u['phone'].toString().isNotEmpty ? "· ${u['phone']}" : ""}',
-                                                      overflow: TextOverflow.ellipsis,
-                                                      style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                                                    ),
-                                                    if (isRiding && activeGroup != null)
-                                                      Padding(
-                                                        padding: const EdgeInsets.only(top: 4),
-                                                        child: Container(
-                                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                          decoration: BoxDecoration(
-                                                            color: AppTheme.neonCyan.withOpacity(0.15),
-                                                            borderRadius: BorderRadius.circular(4),
-                                                            border: Border.all(color: AppTheme.neonCyan.withOpacity(0.6)),
-                                                          ),
-                                                          child: Row(
-                                                            mainAxisSize: MainAxisSize.min,
-                                                            children: [
-                                                              Icon(Icons.two_wheeler_rounded, color: AppTheme.neonCyan, size: 12),
-                                                              const SizedBox(width: 4),
-                                                              Flexible(
-                                                                child: Text(
-                                                                  'Riding in ${activeGroup['name']}',
-                                                                  style: TextStyle(color: AppTheme.neonCyan, fontSize: 12, fontWeight: FontWeight.bold),
-                                                                  overflow: TextOverflow.ellipsis,
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      ),
-                                                  ],
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted, size: 20),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                          ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      body: LayoutBuilder(builder: (context, c) {
+        final wide = c.maxWidth >= adminWideBreakpoint;
+        final list = _buildList(visible, me, wide, filter);
+        if (!wide) {
+          return Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 760), child: list));
+        }
+        Map<String, dynamic>? selected;
+        for (final u in _users) {
+          if (u['userId']?.toString() == _selectedId) selected = u;
+        }
+        final sel = selected;
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(width: (c.maxWidth * 0.42).clamp(340.0, 460.0).toDouble(), child: list),
+            VerticalDivider(width: 1, color: AppTheme.subtleBorder),
+            Expanded(
+              child: sel == null
+                  ? const EmptyState(
+                      icon: Icons.person_search_rounded,
+                      title: 'Pick a user',
+                      message: 'Their profile, account status and rides show here.',
+                    )
+                  : AdminUserDetailsScreen(
+                      key: ValueKey(_selectedId),
+                      userId: _selectedId!,
+                      initialUser: sel,
+                      embedded: true,
+                      onChanged: _load,
+                      onDeleted: () {
+                        setState(() => _selectedId = null);
+                        _load();
+                      },
+                    ),
+            ),
+          ],
+        );
+      }),
     );
   }
 
-  Widget _filterChip(String label, String value, {Color? color}) {
-    final isSelected = _filter == value;
-    final chipColor = color ?? AppTheme.neonCyan;
-    return ChoiceChip(
-      label: Text(label),
-      selected: isSelected,
-      onSelected: (_) => setState(() => _filter = value),
-      selectedColor: chipColor.withOpacity(0.2),
-      labelStyle: TextStyle(color: isSelected ? chipColor : AppTheme.textSecondary, fontSize: 12, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal),
-      backgroundColor: AppTheme.slateCard,
-      side: BorderSide(color: isSelected ? chipColor : AppTheme.subtleBorder),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      showCheckmark: false,
+  Widget _buildList(List<Map<String, dynamic>> visible, String? me, bool wide, Widget filter) {
+    final Widget content;
+    if (!_loaded && _error != null) {
+      content = AdminScrollFill(child: AdminErrorState(message: _error!, onRetry: _load));
+    } else if (visible.isEmpty) {
+      final filtered = _query.trim().isNotEmpty || _filter != AdminUserFilter.all;
+      content = AdminScrollFill(
+        child: EmptyState(
+          icon: Icons.people_outline_rounded,
+          title: filtered ? 'No matching users' : 'No users yet',
+          message: filtered ? 'Try another search or filter.' : 'Accounts appear here when riders register.',
+          primaryLabel: _filter != AdminUserFilter.all ? 'Show all' : null,
+          onPrimary: _filter != AdminUserFilter.all ? () => setState(() => _filter = AdminUserFilter.all) : null,
+        ),
+      );
+    } else {
+      content = ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(Space.s16, Space.s8, Space.s16, Space.s32),
+        itemCount: visible.length,
+        itemBuilder: (ctx, i) {
+          final u = visible[i];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: Space.s8),
+            child: _UserRow(
+              key: ValueKey(u['userId']),
+              user: u,
+              isMe: me != null && u['userId'] == me,
+              selected: wide && u['userId']?.toString() == _selectedId,
+              onTap: () => _open(u, wide),
+            ),
+          );
+        },
+      );
+    }
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s16, Space.s8),
+          child: AdminSearchRow(
+            hint: 'Name, email, phone or vehicle',
+            onChanged: (v) => setState(() => _query = v),
+            filter: filter,
+          ),
+        ),
+        Expanded(
+          child: LoadingState(
+            loading: _loading,
+            hasData: _loaded || _error != null,
+            child: RefreshIndicator(color: AppTheme.neonCyan, onRefresh: _load, child: content),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One user: avatar, name, email and phone, and what stands out: an account
+/// that is not active, an admin, a rider in a live ride.
+class _UserRow extends StatelessWidget {
+  final Map<String, dynamic> user;
+  final bool isMe;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _UserRow({super.key, required this.user, required this.isMe, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final u = user;
+    final name = (u['name']?.toString() ?? '').trim();
+    final isAdmin = u['role'] == AppConstants.adminRole;
+    final status = AccountStatus.fromCode(u['status'] ?? 'ACTIVE');
+    final activeGroup = u['activeGroup'];
+    final groupName = activeGroup is Map ? (activeGroup['name']?.toString() ?? '') : '';
+    final riding = u['isInActiveConvoy'] == true;
+    final phone = u['phone']?.toString() ?? '';
+    final contact = [u['email']?.toString() ?? '', phone].where((s) => s.isNotEmpty).join(', ');
+
+    final lines = <Widget>[
+      if (status != AccountStatus.active) StatusTextChip.account(status),
+      if (riding)
+        StatusLine(
+          icon: Icons.two_wheeler_rounded,
+          text: groupName.isEmpty ? 'In a live ride' : 'Riding in $groupName',
+          color: StatusColors.success,
+        ),
+    ];
+
+    return AdminRow(
+      leading: RiderAvatar(name: name.isEmpty ? '?' : name, color: isAdmin ? AppTheme.infoBlue : null),
+      title: '${name.isEmpty ? 'Unnamed rider' : name}${isMe ? ' (you)' : ''}',
+      subtitle: contact,
+      detail: isAdmin ? 'Admin' : null,
+      status: lines.isEmpty
+          ? null
+          : Wrap(spacing: Space.s8, runSpacing: Space.s4, crossAxisAlignment: WrapCrossAlignment.center, children: lines),
+      selected: selected,
+      onTap: onTap,
     );
   }
 }

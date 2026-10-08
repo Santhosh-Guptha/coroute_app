@@ -905,6 +905,16 @@ class ConvoyService extends ChangeNotifier {
   /// Lead: adds a planned stop. Anyone else: sends a suggestion for the lead.
   bool addStop(PickedPlace p) => _sendRoute({'type': 'STOP_ADD', ...p.toJson()});
   bool suggestStop(PickedPlace p) => _sendRoute({'type': 'STOP_SUGGEST', ...p.toJson()});
+
+  /// Lead: sets a meeting point (a MEETING stop) through the same add-stop
+  /// message, placed before [insertBefore] (riding order) and replacing the
+  /// open meeting point [replaceStopId], if given. The gateway checks both.
+  bool addMeetingPoint(PickedPlace p, {String? insertBefore, String? replaceStopId}) => _sendRoute({
+        'type': 'STOP_ADD',
+        ...p.copyWith(category: 'MEETING').toJson(),
+        'insertBefore': ?insertBefore,
+        'replaceStopId': ?replaceStopId,
+      });
   bool acceptStop(String stopId) => _sendRoute({'type': 'STOP_ACCEPT', 'stopId': stopId});
   bool declineStop(String stopId) => _sendRoute({'type': 'STOP_DECLINE', 'stopId': stopId});
   bool removeStop(String stopId) => _sendRoute({'type': 'STOP_REMOVE', 'stopId': stopId});

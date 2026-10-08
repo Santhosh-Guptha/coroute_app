@@ -27,12 +27,13 @@ AlertFacts alertFactsOf(ConvoyService s) {
 }
 
 /// Alerts from the group timeline for [f], or an empty list when there is no ride.
-List<InAppAlert> alertsFor(AlertFacts f, TimelineService timeline, {required int nowMs}) {
+/// [lat] and [lng] (my last position) add "3.4 km from you" to a new meeting point.
+List<InAppAlert> alertsFor(AlertFacts f, TimelineService timeline, {required int nowMs, double? lat, double? lng}) {
   final uid = f.userId;
   if (f.groupId == null || uid == null || timeline.groupId != f.groupId) return const [];
   return inAppAlerts(
     timeline.events,
-    AlertViewer(userId: uid, isLead: f.isLead, isSweeper: f.isSweeper),
+    AlertViewer(userId: uid, isLead: f.isLead, isSweeper: f.isSweeper, lat: lat, lng: lng),
     nowMs: nowMs,
   );
 }
@@ -113,7 +114,8 @@ class _AlertsList extends StatelessWidget {
     return space > 0 ? n.substring(0, space) : n;
   }
 
-  static void _showOnMap(BuildContext context) => RiderHomeScreen.selectTab(context, HomeTab.ride);
+  /// Switches to the Ride tab, centres the map on the rider and opens their card.
+  static void _showOnMap(BuildContext context, String userId) => RiderHomeScreen.showRiderOnMap(context, userId);
 
   static Future<void> _call(BuildContext context, String phone) async {
     final ok = await launchUrl(Uri(scheme: 'tel', path: phone.replaceAll(' ', '')));
@@ -126,7 +128,11 @@ class _AlertsList extends StatelessWidget {
   Widget build(BuildContext context) {
     final facts = context.select<ConvoyService, AlertFacts>(alertFactsOf);
     final timeline = context.watch<TimelineService>();
-    final alerts = alertsFor(facts, timeline, nowMs: DateTime.now().millisecondsSinceEpoch);
+    // My position only for "km from you" text: read, not watched (no rebuild on every fix).
+    final service = context.read<ConvoyService>();
+    final myUid = facts.userId;
+    final mePos = myUid == null ? null : service.activeConvoy?.riders[myUid];
+    final alerts = alertsFor(facts, timeline, nowMs: DateTime.now().millisecondsSinceEpoch, lat: mePos?.lat, lng: mePos?.lng);
 
     // Your own SOS comes first. The notification rules leave it out, because the sender knows.
     final local = <Widget>[
@@ -167,7 +173,7 @@ class _AlertsList extends StatelessWidget {
     final critical = alerts.where((a) => a.tier == AlertTier.critical).toList();
     final important = alerts.where((a) => a.tier == AlertTier.important).toList();
     final normal = alerts.where((a) => a.tier == AlertTier.normal).toList();
-    final riders = context.read<ConvoyService>().activeConvoy?.riders ?? const {};
+    final riders = service.activeConvoy?.riders ?? const {};
 
     Widget tile(InAppAlert a) {
       final uid = a.userId;
@@ -186,7 +192,7 @@ class _AlertsList extends StatelessWidget {
               title: a.spec.title,
               message: a.spec.body,
               actionLabel: onMap ? 'Show on map' : null,
-              onAction: onMap ? () => _showOnMap(context) : null,
+              onAction: onMap ? () => _showOnMap(context, rider.userId) : null,
             ),
             if (canCall)
               Align(

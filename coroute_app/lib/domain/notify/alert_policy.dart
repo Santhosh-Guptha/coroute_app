@@ -1,5 +1,6 @@
 import '../../data/models/timeline_event_model.dart';
 import '../timeline/timeline_text.dart';
+import '../tracking/geo_math.dart';
 
 /// Which notification channel an alert uses.
 enum AlertChannel { sos, alerts, updates, activity }
@@ -36,7 +37,11 @@ class AlertViewer {
   final String userId;
   final bool isLead;
   final bool isSweeper;
-  const AlertViewer({required this.userId, this.isLead = false, this.isSweeper = false});
+
+  /// My last known position (for "3.4 km from you"); null when unknown.
+  final double? lat;
+  final double? lng;
+  const AlertViewer({required this.userId, this.isLead = false, this.isSweeper = false, this.lat, this.lng});
 }
 
 /// Turns the group timeline into notifications.
@@ -48,6 +53,30 @@ class AlertViewer {
 /// no longer true, so an alert disappears by itself when its cause ends
 /// (the rider moves again, the SOS is resolved, the group regroups).
 class AlertPolicy {
+  /// One key for every "Meeting point changed" alert: a newer meeting point
+  /// replaces the older alert (same notification, one row in the app).
+  static const String meetingKey = 'EV:MEETING';
+
+  /// Alerts that are shown as a notification even while CoRoute is open:
+  /// safety alerts (the alerts channel). The meeting point already shows in
+  /// the ride alert slot, so it is not posted twice while the app is open.
+  static bool showWhileOpen(AlertSpec a) => a.channel == AlertChannel.alerts && a.key != meetingKey;
+
+  /// "Meeting point changed": where, and how far from me as the crow flies.
+  static AlertSpec meetingChanged(TimelineEventModel e, AlertViewer me) {
+    final name = e.dataString('name').isNotEmpty ? e.dataString('name') : e.placeName;
+    final lat = e.lat, lng = e.lng, myLat = me.lat, myLng = me.lng;
+    var far = '';
+    if (lat != null && lng != null && myLat != null && myLng != null && (myLat != 0 || myLng != 0)) {
+      far = '${TimelineText.distance(GeoMath.haversine(myLat, myLng, lat, lng))} from you';
+    }
+    final body = [
+      if (name.isNotEmpty) name,
+      if (far.isNotEmpty) far,
+    ].join(', ');
+    return AlertSpec(meetingKey, AlertChannel.alerts, 'Meeting point changed', body.isEmpty ? '' : '$body.');
+  }
+
   AlertPolicy({this.stationaryAlert = const Duration(minutes: 20), this.offlineAlert = const Duration(minutes: 5)});
 
   final Duration stationaryAlert;
@@ -135,8 +164,11 @@ class AlertPolicy {
       case 'LEFT':
         if (mine) return null;
         return AlertSpec('EV:${e.eventId}', AlertChannel.activity, '$who left the convoy', '');
-      case 'ROUTE_CHANGED':
       case 'STOP_ADDED':
+        if (mine) return null;
+        if (e.dataString('category').toUpperCase() == 'MEETING') return meetingChanged(e, me);
+        return AlertSpec('EV:${e.eventId}', AlertChannel.activity, TimelineText.title(e, nowMs: e.startedAt), 'The route on your map is updated.');
+      case 'ROUTE_CHANGED':
         if (mine) return null;
         return AlertSpec('EV:${e.eventId}', AlertChannel.activity, TimelineText.title(e, nowMs: e.startedAt), 'The route on your map is updated.');
       default:

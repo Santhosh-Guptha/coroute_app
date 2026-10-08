@@ -525,29 +525,32 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       // Fleet Dashboard Verification
-      expect(find.text('Master Admin Console'), findsOneWidget);
-      expect(find.text('Active Convoys').first, findsOneWidget);
-      expect(find.text('Riders Online'), findsOneWidget);
-      expect(find.text('Emergency SOS'), findsOneWidget);
+      // 3.13 admin home: labels changed with the admin console redesign (WP-ADM).
+      expect(find.text('Admin'), findsOneWidget);
+      expect(find.text('Live rides'), findsWidgets);
+      expect(find.text('Riders online'), findsOneWidget);
+      expect(find.text('Open SOS'), findsOneWidget);
 
-      // Open Global Safety Broadcast Modal
-      expect(find.byIcon(Icons.campaign), findsOneWidget);
-      await tester.tap(find.byIcon(Icons.campaign));
+      // Open the safety broadcast sheet
+      expect(find.byTooltip('Safety broadcast'), findsOneWidget);
+      await tester.tap(find.byTooltip('Safety broadcast'));
+      await tester.pump(); // the route animation starts on this frame
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Global Safety Broadcast'), findsOneWidget);
-      expect(find.text('This alert will be broadcasted to all active convoys immediately on their map HUD.'), findsOneWidget);
-      expect(find.text('Cancel'), findsOneWidget);
-      expect(find.text('Send to Fleet'), findsOneWidget);
+      expect(find.text('Safety broadcast'), findsOneWidget);
+      expect(find.text('Every rider in a live ride sees this alert on their map right away.'), findsOneWidget);
+      expect(find.text('Send to all live rides'), findsOneWidget);
 
       // Enter Broadcast Message and Send
       final broadcastInput = find.byType(TextField);
       await tester.enterText(broadcastInput, 'Heavy Fog Warning on NH48. Reduce speed.');
-      await tester.tap(find.text('Send to Fleet'));
+      await tester.pump();
+      await tester.tap(find.text('Send to all live rides'));
+      await tester.pump(); // the route animation starts on this frame
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Modal closed after dispatch
-      expect(find.text('Global Safety Broadcast'), findsNothing);
+      // Sheet closed after dispatch
+      expect(find.text('Every rider in a live ride sees this alert on their map right away.'), findsNothing);
     });
   });
 }

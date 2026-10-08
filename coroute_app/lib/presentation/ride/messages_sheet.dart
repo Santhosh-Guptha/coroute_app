@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
@@ -5,28 +7,169 @@ import '../../core/ui/ui.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/convoy_service.dart';
 
-/// A quick message: what the button says, what the group reads, and its card type.
+/// A quick reply: the words on the chip (also the chat text) and its card type.
 class QuickMessage {
   final IconData icon;
-  final String label;
   final String text;
   final String cardType;
 
-  /// "Wait for me" is not a chat line: it asks the group to wait (a timed request).
+  /// "Wait for me" is not a plain chat line: it asks the group to wait (a timed
+  /// request that the gateway also posts in the chat).
   final bool isWait;
 
-  const QuickMessage(this.icon, this.label, this.text, this.cardType, {this.isWait = false});
+  const QuickMessage(this.icon, this.text, this.cardType, {this.isWait = false});
 }
 
-/// The one list of quick messages (the dashboard and the map had two different ones).
+/// The one list of quick replies. Card types are at most 24 characters (gateway limit).
 const List<QuickMessage> quickMessages = [
-  QuickMessage(Icons.pan_tool_rounded, 'Wait for me', '', 'WAIT_2MIN', isWait: true),
-  QuickMessage(Icons.local_gas_station_rounded, 'Need fuel', 'Looking for a fuel station soon.', 'FUEL'),
-  QuickMessage(Icons.groups_rounded, 'Regroup here', 'Regroup here.', 'REGROUP'),
-  QuickMessage(Icons.build_rounded, 'Bike problem', 'Small bike problem, slowing down.', 'MECHANICAL'),
-  QuickMessage(Icons.warning_amber_rounded, 'Road hazard ahead', 'Road hazard ahead, take care.', 'HAZARD'),
-  QuickMessage(Icons.thumb_up_alt_rounded, 'All good', 'All good, moving.', 'OK'),
+  QuickMessage(Icons.local_gas_station_rounded, 'Fuel stop', 'FUEL'),
+  QuickMessage(Icons.pan_tool_rounded, 'Wait for me', 'WAIT_2MIN', isWait: true),
+  QuickMessage(Icons.thumb_up_alt_rounded, 'All good', 'OK'),
+  QuickMessage(Icons.speed_rounded, 'Slow down', 'SLOW_DOWN'),
+  QuickMessage(Icons.coffee_rounded, 'Taking a break', 'BREAK'),
+  QuickMessage(Icons.build_rounded, 'Bike problem', 'MECHANICAL'),
+  QuickMessage(Icons.warning_amber_rounded, 'Road hazard ahead', 'HAZARD'),
 ];
+
+/// Sends [QuickMessage]; returns true when it was handed to the connection.
+typedef QuickReplySend = bool Function(QuickMessage message);
+
+/// One wrap of large, glove friendly quick reply chips (52 dp high). One tap
+/// sends, no confirm. The same chip is ignored for [cooldown] after it was
+/// sent, so a double tap never sends twice. A short line under the chips says
+/// "Sent: ..." (or that there is no connection) and clears itself.
+class QuickReplyBar extends StatefulWidget {
+  final QuickReplySend onSend;
+  final List<QuickMessage> messages;
+
+  const QuickReplyBar({super.key, required this.onSend, this.messages = quickMessages});
+
+  /// A second tap on the same chip within this time is ignored.
+  static const Duration cooldown = Duration(seconds: 2);
+
+  /// "Wait for me" alerts the whole group; the gateway allows 3 per 10 s, so it cools down longer.
+  static const Duration waitCooldown = Duration(seconds: 4);
+
+  /// How long the "Sent" line stays.
+  static const Duration feedbackFor = Duration(seconds: 2);
+
+  /// Chip height: above the 48 dp minimum for gloves.
+  static const double chipHeight = 52;
+
+  @override
+  State<QuickReplyBar> createState() => _QuickReplyBarState();
+}
+
+class _QuickReplyBarState extends State<QuickReplyBar> {
+  final Map<String, Timer> _cooling = {};
+  Timer? _feedbackClear;
+  String? _feedback;
+  bool _feedbackOk = true;
+
+  @override
+  void dispose() {
+    for (final t in _cooling.values) {
+      t.cancel();
+    }
+    _feedbackClear?.cancel();
+    super.dispose();
+  }
+
+  void _tap(QuickMessage q) {
+    if (_cooling.containsKey(q.text)) return; // double tap: already sent
+    final ok = widget.onSend(q);
+    if (ok) {
+      _cooling[q.text] = Timer(q.isWait ? QuickReplyBar.waitCooldown : QuickReplyBar.cooldown, () => _cooling.remove(q.text));
+    }
+    _feedbackClear?.cancel();
+    _feedbackClear = Timer(QuickReplyBar.feedbackFor, () {
+      if (mounted) setState(() => _feedback = null);
+    });
+    setState(() {
+      _feedbackOk = ok;
+      _feedback = ok ? 'Sent: ${q.text}' : 'Not sent, no connection';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final feedback = _feedback;
+    final color = _feedbackOk ? StatusColors.success : StatusColors.warning;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: Space.s8,
+          runSpacing: Space.s8,
+          children: [
+            for (final q in widget.messages) _QuickChip(message: q, onTap: () => _tap(q)),
+          ],
+        ),
+        ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 28),
+          child: Semantics(
+            liveRegion: true,
+            child: feedback == null
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(top: Space.s8),
+                    child: Row(
+                      children: [
+                        Icon(_feedbackOk ? Icons.check_circle_rounded : Icons.cloud_off_rounded, size: 16, color: color),
+                        const SizedBox(width: Space.s4),
+                        Flexible(
+                          child: Text(feedback, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: color)),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _QuickChip extends StatelessWidget {
+  final QuickMessage message;
+  final VoidCallback onTap;
+
+  const _QuickChip({required this.message, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppTheme.elevatedCard,
+      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: QuickReplyBar.chipHeight, minWidth: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.s16),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(message.icon, size: 22, color: AppTheme.neonCyan),
+                const SizedBox(width: Space.s8),
+                Flexible(
+                  child: Text(
+                    message.text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// Opens the group messages sheet (quick messages, the conversation, a text field).
 Future<void> showMessagesSheet(BuildContext context, {required String convoyId, required RiderModel me}) {
@@ -57,12 +200,16 @@ class _MessagesViewState extends State<MessagesView> {
     super.dispose();
   }
 
-  void _sendQuick(ConvoyService service, QuickMessage q) {
+  /// The same paths as before: a wait request, or a chat line marked as a quick card.
+  /// Offline both are dropped by the connection, so the bar says "Not sent".
+  bool _sendQuick(ConvoyService service, QuickMessage q) {
+    final online = service.isOnline;
     if (q.isWait) {
       service.requestWait(widget.me.name);
     } else {
       service.sendGroupMessage(senderId: widget.me.userId, senderName: widget.me.name, text: q.text, isQuickCard: true, cardType: q.cardType);
     }
+    return online;
   }
 
   void _send(ConvoyService service) {
@@ -82,20 +229,8 @@ class _MessagesViewState extends State<MessagesView> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Wrap(
-          spacing: Space.s8,
-          runSpacing: Space.s4,
-          children: [
-            for (final q in quickMessages)
-              ActionChip(
-                avatar: Icon(q.icon, size: 18, color: AppTheme.neonCyan),
-                label: Text(q.label, style: AppText.label.copyWith(color: AppTheme.textPrimary)),
-                materialTapTargetSize: MaterialTapTargetSize.padded,
-                onPressed: () => _sendQuick(service, q),
-              ),
-          ],
-        ),
-        const SizedBox(height: Space.s8),
+        QuickReplyBar(onSend: (q) => _sendQuick(service, q)),
+        const SizedBox(height: Space.s4),
         const Divider(height: 1),
         if (messages.isEmpty)
           Padding(

@@ -453,15 +453,26 @@ class ConvoyManager extends EventEmitter {
     if (route) this.recomputeRoute(room.groupId).catch((e) => this.log.warn('[convoys] route failed', e.message));
   }
 
-  /** The lead adds a planned stop; anyone else's stop becomes a suggestion the lead accepts or declines. */
+  /**
+   * The lead adds a planned stop; anyone else's stop becomes a suggestion the lead accepts or declines.
+   * Lead only, optional: `insertBefore` (a stopId) puts the stop before that stop instead of at the end
+   * (riding order), and `replaceStopId` removes an open (planned, not visited) MEETING stop in the same
+   * change when the new stop is a MEETING stop ("Meet here" moves the meeting point). Unknown ids are ignored.
+   */
   async addStop(groupId, user, p) {
     const room = await this.getRoom(groupId);
     this._requireMember(room, user);
     const lead = this.isLead(room, user);
-    if ((room.meta.stopPoints || []).length >= MAX_STOPS) throw new ConvoyError(`A trip can have at most ${MAX_STOPS} stops.`);
+    let list = [...(room.meta.stopPoints || [])];
     const [stop] = sanitizeStops([p], { by: user, status: lead ? 'PLANNED' : 'SUGGESTED' });
     if (!stop) throw new ConvoyError('Pick a place for the stop.');
-    room.meta.stopPoints = [...(room.meta.stopPoints || []), stop];
+    if (lead && stop.category === 'MEETING' && typeof p.replaceStopId === 'string' && p.replaceStopId) {
+      list = list.filter((s) => !(s.stopId === p.replaceStopId && s.category === 'MEETING' && s.status === 'PLANNED' && !s.isVisited));
+    }
+    if (list.length >= MAX_STOPS) throw new ConvoyError(`A trip can have at most ${MAX_STOPS} stops.`);
+    const at = lead && typeof p.insertBefore === 'string' && p.insertBefore ? list.findIndex((s) => s.stopId === p.insertBefore) : -1;
+    if (at >= 0) list.splice(at, 0, stop); else list.push(stop);
+    room.meta.stopPoints = list;
     await this._saveStops(room, { route: lead });
     this.emit('activity', groupId, { type: lead ? 'STOP_ADDED' : 'STOP_SUGGESTED', user, stop });
     return stop;

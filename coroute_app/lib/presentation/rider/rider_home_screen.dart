@@ -8,6 +8,7 @@ import '../../data/services/timeline_service.dart';
 import '../account/account_screen.dart';
 import '../alerts/alerts_screen.dart';
 import '../home/ride_start_view.dart';
+import '../ride/map_focus.dart';
 import 'live_cockpit_map_screen.dart';
 import 'trip_history_screen.dart';
 
@@ -37,6 +38,16 @@ class RiderHomeScreen extends StatefulWidget {
     state._select(tab);
   }
 
+  /// Switches to the Ride tab, centres the map on [userId] and opens their
+  /// rider card (from the Alerts tab: "Show on map"). Nothing happens
+  /// without an active ride.
+  static void showRiderOnMap(BuildContext context, String userId) {
+    final state = context.findAncestorStateOfType<_RiderHomeScreenState>() ?? _current;
+    if (state == null || !state.mounted || state._lastGroupId == null) return;
+    selectTab(context, HomeTab.ride);
+    state._mapFocus.showRider(userId);
+  }
+
   @override
   State<RiderHomeScreen> createState() => _RiderHomeScreenState();
 }
@@ -50,6 +61,9 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   String? _lastGroupId;
   bool _rideSaved = false;
   bool _joinOpen = false;
+
+  /// "Show on map" requests from the Alerts tab to the ride map.
+  final MapFocus _mapFocus = MapFocus();
 
   @override
   void initState() {
@@ -68,6 +82,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   @override
   void dispose() {
     _convoys?.removeListener(_onConvoyChanged);
+    _mapFocus.dispose();
     if (RiderHomeScreen._current == this) RiderHomeScreen._current = null;
     super.dispose();
   }
@@ -109,7 +124,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
 
   Widget _rideTab(String? groupId) {
     if (groupId != null) {
-      return LiveCockpitMapScreen(key: ValueKey(groupId), convoyId: groupId, embedded: true);
+      return LiveCockpitMapScreen(key: ValueKey(groupId), convoyId: groupId, embedded: true, focus: _mapFocus);
     }
     return RideStartView(
       showRideSaved: _rideSaved,

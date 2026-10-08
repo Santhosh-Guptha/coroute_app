@@ -3,6 +3,7 @@ import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/models/route_model.dart';
 import '../../data/models/stop_point_model.dart';
+import '../timeline/timeline_text.dart';
 import '../tracking/geo_math.dart';
 
 /// The rider's own GPS in plain words (shown in the ride top bar).
@@ -105,6 +106,19 @@ class RideSnapshot {
     required this.nextStopM,
     required this.stops,
   });
+
+  /// The same snapshot with the remaining distance and ETA measured along
+  /// the part of the route still to ride (see `RouteGuide`).
+  RideSnapshot withRemaining(double? remainingM, Duration? eta) => RideSnapshot(
+        me: me,
+        remainingM: remainingM,
+        eta: eta,
+        ladder: ladder,
+        spreadM: spreadM,
+        nextStop: nextStop,
+        nextStopM: nextStopM,
+        stops: stops,
+      );
 }
 
 /// Pure ride arithmetic for the active ride screen: remaining distance, ETA,
@@ -309,6 +323,23 @@ class RideFacts {
     if (lastFixMs <= 0) return GpsState.updating;
     if (moving && nowMs - lastFixMs >= gpsUpdatingAfter.inMilliseconds) return GpsState.updating;
     return GpsState.accurate;
+  }
+
+  /// Plain text for "Share my ETA": where I am going, how far is left and
+  /// when I arrive. No link, no coordinates. [arrival] is the clock time
+  /// already formatted for the phone ("4:35 PM"); null or empty leaves it out.
+  /// "On the way to Goa with CoRoute. 42 km left, arriving about 4:35 PM."
+  static String shareEtaText({required String destinationName, double? remainingM, String? arrival}) {
+    final dest = destinationName.trim();
+    final head = dest.isEmpty ? 'On the way with CoRoute.' : 'On the way to $dest with CoRoute.';
+    final left = (remainingM != null && remainingM.isFinite) ? '${TimelineText.distance(remainingM)} left' : '';
+    final at = (arrival == null || arrival.isEmpty) ? '' : 'arriving about $arrival';
+    final tail = [
+      if (left.isNotEmpty) left,
+      if (at.isNotEmpty) at,
+    ].join(', ');
+    if (tail.isEmpty) return head;
+    return '$head ${tail[0].toUpperCase()}${tail.substring(1)}.';
   }
 
   /// All of the above for one convoy update.

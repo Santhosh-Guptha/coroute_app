@@ -8,12 +8,12 @@ import '../../domain/notify/alert_policy.dart';
 /// Built on the same specs as the notifications, so the app and the
 /// notification shade never disagree:
 /// * `SOS:*`, `OFFLINE:*`, `SEPARATED:*` are critical;
-/// * `STOPPED:*`, `OFF_ROUTE:*` and the `alerts` channel (over the speed limit) are important;
+/// * `STOPPED:*`, `OFF_ROUTE:*`, the meeting point and the `alerts` channel (over the speed limit) are important;
 /// * the `updates` and `activity` channels are normal.
 AlertTier tierFor(AlertSpec spec) {
   final k = spec.key;
   if (k.startsWith('SOS:') || k.startsWith('OFFLINE:') || k.startsWith('SEPARATED:')) return AlertTier.critical;
-  if (k.startsWith('STOPPED:') || k.startsWith('OFF_ROUTE:')) return AlertTier.important;
+  if (k.startsWith('STOPPED:') || k.startsWith('OFF_ROUTE:') || k == AlertPolicy.meetingKey) return AlertTier.important;
   return switch (spec.channel) {
     AlertChannel.sos => AlertTier.critical,
     AlertChannel.alerts => AlertTier.important,
@@ -26,11 +26,14 @@ AlertTier tierFor(AlertSpec spec) {
 /// the creator or a LEAD is the lead, a SWEEPER is the sweeper.
 AlertViewer? alertViewerFor(ConvoyModel? convoy, String? userId) {
   if (convoy == null || userId == null || userId.isEmpty) return null;
-  final role = convoy.riders[userId]?.role ?? 'PACK';
+  final me = convoy.riders[userId];
+  final role = me?.role ?? 'PACK';
   return AlertViewer(
     userId: userId,
     isLead: convoy.createdByUserId == userId || role == 'LEAD',
     isSweeper: role == 'SWEEPER',
+    lat: me?.lat,
+    lng: me?.lng,
   );
 }
 
@@ -81,9 +84,11 @@ List<InAppAlert> inAppAlerts(
     oneShots.add(InAppAlert(spec: spec, tier: tierFor(spec), event: e, standing: false));
   }
   oneShots.sort((a, b) => b.at.compareTo(a.at));
+  // One row per key: a newer one-time alert with the same key (a new meeting point) replaces the older.
+  final seen = <String>{...byKey.keys};
   final out = <InAppAlert>[
     ...byKey.values,
-    ...oneShots.where((a) => !byKey.containsKey(a.key)).take(maxRecent),
+    ...oneShots.where((a) => seen.add(a.key)).take(maxRecent),
   ];
   out.sort((a, b) {
     final t = a.tier.index.compareTo(b.tier.index);

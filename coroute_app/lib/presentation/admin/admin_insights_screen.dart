@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/glass_card.dart';
+import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
+import 'admin_ui.dart';
 
 /// Master admin: website/app feedback, first-party page-view counts and the
 /// app builds riders use (to know when the minimum build can be raised).
+/// Pull down to refresh; the old numbers stay visible while they reload.
 class AdminInsightsScreen extends StatefulWidget {
   const AdminInsightsScreen({super.key});
 
@@ -20,6 +22,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
   List<Map<String, dynamic>> _views = [];
   Map<String, dynamic> _builds = {};
   bool _loading = true;
+  bool _loaded = false;
   String? _error;
 
   @override
@@ -40,19 +43,42 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
       _error = null;
     });
     final api = context.read<ApiClient>();
+    String? error;
     try {
       final fb = await api.get('/admin/feedback');
       final an = await api.get('/admin/analytics?days=30');
       final ab = await api.get('/admin/app-builds?days=30');
       _builds = ab is Map ? Map<String, dynamic>.from(ab) : {};
-      _feedback = ((fb is Map ? fb['feedback'] : null) as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
-      _views = ((an is Map ? an['pageviews'] : null) as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      _feedback = adminMapList(fb is Map ? fb['feedback'] : null);
+      _views = adminMapList(an is Map ? an['pageviews'] : null);
+      _loaded = true;
     } on ApiException catch (e) {
-      _error = e.message;
+      error = e.message;
     } catch (_) {
-      _error = 'Could not load data.';
+      error = 'Could not load data.';
     }
-    if (mounted) setState(() => _loading = false);
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _error = error;
+    });
+    if (error != null && _loaded) adminSnack(context, error, error: true);
+  }
+
+  /// One tab body: error, spinner, or [child] with pull to refresh.
+  Widget _tab(Widget Function() child) {
+    if (!_loaded && _error != null) {
+      return RefreshIndicator(
+        color: AppTheme.neonCyan,
+        onRefresh: _load,
+        child: AdminScrollFill(child: AdminErrorState(message: _error!, onRetry: _load)),
+      );
+    }
+    return LoadingState(
+      loading: _loading,
+      hasData: _loaded,
+      child: RefreshIndicator(color: AppTheme.neonCyan, onRefresh: _load, child: child()),
+    );
   }
 
   @override
@@ -60,56 +86,67 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
       appBar: AppBar(
-        title: const Text('Feedback & analytics'),
-        actions: [IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: _load)],
+        title: const Text('Feedback and analytics'),
+        actions: [IconButton(icon: const Icon(Icons.refresh_rounded), tooltip: 'Refresh', onPressed: _load)],
         bottom: TabBar(
           controller: _tabs,
           indicatorColor: AppTheme.neonCyan,
           labelColor: AppTheme.neonCyan,
-          unselectedLabelColor: AppTheme.textMuted,
+          unselectedLabelColor: AppTheme.textSecondary,
           isScrollable: true,
-          tabs: [Tab(text: 'Feedback (${_feedback.length})'), const Tab(text: 'Page views, 30 days'), const Tab(text: 'App versions')],
+          tabAlignment: TabAlignment.start,
+          tabs: [
+            Tab(height: 48, text: _loaded ? 'Feedback (${_feedback.length})' : 'Feedback'),
+            const Tab(height: 48, text: 'Page views'),
+            const Tab(height: 48, text: 'App versions'),
+          ],
         ),
       ),
-      body: _loading
-          ? Center(child: CircularProgressIndicator(color: AppTheme.neonCyan))
-          : _error != null
-              ? Center(child: Text(_error!, style: TextStyle(color: AppTheme.laserRed)))
-              : TabBarView(controller: _tabs, children: [_feedbackList(), _viewsList(), _buildsList()]),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: TabBarView(
+            controller: _tabs,
+            children: [_tab(_feedbackList), _tab(_viewsList), _tab(_buildsList)],
+          ),
+        ),
+      ),
     );
   }
 
   Widget _feedbackList() {
     if (_feedback.isEmpty) {
-      return Center(child: Text('No feedback yet.', style: TextStyle(color: AppTheme.textMuted)));
+      return const AdminScrollFill(
+        child: EmptyState(
+          icon: Icons.forum_outlined,
+          title: 'No feedback yet',
+          message: 'Messages from the website and the app show here.',
+        ),
+      );
     }
     final fmt = DateFormat('d MMM yyyy, HH:mm');
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
       itemCount: _feedback.length,
       itemBuilder: (ctx, i) {
         final f = _feedback[i];
         final ts = (f['createdAt'] as num?)?.toInt() ?? 0;
-        final from = [f['name'], f['email']].where((x) => x != null && x.toString().isNotEmpty).join(' · ');
-        final meta = [f['source'], f['appVersion'], f['device']].where((x) => x != null && x.toString().isNotEmpty).join(' · ');
+        final from = [f['name'], f['email']].where((x) => x != null && x.toString().isNotEmpty).join(', ');
+        final meta = [f['source'], f['appVersion'], f['device']].where((x) => x != null && x.toString().isNotEmpty).join(', ');
         return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: GlassCard(
-            padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.only(bottom: Space.s8),
+          child: AdminCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(child: Text(from, style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis)),
-                    Text(ts > 0 ? fmt.format(DateTime.fromMillisecondsSinceEpoch(ts)) : '', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                SelectableText(f['message']?.toString() ?? '', style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, height: 1.4)),
+                Text(from.isEmpty ? 'Anonymous' : from, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                if (ts > 0) Text(fmt.format(DateTime.fromMillisecondsSinceEpoch(ts)), style: AppText.caption),
+                const SizedBox(height: Space.s8),
+                SelectableText(f['message']?.toString() ?? '', style: AppText.body),
                 if (meta.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(meta, style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                  const SizedBox(height: Space.s8),
+                  Text(meta, style: AppText.caption),
                 ],
               ],
             ),
@@ -121,7 +158,13 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
 
   Widget _viewsList() {
     if (_views.isEmpty) {
-      return Center(child: Text('No page views recorded yet.', style: TextStyle(color: AppTheme.textMuted)));
+      return const AdminScrollFill(
+        child: EmptyState(
+          icon: Icons.bar_chart_rounded,
+          title: 'No page views yet',
+          message: 'Website visits of the last 30 days show here.',
+        ),
+      );
     }
     final total = _views.fold<int>(0, (a, v) => a + ((v['count'] as num?)?.toInt() ?? 0));
     final byPath = <String, int>{};
@@ -137,47 +180,17 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
       }
     }
     List<MapEntry<String, int>> sorted(Map<String, int> m) => m.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-    Widget block(String title, List<MapEntry<String, int>> rows) => Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: GlassCard(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: TextStyle(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                const SizedBox(height: 8),
-                for (final r in rows.take(12))
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Row(
-                      children: [
-                        Expanded(child: Text(r.key, style: TextStyle(color: AppTheme.textPrimary, fontSize: 13), overflow: TextOverflow.ellipsis)),
-                        Text('${r.value}', style: TextStyle(color: AppTheme.neonCyan, fontSize: 13, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
     final days = byDay.entries.toList()..sort((a, b) => b.key.compareTo(a.key));
     return ListView(
-      padding: const EdgeInsets.all(16),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
       children: [
-        GlassCard(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Expanded(child: Text('Total page views, last 30 days', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13))),
-              Text('$total', style: TextStyle(color: AppTheme.textPrimary, fontSize: 22, fontWeight: FontWeight.bold)),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        block('BY PAGE', sorted(byPath)),
-        block('BY DAY', days),
-        block('BY REFERRER', sorted(byRef)),
-        Text('Counts only: no cookies, IP addresses or identifiers are stored.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+        AdminCard(child: RideMetric(value: '$total', label: 'Page views, last 30 days', emphasis: true)),
+        _CountBlock(title: 'By page', rows: sorted(byPath)),
+        _CountBlock(title: 'By day', rows: days),
+        _CountBlock(title: 'By referrer', rows: sorted(byRef)),
+        const SizedBox(height: Space.s16),
+        Text('Counts only: no cookies, IP addresses or identifiers are stored.', style: AppText.caption),
       ],
     );
   }
@@ -192,55 +205,106 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
       for (final l in (_builds['lockout'] as List? ?? const []).whereType<Map>()) (l['build'] as num).toInt(): (l['wouldLockOut'] as num).toInt(),
     };
     String pct(int part) => total == 0 ? '0%' : '${(part * 100 / total).round()}%';
-    final line = TextStyle(color: AppTheme.textSecondary, fontSize: 13);
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      GlassCard(
-        padding: const EdgeInsets.all(14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('$total riders used the app in the last 30 days', style: TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          Text('Minimum build $minBuild, latest $latest. ${pct(onLatest)} are on the latest build.', style: line),
-        ]),
-      ),
-      const SizedBox(height: 12),
-      for (final b in builds)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: GlassCard(
-            padding: const EdgeInsets.all(12),
-            child: Row(children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Build ${b['build']}', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600)),
-                  Text(
-                    (lockout[(b['build'] as num).toInt()] ?? 0) == 0
-                        ? 'Safe to make this the minimum: nobody would be locked out.'
-                        : 'As the minimum it would lock out ${lockout[(b['build'] as num).toInt()]} riders.',
-                    style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                  ),
-                ]),
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
+      children: [
+        AdminCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: RideMetric(value: '$total', label: 'Riders, 30 days')),
+                  Expanded(child: RideMetric(value: pct(onLatest), label: 'On latest')),
+                  Expanded(child: RideMetric(value: '$minBuild', label: 'Minimum build')),
+                  Expanded(child: RideMetric(value: '$latest', label: 'Latest build')),
+                ],
               ),
-              Text('${b['users']} (${pct((b['users'] as num).toInt())})', style: TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold)),
-            ]),
+            ],
           ),
         ),
-      if (older > 0)
-        GlassCard(
-          padding: const EdgeInsets.all(12),
-          child: Row(children: [
-            Expanded(
-              child: Text('Older than build 65 (these builds do not report their number)',
-                  style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w600)),
+        const AdminSectionLabel('Builds in use'),
+        if (builds.isEmpty && older == 0) Text('No app versions reported yet.', style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+        for (final b in builds)
+          Padding(
+            padding: const EdgeInsets.only(bottom: Space.s8),
+            child: _buildRow(
+              title: 'Build ${b['build']}',
+              note: (lockout[(b['build'] as num).toInt()] ?? 0) == 0
+                  ? 'Safe as the minimum: nobody would be locked out.'
+                  : 'As the minimum it would lock out ${lockout[(b['build'] as num).toInt()]} riders.',
+              safe: (lockout[(b['build'] as num).toInt()] ?? 0) == 0,
+              count: '${b['users']} (${pct((b['users'] as num).toInt())})',
             ),
-            Text('$older (${pct(older)})', style: TextStyle(color: AppTheme.hyperAmber, fontWeight: FontWeight.bold)),
-          ]),
+          ),
+        if (older > 0)
+          _buildRow(
+            title: 'Older than build 65',
+            note: 'These builds do not report their number.',
+            safe: false,
+            count: '$older (${pct(older)})',
+          ),
+        const SizedBox(height: Space.s16),
+        Text(
+          'To raise the minimum build, set MIN_APP_BUILD in /etc/coroute/gateway.env on the server and restart the gateway. '
+          'Riders below it see "Update required" and a download link.',
+          style: AppText.caption,
         ),
-      const SizedBox(height: 12),
-      Text(
-        'To raise the minimum build, set MIN_APP_BUILD in /etc/coroute/gateway.env on the server and restart the gateway. '
-        'Riders below it see "Update required" and a download link.',
-        style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+      ],
+    );
+  }
+
+  Widget _buildRow({required String title, required String note, required bool safe, required String count}) {
+    return AdminRow(
+      leading: AdminRowIcon(Icons.system_update_rounded, color: safe ? StatusColors.success : StatusColors.warning),
+      title: title,
+      status: StatusLine(
+        icon: safe ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
+        text: note,
+        color: safe ? StatusColors.success : StatusColors.warning,
       ),
-    ]);
+      trailing: Padding(
+        padding: const EdgeInsets.only(left: Space.s8),
+        child: Text(count, style: AppText.label.copyWith(color: AppTheme.textPrimary, fontFeatures: const [FontFeature.tabularFigures()])),
+      ),
+    );
+  }
+}
+
+/// A titled list of name and count rows (top 12).
+class _CountBlock extends StatelessWidget {
+  final String title;
+  final List<MapEntry<String, int>> rows;
+
+  const _CountBlock({required this.title, required this.rows});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AdminSectionLabel(title),
+        AdminCard(
+          padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s8),
+          child: Column(
+            children: [
+              if (rows.isEmpty) Padding(padding: const EdgeInsets.symmetric(vertical: Space.s8), child: Text('None', style: AppText.caption)),
+              for (final r in rows.take(12))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: Space.s8),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text(r.key.isEmpty ? '(none)' : r.key, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body)),
+                      const SizedBox(width: Space.s8),
+                      Text('${r.value}', style: AppText.body.copyWith(fontWeight: FontWeight.w600, fontFeatures: const [FontFeature.tabularFigures()])),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }

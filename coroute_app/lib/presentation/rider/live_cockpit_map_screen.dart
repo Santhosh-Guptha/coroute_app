@@ -15,7 +15,9 @@ import '../../core/ui/ui.dart';
 import '../../core/widgets/cockpit_hud.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
+import '../../data/models/route_model.dart';
 import '../../data/models/stop_point_model.dart';
+import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/geo_service.dart';
@@ -24,14 +26,20 @@ import '../../data/services/settings_service.dart';
 import '../../data/services/timeline_service.dart';
 import '../../domain/notify/alert_policy.dart';
 import '../../domain/ride/ride_facts.dart';
+import '../../domain/route/route_plan.dart';
+import '../../domain/route/route_progress.dart';
 import '../../domain/timeline/timeline_text.dart';
+import '../../domain/tracking/geo_math.dart';
 import '../alerts/alert_tiers.dart';
 import '../map_picker/map_picker_screen.dart';
 import '../ride/group_settings_sheet.dart';
+import '../ride/map_focus.dart';
+import '../ride/meet_here_sheet.dart';
 import '../ride/messages_sheet.dart';
 import '../ride/ride_sheet.dart';
 import '../ride/rider_card_sheet.dart';
 import '../ride/riders_ladder.dart';
+import '../ride/route_guide.dart';
 import '../timeline/member_colors.dart';
 import '../trip_planner/route_stops_panel.dart';
 import '../widgets/connection_banner.dart';
@@ -49,11 +57,19 @@ import 'rider_home_screen.dart';
 ///
 /// With [embedded] it is the Ride tab of the shell: no back button and it
 /// never pops a route.
+///
+/// Only the part of the route still to ride is drawn (the line behind me
+/// disappears as I ride), and remaining distance and ETA are measured along
+/// it. When I leave the planned route a personal route is fetched quietly
+/// ([RouteGuide]); one status line in the top bar says so. The lead can
+/// long-press the map to set the group's meeting point. [focus] carries
+/// "Show on map" requests from the Alerts tab.
 class LiveCockpitMapScreen extends StatefulWidget {
   final String convoyId;
   final bool embedded;
+  final MapFocus? focus;
 
-  const LiveCockpitMapScreen({super.key, required this.convoyId, this.embedded = false});
+  const LiveCockpitMapScreen({super.key, required this.convoyId, this.embedded = false, this.focus});
 
   /// Heading to draw for me: the compass while slow (GPS course is unreliable below 10 km/h).
   static double myHeading(RiderModel me, double? compass) => (me.speedKmh < 10.0 && compass != null) ? compass : me.heading;
@@ -116,6 +132,118 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   int _waitTimerAt = 0;
   Timer? _staleTimer;
 
+  // Route following: fed with my own fixes by the convoy listener (never by a timer).
+  late final RouteGuide _guide = RouteGuide(fetchRoute: _fetchRoute);
+  ConvoyService? _convoys;
+  AuthService? _auth;
+  GeoService? _geo;
+
+  // The active line as map points, rebuilt only when the line is replaced or my matched point moves.
+  RouteProgress? _lineSource;
+  int _lineVersion = -1;
+  List<LatLng> _lineFull = const [];
+  RouteMatch? _trimKey;
+  List<LatLng> _lineTrimmed = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _guide.addListener(_onGuide);
+    widget.focus?.addListener(_onFocusRequest);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _auth = context.read<AuthService>();
+      final s = context.read<ConvoyService>();
+      _convoys = s;
+      s.addListener(_onConvoyUpdate);
+      _onConvoyUpdate();
+      _onFocusRequest();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant LiveCockpitMapScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.focus, widget.focus)) {
+      oldWidget.focus?.removeListener(_onFocusRequest);
+      widget.focus?.addListener(_onFocusRequest);
+    }
+  }
+
+  /// The route status or the active line changed (a new route arrived, or I
+  /// am back on the plan). Called from a convoy update or a finished route
+  /// request, never while building.
+  void _onGuide() {
+    if (mounted) setState(() {});
+  }
+
+  GeoService _geoService() => _geo ??= GeoService(context.read<ApiClient>());
+
+  Future<RouteModel?> _fetchRoute(List<(double, double)> waypoints) async {
+    if (!mounted) return null;
+    return _geoService().route(waypoints);
+  }
+
+  /// Every convoy change: keep the guide on the current plan and give it my
+  /// newest fix. Only while the app is on screen: in the background nothing
+  /// is matched or fetched (the ongoing notification works as before).
+  void _onConvoyUpdate() {
+    final s = _convoys;
+    if (s == null || !mounted) return;
+    final convoy = s.allConvoys[widget.convoyId];
+    final uid = _auth?.currentUserId ?? s.myUserId ?? '';
+    if (convoy == null || uid.isEmpty) return;
+    _guide.setConvoy(convoy, uid);
+    if (!s.isRealGpsActive) return;
+    final life = WidgetsBinding.instance.lifecycleState;
+    if (life != null && life != AppLifecycleState.resumed) return;
+    final me = convoy.riders[uid];
+    if (me == null || !RideFacts.hasPosition(me)) return;
+    _guide.onFix(
+      lat: me.lat,
+      lng: me.lng,
+      speedKmh: me.speedKmh,
+      accuracyM: s.myFixAccuracyM,
+      nowMs: DateTime.now().millisecondsSinceEpoch,
+      online: s.isOnline,
+      lowData: s.settings?.lowData ?? false,
+    );
+  }
+
+  /// "Show on map" from the Alerts tab: centre on the rider and open their card.
+  void _onFocusRequest() {
+    final req = widget.focus?.take();
+    if (req == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final r = context.read<ConvoyService>().allConvoys[widget.convoyId]?.riders[req.userId];
+      if (r == null) return;
+      if (RideFacts.hasPosition(r)) _focus(r.lat, r.lng);
+      _openRider(r);
+    });
+  }
+
+  /// The part of the active line still to ride, as map points. Before I
+  /// first reach the planned route (riding to the start) the whole line.
+  List<LatLng> _activeLine(List<LatLng> planPoints) {
+    final active = _guide.active;
+    if (active == null || !active.isUsable) return planPoints;
+    if (!identical(active, _lineSource) || _lineVersion != _guide.routeVersion) {
+      _lineSource = active;
+      _lineVersion = _guide.routeVersion;
+      _lineFull = [for (final (lat, lng) in active.points) LatLng(lat, lng)];
+      _trimKey = null;
+    }
+    final m = _guide.started ? active.matched : null;
+    if (m == null) return _lineFull;
+    if (!identical(m, _trimKey)) {
+      _trimKey = m;
+      final from = m.index + 1;
+      _lineTrimmed = [LatLng(m.lat, m.lng), if (from < _lineFull.length) ..._lineFull.sublist(from)];
+    }
+    return _lineTrimmed;
+  }
+
   List<LatLng> _routeFor(ConvoyModel convoy) {
     if (!identical(convoy.route, _routeKey) || !identical(convoy.routeBreadcrumbs, _breadcrumbKey)) {
       _routeKey = convoy.route;
@@ -146,6 +274,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
   @override
   void dispose() {
+    _convoys?.removeListener(_onConvoyUpdate);
+    widget.focus?.removeListener(_onFocusRequest);
+    _guide.removeListener(_onGuide);
+    _guide.dispose();
     _waitTimer?.cancel();
     _staleTimer?.cancel();
     _sheetTop.dispose();
@@ -210,6 +342,55 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     if (ok && !lead && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suggestion sent to the lead.')));
     }
+  }
+
+  /// Long-press on the map. The lead gets "Meet here" (or add a stop there);
+  /// anyone else suggests a stop, as before.
+  Future<void> _onLongPress(ConvoyService service, LatLng point) async {
+    if (!service.canEditRoute) return _addStopAt(context, service, point);
+    final convoy = service.allConvoys[widget.convoyId];
+    if (convoy == null) return;
+    final uid = _auth?.currentUserId ?? service.myUserId ?? '';
+    final me = convoy.riders[uid];
+    final lat = point.latitude, lng = point.longitude;
+    final distance = (me != null && RideFacts.hasPosition(me)) ? GeoMath.haversine(me.lat, me.lng, lat, lng) : null;
+    final placement = RoutePlan.meetingPlacement(
+      convoy,
+      lat: lat,
+      lng: lng,
+      plan: _guide.plan,
+      fromAlongM: _guide.started ? _guide.plan?.matched?.alongM : null,
+    );
+    final old = placement.replaces;
+    final res = await showMeetHereSheet(
+      context,
+      placeName: () => _geoService().reverse(lat, lng),
+      distanceFromMeM: distance,
+      replacesName: old?.name,
+    );
+    if (res == null || !mounted) return;
+    if (res.action == MeetHereAction.addStop) {
+      await _addStopAt(context, service, point);
+      return;
+    }
+    final ok = service.addMeetingPoint(
+      PickedPlace(lat: lat, lng: lng, name: res.name.isEmpty ? StopKind.meeting.label : res.name, category: RoutePlan.meetingCategory),
+      insertBefore: placement.insertBefore,
+      replaceStopId: old?.stopId,
+    );
+    if (ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Meeting point set. Your group gets an alert.')));
+    }
+  }
+
+  /// "Share my ETA": plain text through the phone's share sheet. No link and no coordinates.
+  void _shareEta(ConvoyModel convoy, double? remainingM, Duration? eta) {
+    final text = RideFacts.shareEtaText(
+      destinationName: convoy.destinationName,
+      remainingM: remainingM,
+      arrival: eta == null ? null : _eta(eta),
+    );
+    SharePlus.instance.share(ShareParams(text: text));
   }
 
   void _focus(double lat, double lng) {
@@ -368,6 +549,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     // Alerts from the group timeline (same rules as the notifications). SOS is above already.
     for (final a in timelineAlerts) {
       if (a.key.startsWith('SOS:')) continue;
+      // The route status line already says it (and a new route is on the way).
+      if (a.key == 'OFF_ROUTE:$uid' && _guide.handlesOffRoute) continue;
       if (!a.standing && a.tier == AlertTier.normal) continue;
       final r = a.userId == null ? null : convoy.riders[a.userId];
       out.add(_Slot(
@@ -444,8 +627,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     final me = convoy.riders[uid] ??
         RiderModel(userId: uid.isEmpty ? '0' : uid, name: auth.currentUserName ?? 'Rider', lat: 0.0, lng: 0.0, lastSeenEpochMs: 0);
     final now = DateTime.now().millisecondsSinceEpoch;
-    final snap = _snapshotFor(convoy, uid);
-    final routePoints = _routeFor(convoy);
+    // Remaining distance and ETA along the part of the route still to ride, once I am on it.
+    final guideLeft = RideFacts.hasDestination(convoy) ? _guide.remainingM : null;
+    final baseSnap = _snapshotFor(convoy, uid);
+    final snap = guideLeft == null ? baseSnap : baseSnap.withRemaining(guideLeft, _guide.eta);
+    final routePoints = _activeLine(_routeFor(convoy));
     final colors = MemberColors.assign(convoy.riders.keys);
     final statuses = <String, RiderStatus>{
       for (final r in convoy.riders.values)
@@ -527,6 +713,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     title: _topTitle(convoy, snap),
                     connection: connection,
                     gps: gps,
+                    route: _guide.statusLine,
                     onBack: widget.embedded ? null : () => Navigator.of(context).maybePop(),
                   ),
                   if (slots.isNotEmpty) ...[
@@ -785,6 +972,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       ),
       SheetRow(icon: Icons.tune_rounded, title: 'Group settings', onTap: () => showGroupSettings(context, convoyId: convoy.groupId)),
       SheetRow(icon: Icons.headset_mic_rounded, title: 'Intercom options', onTap: () => IntercomOptions.show(context)),
+      if (hasDest)
+        SheetRow(
+          icon: Icons.share_rounded,
+          title: 'Share my ETA',
+          subtitle: _etaShareSubtitle(snap),
+          onTap: () => _shareEta(convoy, snap.remainingM, snap.eta),
+        ),
       SheetRow(
         icon: Icons.person_add_alt_rounded,
         title: 'Invite riders',
@@ -831,6 +1025,17 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     ];
   }
 
+  /// "42 km left, about 4:35 PM" under "Share my ETA" (null when nothing is known yet).
+  String? _etaShareSubtitle(RideSnapshot snap) {
+    final left = snap.remainingM;
+    final eta = snap.eta;
+    final parts = <String>[
+      if (left != null) '${formatDistanceRounded(left)} left',
+      if (eta != null) 'about ${_eta(eta)}',
+    ];
+    return parts.isEmpty ? null : parts.join(', ');
+  }
+
   void _openStops(ConvoyModel convoy) {
     showAppSheet<void>(
       context,
@@ -867,8 +1072,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           _sheetKey.currentState?.collapse();
           if (_selectedRiderId != null) setState(() => _selectedRiderId = null);
         },
-        // Long-press anywhere: the lead adds a stop there, anyone else suggests one.
-        onLongPress: (_, point) => _addStopAt(context, service, point),
+        // Long-press anywhere: the lead sets a meeting point or adds a stop there, anyone else suggests a stop.
+        onLongPress: (_, point) => _onLongPress(service, point),
       ),
       children: [
         TileLayer(
@@ -883,7 +1088,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             Polyline(
               points: routePoints,
               strokeWidth: 5,
-              color: (convoy.route?.approximate ?? false) ? AppTheme.neonCyan.withOpacity(0.45) : AppTheme.neonCyan.withOpacity(0.75),
+              color: (!_guide.hasPersonalRoute && (convoy.route?.approximate ?? false))
+                  ? AppTheme.neonCyan.withOpacity(0.45)
+                  : AppTheme.neonCyan.withOpacity(0.75),
             ),
           ]),
         MarkerLayer(markers: [
@@ -963,7 +1170,10 @@ class _TopBar extends StatelessWidget {
   final GpsState gps;
   final VoidCallback? onBack;
 
-  const _TopBar({required this.title, required this.connection, required this.gps, this.onBack});
+  /// The quiet route status ("New route, 42 km"), or null.
+  final String? route;
+
+  const _TopBar({required this.title, required this.connection, required this.gps, this.onBack, this.route});
 
   @override
   Widget build(BuildContext context) {
@@ -974,6 +1184,7 @@ class _TopBar extends StatelessWidget {
       if (gps != GpsState.accurate) 'GPS ${gps.label.toLowerCase()}',
     ];
     final warn = words.isNotEmpty;
+    final r = route;
     return Material(
       color: AppTheme.slateCard,
       elevation: 2,
@@ -1006,6 +1217,19 @@ class _TopBar extends StatelessWidget {
                             const SizedBox(width: Space.s4),
                             Expanded(
                               child: Text(words.join(', '), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (r != null)
+                      Semantics(
+                        liveRegion: true,
+                        child: Row(
+                          children: [
+                            Icon(Icons.alt_route_rounded, size: 16, color: StatusColors.info),
+                            const SizedBox(width: Space.s4),
+                            Expanded(
+                              child: Text(r, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
                             ),
                           ],
                         ),

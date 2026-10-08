@@ -17,6 +17,7 @@ import '../../domain/tracking/replay_math.dart';
 import '../timeline/member_colors.dart';
 import '../timeline/timeline_list.dart';
 import 'replay_screen.dart';
+import 'ride_share_card.dart';
 import 'trip_route_map.dart';
 
 /// Full report of a finished trip, in two tabs:
@@ -49,7 +50,11 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   bool _loading = true;
   String? _error;
   bool _sharing = false;
+  bool _preparingCard = false;
   TimelineEventModel? _highlight;
+
+  /// Recorded routes, once the Route tab (or the share card) has loaded them.
+  List<ReplayTrack>? _tracks;
 
   @override
   void initState() {
@@ -124,6 +129,10 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   }
 
   void _shareSummary() {
+    SharePlus.instance.share(ShareParams(text: _summaryText(), subject: 'CoRoute trip: ${widget.trip.tripName}'));
+  }
+
+  String _summaryText() {
     final r = _report;
     final t = widget.trip;
     final me = _memberFor(r, context.read<AuthService>().currentUserId);
@@ -138,7 +147,64 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
           'stopped ${formatDuration(Duration(milliseconds: restMs))} ($stops stops), top ${top.round()} km/h',
       if (r != null) '${r.memberCount} riders, ${r.arrived} reached the destination',
     ];
-    SharePlus.instance.share(ShareParams(text: lines.join('\n'), subject: 'CoRoute trip: ${t.tripName}'));
+    return lines.join('\n');
+  }
+
+  /// "Share ride": the share card preview (image, or the same summary as text).
+  /// Only numbers the report has: unknown values are left off the card.
+  Future<void> _openShareCard() async {
+    if (_preparingCard) return;
+    final t = widget.trip;
+    final myId = context.read<AuthService>().currentUserId;
+    // The sketch prefers the recorded route. Load it once if the Route tab has not yet.
+    if (t.breadcrumbTrail.isEmpty && _tracks == null && t.groupId.isNotEmpty) {
+      setState(() => _preparingCard = true);
+      final api = context.read<ApiClient>();
+      try {
+        final res = await api.get('/convoys/${Uri.encodeComponent(t.groupId)}/tracks?simplify=8', timeout: const Duration(seconds: 12));
+        final list = (res is Map ? res['tracks'] : null) as List? ?? const [];
+        _tracks = list.whereType<Map>().map((m) => ReplayTrack.fromJson(Map<String, dynamic>.from(m))).where((x) => x.points.length >= 2).toList();
+      } catch (_) {
+        // No route: the planned line (or no sketch) is used instead.
+      }
+      if (!mounted) return;
+      setState(() => _preparingCard = false);
+    }
+    if (!mounted) return;
+    await showRideShareSheet(context, _shareData(myId), text: _summaryText());
+  }
+
+  RideShareData _shareData(String? myId) {
+    final r = _report;
+    final t = widget.trip;
+    final me = _memberFor(r, myId);
+    final moving = me?.movingMs ?? t.movingMs;
+    final hasTimes = me != null || moving > 0 || t.restMs > 0;
+    return RideShareData(
+      tripName: t.tripName,
+      date: DateTime.fromMillisecondsSinceEpoch(t.startTimeEpochMs),
+      distanceM: me?.distanceM ?? t.totalDistanceKm * 1000,
+      ridingMs: hasTimes ? moving : null,
+      riders: r?.memberCount ?? t.riderCount,
+      stops: me?.stops ?? t.stopCount,
+      from: t.startLocationName,
+      to: t.destinationName,
+      sketch: _sketchPoints(myId),
+    );
+  }
+
+  /// My recorded route (saved on the phone, else from the server), else the planned line.
+  List<LatLng> _sketchPoints(String? myId) {
+    final trail = RideShareData.cleanPoints(widget.trip.breadcrumbTrail.map((p) => LatLng(p.lat, p.lng)));
+    if (trail.length >= 2) return trail;
+    for (final tr in _tracks ?? const <ReplayTrack>[]) {
+      if (tr.userId != myId) continue;
+      final pts = RideShareData.cleanPoints(tr.points.map((p) => LatLng(p.lat, p.lng)));
+      if (pts.length >= 2) return pts;
+    }
+    final planned = RideShareData.cleanPoints(TripRouteMap.plannedLineOf(_plan));
+    if (planned.length >= 2) return planned;
+    return trail; // 0 or 1 point: the painter draws nothing or one dot
   }
 
   static MemberReport? _memberFor(TripReportModel? r, String? userId) {
@@ -168,7 +234,16 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
       appBar: AppBar(
         title: Text(widget.trip.tripName, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
-          IconButton(tooltip: 'Share summary', icon: const Icon(Icons.ios_share_rounded), onPressed: _shareSummary),
+          if (widget.adminView)
+            IconButton(tooltip: 'Share summary', icon: const Icon(Icons.ios_share_rounded), onPressed: _shareSummary)
+          else
+            IconButton(
+              tooltip: 'Share ride',
+              icon: _preparingCard
+                  ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan))
+                  : const Icon(Icons.ios_share_rounded),
+              onPressed: _preparingCard ? null : _openShareCard,
+            ),
           if (!widget.adminView)
             IconButton(
               tooltip: 'Share my route (GPX)',
@@ -205,6 +280,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
               eventsLoading: _loading,
               highlight: _highlight,
               onHighlight: (e) => setState(() => _highlight = e),
+              onTracks: (tracks) => _tracks = tracks,
             ),
           ],
         ),
@@ -547,6 +623,9 @@ class _RouteView extends StatefulWidget {
   final TimelineEventModel? highlight;
   final ValueChanged<TimelineEventModel?> onHighlight;
 
+  /// The loaded routes, kept by the screen for the share card sketch.
+  final ValueChanged<List<ReplayTrack>>? onTracks;
+
   const _RouteView({
     required this.groupId,
     required this.title,
@@ -559,6 +638,7 @@ class _RouteView extends StatefulWidget {
     required this.eventsLoading,
     required this.highlight,
     required this.onHighlight,
+    this.onTracks,
   });
 
   @override
@@ -603,6 +683,7 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
       final list = (res is Map ? res['tracks'] : null) as List? ?? const [];
       final tracks = list.whereType<Map>().map((m) => ReplayTrack.fromJson(Map<String, dynamic>.from(m))).where((t) => t.points.length >= 2).toList();
       if (!mounted) return;
+      widget.onTracks?.call(tracks);
       setState(() {
         _tracks = tracks;
         _trackPlan = res is Map ? TripPlan.fromJson(res['plan']) : null;

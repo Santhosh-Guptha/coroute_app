@@ -1,19 +1,32 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/glass_card.dart';
+import '../../core/theme/map_tiles.dart';
+import '../../core/ui/ui.dart';
+import '../../data/models/convoy_model.dart';
+import '../../data/models/sos_alert_model.dart';
+import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
+import '../../domain/timeline/timeline_text.dart';
 import '../auth/access_gate_screen.dart';
+import '../ride/riders_ladder.dart';
+import '../timeline/member_colors.dart';
 import 'admin_convoy_inspector.dart';
 import 'admin_insights_screen.dart';
 import 'admin_ride_history_screen.dart';
+import 'admin_ui.dart';
 import 'admin_users_screen.dart';
-import '../../core/theme/map_tiles.dart';
 
+/// The admin home: what needs attention first (open SOS, live rides,
+/// accounts on hold), then the numbers, the fleet map and the admin tools.
+/// Every number comes from the server (live fleet over the socket, accounts
+/// from /admin/users); nothing is estimated. Pull down to refresh; what is on
+/// screen stays while it reloads.
 class MasterAdminDashboard extends StatefulWidget {
   const MasterAdminDashboard({super.key});
 
@@ -22,524 +35,309 @@ class MasterAdminDashboard extends StatefulWidget {
 }
 
 class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
-  final _broadcastController = TextEditingController();
+  /// Registered accounts, null until the first answer (then the counts show).
+  List<Map<String, dynamic>>? _users;
+  bool _loadingUsers = false;
 
   @override
   void initState() {
     super.initState();
     // Live fleet overview is pushed by the gateway (read-only, no audio).
-    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<ConvoyService>().startAdminFleetWatch());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<ConvoyService>().startAdminFleetWatch();
+      _loadUsers();
+    });
   }
 
-  LatLng _computeFleetCenter(List<dynamic> convoys) {
-    double totalLat = 0;
-    double totalLng = 0;
-    int count = 0;
-    for (final c in convoys) {
-      for (final r in c.riders.values) {
-        if (r.lat != 0.0 || r.lng != 0.0) {
-          totalLat += r.lat;
-          totalLng += r.lng;
-          count++;
-        }
-      }
+  Future<void> _loadUsers() async {
+    if (_loadingUsers) return;
+    setState(() => _loadingUsers = true);
+    try {
+      final res = await context.read<ApiClient>().get('/admin/users');
+      _users = adminMapList(res is Map ? res['users'] : null);
+    } catch (_) {
+      // Offline or busy: the counts that need it stay hidden or keep their last value.
     }
-    if (count == 0) return const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng); // India center as neutral default
-    return LatLng(totalLat / count, totalLng / count);
+    if (mounted) setState(() => _loadingUsers = false);
   }
 
-  @override
-  void dispose() {
-    _broadcastController.dispose();
-    super.dispose();
+  Future<void> _refresh() async {
+    context.read<ConvoyService>().startAdminFleetWatch();
+    await _loadUsers();
   }
 
-  void _showBroadcastDialog(BuildContext context, ConvoyService convoyService) {
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: AppTheme.slateCard,
-          title: Row(
-            children: [
-              Icon(Icons.campaign, color: AppTheme.hyperAmber),
-              SizedBox(width: 8),
-              Flexible(child: Text('Global Safety Broadcast', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18))),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'This alert will be broadcasted to all active convoys immediately on their map HUD.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _broadcastController,
-                maxLines: 2,
-                style: TextStyle(color: AppTheme.textPrimary),
-                decoration: const InputDecoration(
-                  hintText: 'e.g. Heavy rain alert on NH-48. Reduce speed and regroup.',
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.hyperAmber),
-              onPressed: () {
-                final msg = _broadcastController.text.trim();
-                if (msg.isNotEmpty) {
-                  convoyService.adminBroadcastSafetyAlert(msg);
-                  _broadcastController.clear();
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Safety alert broadcasted across all convoys!')),
-                  );
-                }
-              },
-              child: const Text('Send to Fleet', style: TextStyle(color: Colors.black)),
-            ),
-          ],
-        );
-      },
+  void _push(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+
+  void _openConvoy(ConvoyModel convoy) => _push(AdminConvoyInspector(convoy: convoy));
+
+  Future<void> _signOut() async {
+    await context.read<AuthService>().logout();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const AccessGateScreen()), (_) => false);
+  }
+
+  void _showBroadcastSheet(ConvoyService convoyService) {
+    showAppSheet<void>(
+      context,
+      isScrollControlled: true,
+      title: 'Safety broadcast',
+      builder: (_) => _BroadcastSheet(
+        onSend: (msg) {
+          convoyService.adminBroadcastSafetyAlert(msg);
+          adminSnack(context, 'Safety alert sent to every live ride.');
+        },
+      ),
     );
+  }
+
+  LatLng _fleetCenter(List<LatLng> points) {
+    if (points.isEmpty) return const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng); // India centre as neutral default
+    var lat = 0.0, lng = 0.0;
+    for (final p in points) {
+      lat += p.latitude;
+      lng += p.longitude;
+    }
+    return LatLng(lat / points.length, lng / points.length);
   }
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthService>();
     final convoyService = context.watch<ConvoyService>();
+    final now = DateTime.now().millisecondsSinceEpoch;
     final convoys = convoyService.allConvoys.values.toList();
 
-    int totalRiders = 0;
-    int totalAlerts = 0;
-    for (final c in convoys) {
-      totalRiders += c.riders.length;
-      totalAlerts += c.activeAlerts.length;
-    }
+    // Open SOS across every live ride, newest first.
+    final sos = <(ConvoyModel, SosAlertModel)>[
+      for (final c in convoys)
+        for (final a in c.activeAlerts)
+          if (!a.resolved) (c, a),
+    ]..sort((x, y) => y.$2.timestamp.compareTo(x.$2.timestamp));
+    final sosGroups = {for (final s in sos) s.$1.groupId};
+    convoys.sort((a, b) {
+      final s = (sosGroups.contains(b.groupId) ? 1 : 0) - (sosGroups.contains(a.groupId) ? 1 : 0);
+      return s != 0 ? s : a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+    final totalRiders = convoys.fold<int>(0, (n, c) => n + c.riders.length);
+
+    final users = _users;
+    final onHold = users?.where((u) => AccountStatus.fromCode(u['status']) == AccountStatus.onHold).length;
+
+    // 1. Open SOS.
+    final sosSection = <Widget>[
+      if (sos.isEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: Space.s8),
+          child: StatusLine(icon: Icons.check_circle_rounded, text: 'No open SOS', color: StatusColors.success),
+        )
+      else
+        for (final (c, a) in sos)
+          Padding(
+            padding: const EdgeInsets.only(bottom: Space.s8),
+            child: RideAlert(
+              tier: AlertTier.critical,
+              title: 'SOS: ${a.userName.isEmpty ? 'a rider' : a.userName} needs help',
+              message: '${c.name}. ${adminCapitalize(TimelineText.reason(a.alertType))}, '
+                  '${formatAgo(Duration(milliseconds: math.max(0, now - a.timestamp)))}',
+              actionLabel: 'Open ride',
+              onAction: () => _openConvoy(c),
+            ),
+          ),
+    ];
+
+    // 2. Live rides.
+    final ridesSection = <Widget>[
+      const AdminSectionLabel('Live rides'),
+      if (convoys.isEmpty)
+        AdminRow(
+          leading: const AdminRowIcon(Icons.two_wheeler_rounded),
+          title: 'No live rides right now',
+          subtitle: 'Finished rides are in Ride history.',
+          onTap: () => _push(const AdminRideHistoryScreen()),
+        )
+      else
+        for (final c in convoys)
+          Padding(
+            padding: const EdgeInsets.only(bottom: Space.s8),
+            child: _ConvoyRow(
+              key: ValueKey(c.groupId),
+              convoy: c,
+              sosCount: sos.where((s) => s.$1.groupId == c.groupId).length,
+              onTap: () => _openConvoy(c),
+            ),
+          ),
+    ];
+
+    // 3. Accounts on hold.
+    final holdSection = <Widget>[
+      if (onHold != null && onHold > 0)
+        Padding(
+          padding: const EdgeInsets.only(top: Space.s16),
+          child: RideAlert(
+            tier: AlertTier.important,
+            title: onHold == 1 ? '1 account on hold' : '$onHold accounts on hold',
+            message: 'They cannot sign in until you release the hold.',
+            actionLabel: 'Review',
+            onAction: () => _push(const AdminUsersScreen(initialFilter: AdminUserFilter.onHold)),
+          ),
+        ),
+    ];
+
+    // 4. Numbers.
+    final stats = <Widget>[
+      const AdminSectionLabel('Overview'),
+      AdminCard(
+        child: Row(
+          children: [
+            Expanded(child: RideMetric(value: '${convoys.length}', label: 'Live rides')),
+            Expanded(child: RideMetric(value: '$totalRiders', label: 'Riders online')),
+            Expanded(
+              child: RideMetric(
+                value: '${sos.length}',
+                label: 'Open SOS',
+                color: sos.isEmpty ? null : StatusColors.critical,
+              ),
+            ),
+            if (users != null) Expanded(child: RideMetric(value: '${users.length}', label: 'Accounts')),
+          ],
+        ),
+      ),
+    ];
+
+    // Fleet map, only when someone is out riding.
+    final points = <LatLng>[
+      for (final c in convoys)
+        for (final r in c.riders.values)
+          if (r.lat != 0.0 || r.lng != 0.0) LatLng(r.lat, r.lng),
+    ];
+    final mapSection = <Widget>[
+      if (points.isNotEmpty) ...[
+        const AdminSectionLabel('Fleet map'),
+        SizedBox(height: 240, child: _fleetMap(convoys, points, now)),
+      ],
+    ];
+
+    // 5. Tools.
+    Widget tool(IconData icon, String title, String subtitle, VoidCallback onTap, {Color? color}) => ListTile(
+          contentPadding: EdgeInsets.zero,
+          minVerticalPadding: Space.s12,
+          leading: Icon(icon, color: color ?? AppTheme.textSecondary),
+          title: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(color: color ?? AppTheme.textPrimary)),
+          subtitle: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+          trailing: color == null ? Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted) : null,
+          onTap: onTap,
+        );
+    final tools = <Widget>[
+      const AdminSectionLabel('Manage'),
+      tool(Icons.people_alt_rounded, 'Users', 'Accounts, hold, block, delete and their rides', () => _push(const AdminUsersScreen())),
+      tool(Icons.history_rounded, 'Ride history', 'Live and finished rides, retention and delete', () => _push(const AdminRideHistoryScreen())),
+      tool(Icons.insights_rounded, 'Feedback and analytics', 'Feedback, page views and app versions', () => _push(const AdminInsightsScreen())),
+      tool(Icons.logout_rounded, 'Sign out', 'Leave the admin console on this phone', _signOut, color: AppTheme.textPrimary),
+    ];
 
     return Scaffold(
       backgroundColor: AppTheme.obsidianVoid,
       appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppTheme.infoBlue,
-              ),
-              child: const Icon(Icons.shield, color: Colors.white, size: 16),
-            ),
-            const SizedBox(width: 8),
-            Flexible(child: const Text(
-              'Master Admin Console',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ],
-        ),
+        title: const Text('Admin'),
         actions: [
           IconButton(
-            tooltip: 'Safety Broadcast',
-            icon: Icon(Icons.campaign, color: AppTheme.hyperAmber),
-            onPressed: () => _showBroadcastDialog(context, convoyService),
-          ),
-          IconButton(
-            tooltip: 'Groups & Retention',
-            icon: Icon(Icons.history_rounded, color: AppTheme.emeraldSafe),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRideHistoryScreen())),
-          ),
-          IconButton(
-            tooltip: 'Feedback & analytics',
-            icon: Icon(Icons.insights_rounded, color: AppTheme.neonCyan),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminInsightsScreen())),
-          ),
-          IconButton(
-            tooltip: 'Registered Users',
-            icon: Icon(Icons.people_alt_rounded, color: AppTheme.infoBlue),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())),
-          ),
-          IconButton(
-            tooltip: 'Logout',
-            icon: Icon(Icons.logout, color: AppTheme.textMuted),
-            onPressed: () async {
-              await auth.logout();
-              if (context.mounted) {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AccessGateScreen()),
-                );
-              }
-            },
+            tooltip: 'Safety broadcast',
+            icon: const Icon(Icons.campaign_rounded),
+            onPressed: () => _showBroadcastSheet(convoyService),
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
-            child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Management Hub
-            Row(
-              children: [
-                Expanded(
-                  child: GlassCard(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRideHistoryScreen())),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.emeraldSafe.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Icon(Icons.history_rounded, color: AppTheme.emeraldSafe, size: 20),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Groups & Retention',
-                                style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Active rides & policy',
-                                style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted, size: 18),
-                      ],
+      body: LoadingState(
+        loading: _loadingUsers,
+        child: RefreshIndicator(
+          color: AppTheme.neonCyan,
+          onRefresh: _refresh,
+          child: LayoutBuilder(builder: (context, c) {
+            final wide = c.maxWidth >= adminWideBreakpoint;
+            final Widget body;
+            if (wide) {
+              body = Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [...sosSection, ...ridesSection, ...holdSection],
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: GlassCard(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUsersScreen())),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.neonCyan.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Icon(Icons.people_alt_rounded, color: AppTheme.neonCyan, size: 20),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Registered Users',
-                                style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Hold, block & trips',
-                                style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted, size: 18),
-                      ],
+                  const SizedBox(width: Space.s24),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [...stats, ...mapSection, ...tools],
                     ),
                   ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 14),
-
-            // KPI Grid
-            Row(
-              children: [
-                _buildKpiCard(
-                  title: 'Active Convoys',
-                  value: convoys.length.toString(),
-                  icon: Icons.groups_rounded,
-                  accentColor: AppTheme.neonCyan,
-                ),
-                const SizedBox(width: 10),
-                _buildKpiCard(
-                  title: 'Riders Online',
-                  value: totalRiders.toString(),
-                  icon: Icons.two_wheeler,
-                  accentColor: AppTheme.emeraldSafe,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                _buildKpiCard(
-                  title: 'Emergency SOS',
-                  value: totalAlerts.toString(),
-                  icon: Icons.warning_amber_rounded,
-                  accentColor: totalAlerts > 0 ? AppTheme.laserRed : AppTheme.textMuted,
-                ),
-                const SizedBox(width: 10),
-                _buildKpiCard(
-                  title: 'Fleet Status',
-                  value: totalAlerts > 0 ? 'Alerts Active' : (totalRiders > 0 ? 'All Clear' : 'No Riders'),
-                  icon: Icons.check_circle_outline,
-                  accentColor: totalAlerts > 0 ? AppTheme.laserRed : (totalRiders > 0 ? AppTheme.emeraldSafe : AppTheme.textMuted),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 20),
-
-            // Fleet Radar Map
-            Text(
-              'Global Fleet Radar',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                height: 220,
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppTheme.subtleBorder),
-                ),
-                child: FlutterMap(
-                  options: MapOptions(
-                    initialCenter: _computeFleetCenter(convoys),
-                    initialZoom: totalRiders > 0 ? 10.0 : 3.0,
-                  ),
-                  children: [
-                    TileLayer(
-                      tileBuilder: mapTileBuilder,
-                      urlTemplate: AppConstants.osmTileUrl,
-                      userAgentPackageName: AppConstants.osmUserAgent,
-                    ),
-                    MarkerLayer(
-                      markers: convoys.expand((c) {
-                        return c.riders.values.map((r) {
-                          return Marker(
-                            point: LatLng(r.lat, r.lng),
-                            width: 36,
-                            height: 36,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: r.role == 'LEAD' ? AppTheme.hyperAmber : AppTheme.neonCyan,
-                                border: Border.all(color: Colors.black, width: 2),
-                              ),
-                              child: const Icon(
-                                Icons.two_wheeler,
-                                color: Colors.black,
-                                size: 18,
-                              ),
-                            ),
-                          );
-                        });
-                      }).toList(),
-                    ),
-                  ],
+                ],
+              );
+            } else {
+              body = Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [...sosSection, ...ridesSection, ...holdSection, ...stats, ...mapSection, ...tools],
+              );
+            }
+            return SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(Space.s16, Space.s8, Space.s16, Space.s32),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: wide ? 1200 : 760),
+                  child: body,
                 ),
               ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Convoys Management List
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Active Convoys',
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  '${convoys.length} live sessions',
-                  style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-
-            if (convoys.isEmpty)
-              Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text(
-                    'No convoys on the road right now. Finished rides are in Ride history.',
-                    style: TextStyle(color: AppTheme.textMuted),
-                  ),
-                ),
-              )
-            else
-              ...convoys.map((convoy) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: GlassCard(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AdminConvoyInspector(convoy: convoy),
-                        ),
-                      );
-                    },
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: AppTheme.neonCyan.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Icon(Icons.group_work, color: AppTheme.neonCyan, size: 20),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    convoy.name,
-                                    style: TextStyle(
-                                      color: AppTheme.textPrimary,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 15,
-                                    ),
-                                  ),
-                                  Text(
-                                    'Code: ${convoy.joinCode} · Lead: ${convoy.createdByUserName}',
-                                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: AppTheme.emeraldSafe.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.people, size: 12, color: AppTheme.emeraldSafe),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '${convoy.riders.length}',
-                                    style: TextStyle(
-                                      color: AppTheme.emeraldSafe,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(child: Text(
-                              'Destination: ${convoy.destinationName.ifEmpty ? 'Open Highway' : convoy.destinationName}',
-                              style: TextStyle(color: AppTheme.textMuted, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                            Row(
-                              children: [
-                                Text(
-                                  'Inspect Telemetry',
-                                  style: TextStyle(
-                                    color: AppTheme.neonCyan,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Icon(Icons.chevron_right, color: AppTheme.neonCyan, size: 16),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
-          ],
-        ),
-          ),
+            );
+          }),
         ),
       ),
     );
   }
 
-  Widget _buildKpiCard({
-    required String title,
-    required String value,
-    required IconData icon,
-    required Color accentColor,
-  }) {
-    return Expanded(
-      child: GlassCard(
-        padding: const EdgeInsets.all(14),
-        child: Row(
+  Widget _fleetMap(List<ConvoyModel> convoys, List<LatLng> points, int now) {
+    final markers = <Marker>[];
+    for (final c in convoys) {
+      final colors = MemberColors.assign(c.riders.keys);
+      for (final r in c.riders.values) {
+        if (r.lat == 0.0 && r.lng == 0.0) continue;
+        markers.add(Marker(
+          point: LatLng(r.lat, r.lng),
+          width: 48,
+          height: 48,
+          child: RiderAvatar(
+            name: r.name,
+            color: colors[r.userId],
+            status: riderStatusOf(r, c, isMe: false, nowMs: now),
+            size: 36,
+            onTap: () => _openConvoy(c),
+          ),
+        ));
+      }
+    }
+    return ClipRRect(
+      borderRadius: Radii.mdAll,
+      child: DecoratedBox(
+        position: DecorationPosition.foreground,
+        decoration: BoxDecoration(borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.subtleBorder)),
+        child: FlutterMap(
+          // A new fleet (rides started or ended) fits the camera again.
+          key: ValueKey(convoys.map((c) => c.groupId).join(',')),
+          options: MapOptions(
+            initialCenter: _fleetCenter(points),
+            initialZoom: 12,
+            initialCameraFit: points.length > 1
+                ? CameraFit.coordinates(coordinates: points, padding: const EdgeInsets.all(32), maxZoom: 14)
+                : null,
+          ),
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: accentColor.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: accentColor, size: 20),
+            TileLayer(
+              tileBuilder: mapTileBuilder,
+              urlTemplate: AppConstants.osmTileUrl,
+              userAgentPackageName: AppConstants.osmUserAgent,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    value,
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            MarkerLayer(markers: markers),
           ],
         ),
       ),
@@ -547,6 +345,97 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
   }
 }
 
-extension StringExtension on String {
-  bool get ifEmpty => trim().isEmpty;
+/// One live ride: name, code and lead, riders and destination, and an
+/// "Emergency" chip when someone in it has an open SOS.
+class _ConvoyRow extends StatelessWidget {
+  final ConvoyModel convoy;
+  final int sosCount;
+  final VoidCallback onTap;
+
+  const _ConvoyRow({super.key, required this.convoy, required this.sosCount, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = convoy;
+    final n = c.riders.length;
+    final dest = c.destinationName.trim();
+    return AdminRow(
+      leading: AdminRowIcon(Icons.two_wheeler_rounded, color: sosCount > 0 ? StatusColors.critical : null),
+      title: c.name.isEmpty ? 'Ride' : c.name,
+      subtitle: [
+        if (c.joinCode.isNotEmpty) 'Code ${c.joinCode}',
+        if (c.createdByUserName.isNotEmpty) 'lead ${c.createdByUserName}',
+      ].join(', '),
+      detail: '$n ${n == 1 ? 'rider' : 'riders'}, ${dest.isEmpty ? 'no destination set' : 'to $dest'}',
+      status: sosCount > 0 ? RiderStatusChip(status: RiderStatus.emergency, detail: sosCount == 1 ? '1 SOS' : '$sosCount SOS') : null,
+      onTap: onTap,
+    );
+  }
+}
+
+/// The broadcast form: what it does, the message, one send button.
+class _BroadcastSheet extends StatefulWidget {
+  final ValueChanged<String> onSend;
+
+  const _BroadcastSheet({required this.onSend});
+
+  @override
+  State<_BroadcastSheet> createState() => _BroadcastSheetState();
+}
+
+class _BroadcastSheetState extends State<_BroadcastSheet> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _send() {
+    final msg = _ctrl.text.trim();
+    if (msg.isEmpty) return;
+    Navigator.pop(context);
+    widget.onSend(msg);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = _ctrl.text.trim().isNotEmpty;
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Every rider in a live ride sees this alert on their map right away.',
+            style: AppText.body.copyWith(color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: Space.s16),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            minLines: 2,
+            maxLines: 4,
+            maxLength: 300,
+            textCapitalization: TextCapitalization.sentences,
+            onChanged: (_) => setState(() {}),
+            style: AppText.body,
+            decoration: const InputDecoration(
+              labelText: 'Message',
+              hintText: 'Heavy rain on NH 48. Reduce speed and regroup.',
+              border: OutlineInputBorder(borderRadius: Radii.mdAll),
+            ),
+          ),
+          const SizedBox(height: Space.s8),
+          FilledButton.icon(
+            onPressed: ready ? _send : null,
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+            icon: const Icon(Icons.campaign_rounded),
+            label: const Text('Send to all live rides'),
+          ),
+        ],
+      ),
+    );
+  }
 }
