@@ -24,10 +24,15 @@ class GeoProxy {
     this.inflight = new Map();
     this.queued = 0; // upstream calls waiting in or running through _queued
     this.tableCache = new Map(); // "lat,lng>lat,lng" (3 dp) -> { at, value } (memory LRU, never in geo_cache)
+    // 3.16 weather: grid cell (0.1 deg) -> { at, value } memory LRU in front of geo_cache; upstream calls this minute.
+    this.weatherCache = new Map();
+    this.weatherTimes = [];
+    this.hospitalInflight = new Map();
   }
 
   get searchEnabled() { return !!config.geoSearchUrl; }
   get routeEnabled() { return !!config.geoRouteUrl; }
+  get weatherEnabled() { return !!config.weatherUrl; }
 
   /** Serialises upstream calls and spaces them out. */
   _queued(fn) {
@@ -222,6 +227,137 @@ class GeoProxy {
     });
     return out.map((v) => (v === undefined ? null : v));
   }
+
+  // ---------------------------------------------------------------- 3.16 weather (Open-Meteo)
+  /**
+   * Hourly rain forecast for 1 to 5 route points ({lat, lng, at}: `at` in epoch seconds). Points
+   * are rounded to a 0.1 degree grid (about 10 km) and cached for WEATHER_CACHE_MIN (memory LRU of
+   * 500 cells in front of geo_cache), so every rider on the same road shares one forecast. Missing
+   * cells go upstream in ONE call, within a global budget of WEATHER_PER_MIN calls a minute; over
+   * budget, cached cells are answered and the rest are null. Returns
+   * { points: [{lat, lng, at, precipProb, precipMm, code, tempC} | null], source, attribution }
+   * or null when disabled. Nothing about the points is logged.
+   */
+  async weather(points) {
+    if (!this.weatherEnabled || !Array.isArray(points) || !points.length) return null;
+    const now = Date.now();
+    const ttl = config.weatherCacheMin * 60000;
+    const keys = points.map((p) => ({ la: round(p.lat, 1), ln: round(p.lng, 1) })).map((g) => ({ ...g, k: `wx:${g.la},${g.ln}` }));
+    const cells = new Map(); // k -> stored forecast
+    const missing = new Map(); // k -> grid
+    for (const g of keys) {
+      if (cells.has(g.k) || missing.has(g.k)) continue;
+      const mem = this.weatherCache.get(g.k);
+      if (mem && now - mem.at < ttl) { this.weatherCache.delete(g.k); this.weatherCache.set(g.k, mem); cells.set(g.k, mem.value); continue; }
+      const hit = await this.repo.geoCacheGet(g.k).catch(() => null);
+      if (hit && hit.value && now - (hit.createdAt || 0) < ttl) { this._wxRemember(g.k, hit.value, hit.createdAt); cells.set(g.k, hit.value); continue; }
+      missing.set(g.k, g);
+    }
+    if (missing.size) {
+      this.weatherTimes = this.weatherTimes.filter((x) => now - x < 60000);
+      if (this.weatherTimes.length < config.weatherPerMin) {
+        this.weatherTimes.push(now);
+        const list = [...missing.values()];
+        const fetched = await this._weatherFetch(list);
+        if (fetched) {
+          list.forEach((g, i) => {
+            const v = fetched[i];
+            if (!v) return;
+            cells.set(g.k, v);
+            this._wxRemember(g.k, v, now);
+            this.repo.geoCachePut(g.k, v).catch(() => {});
+          });
+        }
+      }
+    }
+    const out = points.map((p, i) => {
+      const f = cells.get(keys[i].k);
+      if (!f || !Array.isArray(f.probs)) return null;
+      const idx = Math.floor((p.at - f.hourlyFrom) / 3600);
+      if (idx < 0 || idx >= f.probs.length) return null;
+      const n = (v) => (Number.isFinite(v) ? v : null);
+      return { lat: round(p.lat, 5), lng: round(p.lng, 5), at: p.at, precipProb: n(f.probs[idx]), precipMm: n(f.mm[idx]), code: n(f.codes[idx]), tempC: n(f.temps[idx]) };
+    });
+    return { points: out, source: 'Open-Meteo', attribution: 'Weather data by Open-Meteo.com (CC BY 4.0)' };
+  }
+
+  _wxRemember(k, value, at) {
+    this.weatherCache.delete(k);
+    this.weatherCache.set(k, { at: at || Date.now(), value });
+    while (this.weatherCache.size > 500) this.weatherCache.delete(this.weatherCache.keys().next().value);
+  }
+
+  /** One Open-Meteo call for several grid cells. Returns one stored forecast per cell (or null), or null when the call failed. */
+  async _weatherFetch(cells) {
+    const lat = cells.map((g) => g.la).join(','), lng = cells.map((g) => g.ln).join(',');
+    const url = `${config.weatherUrl}/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=precipitation_probability,precipitation,weather_code,temperature_2m&forecast_days=3&timezone=UTC`;
+    let j;
+    try {
+      j = await this._queued(() => this._getJson(url));
+    } catch (e) {
+      this.log.warn('[geo] weather failed', String(e && e.message || e).replace(/[0-9.,-]{6,}/g, 'x'));
+      return null;
+    }
+    const list = Array.isArray(j) ? j : (j && typeof j === 'object' ? [j] : []);
+    return cells.map((g, i) => weatherCell(list[i]));
+  }
+
+  // ---------------------------------------------------------------- 3.16 nearest hospital
+  /**
+   * The nearest hospital to a point (Nominatim amenity search, bounded to about 15 km around it),
+   * for the incident sheet. One upstream call per 1 km grid cell, cached 30 days; "nothing found"
+   * is cached 6 hours so a rural emergency is not retried at every alert. Returns
+   * { name, lat, lng, distanceM } or null. Never throws.
+   */
+  async nearestHospital(lat, lng) {
+    if (!this.searchEnabled || !(Math.abs(Number(lat)) <= 90 && Math.abs(Number(lng)) <= 180) || !(lat || lng)) return null;
+    const la = round(lat, 2), ln = round(lng, 2);
+    const k = `hosp:${la},${ln}`;
+    const now = Date.now();
+    const hit = await this.repo.geoCacheGet(k).catch(() => null);
+    if (hit && hit.value) {
+      const age = now - (hit.createdAt || 0);
+      if (hit.value.none ? age < 6 * 3600000 : age < config.geoCacheDays * 86400000) return hit.value.none ? null : hit.value;
+    }
+    if (this.hospitalInflight.has(k)) return this.hospitalInflight.get(k);
+    const p = (async () => {
+      let value = null;
+      try {
+        const box = `${round(ln - 0.15, 3)},${round(la + 0.15, 3)},${round(ln + 0.15, 3)},${round(la - 0.15, 3)}`;
+        const rows = await this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&q=hospital&limit=5&bounded=1&viewbox=${box}`));
+        let best = null;
+        for (const r of Array.isArray(rows) ? rows : []) {
+          const y = Number(r.lat), x = Number(r.lon);
+          if (!Number.isFinite(y) || !Number.isFinite(x)) continue;
+          const d = haversine(la, ln, y, x);
+          if (!best || d < best.distanceM) best = { name: String(r.name || shortName(r) || 'Hospital').slice(0, 80), lat: round(y, 5), lng: round(x, 5), distanceM: Math.round(d) };
+        }
+        value = best;
+      } catch (e) {
+        this.log.warn('[geo] hospital lookup failed', e.message);
+        return null; // not cached: the next alert in this cell may try again
+      }
+      await this.repo.geoCachePut(k, value || { none: true }).catch(() => {});
+      return value;
+    })().finally(() => this.hospitalInflight.delete(k));
+    this.hospitalInflight.set(k, p);
+    return p;
+  }
+}
+
+/** One Open-Meteo location result reduced to what is stored: { hourlyFrom (epoch s), probs[], mm[], codes[], temps[] }. */
+function weatherCell(r) {
+  const h = r && r.hourly;
+  if (!h || !Array.isArray(h.time) || !h.time.length) return null;
+  const t0 = h.time[0];
+  const from = typeof t0 === 'number' ? t0 : Math.floor(Date.parse(/[Z+]/.test(String(t0).slice(10)) ? t0 : `${t0}Z`) / 1000);
+  if (!Number.isFinite(from)) return null;
+  const n = h.time.length;
+  const arr = (list, int) => Array.from({ length: n }, (_, i) => {
+    const v = Number(Array.isArray(list) ? list[i] : NaN);
+    return Number.isFinite(v) ? (int ? Math.round(v) : Math.round(v * 10) / 10) : null;
+  });
+  return { hourlyFrom: from, probs: arr(h.precipitation_probability, true), mm: arr(h.precipitation, false), codes: arr(h.weather_code, true), temps: arr(h.temperature_2m, false) };
 }
 
 /** "Shamshabad, Rangareddy, Telangana": locality, district, state (country only when abroad). */

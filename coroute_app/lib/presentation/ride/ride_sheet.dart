@@ -333,15 +333,16 @@ class SheetSectionTitle extends StatelessWidget {
   }
 }
 
-/// A 56 dp row in the expanded sheet (Messages, Group settings, ...).
+/// A 56 dp row in the expanded sheet (Messages, Group settings, ...). With
+/// no [onTap] it is a plain information row (its [trailing] may still act).
 class SheetRow extends StatelessWidget {
   final IconData icon;
   final String title;
   final String? subtitle;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Widget? trailing;
 
-  const SheetRow({super.key, required this.icon, required this.title, this.subtitle, required this.onTap, this.trailing});
+  const SheetRow({super.key, required this.icon, required this.title, this.subtitle, this.onTap, this.trailing});
 
   @override
   Widget build(BuildContext context) {
@@ -351,9 +352,105 @@ class SheetRow extends StatelessWidget {
       minTileHeight: 56,
       leading: Icon(icon, color: AppTheme.textPrimary),
       title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-      subtitle: sub == null || sub.isEmpty ? null : Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
-      trailing: trailing ?? Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
+      subtitle: sub == null || sub.isEmpty ? null : Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+      trailing: trailing ?? (onTap == null ? null : Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted)),
       onTap: onTap,
     );
+  }
+}
+
+/// One short line with an icon under the sheet title ("Rain likely after
+/// Warangal around 3 PM", "Dark in 40 min"). Static.
+class SheetLine extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const SheetLine({super.key, required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: Space.s4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: AppTheme.textSecondary),
+          const SizedBox(width: Space.s8),
+          Expanded(child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label)),
+        ],
+      ),
+    );
+  }
+}
+
+/// How the "Save route map" row reads (pure, for tests): idle, saving,
+/// saved or failed.
+enum SaveMapState { idle, running, saved, failed }
+
+SaveMapState saveMapStateOf({required bool running, required int done, required int total, String? error}) {
+  if (running) return SaveMapState.running;
+  if (error != null && error.isNotEmpty) return SaveMapState.failed;
+  if (total > 0 && done >= total) return SaveMapState.saved;
+  return SaveMapState.idle;
+}
+
+/// "Save route map" in the ride sheet and the review sheet (3.16, item 16):
+/// a button while idle, a progress line while the tiles download, "Route map
+/// saved" when done, and a retry when it failed. Tapping it is always
+/// allowed, whatever the network (the automatic prefetch waits for Wi-Fi).
+class SaveRouteMapRow extends StatelessWidget {
+  final bool running;
+  final int done;
+  final int total;
+  final String? error;
+  final VoidCallback? onSave;
+
+  const SaveRouteMapRow({super.key, required this.running, required this.done, required this.total, this.error, this.onSave});
+
+  static const String idleTitle = 'Save route map';
+  static const String savedTitle = 'Route map saved';
+  static const String failedTitle = 'Could not save the map right now';
+  static String progressTitle(int done, int total) => 'Saving route map: $done of $total';
+
+  @override
+  Widget build(BuildContext context) {
+    final state = saveMapStateOf(running: running, done: done, total: total, error: error);
+    switch (state) {
+      case SaveMapState.running:
+        return SheetRow(
+          icon: Icons.download_rounded,
+          title: progressTitle(done, total),
+          trailing: SizedBox(
+            width: 48,
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, value: total > 0 ? (done / total).clamp(0.0, 1.0) : null),
+              ),
+            ),
+          ),
+        );
+      case SaveMapState.saved:
+        return SheetRow(
+          icon: Icons.download_done_rounded,
+          title: savedTitle,
+          subtitle: 'Maps along the route work without signal.',
+          trailing: Icon(Icons.check_circle_rounded, color: StatusColors.success),
+        );
+      case SaveMapState.failed:
+        return SheetRow(
+          icon: Icons.download_rounded,
+          title: failedTitle,
+          subtitle: 'Tap to try again.',
+          onTap: onSave,
+        );
+      case SaveMapState.idle:
+        return SheetRow(
+          icon: Icons.download_rounded,
+          title: idleTitle,
+          subtitle: 'Map tiles along the route are kept on the phone for 30 days.',
+          onTap: onSave,
+        );
+    }
   }
 }

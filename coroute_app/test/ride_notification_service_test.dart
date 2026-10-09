@@ -12,6 +12,7 @@ import 'package:coroute_app/data/models/sos_alert_model.dart';
 import 'package:coroute_app/data/services/background_service.dart';
 import 'package:coroute_app/data/services/ride_notification_service.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
+import 'package:coroute_app/domain/notify/notification_snapshot.dart';
 
 const int t0 = 1700000000000;
 
@@ -115,16 +116,24 @@ void main() {
   late int now;
   RideNotificationService? service;
 
+  MedicalId? medical;
+  int medicalAsked = 0;
+
   Future<void> setUp0(WidgetTester tester, {bool start = true}) async {
     SharedPreferences.setMockInitialValues({});
     BackgroundService.debugReset();
     port = FakePort();
     channel = FakeChannel();
     now = t0;
+    medical = null;
+    medicalAsked = 0;
     settings = SettingsService();
     await settings.load();
     if (start) {
-      service = RideNotificationService.forPort(port, settings, channel: channel, clock: () => now, clockText: (ms) => 'T');
+      service = RideNotificationService.forPort(port, settings, channel: channel, clock: () => now, clockText: (ms) => 'T', medicalId: () {
+        medicalAsked++;
+        return medical;
+      });
     }
   }
 
@@ -138,6 +147,39 @@ void main() {
     now += d.inMilliseconds;
     await tester.pump(d);
   }
+
+  testWidgets('3.16: the medical ID provider is asked on every push; my own SOS shows it and the key changes', (tester) async {
+    await setUp0(tester);
+    port.convoy = ride();
+    port.changed();
+    await tester.pump();
+    expect(channel.shows, hasLength(1));
+    expect(medicalAsked, 1);
+    final mine = SosAlertModel(alertId: 'AL2', userId: 'me', userName: 'Kiran', lat: 13.0, lng: 77.6, alertType: 'CRASH', timestamp: t0);
+    port.convoy = ride(alerts: [mine]);
+    port.changed();
+    await tester.pump();
+    expect(channel.shows, hasLength(2), reason: 'an emergency pushes at once');
+    expect(channel.shows.last['publicText'], isNot(contains('Blood')));
+    expect(medicalAsked, 2);
+
+    // The setting switches on mid-SOS: the next push carries the medical line (new dedupe key).
+    medical = const MedicalId(bloodGroup: 'AB+', allergies: 'none known', contactName: 'Asha', contactPhone: '98765 43210');
+    await advance(tester, const Duration(seconds: 11));
+    port.changed();
+    await tester.pump();
+    expect(channel.shows, hasLength(3));
+    expect(channel.shows.last['publicText'], 'Your SOS is active. Blood group AB+. Allergies: none known. Emergency contact: Asha 98765 43210.');
+    expect(channel.shows.last['subtitle'], contains('AB+'));
+    expect(channel.shows.last['lockScreenPublic'], isTrue);
+
+    // Unchanged content: no further push.
+    await advance(tester, const Duration(seconds: 11));
+    port.changed();
+    await tester.pump();
+    expect(channel.shows, hasLength(3));
+    await tearDown0();
+  });
 
   testWidgets('nothing without a ride; pushes at once when the ride starts', (tester) async {
     await setUp0(tester);

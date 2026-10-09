@@ -27,6 +27,10 @@ class NetResponder {
   /// Why they stopped, for example NOT_FOUND ("Unable to locate"); '' otherwise.
   final String reason;
 
+  /// 3.16: asked although far by road (straight-line close, road far); [etaS] and
+  /// [distanceM] are then road values.
+  final bool farByRoad;
+
   const NetResponder({
     required this.rid,
     required this.name,
@@ -38,6 +42,7 @@ class NetResponder {
     this.acceptedAt = 0,
     this.arrivedAt = 0,
     this.reason = '',
+    this.farByRoad = false,
   });
 
   /// On the way or with the rider.
@@ -58,6 +63,7 @@ class NetResponder {
       acceptedAt: _i(json['acceptedAt']) ?? 0,
       arrivedAt: _i(json['arrivedAt']) ?? 0,
       reason: _s(json['reason']),
+      farByRoad: _b(json['farByRoad']),
     );
   }
 
@@ -72,7 +78,54 @@ class NetResponder {
         'acceptedAt': acceptedAt,
         'arrivedAt': arrivedAt,
         if (reason.isNotEmpty) 'reason': reason,
+        if (farByRoad) 'farByRoad': true,
       };
+}
+
+/// A place near an emergency found by the server (3.16: the nearest hospital).
+class NearbyPlace {
+  final String name;
+  final double lat;
+  final double lng;
+  final double distanceM;
+
+  const NearbyPlace({required this.name, required this.lat, required this.lng, required this.distanceM});
+
+  static NearbyPlace? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final lat = _d(json['lat']), lng = _d(json['lng']);
+    final name = _s(json['name']).trim();
+    if (lat == null || lng == null || name.isEmpty) return null;
+    return NearbyPlace(name: name, lat: lat, lng: lng, distanceM: _d(json['distanceM']) ?? 0);
+  }
+
+  Map<String, dynamic> toJson() => {'name': name, 'lat': lat, 'lng': lng, 'distanceM': distanceM};
+}
+
+/// A live emergency link this phone created (3.16). The token lives in memory only:
+/// never persisted, never logged (the server keeps only its hash).
+class LiveLink {
+  final String token;
+  final String url;
+
+  /// Epoch ms.
+  final int expiresAt;
+
+  const LiveLink({required this.token, required this.url, required this.expiresAt});
+
+  bool isValidAt(int nowMs) => token.isNotEmpty && expiresAt > nowMs;
+
+  static LiveLink? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final token = _s(json['token']);
+    final url = _s(json['url']);
+    final exp = _i(json['expiresAt']);
+    if (token.isEmpty || url.isEmpty || exp == null) return null;
+    return LiveLink(token: token, url: url, expiresAt: exp);
+  }
+
+  @override
+  String toString() => 'LiveLink(expiresAt: $expiresAt)'; // never the token
 }
 
 /// The search for nearby riders for one emergency, as the rider's own group sees it.
@@ -201,6 +254,10 @@ class AssistRequest {
   /// "Have you reached the rider?" (I am within about 100 m).
   final bool arrivalCheck;
 
+  /// 3.16: asked although far by road (straight-line close, road far); [routeDistanceM]
+  /// and [etaS] are then road values.
+  final bool farByRoad;
+
   const AssistRequest({
     required this.incidentId,
     required this.lat,
@@ -220,6 +277,7 @@ class AssistRequest {
     this.subject,
     this.medical,
     this.arrivalCheck = false,
+    this.farByRoad = false,
   });
 
   /// I accepted and am on the way (accepted, en route, arriving).
@@ -254,6 +312,7 @@ class AssistRequest {
       subject: AssistSubject.fromJson(json['subject']),
       medical: MedicalInfo.fromJson(json['medical']),
       arrivalCheck: _b(json['arrivalCheck']),
+      farByRoad: _b(json['farByRoad']),
     );
   }
 
@@ -287,6 +346,7 @@ class AssistRequest {
     AssistSubject? subject,
     MedicalInfo? medical,
     bool? arrivalCheck,
+    bool? farByRoad,
   }) =>
       AssistRequest(
         incidentId: incidentId,
@@ -307,6 +367,7 @@ class AssistRequest {
         subject: subject ?? this.subject,
         medical: medical ?? this.medical,
         arrivalCheck: arrivalCheck ?? this.arrivalCheck,
+        farByRoad: farByRoad ?? this.farByRoad,
       );
 }
 

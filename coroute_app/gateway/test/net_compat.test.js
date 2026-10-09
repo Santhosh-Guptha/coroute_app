@@ -17,11 +17,11 @@ after(async () => { await h.t.gw.shutdown(); });
 
 const NEW_TYPES = ['EMERGENCY_UPDATE', 'ASSIST_REQUEST', 'ASSIST_UPDATE', 'ASSIST_CLOSED', 'HAZARD', 'HAZARD_CLEAR', 'DISCOVERY', 'WAVED'];
 
-test('HELLO keeps the 3.14 features first and appends net1, discovery1', async () => {
+test('HELLO keeps the 3.14 features first and appends net1, discovery1, ride316', async () => {
   const u = await h.rider('Hello');
   const ws = await h.t.connect(u.token);
   const hello = await ws.next((m) => m.type === 'HELLO');
-  assert.deepEqual(hello.features, ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster', 'net1', 'discovery1']);
+  assert.deepEqual(hello.features, ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster', 'net1', 'discovery1', 'ride316']);
   ws.close();
 });
 

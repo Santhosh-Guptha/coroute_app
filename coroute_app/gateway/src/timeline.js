@@ -9,6 +9,9 @@
  *   interval  STOPPED, SEPARATED, OFF_ROUTE, OFFLINE, SOS, CORIDE, MOVING, STOP_REACHED, DESTINATION_REACHED (time at the place),
  *             OVERSPEED (over the group speed limit), POSSIBLE_INCIDENT (hard stop, then still), NO_REPLY (solo check-in)
  *             (open while it lasts; closed with endedAt/durationMs)
+ *   3.16      instant ROLE_CHANGED (sweeper set or removed), FOLLOW_UP (still okay after a crash alarm);
+ *             interval STALE_UPDATE (a moving rider stopped sending fixes), LOW_BATTERY (15% and not charging),
+ *             BEHIND_SWEEPER (a rider fell behind the sweeper on the route)
  *
  * Live entries are computed from telemetry the moment they happen
  * (confidence "live"). When the trip ends, the report builder re-derives
@@ -21,12 +24,16 @@
  */
 const crypto = require('crypto');
 const config = require('./config');
-const { haversine, distanceToPolyline, medianCentre, decodePolyline } = require('./geo_math');
+const { haversine, distanceToPolyline, alongRoute, medianCentre, decodePolyline } = require('./geo_math');
 const { buildTripReport } = require('./report');
 const { scrub, mentions } = require('./anonymise');
-const { ConvoyError } = require('./convoys');
+const { ConvoyError, sourceOf } = require('./convoys');
 
-const INTERVAL_TYPES = new Set(['STOPPED', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'SOS', 'CORIDE', 'MOVING', 'STOP_REACHED', 'DESTINATION_REACHED', 'OVERSPEED', 'POSSIBLE_INCIDENT', 'NO_REPLY']);
+const INTERVAL_TYPES = new Set(['STOPPED', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'SOS', 'CORIDE', 'MOVING', 'STOP_REACHED', 'DESTINATION_REACHED', 'OVERSPEED', 'POSSIBLE_INCIDENT', 'NO_REPLY',
+  'STALE_UPDATE', 'LOW_BATTERY', 'BEHIND_SWEEPER']);
+/** Stale rule: gaps longer than this are dead zones, not the rider's rhythm; ring of the last GAP_RING gaps. */
+const GAP_MAX_S = 300;
+const GAP_RING = 10;
 const FRESH_MS = 2 * 60000;
 const HOLD_MS = 60000; // a condition must last this long before it becomes an entry
 const MAX_TS = Number.MAX_SAFE_INTEGER;
@@ -121,7 +128,7 @@ class TimelineEngine {
 
   _rs(st, userId) {
     let r = st.riders.get(userId);
-    if (!r) { r = { cluster: null, sepSince: 0, offSince: 0, visits: {}, lastFixAt: 0 }; st.riders.set(userId, r); }
+    if (!r) { r = { cluster: null, sepSince: 0, offSince: 0, visits: {}, lastFixAt: 0, gaps: [], behindSince: 0, segIndex: null }; st.riders.set(userId, r); }
     return r;
   }
 
@@ -206,11 +213,20 @@ class TimelineEngine {
     const st = await this._state(gid);
     const rs = this._rs(st, rider.userId);
     const t = rider.lastSeenEpochMs || this.now();
+    // 3.16 stale rule: the rider's own rhythm (last GAP_RING intervals between fixes, dead zones excluded).
+    if (rs.lastFixAt > 0 && t > rs.lastFixAt) {
+      const gapS = (t - rs.lastFixAt) / 1000;
+      if (gapS <= GAP_MAX_S) { rs.gaps.push(gapS); if (rs.gaps.length > GAP_RING) rs.gaps.shift(); }
+    }
     rs.lastFixAt = t;
     const who = { userId: rider.userId, userName: rider.name };
 
     // Back online?
     if (st.open.has(`OFFLINE:${rider.userId}`)) await this._close(gid, st, `OFFLINE:${rider.userId}`, t);
+    // 3.16: updates resumed.
+    if (st.open.has(`STALE:${rider.userId}`)) await this._close(gid, st, `STALE:${rider.userId}`, t, { data: { result: 'RESUMED' } });
+    // 3.16: low battery (the phone reports its level with every fix).
+    await this._battery(gid, st, room, rider, t);
 
     // Possible incident (hard stop, then still): server side, so riders on older apps get it too.
     await this._incident(gid, st, rs, room, rider, t);
@@ -265,14 +281,37 @@ class TimelineEngine {
       }
     }
 
-    // Group speed limit.
-    await this._speed(gid, st, rs, rider, p, t, m.speedLimitKmh || 0);
+    // Group speed limit, lowered near stops and in towns (3.16) when the lead set a town limit.
+    await this._speed(gid, st, rs, rider, p, t, m.speedLimitKmh || 0, this._activeLimit(m, p));
 
-    // Separation, at most every 5 s per convoy.
+    // Separation and the sweeper rule (3.16), at most every 5 s per convoy.
     if (t - st.lastSepCheck >= 5000) {
       st.lastSepCheck = t;
       await this._checkSeparation(gid, st, room, t);
+      await this._checkSweeper(gid, st, room, t);
     }
+  }
+
+  /**
+   * 3.16 speed by context: { limit, context } for a fix. Within TOWN_RADIUS_M of the start, the
+   * destination or a planned stop the town limit applies (the lower of the two when both are set).
+   * One distance per place per fix, at most about 22 places.
+   */
+  _activeLimit(m, p) {
+    const group = m.speedLimitKmh || 0;
+    const town = m.townLimitKmh || 0;
+    if (!town) return { limit: group, context: 'GROUP' };
+    const R = config.townRadiusM;
+    const near = (lat, lng) => (lat || lng) && haversine(lat, lng, p.lat, p.lng) <= R;
+    let inTown = (m.start && near(m.start.lat, m.start.lng)) || near(m.destinationLat || 0, m.destinationLng || 0);
+    if (!inTown) {
+      for (const s of m.stopPoints || []) {
+        if (!s.lat || s.status === 'SUGGESTED' || s.status === 'SKIPPED') continue;
+        if (near(s.lat, s.lng)) { inTown = true; break; }
+      }
+    }
+    if (!inTown) return { limit: group, context: 'GROUP' };
+    return { limit: group > 0 ? Math.min(group, town) : town, context: 'TOWN' };
   }
 
   /**
@@ -327,7 +366,9 @@ class TimelineEngine {
    * before overspeedRenotifyMs has passed since their last episode ended is
    * logged without a new notification.
    */
-  async _speed(gid, st, rs, rider, p, t, limit) {
+  async _speed(gid, st, rs, rider, p, t, groupLimit, active = null) {
+    const limit = active ? active.limit : groupLimit;
+    const context = active ? active.context : 'GROUP';
     const slot = `OVERSPEED:${rider.userId}`;
     const open = st.open.get(slot);
     if (!limit) {
@@ -350,7 +391,7 @@ class TimelineEngine {
       await this._open(gid, st, slot, {
         userId: rider.userId, userName: rider.name, type: 'OVERSPEED', startedAt: rs.overSince,
         lat: rs.overAt?.lat ?? p.lat, lng: rs.overAt?.lng ?? p.lng,
-        data: { limitKmh: limit, maxKmh: rs.overPeak, count: rs.overCount, notify },
+        data: { limitKmh: limit, maxKmh: rs.overPeak, count: rs.overCount, notify, context },
       });
       rs.overSince = 0;
     } else if (v <= limit) {
@@ -397,19 +438,22 @@ class TimelineEngine {
     }
   }
 
-  /** Periodic: offline detection. */
+  /** Periodic: offline detection, stale riders (3.16). */
   async tick() {
     const t = this.now();
     for (const [gid, room] of this.convoys.rooms) {
       if (!['STARTED', 'PAUSED'].includes(room.meta.tripStatus)) continue;
       const st = await this._state(gid);
       const limit = (room.meta.offlineAlertMinutes || config.offlineAlertMinutes) * 60000;
+      const typical = this._typicalGap(st);
+      const staleS = Math.max(config.staleMinS, config.staleFactor * typical);
       for (const r of room.riders.values()) {
         const last = r.lastSeenEpochMs || 0;
         const slot = `OFFLINE:${r.userId}`;
         if (last && t - last >= limit && !st.open.has(slot)) {
           await this._open(gid, st, slot, { userId: r.userId, userName: r.name, type: 'OFFLINE', startedAt: last, lat: r.lat, lng: r.lng, data: { cause: 'NO_SIGNAL' } });
         }
+        await this._stale(gid, st, room, r, t, { typical, staleS });
         await this._escalateOffline(gid, st, room, r, t);
         const rsi = st.riders.get(r.userId);
         if (rsi?.hardStop) await this._maybeOpenIncident(gid, st, rsi, room, r, t);
@@ -440,7 +484,8 @@ class TimelineEngine {
       case 'ALERT': {
         const a = payload.alert;
         const st = await this._state(gid);
-        const data = { alertId: a.alertId, alertType: a.alertType, auto: !!a.auto, responders: [] };
+        const data = { alertId: a.alertId, alertType: a.alertType, auto: !!a.auto, responders: [], source: sourceOf(a) };
+        if (a.reportedBy) { data.reportedBy = a.reportedBy; data.reportedByName = a.reportedByName || this._name(gid, a.reportedBy); }
         if (a.details && Number.isFinite(a.details.speedBeforeKmh)) data.speedBeforeKmh = a.details.speedBeforeKmh;
         await this._open(gid, st, `SOS:${a.alertId}`, { userId: a.userId, userName: a.userName, type: 'SOS', startedAt: a.timestamp, lat: a.lat, lng: a.lng, data });
         // An SOS replaces a possible incident of the same rider.
@@ -518,6 +563,8 @@ class TimelineEngine {
         await this._update(gid, open);
         return null;
       }
+      case 'ROLE_CHANGED':
+        return this._instant(gid, { ...who, type: 'ROLE_CHANGED', data: { role: act.role, byUserId: act.byUserId || '' } });
       case 'CORIDE': {
         const slot = `CORIDE:${act.user.userId}`;
         if (act.withUserId) return this._open(gid, st, slot, { ...who, type: 'CORIDE', startedAt: this.now(), data: { withUserId: act.withUserId, withName: this._name(gid, act.withUserId) } });
@@ -642,6 +689,7 @@ class TimelineEngine {
     if (!r) return;
     const slot = `OFFLINE:${p.userId}`;
     const open = st.open.get(slot);
+    if (st.open.has(`STALE:${p.userId}`)) await this._close(gid, st, `STALE:${p.userId}`, this.now(), { data: { result: 'APP_CLOSED' } });
     if (open) {
       if (open.data?.cause !== 'APP_CLOSED') { open.data = { ...(open.data || {}), cause: 'APP_CLOSED' }; await this._update(gid, open); }
       return;
@@ -671,11 +719,18 @@ class TimelineEngine {
     if (!rider) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const result = msg.result;
     if (result !== 'OK' && result !== 'NO_REPLY') throw new ConvoyError('Check-in result must be OK or NO_REPLY.', 400);
+    const followUp = msg.context === 'FOLLOW_UP';
+    // 3.16: the follow-up after a crash alarm only says "still okay"; it never opens or closes anything.
+    if (followUp && result !== 'OK') throw new ConvoyError('A follow-up check-in can only be OK.', 400, 'BAD_RESULT');
     const st = await this._state(gid);
     const t = this.now();
     const num = (v) => (v === null || v === undefined || typeof v === 'boolean' || v === '' ? NaN : Number(v));
     const lat = Number.isFinite(num(msg.lat)) ? Math.max(-90, Math.min(90, num(msg.lat))) : rider.lat;
     const lng = Number.isFinite(num(msg.lng)) ? Math.max(-180, Math.min(180, num(msg.lng))) : rider.lng;
+    if (followUp) {
+      await this._instant(gid, { userId: user.userId, userName: rider.name, type: 'FOLLOW_UP', startedAt: t, lat, lng, data: { result: 'OK' } });
+      return { followUp: true };
+    }
     if (result === 'NO_REPLY') {
       const awayM = Number.isFinite(num(msg.awayM)) ? Math.round(Math.max(0, Math.min(500000, num(msg.awayM)))) : 0;
       await this._open(gid, st, `NO_REPLY:${user.userId}`, { userId: user.userId, userName: rider.name, type: 'NO_REPLY', startedAt: t, lat, lng, data: { awayM } });
@@ -689,6 +744,135 @@ class TimelineEngine {
     }
     if (closed) await this._instant(gid, { userId: user.userId, userName: rider.name, type: 'CHECK_IN', startedAt: t, lat, lng, data: { result: 'OK' } });
     return { closed };
+  }
+
+  // ------------------------------------------------------- safety (3.16)
+  /** Riders to tell about a rider's trouble: the lead(s) and the sweeper (never the rider). */
+  _leadsAndSweeper(room, subjectId) {
+    const out = [];
+    for (const r of room.riders.values()) {
+      if (r.userId === subjectId) continue;
+      if (r.role === 'LEAD' || room.meta.createdByUserId === r.userId) out.push(r.userId);
+    }
+    for (const r of room.riders.values()) if (r.userId !== subjectId && r.role === 'SWEEPER' && !out.includes(r.userId)) out.push(r.userId);
+    return out;
+  }
+
+  /** The group's typical gap between fixes (s): median of each rider's median gap (riders with 3 gaps or more), default 20. */
+  _typicalGap(st) {
+    const meds = [];
+    for (const rs of st.riders.values()) {
+      if (!rs.gaps || rs.gaps.length < 3) continue;
+      meds.push(median(rs.gaps));
+    }
+    return meds.length ? median(meds) : 20;
+  }
+
+  /**
+   * Stale rider (item 10): riding (last speed 1 km/h or more, parked phones heartbeat slowly on
+   * purpose), online as far as presence knows, no OFFLINE entry yet, and no fix for longer than
+   * max(STALE_MIN_S, STALE_FACTOR x the group's typical gap). Closed by the next fix (RESUMED),
+   * replaced when OFFLINE opens (OFFLINE), on leave and at trip end.
+   */
+  async _stale(gid, st, room, r, t, { typical, staleS }) {
+    const slot = `STALE:${r.userId}`;
+    const open = st.open.get(slot);
+    if (st.open.has(`OFFLINE:${r.userId}`) || r.presence === 'APP_CLOSED') {
+      if (open) await this._close(gid, st, slot, t, { data: { result: st.open.has(`OFFLINE:${r.userId}`) ? 'OFFLINE' : 'APP_CLOSED' } });
+      return;
+    }
+    if (open) return;
+    const last = r.lastSeenEpochMs || 0;
+    if (!last || !(r.lat || r.lng) || (Number(r.speedKmh) || 0) < 1) return;
+    const gapS = (t - last) / 1000;
+    if (gapS < staleS) return;
+    await this._open(gid, st, slot, {
+      userId: r.userId, userName: r.name, type: 'STALE_UPDATE', startedAt: last, lat: r.lat, lng: r.lng,
+      data: { gapS: Math.round(gapS), typicalS: Math.round(typical), notify: this._leadsAndSweeper(room, r.userId) },
+    });
+  }
+
+  /**
+   * Low battery (item 12): at or under BATTERY_LOW_PCT and not charging opens LOW_BATTERY:<uid> for
+   * the lead and sweeper; the level is updated only when it drops by 5 or more; charging or
+   * BATTERY_OK_PCT closes it (CHARGING / RECOVERED), as do leave and trip end.
+   */
+  async _battery(gid, st, room, rider, t) {
+    const level = Number(rider.batteryLevel);
+    if (!Number.isFinite(level)) return;
+    const charging = rider.isCharging === true;
+    const slot = `BATTERY:${rider.userId}`;
+    const open = st.open.get(slot);
+    if (open) {
+      if (charging) return this._close(gid, st, slot, t, { data: { result: 'CHARGING' } });
+      if (level >= config.batteryOkPct) return this._close(gid, st, slot, t, { data: { result: 'RECOVERED' } });
+      if ((open.data.level ?? 100) - level >= 5) { open.data = { ...open.data, level: Math.round(level) }; await this._update(gid, open); }
+      return null;
+    }
+    if (level > config.batteryLowPct || charging) return null;
+    return this._open(gid, st, slot, {
+      userId: rider.userId, userName: rider.name, type: 'LOW_BATTERY', startedAt: t, lat: rider.lat, lng: rider.lng,
+      data: { level: Math.round(level), notify: this._leadsAndSweeper(room, rider.userId) },
+    });
+  }
+
+  /**
+   * Sweeper rule (item 11), every 5 s with the separation check: with a fresh, positioned sweeper,
+   * every other fresh rider further than SWEEPER_BEHIND_M behind them (along the route when both
+   * project on it within 300 m; by distance to the destination without a route) for HOLD_MS opens
+   * BEHIND:<uid> for the sweeper and the lead. Closed under 100 m behind, and all at once when the
+   * sweeper changes or leaves.
+   */
+  async _checkSweeper(gid, st, room, t) {
+    const fresh = (r) => t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng);
+    const sweeper = [...room.riders.values()].find((r) => r.role === 'SWEEPER');
+    const sid = sweeper ? sweeper.userId : null;
+    if (st.sweeperId !== sid) {
+      st.sweeperId = sid;
+      for (const slot of [...st.open.keys()]) if (slot.startsWith('BEHIND:')) await this._close(gid, st, slot, t, { data: { result: 'SWEEPER_CHANGED' } });
+      for (const rs of st.riders.values()) rs.behindSince = 0;
+    }
+    if (!sweeper || !fresh(sweeper)) return;
+    const m = room.meta;
+    const route = this._route(st, m);
+    const dest = (m.destinationLat || m.destinationLng) ? { lat: m.destinationLat, lng: m.destinationLng } : null;
+    if (!route && !dest) return;
+    const srs = this._rs(st, sid);
+    let sAlong = null;
+    if (route) {
+      const on = alongRoute({ lat: sweeper.lat, lng: sweeper.lng }, route, { fromIndex: srs.segIndex });
+      if (on) { sAlong = on.alongM; srs.segIndex = on.segIndex; }
+    }
+    for (const r of room.riders.values()) {
+      if (r.userId === sid || !fresh(r)) continue;
+      const rs = this._rs(st, r.userId);
+      let behindM = null;
+      if (route && sAlong !== null) {
+        const on = alongRoute({ lat: r.lat, lng: r.lng }, route, { fromIndex: rs.segIndex });
+        if (on) { rs.segIndex = on.segIndex; behindM = sAlong - on.alongM; }
+      } else if (!route && dest) {
+        behindM = haversine(r.lat, r.lng, dest.lat, dest.lng) - haversine(sweeper.lat, sweeper.lng, dest.lat, dest.lng);
+      }
+      if (behindM === null) continue;
+      const slot = `BEHIND:${r.userId}`;
+      const open = st.open.get(slot);
+      if (behindM > config.sweeperBehindM) {
+        if (!rs.behindSince) rs.behindSince = t;
+        if (open) {
+          if (Math.round(behindM) > (open.data.maxDistanceM || 0)) open.data.maxDistanceM = Math.round(behindM);
+          continue;
+        }
+        if (t - rs.behindSince >= HOLD_MS) {
+          await this._open(gid, st, slot, {
+            userId: r.userId, userName: r.name, type: 'BEHIND_SWEEPER', startedAt: rs.behindSince, lat: r.lat, lng: r.lng,
+            data: { distanceM: Math.round(behindM), maxDistanceM: Math.round(behindM), sweeperId: sid, sweeperName: sweeper.name || '', notify: [sid, ...this._leadsAndSweeper(room, r.userId).filter((x) => x !== sid)] },
+          });
+        }
+      } else if (behindM < 100) {
+        rs.behindSince = 0;
+        if (open) await this._close(gid, st, slot, t);
+      }
+    }
   }
 
   // ------------------------------------------------------------- report
@@ -755,6 +939,12 @@ class TimelineEngine {
 function publicEvent(ev) {
   const { slot, key, ...rest } = ev;
   return rest;
+}
+
+function median(list) {
+  const s = [...list].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
 module.exports = { TimelineEngine, visibleWindow, eventVisible, publicEvent, INTERVAL_TYPES };

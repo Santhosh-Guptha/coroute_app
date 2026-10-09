@@ -170,6 +170,7 @@ class RideNotificationService {
     SettingsService settings, {
     RideNotificationChannel? channel,
     int Function()? clock,
+    MedicalId? Function()? medicalId,
   }) : this.forPort(
           ConvoyRideNotifPort(convoys),
           settings,
@@ -177,9 +178,11 @@ class RideNotificationService {
           timelineEvents: () => timeline.events,
           channel: channel,
           clock: clock,
+          medicalId: medicalId,
         );
 
-  /// For tests: any port, any timeline source.
+  /// For tests: any port, any timeline source. [medicalId] (3.16) returns the rider's
+  /// medical ID for the lock screen during their own SOS, or null (setting off).
   RideNotificationService.forPort(
     this._port,
     this._settings, {
@@ -188,9 +191,11 @@ class RideNotificationService {
     RideNotificationChannel? channel,
     int Function()? clock,
     this._clockText,
+    MedicalId? Function()? medicalId,
   })  : _events = timelineEvents ?? (() => const <TimelineEventModel>[]),
         _channel = channel ?? RideNotificationChannel(),
-        _clock = clock ?? _wallClock {
+        _clock = clock ?? _wallClock,
+        _medicalId = medicalId ?? _noMedicalId {
     _port.addListener(_onChange);
     _timeline?.addListener(_onChange);
     _settings.addListener(_onChange);
@@ -205,6 +210,7 @@ class RideNotificationService {
   }
 
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
+  static MedicalId? _noMedicalId() => null;
 
   final RideNotifPort _port;
   final SettingsService _settings;
@@ -213,6 +219,7 @@ class RideNotificationService {
   final RideNotificationChannel _channel;
   final int Function() _clock;
   final String? Function(int ms)? _clockText;
+  final MedicalId? Function() _medicalId;
   StreamSubscription<RideNotifAction>? _actionSub;
 
   final ValueNotifier<RideNotifAction?> _pending = ValueNotifier<RideNotifAction?>(null);
@@ -396,6 +403,7 @@ class RideNotificationService {
       nowMs: now,
       lockScreenPublic: _settings.rideOnLockScreen,
       clockText: _clockText,
+      medicalId: _medicalId(),
     );
     final quick = _quickKey(NotificationSnapshotBuilder.quickState(convoy: convoy, myUserId: uid, assists: _port.assistRequests, hazards: _port.hazards));
     final key = snap.dedupeKey;

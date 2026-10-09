@@ -63,6 +63,7 @@
         <li>In an SOS or crash alert your own group is always alerted first. A few riders of other groups on the same road may be asked to help, at most 3 at a time. They never get your phone number, and you can turn this off.</li>
         <li>Medical info is optional. Your convoy sees it only while your SOS or crash alert is open, and administrators never see it.</li>
         <li>Emergency texts and Groups nearby are off until they are switched on.</li>
+        <li>During an SOS you, or your lead, can share a live link that shows your first name, last position and update time for 30 minutes. Weather and nearest hospital lookups send only rounded route points or the alert position through our server. Saved map tiles stay on your phone.</li>
         <li>Recorded routes and exact positions are deleted after 90 days. You can delete your account in the app at any time, and it is removed at once.</li>
       </ul>
       <p class="legal-summary__note">This is a short summary. The full text below has the details.</p>
@@ -80,6 +81,14 @@
           <li><a class="legal-toc__link" href="#emergency-texts">Emergency texts when there is no internet</a></li>
           <li><a class="legal-toc__link" href="#spoken-alerts">Spoken alerts and the ride notification</a></li>
           <li><a class="legal-toc__link" href="#microphone">Microphone</a></li>
+          <li><a class="legal-toc__link" href="#live-links">Live emergency links</a></li>
+          <li><a class="legal-toc__link" href="#weather">Weather on the route</a></li>
+          <li><a class="legal-toc__link" href="#nearest-hospital">Nearest hospital</a></li>
+          <li><a class="legal-toc__link" href="#offline-maps">Maps saved on your phone</a></li>
+          <li><a class="legal-toc__link" href="#ride-alerts">Sweeper, battery and update gaps</a></li>
+          <li><a class="legal-toc__link" href="#hard-braking">Hard braking count</a></li>
+          <li><a class="legal-toc__link" href="#medical-id-lock-screen">Medical ID on the lock screen</a></li>
+          <li><a class="legal-toc__link" href="#bluetooth">Bluetooth</a></li>
           <li><a class="legal-toc__link" href="#who-can-see">Who can see your data</a></li>
           <li><a class="legal-toc__link" href="#where-data-lives">Where your data lives</a></li>
           <li><a class="legal-toc__link" href="#your-rights">Your choices and rights</a></li>
@@ -199,6 +208,75 @@
       <p>The microphone is used only while you hold the Talk button or have armed the hands-free (VOX) mode, and only inside an
       active convoy. Your voice is sent live to the members of your convoy (or to the single rider you selected) and is not recorded
       or stored by us.</p>
+      </section>
+
+      <section class="legal-section" id="live-links" aria-labelledby="live-links-h">
+      <h2 id="live-links-h">Live emergency links</h2>
+      <p>While your SOS or crash alert is open, you or the lead of your group can create a live link and send it to anyone, for
+      example a family member or the emergency services. Nobody else can create one. The link opens a public web page on our
+      site that shows your first name, your last position, the time of that position, the time the link stops working, and a
+      "Call 112" button. Nothing else: no phone number, no group, no other riders, no medical info.</p>
+      <p>A link works for 30 minutes. It stops earlier when the rider or the lead revokes it in the app, or when the alert is
+      closed. After that the page says only that the link has expired. The link is a random code that we store only as a hash,
+      so a lost link cannot be recovered or reopened. At most 3 links can be made for one alert.</p>
+      <p>Anyone with the link can open the page. Requests from one network address are rate limited, and the addresses are not
+      stored beyond the normal server logs described above. The page sets no cookies and does not count page views. The map on
+      the page is drawn from OpenStreetMap map images, which the viewer's browser loads from openstreetmap.org. The safety log
+      keeps who created or revoked a link, and that a link was viewed, with the time and the alert id only; never the link
+      itself and never a position.</p>
+      </section>
+
+      <section class="legal-section" id="weather" aria-labelledby="weather-h">
+      <h2 id="weather-h">Weather on the route</h2>
+      <p>When you review a planned route and once more when the ride starts, the app can ask for a weather line such as
+      "Rain likely after Warangal around 3 PM". To do this it sends up to 5 points along your planned route, rounded to about
+      10 km, to Open-Meteo (open-meteo.com) through our server. Our server does not send your name, your account or your exact
+      position, and it keeps the answer for 30 minutes so that other riders at the same places get the same answer without a new
+      request. Nothing is sent when data saver is on. Weather data by Open-Meteo.com.</p>
+      </section>
+
+      <section class="legal-section" id="nearest-hospital" aria-labelledby="nearest-hospital-h">
+      <h2 id="nearest-hospital-h">Nearest hospital</h2>
+      <p>When an SOS or crash alert opens, our server asks OpenStreetMap (Nominatim, the same service we already use for place
+      names) for the nearest hospital to the alert position, once per alert. The result, for example "Nearest hospital: X, 4.2 km",
+      is shown to your group with the alert. Only the position of the alert, rounded to about 1 km, is sent; no names or account details. The answer is
+      kept for 30 days so that a new alert within about 1 km needs no new request. The alert itself never waits for this lookup.</p>
+      </section>
+
+      <section class="legal-section" id="offline-maps" aria-labelledby="offline-maps-h">
+      <h2 id="offline-maps-h">Maps saved on your phone</h2>
+      <p>Before a ride, on Wi-Fi or when you tap "Save route map", the app can download the map tiles along your planned route
+      from OpenStreetMap and keep them on your phone, so the map still shows when there is no signal. The tiles are kept on the
+      phone only, up to 60 MB, and are deleted after 30 days or when you delete the trip. Nothing about this leaves your phone,
+      and we do not know which tiles were saved.</p>
+      </section>
+
+      <section class="legal-section" id="ride-alerts" aria-labelledby="ride-alerts-h">
+      <h2 id="ride-alerts-h">Sweeper, battery and update gaps</h2>
+      <p>Your battery level and the time of your last position update are already shared with your ride group as part of your
+      live location. Since 3.16 the app also uses them for alerts: the lead can make one rider the sweeper, and the lead and the
+      sweeper are told when a rider's battery is low, when a rider has not sent an update for unusually long, or when a rider
+      drops behind the sweeper. This adds no new data; it only shows what the group already sees in a clearer way.</p>
+      </section>
+
+      <section class="legal-section" id="hard-braking" aria-labelledby="hard-braking-h">
+      <h2 id="hard-braking-h">Hard braking count</h2>
+      <p>While crash detection is on, the phone counts hard stops from the motion sensor it already reads. The count is shown only
+      to you on your own post-ride summary. It is kept on your phone, it is never uploaded and your group never sees it.</p>
+      </section>
+
+      <section class="legal-section" id="medical-id-lock-screen" aria-labelledby="medical-id-lock-screen-h">
+      <h2 id="medical-id-lock-screen-h">Medical ID on the lock screen</h2>
+      <p>"Show my medical ID on the lock screen during an SOS" is off until you turn it on. When it is on, and only while your own
+      SOS or crash alert is open, the ride notification on your lock screen shows your blood group, allergies and emergency contact
+      name and number, so that a person who finds you can read them without unlocking the phone. This is shown by your phone only
+      and is not sent anywhere beyond what the section "Who can see your data" already describes.</p>
+      </section>
+
+      <section class="legal-section" id="bluetooth" aria-labelledby="bluetooth-h">
+      <h2 id="bluetooth-h">Bluetooth</h2>
+      <p>Coroute does not use Bluetooth. An unused Bluetooth permission that earlier versions listed was removed in 3.16. The app
+      never asked for it, and no feature depended on it.</p>
       </section>
 
       <section class="legal-section" id="who-can-see" aria-labelledby="who-can-see-h">

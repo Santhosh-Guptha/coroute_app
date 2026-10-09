@@ -191,6 +191,11 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       route: _route,
       stops: _stops.length,
       speedLimitKmh: _speedLimit,
+      namedStops: [for (final s in _stops) (s.name, s.lat, s.lng)],
+      startLat: _start?.lat,
+      startLng: _start?.lng,
+      destinationLat: _destination?.lat,
+      destinationLng: _destination?.lng,
     );
     if (limit == null || !mounted) return;
     setState(() => _speedLimit = limit);
@@ -281,7 +286,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         onLongPress: (_, p) => _addStopAt(p),
       ),
       children: [
-        TileLayer(tileBuilder: mapTileBuilder, urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
+        appTileLayer(),
         if (line.length >= 2) PolylineLayer(polylines: [Polyline(points: line, strokeWidth: 5, color: AppTheme.neonCyan)]),
         MarkerLayer(markers: [
           if (_start != null)

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--
+  Served at /e/<token> with status 410 when a live emergency link is unknown, expired, revoked or the alert was closed.
+  No site.js here either: the token is in the path, and the page-view beacon would send it.
+-->
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Link expired | Coroute</title>
+<meta name="description" content="This Coroute live emergency link has expired. Live links last 30 minutes or until the rider's group closes the alert.">
+<meta name="theme-color" content="#0B0D0E">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/live.css">
+<script src="/assets/live.js" defer></script>
+</head>
+<body data-page="live">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="live topo" aria-labelledby="live-title">
+    <div class="container live__wrap">
+
+      <header class="live__head">
+        <p class="live__kicker live__kicker--muted"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Live emergency link</p>
+        <h1 id="live-title">This link has expired</h1>
+        <p class="t-lead">Live emergency links in Coroute last 30 minutes or until the rider's group closes the alert.</p>
+      </header>
+
+      <div class="live__card card card--raised live__card--expired">
+        <p class="live__expired-line">If someone is in danger, call 112.</p>
+        <p class="t-small t-muted">112 is the emergency number in India. Elsewhere, call your local emergency number.</p>
+        <div class="live__actions">
+          <a class="btn btn--primary btn--lg btn--block" href="tel:112">Call 112</a>
+        </div>
+      </div>
+
+      <div class="live__todo">
+        <h2 class="t-h4">About live links</h2>
+        <p>A rider in an open SOS, or the lead of their group, can share a link like this one. It shows only the rider's first name, last position and the time of the last update. Nothing else is shared, and the link cannot be reopened once it has expired. <a class="link" href="/privacy#live-links">How live links work</a>.</p>
+        <div class="cluster cluster--16 live__cta">
+          <a class="btn btn--secondary" href="/get">Get Coroute</a>
+          <a class="link-arrow" href="/safety"><span>Safety in Coroute</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+<!--#include footer-->
+</body>
+</html>

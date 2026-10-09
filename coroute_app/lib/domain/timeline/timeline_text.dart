@@ -92,6 +92,13 @@ class TimelineText {
       case 'SOS':
         final kind = e.dataString('alertType');
         if (kind == 'CRASH' && e.data['auto'] == true) return '$who: crash detected (automatic alert)';
+        // 3.16: a "Rider down here" report names the reporter, never "raised an SOS".
+        final source = e.dataString('source').toUpperCase();
+        final reporter = e.dataString('reportedByName');
+        if (source == 'NEARBY_REPORT') return '${reporter.isEmpty ? who : reporter} reported a rider down';
+        if (source == 'MEMBER_REPORT' || (kind == 'RIDER_DOWN' && reporter.isNotEmpty)) {
+          return '${reporter.isEmpty ? 'A rider' : reporter} reported $who down';
+        }
         return '$who raised an SOS${kind.isEmpty ? '' : ' (${reason(kind)})'}';
       case 'POSSIBLE_INCIDENT':
         return 'Possible incident: $who';
@@ -144,8 +151,35 @@ class TimelineText {
       case 'OVERSPEED':
         final top = e.dataNum('maxKmh');
         final limit = e.dataNum('limitKmh');
-        if (e.open) return '$who is over the ${limit == null ? 'group' : '${limit.round()} km/h'} limit';
-        return '$who rode over the limit for $dur${top == null ? '' : ', top ${top.round()} km/h'}';
+        final town = e.dataString('context').toUpperCase() == 'TOWN';
+        if (e.open) {
+          if (town) return '$who is over the town limit${limit == null ? '' : ' of ${limit.round()} km/h'}';
+          return '$who is over the ${limit == null ? 'group' : '${limit.round()} km/h'} limit';
+        }
+        return '$who rode over the ${town ? 'town ' : ''}limit for $dur${top == null ? '' : ', top ${top.round()} km/h'}';
+      case 'STALE_UPDATE':
+        // 3.16: riding but no update for far longer than the group's usual gap.
+        if (e.open) return 'No update from $who for $dur';
+        return e.dataString('result') == 'OFFLINE' ? '$who: no signal after $dur' : '$who: updates resumed after $dur';
+      case 'LOW_BATTERY':
+        final level = e.dataNum('level')?.round();
+        if (!e.open) {
+          switch (e.dataString('result')) {
+            case 'CHARGING':
+              return '$who: battery charging';
+            case 'RECOVERED':
+              return '$who: battery recovered';
+          }
+        }
+        return '$who: battery${level == null ? ' low' : ' $level%'}';
+      case 'BEHIND_SWEEPER':
+        final behindM = e.open ? (e.dataNum('distanceM') ?? e.dataNum('maxDistanceM')) : (e.dataNum('maxDistanceM') ?? e.dataNum('distanceM'));
+        final far = behindM == null ? '' : ' (${distance(behindM)})';
+        return e.open ? '$who is behind the sweeper$far' : '$who fell behind the sweeper$far';
+      case 'ROLE_CHANGED':
+        return e.dataString('role').toUpperCase() == 'SWEEPER' ? '$who is now the sweeper' : '$who is no longer the sweeper';
+      case 'FOLLOW_UP':
+        return '$who said they are still OK';
       case 'CORIDE':
         final w = e.dataString('withName');
         return e.open ? '$who is riding with ${w.isEmpty ? 'another rider' : w}' : '$who rode with ${w.isEmpty ? 'another rider' : w} for $dur';
@@ -227,6 +261,14 @@ class TimelineText {
       case 'STATUS':
         final msg = e.dataString('message');
         if (msg.isNotEmpty) parts.add(msg);
+        break;
+      case 'STALE_UPDATE':
+        final typical = e.dataNum('typicalS');
+        if (typical != null && typical > 0) parts.add('usually every ${duration(Duration(seconds: typical.round()))}');
+        break;
+      case 'BEHIND_SWEEPER':
+        final sw = e.dataString('sweeperName');
+        if (sw.isNotEmpty) parts.add('sweeper $sw');
         break;
       default:
         break;

@@ -76,7 +76,8 @@ String clock(int ms) {
   return '${t.hour}:${t.minute.toString().padLeft(2, '0')}';
 }
 
-NotificationSnapshot build(ConvoyModel c, {List<TimelineEventModel> events = const [], List<AssistRequest> assists = const [], List<HazardWarning> hazards = const [], bool lock = true}) =>
+NotificationSnapshot build(ConvoyModel c,
+        {List<TimelineEventModel> events = const [], List<AssistRequest> assists = const [], List<HazardWarning> hazards = const [], bool lock = true, MedicalId? medicalId}) =>
     NotificationSnapshotBuilder.build(
       convoy: c,
       myUserId: 'me',
@@ -86,6 +87,7 @@ NotificationSnapshot build(ConvoyModel c, {List<TimelineEventModel> events = con
       nowMs: now,
       lockScreenPublic: lock,
       clockText: clock,
+      medicalId: medicalId,
     );
 
 SosAlertModel crashOf(String uid, String name, double lat, {EmergencyNetwork? network, OwnNearest? nearest, String type = SosTypes.crash, int? lastUpdateAt}) => SosAlertModel(
@@ -256,8 +258,71 @@ void main() {
     test('my own SOS: no SOS button, no Navigate', () {
       final s = build(convoy(alerts: [crashOf('me', 'Kiran', myLat)]));
       expect(s.title, 'Your SOS is active');
+      expect(s.subtitle, 'Your group can see where you are.');
       expect(s.showSos, isFalse);
       expect(s.contextAction, NotifContextAction.none);
+      expect(s.customPublicText, isNull);
+    });
+
+    test('my own SOS with the medical ID setting (3.16): blood group, allergies and contact on the lock screen', () {
+      const id = MedicalId(bloodGroup: 'O+', allergies: 'penicillin', contactName: 'Asha', contactPhone: '98765 43210');
+      final s = build(convoy(alerts: [crashOf('me', 'Kiran', myLat)]), lock: false, medicalId: id);
+      expect(s.title, 'Your SOS is active');
+      expect(s.subtitle, 'Blood group O+. Allergies: penicillin. Emergency contact: Asha 98765 43210.');
+      expect(s.publicTitle, 'CoRoute');
+      expect(s.publicText, 'Your SOS is active. Blood group O+. Allergies: penicillin. Emergency contact: Asha 98765 43210.');
+      expect(s.lockScreenPublic, isFalse, reason: 'the ride stays hidden on the lock screen; the public version carries the medical line');
+      final args = s.toChannelArgs();
+      expect(args['publicText'], contains('O+'));
+      expect(args['lockScreenPublic'], isFalse);
+      expect(build(convoy(alerts: [crashOf('me', 'Kiran', myLat)]), lock: true, medicalId: id).lockScreenPublic, isTrue);
+      expect(s.dedupeKey, isNot(build(convoy(alerts: [crashOf('me', 'Kiran', myLat)]), lock: false).dedupeKey));
+
+      // Blanks read "not given"; an empty ID changes nothing.
+      final partial = build(convoy(alerts: [crashOf('me', 'Kiran', myLat)]), medicalId: const MedicalId(bloodGroup: 'B+'));
+      expect(partial.subtitle, 'Blood group B+. Allergies: not given. Emergency contact: not given.');
+      final empty = build(convoy(alerts: [crashOf('me', 'Kiran', myLat)]), medicalId: const MedicalId());
+      expect(empty.customPublicText, isNull);
+      expect(empty.subtitle, 'Your group can see where you are.');
+
+      // Never for another rider's SOS, never outside an emergency.
+      final other = build(convoy(alerts: [crashOf('d', 'Rahul', north(-4800))]), medicalId: id);
+      expect(jsonEncode(other.toChannelArgs()), isNot(contains('O+')));
+      final ride = build(convoy(), medicalId: id);
+      expect(jsonEncode(ride.toChannelArgs()), isNot(contains('penicillin')));
+    });
+
+    test('rider down reports (3.16): the reporter is named, never "may have met with an accident"; my own nearby report is not my SOS', () {
+      const id = MedicalId(bloodGroup: 'O+', allergies: 'penicillin', contactName: 'Asha', contactPhone: '98765 43210');
+      // Arjun reported Rahul (a member) down: the subject is Rahul, the reporter Arjun.
+      final member = crashOf('d', 'Rahul Sharma', north(-4800), type: SosTypes.riderDown)
+          .copyWith(source: EmergencySource.memberReport, reportedBy: 'a', reportedByName: 'Arjun Reddy');
+      final s = build(convoy(alerts: [member]), medicalId: id);
+      expect(s.title, 'EMERGENCY: Arjun reported Rahul down');
+      expect(jsonEncode(s.toChannelArgs()), isNot(contains('accident')));
+      expect(s.contextAction, NotifContextAction.navigateEmergency);
+      expect(s.contextLabel, 'Navigate to Rahul');
+      // Arjun reported someone not in the group: the alert is in Arjun's name.
+      final nearby = crashOf('a', 'Arjun Reddy', north(-4800), type: SosTypes.riderDown)
+          .copyWith(source: EmergencySource.nearbyReport, reportedBy: 'a', reportedByName: 'Arjun Reddy');
+      final n = build(convoy(alerts: [nearby]));
+      expect(n.title, 'EMERGENCY: Arjun reported a rider down');
+      expect(jsonEncode(n.toChannelArgs()), isNot(contains('accident')));
+      // I reported someone not in the group: not "Your SOS is active", no medical ID on the lock screen, nothing to navigate to.
+      final mineNearby = crashOf('me', 'Kiran', myLat, type: SosTypes.riderDown)
+          .copyWith(source: EmergencySource.nearbyReport, reportedBy: 'me', reportedByName: 'Kiran');
+      final m = build(convoy(alerts: [mineNearby]), lock: false, medicalId: id);
+      expect(m.title, 'EMERGENCY: Kiran reported a rider down');
+      expect(m.customPublicText, isNull);
+      expect(m.lockScreenPublic, isFalse);
+      expect(jsonEncode(m.toChannelArgs()), isNot(contains('O+')));
+      expect(m.contextAction, NotifContextAction.none);
+      // Arjun reported me down: that is about me (my SOS view, medical ID allowed).
+      final aboutMe = crashOf('me', 'Kiran', myLat, type: SosTypes.riderDown)
+          .copyWith(source: EmergencySource.memberReport, reportedBy: 'a', reportedByName: 'Arjun Reddy');
+      final me2 = build(convoy(alerts: [aboutMe]), medicalId: id);
+      expect(me2.title, 'Your SOS is active');
+      expect(me2.customPublicText, contains('O+'));
     });
 
     test('assist request before accepting: distance only, I Can Help, never a name', () {
@@ -327,6 +392,12 @@ void main() {
       for (final s in [ride, sos, assist]) {
         expect('${s.publicTitle} ${s.publicText}', isNot(contains('Rahul')));
         expect('${s.publicTitle} ${s.publicText}', isNot(matches(RegExp(r'\d'))));
+      }
+      // Without the medical ID setting nothing medical appears, even on my own SOS.
+      final mine = build(convoy(alerts: [crashOf('me', 'Kiran', myLat)]));
+      final text = jsonEncode(mine.toChannelArgs());
+      for (final bad in ['Blood', 'Allerg', 'contact', 'O+']) {
+        expect(text, isNot(contains(bad)));
       }
     });
 

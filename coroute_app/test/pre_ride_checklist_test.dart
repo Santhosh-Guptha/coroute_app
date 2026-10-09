@@ -128,6 +128,31 @@ void main() {
     expect(noBrand.any((c) => c.key == 'oemGuide' || c.key == 'fullScreen'), isFalse, reason: 'not Android 14, not Android');
   });
 
+  testWidgets('helmet, licence and documents line: first in the sheet, gone when the setting is off (3.16)', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await smallPhone(tester);
+    final settings = SettingsService();
+    await settings.load();
+    final checks = PreRideChecklist.checksFrom(permissions: perms, batteryLevel: 80, hasEmergencyContact: true);
+    await tester.pumpWidget(ChangeNotifierProvider<SettingsService>.value(
+      value: settings,
+      child: host(Scaffold(body: PreRideChecklistSheet(checks: checks, requestPermission: (_) async => true))),
+    ));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text(PreRideChecklistSheet.documentsLine), findsOneWidget);
+    // Above every automatic check.
+    final line = tester.getTopLeft(find.text(PreRideChecklistSheet.documentsLine)).dy;
+    final firstCheck = tester.getTopLeft(find.text(checks.first.title)).dy;
+    expect(line, lessThan(firstCheck));
+    await settings.setDocumentsReminder(false);
+    await tester.pump();
+    expect(find.text(PreRideChecklistSheet.documentsLine), findsNothing);
+    await settings.setDocumentsReminder(true);
+    await tester.pump();
+    expect(find.text(PreRideChecklistSheet.documentsLine), findsOneWidget);
+  });
+
   testWidgets('crash detection and "Text the group" switches; switching texts on asks for SMS first', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await smallPhone(tester);

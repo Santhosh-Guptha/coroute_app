@@ -15,7 +15,7 @@ const config = require('./config');
 const { ACTIVE_STATUSES } = require('./oracle/repo');
 const { haversine, encodePolyline, decodePolyline, pointToSegment } = require('./geo_math');
 const { scrub, scrubConvoyMeta, mentions } = require('./anonymise');
-const { validPhone } = require('./validate');
+const { validPhone, roleOf } = require('./validate');
 
 const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'MEETING', 'SCENIC', 'TOLL', 'OTHER']);
 /** The chat card posted when a rider asks the group to wait (plain text, no emoji). */
@@ -82,6 +82,12 @@ const now = () => Date.now();
 function num(v, def = 0) { const n = Number(v); return Number.isFinite(n) ? n : def; }
 /** Group speed limit in km/h: 0 means off, otherwise 20-200 in whole km/h. */
 function speedLimit(v) { const n = Math.round(num(v, 0)); return n <= 0 ? 0 : Math.max(20, Math.min(200, n)); }
+/** 3.16 lower limit near stops and in towns: 0 means off, otherwise 20-100 whole km/h. */
+function townLimit(v) { const n = Math.round(num(v, 0)); return n <= 0 ? 0 : Math.max(20, Math.min(100, n)); }
+/** Live emergency link token: 24 random bytes as base64url = 32 chars of A-Z a-z 0-9 _ -. Only its hash is ever stored. */
+function newLiveToken() { return crypto.randomBytes(24).toString('base64url'); }
+function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
+function firstNameOf(name) { return String(name || '').trim().split(/\s+/)[0].slice(0, 20); }
 function clampLat(v) { return Math.max(-90, Math.min(90, num(v))); }
 function clampLng(v) { return Math.max(-180, Math.min(180, num(v))); }
 
@@ -96,7 +102,14 @@ class ConvoyManager extends EventEmitter {
     /** async (waypoints[]) => { distanceM, durationS, polyline, legs[] } | null. Set by app.js (GeoProxy). */
     this.router = opts.router || null;
     this.routeSeq = new Map(); // groupId -> latest route request number (stale answers are ignored)
+    /** 3.16: GeoProxy (nearest hospital) and SafetyAudit, set by app.js; both optional. */
+    this.geo = opts.geo || null;
+    this.audit = opts.audit || null;
+    /** 3.16 live emergency links: sha256(token) -> { gid, alertId } for open alerts of loaded rooms. */
+    this.liveLinks = new Map();
   }
+
+  _audit(row) { try { if (this.audit) this.audit.add(row); } catch { /* never in the way */ } }
 
   // ---------------------------------------------------------------- rooms
   async _loadRoom(groupId) {
@@ -118,6 +131,10 @@ class ConvoyManager extends EventEmitter {
       persistTimer: null,
     };
     this.rooms.set(groupId, room);
+    // 3.16: live link index from the open alerts (the token itself is never stored, only its hash).
+    for (const a of room.alerts.values()) {
+      if (!a.resolved && a.liveLink && a.liveLink.hash && !a.liveLink.revokedAt) this.liveLinks.set(a.liveLink.hash, { gid: groupId, alertId: a.alertId });
+    }
     // 3.15: the safety network rebuilds its incidents from open alerts of a room loaded after a restart.
     this.emit('roomLoaded', groupId);
     return room;
@@ -159,6 +176,7 @@ class ConvoyManager extends EventEmitter {
       stopThresholdSeconds: m.stopThresholdSeconds ?? 180,
       voiceGuidanceEnabled: m.voiceGuidanceEnabled ?? true,
       speedLimitKmh: m.speedLimitKmh || 0,
+      townLimitKmh: m.townLimitKmh || 0,
       routeBreadcrumbs: m.routeBreadcrumbs || [],
       start: m.start || null,
       route: m.route ? publicRoute(m.route) : null,
@@ -518,7 +536,34 @@ class ConvoyManager extends EventEmitter {
     try {
       this.emit('emergency', room.groupId, alert, 'RAISED', { owner: ownerInfo(ownerDoc) });
     } catch (e) { this.log.warn('[convoys] emergency hook failed', e.message); }
+    this._lookupHospital(room, alert);
     return alert;
+  }
+
+  /**
+   * 3.16: nearest hospital for the incident sheet. Runs after the ALERT went out and is never awaited:
+   * one lookup per alert (memory flag), only for HIGH / CRITICAL alerts, only when the polite OSM queue
+   * is short. On success the alert gets `nearestHospital` (stored) and the room an EMERGENCY_UPDATE.
+   */
+  _lookupHospital(room, alert) {
+    if (alert.hospitalTried || alert.nearestHospital) return;
+    alert.hospitalTried = true;
+    if (!this.geo || typeof this.geo.nearestHospital !== 'function') return;
+    if (!['HIGH', 'CRITICAL'].includes(alert.severity || severityOf(alert.alertType, sourceOf(alert)))) return;
+    if (typeof this.geo.queueWaitMs === 'function' && this.geo.queueWaitMs() >= config.hospitalMaxWaitMs) return;
+    if (!(alert.lat || alert.lng)) return;
+    const gid = room.groupId, alertId = alert.alertId;
+    Promise.resolve()
+      .then(() => this.geo.nearestHospital(alert.lat, alert.lng))
+      .then(async (h) => {
+        if (!h || !h.name) return;
+        const cur = this.rooms.get(gid)?.alerts.get(alertId);
+        if (!cur || cur.resolved) return;
+        cur.nearestHospital = { name: String(h.name).slice(0, 80), lat: h.lat, lng: h.lng, distanceM: Math.round(h.distanceM) };
+        await this.repo.updateAlert(gid, alertId, { nearestHospital: cur.nearestHospital }).catch(() => {});
+        this.emitEmergencyUpdate(gid, alertId);
+      })
+      .catch((e) => this.log.warn('[convoys] hospital lookup failed', e.message));
   }
 
   /**
@@ -574,7 +619,9 @@ class ConvoyManager extends EventEmitter {
     if (EMERGENCY_TERMINAL.includes(next)) {
       a.resolved = true; a.resolvedAt = t; a.resolvedBy = by; a.resolveReason = next === 'EXPIRED' ? 'EXPIRED' : next;
       delete a.medical;
-      await this.repo.resolveAlert(groupId, alertId, by, { status: next, resolveReason: a.resolveReason, lastUpdateAt: t, ...(a.netResponders ? { netResponders: a.netResponders } : {}) })
+      // 3.16: a live link dies with the alert.
+      const linkPatch = this._revokeLink(groupId, a, t, 'SYSTEM') ? { liveLink: a.liveLink } : {};
+      await this.repo.resolveAlert(groupId, alertId, by, { status: next, resolveReason: a.resolveReason, lastUpdateAt: t, ...(a.netResponders ? { netResponders: a.netResponders } : {}), ...linkPatch })
         .catch((e) => this.log.warn('[convoys] resolve failed', e.message));
       this.emit('activity', groupId, { type: 'EMERGENCY_STATUS', alert: a });
       this._emit(groupId, 'ALERT_RESOLVED', { alertId, by, status: next });
@@ -609,9 +656,137 @@ class ConvoyManager extends EventEmitter {
       lat: pos.lat, lng: pos.lng,
       network: sum.network || { state: 'OFF', stage: 0, notified: 0, onScene: false, responders: [] },
       ownNearest: sum.ownNearest || null,
+      // 3.16: known once the lookup answered (never delays anything).
+      ...(a.nearestHospital ? { nearestHospital: a.nearestHospital } : {}),
       ts: now(),
     });
     return true;
+  }
+
+  // ------------------------------------------------------ live emergency links (3.16)
+  /**
+   * A public link https://<origin>/e/<token> to the rider's live position during an open SOS,
+   * made by the alert owner or the lead. The token (24 random bytes, base64url) is returned once
+   * and never stored: the alert keeps sha256(token), expiry, creator and revocation. One valid link
+   * per alert (409 LINK_ACTIVE while one lives), at most LIVE_LINK_PER_ALERT links per alert (429).
+   * Returns { token, expiresAt } (the URL is built by the REST layer from the request origin).
+   */
+  async createLiveLink(groupId, user, alertId) {
+    const room = await this.getRoom(groupId);
+    this._requireMember(room, user);
+    const a = typeof alertId === 'string' ? room.alerts.get(alertId) : null;
+    if (!a || a.resolved) throw new ConvoyError('That alert is no longer open.', 404, 'ALERT_CLOSED');
+    if (a.userId !== user.userId && !this.isLead(room, user)) throw new ConvoyError('Only the rider or the lead can share a live link.', 403, 'NOT_ALLOWED');
+    const t = now();
+    const cur = a.liveLink;
+    if (cur && cur.hash && !cur.revokedAt && cur.expiresAt > t) {
+      const e = new ConvoyError('A live link is already active.', 409, 'LINK_ACTIVE');
+      e.expiresAt = cur.expiresAt;
+      throw e;
+    }
+    if (cur && cur.hash) this._revokeLink(groupId, a, t, user.userId, cur.expiresAt <= t ? 'EXPIRE' : 'REVOKE');
+    const count = (a.liveLinkCount || 0) + 1;
+    if (count > config.liveLinkPerAlert) throw new ConvoyError('No more live links can be made for this alert.', 429, 'LINK_LIMIT');
+    const token = newLiveToken();
+    const hash = sha256(token);
+    a.liveLink = { hash, expiresAt: t + config.liveLinkMin * 60000, createdBy: user.userId, createdAt: t, revokedAt: 0 };
+    a.liveLinkCount = count;
+    this.liveLinks.set(hash, { gid: groupId, alertId: a.alertId });
+    await this.repo.updateAlert(groupId, a.alertId, { liveLink: a.liveLink, liveLinkCount: count }).catch((e) => this.log.warn('[convoys] live link save failed', e.message));
+    this._audit({ kind: 'LIVE_LINK', actorId: user.userId, subjectId: a.userId, alertId: a.alertId, groupId, detail: 'CREATE' });
+    this.emitEmergencyUpdate(groupId, a.alertId);
+    return { token, expiresAt: a.liveLink.expiresAt };
+  }
+
+  /** Owner, lead or admin stops a live link early. Idempotent. */
+  async revokeLiveLink(groupId, user, alertId) {
+    const room = await this.getRoom(groupId);
+    if (user.role !== 'MASTER_ADMIN') this._requireMember(room, user);
+    const a = typeof alertId === 'string' ? room.alerts.get(alertId) : null;
+    if (!a) throw new ConvoyError('That alert is no longer open.', 404, 'ALERT_CLOSED');
+    if (a.userId !== user.userId && !this.isLead(room, user)) throw new ConvoyError('Only the rider or the lead can stop a live link.', 403, 'NOT_ALLOWED');
+    if (this._revokeLink(groupId, a, now(), user.userId)) {
+      await this.repo.updateAlert(groupId, a.alertId, { liveLink: a.liveLink }).catch(() => {});
+      if (!a.resolved) this.emitEmergencyUpdate(groupId, a.alertId);
+    }
+    return true;
+  }
+
+  /** Marks the alert's link revoked (memory + index) and audits it. Returns true when something changed. */
+  _revokeLink(groupId, a, t, by, detail = 'REVOKE') {
+    const l = a.liveLink;
+    if (!l || !l.hash || l.revokedAt) return false;
+    l.revokedAt = t;
+    this.liveLinks.delete(l.hash);
+    this._audit({ kind: 'LIVE_LINK', actorId: by, subjectId: a.userId, alertId: a.alertId, groupId, detail });
+    return true;
+  }
+
+  /**
+   * What the public page shows for a link hash: { firstName, lat, lng, at, active: true, expiresAt }
+   * or null (unknown, expired, revoked, resolved). The position is the rider's current one in the
+   * room when it is fresher than the alert's, else the alert's. Nothing else leaves.
+   */
+  liveView(hash) {
+    const ref = typeof hash === 'string' ? this.liveLinks.get(hash) : null;
+    if (!ref) return null;
+    const room = this.rooms.get(ref.gid);
+    const a = room?.alerts.get(ref.alertId);
+    const l = a && a.liveLink;
+    if (!a || !l || l.hash !== hash || a.resolved || l.revokedAt) { this.liveLinks.delete(hash); return null; }
+    const t = now();
+    if (l.expiresAt <= t) {
+      this._revokeLink(ref.gid, a, t, 'SYSTEM', 'EXPIRE');
+      this.repo.updateAlert(ref.gid, a.alertId, { liveLink: a.liveLink }).catch(() => {});
+      return null;
+    }
+    const alertAt = a.lastUpdateAt || a.timestamp || 0;
+    const rider = room.riders.get(a.userId);
+    let lat = a.lat, lng = a.lng, at = alertAt;
+    if (rider && (rider.lat || rider.lng) && (rider.lastSeenEpochMs || 0) >= alertAt) { lat = rider.lat; lng = rider.lng; at = rider.lastSeenEpochMs; }
+    return { firstName: firstNameOf(a.userName || rider?.name), lat: +Number(lat).toFixed(5), lng: +Number(lng).toFixed(5), at, active: true, expiresAt: l.expiresAt };
+  }
+
+  // ------------------------------------------------------ sweeper role (3.16)
+  /**
+   * The lead makes a rider the SWEEPER (or back to PACK). One sweeper per room: the previous one
+   * becomes PACK in the same change. Never the creator, never a LEAD. Every changed rider is sent as
+   * RIDER_UPDATE (old and new apps apply `role`) and the timeline gets ROLE_CHANGED for the target.
+   */
+  async setRole(groupId, user, userId, role) {
+    const room = await this.getRoom(groupId);
+    this._requireLead(room, user);
+    const r = roleOf(role);
+    if (!r) throw new ConvoyError('Role must be SWEEPER or PACK.', 400, 'BAD_ROLE');
+    const uid = typeof userId === 'string' && userId.length <= 64 ? userId : '';
+    const target = uid ? room.riders.get(uid) : null;
+    if (!target) throw new ConvoyError('That rider is not in this convoy.', 404, 'NOT_MEMBER');
+    if (target.role === 'LEAD' || room.meta.createdByUserId === uid) throw new ConvoyError('The lead cannot be given another role.', 403, 'NOT_ALLOWED');
+    const changed = [];
+    if (r === 'SWEEPER') {
+      for (const o of room.riders.values()) {
+        if (o.userId !== uid && o.role === 'SWEEPER') changed.push(this._applyRole(room, o.userId, 'PACK'));
+      }
+    }
+    if (target.role !== r) changed.push(this._applyRole(room, uid, r));
+    if (!changed.length) return target;
+    this._touch(room);
+    await this.repo.saveConvoyMeta(room.meta);
+    for (const rider of changed) {
+      room.dirty.delete(rider.userId);
+      await this.repo.upsertRider(groupId, rider).catch((e) => this.log.warn('[convoys] role save failed', e.message));
+      this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(rider) });
+    }
+    this.emit('activity', groupId, { type: 'ROLE_CHANGED', user: { userId: uid, name: target.name }, role: r, byUserId: user.userId });
+    this.emit('fleet');
+    return room.riders.get(uid);
+  }
+
+  _applyRole(room, uid, role) {
+    const next = { ...room.riders.get(uid), role };
+    room.riders.set(uid, next);
+    if (room.meta.members?.[uid]) room.meta.members[uid] = { ...room.meta.members[uid], role };
+    return next;
   }
 
   /**
@@ -678,6 +853,7 @@ class ConvoyManager extends EventEmitter {
     this._emit(groupId, 'ALERT', { alert: publicAlert(alert, { summary: this._summary(groupId, alert.alertId) }) });
     this.emit('fleet');
     try { this.emit('emergency', groupId, alert, 'RAISED', { owner: null }); } catch (e) { this.log.warn('[convoys] emergency hook failed', e.message); }
+    this._lookupHospital(room, alert);
     return { alert, duplicate: false };
   }
 
@@ -1113,6 +1289,8 @@ class ConvoyManager extends EventEmitter {
     if (patch.stopThresholdSeconds !== undefined) room.meta.stopThresholdSeconds = Math.max(30, Math.min(3600, num(patch.stopThresholdSeconds, 180)));
     if (patch.voiceGuidanceEnabled !== undefined) room.meta.voiceGuidanceEnabled = !!patch.voiceGuidanceEnabled;
     if (patch.speedLimitKmh !== undefined) room.meta.speedLimitKmh = speedLimit(patch.speedLimitKmh);
+    // 3.16: lower limit near stops and in towns (0 = off; wrong types read as off).
+    if (patch.townLimitKmh !== undefined && patch.townLimitKmh !== null && typeof patch.townLimitKmh !== 'boolean') room.meta.townLimitKmh = townLimit(patch.townLimitKmh);
     // 3.15: social visibility and the group default for nearby assistance (wrong types are ignored).
     if (patch.visibility === 'PUBLIC' || patch.visibility === 'PRIVATE') room.meta.visibility = patch.visibility;
     if (typeof patch.discovery === 'boolean') room.meta.discovery = patch.discovery;
@@ -1122,6 +1300,7 @@ class ConvoyManager extends EventEmitter {
     const { distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled } = room.meta;
     this._emit(groupId, 'CONFIG', {
       distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled, speedLimitKmh: room.meta.speedLimitKmh || 0,
+      townLimitKmh: room.meta.townLimitKmh || 0,
       visibility: room.meta.visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE', discovery: room.meta.discovery === true, assistDefault: room.meta.assistDefault !== false,
     });
   }
@@ -1394,7 +1573,7 @@ function respondersList(map) {
  * (`medical: false` for admins and the fleet feed), and only while the alert is open.
  */
 function publicAlert(a, { medical = true, summary = null } = {}) {
-  const { key, groupId, medical: med, responders, network, ownNearest, ...rest } = a;
+  const { key, groupId, medical: med, responders, network, ownNearest, liveLink, liveLinkCount, hospitalTried, ...rest } = a;
   const source = sourceOf(a);
   const out = {
     ...rest, auto: !!a.auto, details: a.details || {}, occurredAt: a.occurredAt || a.timestamp || 0, responders: respondersList(responders),
@@ -1412,6 +1591,9 @@ function publicAlert(a, { medical = true, summary = null } = {}) {
   if (summary && summary.network) out.network = summary.network;
   if (summary && summary.ownNearest !== undefined) out.ownNearest = summary.ownNearest;
   if (medical && med && !a.resolved) out.medical = med;
+  // 3.16: the live link's times only (never the hash), and the nearest hospital once known.
+  if (liveLink && liveLink.hash) out.liveLink = { expiresAt: liveLink.expiresAt || 0, revokedAt: liveLink.revokedAt || 0 };
+  if (a.nearestHospital && a.nearestHospital.name) out.nearestHospital = a.nearestHospital;
   return out;
 }
 
@@ -1433,4 +1615,5 @@ function sanitizeBreadcrumbs(list) {
 module.exports = {
   ConvoyManager, ConvoyError, publicRider, publicAlert, sanitizeTelemetry, TELEMETRY_FIELDS, TRUSTED_FIELDS, WAIT_MESSAGE, SOS_TYPES, LIVE_STATUSES,
   statusOf, sourceOf, severityOf, isOpenStatus, falseAlarmCount, ownerInfo, EMERGENCY_OPEN, EMERGENCY_TERMINAL, EMERGENCY_SOURCES,
+  townLimit, sha256,
 };

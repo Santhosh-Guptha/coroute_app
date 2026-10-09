@@ -13,7 +13,6 @@
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <!-- Rider safety: emergency texts from the rider's own phone when an SOS cannot be sent
          over the internet (opt-in in the pre-ride checklist), and the crash alarm over the lock screen. -->
     <uses-permission android:name="android.permission.SEND_SMS"/>

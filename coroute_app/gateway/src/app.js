@@ -24,6 +24,9 @@ const { Discovery } = require('./discovery');
 const { SafetyAudit } = require('./safety_audit');
 const { RouteIndexCache, gridSize } = require('./net_geo');
 const { loadSite, isHiddenPath, SITE_PAGES, SITEMAP } = require('./pages');
+const rateLimit = require('express-rate-limit');
+const { liveTokenOf } = require('./validate');
+const { sha256 } = require('./convoys');
 
 function createSoda() {
   if (config.sodaUrl === 'memory' || config.sodaUrl === 'http://mock') return new MemorySoda();
@@ -37,14 +40,17 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const gate = new UserGate(repo);
   const auth = new AuthService(repo, { googleVerifier, gate });
   const convoys = new ConvoyManager(repo, { logger });
+  // 3.16: the live link index and the role / live link audit rows go through the same audit as the network.
+  const audit = new SafetyAudit({ repo, logger });
+  convoys.audit = audit;
   // A phone number, emergency-text opt-out or nearby-assistance switch change reaches the rider's live ride.
   auth.onProfileChanged = (user, keys) => convoys.applyProfile(user.userId, user, keys);
   const tracks = new TrackStore(repo);
   const geo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
   convoys.router = (wp) => geo.route(wp);
+  convoys.geo = geo; // 3.16: nearest hospital lookups (never awaited by the SOS path)
   const timeline = new TimelineEngine({ convoys, repo, tracks, geo, logger, ...(clock ? { clock } : {}) });
   // 3.15: rider safety network and rider discovery (separate modules; they share only route geometry).
-  const audit = new SafetyAudit({ repo, logger });
   const routes = new RouteIndexCache({ simplifyM: config.netRouteSimplifyM, maxPoints: config.netRouteMaxPoints, G: gridSize(config.netGridMillideg) });
   const network = new SafetyNetwork({ convoys, geo, audit, logger, routes });
   const discovery = new Discovery({ convoys, network, audit, logger, routes });
@@ -100,6 +106,26 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     const html = site.render('join.html', { ...pageVars(req), __CODE__: code });
     res.type('html').set('Cache-Control', 'no-store').send(html);
   });
+  // 3.16 live emergency link page: the rider's first name, last position and time for 30 minutes. Never cached,
+  // never indexed, no referrer leaves the page. A malformed token is a 404; a dead link the expired page (410).
+  const publicLiveLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests.' } });
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  app.get('/e/:token', publicLiveLimiter, (req, res) => {
+    const token = liveTokenOf(req.params.token);
+    if (!token) return notFoundPage(req, res);
+    res.set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer').set('X-Robots-Tag', 'noindex');
+    const view = convoys.liveView(sha256(token));
+    if (!view) {
+      const html = site.has('live_expired.html') ? site.render('live_expired.html', pageVars(req)) : plainLivePage(null);
+      return res.status(410).type('html').send(html);
+    }
+    const vars = {
+      ...pageVars(req), __RIDER__: esc(view.firstName || 'A rider'), __LAT__: view.lat.toFixed(5), __LNG__: view.lng.toFixed(5),
+      __AT__: new Date(view.at).toISOString(), __EXPIRES__: new Date(view.expiresAt).toISOString(),
+    };
+    const html = site.has('live.html') ? site.render('live.html', vars) : plainLivePage(vars);
+    res.type('html').send(html);
+  });
   // Android App Links verification (express.static ignores dot-directories, so serve it explicitly).
   app.get('/.well-known/assetlinks.json', (req, res) => res.type('application/json').set('Cache-Control', 'public, max-age=86400').sendFile(pub('.well-known/assetlinks.json')));
   app.get('/status', (req, res) => res.json({ service: 'CoRoute Gateway', version: require('../package.json').version, status: 'ONLINE' }));
@@ -116,7 +142,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       }
     },
   }));
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate, network, audit }));
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate, network, audit, publicLiveLimiter }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -140,6 +166,22 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   }
 
   return { app, server, hub, repo, soda, auth, gate, convoys, retention, tracks, timeline, geo, network, discovery, audit, routes, shutdown };
+}
+
+/**
+ * Built-in fallback for the live link pages when public/live.html / live_expired.html are not deployed
+ * (the website pages are the real ones). Plain text, no scripts, no map: the position, the time and "Call 112".
+ */
+function plainLivePage(v) {
+  const head = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+    + '<meta name="robots" content="noindex"><meta name="referrer" content="no-referrer"><title>CoRoute: rider emergency</title>'
+    + '<style>body{font-family:system-ui,sans-serif;margin:0;padding:24px;max-width:36rem;line-height:1.5}a.call{display:inline-block;padding:14px 20px;border:2px solid #111;text-decoration:none;color:#111;font-weight:700;margin-top:12px}</style></head><body>';
+  if (!v) return `${head}<h1>This link has expired</h1><p>Live emergency links in CoRoute last 30 minutes or until the rider's group closes the alert.</p><p>If someone is in danger, call 112.</p><p><a class="call" href="tel:112">Call 112</a></p></body></html>`;
+  const maps = `https://www.google.com/maps/dir/?api=1&amp;destination=${v.__LAT__},${v.__LNG__}`;
+  return `${head}<h1>Rider emergency</h1><p>${v.__RIDER__} raised an SOS in CoRoute and shared this link with you.</p>`
+    + `<p>Last position: <span data-lat="${v.__LAT__}" data-lng="${v.__LNG__}">${v.__LAT__}, ${v.__LNG__}</span><br>Updated: ${v.__AT__}<br>Link valid until: ${v.__EXPIRES__}</p>`
+    + `<p><a class="call" href="tel:112">Call 112</a></p><p><a href="${maps}" rel="noreferrer noopener" target="_blank">Open in Google Maps</a></p>`
+    + '<p>What to do: call 112, say the location, stay on the line.</p></body></html>';
 }
 
 module.exports = { createApp, createSoda };

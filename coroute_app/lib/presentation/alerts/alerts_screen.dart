@@ -286,7 +286,7 @@ class _AlertsList extends StatelessWidget {
     final localNormal = <Widget>[
       for (final n in service.assistNotices)
         if (n.reason == AssistClosedReason.taken && now < n.at + NetworkConstants.assistTakenShowFor.inMilliseconds)
-          const RideAlert(tier: AlertTier.normal, title: AssistTexts.takenTitle, message: AssistTexts.takenBody),
+          RideAlert(tier: AlertTier.normal, title: AssistTexts.takenTitle, message: AssistTexts.takenBody),
       for (final p in prompts.where((p) => p.tier == AlertTier.normal)) prompt(p),
       if (social)
         for (final e in service.encounters)

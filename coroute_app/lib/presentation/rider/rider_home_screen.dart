@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/l10n/l10n.dart';
+import '../../core/ui/confirm.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/background_service.dart';
@@ -18,6 +20,24 @@ import 'trip_history_screen.dart';
 
 /// The four tabs of the app, in bottom navigation order.
 enum HomeTab { ride, trips, alerts, profile }
+
+/// "Leave ride" from the ride notification (3.16, item 3). The notification
+/// button only sets [ConvoyService.leaveRequestedFromNotification]; this
+/// clears it, asks the rider to confirm, and only then leaves. Used by the
+/// ride screen, and by the shell when the ride screen is not built yet.
+Future<void> leaveFromNotification(BuildContext context, ConvoyService convoys, String uid, {bool embedded = true}) async {
+  convoys.clearLeaveRequest();
+  final ok = await confirmAction(
+    context,
+    title: L10n.t('leave.title'),
+    message: L10n.t('leave.body'),
+    confirmLabel: L10n.t('leave.confirm'),
+    destructive: true,
+  );
+  if (!ok || !context.mounted) return;
+  convoys.leaveActiveConvoy(uid);
+  if (!embedded) Navigator.of(context).maybePop();
+}
 
 /// The app shell: Ride | Trips | Alerts | Profile in a bottom navigation bar.
 ///
@@ -65,6 +85,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   String? _lastGroupId;
   bool _rideSaved = false;
   bool _joinOpen = false;
+  bool _leaveAsking = false;
 
   /// "Show on map" requests from the Alerts tab to the ride map.
   final MapFocus _mapFocus = MapFocus();
@@ -140,6 +161,19 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     final s = _convoys;
     if (s == null || !mounted) return;
     final gid = s.activeGroupId;
+    // "Leave ride" from the notification while the ride screen is not built (the ride screen
+    // handles it itself once it is): confirm first, never one tap.
+    if (s.leaveRequestedFromNotification && gid != null && !_built.contains(HomeTab.ride) && !_leaveAsking) {
+      _leaveAsking = true;
+      final uid = s.myUserId ?? '';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          _leaveAsking = false;
+          return;
+        }
+        leaveFromNotification(context, s, uid).whenComplete(() => _leaveAsking = false);
+      });
+    }
     if (gid != _lastGroupId) {
       final started = _lastGroupId == null && gid != null;
       final ended = _lastGroupId != null && gid == null;

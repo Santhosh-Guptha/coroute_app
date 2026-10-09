@@ -323,11 +323,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                 : null,
           ),
           children: [
-            TileLayer(
-              tileBuilder: mapTileBuilder,
-              urlTemplate: AppConstants.osmTileUrl,
-              userAgentPackageName: AppConstants.osmUserAgent,
-            ),
+            appTileLayer(),
             MarkerLayer(markers: markers),
           ],
         ),

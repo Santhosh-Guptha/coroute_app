@@ -1,4 +1,4 @@
-# Rider safety: device tests (CoRoute 3.14 and 3.15)
+# Rider safety: device tests (CoRoute 3.14, 3.15 and 3.16)
 
 How to check crash detection, the crash alarm, emergency texts, the break
 reminder and the "Are you OK?" check-in on real phones, safely, without a real
@@ -264,7 +264,7 @@ also needs the group's voice guidance switch).
 | B raises SOS, A in a pocket with the screen off | A hears once: "Emergency. <B> may have met with an accident 4.8 kilometers behind you." Music on A ducks while it speaks and comes back |
 | Same SOS again within 10 min (reconnect) | not spoken again |
 | Bluetooth helmet intercom paired to A | the voice comes through the helmet like map directions; the CoRoute intercom continues afterwards |
-| Settings > System > Languages: Hindi as the phone language | still spoken in English (Indian English voice if installed) |
+| Settings > System > Languages: Hindi as the phone language, CoRoute language "System language" (3.16) | spoken in Hindi when the phone has a Hindi voice (Settings > Accessibility > Text-to-speech, Google engine, install the voice); without one, English |
 | Text-to-speech engine disabled (Settings > Apps > Speech Services by Google > Disable) or a phone without one | no voice, no error, banners and notifications still show |
 | "Speak emergency alerts" off | silent, banner still shows |
 | Group voice guidance off | warnings and directions silent, emergencies still spoken |
@@ -276,6 +276,101 @@ Same as section 9 over 2 hours, screen off: "Large ride notification" on vs off.
 Expected: no measurable difference (it redraws at most every 10 s from data the
 app already has; no extra GPS or network). `adb shell dumpsys notification`
 should show the CoRoute notification updated at most about 6 times a minute.
+
+## 13. Fuel reminder (3.16)
+
+Profile (or Ride safety) > "Tank range (km)": set 10 km for the test. Ride, or
+use a mock-location app that moves the position along a road at 40 km/h.
+Expected: at about 8 km since the ride started (or since the last "Filled up")
+one prompt "Fuel soon" with "OK" and "Filled up", also as a notification when
+the screen is off; never a second one for the same tank. "Filled up" (the
+prompt, or the ride sheet row) restarts the count; so does arriving at a stop
+of the category Fuel on the plan. Kill the app mid-ride and open it again: the
+"km since last fill" row keeps its value. Range 0: no reminder.
+
+## 14. Hard stops (3.16)
+
+Ride above 25 km/h and brake firmly (from 60 to 30 within 3 s) three times, at
+least 10 s apart; also ride over a pothole without braking. After the ride the
+trip report shows "3 hard stops" with "Only you can see this." The pothole does
+not count, nor does braking below 25 km/h. The count is on the phone only:
+`adb logcat` and the server never see it. Another rider's report never shows yours.
+
+## 15. Post-crash follow-up (3.16)
+
+Trigger the crash alarm as in section 3 and tap "I'm OK". Ride on, then stop
+for a minute: one prompt "Still okay? Anything hurt?" with "Yes, fine" and
+"Need help" (also a notification with both buttons). "Yes, fine" writes "Kiran
+said they are still OK" to the timeline; "Need help" raises an SOS. Without a
+stop the prompt comes 20 min after "I'm OK". It comes once. The hidden
+developer action (section 17) never asks it.
+
+## 16. Night voice (3.16)
+
+Ride after sunset with "Speak warnings and directions" OFF and "Speak more after
+dark" ON (default). Expected: stopped-rider and separation alerts are spoken;
+hazard directions are not. By day, with the same settings, nothing is spoken
+except emergencies. With "Speak emergency alerts" OFF nothing is spoken at all.
+The day/night switch comes from the ride's own fixes (no timer): `dumpsys
+alarm` shows nothing new for CoRoute.
+
+## 17. Wearable hook (3.16, developer action)
+
+Ride safety sheet: tap the title 7 times while a ride is active. The row
+"Developer: simulate wearable impact" opens the crash alarm (15 s, "Possible
+accident detected") exactly like the sensor would. Let it time out once: the
+server's alert shows source WEARABLE in the admin emergencies panel. Tap "I'm
+OK" once: no follow-up prompt comes later (the simulation is not a real
+impact). No Bluetooth permission is asked anywhere (it was removed in 3.16;
+`adb shell dumpsys package space.devmonks.coroute_app | grep BLUETOOTH` prints nothing).
+
+## 18. Weather and sunset lines (3.16)
+
+Plan a route of 2 hours or more and open the review sheet. Expected: "Checking
+weather..." then one line, for example "Rain likely after Warangal around 3 PM"
+or "No rain expected on the route", with "Weather data by Open-Meteo.com"
+underneath; the sunset line "You will reach the destination after dark (sunset
+6:10 PM)" when the ETA passes sunset. Start the ride: the ride sheet shows the
+rain line only while rain is expected, and "Dark in 40 min" within an hour of
+sunset. Data saver on: "Weather check skipped (data saver)" and no request
+(`adb logcat | grep weather` stays quiet; the gateway log shows no
+`/api/geo/weather` call). Two requests per ride at most: review and start.
+
+## 19. Route map saved on the phone (3.16)
+
+Settings > "Save route maps on Wi-Fi" on. Plan a route, connect to Wi-Fi, start
+the ride: the ride sheet shows "Saving route map: 240 of 600" then "Route map
+saved" (about 12 MB for a long route; `du -sh` of the app's cache folder
+`tiles` grows accordingly). On mobile data nothing is downloaded until the rider
+taps "Save route map". Then switch to airplane mode and pan the ride map along
+the route: tiles at the overview and the street zoom show without a network;
+other areas show the empty tile. The cache keeps at most 60 MB and drops tiles
+after 30 days; Android may clear it when space is short (nothing breaks, maps
+load from the network again). `adb logcat | grep tile.openstreetmap` during the
+prefetch: requests at least 150 ms apart with the CoRoute User-Agent.
+
+## 20. Medical ID on the lock screen and Leave ride (3.16)
+
+Profile: blood group, allergies and an emergency contact set. Ride safety:
+"Show my medical ID on the lock screen during an SOS" OFF (default). Raise an
+SOS, lock the phone: the lock screen shows "Your SOS is active" only. Switch
+the setting on and raise an SOS again: the lock screen shows "Your SOS is
+active. Blood group O+. Allergies: ... Emergency contact: Asha 98765 43210"
+even with "Show ride on lock screen" off (with it off, the rest of the ride,
+names and distances, stays hidden: only that line shows). Another rider's SOS
+never shows your medical ID, and neither does a "Rider down here" report you
+made about someone else. Lock-screen notification button "Leave ride": the app opens with a
+confirm "Leave the ride?"; nothing happens until "Leave ride" is tapped there.
+
+## 21. Hindi and Telugu (3.16)
+
+Profile > Language > Hindi (then Telugu): crash alarm, SOS hold screen, incident
+and assist sheets, hazard banner, safety settings, the crash notification and
+the prompts (fuel, follow-up, check-in, break) show in that language; everything
+else stays English. Spoken alerts use the Hindi or Telugu voice when the phone
+has one (Settings > Accessibility > Text-to-speech output); otherwise they are
+spoken in English. Change the language between rides: the next ride speaks in
+the new language.
 
 ## What to send back
 

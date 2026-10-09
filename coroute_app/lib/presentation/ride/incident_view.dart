@@ -1,3 +1,4 @@
+import '../../core/l10n/l10n.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/medical_info.dart';
 import '../../data/models/network_models.dart';
@@ -83,6 +84,12 @@ class IncidentView {
   /// Who reported it (a member report "Rider down"), empty otherwise.
   final String reportedByName;
 
+  /// The reporter's user id for a report, empty otherwise.
+  final String reportedBy;
+
+  /// Nearest hospital to the alert (3.16, from the gateway), or null.
+  final NearbyPlace? nearestHospital;
+
   const IncidentView({
     required this.kind,
     required this.subjectUserId,
@@ -104,6 +111,8 @@ class IncidentView {
     this.ownNearest,
     this.positionAt = 0,
     this.reportedByName = '',
+    this.reportedBy = '',
+    this.nearestHospital,
   });
 
   /// True for an SOS or a crash alert (the group can answer it).
@@ -132,8 +141,32 @@ class IncidentView {
     return i > 0 ? n.substring(0, i) : n;
   }
 
-  /// "Rahul may have met with an accident" / "Rahul needs help" (own group emergency, 3.15 wording).
-  String get summary => isAccident ? '$who may have met with an accident' : '$who needs help';
+  /// A rider-down report by a member or a nearby rider (3.15 REPORT_DOWN).
+  bool get isReport =>
+      source == EmergencySource.memberReport || source == EmergencySource.nearbyReport || alertType == riderDownType;
+
+  /// The reporter's first name, or "A rider".
+  String get reporterName {
+    final n = reportedByName.trim();
+    if (n.isEmpty) return 'A rider';
+    final i = n.indexOf(' ');
+    return i > 0 ? n.substring(0, i) : n;
+  }
+
+  /// The report names someone else than the reporter (the subject is a group member).
+  bool get reportHasSubject => isReport && subjectUserId.isNotEmpty && subjectUserId != reportedBy;
+
+  /// "Rahul may have met with an accident" / "Rahul needs help" (own group emergency, 3.15
+  /// wording). A report (3.16, item 1) says "Arjun reported a rider down" (or "Arjun reported
+  /// Kiran down"), never "accident": the reporter saw someone, nothing was detected.
+  String get summary {
+    if (isReport) {
+      return reportHasSubject
+          ? L10n.t('incident.report.summary.named', {'reporter': reporterName, 'name': who})
+          : L10n.t('incident.report.summary', {'reporter': reporterName});
+    }
+    return isAccident ? '$who may have met with an accident' : '$who needs help';
+  }
 
   /// The same key as the notification and the Alerts tab row, so nothing shows twice.
   String get key {
@@ -171,6 +204,7 @@ class IncidentView {
           return 'Your lead was told you did not answer';
       }
     }
+    if (isReport) return reportHasSubject ? 'Rider down: $who' : 'Rider down reported';
     switch (kind) {
       case IncidentKind.crash:
         return 'Crash detected: $who';
@@ -187,6 +221,7 @@ class IncidentView {
 
   /// What happened, in two or three words ("Automatic crash alert", "SOS", "Possible incident").
   String get what {
+    if (isReport) return L10n.t('incident.reportedBy', {'name': reporterName});
     switch (kind) {
       case IncidentKind.crash:
         return auto ? 'Automatic crash alert' : 'Crash alert';
@@ -264,6 +299,8 @@ List<IncidentView> incidentsFromEvents(ConvoyModel c, Iterable<TimelineEventMode
       ownNearest: a.ownNearest,
       positionAt: posAt,
       reportedByName: a.reportedByName,
+      reportedBy: a.reportedBy,
+      nearestHospital: a.nearestHospital,
     ));
   }
 

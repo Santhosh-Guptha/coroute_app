@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
+import '../../data/models/safety_wire.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/intercom_service.dart';
 import '../../data/services/timeline_service.dart';
@@ -19,6 +20,8 @@ import 'riders_ladder.dart';
 /// distance from me, speed, last update, distance to the destination, and
 /// the actions Show on map, Call, Talk privately, Pair as pillion. When the
 /// rider has an open SOS it also offers "Mark as handled" (confirmed first).
+/// 3.16: a low battery chip, the sweeper marker, and for the lead "Make
+/// sweeper" / "Remove sweeper".
 Future<void> showRiderCard(
   BuildContext context, {
   required String convoyId,
@@ -105,6 +108,9 @@ class RiderCard extends StatelessWidget {
     final ic = context.watch<IntercomService?>();
     final pairedWithThem = me != null && me.isCoRiding && me.ridingWithUserId == r.userId;
     final reason = riderReasonText(r);
+    // The lead assigns one sweeper (3.16); never the lead themself, needs a 3.16 gateway.
+    final riderIsLead = r.role == RiderRoles.lead || r.userId == convoy.createdByUserId;
+    final canSetSweeper = !isMe && service.canEditRoute && !riderIsLead && service.supports(ProtocolFeatures.ride316);
 
     (String, String?) split(double? m) {
       if (m == null) return ('-', null);
@@ -151,7 +157,7 @@ class RiderCard extends StatelessWidget {
                     child: Text(isMe ? '${r.name} (You)' : r.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
                   ),
                   Text(
-                    [r.vehicleType, if (r.vehicleNo.isNotEmpty) r.vehicleNo, if (r.role == 'LEAD') 'Lead', if (r.role == 'SWEEPER') 'Sweeper'].join(', '),
+                    [r.vehicleType, if (r.vehicleNo.isNotEmpty) r.vehicleNo, if (r.role == RiderRoles.lead) 'Lead'].join(', '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: AppText.caption,
@@ -163,6 +169,8 @@ class RiderCard extends StatelessWidget {
                     children: [
                       RiderStatusChip(status: status, detail: detail),
                       if (inc != null && inc.kind == IncidentKind.possibleIncident) const PossibleIncidentChip(),
+                      if (r.lowBattery) LowBatteryChip(level: r.batteryLevel),
+                      if (r.isSweeper) const SweeperMarker(),
                     ],
                   ),
                 ],
@@ -262,6 +270,17 @@ class RiderCard extends StatelessWidget {
             pairedWithThem ? 'Stop riding as pillion' : 'I am their pillion',
             // Paired: the pillion is told when they get separated from their rider.
             () => service.setCoRiderDriver(myId, pairedWithThem ? '' : r.userId),
+          ),
+        if (canSetSweeper)
+          action(
+            r.isSweeper ? Icons.flag_outlined : Icons.flag_rounded,
+            r.isSweeper ? 'Remove sweeper' : 'Make sweeper',
+            () {
+              final ok = service.setSweeper(r.userId, on: !r.isSweeper);
+              if (!ok) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not change this now. Try again with signal.')));
+              }
+            },
           ),
       ],
     );

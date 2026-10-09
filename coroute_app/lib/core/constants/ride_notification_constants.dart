@@ -66,4 +66,7 @@ class NotifConstants {
 
   /// Lock screen (public version) during an emergency: no names, no places.
   static const String publicEmergencyText = 'Rider emergency nearby, open CoRoute';
+
+  /// Lock screen title when the rider chose to show their medical ID during their own SOS (3.16).
+  static const String appTitle = 'CoRoute';
 }

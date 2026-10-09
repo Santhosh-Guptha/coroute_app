@@ -60,7 +60,7 @@ class FakeConvoys extends ConvoyService {
   @override
   List<OutboxItem> get outbox => const [];
   @override
-  bool sendCheckIn(CheckInResult result, {double? awayM}) {
+  bool sendCheckIn(CheckInResult result, {double? awayM, CheckInContext? context}) {
     checkIns.add(result);
     return true;
   }

@@ -307,7 +307,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
             },
           ),
           children: [
-            TileLayer(tileBuilder: mapTileBuilder, urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
+            appTileLayer(),
           ],
         ),
         // Fixed centre pin: the map moves underneath it. The tip sits on the centre.

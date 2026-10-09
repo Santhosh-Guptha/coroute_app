@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/network_models.dart';
@@ -10,13 +11,17 @@ import 'emergency_guidance.dart';
 String hazardLevelWords(HazardLevel level) {
   switch (level) {
     case HazardLevel.active:
-      return 'Active';
+      return L10n.t('hazard.level.active');
     case HazardLevel.responderArriving:
-      return 'Responder arriving';
+      return L10n.t('hazard.level.arriving');
     case HazardLevel.onScene:
-      return 'Assistance on scene';
+      return L10n.t('hazard.level.onScene');
   }
 }
+
+/// "Accident reported 2.3 km ahead" / "Accident reported" for the map marker.
+String hazardMarkerLabel(double? distanceM) =>
+    distanceM == null ? L10n.t('hazard.marker') : L10n.t('hazard.marker.ahead', {'dist': Relation.distanceText(distanceM)});
 
 /// Metres to a hazard and whether that is along my route: the phone's own
 /// view when it has one, else what the server sent.
@@ -30,9 +35,10 @@ String hazardLevelWords(HazardLevel level) {
 String hazardMessage(HazardWarning h, HazardView? view) {
   final d = hazardDistance(h, view);
   final m = d.distanceM;
-  if (m == null) return 'Rider accident reported ahead. Reduce speed and stay alert.';
-  final where = d.alongRoute ? 'ahead on your route' : 'ahead';
-  return 'Rider accident reported ${Relation.distanceText(m)} $where. Reduce speed and stay alert.';
+  final where = m == null
+      ? L10n.t('hazard.where.none')
+      : L10n.t(d.alongRoute ? 'hazard.where.route' : 'hazard.where.ahead', {'dist': Relation.distanceText(m)});
+  return L10n.t('hazard.body', {'where': where});
 }
 
 /// The amber "CAUTION" banner for an accident reported ahead (another
@@ -55,7 +61,7 @@ class HazardBanner extends StatelessWidget {
     return Semantics(
       container: true,
       liveRegion: true,
-      label: 'Caution. $message $level.',
+      label: '${L10n.t('hazard.title')}. $message $level.',
       child: Material(
         color: Color.alphaBlend(amber.withOpacity(0.16), AppTheme.slateCard),
         elevation: 2,
@@ -82,7 +88,7 @@ class HazardBanner extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('CAUTION', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontWeight: FontWeight.w800)),
+                          Text(L10n.t('hazard.title').toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontWeight: FontWeight.w800)),
                           Text(message, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body),
                           Text(level, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
                         ],

@@ -186,18 +186,18 @@ void main() {
     expect(c.answers.last, (id, AssistAnswer.arrived));
   });
 
-  testWidgets('arrival check: "Have you reached the rider?" Yes, I Found Them / Unable to Locate', (tester) async {
+  testWidgets('arrival check: "Have you reached the rider?" Yes, I found them / Unable to locate', (tester) async {
     final c = fake();
     final a = request(myStatus: 'EN_ROUTE', arrivalCheck: true);
     c.accepted = a;
     await render(tester, AssistBanner(request: a, nowMs: now), convoys: c);
     expect(find.text(AssistTexts.arrivalQuestion), findsOneWidget);
-    await tester.ensureVisible(find.text('Yes, I Found Them'));
-    await tester.tap(find.text('Yes, I Found Them'));
+    await tester.ensureVisible(find.text('Yes, I found them'));
+    await tester.tap(find.text('Yes, I found them'));
     await tester.pump();
     expect(c.answers.last, (id, AssistAnswer.arrived));
-    await tester.ensureVisible(find.text('Unable to Locate'));
-    await tester.tap(find.text('Unable to Locate'));
+    await tester.ensureVisible(find.text('Unable to locate'));
+    await tester.tap(find.text('Unable to locate'));
     await tester.pump();
     expect(c.answers.last, (id, AssistAnswer.notFound));
   });

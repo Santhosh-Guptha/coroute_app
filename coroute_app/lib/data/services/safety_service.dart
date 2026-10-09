@@ -6,14 +6,19 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/safety_constants.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/ui/ride_alert.dart';
 import '../../domain/safety/accel_bucket.dart';
 import '../../domain/safety/crash_detector.dart';
 import '../../domain/safety/fatigue_tracker.dart';
+import '../../domain/safety/fuel_range.dart';
+import '../../domain/safety/hard_brake_counter.dart';
 import '../../domain/safety/sms_plan.dart';
 import '../../domain/safety/solo_check_in.dart';
+import '../../domain/safety/sun_helper.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../../domain/tracking/track_point.dart';
+import '../local/ride_stats_store.dart';
 import '../models/convoy_model.dart';
 import '../models/emergency_roster.dart';
 import '../models/network_wire.dart';
@@ -26,8 +31,16 @@ import 'convoy_service.dart';
 import 'safety_native.dart';
 import 'settings_service.dart';
 import 'sms_sender.dart';
+import 'tile_cache_service.dart';
+import 'voice_service.dart';
+import 'weather_service.dart';
 
-enum SafetyPromptKind { checkIn, fatigue }
+enum SafetyPromptKind { checkIn, fatigue, fuel, followUp }
+
+/// Where an impact reported from outside the phone's own sensor came from (3.16, item 22):
+/// a wearable (no device work this round; the hook is documented in docs/WEARABLE_HOOK.md)
+/// or the hidden developer action that simulates one.
+enum ExternalImpactSource { wearable, developer }
 
 /// A question or reminder for the rider only ("Are you OK?", "Time for a break").
 class SafetyPrompt {
@@ -47,7 +60,10 @@ class SafetyPrompt {
     this.secondaryLabel,
   });
 
-  AlertTier get tier => kind == SafetyPromptKind.checkIn ? AlertTier.important : AlertTier.normal;
+  AlertTier get tier => switch (kind) {
+        SafetyPromptKind.checkIn || SafetyPromptKind.fuel || SafetyPromptKind.followUp => AlertTier.important,
+        SafetyPromptKind.fatigue => AlertTier.normal,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -189,8 +205,14 @@ abstract class SafetySourcePort {
   });
 }
 
+/// Optional extension of [SafetyPort] (3.16): a check-in with a context (the post-crash
+/// follow-up sends `CHECK_IN {context: FOLLOW_UP}`). Ports without it get the plain call.
+abstract class SafetyCheckInPort {
+  bool sendCheckInWith(CheckInResult result, {double? awayM, CheckInContext? context});
+}
+
 /// Adapts the real ConvoyService and AuthService.
-class ConvoySafetyPort implements SafetyPort, SafetySourcePort {
+class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPort {
   ConvoySafetyPort(this._convoys, this._auth);
 
   final ConvoyService _convoys;
@@ -280,25 +302,64 @@ class ConvoySafetyPort implements SafetyPort, SafetySourcePort {
 
   @override
   bool sendCheckIn(CheckInResult result, {double? awayM}) => _convoys.sendCheckIn(result, awayM: awayM);
+
+  @override
+  bool sendCheckInWith(CheckInResult result, {double? awayM, CheckInContext? context}) =>
+      _convoys.sendCheckIn(result, awayM: awayM, context: context);
 }
 
 /// Rider safety on the phone: crash detection with a 15 s alarm ("Possible accident
 /// detected. Are you okay?", [SafetyConstants.crashCountdown]), emergency texts
 /// when an SOS cannot reach the group, the break reminder and the "Are you OK?"
-/// check-in. Battery: the accelerometer runs only during a ride, only while the
+/// check-in. 3.16 adds the fuel reminder, the hard-stop count (rider only), the
+/// post-crash follow-up, the night flag for spoken alerts, the weather check and
+/// the route map prefetch at ride start, and the wearable impact hook.
+/// Battery: the accelerometer runs only during a ride, only while the
 /// rider was faster than 25 km/h in the last 30 s (or an impact is being
 /// checked), and only with crash detection on. No timer runs while idle: the
 /// alarm countdown, the SMS wait and the check-in answer wait are one-shot or
-/// alarm-only timers.
+/// alarm-only timers; everything new in 3.16 rides on fixes and convoy changes.
 class SafetyService extends ChangeNotifier {
-  SafetyService(ConvoyService convoys, SettingsService settings, AuthService auth, {AccelSource? accel, SmsSender? sms})
-      : this._(ConvoySafetyPort(convoys, auth), settings, accel ?? NativeAccelSource(), sms ?? NativeSmsSender(), null, true);
+  SafetyService(
+    ConvoyService convoys,
+    SettingsService settings,
+    AuthService auth, {
+    AccelSource? accel,
+    SmsSender? sms,
+    VoiceService? voice,
+    WeatherService? weather,
+    TilePrefetcher? tiles,
+  }) : this._(ConvoySafetyPort(convoys, auth), settings, accel ?? NativeAccelSource(), sms ?? NativeSmsSender(), null, true,
+            voice: voice, weather: weather, tiles: tiles);
 
   @visibleForTesting
-  SafetyService.forTest(SafetyPort port, SettingsService settings, {required AccelSource accel, required SmsSender sms, int Function()? clock})
-      : this._(port, settings, accel, sms, clock, false);
+  SafetyService.forTest(
+    SafetyPort port,
+    SettingsService settings, {
+    required AccelSource accel,
+    required SmsSender sms,
+    int Function()? clock,
+    VoiceService? voice,
+    WeatherService? weather,
+    TilePrefetcher? tiles,
+    Future<String> Function()? networkKind,
+  }) : this._(port, settings, accel, sms, clock, false, voice: voice, weather: weather, tiles: tiles, networkKind: networkKind);
 
-  SafetyService._(this._port, this._settings, this._accel, this._sms, this._clock, this._native) {
+  SafetyService._(
+    this._port,
+    this._settings,
+    this._accel,
+    this._sms,
+    this._clock,
+    this._native, {
+    VoiceService? voice,
+    WeatherService? weather,
+    TilePrefetcher? tiles,
+    Future<String> Function()? networkKind,
+  })  : _voice = voice,
+        _weather = weather,
+        _tiles = tiles,
+        _networkKind = networkKind ?? SafetyNative.networkKind {
     _port.addListener(_onConvoy);
     _settings.addListener(_onSettings);
     _fixSub = _port.myFixes.listen(_onFix, onError: (Object _) {});
@@ -316,10 +377,16 @@ class SafetyService extends ChangeNotifier {
   final SmsSender _sms;
   final int Function()? _clock;
   final bool _native;
+  final VoiceService? _voice;
+  final WeatherService? _weather;
+  final TilePrefetcher? _tiles;
+  final Future<String> Function() _networkKind;
 
   final CrashDetector _detector = CrashDetector();
   final FatigueTracker _fatigue = FatigueTracker();
   final SoloCheckIn _checkIn = SoloCheckIn();
+  FuelRangeTracker _fuel = FuelRangeTracker();
+  final HardBrakeCounter _brakes = HardBrakeCounter();
 
   StreamSubscription<TrackPoint>? _fixSub;
   StreamSubscription<AccelBucket>? _accelSub;
@@ -328,6 +395,12 @@ class SafetyService extends ChangeNotifier {
   CrashAlarmState? _alarm;
   CrashEvent? _alarmEvent;
   Timer? _alarmTimer;
+
+  /// Set for an alarm raised through [externalImpact] (sent as source WEARABLE; the
+  /// developer action never schedules a follow-up).
+  ExternalImpactSource? _alarmExternal;
+  _FollowUp? _followUp;
+  double _lastImpactG = 0;
 
   final Map<String, SafetyPrompt> _prompts = {};
   Timer? _checkInTimer;
@@ -345,8 +418,19 @@ class SafetyService extends ChangeNotifier {
 
   String? _groupId;
   bool _rideActive = false;
+  String? _tripStatus;
   TrackPoint? _lastFix;
   bool _disposed = false;
+
+  bool _dark = false;
+  int _darkAt = 0;
+  int _darkChecks = 0;
+  TrackPoint? _darkFix;
+  String? _fuelLoadedFor;
+  double _fuelSavedM = 0;
+  int _brakesSaved = 0;
+  String? _weatherDoneFor;
+  String? _tilesDoneFor;
 
   int _now() => _clock?.call() ?? DateTime.now().millisecondsSinceEpoch;
 
@@ -364,6 +448,54 @@ class SafetyService extends ChangeNotifier {
     return _settings.smsFallback && p != null && !_smsRounds.contains(p.clientId) && !_smsBusy;
   }
 
+  /// Metres ridden since the last fill (item 2), for the ride sheet line.
+  double get riddenSinceFillM => _fuel.riddenM;
+
+  /// The fuel reminder is showing.
+  bool get fuelReminderActive => _prompts.containsKey(SafetyConstants.promptFuel);
+
+  /// Hard stops counted in this ride (item 14; rider only, never shared).
+  int get hardStops => _brakes.count;
+
+  /// After sunset at the last fix (item 15); recomputed at most every 5 min on fixes.
+  bool get isDark => _dark;
+
+  /// How many times the day/night flag was computed this ride (battery tests).
+  @visibleForTesting
+  int get darkChecks => _darkChecks;
+
+  /// "Filled up" (quick action or the fuel prompt): the distance count starts again.
+  void filledUp() {
+    _fuel.filledUp(_now());
+    _removePrompt(SafetyConstants.promptFuel, notify: false);
+    _saveFuel(force: true);
+    notifyListeners();
+  }
+
+  /// Item 22: an impact reported by a wearable (or the hidden developer action). Opens
+  /// the same alarm as the phone's own detector, with the last fix's position and speed;
+  /// the SOS then carries source WEARABLE. Ignored outside a ride, with crash detection
+  /// off, while an alarm or my SOS is open, or without a finite [g].
+  void externalImpact({required ExternalImpactSource source, required double g, required int atMs}) {
+    if (_disposed || !_port.rideActive || !_settings.crashDetection || _alarm != null || _port.hasOpenSos) return;
+    if (!g.isFinite || g <= 0) return;
+    final f = _lastFix;
+    final uid = _port.myUserId;
+    final me = uid == null ? null : _port.activeConvoy?.riders[uid];
+    _alarmExternal = source;
+    _openAlarm(CrashEvent(
+      impactAtMs: atMs,
+      impactG: g,
+      speedBeforeKmh: f?.speedKmh ?? me?.speedKmh ?? 0,
+      lat: f?.lat ?? me?.lat ?? 0,
+      lng: f?.lng ?? me?.lng ?? 0,
+    ));
+    if (_alarm == null) _alarmExternal = null; // refused (cooldown, no answer yet)
+  }
+
+  /// The ride-start weather check when it did not run yet (the ride sheet may ask).
+  Future<void> maybeRunStartWeather() => _startWeather();
+
   /// "I'm OK" on the alarm: closes it and sends nothing.
   void alarmImOk() {
     final a = _alarm;
@@ -374,10 +506,17 @@ class SafetyService extends ChangeNotifier {
     }
     _alarmTimer?.cancel();
     _alarmTimer = null;
+    final e = _alarmEvent;
     _alarm = null;
     _alarmEvent = null;
     _detector.cooldown(_now());
     _endAlarmNative();
+    // A real impact answered with "I'm OK": ask once more at the next stop or in 20 min.
+    if (e != null && _alarmExternal != ExternalImpactSource.developer) {
+      _lastImpactG = e.impactG;
+      _followUp = _FollowUp(at: _now(), lat: e.lat, lng: e.lng);
+    }
+    _alarmExternal = null;
     notifyListeners();
   }
 
@@ -408,8 +547,44 @@ class SafetyService extends ChangeNotifier {
       _checkInTimer = null;
       // The lead was told "No reply": tell them the rider is fine. Otherwise nothing is sent.
       if (told) _port.sendCheckIn(CheckInResult.ok);
+    } else if (key == SafetyConstants.promptFuel) {
+      if (!primary) {
+        filledUp();
+        return;
+      }
+    } else if (key == SafetyConstants.promptFollowUp) {
+      if (primary) {
+        _sendCheckInWith(CheckInResult.ok, context: CheckInContext.followUp);
+      } else {
+        _needHelpAfterCrash();
+      }
     }
     _removePrompt(key);
+  }
+
+  void _sendCheckInWith(CheckInResult result, {CheckInContext? context}) {
+    final port = _port;
+    if (port is SafetyCheckInPort) {
+      (port as SafetyCheckInPort).sendCheckInWith(result, context: context);
+    } else {
+      port.sendCheckIn(result);
+    }
+  }
+
+  /// "Need help" on the follow-up: an ordinary SOS (source NEED_HELP) from the last fix.
+  void _needHelpAfterCrash() {
+    final f = _lastFix;
+    final uid = _port.myUserId;
+    final me = uid == null ? null : _port.activeConvoy?.riders[uid];
+    final fu = _followUp;
+    final lat = f?.lat ?? me?.lat ?? fu?.lat ?? 0;
+    final lng = f?.lng ?? me?.lng ?? fu?.lng ?? 0;
+    final port = _port;
+    if (port is SafetySourcePort) {
+      (port as SafetySourcePort).raiseSosFrom(EmergencySource.needHelp, type: SosTypes.crash, lat: lat, lng: lng, impactG: _lastImpactG);
+    } else {
+      port.raiseSos(type: SosTypes.crash, lat: lat, lng: lng, impactG: _lastImpactG);
+    }
   }
 
   /// "Text the group now" from the SOS sheet: the same round as the automatic one.
@@ -422,15 +597,30 @@ class SafetyService extends ChangeNotifier {
   // ------------------------------------------------------------------ inputs
   void _onConvoy() {
     if (_disposed) return;
-    final gid = _port.activeConvoy?.groupId;
+    final convoy = _port.activeConvoy;
+    final gid = convoy?.groupId;
     final active = _port.rideActive;
     if (gid != _groupId || active != _rideActive) {
+      _endRideStats();
+      // The ride ended or changed: a route map still being saved is for the old route (no data after the ride).
+      if (_rideActive) _tiles?.cancel();
       _groupId = gid;
       _rideActive = active;
       _resetRide();
+      if (active && gid != null) _restoreFuel(gid).ignore();
+    }
+    final status = convoy?.tripStatus;
+    if (status != _tripStatus) {
+      _tripStatus = status;
+      if (status == 'STARTED' && active) {
+        _startWeather().ignore();
+        _startTiles().ignore();
+      }
     }
     _watchPendingSos();
     _evalCheckIn();
+    _fuelStopArrival(convoy);
+    _evalFollowUp(convoy);
     _updateSensor();
   }
 
@@ -457,6 +647,8 @@ class SafetyService extends ChangeNotifier {
     _lastFix = p;
     if (_settings.crashDetection) {
       final ev = _detector.onFix(p);
+      // Hard stops are judged only while the detector is armed (the sensor runs then anyway).
+      if (_detector.armedAt(p.ts)) _brakes.onFix(p);
       if (ev != null) _openAlarm(ev);
     }
     if (_settings.fatigueReminder && _fatigue.onFix(p)) {
@@ -466,18 +658,25 @@ class SafetyService extends ChangeNotifier {
         SafetyPrompt(
           key: SafetyConstants.promptFatigue,
           kind: SafetyPromptKind.fatigue,
-          title: 'Time for a break',
-          message: 'You have been riding for $hours h. A $mins min stop helps you stay sharp.',
-          primaryLabel: 'OK',
+          title: L10n.t('prompt.fatigue.title'),
+          message: L10n.t('prompt.fatigue.body', {'h': hours, 'min': mins}),
+          primaryLabel: L10n.t('prompt.ok'),
         ),
         notifyAlways: false,
       );
     }
+    _onFuelFix(p);
+    _onDarkFix(p);
+    _evalFollowUp(_port.activeConvoy);
     _updateSensor();
   }
 
   void _onAccel(AccelBucket b) {
     if (_disposed) return;
+    if (_detector.armedAt(b.tMs)) {
+      _brakes.onAccel(b);
+      if (_brakes.count > 0 && _brakes.count % 10 == 0 && _brakes.count != _brakesSaved) _saveRideStats(endedAt: 0);
+    }
     final ev = _detector.onAccel(b);
     if (ev != null) _openAlarm(ev);
     _updateSensor();
@@ -493,6 +692,21 @@ class SafetyService extends ChangeNotifier {
     _lastCheckInEval = 0;
     _lastAwayM = null;
     _lastFix = null;
+    _fuel = FuelRangeTracker();
+    _fuelLoadedFor = null;
+    _fuelSavedM = 0;
+    _brakes.reset();
+    _brakesSaved = 0;
+    _followUp = null;
+    _lastImpactG = 0;
+    _alarmExternal = null;
+    _darkAt = 0;
+    _darkChecks = 0;
+    _darkFix = null;
+    if (_dark) {
+      _dark = false;
+      _voice?.setNight(false);
+    }
     final hadPrompts = _prompts.isNotEmpty;
     for (final key in _prompts.keys.toList()) {
       _removePrompt(key, notify: false);
@@ -562,8 +776,8 @@ class SafetyService extends ChangeNotifier {
     if (_native) {
       SafetyNative.alarmWindow(true).ignore();
       AlarmNotifier.showCrashAlarm(
-        title: 'Possible accident detected',
-        body: 'Are you okay? Sending SOS to your group in $seconds seconds. Tap I\'m OK if you are fine.',
+        title: L10n.t('notif.crash.title'),
+        body: L10n.t('notif.crash.body', {'n': seconds}),
       ).ignore();
     }
     _haptic();
@@ -596,10 +810,13 @@ class SafetyService extends ChangeNotifier {
     _alarmTimer?.cancel();
     _alarmTimer = null;
     if (a == null || e == null) return;
+    // An impact from outside the phone (wearable hook) is sent as such, whatever the answer.
+    final external = _alarmExternal != null;
+    _alarmExternal = null;
     final port = _port;
     if (port is SafetySourcePort) {
       (port as SafetySourcePort).raiseSosFrom(
-        source,
+        external ? EmergencySource.wearable : source,
         type: SosTypes.crash,
         lat: e.lat,
         lng: e.lng,
@@ -660,9 +877,13 @@ class SafetyService extends ChangeNotifier {
   }
 
   void _onPromptAction(String? actionId, String? payload) {
-    if (actionId != AlarmNotifier.actionPromptOk || payload == null) return;
+    if (payload == null || payload.length <= AlarmNotifier.payloadPrompt.length + 1) return;
     final key = payload.substring(AlarmNotifier.payloadPrompt.length + 1);
-    answerPrompt(key);
+    if (actionId == AlarmNotifier.actionPromptOk) {
+      answerPrompt(key);
+    } else if (actionId == AlarmNotifier.actionPromptSecondary) {
+      answerPrompt(key, primary: false);
+    }
   }
 
   bool get _inBackground {
@@ -707,11 +928,9 @@ class SafetyService extends ChangeNotifier {
       SafetyPrompt(
         key: SafetyConstants.promptCheckIn,
         kind: SafetyPromptKind.checkIn,
-        title: 'Are you OK?',
-        message: told
-            ? 'Your lead was told that you did not answer. Tap I\'m OK if you are fine.'
-            : 'You have been far from your group for $mins min. If you do not answer in $answer min, your lead is told.',
-        primaryLabel: 'I\'m OK',
+        title: L10n.t('prompt.checkin.title'),
+        message: told ? L10n.t('prompt.checkin.told') : L10n.t('prompt.checkin.body', {'min': mins, 'answer': answer}),
+        primaryLabel: L10n.t('prompt.checkin.ok'),
       ),
       notifyAlways: true,
     );
@@ -755,6 +974,183 @@ class SafetyService extends ChangeNotifier {
     final s = List<double>.of(v)..sort();
     final mid = s.length ~/ 2;
     return s.length.isOdd ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  }
+
+  // ------------------------------------------------------------------ fuel range (item 2)
+  void _onFuelFix(TrackPoint p) {
+    _fuel.onFix(p);
+    final range = _settings.fuelRangeKm;
+    if (range > 0 && _fuel.shouldWarn(range)) {
+      final km = (_fuel.riddenM / 1000).round();
+      _showPrompt(
+        SafetyPrompt(
+          key: SafetyConstants.promptFuel,
+          kind: SafetyPromptKind.fuel,
+          title: L10n.t('fuel.title'),
+          message: L10n.t('fuel.body', {'km': '$km km', 'range': range}),
+          primaryLabel: L10n.t('prompt.ok'),
+          secondaryLabel: L10n.t('fuel.filled'),
+        ),
+        notifyAlways: true,
+      );
+      _saveFuel(force: true);
+    } else {
+      _saveFuel();
+    }
+  }
+
+  /// Arriving at a planned FUEL stop counts as a fill (the stop's arrival time of mine).
+  void _fuelStopArrival(ConvoyModel? convoy) {
+    final uid = _port.myUserId;
+    if (convoy == null || uid == null || !_rideActive) return;
+    var latest = 0;
+    for (final s in convoy.stopPoints) {
+      if (s.category != 'FUEL') continue;
+      final at = s.arrivals[uid]?.arrivedAt ?? 0;
+      if (at > latest) latest = at;
+    }
+    if (latest > 0 && latest > _fuel.lastFillAt) {
+      _fuel.filledUp(latest);
+      _removePrompt(SafetyConstants.promptFuel, notify: false);
+      _saveFuel(force: true);
+      notifyListeners();
+    }
+  }
+
+  /// Written when the count moved by 500 m, on a fill or a reminder (cheap JSON, no timer).
+  void _saveFuel({bool force = false}) {
+    final gid = _groupId;
+    if (gid == null || !_rideActive) return;
+    if (!force && (_fuel.riddenM - _fuelSavedM).abs() < 500) return;
+    _fuelSavedM = _fuel.riddenM;
+    final json = jsonEncode({'g': gid, 's': _fuel.toJson()});
+    SharedPreferences.getInstance().then((prefs) => prefs.setString(SafetyConstants.keyFuelState, json)).catchError((Object _) => false);
+  }
+
+  Future<void> _restoreFuel(String gid) async {
+    if (_fuelLoadedFor == gid) return;
+    _fuelLoadedFor = gid;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(SafetyConstants.keyFuelState);
+      if (_disposed || raw == null || raw.isEmpty || _groupId != gid) return;
+      final j = jsonDecode(raw);
+      if (j is! Map || j['g'] != gid) return;
+      final saved = FuelRangeTracker.fromJson(j['s'] is Map ? j['s'] as Map : null);
+      if (saved == null) return;
+      // Fixes that came in while loading are few; the saved count is the larger one.
+      if (saved.riddenM >= _fuel.riddenM) {
+        _fuel = saved;
+        _fuelSavedM = saved.riddenM;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  // ------------------------------------------------------------------ hard stops (item 14)
+  void _endRideStats() {
+    if (_groupId == null || !_rideActive) return;
+    if (_brakes.count > 0) _saveRideStats(endedAt: _now());
+  }
+
+  void _saveRideStats({required int endedAt}) {
+    final gid = _groupId;
+    if (gid == null) return;
+    _brakesSaved = _brakes.count;
+    RideStatsStore.save(RideStats(groupId: gid, hardStops: _brakes.count, endedAt: endedAt)).ignore();
+  }
+
+  // ------------------------------------------------------------------ follow-up (item 19)
+  /// After "I'm OK" on a real impact: once, at the next stop of [SafetyConstants.followUpStopFor]
+  /// or [SafetyConstants.followUpAfter] later, whichever comes first. No timer: checked on fixes
+  /// and convoy changes.
+  void _evalFollowUp(ConvoyModel? convoy) {
+    final fu = _followUp;
+    if (fu == null || !_rideActive || _port.hasOpenSos) {
+      if (fu != null && _port.hasOpenSos) _followUp = null; // an SOS is open: the group already knows
+      return;
+    }
+    final now = _now();
+    final uid = _port.myUserId;
+    final me = uid == null || convoy == null ? null : convoy.riders[uid];
+    final stoppedSince = me?.stoppedSince ?? 0;
+    final stopped = stoppedSince > fu.at && now - stoppedSince >= SafetyConstants.followUpStopFor.inMilliseconds;
+    final overdue = now - fu.at >= SafetyConstants.followUpAfter.inMilliseconds;
+    if (!stopped && !overdue) return;
+    _followUp = null;
+    _showPrompt(
+      SafetyPrompt(
+        key: SafetyConstants.promptFollowUp,
+        kind: SafetyPromptKind.followUp,
+        title: L10n.t('prompt.followup.title'),
+        message: L10n.t('prompt.followup.body'),
+        primaryLabel: L10n.t('prompt.followup.fine'),
+        secondaryLabel: L10n.t('prompt.followup.help'),
+      ),
+      notifyAlways: true,
+    );
+  }
+
+  // ------------------------------------------------------------------ dark (item 15)
+  void _onDarkFix(TrackPoint p) {
+    if (p.lat == 0 && p.lng == 0) return;
+    final now = _now();
+    final last = _darkFix;
+    final moved = last == null || GeoMath.haversine(last.lat, last.lng, p.lat, p.lng) > SafetyConstants.darkRecheckMoveM;
+    if (_darkAt != 0 && !moved && now - _darkAt < SafetyConstants.darkRecheckEvery.inMilliseconds) return;
+    _darkAt = now;
+    _darkFix = p;
+    _darkChecks++;
+    final dark = DarkCheck.isDark(DateTime.fromMillisecondsSinceEpoch(now), p.lat, p.lng);
+    if (dark != _dark) {
+      _dark = dark;
+      _voice?.setNight(dark);
+      notifyListeners();
+    }
+  }
+
+  // ------------------------------------------------------------------ ride start (items 7, 16)
+  Future<void> _startWeather() async {
+    final w = _weather;
+    final convoy = _port.activeConvoy;
+    final gid = convoy?.groupId;
+    if (w == null || convoy == null || gid == null || _weatherDoneFor == gid || convoy.tripStatus != 'STARTED') return;
+    final route = convoy.route;
+    if (route == null || route.points.length < 2 || _settings.lowData) return;
+    _weatherDoneFor = gid;
+    final pts = WeatherService.samplePoints(
+      line: route.points,
+      durationS: route.durationS,
+      departS: _now() ~/ 1000,
+      namedStops: [for (final s in convoy.plannedStops) (s.name, s.lat, s.lng)],
+      destinationName: convoy.destinationName.split(',').first.trim(),
+    );
+    try {
+      await w.check(pts);
+    } catch (_) {}
+  }
+
+  /// Saves the route's tiles once per group, only on Wi-Fi, with the setting on and not in
+  /// data saver. The "Save route map" tap in the sheets starts the same job on any network.
+  Future<void> _startTiles() async {
+    final t = _tiles;
+    final convoy = _port.activeConvoy;
+    final gid = convoy?.groupId;
+    if (t == null || convoy == null || gid == null || _tilesDoneFor == gid) return;
+    if (!_settings.saveRouteMaps || _settings.lowData || t.running) return;
+    final route = convoy.route;
+    if (route == null || route.approximate || route.points.length < 2) return;
+    _tilesDoneFor = gid;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_disposed || prefs.getString(SafetyConstants.keyTilesPrefetchedFor) == gid) return;
+      if (await _networkKind() != 'wifi') {
+        _tilesDoneFor = null; // not now: tried again when the status changes, or by the rider's tap
+        return;
+      }
+      await prefs.setString(SafetyConstants.keyTilesPrefetchedFor, gid);
+      await t.start(route.points, label: convoy.name);
+    } catch (_) {}
   }
 
   // ------------------------------------------------------------------ emergency texts
@@ -895,6 +1291,7 @@ class SafetyService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _saveFuel(force: true);
     _port.removeListener(_onConvoy);
     _settings.removeListener(_onSettings);
     _fixSub?.cancel();
@@ -909,6 +1306,14 @@ class SafetyService extends ChangeNotifier {
     }
     super.dispose();
   }
+}
+
+/// A follow-up question waiting for the next stop (item 19).
+class _FollowUp {
+  final int at;
+  final double lat;
+  final double lng;
+  const _FollowUp({required this.at, required this.lat, required this.lng});
 }
 
 /// Text budget on the phone: timestamps and part counts only (no numbers, no text),

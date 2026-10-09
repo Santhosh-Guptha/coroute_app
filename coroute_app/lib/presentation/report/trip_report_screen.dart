@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../data/local/ride_stats_store.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/models/trip_plan_model.dart';
@@ -56,11 +57,29 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   /// Recorded routes, once the Route tab (or the share card) has loaded them.
   List<ReplayTrack>? _tracks;
 
+  /// This phone's own counts for the trip (hard stops, 3.16); never uploaded.
+  RideStats? _stats;
+
   @override
   void initState() {
     super.initState();
     _load();
+    if (!widget.adminView) _loadStats();
   }
+
+  Future<void> _loadStats() async {
+    RideStats? st;
+    try {
+      st = await RideStatsStore.load(widget.trip.groupId);
+    } catch (_) {
+      st = null;
+    }
+    if (mounted && st != null) setState(() => _stats = st);
+  }
+
+  /// "3 hard stops" / "1 hard stop" (pure, for tests).
+  static String hardStopsText(int n) => n == 1 ? '1 hard stop' : '$n hard stops';
+  static const String hardStopsHint = 'Only you can see this.';
 
   @override
   void dispose() {
@@ -388,9 +407,31 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
         ),
       if (t.riderCount > 1 || (r?.memberCount ?? 0) > 1) RideMetric(value: '${r?.memberCount ?? t.riderCount}', label: 'Riders'),
     ];
+    final hardStops = _stats?.hardStops ?? 0;
     final children = <Widget>[
       if (!widget.adminView) ...[
         _MetricGrid(children: extra),
+        // Hard braking count from this phone's sensors (3.16, item 14): rider only, never shared.
+        if (hardStops > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: Space.s12),
+            child: Row(
+              children: [
+                Icon(Icons.speed_rounded, size: 20, color: AppTheme.textSecondary),
+                const SizedBox(width: Space.s8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(hardStopsText(hardStops), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                      Text(hardStopsHint, style: AppText.caption),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         if (me != null && !me.trackAvailable)
           Padding(
             padding: const EdgeInsets.only(top: Space.s12),

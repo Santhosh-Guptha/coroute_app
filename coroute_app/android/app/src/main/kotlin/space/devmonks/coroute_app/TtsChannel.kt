@@ -18,9 +18,11 @@ import java.util.Locale
  * Spoken ride alerts with the phone's own text-to-speech engine (MethodChannel
  * "coroute/tts", 3.15). No package, no network.
  *
- * - init -> {ok, language}: binds the engine (lazily, on the first alert of a ride) and
- *   picks Indian English, else US / UK / any English. ok=false when there is no engine
- *   or no English voice (the app then stays silent; banners still show).
+ * - init {language?} -> {ok, language}: binds the engine (lazily, on the first alert of a
+ *   ride) and picks the requested voice (3.16: "hi-IN" / "te-IN", then "hi" / "te"), else
+ *   Indian English, else US / UK / any English. ok=false when there is no engine or no
+ *   usable voice (the app then stays silent; banners still show). The language in the
+ *   answer tells Dart whether the requested one was found.
  * - speak {text, id, interrupt} -> Boolean: QUEUE_FLUSH when interrupt, else QUEUE_ADD.
  *   Audio usage "navigation guidance" (goes to a Bluetooth helmet set like map directions),
  *   transient focus that ducks music and the intercom, released when the queue is empty.
@@ -36,6 +38,7 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
     private var ready = false
     private var ok = false
     private var language = ""
+    private var requested = ""
     private val waiting = ArrayList<MethodChannel.Result>()
 
     /** Utterances handed to the engine and not finished yet (main thread only). */
@@ -81,7 +84,10 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "init" -> init(result)
+            "init" -> {
+                requested = (call.argument<String>("language") ?: "").trim()
+                init(result)
+            }
             "speak" -> {
                 val text = (call.argument<String>("text") ?: "").take(MAX_CHARS)
                 val id = call.argument<String>("id") ?: "coroute"
@@ -135,14 +141,28 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
         finishInit(chosen)
     }
 
-    /** Indian English first (familiar place names and numbers), then other English voices. */
+    /**
+     * The requested language first (its region tag, then the bare language), then Indian
+     * English (familiar place names and numbers), then other English voices.
+     */
     private fun chooseLanguage(engine: TextToSpeech): Boolean {
-        val candidates = listOf(
-            Locale.Builder().setLanguage("en").setRegion("IN").build(),
-            Locale.US,
-            Locale.UK,
-            Locale.ENGLISH,
-        )
+        val candidates = ArrayList<Locale>()
+        val want = requested
+        if (want.isNotEmpty() && !want.startsWith("en", ignoreCase = true)) {
+            try {
+                val loc = Locale.forLanguageTag(want)
+                if (loc.language.isNotEmpty()) {
+                    candidates.add(loc)
+                    if (loc.country.isNotEmpty()) candidates.add(Locale.Builder().setLanguage(loc.language).build())
+                }
+            } catch (e: Exception) {
+                // a bad tag: English below
+            }
+        }
+        candidates.add(Locale.Builder().setLanguage("en").setRegion("IN").build())
+        candidates.add(Locale.US)
+        candidates.add(Locale.UK)
+        candidates.add(Locale.ENGLISH)
         for (loc in candidates) {
             val available = try {
                 engine.isLanguageAvailable(loc)

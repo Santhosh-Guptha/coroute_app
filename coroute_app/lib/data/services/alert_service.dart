@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../core/constants/network_constants.dart';
+import '../../core/l10n/l10n.dart';
 import '../../domain/notify/alert_policy.dart';
 import '../models/timeline_event_model.dart';
 import 'alarm_notifier.dart';
@@ -21,12 +22,19 @@ import 'voice_service.dart';
 /// 3.15: also the safety network (assistance requests, accident warnings) and
 /// discovery alerts from [ConvoyService], and each alert with a spoken line is
 /// spoken once through [VoiceService] (foreground or background).
+///
+/// 3.16: spoken lines come in the voice's language ([VoiceService.speechLang]);
+/// SOS lines are critical, group alerts (stopped, separated, no update, low battery,
+/// behind the sweeper) and accident warnings are important (spoken after dark too
+/// when "Speak more after dark" is on), the rest are warnings. A language change
+/// re-words the alerts on screen; nothing is spoken again.
 class AlertService with WidgetsBindingObserver {
   AlertService(this._convoys, this._timeline, {FlutterLocalNotificationsPlugin? plugin, AlertPolicy? policy, this._voice})
       : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
         _policy = policy ?? AlertPolicy() {
     _timeline.addListener(_onTimeline);
     _convoys.addListener(_onConvoy);
+    L10n.changes.addListener(_onLanguage);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -105,6 +113,9 @@ class AlertService with WidgetsBindingObserver {
 
   void _onTimeline() => _reconcile();
 
+  /// Language changed: the alerts on screen are re-worded (same keys, no new sound, no new speech).
+  void _onLanguage() => _reconcile();
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
@@ -138,10 +149,11 @@ class AlertService with WidgetsBindingObserver {
     final timelineReady = _timeline.groupId == _groupId;
     final events = timelineReady ? _timeline.events : const <TimelineEventModel>[];
     final alerts = _convoys.activeConvoy?.activeAlerts ?? const [];
+    final speechLang = _voice?.speechLang ?? 'en';
 
     // Standing alerts: show new or changed, remove resolved.
     final want = <String, AlertSpec>{
-      for (final a in _policy.standing(events, me, nowMs: now, alerts: alerts)) a.key: a,
+      for (final a in _policy.standing(events, me, nowMs: now, alerts: alerts, speechLang: speechLang)) a.key: a,
       for (final a in _policy.network(
         assists: _convoys.assistRequests,
         notices: _convoys.assistNotices,
@@ -150,6 +162,7 @@ class AlertService with WidgetsBindingObserver {
         me: me,
         nowMs: now,
         anyEmergency: alerts.any((a) => !a.resolved),
+        speechLang: speechLang,
       ))
         a.key: a,
     };
@@ -191,10 +204,17 @@ class AlertService with WidgetsBindingObserver {
     for (final a in specs) {
       final line = a.speech;
       if (line == null || line.isEmpty || !_spoken.add(a.key)) continue;
-      final critical = a.channel == AlertChannel.sos;
-      voice.speak(line, priority: critical ? VoicePriority.critical : VoicePriority.warning, key: a.key).ignore();
+      voice.speak(line, priority: speechPriority(a), key: a.key).ignore();
     }
   }
+
+  /// SOS channel: critical. Group alerts and accident warnings (the important tier, spoken
+  /// after dark too): important. Anything else: warning.
+  static VoicePriority speechPriority(AlertSpec a) => switch (a.channel) {
+        AlertChannel.sos => VoicePriority.critical,
+        AlertChannel.alerts || AlertChannel.hazard => VoicePriority.important,
+        AlertChannel.updates || AlertChannel.activity || AlertChannel.social => VoicePriority.warning,
+      };
 
   void _show(AlertSpec a, {bool sticky = false, Duration? timeout, bool update = false}) {
     final (channelId, channelName, desc, importance) = _channels[a.channel]!;
@@ -232,6 +252,7 @@ class AlertService with WidgetsBindingObserver {
 
   void dispose() {
     _tick?.cancel();
+    L10n.changes.removeListener(_onLanguage);
     _timeline.removeListener(_onTimeline);
     _convoys.removeListener(_onConvoy);
     WidgetsBinding.instance.removeObserver(this);

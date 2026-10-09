@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -17,7 +19,8 @@ import io.flutter.plugin.common.MethodChannel
 /**
  * Small device helpers for rider safety (MethodChannel "coroute/safety"):
  * device info, the Android 14 full-screen alarm permission, the brand
- * autostart / battery page, and showing the crash alarm over the lock screen.
+ * autostart / battery page, showing the crash alarm over the lock screen, and (3.16)
+ * the app's cache folder and the network kind for the map tile cache.
  * Every call is quick and runs on the main thread (no blocking work).
  */
 class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHandler {
@@ -32,6 +35,8 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
                 alarmWindow(call.argument<Boolean>("on") == true)
                 result.success(null)
             }
+            "cacheDir" -> result.success(cacheDir())
+            "networkKind" -> result.success(networkKind())
             else -> result.notImplemented()
         }
     }
@@ -46,6 +51,34 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
             "hasAccel" to (accel != null),
             "accelFifo" to (accel?.fifoMaxEventCount ?: 0),
         )
+    }
+
+    /** The app's own cache folder (cleared by Android when space is short; nothing leaves the phone). */
+    private fun cacheDir(): String? {
+        return try {
+            activity.applicationContext.cacheDir?.absolutePath
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** "wifi", "mobile" or "none" for the active network (ACCESS_NETWORK_STATE, already declared). */
+    private fun networkKind(): String {
+        return try {
+            val cm = activity.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return "none"
+            val network = cm.activeNetwork ?: return "none"
+            val caps = cm.getNetworkCapabilities(network) ?: return "none"
+            when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "wifi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) -> "mobile"
+                else -> "none"
+            }
+        } catch (e: Exception) {
+            "none"
+        }
     }
 
     private fun canUseFullScreenIntent(): Boolean {

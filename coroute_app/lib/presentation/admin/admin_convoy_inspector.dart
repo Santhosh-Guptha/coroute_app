@@ -174,11 +174,7 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
           mapController: _map,
           options: MapOptions(initialCenter: center, initialZoom: located.isEmpty ? 5 : 14.5),
           children: [
-            TileLayer(
-              tileBuilder: mapTileBuilder,
-              urlTemplate: AppConstants.osmTileUrl,
-              userAgentPackageName: AppConstants.osmUserAgent,
-            ),
+            appTileLayer(),
             MarkerLayer(
               markers: [
                 for (final r in located)

@@ -51,6 +51,45 @@ function distanceToPolyline(p, line) {
   return best;
 }
 
+/** Cumulative segment lengths of a polyline (metres from the first vertex), cached per line array. */
+const cumCache = new WeakMap();
+function cumulative(line) {
+  let cum = cumCache.get(line);
+  if (cum) return cum;
+  cum = new Float64Array(line.length);
+  for (let i = 1; i < line.length; i++) cum[i] = cum[i - 1] + haversine(line[i - 1].lat, line[i - 1].lng, line[i].lat, line[i].lng);
+  cumCache.set(line, cum);
+  return cum;
+}
+
+/**
+ * Where a point projects on a route (3.16 sweeper rule): the nearest segment within `maxLateralM`
+ * (300 m), returned as { alongM, segIndex, lateralM } or null. With `fromIndex` (the rider's last
+ * segment) only a window of segments around it is searched first, like the route-following code
+ * paths; the whole line is scanned only when the window has nothing within reach. Cumulative
+ * lengths are cached per line array, so repeated calls cost one small loop.
+ */
+function alongRoute(p, line, { fromIndex = null, maxLateralM = 300, window = 150 } = {}) {
+  if (!Array.isArray(line) || line.length < 2 || !p) return null;
+  const cum = cumulative(line);
+  const scan = (from, to) => {
+    let best = null;
+    for (let i = from; i < to; i++) {
+      const r = pointToSegment(p, line[i], line[i + 1]);
+      if (r.dist <= maxLateralM && (!best || r.dist < best.lateralM)) {
+        best = { alongM: cum[i] + r.t * (cum[i + 1] - cum[i]), segIndex: i, lateralM: r.dist };
+      }
+    }
+    return best;
+  };
+  const last = line.length - 1;
+  if (Number.isInteger(fromIndex) && fromIndex >= 0 && fromIndex < last) {
+    const hit = scan(Math.max(0, fromIndex - window), Math.min(last, fromIndex + window + 1));
+    if (hit) return hit;
+  }
+  return scan(0, last);
+}
+
 function polylineLength(line) {
   let d = 0;
   for (let i = 1; i < line.length; i++) d += haversine(line[i - 1].lat, line[i - 1].lng, line[i].lat, line[i].lng);
@@ -131,4 +170,4 @@ function medianCentre(points) {
   return { lat: med(points.map((p) => p.lat)), lng: med(points.map((p) => p.lng)) };
 }
 
-module.exports = { haversine, pointToSegment, distanceToPolyline, polylineLength, encodePolyline, decodePolyline, simplify, medianCentre };
+module.exports = { haversine, pointToSegment, distanceToPolyline, alongRoute, polylineLength, encodePolyline, decodePolyline, simplify, medianCentre };

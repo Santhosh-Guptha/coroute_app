@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:coroute_app/core/constants/emergency_nav_constants.dart';
+import 'package:coroute_app/core/l10n/l10n.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/network_models.dart';
 import 'package:coroute_app/data/models/route_model.dart';
@@ -109,6 +110,12 @@ void main() {
       expect(EmergencyGuidance.navSpeech(100), 'You are approaching the emergency location.');
       expect(EmergencyGuidance.hazardSpeech(2000), 'Caution. Rider accident reported 2 kilometers ahead.');
       expect(EmergencyGuidance.hazardSpeech(500), 'Caution. Rider accident 500 meters ahead. Slow down.');
+      // 3.16: the same lines in the voice engine's language; digits and units stay.
+      expect(EmergencyGuidance.navSpeech(2000, lang: 'hi'), L10n.t('speech.nav.away', {'dist': '2 kilometers'}, 'hi'));
+      expect(EmergencyGuidance.navSpeech(100, lang: 'te'), L10n.t('speech.nav.near', const {}, 'te'));
+      expect(EmergencyGuidance.hazardSpeech(500, lang: 'te'), contains('500 meters'));
+      expect(EmergencyGuidance.hazardSpeech(500, lang: 'te'), isNot(contains('Caution')));
+      expect(EmergencyGuidance.navSpeech(500, lang: 'xx'), 'Emergency location 500 meters away.', reason: 'unknown language falls back to English');
       for (final m in [...EmergencyNavConstants.navThresholdsM, ...EmergencyNavConstants.hazardThresholdsM]) {
         for (final t in [EmergencyGuidance.navSpeech(m), EmergencyGuidance.hazardSpeech(m)]) {
           expect(t.contains('\u2014') || t.contains('\u2013'), isFalse);

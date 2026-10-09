@@ -201,6 +201,30 @@ const config = {
   discoveryCrossWindowS: int('DISCOVERY_CROSS_WINDOW_S', 180),
   auditRetentionDays: int('AUDIT_RETENTION_DAYS', 180),
 
+  // 3.16 safety round. "Far by road": after escalation, the best candidate the road check rejected is
+  // still asked when its road ETA is under NET_FAR_MAX_ETA_S.
+  netFarMaxEtaS: int('NET_FAR_MAX_ETA_S', 900),
+  // Stale rider: no fix for max(STALE_MIN_S, STALE_FACTOR x the group's typical gap) while moving.
+  staleMinS: int('STALE_MIN_S', 90),
+  staleFactor: int('STALE_FACTOR', 3),
+  // Sweeper: a rider this far behind the sweeper (held 60 s) is reported to the sweeper and lead.
+  sweeperBehindM: int('SWEEPER_BEHIND_M', 300),
+  // Low battery: alert at or under BATTERY_LOW_PCT (not charging), closed at BATTERY_OK_PCT or charging.
+  batteryLowPct: int('BATTERY_LOW_PCT', 15),
+  batteryOkPct: int('BATTERY_OK_PCT', 25),
+  // Lower "town" speed limit applies within TOWN_RADIUS_M of the start, planned stops and the destination.
+  townRadiusM: int('TOWN_RADIUS_M', 1000),
+  // Live emergency links: life in minutes, links per alert.
+  liveLinkMin: int('LIVE_LINK_MIN', 30),
+  liveLinkPerAlert: int('LIVE_LINK_PER_ALERT', 3),
+  // Nearest hospital lookup is skipped when the polite OSM queue would wait longer than this.
+  hospitalMaxWaitMs: int('HOSPITAL_MAX_WAIT_MS', 5000),
+  // Weather on the route (Open-Meteo, free, no key). Empty WEATHER_URL disables it. The only new outbound host of 3.16.
+  weatherUrl: (process.env.WEATHER_URL ?? (isTest ? '' : 'https://api.open-meteo.com')).trim().replace(/\/+$/, ''),
+  weatherCacheMin: int('WEATHER_CACHE_MIN', 30),
+  weatherPerMin: int('WEATHER_PER_MIN', 20),
+  weatherUserPerMin: int('WEATHER_USER_PER_MIN', 6),
+
   // Free OpenStreetMap services, proxied and cached by the gateway (empty = disabled).
   geoSearchUrl: (process.env.GEO_SEARCH_URL ?? (isTest ? '' : 'https://nominatim.openstreetmap.org')).trim().replace(/\/+$/, ''),
   geoRouteUrl: (process.env.GEO_ROUTE_URL ?? (isTest ? '' : 'https://router.project-osrm.org')).trim().replace(/\/+$/, ''),
@@ -226,7 +250,7 @@ const config = {
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
-  latestAppBuild: int('LATEST_APP_BUILD', 75),
+  latestAppBuild: int('LATEST_APP_BUILD', 76),
   supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
 
   // CORS: comma separated origins or empty for same-origin/mobile only

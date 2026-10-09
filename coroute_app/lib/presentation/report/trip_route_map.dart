@@ -231,7 +231,7 @@ class TripRouteMapState extends State<TripRouteMap> {
         initialCameraFit: (initial == null && _bounds != null) ? CameraFit.bounds(bounds: _bounds!, padding: const EdgeInsets.all(48)) : null,
       ),
       children: [
-        TileLayer(tileBuilder: mapTileBuilder, urlTemplate: AppConstants.osmTileUrl, userAgentPackageName: AppConstants.osmUserAgent),
+        appTileLayer(),
         PolylineLayer(polylines: [
           // The plan: a dashed neutral line under the ridden routes.
           if (planned != null && planned.length >= 2) ...[

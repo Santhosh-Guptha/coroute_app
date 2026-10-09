@@ -22,6 +22,10 @@
 | **Location → Precise location: riders of other groups** (3.15 nearby rider network) | Not "sharing" in the Play sense (transfer to other users of the app as part of the safety feature the rider turned on, no third party): when a rider raises an SOS or crash alert, up to 3 riders of other groups riding toward it get the **emergency point only** (no name, group or phone); after one accepts, they get the rider's first name and vehicle. Riders can switch off "Ask nearby riders to help me". Accident warnings carry the point only. Discovery ("groups nearby", opt-in, Public groups only) sends group name, rider count and a rounded distance, **never positions**. |
 | **Health info → Health info** (3.15) | Additionally, only if the rider switched on "Share medical info with a rider from another group who comes to help me" (off by default): shown to the one rider of another group who accepted to help, only while the alert is open. |
 | **App activity → Other actions** (3.15 safety log) | Collected, not shared: ids and short codes of safety network actions (raised, asked, answered, false alert reported), no positions or text, deleted after 180 days and with the account. Purpose: Fraud prevention, security, and compliance. |
+| **Location → Approximate location: weather** (3.16) | Up to 5 points along the planned route, rounded to about 10 km, with the expected time there, are sent by the CoRoute server to Open-Meteo (free weather service, no account, no key) for the rain forecast, once when the ride is reviewed and once when it starts, never in data saver. The answer is cached on the server for 30 minutes and shared by everyone. No rider identity leaves the server. Shown with "Weather data by Open-Meteo.com". |
+| **Location → Precise location: live emergency link** (3.16) | Only when the rider (or their lead) taps "Share live link" during an open SOS: a web page shows the rider's first name, last position and time to anyone with the link, for 30 minutes or until it is stopped or the alert closes. The link is random and never listed; the server keeps only a hash of it and who created or stopped it. |
+| **Location → Precise location: nearest hospital** (3.16) | During an SOS or crash alert the CoRoute server asks OpenStreetMap (Nominatim, already used for place names) once for the nearest hospital to the alert position, so the group can navigate there. Nothing else is sent. |
+| **App activity → Other actions** (3.16 ride alerts) | Battery level and update times were already shared with the ride group; 3.16 turns them into alerts for the lead and the sweeper ("Kiran 14% battery", "last update 6 min ago"). Hard braking is counted on the phone only and never uploaded. Map tiles along the route are saved on the phone only (30 days). |
 | **App activity → Other actions** (3.14 crash detection) | The motion sensor is read **on the device only** during a ride above 25 km/h. Not collected, not sent. |
 | **App info and performance → Crash logs / Diagnostics** | Not collected (no analytics/crash SDK). |
 | **Device or other IDs** | Not collected. (The app build number is stored with the account so old builds can be retired safely; it is not a device ID.) |
@@ -47,6 +51,10 @@
   `android.intent.action.TTS_SERVICE`, not a permission), and the large ride notification replaces the existing foreground
   service notification (same id and channel). The lock screen view follows the rider's setting and Android's "hide sensitive
   content"; it never shows phone numbers.
+- 3.16 adds **no new permission** and removes one: `BLUETOOTH_CONNECT` was declared but never used and is gone from the
+  manifest (wearable input is a documented hook only, `docs/WEARABLE_HOOK.md`). Offline route maps use the phone's own
+  storage (app cache, no storage permission). The optional "medical ID on the lock screen" shows blood group, allergies and
+  the emergency contact as notification text only while the rider's own SOS is open, off by default.
 - Telephony is declared `required="false"`, so tablets without SMS can still install the app.
 
 ### Release order
@@ -55,6 +63,10 @@ the new safety messages when the gateway offers them, but nothing new works unti
 
 Upgrade the gateway to **3.15.0 before publishing build 75** (see `RUNBOOK.md`, "Release order for 3.15"). Update the Data
 safety answers above (rows marked 3.15) and the listing text (`store/LISTING.md`) in the same release.
+
+Upgrade the gateway to **3.16.0 before publishing build 76** (see `RUNBOOK.md`, "Release order for 3.16"), and allow the one
+new outbound host `api.open-meteo.com` on the server (or leave `WEATHER_URL` empty). Update the Data safety answers above
+(rows marked 3.16) and the listing text (`store/LISTING.md`) in the same release.
 
 ## Build
 ```

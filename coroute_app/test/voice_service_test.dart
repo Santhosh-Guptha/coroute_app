@@ -3,11 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/core/constants/ride_notification_constants.dart';
+import 'package:coroute_app/core/l10n/l10n.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/data/services/voice_service.dart';
 
-class FakeEngine implements VoiceEngine {
+class FakeEngine implements VoiceEngine, VoiceEngineLanguage {
   bool initResult = true;
+
+  /// The tag the engine "found" (3.16): what the phone's voices allow.
+  @override
+  String language = 'en-IN';
   bool speakResult = true;
   bool throwOnInit = false;
   int inits = 0;
@@ -50,7 +55,13 @@ void main() {
     await settings.load();
     engine = FakeEngine();
     now = 1700000000000;
+    L10n.setLanguage(AppLanguage.en);
     voice = VoiceService(settings, engine: engine, clock: () => now);
+  });
+
+  tearDown(() {
+    L10n.setLanguage(AppLanguage.en);
+    voice.dispose();
   });
 
   test('nothing starts until the first alert (no engine at idle)', () async {
@@ -176,6 +187,86 @@ void main() {
     await voice.speak('Emergency.', priority: VoicePriority.critical, key: 'SOS:1');
     await voice.stop();
     expect(engine.stops, 1);
+  });
+
+  group('3.16: important after dark, language', () {
+    test('important is spoken by day like a warning (needs warnings on and group voice)', () async {
+      expect(await voice.speak('Kiran has been stopped for 5 min.', priority: VoicePriority.important, key: 'STOPPED:k'), isTrue);
+      expect(engine.spoken.single.$2, isFalse, reason: 'never interrupts');
+      await settings.setVoiceWarnings(false);
+      expect(await voice.speak('Kiran is 2 km from the group.', priority: VoicePriority.important, key: 'SEP:k'), isFalse);
+      await settings.setVoiceWarnings(true);
+      voice.setGroupVoice(false);
+      expect(await voice.speak('Kiran is 2 km from the group.', priority: VoicePriority.important, key: 'SEP:k'), isFalse);
+    });
+
+    test('after dark with "Speak more after dark": important is spoken even with warnings off, if voice is on at all', () async {
+      await settings.setVoiceWarnings(false);
+      voice.setNight(true);
+      expect(settings.speakMoreAfterDark, isTrue, reason: 'default on');
+      expect(await voice.speak('Kiran has been stopped for 5 min.', priority: VoicePriority.important, key: 'STOPPED:k'), isTrue);
+      expect(await voice.speak('Hazard ahead.', priority: VoicePriority.warning, key: 'HAZ:1'), isFalse, reason: 'plain warnings stay off');
+      await settings.setVoiceCritical(false);
+      expect(await voice.speak('Kiran is far.', priority: VoicePriority.important, key: 'SEP:k'), isFalse, reason: 'voice is off altogether');
+      await settings.setVoiceCritical(true);
+      await settings.setSpeakMoreAfterDark(false);
+      expect(await voice.speak('Kiran is far.', priority: VoicePriority.important, key: 'SEP:k'), isFalse, reason: 'setting off');
+      await settings.setSpeakMoreAfterDark(true);
+      voice.setNight(false);
+      expect(await voice.speak('Kiran is far.', priority: VoicePriority.important, key: 'SEP:k'), isFalse, reason: 'by day');
+    });
+
+    test('speechLang is the safety language only when the engine confirmed that voice', () async {
+      expect(voice.speechLang, 'en');
+      L10n.setLanguage(AppLanguage.hi);
+      engine.language = 'hi-IN';
+      await voice.speak('x', priority: VoicePriority.critical, key: 'a');
+      expect(voice.speechLang, 'hi');
+      await voice.release();
+      engine.language = 'en-IN'; // no Hindi voice on this phone
+      await voice.speak('x', priority: VoicePriority.critical, key: 'b');
+      expect(voice.speechLang, 'en');
+      await voice.release();
+      L10n.setLanguage(AppLanguage.te);
+      engine.language = 'te';
+      await voice.speak('x', priority: VoicePriority.critical, key: 'c');
+      expect(voice.speechLang, 'te', reason: 'a bare language tag counts');
+    });
+
+    test('a language change releases a started engine so the next alert re-inits', () async {
+      await voice.speak('x', priority: VoicePriority.critical, key: 'a');
+      expect(voice.started, isTrue);
+      L10n.setLanguage(AppLanguage.hi);
+      await Future<void>.delayed(Duration.zero);
+      expect(voice.started, isFalse);
+      expect(engine.releases, 1);
+      expect(voice.speechLang, 'en');
+    });
+
+    test('the native engine passes the language tag to init', () async {
+      final channel = MethodChannel(NotifConstants.ttsChannel);
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        if (call.method == 'init') return {'ok': true, 'language': 'hi-IN'};
+        return true;
+      });
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        L10n.setLanguage(AppLanguage.hi);
+        final native = NativeVoiceEngine(channel: channel);
+        expect(await native.init(), isTrue);
+        expect(native.language, 'hi-IN');
+        expect(calls.single.method, 'init');
+        expect((calls.single.arguments as Map)['language'], 'hi-IN');
+        expect(L10n.ttsTag, 'hi-IN');
+        L10n.setLanguage(AppLanguage.en);
+        expect(L10n.ttsTag, 'en-IN');
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+      }
+    });
   });
 
   test('native engine off Android: not available, never throws', () async {

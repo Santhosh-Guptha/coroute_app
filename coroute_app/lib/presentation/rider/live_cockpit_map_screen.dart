@@ -10,6 +10,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/map_tiles.dart';
 import '../../core/ui/ui.dart';
@@ -29,12 +30,15 @@ import '../../data/services/geo_service.dart';
 import '../../data/services/realtime_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/settings_service.dart';
+import '../../data/services/tile_cache_service.dart';
 import '../../data/services/timeline_service.dart';
+import '../../data/services/weather_service.dart';
 import '../../domain/notify/alert_policy.dart';
 import '../../domain/notify/alert_priority.dart';
 import '../../domain/ride/ride_facts.dart';
 import '../../domain/route/route_plan.dart';
 import '../../domain/route/route_progress.dart';
+import '../../domain/safety/sun_helper.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../alerts/alert_tiers.dart';
 import '../alerts/alerts_screen.dart';
@@ -51,6 +55,7 @@ import '../ride/incident_view.dart';
 import '../ride/map_focus.dart';
 import '../ride/meet_here_sheet.dart';
 import '../ride/messages_sheet.dart';
+import '../ride/report_down_sheet.dart';
 import '../ride/ride_sheet.dart';
 import '../ride/rider_card_sheet.dart';
 import '../ride/riders_ladder.dart';
@@ -144,6 +149,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   LatLng? _lastFollowed;
   String? _selectedRiderId;
   bool _sosNoticeScheduled = false;
+  bool _leaveNoticeScheduled = false;
 
   // The planned route as map points, rebuilt only when the convoy's route changes.
   List<LatLng> _routePoints = const [];
@@ -391,34 +397,44 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   }
 
   /// Long-press on the map. The lead gets "Meet here" (or add a stop there);
-  /// anyone else suggests a stop, as before.
+  /// anyone else suggests a stop, as before. Every rider also gets "Report a
+  /// rider down here" (3.16), which sends the existing rider-down report.
   Future<void> _onLongPress(ConvoyService service, LatLng point) async {
-    if (!service.canEditRoute) return _addStopAt(context, service, point);
     final convoy = service.allConvoys[widget.convoyId];
     if (convoy == null) return;
+    final lead = service.canEditRoute;
     final uid = _auth?.currentUserId ?? service.myUserId ?? '';
     final me = convoy.riders[uid];
     final lat = point.latitude, lng = point.longitude;
     final distance = (me != null && RideFacts.hasPosition(me)) ? GeoMath.haversine(me.lat, me.lng, lat, lng) : null;
-    final placement = RoutePlan.meetingPlacement(
-      convoy,
-      lat: lat,
-      lng: lng,
-      plan: _guide.plan,
-      fromAlongM: _guide.started ? _guide.plan?.matched?.alongM : null,
-    );
-    final old = placement.replaces;
+    final placement = lead
+        ? RoutePlan.meetingPlacement(
+            convoy,
+            lat: lat,
+            lng: lng,
+            plan: _guide.plan,
+            fromAlongM: _guide.started ? _guide.plan?.matched?.alongM : null,
+          )
+        : null;
+    final old = placement?.replaces;
     final res = await showMeetHereSheet(
       context,
       placeName: () => _geoService().reverse(lat, lng),
       distanceFromMeM: distance,
       replacesName: old?.name,
+      lead: lead,
+      canReport: service.supports(ProtocolFeatures.safetyNet),
     );
     if (res == null || !mounted) return;
     if (res.action == MeetHereAction.addStop) {
       await _addStopAt(context, service, point);
       return;
     }
+    if (res.action == MeetHereAction.reportDown) {
+      await _reportDownAt(service, lat, lng, res.name);
+      return;
+    }
+    if (placement == null) return;
     final ok = service.addMeetingPoint(
       PickedPlace(lat: lat, lng: lng, name: res.name.isEmpty ? StopKind.meeting.label : res.name, category: RoutePlan.meetingCategory),
       insertBefore: placement.insertBefore,
@@ -428,6 +444,25 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Meeting point set. Your group gets an alert.')));
     }
   }
+
+  /// "Report a rider down here" (3.16): the report sheet, then the existing
+  /// REPORT_DOWN message. Needs a gateway with the safety network.
+  Future<void> _reportDownAt(ConvoyService service, double lat, double lng, String placeName) async {
+    if (!service.supports(ProtocolFeatures.safetyNet)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L10n.t('report.unavailable'))));
+      return;
+    }
+    final sent = await showReportDownSheet(context, lat: lat, lng: lng, placeName: placeName);
+    if (sent == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(sent ? L10n.t('report.sent') : 'Could not send the report. Try again.'),
+    ));
+  }
+
+  /// "Leave ride" from the ride notification (3.16, item 3): the notification
+  /// only asks; the rider confirms here, like the Leave button in the sheet.
+  Future<void> _leaveFromNotification(ConvoyService service, String uid) =>
+      leaveFromNotification(context, service, uid, embedded: widget.embedded);
 
   /// "Share my ETA": plain text through the phone's share sheet. No link and no coordinates.
   void _shareEta(ConvoyModel convoy, double? remainingM, Duration? eta) {
@@ -667,7 +702,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       out.add(_Slot(
         key: key,
         tier: AlertTier.important,
-        title: 'CAUTION',
+        title: L10n.t('hazard.title').toUpperCase(),
         priority: AlertPriority.hazard,
         dismissible: true,
         child: HazardBanner(
@@ -836,6 +871,16 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     final lowData = context.select<SettingsService?, bool>((s) => s?.lowData ?? false);
     // This phone's ride safety prompts ("Are you OK?", "Time for a break").
     final prompts = safetyPromptsOf(context);
+    // 3.16: the fuel reminder row, the weather line and the route map prefetch state.
+    final fuelRangeKm = context.select<SettingsService?, int>((s) => s?.fuelRangeKm ?? 0);
+    final riddenKm = context.select<SafetyService?, int>((s) => ((s?.riddenSinceFillM ?? 0) / 1000).round());
+    final weatherLine = context.select<WeatherService?, String?>((w) {
+      final last = w?.last;
+      return (last != null && last.rain) ? last.line : null;
+    });
+    // Rebuilds only when the prefetch state changes (at most every 500 ms while it runs).
+    context.select<TilePrefetcher?, (bool, int, int, String?)>((p) => (p?.running ?? false, p?.done ?? 0, p?.total ?? 0, p?.error));
+    final prefetcher = context.read<TilePrefetcher?>();
     final convoy = service.allConvoys[widget.convoyId];
 
     if (convoy == null || convoy.tripStatus == 'ENDED') return _ended(context);
@@ -861,6 +906,16 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     };
     final stoppedFor = RideFacts.stoppedFor(me, nowMs: now, thresholdSeconds: convoy.stopThresholdSeconds);
     final lead = service.canEditRoute;
+
+    // "Leave ride" from the ride notification (3.16): never one tap; a confirm first.
+    if (service.leaveRequestedFromNotification && !_leaveNoticeScheduled) {
+      _leaveNoticeScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _leaveNoticeScheduled = false;
+        if (!mounted) return;
+        _leaveFromNotification(service, uid);
+      });
+    }
 
     // SOS from the ride notification: nothing was sent; the hold screen asks for the hold first.
     if (service.sosRequestedFromNotification && !_sosNoticeScheduled) {
@@ -1048,7 +1103,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   onTopChanged: (v) => _sheetTop.value = v,
                   header: _sheetHeader(convoy, me, snap, stoppedFor, now),
                   body: _sheetBody(convoy, service, me, uid, snap, stoppedFor, colors, statuses, lead, now,
-                      offlinePlaces: offlinePlaces, possibleIncident: possible),
+                      offlinePlaces: offlinePlaces,
+                      possibleIncident: possible,
+                      fuelRangeKm: fuelRangeKm,
+                      riddenKm: riddenKm,
+                      weatherLine: weatherLine,
+                      prefetcher: prefetcher),
                 ),
               ),
             ),
@@ -1167,17 +1227,28 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     int now, {
     Map<String, String> offlinePlaces = const {},
     Set<String> possibleIncident = const {},
+    int fuelRangeKm = 0,
+    int riddenKm = 0,
+    String? weatherLine,
+    TilePrefetcher? prefetcher,
   }) {
     final paused = convoy.tripStatus == 'PAUSED';
     final statusQueued = RiderStatusSheet.queuedStatus(service);
     final chatQueued = service.outbox.where((o) => o.type == 'CHAT' && o.groupId == convoy.groupId).length;
     final hasDest = RideFacts.hasDestination(convoy);
+    // "Dark in 40 min" during the last hour of daylight (null after dark or without a position).
+    final darkLine = RideFacts.hasPosition(me) ? DarkCheck.rideLine(now: DateTime.fromMillisecondsSinceEpoch(now), lat: me.lat, lng: me.lng) : null;
+    final routeLine = convoy.routeLine;
+    final pf = prefetcher;
+    final canSaveMap = routeLine.length >= 2 && !(convoy.route?.approximate ?? true);
     return [
       Semantics(
         header: true,
         child: Text(convoy.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
       ),
       if (paused) Text('Paused by the lead', style: AppText.label.copyWith(color: StatusColors.warning)),
+      if (weatherLine != null) SheetLine(icon: Icons.umbrella_rounded, text: weatherLine),
+      if (darkLine != null) SheetLine(icon: Icons.nights_stay_rounded, text: darkLine),
       if (stoppedFor != null)
         RidingMetrics(
           remainingM: snap.remainingM,
@@ -1237,6 +1308,28 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               ),
         onTap: () => RiderStatusSheet.show(context, userId: me.userId),
       ),
+      if (fuelRangeKm > 0)
+        SheetRow(
+          icon: Icons.local_gas_station_rounded,
+          title: '$riddenKm km since last fill',
+          subtitle: 'Tank range $fuelRangeKm km',
+          trailing: TextButton(
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+            onPressed: () {
+              context.read<SafetyService?>()?.filledUp();
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Fuel count reset.')));
+            },
+            child: const Text('Filled up', maxLines: 1),
+          ),
+        ),
+      if (pf != null && canSaveMap)
+        SaveRouteMapRow(
+          running: pf.running,
+          done: pf.done,
+          total: pf.total,
+          error: pf.error,
+          onSave: () => pf.start(routeLine, label: convoy.name),
+        ),
       SheetRow(icon: Icons.tune_rounded, title: 'Group settings', onTap: () => showGroupSettings(context, convoyId: convoy.groupId)),
       SheetRow(icon: Icons.headset_mic_rounded, title: 'Intercom options', onTap: () => IntercomOptions.show(context)),
       if (hasDest)
@@ -1346,13 +1439,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         onLongPress: (_, point) => _onLongPress(service, point),
       ),
       children: [
-        TileLayer(
-          tileBuilder: mapTileBuilder,
-          urlTemplate: AppConstants.osmTileUrl,
-          userAgentPackageName: AppConstants.osmUserAgent,
-          // Data saver: no extra ring of tiles around the screen.
-          panBuffer: lowData ? 0 : 1,
-        ),
+        // Tiles saved on the phone first (3.16 route map prefetch), then the network.
+        // Data saver: no extra ring of tiles around the screen.
+        appTileLayer(panBuffer: lowData ? 0 : 1),
         if (routePoints.length >= 2)
           PolylineLayer(polylines: [
             Polyline(
@@ -1444,7 +1533,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           point: LatLng(h.lat, h.lng),
           width: HazardMarker.width,
           height: HazardMarker.height,
-          child: HazardMarker(label: d == null ? 'Accident reported' : 'Accident reported ${formatDistanceRounded(d)} ahead', level: h.level),
+          child: HazardMarker(label: hazardMarkerLabel(d), level: h.level),
         ));
       }
     }

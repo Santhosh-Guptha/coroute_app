@@ -1,11 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/ride_notification_constants.dart';
+import '../../core/l10n/l10n.dart';
 import 'settings_service.dart';
 
 /// How urgent a spoken alert is. Critical (emergencies) interrupts whatever is
-/// being said; warning (hazards, directions) waits its turn.
-enum VoicePriority { critical, warning }
+/// being said; important (3.16: stopped rider, separation, stale update, low
+/// battery) and warning (hazards, directions) wait their turn. Important ones
+/// are also spoken after dark with "Speak more after dark" (see [VoiceService]).
+enum VoicePriority { critical, important, warning }
 
 /// The speech engine behind [VoiceService] (the phone's text-to-speech; a fake in tests).
 abstract class VoiceEngine {
@@ -20,21 +23,30 @@ abstract class VoiceEngine {
   Future<void> release();
 }
 
-/// Android TextToSpeech through MethodChannel `coroute/tts` (TtsChannel.kt): Indian
-/// English when installed, else US English; ducks other audio while speaking.
-class NativeVoiceEngine implements VoiceEngine {
+/// An engine that can say which language it ended up with (3.16). [VoiceService]
+/// uses it for [VoiceService.speechLang]; engines without it count as English.
+abstract class VoiceEngineLanguage {
+  /// BCP 47 tag the engine confirmed ('hi-IN', 'en-IN'), '' before init or without a voice.
+  String get language;
+}
+
+/// Android TextToSpeech through MethodChannel `coroute/tts` (TtsChannel.kt): the
+/// language of the app's safety setting (Hindi or Telugu when the phone has the
+/// voice), else Indian English, else US English; ducks other audio while speaking.
+class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
   NativeVoiceEngine({MethodChannel? channel}) : _ch = channel ?? const MethodChannel(NotifConstants.ttsChannel);
 
   final MethodChannel _ch;
 
-  /// The language the engine uses ('en-IN', 'en-US'), '' before [init] or without a voice.
+  /// The language the engine uses ('en-IN', 'hi-IN'), '' before [init] or without a voice.
+  @override
   String language = '';
 
   @override
   Future<bool> init() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
     try {
-      final r = await _ch.invokeMethod<Object?>('init');
+      final r = await _ch.invokeMethod<Object?>('init', {'language': L10n.ttsTag});
       if (r is! Map) return false;
       language = r['language']?.toString() ?? '';
       return r['ok'] == true;
@@ -75,15 +87,23 @@ class NativeVoiceEngine implements VoiceEngine {
 /// - Warnings (hazards, emergency navigation distances) speak when "Speak warnings
 ///   and directions" is on AND the group has voice guidance on; they queue, and
 ///   never more than [NotifConstants.voiceMaxQueued] wait (extra ones are dropped).
+/// - Important alerts (3.16) speak like warnings, and also after dark when "Speak
+///   more after dark" is on and voice is on at all ("Speak emergency alerts").
 /// - The same key is spoken at most once per [NotifConstants.voiceDedupe].
 /// - The engine starts on the first alert of a ride (nothing at idle) and is
-///   released at ride end. Without an engine or an English voice everything is
+///   released at ride end. Without an engine or a usable voice everything is
 ///   silent ([available] false); banners and notifications still show.
+/// - The engine is asked for the safety language (Hindi, Telugu); [speechLang]
+///   says which one it confirmed, so alert texts are built in a language the
+///   phone can actually say. A language change releases the engine; the next
+///   alert starts it again in the new language.
 /// - Social alerts are never spoken (the callers never pass them).
 class VoiceService extends ChangeNotifier {
   VoiceService(this._settings, {VoiceEngine? engine, int Function()? clock})
       : _engine = engine ?? NativeVoiceEngine(),
-        _clock = clock ?? _wallClock;
+        _clock = clock ?? _wallClock {
+    L10n.changes.addListener(_onLanguage);
+  }
 
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 
@@ -95,6 +115,9 @@ class VoiceService extends ChangeNotifier {
   bool _available = false;
   bool _failed = false;
   bool _groupVoice = true;
+  bool _night = false;
+  String _requested = 'en';
+  String _speechLang = 'en';
   int _seq = 0;
 
   /// key -> when it was last spoken (only keys from the last [NotifConstants.voiceDedupe]).
@@ -112,9 +135,22 @@ class VoiceService extends ChangeNotifier {
   @visibleForTesting
   bool get groupVoice => _groupVoice;
 
+  /// After sunset (set by SafetyService from the ride's fixes): important alerts are
+  /// spoken too when "Speak more after dark" is on.
+  void setNight(bool dark) => _night = dark;
+
+  @visibleForTesting
+  bool get night => _night;
+
+  /// 'hi', 'te' or 'en': the safety language when the engine confirmed that voice,
+  /// else 'en' (texts for speech are built in this language).
+  String get speechLang => _speechLang;
+
   bool _allowed(VoicePriority p) => switch (p) {
         VoicePriority.critical => _settings.voiceCritical,
         VoicePriority.warning => _settings.voiceWarnings && _groupVoice,
+        VoicePriority.important =>
+          (_settings.voiceWarnings && _groupVoice) || (_settings.speakMoreAfterDark && _night && _settings.voiceCritical),
       };
 
   /// About how long the engine takes to say [text] (for the queue cap only).
@@ -164,18 +200,29 @@ class VoiceService extends ChangeNotifier {
 
   Future<bool> _start() async {
     bool ok;
+    _requested = L10n.current;
     try {
       ok = await _engine.init();
     } catch (_) {
       ok = false;
     }
+    final e = _engine;
+    final got = ok && e is VoiceEngineLanguage ? e.language.toLowerCase() : '';
+    _speechLang = _requested != 'en' && got.startsWith(_requested) ? _requested : 'en';
     if (ok != _available) {
       _available = ok;
       notifyListeners();
     }
-    // No engine or no English voice: silent for this ride (tried again after release).
+    // No engine or no usable voice: silent for this ride (tried again after release).
     if (!ok) _failed = true;
     return ok;
+  }
+
+  void _onLanguage() {
+    // Re-init with the new language on the next alert (in practice between rides:
+    // main.dart releases the engine at ride end anyway).
+    _speechLang = 'en';
+    if (_init != null) release().ignore();
   }
 
   /// Stops what is being said and drops the queue.
@@ -206,4 +253,10 @@ class VoiceService extends ChangeNotifier {
 
   /// The engine was started in this ride (tests and main.dart's ride-end hook).
   bool get started => _init != null;
+
+  @override
+  void dispose() {
+    L10n.changes.removeListener(_onLanguage);
+    super.dispose();
+  }
 }

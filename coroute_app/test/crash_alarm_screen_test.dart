@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/core/constants/safety_constants.dart';
+import 'package:coroute_app/core/l10n/l10n.dart';
 import 'package:coroute_app/core/theme/app_palette.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
@@ -213,8 +214,9 @@ void main() {
     ));
     await tester.pump();
     expect(tester.takeException(), isNull);
-    // 4 ride safety + accident warnings + 2 voice + 2 notification (the nearby riders switches need AuthService).
-    expect(find.byType(Switch), findsNWidgets(9));
+    // 4 ride safety + documents reminder + accident warnings + 3 voice + 3 notification + route maps
+    // (the nearby riders switches need AuthService).
+    expect(find.byType(Switch), findsNWidgets(13));
     expect(find.text(SafetyTexts.crashTitle), findsOneWidget);
     await tester.tap(find.text(SafetyTexts.smsTitle));
     await tester.pump();
@@ -229,6 +231,51 @@ void main() {
     await tester.pump();
     expect(settings.crashDetection, isFalse);
     expect(SafetySettingsSheet.summary(settings), 'Texts, break reminder, check-in on');
+  });
+
+  for (final lang in [AppLanguage.hi, AppLanguage.te]) {
+    for (final size in [const Size(320, 568), const Size(568, 320)]) {
+      testWidgets('countdown screen in ${lang.code} at ${size.width.round()}x${size.height.round()} x1.3: translated, no overflow', (tester) async {
+        L10n.setLanguage(lang);
+        addTearDown(() => L10n.setLanguage(AppLanguage.system));
+        await screen(tester, size);
+        await tester.pumpWidget(host(CrashAlarmView(secondsLeft: 27, onImOk: () {}, onSendNow: () {}), AppPalette.dark));
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(find.text(L10n.t('crash.title', const {}, lang.code)), findsOneWidget);
+        expect(find.text(L10n.t('crash.ok', const {}, lang.code)), findsOneWidget);
+        expect(find.text(L10n.t('crash.help', const {}, lang.code)), findsOneWidget);
+        expect(find.text(L10n.t('crash.countdown', {'n': 27}, lang.code)), findsOneWidget);
+        expect(find.text('Possible accident detected. Are you okay?'), findsNothing);
+      });
+    }
+  }
+
+  testWidgets('countdown screen switches language at once when the setting changes', (tester) async {
+    L10n.setLanguage(AppLanguage.system);
+    addTearDown(() => L10n.setLanguage(AppLanguage.system));
+    SharedPreferences.setMockInitialValues({});
+    final settings = SettingsService();
+    await settings.load();
+    final port = _Port();
+    final safety = SafetyService.forTest(port, settings, accel: _NoAccel(), sms: _NoSms(), clock: () => 1700000000000);
+    await screen(tester, const Size(360, 740));
+    await tester.pumpWidget(ChangeNotifierProvider<SafetyService>.value(value: safety, child: host(const CrashAlarmScreen(), AppPalette.dark)));
+    safety.debugRaiseCrash(const CrashEvent(impactAtMs: 1700000000000, impactG: 6, speedBeforeKmh: 50, lat: 12.97, lng: 77.59));
+    await tester.pump();
+    expect(find.text('Possible accident detected. Are you okay?'), findsOneWidget);
+    L10n.setLanguage(AppLanguage.hi);
+    await tester.pump();
+    expect(find.text(L10n.t('crash.title', const {}, 'hi')), findsOneWidget);
+    L10n.setLanguage(AppLanguage.system);
+    await tester.pump();
+    await tester.tap(find.text("I'm OK"));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(port.raised, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    safety.dispose();
+    port.dispose();
   });
 
   for (final size in [const Size(320, 568), const Size(568, 320)]) {

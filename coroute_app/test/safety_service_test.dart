@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/core/constants/safety_constants.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
@@ -13,13 +17,15 @@ import 'package:coroute_app/data/services/accel_source.dart';
 import 'package:coroute_app/data/services/safety_service.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/data/services/sms_sender.dart';
+import 'package:coroute_app/data/services/tile_cache_service.dart';
+import 'package:coroute_app/data/services/voice_service.dart';
 import 'package:coroute_app/domain/safety/accel_bucket.dart';
 import 'package:coroute_app/domain/safety/crash_detector.dart';
 import 'package:coroute_app/domain/tracking/track_point.dart';
 
 const int t0 = 1700000000000;
 
-class FakePort extends ChangeNotifier implements SafetyPort, SafetySourcePort {
+class FakePort extends ChangeNotifier implements SafetyPort, SafetySourcePort, SafetyCheckInPort {
   FakePort(this.clock);
   final int Function() clock;
 
@@ -31,6 +37,7 @@ class FakePort extends ChangeNotifier implements SafetyPort, SafetySourcePort {
   RosterContact? contact = const RosterContact(name: 'Brother', phone: '+91 91234 56780');
   final List<Map<String, Object?>> raised = [];
   final List<(CheckInResult, double?)> checkIns = [];
+  final List<CheckInContext?> checkInContexts = [];
 
   void changed() => notifyListeners();
 
@@ -91,8 +98,28 @@ class FakePort extends ChangeNotifier implements SafetyPort, SafetySourcePort {
   @override
   bool sendCheckIn(CheckInResult result, {double? awayM}) {
     checkIns.add((result, awayM));
+    checkInContexts.add(null);
     return true;
   }
+
+  /// 3.16: the follow-up check-in carries a context.
+  @override
+  bool sendCheckInWith(CheckInResult result, {double? awayM, CheckInContext? context}) {
+    checkIns.add((result, awayM));
+    checkInContexts.add(context);
+    return true;
+  }
+}
+
+class SilentEngine implements VoiceEngine {
+  @override
+  Future<bool> init() async => true;
+  @override
+  Future<bool> speak(String text, {required bool interrupt, required String id}) async => true;
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<void> release() async {}
 }
 
 class FakeAccel implements AccelSource {
@@ -559,6 +586,248 @@ void main() {
       await tick(tester, 70);
       expect(safety.prompts, isEmpty);
       await tearDown0(tester);
+    });
+  });
+
+  group('3.16: wearable hook, follow-up, night flag', () {
+    ConvoyModel ride({int stoppedSince = 0, String status = 'STARTED'}) => convoyWith({
+          'me': RiderModel(userId: 'me', name: 'Kiran', lat: 17.385, lng: 78.4867, lastSeenEpochMs: t0, stoppedSince: stoppedSince),
+        }, status: status);
+
+    testWidgets('externalImpact opens the alarm only in a ride with no open SOS; the timeout sends source WEARABLE', (tester) async {
+      await setUp0(tester);
+      safety.externalImpact(source: ExternalImpactSource.wearable, g: 6.0, atMs: now);
+      expect(safety.alarm, isNull, reason: 'no ride');
+      port.convoy = ride();
+      port.changed();
+      await tester.pump();
+      port.fixes.add(TrackPoint(ts: now, lat: 17.4, lng: 78.5, speedKmh: 42));
+      await tester.pump();
+      safety.externalImpact(source: ExternalImpactSource.wearable, g: 6.0, atMs: now);
+      expect(safety.alarm, isNotNull);
+      expect(safety.alarm!.impactG, 6.0);
+      expect(safety.alarm!.speedBeforeKmh, 42);
+      expect(safety.alarm!.lat, 17.4);
+      await wait(tester, SafetyConstants.crashCountdown);
+      expect(port.raised, hasLength(1));
+      expect(port.raised.single['source'], EmergencySource.wearable);
+      expect(port.raised.single['type'], SosTypes.crash);
+      expect(port.raised.single['impactG'], 6.0);
+      safety.closeAlarm();
+      safety.externalImpact(source: ExternalImpactSource.wearable, g: 6.0, atMs: now);
+      expect(safety.alarm, isNull, reason: 'my SOS is open');
+      await tearDown0(tester);
+    });
+
+    testWidgets('Need Help on a wearable alarm is still sent as WEARABLE; the developer action never schedules a follow-up', (tester) async {
+      await setUp0(tester);
+      port.convoy = ride();
+      port.changed();
+      safety.externalImpact(source: ExternalImpactSource.developer, g: SafetyConstants.wearableImpactG, atMs: now);
+      expect(safety.alarm, isNotNull);
+      safety.alarmImOk();
+      expect(safety.alarm, isNull);
+      now += SafetyConstants.followUpAfter.inMilliseconds + 1000;
+      port.changed();
+      await tester.pump();
+      expect(safety.prompts, isEmpty, reason: 'a simulated impact asks nothing later');
+
+      now += SafetyConstants.crashCooldown.inMilliseconds + 1000;
+      safety.externalImpact(source: ExternalImpactSource.wearable, g: 7.0, atMs: now);
+      expect(safety.alarm, isNotNull);
+      safety.alarmSendNow();
+      expect(port.raised.single['source'], EmergencySource.wearable);
+      await tearDown0(tester);
+    });
+
+    testWidgets('follow-up after I\'m OK at the next stop; "Yes, fine" sends CHECK_IN FOLLOW_UP', (tester) async {
+      await setUp0(tester);
+      port.convoy = ride();
+      port.changed();
+      safety.debugRaiseCrash(crash);
+      safety.alarmImOk();
+      expect(safety.prompts, isEmpty);
+      // Riding on, then a stop of 60 s.
+      now += 5 * 60 * 1000;
+      port.fixes.add(TrackPoint(ts: now, lat: 17.4, lng: 78.5, speedKmh: 40));
+      await tester.pump();
+      expect(safety.prompts, isEmpty);
+      final stopAt = now;
+      port.convoy = ride(stoppedSince: stopAt);
+      port.changed();
+      await tester.pump();
+      expect(safety.prompts, isEmpty, reason: 'just stopped');
+      now = stopAt + 59 * 1000;
+      port.changed();
+      await tester.pump();
+      expect(safety.prompts, isEmpty);
+      now = stopAt + 61 * 1000;
+      port.changed();
+      await tester.pump();
+      expect(safety.prompts.map((p) => p.key), [SafetyConstants.promptFollowUp]);
+      final p = safety.prompts.single;
+      expect(p.kind, SafetyPromptKind.followUp);
+      expect(p.title, 'Still okay? Anything hurt?');
+      expect(p.primaryLabel, 'Yes, fine');
+      expect(p.secondaryLabel, 'Need help');
+      expect(p.tier.name, 'important');
+      safety.answerPrompt(SafetyConstants.promptFollowUp);
+      expect(safety.prompts, isEmpty);
+      expect(port.checkIns, [(CheckInResult.ok, null)]);
+      expect(port.checkInContexts, [CheckInContext.followUp]);
+      expect(port.raised, isEmpty);
+      port.changed();
+      await tester.pump();
+      expect(safety.prompts, isEmpty, reason: 'asked once');
+      await tearDown0(tester);
+    });
+
+    testWidgets('follow-up after 20 min without a stop; "Need help" raises an SOS (NEED_HELP)', (tester) async {
+      await setUp0(tester);
+      port.convoy = ride();
+      port.changed();
+      safety.debugRaiseCrash(crash);
+      safety.alarmImOk();
+      now += 19 * 60 * 1000;
+      port.fixes.add(TrackPoint(ts: now, lat: 17.5, lng: 78.6, speedKmh: 50));
+      await tester.pump();
+      expect(safety.prompts, isEmpty);
+      now += 2 * 60 * 1000;
+      port.fixes.add(TrackPoint(ts: now, lat: 17.51, lng: 78.61, speedKmh: 50));
+      await tester.pump();
+      expect(safety.prompts.map((p) => p.key), [SafetyConstants.promptFollowUp]);
+      safety.answerPrompt(SafetyConstants.promptFollowUp, primary: false);
+      expect(safety.prompts, isEmpty);
+      expect(port.raised, hasLength(1));
+      final sos = port.raised.single;
+      expect(sos['source'], EmergencySource.needHelp);
+      expect(sos['type'], SosTypes.crash);
+      expect(sos['lat'], 17.51);
+      expect(sos['impactG'], crash.impactG);
+      expect(port.checkIns, isEmpty);
+      await tearDown0(tester);
+    });
+
+    testWidgets('the night flag comes from fixes, at most every 5 min or after a 20 km move', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      now = t0; // 2023-11-14 22:13 UTC: 3:43 AM in Hyderabad, dark
+      port = FakePort(() => now);
+      accel = FakeAccel();
+      sms = FakeSms();
+      settings = SettingsService();
+      await settings.load();
+      final voice = VoiceService(settings, engine: SilentEngine(), clock: () => now);
+      safety = SafetyService.forTest(port, settings, accel: accel, sms: sms, clock: () => now, voice: voice);
+      port.convoy = ride();
+      port.changed();
+      expect(safety.isDark, isFalse);
+      TrackPoint hyd(int plusS, [double dLat = 0]) => TrackPoint(ts: now + plusS * 1000, lat: 17.385 + dLat, lng: 78.4867, speedKmh: 30);
+      port.fixes.add(hyd(0));
+      await tester.pump();
+      expect(safety.isDark, isTrue);
+      expect(voice.night, isTrue);
+      expect(safety.darkChecks, 1);
+      now += 60 * 1000;
+      port.fixes.add(hyd(0));
+      now += 60 * 1000;
+      port.fixes.add(hyd(0));
+      await tester.pump();
+      expect(safety.darkChecks, 1, reason: 'within 5 min, same place');
+      now += 4 * 60 * 1000;
+      port.fixes.add(hyd(0));
+      await tester.pump();
+      expect(safety.darkChecks, 2);
+      port.fixes.add(hyd(0, 0.25)); // about 28 km north
+      await tester.pump();
+      expect(safety.darkChecks, 3, reason: 'moved more than 20 km');
+      now += 8 * 3600 * 1000; // 11:49 AM in Hyderabad
+      port.fixes.add(hyd(0, 0.25));
+      await tester.pump();
+      expect(safety.isDark, isFalse);
+      expect(voice.night, isFalse);
+      port.convoy = null;
+      port.changed();
+      await tester.pump();
+      expect(safety.darkChecks, 0, reason: 'reset with the ride');
+      await tearDown0(tester);
+      voice.dispose();
+    });
+
+    testWidgets('hard stops are counted only while the detector is armed and saved at ride end', (tester) async {
+      await setUp0(tester);
+      port.convoy = ride();
+      port.changed();
+      await tester.pump();
+      // Slow riding: a brake-like drop with a 1.8 g bucket does not count (sensor is not on).
+      port.fixes.add(fix(0, 20));
+      port.fixes.add(fix(1, 18));
+      await tester.pump();
+      accel.add(bucket(1, peak: 1.8));
+      port.fixes.add(fix(2, 0));
+      await tester.pump();
+      expect(safety.hardStops, 0);
+      // At speed: counts.
+      port.fixes.add(fix(10, 60));
+      await tester.pump();
+      expect(accel.running, isTrue);
+      accel.add(bucket(11, peak: 1.8));
+      port.fixes.add(fix(12, 45));
+      port.fixes.add(fix(13, 30));
+      await tester.pump();
+      expect(safety.hardStops, 1);
+      now = t0 + 60 * 1000;
+      port.convoy = ride(status: 'ENDED');
+      port.changed();
+      await tester.pump();
+      await tester.pump();
+      expect(safety.hardStops, 0, reason: 'a new ride starts from zero');
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(SafetyConstants.keyRideStats), contains('"G"'));
+      expect(prefs.getString(SafetyConstants.keyRideStats), contains('"h":1'));
+      await tearDown0(tester);
+    });
+
+    testWidgets('a route map still being saved is cancelled when the ride ends (no downloads after the ride)', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      now = t0;
+      port = FakePort(() => now);
+      accel = FakeAccel();
+      sms = FakeSms();
+      settings = SettingsService();
+      await settings.load();
+      late Directory tmp;
+      late TilePrefetcher tiles;
+      var served = 0;
+      // Real I/O and real time: the cache writes files and the client answers after a short delay.
+      await tester.runAsync(() async {
+        tmp = await Directory.systemTemp.createTemp('coroute_safety_tiles');
+        final cache = (await TileCache.open('${tmp.path}/tiles', clock: () => now))!;
+        final client = MockClient((req) async {
+          served++;
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+          return http.Response.bytes(Uint8List.fromList(List<int>.filled(10, 1)), 200);
+        });
+        tiles = TilePrefetcher(cache, client: client, clock: () => now, spacing: Duration.zero);
+        safety = SafetyService.forTest(port, settings, accel: accel, sms: sms, clock: () => now, tiles: tiles);
+        port.convoy = ride();
+        port.changed();
+        // The rider tapped "Save route map" (any network); the job is long.
+        final line = [for (var i = 0; i <= 40; i++) (17.385 + i * 0.009, 78.4867)];
+        final job = tiles.start(line, label: 'Nandi');
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(tiles.running, isTrue);
+        // The ride ends: the job is cancelled; only the tiles in flight finish.
+        port.convoy = ride(status: 'ENDED');
+        port.changed();
+        final at = served;
+        await job;
+        expect(tiles.running, isFalse);
+        expect(tiles.done, lessThan(tiles.total));
+        expect(served - at, lessThanOrEqualTo(SafetyConstants.prefetchParallel));
+      });
+      await tearDown0(tester);
+      tiles.dispose();
+      await tester.runAsync(() => tmp.delete(recursive: true));
     });
   });
 

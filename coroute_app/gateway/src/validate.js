@@ -183,4 +183,39 @@ function validPhone(v) {
 const CLIENT_ID = /^[A-Za-z0-9_.:-]{1,64}$/;
 function clientIdOf(v) { return typeof v === 'string' && CLIENT_ID.test(v) ? v : ''; }
 
-module.exports = { ValidationError, SWITCHES, profileFields, tripRecord, sitePath, cleanPhone, downsample, validPhone, clientIdOf, BLOOD_GROUPS };
+/** Roles the lead may give a rider (3.16 ROLE_SET). LEAD is never set through a socket message. */
+const ROLES_SETTABLE = new Set(['SWEEPER', 'PACK']);
+/** A settable role as sent, or '' for anything else. */
+function roleOf(v) { return typeof v === 'string' && ROLES_SETTABLE.has(v) ? v : ''; }
+
+/** Live emergency link token (3.16): exactly 32 of A-Z a-z 0-9 _ - (24 random bytes, base64url). */
+const LIVE_TOKEN = /^[A-Za-z0-9_-]{32}$/;
+function liveTokenOf(v) { return typeof v === 'string' && LIVE_TOKEN.test(v) ? v : ''; }
+
+/**
+ * Weather points (3.16): 1 to 5 of { lat, lng, at? }. Returns the clean list or throws ValidationError 422.
+ * `at` (epoch seconds) defaults to now and is clamped to [now - 1 h, now + 48 h].
+ */
+function weatherPoints(input, nowS = Math.floor(Date.now() / 1000)) {
+  if (!Array.isArray(input) || input.length < 1 || input.length > 5) throw new ValidationError('Send 1 to 5 points.', { points: 'Send 1 to 5 points.' });
+  const out = [];
+  for (const p of input) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) throw new ValidationError('Each point needs lat and lng.', { points: 'Each point needs lat and lng.' });
+    const num = (v) => (v === null || v === undefined || v === '' || typeof v === 'boolean' ? NaN : Number(v));
+    const lat = num(p.lat), lng = num(p.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) {
+      throw new ValidationError('Each point needs lat and lng.', { points: 'Each point needs lat and lng.' });
+    }
+    let at = p.at === undefined || p.at === null ? nowS : num(p.at);
+    if (!Number.isFinite(at)) throw new ValidationError('Point time must be a number (epoch seconds).', { points: 'Point time must be a number (epoch seconds).' });
+    if (at > 1e11) at = Math.round(at / 1000); // milliseconds sent by mistake
+    at = Math.round(Math.max(nowS - 3600, Math.min(nowS + 48 * 3600, at)));
+    out.push({ lat, lng, at });
+  }
+  return out;
+}
+
+module.exports = {
+  ValidationError, SWITCHES, profileFields, tripRecord, sitePath, cleanPhone, downsample, validPhone, clientIdOf, BLOOD_GROUPS,
+  ROLES_SETTABLE, roleOf, liveTokenOf, weatherPoints,
+};

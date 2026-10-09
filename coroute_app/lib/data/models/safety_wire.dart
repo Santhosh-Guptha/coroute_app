@@ -13,6 +13,31 @@ class SosTypes {
 class SafetyEventTypes {
   SafetyEventTypes._();
   static const String possibleIncident = 'POSSIBLE_INCIDENT', noReply = 'NO_REPLY', sosResponse = 'SOS_RESPONSE', checkIn = 'CHECK_IN';
+
+  /// 3.16: a rider's updates stopped (interval), low battery (interval), behind the
+  /// sweeper (interval), sweeper assigned or removed (instant), post-crash follow-up (instant).
+  static const String staleUpdate = 'STALE_UPDATE', lowBattery = 'LOW_BATTERY', behindSweeper = 'BEHIND_SWEEPER', roleChanged = 'ROLE_CHANGED', followUp = 'FOLLOW_UP';
+}
+
+/// Rider roles in a convoy (3.16: the lead assigns one SWEEPER with ROLE_SET).
+class RiderRoles {
+  RiderRoles._();
+  static const String lead = 'LEAD', sweeper = 'SWEEPER', pack = 'PACK';
+}
+
+/// Why a CHECK_IN is sent (3.16): the post-crash "Still okay?" follow-up.
+enum CheckInContext {
+  followUp;
+
+  /// Wire name: FOLLOW_UP.
+  String get wire => switch (this) {
+        CheckInContext.followUp => 'FOLLOW_UP',
+      };
+
+  static CheckInContext? fromWire(String? s) => switch (s?.toUpperCase()) {
+        'FOLLOW_UP' => CheckInContext.followUp,
+        _ => null,
+      };
 }
 
 /// A rider's answer to someone else's SOS.
@@ -121,4 +146,7 @@ class ProtocolFeatures {
 
   /// 3.15: Rider Discovery Network (public groups nearby, wave).
   static const String discovery = 'discovery1';
+
+  /// 3.16: sweeper role, town speed limit, follow-up check-in, live links, nearest hospital.
+  static const String ride316 = 'ride316';
 }

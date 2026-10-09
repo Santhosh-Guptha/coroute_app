@@ -98,6 +98,10 @@ void main() {
       expect(tester.widget<TextField>(find.byKey(const ValueKey('allergies'))).controller!.text.length, 120);
 
       await tester.scrollUntilVisible(find.byKey(const ValueKey('medicalNotes')), 200, scrollable: find.byType(Scrollable).first);
+      // 3.16: the label reads "Notes for a doctor" and the safety card can be opened from here.
+      expect(find.text('Notes for a doctor'), findsOneWidget);
+      expect(find.text('Notes for helpers'), findsNothing);
+      expect(find.byKey(const ValueKey('safetyCard')), findsOneWidget);
       await tester.enterText(find.byKey(const ValueKey('medicalNotes')), 'b' * 250);
       await tester.pump();
       expect(tester.widget<TextField>(find.byKey(const ValueKey('medicalNotes'))).controller!.text.length, 200);

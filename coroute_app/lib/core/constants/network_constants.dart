@@ -38,6 +38,23 @@ class NetworkConstants {
   static const String keyNetConsentSeen = 'coroute_net_consent_seen';
   static const String keyNetConsentPrompts = 'coroute_net_consent_prompts';
 
+  // 3.16 settings keys.
+  static const String keyLanguage = 'coroute_language';
+  static const String keyFuelRangeKm = 'coroute_fuel_range_km';
+  static const String keySpeakAfterDark = 'coroute_speak_after_dark';
+  static const String keyMedicalIdLock = 'coroute_medical_id_lock';
+  static const String keyDocsReminder = 'coroute_docs_reminder';
+  static const String keySaveRouteMaps = 'coroute_save_route_maps';
+
+  /// Tank range (km) bounds of the fuel reminder setting (0 = off).
+  static const int fuelRangeMaxKm = 1500;
+
+  /// A rider's card shows the "{n}% battery" chip at or below this (not charging).
+  static const int lowBatteryChipPct = 20;
+
+  /// How long a live emergency link lasts (display only; the server decides).
+  static const int liveLinkMinutes = 30;
+
   /// The nearby riders consent sheet is offered at most this many times ("Later").
   static const int netConsentMaxPrompts = 3;
 

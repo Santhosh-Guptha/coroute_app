@@ -1,3 +1,4 @@
+import '../../core/constants/network_constants.dart';
 import 'safety_wire.dart';
 
 class RiderModel {
@@ -30,6 +31,12 @@ class RiderModel {
   final int presenceAt;
 
   RiderPresence get presenceState => RiderPresence.fromWire(presence);
+
+  /// The lead made this rider the sweeper (3.16).
+  bool get isSweeper => role == RiderRoles.sweeper;
+
+  /// Battery at or below [NetworkConstants.lowBatteryChipPct] and not charging (the "{n}% battery" chip).
+  bool get lowBattery => batteryLevel <= NetworkConstants.lowBatteryChipPct && !isCharging;
 
   RiderModel({
     required this.userId,

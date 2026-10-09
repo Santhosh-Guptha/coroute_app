@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/safety_service.dart';
@@ -9,12 +10,20 @@ import '../widgets/emergency_sos_sheet.dart';
 /// while [SafetyService.alarm] is open. Counting down: red screen, "Possible
 /// accident detected. Are you okay?", **I'm OK** (green, nothing is sent)
 /// and **Need Help** (sends at once). After the SOS went out: the SOS sheet content (call, text, 112,
-/// "I am safe") until the rider closes it.
+/// "I am safe") until the rider closes it. Texts follow the rider's language
+/// ([L10n], 3.16) and change at once when it changes.
 class CrashAlarmScreen extends StatelessWidget {
   const CrashAlarmScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: L10n.changes,
+      builder: (context, _, _) => _body(context),
+    );
+  }
+
+  Widget _body(BuildContext context) {
     final safety = context.watch<SafetyService>();
     final alarm = safety.alarm;
     if (alarm == null) {
@@ -28,7 +37,7 @@ class CrashAlarmScreen extends StatelessWidget {
         },
         child: Scaffold(
           backgroundColor: AppTheme.obsidianVoid,
-          appBar: AppBar(title: const Text('Crash SOS sent')),
+          appBar: AppBar(title: Text(L10n.t('crash.sent'), maxLines: 1, overflow: TextOverflow.ellipsis)),
           body: SafeArea(
             child: Center(
               child: ConstrainedBox(
@@ -55,11 +64,14 @@ class CrashAlarmScreen extends StatelessWidget {
   }
 }
 
-/// The red countdown screen itself (pure, for tests).
+/// The red countdown screen itself (pure, for tests). Verified at 320 dp and
+/// text x1.3 in portrait and landscape: every text wraps or shrinks, the two
+/// buttons keep their height, nothing overflows.
 class CrashAlarmView extends StatelessWidget {
-  static const String title = 'Possible accident detected. Are you okay?';
-  static const String okLabel = 'I\'m OK';
-  static const String helpLabel = 'Need Help';
+  /// The words in the rider's language (read at build time).
+  static String get title => L10n.t('crash.title');
+  static String get okLabel => L10n.t('crash.ok');
+  static String get helpLabel => L10n.t('crash.help');
 
   final int secondsLeft;
   final VoidCallback onImOk;
@@ -70,7 +82,7 @@ class CrashAlarmView extends StatelessWidget {
   static const double buttonHeight = 72;
 
   static String countdownText(int seconds) =>
-      'Sending SOS to your group in $seconds ${seconds == 1 ? 'second' : 'seconds'}.';
+      seconds == 1 ? L10n.t('crash.countdown.one') : L10n.t('crash.countdown', {'n': seconds});
 
   @override
   Widget build(BuildContext context) {
@@ -79,10 +91,13 @@ class CrashAlarmView extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
-          decoration: BoxDecoration(border: Border.all(color: onRed), borderRadius: Radii.smAll),
-          child: Text('Automatic alert', style: AppText.label.copyWith(color: onRed)),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
+            decoration: BoxDecoration(border: Border.all(color: onRed), borderRadius: Radii.smAll),
+            child: Text(L10n.t('crash.automatic'), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: onRed)),
+          ),
         ),
         const SizedBox(height: Space.s12),
         Semantics(
@@ -91,25 +106,34 @@ class CrashAlarmView extends StatelessWidget {
           liveRegion: true,
           child: Text(
             title,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
             style: AppText.metric.copyWith(color: onRed, fontSize: 30, height: 1.15),
           ),
         ),
         const SizedBox(height: Space.s8),
         Text(
           countdownText(secondsLeft),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
           style: AppText.title.copyWith(color: onRed, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: Space.s4),
         Text(
-          'If you are fine, tap I\'m OK. Nothing is sent.',
+          L10n.t('crash.hint'),
+          maxLines: 4,
+          overflow: TextOverflow.ellipsis,
           style: AppText.body.copyWith(color: onRed),
         ),
       ],
     );
     final count = ExcludeSemantics(
-      child: Text(
-        '$secondsLeft',
-        style: AppText.metric.copyWith(color: onRed, fontSize: 64, height: 1.0),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          '$secondsLeft',
+          style: AppText.metric.copyWith(color: onRed, fontSize: 64, height: 1.0),
+        ),
       ),
     );
     final ok = SizedBox(
@@ -120,11 +144,12 @@ class CrashAlarmView extends StatelessWidget {
           backgroundColor: StatusColors.success,
           foregroundColor: onRed,
           minimumSize: const Size.fromHeight(buttonHeight),
+          padding: const EdgeInsets.symmetric(horizontal: Space.s12),
           side: BorderSide(color: onRed, width: 2),
           textStyle: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
         ),
         icon: const Icon(Icons.check_circle_rounded, size: 30),
-        label: const Text(okLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
+        label: Text(okLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
     final send = SizedBox(
@@ -135,11 +160,12 @@ class CrashAlarmView extends StatelessWidget {
           backgroundColor: StatusColors.critical,
           foregroundColor: onRed,
           minimumSize: const Size.fromHeight(buttonHeight),
+          padding: const EdgeInsets.symmetric(horizontal: Space.s12),
           side: BorderSide(color: onRed, width: 3),
           textStyle: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
         ),
         icon: const Icon(Icons.sos_rounded, size: 30),
-        label: const Text(helpLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
+        label: Text(helpLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
 

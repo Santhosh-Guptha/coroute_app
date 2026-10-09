@@ -104,6 +104,60 @@ class PossibleIncidentChip extends StatelessWidget {
   }
 }
 
+/// "14% battery" as a small amber chip with an icon (3.16, item 12): shown
+/// in the ladder and on the rider card while [RiderModel.lowBattery].
+class LowBatteryChip extends StatelessWidget {
+  final int level;
+  const LowBatteryChip({super.key, required this.level});
+
+  static String text(int level) => '$level% battery';
+
+  @override
+  Widget build(BuildContext context) {
+    final Color c = StatusColors.warning;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
+      decoration: ShapeDecoration(
+        color: c.withOpacity(0.14),
+        shape: StadiumBorder(side: BorderSide(color: c.withOpacity(0.6))),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.battery_alert_rounded, size: 16, color: c),
+          const SizedBox(width: Space.s4),
+          Flexible(child: Text(text(level), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: c))),
+        ],
+      ),
+    );
+  }
+}
+
+/// The sweeper's tail marker (3.16, item 11): a flag and "Sweeper", muted.
+/// Used on the sweeper's rung in the ladder and on their card.
+class SweeperMarker extends StatelessWidget {
+  const SweeperMarker({super.key});
+
+  static const String label = 'Sweeper';
+
+  @override
+  Widget build(BuildContext context) {
+    final Color c = AppTheme.textSecondary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
+      decoration: ShapeDecoration(shape: StadiumBorder(side: BorderSide(color: AppTheme.subtleBorder))),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.flag_rounded, size: 16, color: c),
+          const SizedBox(width: Space.s4),
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: c)),
+        ],
+      ),
+    );
+  }
+}
+
 /// A presence line with its icon, for the ladder and the rider card.
 class PresenceText extends StatelessWidget {
   final RiderModel rider;
@@ -240,12 +294,12 @@ class _RiderRow extends StatelessWidget {
     final detail = presence == null ? riderStatusDetail(r, status, nowMs: nowMs) : null;
     final reason = riderReasonText(r);
     final dist = rung.displayFromMeM;
-    final lowBattery = r.batteryLevel > 0 && r.batteryLevel < 20;
+    final lowBattery = r.lowBattery;
+    final sweeper = r.isSweeper;
     final extra = [
       if (reason.isNotEmpty) reason,
-      if (rung.isMe || lowBattery) 'Battery ${r.batteryLevel}%${r.isCharging ? ', charging' : ''}',
-      if (r.role == 'LEAD') 'Lead',
-      if (r.role == 'SWEEPER') 'Sweeper',
+      if (rung.isMe && !lowBattery) 'Battery ${r.batteryLevel}%${r.isCharging ? ', charging' : ''}',
+      if (r.role == RiderRoles.lead) 'Lead',
     ].join(', ');
     final distText = dist == null || rung.isMe ? '' : describeDistance(dist, ahead: rung.ahead);
     final semantic = [
@@ -253,6 +307,8 @@ class _RiderRow extends StatelessWidget {
       detail == null ? status.label : '${status.label}, $detail',
       ?presence,
       if (incident) 'possible incident',
+      if (lowBattery) LowBatteryChip.text(r.batteryLevel),
+      if (sweeper) SweeperMarker.label,
       if (distText.isNotEmpty) distText,
       if (rung.tooFarBehind) 'too far behind',
       if (extra.isNotEmpty) extra,
@@ -294,6 +350,8 @@ class _RiderRow extends StatelessWidget {
                         children: [
                           RiderStatusChip(status: status, detail: detail),
                           if (incident) const PossibleIncidentChip(),
+                          if (lowBattery) LowBatteryChip(level: r.batteryLevel),
+                          if (sweeper) const SweeperMarker(),
                           if (dist != null && !rung.isMe) DistanceIndicator(meters: dist, ahead: rung.ahead, warn: rung.tooFarBehind),
                         ],
                       ),

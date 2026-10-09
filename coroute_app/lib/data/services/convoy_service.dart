@@ -171,6 +171,11 @@ class ConvoyService extends ChangeNotifier {
   int _networkRevision = 0;
   bool _wasConnected = false;
 
+  // 3.16: "Leave ride" pressed on the notification (the UI confirms it), live emergency
+  // links this phone created (memory only, token never persisted or logged).
+  bool _leaveRequestedFromNotification = false;
+  final Map<String, LiveLink> _liveLinks = {};
+
   // ------------------------------------------------------------- getters
   Map<String, ConvoyModel> get allConvoys => Map.unmodifiable(_allConvoys);
   String? get activeGroupId => _activeGroupId;
@@ -193,6 +198,15 @@ class ConvoyService extends ChangeNotifier {
     notifyListeners();
   }
   bool get isRealGpsActive => _isRealGpsActive;
+
+  /// Set when "Leave ride" was pressed on the notification (3.16): the UI asks "Leave the
+  /// ride?" and calls [leaveActiveConvoy] on yes. Nothing leaves by itself.
+  bool get leaveRequestedFromNotification => _leaveRequestedFromNotification;
+  void clearLeaveRequest() {
+    if (!_leaveRequestedFromNotification) return;
+    _leaveRequestedFromNotification = false;
+    notifyListeners();
+  }
 
   /// Accuracy in metres of the last GPS fix (read-only; for the "Low accuracy" GPS word).
   double? get myFixAccuracyM => _lastFixAccuracyM;
@@ -313,6 +327,30 @@ class ConvoyService extends ChangeNotifier {
         .toList()
       ..sort((a, b) => b.at.compareTo(a.at));
     return List.unmodifiable(list);
+  }
+
+  // ------------------------------------------------------------ 3.16 getters
+  bool get _ride316 => _rt.supports(ProtocolFeatures.ride316);
+
+  /// The rider the lead made the sweeper, if any.
+  String? get sweeperId => activeConvoy?.sweeperId;
+  bool get hasSweeper => sweeperId != null;
+
+  /// The live emergency link this phone created for [alertId], while it is valid: not
+  /// expired, not revoked (here or by the lead) and the alert still open.
+  LiveLink? liveLinkFor(String alertId) {
+    final l = _liveLinks[alertId];
+    if (l == null) return null;
+    final now = _clock();
+    SosAlertModel? alert;
+    for (final a in activeConvoy?.activeAlerts ?? const <SosAlertModel>[]) {
+      if (a.alertId == alertId) alert = a;
+    }
+    if (!l.isValidAt(now) || alert == null || alert.resolved || alert.liveLinkRevokedAt > 0) {
+      _liveLinks.remove(alertId);
+      return null;
+    }
+    return l;
   }
 
   // ---------------------------------------------------------- lifecycle
@@ -531,7 +569,9 @@ class ConvoyService extends ChangeNotifier {
   void _onNotificationButton(String id) {
     if (_activeGroupId == null) return;
     if (id == BackgroundService.buttonLeave && _myUserId != null) {
-      leaveActiveConvoy(_myUserId!).ignore();
+      // 3.16: never a one-tap leave. The app asks "Leave the ride?" first.
+      _leaveRequestedFromNotification = true;
+      notifyListeners();
     } else if (id == BackgroundService.buttonSos) {
       // 3.15: never a one-tap send. The app opens the hold-to-send SOS screen.
       openSosFromNotification();
@@ -692,6 +732,7 @@ class ConvoyService extends ChangeNotifier {
         }
         final others = convoy.activeAlerts.where((a) => a.alertId != alert.alertId);
         final alerts = alert.resolved ? others.toList() : (List<SosAlertModel>.from(others)..add(alert));
+        if (alert.resolved || alert.liveLinkRevokedAt > 0) _liveLinks.remove(alert.alertId);
         _allConvoys[gid] = convoy.copyWith(activeAlerts: alerts);
         _networkRevision++;
         break;
@@ -705,6 +746,7 @@ class ConvoyService extends ChangeNotifier {
           }
         }
         if (resolvedId != null && resolvedId == _deliveredSosAlertId) _deliveredSosAlertId = null;
+        _liveLinks.remove(resolvedId);
         _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != resolvedId).toList());
         _networkRevision++;
         break;
@@ -797,6 +839,7 @@ class ConvoyService extends ChangeNotifier {
           visibility: e['visibility'] is String ? GroupVisibility.fromWire(e['visibility'] as String) : null,
           discovery: e['discovery'] is bool ? e['discovery'] as bool : null,
           assistDefault: e['assistDefault'] is bool ? e['assistDefault'] as bool : null,
+          townLimitKmh: (e['townLimitKmh'] as num?)?.toInt(),
         );
         break;
       case 'TRIP_STATUS':
@@ -1353,13 +1396,30 @@ class ConvoyService extends ChangeNotifier {
     _rt.send({'type': 'CORIDER', 'ridingWithUserId': driverId});
   }
 
-  void updateGroupConfig({double? distanceThresholdMeters, int? stopThresholdSeconds, bool? voiceGuidanceEnabled, int? speedLimitKmh}) {
+  /// Lead: group settings. [townLimitKmh] (3.16, 0 = off) goes only to a gateway that supports it.
+  void updateGroupConfig({double? distanceThresholdMeters, int? stopThresholdSeconds, bool? voiceGuidanceEnabled, int? speedLimitKmh, int? townLimitKmh}) {
     final payload = <String, dynamic>{'type': 'CONFIG'};
     if (distanceThresholdMeters != null) payload['distanceThresholdMeters'] = distanceThresholdMeters;
     if (stopThresholdSeconds != null) payload['stopThresholdSeconds'] = stopThresholdSeconds;
     if (voiceGuidanceEnabled != null) payload['voiceGuidanceEnabled'] = voiceGuidanceEnabled;
     if (speedLimitKmh != null) payload['speedLimitKmh'] = speedLimitKmh;
+    if (townLimitKmh != null && _ride316) payload['townLimitKmh'] = townLimitKmh;
+    if (payload.length == 1) return;
     _rt.send(payload);
+  }
+
+  /// Lead (3.16): makes [userId] the sweeper, or back to pack. One sweeper per group (the
+  /// server moves the previous one back); applied when the RIDER_UPDATE comes back. Goes
+  /// through the outbox. False when not the lead, the gateway is too old, the rider is not
+  /// in the group, or the target is me or a lead.
+  bool setSweeper(String userId, {required bool on}) {
+    final c = activeConvoy;
+    if (c == null || !canEditRoute || !_ride316) return false;
+    final r = c.riders[userId];
+    if (r == null || userId == _myUserId || userId == c.createdByUserId || r.role == RiderRoles.lead) return false;
+    // Only the newest role change for a rider matters.
+    _outbox.removeWhere((i) => i.type == 'ROLE_SET' && i.state == OutboxState.waiting && i.payload['userId'] == userId);
+    return _enqueue('ROLE_SET', {'userId': userId, 'role': on ? RiderRoles.sweeper : RiderRoles.pack}) != null;
   }
 
   /// Raises an SOS for the active convoy. It is kept on the phone (memory and disk) until
@@ -1502,13 +1562,17 @@ class ConvoyService extends ChangeNotifier {
   }
 
   /// Answer to the solo "Are you OK?" check (or no answer). Goes through the outbox.
-  /// False when not in a ride or the gateway is too old.
-  bool sendCheckIn(CheckInResult result, {double? awayM}) {
+  /// False when not in a ride or the gateway is too old. [context] (3.16): the post-crash
+  /// "Still okay?" follow-up, sent only to a gateway that supports it (an older one gets a
+  /// plain OK check-in).
+  bool sendCheckIn(CheckInResult result, {double? awayM, CheckInContext? context}) {
     if (_activeGroupId == null || !_rt.supports(ProtocolFeatures.checkIn)) return false;
+    if (context == CheckInContext.followUp && result == CheckInResult.noReply) return false; // the server refuses it
     final me = _myUserId == null ? null : activeConvoy?.riders[_myUserId];
     final lat = me?.lat ?? 0.0, lng = me?.lng ?? 0.0;
     final hasPos = lat != 0 || lng != 0;
     final payload = <String, dynamic>{'result': result.wire};
+    if (context != null && _ride316) payload['context'] = context.wire;
     if (awayM != null && awayM.isFinite) payload['awayM'] = awayM.round().clamp(0, 500000);
     if (hasPos) {
       payload['lat'] = lat;
@@ -1829,6 +1893,7 @@ class ConvoyService extends ChangeNotifier {
   void resolveSosAlert(String alertId, {ResolveReason reason = ResolveReason.resolved}) {
     final gid = _activeGroupId;
     if (gid == null) return;
+    _liveLinks.remove(alertId); // the server revokes it with the alert
     final convoy = _allConvoys[gid];
     if (convoy != null) {
       _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != alertId).toList());
@@ -1843,6 +1908,8 @@ class ConvoyService extends ChangeNotifier {
     final lat = d(e['lat']), lng = d(e['lng']);
     final hasPos = lat != null && lng != null && (lat != 0 || lng != 0);
     final lu = d(e['lastUpdateAt']);
+    final link = e['liveLink'] is Map ? e['liveLink'] as Map : null;
+    if (link != null && ((link['revokedAt'] as num?)?.toInt() ?? 0) > 0) _liveLinks.remove(a.alertId);
     return a.copyWith(
       status: EmergencyStatus.fromWire(e['status']?.toString()),
       lastUpdateAt: lu?.toInt(),
@@ -1851,6 +1918,9 @@ class ConvoyService extends ChangeNotifier {
       network: EmergencyNetwork.fromJson(e['network']),
       ownNearest: OwnNearest.fromJson(e['ownNearest']),
       clearOwnNearest: e.containsKey('ownNearest') && e['ownNearest'] == null,
+      nearestHospital: NearbyPlace.fromJson(e['nearestHospital']),
+      liveLinkExpiresAt: link == null ? null : ((link['expiresAt'] as num?)?.toInt() ?? 0),
+      liveLinkRevokedAt: link == null ? null : ((link['revokedAt'] as num?)?.toInt() ?? 0),
     );
   }
 
@@ -1940,6 +2010,7 @@ class ConvoyService extends ChangeNotifier {
   /// Everything of the safety and discovery networks goes (subject, medical, positions).
   void _clearNetwork() {
     _netUnconfirmed.clear();
+    _liveLinks.clear();
     if (_assists.isEmpty && _assistNotices.isEmpty && _hazards.isEmpty && _encounters.isEmpty && _ignoredEncounters.isEmpty && _falseReported.isEmpty) return;
     _assists.clear();
     _assistNotices.clear();
@@ -2033,6 +2104,52 @@ class ConvoyService extends ChangeNotifier {
       notifyListeners();
     }
     return true;
+  }
+
+  // ------------------------------------------------------- 3.16 live links
+  /// Creates a live emergency link for an open alert of my group (the owner or the lead):
+  /// `https://<origin>/e/<token>`, valid [NetworkConstants.liveLinkMinutes]. Kept in memory
+  /// only; the token is never persisted or logged. When the server says one is already
+  /// active (409 LINK_ACTIVE) the one this phone knows is returned, else null.
+  Future<LiveLink?> createLiveLink(String alertId) async {
+    final gid = _activeGroupId;
+    if (gid == null || alertId.isEmpty || !_ride316) return null;
+    try {
+      final res = await _api.post('/convoys/$gid/alerts/$alertId/live-link');
+      final link = LiveLink.fromJson(res);
+      if (link == null || _activeGroupId != gid) return null;
+      _liveLinks[alertId] = link;
+      _networkRevision++;
+      notifyListeners();
+      return link;
+    } on ApiException catch (e) {
+      if (e.statusCode == 409) return liveLinkFor(alertId);
+      _lastError = e.message;
+      notifyListeners();
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Stops sharing: revokes the live link of [alertId] on the server and drops it here.
+  Future<bool> revokeLiveLink(String alertId) async {
+    final gid = _activeGroupId;
+    if (gid == null || alertId.isEmpty || !_ride316) return false;
+    final had = _liveLinks.remove(alertId) != null;
+    if (had) {
+      _networkRevision++;
+      notifyListeners();
+    }
+    try {
+      await _api.delete('/convoys/$gid/alerts/$alertId/live-link');
+      return true;
+    } on ApiException catch (e) {
+      // Already gone (closed alert, no link): nothing to share any more.
+      return e.statusCode == 404;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ------------------------------------------------------------------ admin

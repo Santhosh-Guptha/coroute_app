@@ -43,17 +43,20 @@ const ACTION_TYPES = new Set([
   'SOS_RESPOND', 'BYE',
   // 3.15
   'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE',
+  // 3.16
+  'ROLE_SET',
 ]);
 /** Socket messages that alert the whole convoy: a few per 10 seconds, each type with its own budget
  * (a rider who just asked the group to wait must still be able to raise an SOS). */
 const ALARM_TYPES = new Set(['WAIT', 'SOS', 'CHECK_IN', 'REPORT_DOWN']);
 /** Messages that may carry a clientId (phone outbox): applied once, answered with ACK. */
-const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN', 'REPORT_DOWN', 'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE']);
+const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN', 'REPORT_DOWN', 'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE', 'ROLE_SET']);
 const BYE_REASONS = new Set(['APP_CLOSED', 'SIGN_OUT', 'LEFT']);
 /** Protocol features this gateway offers (HELLO.features); 3.14 apps use a feature only when listed. */
 const FEATURES_314 = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster'];
 /** 3.15: safety network and discovery, appended when switched on. */
-const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : [])];
+/** 3.16: sweeper role, follow-up check-in, town limit, live links (always on). */
+const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), 'ride316'];
 /** Client capabilities a 3.15 app sends with JOIN. Server-to-client types added in 3.15 go only to sockets with 'net1'. */
 const CAP = /^[a-z0-9]{1,16}$/;
 const INCIDENT_ID = /^NET-[0-9A-F]{12}$/;
@@ -488,6 +491,11 @@ class Hub {
         const encounterId = typeof msg.encounterId === 'string' && ENCOUNTER_ID.test(msg.encounterId) ? msg.encounterId : '';
         if (!encounterId) throw new ConvoyError('That group is no longer nearby.', 404, 'ENCOUNTER_CLOSED');
         return this._once(ws, cid, 'WAVE', async () => { this.discovery.wave(u, gid, encounterId); });
+      }
+      // ---- 3.16 ----
+      case 'ROLE_SET': {
+        const gid = this._requireRoom(ws);
+        return this._once(ws, cid, 'ROLE_SET', () => this.convoys.setRole(gid, u, msg.userId, msg.role));
       }
       case 'STOP_ADD': return void await this.convoys.addStop(this._requireRoom(ws), u, msg);
       case 'STOP_SUGGEST': return void await this.convoys.suggestStop(this._requireRoom(ws), u, msg);

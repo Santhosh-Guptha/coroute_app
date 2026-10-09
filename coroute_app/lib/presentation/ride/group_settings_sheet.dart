@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../data/models/convoy_model.dart';
 import '../../data/models/network_wire.dart';
 import '../../data/models/safety_wire.dart';
 import '../../data/services/convoy_service.dart';
@@ -24,6 +25,18 @@ Future<void> showGroupSettings(BuildContext context, {required String convoyId})
 class GroupSettingsView extends StatelessWidget {
   final String convoyId;
   const GroupSettingsView({super.key, required this.convoyId});
+
+  /// Item 13 (3.16): the lower limit near planned stops, the start and the destination.
+  static const String townLimitTitle = 'Lower limit near stops and in towns';
+  static const String townLimitExplain = 'Within 1 km of planned stops, the start and the destination.';
+  static const List<int> townLimitChoices = [0, 30, 40, 50, 60];
+
+  /// "Sweeper: Kiran" or "No sweeper yet (set from a rider's card)" (3.16, item 11).
+  static String sweeperLine(ConvoyModel convoy) {
+    final id = convoy.sweeperId;
+    final name = id == null ? '' : (convoy.riders[id]?.name.trim() ?? '');
+    return name.isEmpty ? "No sweeper yet (set from a rider's card)" : 'Sweeper: $name';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -112,6 +125,46 @@ class GroupSettingsView extends StatelessWidget {
               ),
             ),
           ),
+          if (service.supports(ProtocolFeatures.ride316))
+            section(
+              title: GroupSettingsView.townLimitTitle,
+              value: convoy.townLimitKmh > 0 ? '${convoy.townLimitKmh} km/h' : 'Off',
+              help: GroupSettingsView.townLimitExplain,
+              control: Padding(
+                padding: const EdgeInsets.symmetric(vertical: Space.s8),
+                child: Wrap(
+                  spacing: Space.s8,
+                  runSpacing: Space.s4,
+                  children: [
+                    for (final v in GroupSettingsView.townLimitChoices)
+                      ChoiceChip(
+                        label: Text(v == 0 ? 'Off' : '$v'),
+                        selected: convoy.townLimitKmh == v,
+                        materialTapTargetSize: MaterialTapTargetSize.padded,
+                        onSelected: lead ? (_) => service.updateGroupConfig(townLimitKmh: v) : null,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          if (service.supports(ProtocolFeatures.ride316))
+            Padding(
+              padding: const EdgeInsets.only(bottom: Space.s16),
+              child: Row(
+                children: [
+                  Icon(Icons.flag_rounded, size: 20, color: AppTheme.textSecondary),
+                  const SizedBox(width: Space.s8),
+                  Expanded(
+                    child: Text(
+                      GroupSettingsView.sweeperLine(convoy),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.body,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: Text('Spoken alerts', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),

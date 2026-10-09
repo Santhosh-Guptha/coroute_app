@@ -16,8 +16,13 @@ import '../../domain/notify/alert_priority.dart';
 /// * the `updates` and `activity` channels are normal (SOS responses).
 /// 3.15: `ASSIST:*` (a request to help a nearby rider) is critical, `HAZARD:*` (accident
 /// ahead, amber) important, `ASSIST_TAKEN:*` and `MEET:*` (other groups) normal.
+/// 3.16: `STALE:*`, `BATTERY:*` and `BEHIND:*` (about another rider) are important, my own
+/// `BEHIND:*` is normal, the fuel and follow-up prompts are important.
 AlertTier tierFor(AlertSpec spec) {
   final k = spec.key;
+  if (k.startsWith(AlertPolicy.behindPrefix)) return spec.aboutMe ? AlertTier.normal : AlertTier.important;
+  if (k.startsWith(AlertPolicy.stalePrefix) || k.startsWith(AlertPolicy.batteryPrefix)) return AlertTier.important;
+  if (k == AlertPolicy.fuelKey || k == AlertPolicy.followUpKey) return AlertTier.important;
   if (k.startsWith(AlertPolicy.assistTakenPrefix) || k.startsWith(AlertPolicy.encounterPrefix)) return AlertTier.normal;
   if (k.startsWith(AlertPolicy.assistPrefix)) return AlertTier.critical;
   if (k.startsWith(AlertPolicy.hazardPrefix)) return AlertTier.important;

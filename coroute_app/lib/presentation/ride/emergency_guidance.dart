@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import '../../core/constants/emergency_nav_constants.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/ui/ui_format.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/network_models.dart';
@@ -65,8 +66,8 @@ class HazardView {
 
   const HazardView({required this.hazard, required this.distanceM, this.alongRoute = false, this.passed = false});
 
-  /// "Accident reported 2.3 km ahead" (the map marker label).
-  String get label => 'Accident reported ${Relation.distanceText(distanceM)} ahead';
+  /// "Accident reported 2.3 km ahead" (the map marker label, the rider's language).
+  String get label => L10n.t('hazard.marker.ahead', {'dist': Relation.distanceText(distanceM)});
 }
 
 /// Speaks text with the warning priority (tests pass their own).
@@ -214,14 +215,19 @@ class EmergencyGuidance extends ChangeNotifier {
     return '$m meters';
   }
 
-  /// What is said at a navigation threshold.
-  static String navSpeech(int m) =>
-      m <= 100 ? 'You are approaching the emergency location.' : 'Emergency location ${spokenDistance(m)} away.';
+  /// What is said at a navigation threshold, in [lang] (the voice engine's
+  /// confirmed language, [VoiceService.speechLang]; default English).
+  /// Distances stay as digits and units in every language.
+  static String navSpeech(int m, {String lang = 'en'}) =>
+      m <= 100 ? L10n.t('speech.nav.near', const {}, lang) : L10n.t('speech.nav.away', {'dist': spokenDistance(m)}, lang);
 
-  /// What is said at a hazard threshold.
-  static String hazardSpeech(int m) => m <= 500
-      ? 'Caution. Rider accident ${spokenDistance(m)} ahead. Slow down.'
-      : 'Caution. Rider accident reported ${spokenDistance(m)} ahead.';
+  /// What is said at a hazard threshold, in [lang].
+  static String hazardSpeech(int m, {String lang = 'en'}) => m <= 500
+      ? L10n.t('speech.hazard.near', {'dist': spokenDistance(m)}, lang)
+      : L10n.t('speech.hazard.ahead', {'dist': spokenDistance(m)}, lang);
+
+  /// The language the spoken lines use: what the voice engine confirmed, else English.
+  String get _speechLang => _voice?.speechLang ?? 'en';
 
   // ------------------------------------------------------------- actions
 
@@ -432,7 +438,7 @@ class EmergencyGuidance extends ChangeNotifier {
     }
     if (!feedVoice) return;
     final hit = _navAnnouncer.onDistance(remaining);
-    if (hit != null) _say(navSpeech(hit), 'NAV:${t.ref}:$hit');
+    if (hit != null) _say(navSpeech(hit, lang: _speechLang), 'NAV:${t.ref}:$hit');
   }
 
   Future<void> _requestRoute() async {
@@ -540,7 +546,7 @@ class EmergencyGuidance extends ChangeNotifier {
       final navigatingHere = _target?.ref == h.hazardId;
       if ((along || toward) && !navigatingHere) {
         final hit = st.announcer.onDistance(st.distanceM!);
-        if (hit != null) _say(hazardSpeech(hit), 'HAZ:${h.hazardId}:$hit');
+        if (hit != null) _say(hazardSpeech(hit, lang: _speechLang), 'HAZ:${h.hazardId}:$hit');
       }
     }
   }

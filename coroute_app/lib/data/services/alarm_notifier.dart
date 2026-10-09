@@ -4,6 +4,8 @@ import 'dart:ui' show IsolateNameServer;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../core/constants/safety_constants.dart';
+import '../../core/l10n/l10n.dart';
+import '../../core/ui/ride_alert.dart';
 import 'safety_service.dart';
 
 /// Called by flutter_local_notifications on a background isolate when a
@@ -21,7 +23,8 @@ void alarmNotificationBackground(NotificationResponse response) {
 /// notifications: the crash alarm, the rider prompts and the admin alarm.
 ///
 /// Payload prefixes: 'CRASH' (crash alarm), 'PROMPT' (`PROMPT:<key>`), 'ADMIN'.
-/// Button ids: 'crash_ok', 'crash_send', 'prompt_ok'.
+/// Button ids: 'crash_ok', 'crash_send', 'prompt_ok', 'prompt_secondary' (3.16:
+/// "Filled up", "Need help").
 class AlarmNotifier {
   AlarmNotifier._();
 
@@ -32,6 +35,7 @@ class AlarmNotifier {
   static const String actionCrashOk = 'crash_ok';
   static const String actionCrashSend = 'crash_send';
   static const String actionPromptOk = 'prompt_ok';
+  static const String actionPromptSecondary = 'prompt_secondary';
 
   static FlutterLocalNotificationsPlugin? _plugin;
   static Future<bool>? _init;
@@ -131,8 +135,8 @@ class AlarmNotifier {
   static void debugDispatch(String? actionId, String? payload) => _dispatch(actionId, payload);
 
   /// The crash alarm: full-screen over the lock screen (when Android allows it),
-  /// alarm volume, repeating sound and vibration, buttons "I'm OK" and "Send now"
-  /// that work without unlocking.
+  /// alarm volume, repeating sound and vibration, buttons "I'm OK" and "Need Help"
+  /// that work without unlocking (labels in the safety language).
   static Future<void> showCrashAlarm({required String title, required String body}) async {
     if (!await ensureInitialized()) return;
     final details = AndroidNotificationDetails(
@@ -152,9 +156,9 @@ class AlarmNotifier {
       autoCancel: false,
       showWhen: true,
       styleInformation: BigTextStyleInformation(body),
-      actions: const [
-        AndroidNotificationAction(actionCrashOk, "I'm OK", showsUserInterface: false, cancelNotification: true),
-        AndroidNotificationAction(actionCrashSend, 'Send now', showsUserInterface: false, cancelNotification: true),
+      actions: [
+        AndroidNotificationAction(actionCrashOk, L10n.t('notif.crash.ok'), showsUserInterface: false, cancelNotification: true),
+        AndroidNotificationAction(actionCrashSend, L10n.t('notif.crash.help'), showsUserInterface: false, cancelNotification: true),
       ],
     );
     try {
@@ -166,16 +170,18 @@ class AlarmNotifier {
 
   static Future<void> cancelCrashAlarm() => _cancel(SafetyConstants.crashAlarmId);
 
-  /// A rider prompt ("Are you OK?", "Time for a break") with its main button.
+  /// A rider prompt ("Are you OK?", "Time for a break", "Fuel soon", "Still okay?")
+  /// with its main button and, when the prompt has one, its second button.
   static Future<void> showPrompt(SafetyPrompt p) async {
     if (!await ensureInitialized()) return;
-    final checkIn = p.kind == SafetyPromptKind.checkIn;
+    final urgent = p.tier == AlertTier.important;
+    final secondary = p.secondaryLabel;
     final details = AndroidNotificationDetails(
       SafetyConstants.channelSafety,
       'Ride safety',
       channelDescription: 'Are you OK? checks and break reminders, for you only.',
       importance: Importance.high,
-      priority: checkIn ? Priority.high : Priority.defaultPriority,
+      priority: urgent ? Priority.high : Priority.defaultPriority,
       category: AndroidNotificationCategory.reminder,
       visibility: NotificationVisibility.public,
       onlyAlertOnce: true,
@@ -183,6 +189,8 @@ class AlarmNotifier {
       styleInformation: BigTextStyleInformation(p.message),
       actions: [
         AndroidNotificationAction(actionPromptOk, p.primaryLabel, showsUserInterface: false, cancelNotification: true),
+        if (secondary != null && secondary.isNotEmpty)
+          AndroidNotificationAction(actionPromptSecondary, secondary, showsUserInterface: false, cancelNotification: true),
       ],
     );
     try {
@@ -194,7 +202,12 @@ class AlarmNotifier {
 
   static Future<void> cancelPrompt(String key) => _cancel(_promptId(key));
 
-  static int _promptId(String key) => key == SafetyConstants.promptCheckIn ? SafetyConstants.checkInId : SafetyConstants.fatigueId;
+  static int _promptId(String key) => switch (key) {
+        SafetyConstants.promptCheckIn => SafetyConstants.checkInId,
+        SafetyConstants.promptFuel => SafetyConstants.fuelId,
+        SafetyConstants.promptFollowUp => SafetyConstants.followUpId,
+        _ => SafetyConstants.fatigueId,
+      };
 
   /// Admin console: rings (alarm volume, repeating) while an emergency is open and not silenced.
   static Future<void> startAdminAlarm({required String title, required String body}) async {

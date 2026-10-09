@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
+import '../../core/l10n/l10n.dart';
 
 /// Rider settings kept on the phone: data saver ("low data") mode and the ride
 /// safety switches.
@@ -15,6 +16,10 @@ import '../../core/constants/safety_constants.dart';
 /// no internet (off until the rider opts in and allows SMS), the break reminder
 /// and the "Are you OK?" check-in (both on), and whether the brand battery
 /// guide was seen.
+///
+/// 3.16: language (safety screens and spoken alerts), tank range for the fuel
+/// reminder, "speak more after dark", medical ID on the lock screen during an SOS,
+/// the helmet and documents reminder, and saving route maps on Wi-Fi.
 class SettingsService extends ChangeNotifier {
   SettingsService([this._prefs]);
 
@@ -35,6 +40,14 @@ class SettingsService extends ChangeNotifier {
   bool _richNotification = true;
   bool _netConsentSeen = false;
   int _netConsentPrompts = 0;
+
+  // 3.16.
+  AppLanguage _language = AppLanguage.system;
+  int _fuelRangeKm = 0;
+  bool _speakMoreAfterDark = true;
+  bool _medicalIdOnLockScreen = false;
+  bool _documentsReminder = true;
+  bool _saveRouteMaps = true;
 
   bool get lowData => _lowData;
   bool get crashDetection => _crashDetection;
@@ -65,6 +78,24 @@ class SettingsService extends ChangeNotifier {
   /// How many times the consent sheet was put off with Later.
   int get netConsentPrompts => _netConsentPrompts;
 
+  /// Language of the safety screens and spoken alerts (system by default).
+  AppLanguage get language => _language;
+
+  /// Tank range in km for the fuel reminder; 0 = off.
+  int get fuelRangeKm => _fuelRangeKm;
+
+  /// After sunset, important group alerts are spoken too (on by default).
+  bool get speakMoreAfterDark => _speakMoreAfterDark;
+
+  /// Blood group, allergies and emergency contact on the lock screen during my own SOS (off by default).
+  bool get medicalIdOnLockScreen => _medicalIdOnLockScreen;
+
+  /// "Helmet on, licence and documents with you?" line in the pre-ride checklist (on by default).
+  bool get documentsReminder => _documentsReminder;
+
+  /// Save map tiles along the planned route on Wi-Fi before the ride (on by default).
+  bool get saveRouteMaps => _saveRouteMaps;
+
   Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
 
   /// Reads the saved settings. Safe to call more than once.
@@ -84,12 +115,21 @@ class SettingsService extends ChangeNotifier {
       _richNotification = prefs.getBool(NetworkConstants.keyRichNotification) ?? true;
       _netConsentSeen = prefs.getBool(NetworkConstants.keyNetConsentSeen) ?? false;
       _netConsentPrompts = prefs.getInt(NetworkConstants.keyNetConsentPrompts) ?? 0;
+      _language = AppLanguage.fromCode(prefs.getString(NetworkConstants.keyLanguage));
+      _fuelRangeKm = _clampRange(prefs.getInt(NetworkConstants.keyFuelRangeKm) ?? 0);
+      _speakMoreAfterDark = prefs.getBool(NetworkConstants.keySpeakAfterDark) ?? true;
+      _medicalIdOnLockScreen = prefs.getBool(NetworkConstants.keyMedicalIdLock) ?? false;
+      _documentsReminder = prefs.getBool(NetworkConstants.keyDocsReminder) ?? true;
+      _saveRouteMaps = prefs.getBool(NetworkConstants.keySaveRouteMaps) ?? true;
     } catch (e) {
       debugPrint('settings load note: $e');
     }
+    L10n.setLanguage(_language);
     _loaded = true;
     notifyListeners();
   }
+
+  static int _clampRange(int km) => km.clamp(0, NetworkConstants.fuelRangeMaxKm);
 
   Future<void> _save(String key, bool value) async {
     try {
@@ -188,6 +228,62 @@ class SettingsService extends ChangeNotifier {
     } catch (e) {
       debugPrint('settings save note: $e');
     }
+  }
+
+  /// Language of the safety screens and spoken alerts; applied at once through [L10n].
+  Future<void> setLanguage(AppLanguage value) async {
+    if (value == _language) return;
+    _language = value;
+    L10n.setLanguage(value);
+    notifyListeners();
+    try {
+      final prefs = await _p();
+      await prefs.setString(NetworkConstants.keyLanguage, value.code);
+    } catch (e) {
+      debugPrint('settings save note: $e');
+    }
+  }
+
+  /// Tank range in km (0 turns the fuel reminder off; at most [NetworkConstants.fuelRangeMaxKm]).
+  Future<void> setFuelRangeKm(int km) async {
+    final v = _clampRange(km);
+    if (v == _fuelRangeKm) return;
+    _fuelRangeKm = v;
+    notifyListeners();
+    try {
+      final prefs = await _p();
+      await prefs.setInt(NetworkConstants.keyFuelRangeKm, v);
+    } catch (e) {
+      debugPrint('settings save note: $e');
+    }
+  }
+
+  Future<void> setSpeakMoreAfterDark(bool value) async {
+    if (value == _speakMoreAfterDark) return;
+    _speakMoreAfterDark = value;
+    notifyListeners();
+    await _save(NetworkConstants.keySpeakAfterDark, value);
+  }
+
+  Future<void> setMedicalIdOnLockScreen(bool value) async {
+    if (value == _medicalIdOnLockScreen) return;
+    _medicalIdOnLockScreen = value;
+    notifyListeners();
+    await _save(NetworkConstants.keyMedicalIdLock, value);
+  }
+
+  Future<void> setDocumentsReminder(bool value) async {
+    if (value == _documentsReminder) return;
+    _documentsReminder = value;
+    notifyListeners();
+    await _save(NetworkConstants.keyDocsReminder, value);
+  }
+
+  Future<void> setSaveRouteMaps(bool value) async {
+    if (value == _saveRouteMaps) return;
+    _saveRouteMaps = value;
+    notifyListeners();
+    await _save(NetworkConstants.keySaveRouteMaps, value);
   }
 
   Future<void> markOemGuideSeen() async {

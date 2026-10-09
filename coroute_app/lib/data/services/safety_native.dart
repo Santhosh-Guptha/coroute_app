@@ -82,6 +82,27 @@ class SafetyNative {
     } catch (_) {}
   }
 
+  /// The app's own cache folder (`context.cacheDir`), for the map tile cache. Null off Android.
+  static Future<String?> cacheDir() async {
+    if (!_android) return null;
+    try {
+      final d = await _channel.invokeMethod<String>('cacheDir');
+      return d == null || d.isEmpty ? null : d;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 'wifi', 'mobile' or 'none' (ConnectivityManager; no new permission). 'none' off Android.
+  static Future<String> networkKind() async {
+    if (!_android) return 'none';
+    try {
+      return await _channel.invokeMethod<String>('networkKind') ?? 'none';
+    } catch (_) {
+      return 'none';
+    }
+  }
+
   static Future<bool> _bool(String method) async {
     if (!_android) return false;
     try {

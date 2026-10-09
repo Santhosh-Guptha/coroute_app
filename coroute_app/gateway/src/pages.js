@@ -24,8 +24,10 @@ const SITE_PAGES = {
   '/privacy': 'privacy.html',
   '/terms': 'terms.html',
 };
-/** Pages rendered by other handlers (not routes of their own). */
-const SPECIAL_PAGES = ['404.html', 'join.html'];
+/** Pages rendered by other handlers (not routes of their own). 3.16: the live emergency link pages (/e/<token>). */
+const SPECIAL_PAGES = ['404.html', 'join.html', 'live.html', 'live_expired.html'];
+/** Special pages a deployment may still lack (the server then answers with a built-in plain page). */
+const OPTIONAL_PAGES = new Set(['live.html', 'live_expired.html']);
 /** Sitemap entries: path and priority. */
 const SITEMAP = [['/', '1.0'], ['/features', '0.8'], ['/safety', '0.8'], ['/how-it-works', '0.7'], ['/get', '0.8'], ['/about', '0.5'], ['/privacy', '0.3'], ['/terms', '0.3']];
 
@@ -66,6 +68,7 @@ function loadSite(publicDir) {
 
   const cache = new Map();
   for (const file of [...new Set([...Object.values(SITE_PAGES), ...SPECIAL_PAGES])]) {
+    if (OPTIONAL_PAGES.has(file) && !fs.existsSync(path.join(publicDir, file))) continue;
     let html = read(file).replace(INCLUDE, (m, name) => {
       if (!(name in partials)) throw new Error(`${file}: unknown include "${name}"`);
       return partials[name];
@@ -81,6 +84,8 @@ function loadSite(publicDir) {
     appVersion,
     /** Short content hash of one file under public/assets (path relative to assets/). */
     assetHash: (rel) => fileHashes.get(rel),
+    /** True when the page file exists and was loaded. */
+    has: (file) => cache.has(file),
     /** The page with the per-request placeholders filled in. */
     render(file, vars = {}) {
       let html = cache.get(file);

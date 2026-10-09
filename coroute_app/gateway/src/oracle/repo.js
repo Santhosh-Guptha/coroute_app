@@ -37,7 +37,8 @@ const C = {
 };
 
 /** Alert fields that live in memory only (filled by the safety network) and are never stored. */
-const MEMORY_ONLY_ALERT_FIELDS = ['network', 'ownNearest'];
+// 3.16: `liveLink` (hash, times) and `nearestHospital` are stored with the alert; `hospitalTried` is not.
+const MEMORY_ONLY_ALERT_FIELDS = ['network', 'ownNearest', 'hospitalTried'];
 function storableAlert(a) {
   const out = { ...a };
   for (const k of MEMORY_ONLY_ALERT_FIELDS) delete out[k];

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'core/constants/app_constants.dart';
+import 'core/l10n/l10n.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'core/ui/ui.dart';
@@ -16,16 +17,21 @@ import 'data/services/convoy_service.dart';
 import 'data/services/geo_service.dart';
 import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
+import 'data/local/ride_stats_store.dart';
 import 'data/local/sqflite_track_queue.dart';
 import 'data/services/realtime_service.dart';
 import 'data/services/ride_notification_service.dart';
+import 'data/services/safety_native.dart';
 import 'data/services/safety_service.dart';
 import 'data/services/settings_service.dart';
+import 'data/services/tile_cache_service.dart';
 import 'data/services/timeline_service.dart';
 import 'data/services/track_recorder.dart';
 import 'data/services/track_uploader.dart';
 import 'data/services/trip_storage_service.dart';
 import 'data/services/voice_service.dart';
+import 'data/services/weather_service.dart';
+import 'domain/notify/notification_snapshot.dart';
 import 'presentation/auth/access_gate_screen.dart';
 import 'presentation/ride/emergency_guidance.dart';
 import 'presentation/safety/crash_alarm_host.dart';
@@ -43,9 +49,20 @@ void main() async {
   await MetaService.readPackageInfo();
   final theme = ThemeController();
   await theme.load();
+  // The phone's language decides the safety texts when the setting is "System language".
+  L10n.systemLanguage = WidgetsBinding.instance.platformDispatcher.locale.languageCode;
   // Data saver is known before the first frame, so the first ride already uses it.
   final settings = SettingsService();
   await settings.load();
+  // Map tiles saved on the phone (3.16): best effort; without it maps use the network.
+  try {
+    final dir = await SafetyNative.cacheDir();
+    if (dir != null) TileCache.instance = await TileCache.open('$dir/tiles');
+  } catch (_) {
+    TileCache.instance = null;
+  }
+  // Rider-only ride numbers (hard stops) older than 90 days go; nothing else to maintain.
+  RideStatsStore.prune().ignore();
   SystemChrome.setSystemUIOverlayStyle(AppTheme.overlayStyle);
   runApp(CoRouteApp(theme: theme, settings: settings));
 }
@@ -62,6 +79,10 @@ class CoRouteApp extends StatelessWidget {
         ChangeNotifierProvider<ThemeController>.value(value: theme),
         ChangeNotifierProvider<SettingsService>(create: (_) => settings ?? (SettingsService()..load())),
         ChangeNotifierProvider(create: (_) => ApiClient()),
+        // Weather along the route (3.16): two small requests per ride through the gateway.
+        ChangeNotifierProvider<WeatherService>(create: (ctx) => WeatherService(ctx.read<ApiClient>(), ctx.read<SettingsService>())),
+        // Route map tiles saved before the ride (3.16): one bounded job, on Wi-Fi or by a tap.
+        ChangeNotifierProvider<TilePrefetcher>(create: (_) => TilePrefetcher(TileCache.instance)),
         ChangeNotifierProvider(create: (ctx) {
           final api = ctx.read<ApiClient>();
           final rt = RealtimeService();
@@ -109,11 +130,19 @@ class CoRouteApp extends StatelessWidget {
           create: (ctx) => AlertService(ctx.read<ConvoyService>(), ctx.read<TimelineService>(), voice: ctx.read<VoiceService>()),
           dispose: (_, a) => a.dispose(),
         ),
-        // Rider safety: crash alarm, emergency texts, break reminder, "Are you OK?" check-in.
+        // Rider safety: crash alarm, emergency texts, break reminder, "Are you OK?" check-in,
+        // fuel reminder, hard stops, follow-up, night voice, weather and tiles at ride start.
         // Created at start so a crash alarm can open without any screen asking for it.
         ChangeNotifierProvider<SafetyService>(
           lazy: false,
-          create: (ctx) => SafetyService(ctx.read<ConvoyService>(), ctx.read<SettingsService>(), ctx.read<AuthService>()),
+          create: (ctx) => SafetyService(
+            ctx.read<ConvoyService>(),
+            ctx.read<SettingsService>(),
+            ctx.read<AuthService>(),
+            voice: ctx.read<VoiceService>(),
+            weather: ctx.read<WeatherService>(),
+            tiles: ctx.read<TilePrefetcher>(),
+          ),
         ),
         // In-app navigation to an emergency and accident warnings on my route (voice works with
         // the screen off, from fixes the ride already has).
@@ -132,7 +161,17 @@ class CoRouteApp extends StatelessWidget {
         // The big ride notification on the home and lock screen (replaces the plain one in place).
         Provider<RideNotificationService>(
           lazy: false,
-          create: (ctx) => RideNotificationService(ctx.read<ConvoyService>(), ctx.read<TimelineService>(), ctx.read<SettingsService>()),
+          create: (ctx) {
+            final settings = ctx.read<SettingsService>();
+            final auth = ctx.read<AuthService>();
+            return RideNotificationService(
+              ctx.read<ConvoyService>(),
+              ctx.read<TimelineService>(),
+              settings,
+              // Opt-in (3.16): the rider's medical ID on the lock screen during their own SOS.
+              medicalId: () => settings.medicalIdOnLockScreen ? MedicalId.fromAuth(auth) : null,
+            );
+          },
           dispose: (_, n) => n.dispose(),
         ),
       ],

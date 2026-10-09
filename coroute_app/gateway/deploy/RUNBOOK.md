@@ -188,7 +188,7 @@ they ignore. Their SOS alerts are still searched for by the network (server side
 
 1. Upgrade the gateway (section 7). Check: `curl -s https://coroute.duckdns.org/api/health` shows `"version":"3.15.0"`,
    `./deploy/smoke_test.sh https://coroute.duckdns.org` passes, and the log shows no `[net]` or `[discovery]` warnings.
-2. In `/etc/coroute/gateway.env` set `LATEST_APP_BUILD=75` (the default is already 75) and restart.
+2. In `/etc/coroute/gateway.env` set `LATEST_APP_BUILD=75` (the default was 75 in 3.15; 76 since 3.16) and restart.
 3. Only then publish the app (APKs on the gateway, section 4, and the Play release; see `PLAY_STORE_CHECKLIST.md` for
    the Data safety and listing changes).
 4. Do not raise `MIN_APP_BUILD` for this release.
@@ -216,6 +216,48 @@ Operations:
 * Privacy notes: the safety log holds ids and short codes only (no positions, names or text) and is purged after
   `AUDIT_RETENTION_DAYS` (180) and on account deletion. The network summary (responders, ETAs) lives in memory only;
   an alert stores just the responders' first names, statuses and times (`netResponders`).
+
+## Release order for 3.16 (safety round): gateway first, then the app
+
+The 3.16 app (build 76) sends `ROLE_SET` (sweeper), `CHECK_IN` with `context: FOLLOW_UP`, `CONFIG.townLimitKmh` and
+calls the new REST endpoints (`/api/geo/weather`, `/api/convoys/:id/alerts/:id/live-link`) only when the gateway's HELLO
+lists `ride316`. Everything new the gateway sends is either a new timeline type (`STALE_UPDATE`, `LOW_BATTERY`,
+`BEHIND_SWEEPER`, `ROLE_CHANGED`, `FOLLOW_UP`), which 3.14 and 3.15 apps print as a generic line, or an extra field on an
+existing message (`nearestHospital`, `liveLink`, `townLimitKmh`, `farByRoad`, `OVERSPEED.data.context`), which they ignore.
+
+1. Upgrade the gateway (section 7). Check: `curl -s https://coroute.duckdns.org/api/health` shows `"version":"3.16.0"`
+   and `./deploy/smoke_test.sh https://coroute.duckdns.org` passes.
+2. Outbound allow-list / firewall: 3.16 adds ONE new outbound host, `api.open-meteo.com` (HTTPS, weather on the
+   route, no key). Everything else still goes to the OSM hosts of section "Free OpenStreetMap services". If the host
+   cannot be allowed, set `WEATHER_URL=` (empty): the app then shows no weather line (503 `WEATHER_OFF`).
+3. In `/etc/coroute/gateway.env` set `LATEST_APP_BUILD=76` (the default is already 76) and restart.
+4. Only then publish the app (APKs on the gateway, section 4, and the Play release; `PLAY_STORE_CHECKLIST.md`).
+5. Do not raise `MIN_APP_BUILD` for this release. No new collections, no manual steps: new alert fields (`liveLink`
+   hash and times, `nearestHospital`) live on the existing alert documents; weather and hospital answers in `geo_cache`.
+
+Budgets (all in `deploy/.env.example`, section "3.16"):
+* Weather: one Open-Meteo call per review and per ride start with up to 5 route points, rounded to a 0.1 degree grid and
+  cached 30 minutes for everyone (memory, then `geo_cache`). Global `WEATHER_PER_MIN=20` upstream calls a minute (over
+  budget: cached cells are answered, the rest are null), `WEATHER_USER_PER_MIN=6` per rider. Attribution "Weather data by
+  Open-Meteo.com" is shown in the app and on the privacy page.
+* Nearest hospital: one Nominatim search per HIGH or CRITICAL alert (never for LOW), after the ALERT went out and never
+  awaited by it, skipped when the polite OSM queue would wait more than `HOSPITAL_MAX_WAIT_MS`; answers cached 30 days per
+  1 km cell, "nothing found" 6 hours.
+* Live emergency links (`/e/<token>`): the token (24 random bytes, base64url, 32 chars) is returned once to the rider or
+  lead and only its sha256 is stored with the alert; 30 minutes, revocable, revoked automatically when the alert closes,
+  at most 3 per alert. The public JSON view and page are limited to 60 requests a minute per IP, sent with `no-store`,
+  `X-Robots-Tag: noindex` and `Referrer-Policy: no-referrer`, and show the first name, last position and time only.
+  Audit rows `LIVE_LINK` (CREATE / REVOKE / EXPIRE / VIEW) carry ids, never the token.
+* Admin "call the emergency contact" (`POST /api/admin/emergencies/:groupId/:alertId/contact`, 10 a minute per admin)
+  answers the contact once for the call; the audit row `ADMIN_CONTACT CALL` holds the admin, rider, alert and time,
+  never the number. Both audit kinds appear in `GET /api/admin/safety`.
+
+Server-side rules (no new timers; they ride on the telemetry path and the existing 30 s timeline tick): stale rider
+(`STALE_UPDATE`, thresholds from the group's own update rhythm, parked phones excluded, closed by the next fix or
+replaced by OFFLINE), low battery (`LOW_BATTERY` at 15%, closed at 25% or when charging), sweeper (`ROLE_SET` by the
+lead only, one per room; `BEHIND_SWEEPER` after 60 s more than 300 m behind on the route), town speed limit
+(`OVERSPEED.data.context = TOWN` within 1 km of the start, planned stops and the destination). All are plain timeline
+entries with a `notify` list (lead and sweeper); the apps turn them into alerts.
 
 ## Free-tier capacity notes
 

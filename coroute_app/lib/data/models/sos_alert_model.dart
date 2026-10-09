@@ -58,6 +58,14 @@ class SosAlertModel {
   /// The nearest rider of my group to the emergency.
   final OwnNearest? ownNearest;
 
+  /// 3.16: the nearest hospital the server found (HIGH/CRITICAL alerts, when it could).
+  final NearbyPlace? nearestHospital;
+
+  /// 3.16: the live emergency link state (`liveLink {expiresAt, revokedAt}`), 0 when none.
+  /// The token itself is never sent to the group (see [LiveLink] in ConvoyService).
+  final int liveLinkExpiresAt;
+  final int liveLinkRevokedAt;
+
   SosAlertModel({
     required this.alertId,
     required this.userId,
@@ -85,6 +93,9 @@ class SosAlertModel {
     this.reportedByName = '',
     this.network,
     this.ownNearest,
+    this.nearestHospital,
+    this.liveLinkExpiresAt = 0,
+    this.liveLinkRevokedAt = 0,
   }) : occurredAt = occurredAt ?? timestamp;
 
   bool get isCrash => alertType == SosTypes.crash;
@@ -97,6 +108,12 @@ class SosAlertModel {
 
   /// Most recent known time of the rider's position ([lastUpdateAt], else the raise time).
   int get lastKnownAt => lastUpdateAt ?? timestamp;
+
+  /// Reported by another rider ("Rider down here"), not raised by the rider themself.
+  bool get isReport => effectiveSource == EmergencySource.memberReport || effectiveSource == EmergencySource.nearbyReport;
+
+  /// A live emergency link exists and was not revoked (as the server told the group).
+  bool liveLinkActiveAt(int nowMs) => liveLinkExpiresAt > nowMs && liveLinkRevokedAt == 0;
 
   /// A (possible) accident: crash, crash detection or a rider reported down.
   bool get isAccident =>
@@ -131,6 +148,9 @@ class SosAlertModel {
     EmergencyNetwork? network,
     OwnNearest? ownNearest,
     bool clearOwnNearest = false,
+    NearbyPlace? nearestHospital,
+    int? liveLinkExpiresAt,
+    int? liveLinkRevokedAt,
   }) {
     return SosAlertModel(
       alertId: alertId ?? this.alertId,
@@ -159,6 +179,9 @@ class SosAlertModel {
       reportedByName: reportedByName ?? this.reportedByName,
       network: network ?? this.network,
       ownNearest: clearOwnNearest ? null : (ownNearest ?? this.ownNearest),
+      nearestHospital: nearestHospital ?? this.nearestHospital,
+      liveLinkExpiresAt: liveLinkExpiresAt ?? this.liveLinkExpiresAt,
+      liveLinkRevokedAt: liveLinkRevokedAt ?? this.liveLinkRevokedAt,
     );
   }
 
@@ -191,6 +214,8 @@ class SosAlertModel {
       if (reportedByName.isNotEmpty) 'reportedByName': reportedByName,
       'network': ?network?.toJson(),
       'ownNearest': ?ownNearest?.toJson(),
+      'nearestHospital': ?nearestHospital?.toJson(),
+      if (liveLinkExpiresAt > 0) 'liveLink': {'expiresAt': liveLinkExpiresAt, 'revokedAt': liveLinkRevokedAt},
     };
   }
 
@@ -198,6 +223,7 @@ class SosAlertModel {
     final details = json['details'] is Map ? Map<String, dynamic>.from(json['details'] as Map) : const <String, dynamic>{};
     double? toD(Object? v) => v is num ? v.toDouble() : null;
     final timestamp = (json['timestamp'] as num?)?.toInt() ?? 0;
+    final link = json['liveLink'] is Map ? json['liveLink'] as Map : const {};
     return SosAlertModel(
       alertId: json['alertId'] ?? '',
       userId: json['userId'] ?? '',
@@ -225,6 +251,9 @@ class SosAlertModel {
       reportedByName: json['reportedByName']?.toString() ?? '',
       network: EmergencyNetwork.fromJson(json['network']),
       ownNearest: OwnNearest.fromJson(json['ownNearest']),
+      nearestHospital: NearbyPlace.fromJson(json['nearestHospital']),
+      liveLinkExpiresAt: (link['expiresAt'] as num?)?.toInt() ?? 0,
+      liveLinkRevokedAt: (link['revokedAt'] as num?)?.toInt() ?? 0,
     );
   }
 }

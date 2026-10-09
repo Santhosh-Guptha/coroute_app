@@ -467,11 +467,7 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
             initialCameraFit: bounds == null ? null : CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)),
           ),
           children: [
-            TileLayer(
-              tileBuilder: mapTileBuilder,
-              urlTemplate: AppConstants.osmTileUrl,
-              userAgentPackageName: AppConstants.osmUserAgent,
-            ),
+            appTileLayer(),
             if (points.length >= 2)
               PolylineLayer(polylines: [Polyline(points: points, strokeWidth: 5.0, color: AppTheme.neonCyan)]),
             if (points.isNotEmpty)

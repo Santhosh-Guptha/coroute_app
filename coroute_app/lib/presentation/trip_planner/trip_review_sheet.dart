@@ -1,12 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/route_model.dart';
+import '../../data/services/settings_service.dart';
+import '../../data/services/tile_cache_service.dart';
+import '../../data/services/weather_service.dart';
+import '../../domain/safety/sun_helper.dart';
+import '../ride/ride_sheet.dart' show SaveRouteMapRow;
 
 /// The last step before a ride starts: what the trip looks like (distance,
-/// estimated time, stops, riders, departure), how the group is invited, the
-/// optional group speed limit, then [Start Ride].
+/// estimated time, stops, riders, departure), the weather along the route
+/// and whether the ride ends after dark (3.16), "Save route map", how the
+/// group is invited, the optional group speed limit, then [Start Ride].
 ///
 /// [show] returns the chosen speed limit in km/h (0 = off) when the rider
 /// presses Start Ride, or null when the sheet is closed.
@@ -18,6 +26,16 @@ class TripReviewSheet extends StatefulWidget {
   final int stops;
   final int speedLimitKmh;
 
+  /// Planned stops (name, lat, lng) for the weather sample points.
+  final List<(String, double, double)> namedStops;
+  final double? startLat;
+  final double? startLng;
+  final double? destinationLat;
+  final double? destinationLng;
+
+  /// For the sunset line in tests; defaults to now.
+  final DateTime? now;
+
   const TripReviewSheet({
     super.key,
     required this.name,
@@ -26,7 +44,15 @@ class TripReviewSheet extends StatefulWidget {
     this.route,
     this.stops = 0,
     this.speedLimitKmh = 0,
+    this.namedStops = const [],
+    this.startLat,
+    this.startLng,
+    this.destinationLat,
+    this.destinationLng,
+    this.now,
   });
+
+  static const String checkingWeather = 'Checking weather...';
 
   static Future<int?> show(
     BuildContext context, {
@@ -36,6 +62,11 @@ class TripReviewSheet extends StatefulWidget {
     RouteModel? route,
     int stops = 0,
     int speedLimitKmh = 0,
+    List<(String, double, double)> namedStops = const [],
+    double? startLat,
+    double? startLng,
+    double? destinationLat,
+    double? destinationLng,
   }) {
     return showAppSheet<int>(
       context,
@@ -47,8 +78,33 @@ class TripReviewSheet extends StatefulWidget {
         route: route,
         stops: stops,
         speedLimitKmh: speedLimitKmh,
+        namedStops: namedStops,
+        startLat: startLat,
+        startLng: startLng,
+        destinationLat: destinationLat,
+        destinationLng: destinationLng,
       ),
     );
+  }
+
+  /// The sunset line for this trip (pure): null by day. The destination position,
+  /// else the route's last point, decides the sunset.
+  static String? darkLine({
+    required DateTime now,
+    required RouteModel? route,
+    double? destinationLat,
+    double? destinationLng,
+    required String Function(DateTime) fmtTime,
+  }) {
+    if (route == null) return null;
+    var lat = destinationLat ?? 0.0, lng = destinationLng ?? 0.0;
+    if ((lat == 0 && lng == 0) && route.points.isNotEmpty) {
+      final (la, ln) = route.points.last;
+      lat = la;
+      lng = ln;
+    }
+    if (lat == 0 && lng == 0) return null;
+    return DarkCheck.reviewLine(departure: now, eta: Duration(seconds: route.durationS), lat: lat, lng: lng, fmtTime: fmtTime);
   }
 
   /// "From Home to Fort", "From Home", "To Fort" or "".
@@ -67,11 +123,63 @@ class TripReviewSheet extends StatefulWidget {
 
 class _TripReviewSheetState extends State<TripReviewSheet> {
   late int _limit = widget.speedLimitKmh;
+  WeatherSummary? _weather;
+  bool _checking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkWeather());
+  }
+
+  /// One weather check when the sheet opens (cached 30 min; none under data saver).
+  Future<void> _checkWeather() async {
+    if (!mounted) return;
+    final r = widget.route;
+    final weather = Provider.of<WeatherService?>(context, listen: false);
+    if (r == null || weather == null || r.points.isEmpty) return;
+    final now = widget.now ?? DateTime.now();
+    final pts = WeatherService.samplePoints(
+      line: r.points,
+      durationS: r.durationS,
+      departS: now.millisecondsSinceEpoch ~/ 1000,
+      namedStops: widget.namedStops,
+      destinationName: widget.destinationName ?? '',
+    );
+    setState(() => _checking = true);
+    WeatherSummary? w;
+    try {
+      w = await weather.check(pts);
+    } catch (_) {
+      w = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _weather = w;
+      _checking = false;
+    });
+  }
+
+  String _clock(DateTime d) => MaterialLocalizations.of(context).formatTimeOfDay(
+        TimeOfDay.fromDateTime(d),
+        alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+      );
 
   @override
   Widget build(BuildContext context) {
     final r = widget.route;
     final hasDestination = (widget.destinationName ?? '').trim().isNotEmpty;
+    final lowData = Provider.of<SettingsService?>(context)?.lowData ?? false;
+    final pf = Provider.of<TilePrefetcher?>(context);
+    final weatherLine = _checking ? TripReviewSheet.checkingWeather : (lowData ? L10n.t('weather.off') : _weather?.line);
+    final dark = TripReviewSheet.darkLine(
+      now: widget.now ?? DateTime.now(),
+      route: r,
+      destinationLat: widget.destinationLat,
+      destinationLng: widget.destinationLng,
+      fmtTime: _clock,
+    );
+    final canSaveMap = r != null && !r.approximate && r.points.length >= 2;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -104,6 +212,30 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                 Padding(
                   padding: const EdgeInsets.only(top: Space.s8),
                   child: Text('Distance and time are a straight-line estimate.', style: AppText.caption),
+                ),
+              if (r != null && weatherLine != null) ...[
+                const SizedBox(height: Space.s12),
+                _Note(icon: Icons.umbrella_rounded, text: weatherLine),
+                if (!_checking && _weather != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: Space.s4, left: 28),
+                    child: Text(L10n.t('weather.by'), style: AppText.caption),
+                  ),
+              ],
+              if (dark != null) ...[
+                const SizedBox(height: Space.s12),
+                _Note(icon: Icons.nights_stay_rounded, text: dark),
+              ],
+              if (r != null && pf != null && canSaveMap)
+                Padding(
+                  padding: const EdgeInsets.only(top: Space.s8),
+                  child: SaveRouteMapRow(
+                    running: pf.running,
+                    done: pf.done,
+                    total: pf.total,
+                    error: pf.error,
+                    onSave: () => pf.start(r.points, label: widget.name),
+                  ),
                 ),
               const SizedBox(height: Space.s16),
               const _Note(
@@ -174,7 +306,7 @@ class _Note extends StatelessWidget {
       children: [
         Icon(icon, size: 20, color: AppTheme.textSecondary),
         const SizedBox(width: Space.s8),
-        Expanded(child: Text(text, style: AppText.body)),
+        Expanded(child: Text(text, maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.body)),
       ],
     );
   }

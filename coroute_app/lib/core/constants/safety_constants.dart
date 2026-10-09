@@ -92,4 +92,74 @@ class SafetyConstants {
   /// Keys of the local prompts (the same keys AlertPolicy uses).
   static const String promptFatigue = 'LOCAL:FATIGUE';
   static const String promptCheckIn = 'LOCAL:CHECK_IN';
+  static const String promptFuel = 'LOCAL:FUEL';
+  static const String promptFollowUp = 'LOCAL:FOLLOW_UP';
+  static const int fuelId = 1104;
+  static const int followUpId = 1105;
+
+  // ---------------------------------------------------------------- fuel range (3.16)
+  /// The reminder comes when this share of the tank range was ridden since the last fill.
+  static const double fuelWarnFraction = 0.8;
+  static const int fuelMinRangeKm = 50;
+  static const int fuelMaxRangeKm = 1500;
+
+  /// A jump between two fixes larger than this, or a gap longer than [fuelMaxGap], is not
+  /// counted as distance (GPS teleports, app restarts).
+  static const double fuelMaxJumpM = 500;
+  static const Duration fuelMaxGap = Duration(minutes: 5);
+
+  /// Distance ridden since the last fill, for the current ride (survives a restart).
+  static const String keyFuelState = 'coroute_fuel_state_v1';
+
+  // ---------------------------------------------------------------- hard stops (3.16)
+  /// A bucket peak between this and [crashImpactG] with a speed drop of at least
+  /// [hardBrakeDropKmh] within [hardBrakeWindow] is one hard stop; one per [hardBrakeDedupe].
+  static const double hardBrakePeakG = 1.6;
+  static const double hardBrakeDropKmh = 20;
+  static const Duration hardBrakeWindow = Duration(seconds: 6);
+  static const Duration hardBrakeDedupe = Duration(seconds: 10);
+
+  /// Fixes the counter keeps to judge a drop.
+  static const Duration hardBrakeFixWindow = Duration(seconds: 8);
+
+  /// Rider-only ride statistics (hard stops per trip), never uploaded.
+  static const String keyRideStats = 'coroute_ride_stats_v1';
+  static const int rideStatsMax = 50;
+
+  // ---------------------------------------------------------------- post-crash follow-up (3.16)
+  /// After "I'm OK" on a real impact: one "Still okay?" at the next stop of at least
+  /// [followUpStopFor], or [followUpAfter] later, whichever comes first.
+  static const Duration followUpStopFor = Duration(seconds: 60);
+  static const Duration followUpAfter = Duration(minutes: 20);
+
+  // ---------------------------------------------------------------- dark (3.16)
+  /// "Dark in 40 min" shows when sunset is this close.
+  static const Duration darkWarnBefore = Duration(minutes: 60);
+
+  /// The day/night flag is recomputed from fixes at most this often (or after a 20 km move).
+  static const Duration darkRecheckEvery = Duration(minutes: 5);
+  static const double darkRecheckMoveM = 20000;
+
+  // ---------------------------------------------------------------- wearable hook (3.16)
+  /// Impact value of the hidden developer action (no device work this round).
+  static const double wearableImpactG = 6.0;
+
+  // ---------------------------------------------------------------- map tiles (3.16)
+  static const int tileCacheMaxBytes = 60 * 1024 * 1024;
+  static const int tileMaxAgeDays = 30;
+  static const List<int> prefetchZooms = [12, 14];
+  static const int prefetchMaxTiles = 600;
+  static const Duration prefetchSpacing = Duration(milliseconds: 150);
+  static const int prefetchParallel = 2;
+  static const Duration prefetchTimeout = Duration(seconds: 8);
+  static const int prefetchMaxFailures = 5;
+  static const double prefetchSampleM = 200;
+  static const String keyTilesPrefetchedFor = 'coroute_tiles_prefetched_for';
+
+  // ---------------------------------------------------------------- weather (3.16)
+  static const Duration weatherCacheFor = Duration(minutes: 30);
+  static const int weatherMaxPoints = 5;
+
+  /// A sample point takes the name of a planned stop within this distance.
+  static const double weatherStopNearM = 2000;
 }

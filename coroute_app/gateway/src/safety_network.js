@@ -298,6 +298,7 @@ class SafetyNetwork extends EventEmitter {
     return [...inc.responders.values()].map((R) => {
       const out = { rid: R.rid, name: R.name, status: R.status, etaS: Number.isFinite(R.etaS) ? Math.round(R.etaS) : null, distanceM: Number.isFinite(R.distanceM) ? Math.round(R.distanceM / 10) * 10 : null, acceptedAt: R.acceptedAt || 0, arrivedAt: R.arrivedAt || 0 };
       if (MOVING_RESPONDER.has(R.status) && Number.isFinite(R.lat)) { out.lat = r5(R.lat); out.lng = r5(R.lng); }
+      if (inc.notified.get(R.uid)?.confidence === 'FAR') out.farByRoad = true; // 3.16
       if (R.reason) out.reason = R.reason;
       return out;
     });
@@ -588,35 +589,60 @@ class SafetyNetwork extends EventEmitter {
     this._pushUpdate(inc, { force: true });
   }
 
-  /** Background OSRM table check for fallback candidates (budgeted, never blocking). */
+  /**
+   * Background OSRM table check for fallback candidates (budgeted, never blocking). A road answer
+   * already known for a rider in this incident (3.16) is reused instead of asked again, so a rider
+   * found far by road is never later mistaken for "no road answer" once the OSRM budget is spent.
+   */
   _roadCheck(inc, lows, ownBest) {
     const t = Date.now();
     this.osrmTimes = this.osrmTimes.filter((x) => t - x < 60000);
-    const allowed = !!this.geo && this.geo.routeEnabled && inc.osrmCalls < config.netOsrmPerIncident && this.osrmTimes.length < config.netOsrmPerMin
+    const known = inc.roadKnown || (inc.roadKnown = new Map()); // uid -> { distanceM, durationS, at } (kept NET_OSRM_CACHE_MIN)
+    for (const [uid, r] of known) if (t - r.at >= config.netOsrmCacheMin * 60000) known.delete(uid);
+    const ask = lows.filter((c) => !known.has(c.uid));
+    const allowed = ask.length > 0 && !!this.geo && this.geo.routeEnabled && inc.osrmCalls < config.netOsrmPerIncident && this.osrmTimes.length < config.netOsrmPerMin
       && (typeof this.geo.queueWaitMs !== 'function' || this.geo.queueWaitMs() < config.netOsrmMaxWaitMs);
-    const finish = (res) => {
+    const finish = (fetched) => {
       inc.osrmPending = false;
       if (inc.closed) return;
       const now = this.clock();
+      if (fetched) ask.forEach((c, i) => { if (fetched[i] && Number.isFinite(fetched[i].distanceM)) known.set(c.uid, { ...fetched[i], at: t }); });
       if (!this._canSearch(inc, now)) return;
       const ok = [];
-      lows.forEach((c, i) => {
-        const r = res && res[i];
+      const far = []; // 3.16: close in a straight line, far by road
+      lows.forEach((c) => {
+        const r = known.get(c.uid);
         if (r && Number.isFinite(r.distanceM)) {
-          if (r.distanceM > c.d * config.netRoadRatioPct / 100) return; // "1.8 km away, 12 km by road"
-          ok.push({ ...c, etaS: Math.max(Number(r.durationS) || 0, r.distanceM / c.v), routeDistanceM: r.distanceM });
+          const etaS = Math.max(Number(r.durationS) || 0, r.distanceM / c.v);
+          if (r.distanceM > c.d * config.netRoadRatioPct / 100) { far.push({ ...c, etaS, routeDistanceM: r.distanceM, mode: 'FAR' }); return; } // "1.8 km away, 12 km by road"
+          ok.push({ ...c, etaS, routeDistanceM: r.distanceM });
         } else if (c.d <= config.netFallbackNoOsrmM) {
           ok.push(c); // no road answer: only very close riders heading straight at it
         }
       });
       ok.sort((a, b) => a.etaS - b.etaS);
-      const pick = ok.find((c) => c.etaS + config.netEtaMarginS < ownBest && !inc.notified.has(c.uid) && this.out.online(c.uid, 'net1'));
-      if (pick && this._pendingCount(inc) < config.netPendingMax && this._stageLive(inc) < config.netNotifyMax
-        && (!inc.throttled || inc.notified.size < config.netAbuserNotify)) {
+      const capsOk = () => this._pendingCount(inc) < config.netPendingMax && this._stageLive(inc) < config.netNotifyMax
+        && (!inc.throttled || inc.notified.size < config.netAbuserNotify);
+      const usable = (c) => c.etaS + config.netEtaMarginS < ownBest && !inc.notified.has(c.uid) && this.out.online(c.uid, 'net1');
+      const pick = ok.find(usable);
+      if (pick && capsOk()) {
         inc.lowInStage = true;
         this._notify(inc, pick, now);
         this._pushUpdate(inc, { force: true });
         return;
+      }
+      // Nobody qualified and the escalation is done: ask the best "far by road" rider anyway, once per
+      // incident, when their road ETA is under NET_FAR_MAX_ETA_S (the group may still be the closest).
+      if (!pick && inc.stage === 2 && !inc.farAsked && far.length) {
+        far.sort((a, b) => a.etaS - b.etaS);
+        const f = far.find((c) => c.etaS < config.netFarMaxEtaS && usable(c));
+        if (f && capsOk()) {
+          inc.farAsked = true;
+          inc.lowInStage = true;
+          this._notify(inc, f, now);
+          this._pushUpdate(inc, { force: true });
+          return;
+        }
       }
       if (!inc.notified.size || this._pendingCount(inc) === 0) this._nothingFound(inc, now, inc.stage === 1 ? 0 : 1);
     };
@@ -629,7 +655,7 @@ class SafetyNetwork extends EventEmitter {
     const timer = setTimeout(() => { if (!done) { done = true; finish(null); } }, timeout);
     if (timer.unref) timer.unref();
     Promise.resolve()
-      .then(() => this.geo.table(lows.map((c) => { const r = this.convoys.rooms.get(c.gid)?.riders.get(c.uid); return { lat: r?.lat, lng: r?.lng }; }), { lat: inc.lat, lng: inc.lng }, { timeoutMs: config.netOsrmTimeoutMs }))
+      .then(() => this.geo.table(ask.map((c) => { const r = this.convoys.rooms.get(c.gid)?.riders.get(c.uid); return { lat: r?.lat, lng: r?.lng }; }), { lat: inc.lat, lng: inc.lng }, { timeoutMs: config.netOsrmTimeoutMs }))
       .catch(() => null)
       .then((res) => { if (done) return; done = true; clearTimeout(timer); this._guard(() => finish(res)); });
   }
@@ -1063,6 +1089,7 @@ function externalRequestView(inc, n) {
   };
   if (Number.isFinite(n.routeDistanceM)) out.routeDistanceM = r100(n.routeDistanceM);
   if (Number.isFinite(n.etaS)) out.etaS = r30(n.etaS);
+  if (n.confidence === 'FAR') out.farByRoad = true; // 3.16: close in a straight line, far by road (road values above)
   return out;
 }
 

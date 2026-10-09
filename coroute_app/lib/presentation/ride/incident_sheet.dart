@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/constants/emergency_nav_constants.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/medical_info.dart';
+import '../../data/models/network_models.dart';
 import '../../data/models/network_wire.dart';
 import '../../data/models/outbox_item.dart';
 import '../../data/models/rider_model.dart';
@@ -13,6 +17,7 @@ import '../../data/services/timeline_service.dart';
 import '../../domain/notify/relation.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../alerts/alert_tiers.dart';
+import '../safety/safety_card_sheet.dart';
 import 'emergency_guidance.dart';
 import 'incident_banner.dart';
 import 'incident_view.dart';
@@ -40,7 +45,9 @@ Future<void> showIncidentSheet(
 }
 
 /// The body of the incident sheet. Follows live changes (responders, the
-/// alert closing) through ConvoyService and TimelineService.
+/// alert closing) through ConvoyService and TimelineService. 3.16: the
+/// nearest hospital line with Navigate, the safety card, and for the lead
+/// the live emergency link. Texts follow the rider's language.
 class IncidentSheetBody extends StatelessWidget {
   final String convoyId;
   final String subjectUserId;
@@ -62,6 +69,13 @@ class IncidentSheetBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: L10n.changes,
+      builder: (context, _, _) => _body(context),
+    );
+  }
+
+  Widget _body(BuildContext context) {
     final service = context.watch<ConvoyService>();
     final timeline = context.watch<TimelineService?>();
     final now = nowMs ?? DateTime.now().millisecondsSinceEpoch;
@@ -96,12 +110,20 @@ class IncidentSheetBody extends StatelessWidget {
     final header = emergency
         ? _Header(
             incident: inc,
-            title: 'EMERGENCY',
-            what: [inc.summary, if (inc.auto) 'Automatic alert', if (inc.reportedByName.trim().isNotEmpty) 'Reported by ${inc.reportedByName.trim()}'].join('. '),
+            title: L10n.t('incident.emergency'),
+            // A report already names the reporter in its summary.
+            what: [
+              inc.summary,
+              if (inc.auto && !inc.isReport) L10n.t('incident.automatic'),
+              if (!inc.isReport && inc.reportedByName.trim().isNotEmpty) L10n.t('incident.reportedBy', {'name': inc.reportedByName.trim()}),
+            ].join('. '),
             where: relation ?? where,
             updated: updated,
           )
         : _Header(incident: inc, what: ago == null ? inc.what : '${inc.what}, $ago', where: where, updated: updated);
+    final hospital = inc.isAlert ? inc.nearestHospital : null;
+    // Live link (3.16): an open SOS or crash alert on a 3.16 gateway.
+    final linkId = (inc.isAlert && service.supports(ProtocolFeatures.ride316)) ? id : null;
 
     if (inc.isMe) {
       return Column(
@@ -112,11 +134,13 @@ class IncidentSheetBody extends StatelessWidget {
           const SizedBox(height: Space.s16),
           if (inc.isAlert) ...[
             NetworkStatusLines(incident: inc, forMe: true),
+            if (hospital != null) HospitalLine(place: hospital),
             _Responders(responders: inc.responders, now: now, forMe: true),
+            if (linkId != null) ...[const SizedBox(height: Space.s12), LiveLinkControls(alertId: linkId)],
             const SizedBox(height: Space.s16),
             _BigButton(
               icon: Icons.check_circle_rounded,
-              label: 'Help reached me',
+              label: L10n.t('sos.ok'),
               color: StatusColors.success,
               onPressed: () {
                 service.cancelMySos(reason: ResolveReason.resolved);
@@ -126,7 +150,7 @@ class IncidentSheetBody extends StatelessWidget {
             const SizedBox(height: Space.s8),
             _BigButton(
               icon: Icons.do_not_disturb_on_rounded,
-              label: 'False alarm',
+              label: L10n.t('sos.false'),
               outlined: true,
               onPressed: () {
                 service.cancelMySos(reason: ResolveReason.falseAlarm);
@@ -143,7 +167,7 @@ class IncidentSheetBody extends StatelessWidget {
             const SizedBox(height: Space.s16),
             _BigButton(
               icon: Icons.check_circle_rounded,
-              label: "I'm OK",
+              label: L10n.t('incident.imOk'),
               color: StatusColors.success,
               onPressed: () {
                 final ok = service.sendCheckIn(CheckInResult.ok);
@@ -181,12 +205,13 @@ class IncidentSheetBody extends StatelessWidget {
         if (emergency) ...[
           _DistanceEta(incident: inc, myLat: me?.lat, myLng: me?.lng, relation: relation),
           NetworkStatusLines(incident: inc, myUserId: myId),
+          if (hospital != null) HospitalLine(place: hospital),
           const SizedBox(height: Space.s8),
         ],
         if (inc.hasPosition)
           _BigButton(
             icon: Icons.navigation_rounded,
-            label: emergency ? 'Navigate to ${_first(inc.who)}' : 'Navigate',
+            label: emergency ? L10n.t('incident.navigateTo', {'name': _first(inc.who)}) : L10n.t('incident.navigate'),
             onPressed: emergency
                 ? () => navigateToEmergency(
                       context,
@@ -198,22 +223,40 @@ class IncidentSheetBody extends StatelessWidget {
           ),
         if (phone.isNotEmpty) ...[
           const SizedBox(height: Space.s8),
-          _BigButton(icon: Icons.call_rounded, label: 'Call ${_first(inc.who)}', outlined: true, onPressed: () => _dial(context, phone)),
+          _BigButton(icon: Icons.call_rounded, label: L10n.t('incident.call', {'name': _first(inc.who)}), outlined: true, onPressed: () => _dial(context, phone)),
         ],
         // The lead sees who is already helping first; everyone else first says if they go.
         if (isLead && responders != null) ...[const SizedBox(height: Space.s24), responders],
         if (respond != null) ...[const SizedBox(height: Space.s24), respond],
         if (!isLead && responders != null) ...[const SizedBox(height: Space.s24), responders],
-        if (medical != null) ...[const SizedBox(height: Space.s24), MedicalCard(info: medical)],
+        if (medical != null) ...[
+          const SizedBox(height: Space.s24),
+          MedicalCard(info: medical),
+          const SizedBox(height: Space.s8),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            onPressed: () => SafetyCardSheet.show(
+              context,
+              name: inc.who,
+              medical: medical,
+              contactName: rider?.emergencyContactName ?? '',
+              contactPhone: contact,
+            ),
+            icon: const Icon(Icons.medical_information_rounded),
+            label: Text(L10n.t('incident.card'), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        ],
         if (inc.isAlert && contact.isNotEmpty) ...[
           const SizedBox(height: Space.s16),
           _BigButton(
             icon: Icons.emergency_rounded,
-            label: 'Call their emergency contact',
+            label: L10n.t('incident.callContact'),
             outlined: true,
             onPressed: () => _dial(context, contact),
           ),
         ],
+        // The lead can share a live link to the rider's position (3.16, item 17).
+        if (isLead && linkId != null) ...[const SizedBox(height: Space.s16), LiveLinkControls(alertId: linkId)],
         if (emergency && inc.hasPosition) ...[
           const SizedBox(height: Space.s8),
           TextButton.icon(
@@ -232,7 +275,7 @@ class IncidentSheetBody extends StatelessWidget {
                 context,
                 title: "Mark ${inc.who}'s SOS as handled?",
                 message: 'The SOS alert closes for the whole group. Do this only when ${inc.who} is safe or help is with them.',
-                confirmLabel: 'Mark as handled',
+                confirmLabel: L10n.t('incident.handled'),
                 destructive: true,
               );
               if (!ok) return;
@@ -240,7 +283,7 @@ class IncidentSheetBody extends StatelessWidget {
               if (context.mounted) Navigator.of(context).maybePop();
             },
             icon: const Icon(Icons.task_alt_rounded),
-            label: const Text('Mark as handled', maxLines: 1, overflow: TextOverflow.ellipsis),
+            label: Text(L10n.t('incident.handled'), maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         ],
       ],
@@ -256,7 +299,7 @@ class IncidentSheetBody extends StatelessWidget {
         children: [
           Icon(Icons.check_circle_rounded, size: 40, color: StatusColors.success),
           const SizedBox(height: Space.s8),
-          Text('This alert is closed', textAlign: TextAlign.center, style: AppText.title),
+          Text(L10n.t('incident.closed'), textAlign: TextAlign.center, style: AppText.title),
           const SizedBox(height: Space.s4),
           Text(
             rider == null ? 'The rider is no longer in the ride.' : '${rider.name} is not in an open alert any more.',
@@ -413,8 +456,8 @@ class _RespondButtons extends StatelessWidget {
       );
     }
 
-    final going = choice(SosResponseKind.going, Icons.directions_run_rounded, "I'm going");
-    final withThem = choice(SosResponseKind.withThem, Icons.handshake_rounded, "I'm with them");
+    final going = choice(SosResponseKind.going, Icons.directions_run_rounded, L10n.t('incident.going'));
+    final withThem = choice(SosResponseKind.withThem, Icons.handshake_rounded, L10n.t('incident.with'));
     final m = mine;
 
     return Column(
@@ -731,6 +774,154 @@ class NetworkStatusLines extends StatelessWidget {
           for (final l in lines) Padding(padding: const EdgeInsets.only(bottom: Space.s4), child: l),
         ],
       ),
+    );
+  }
+}
+
+/// "Nearest hospital: Apollo, 4.2 km" with a Navigate button (3.16, item 18).
+/// The gateway looks it up once per emergency; the line never blocks the alert.
+class HospitalLine extends StatelessWidget {
+  final NearbyPlace place;
+  const HospitalLine({super.key, required this.place});
+
+  /// The words shown (pure, for tests).
+  static String text(NearbyPlace p) => L10n.t('incident.hospital.line', {'name': p.name, 'km': formatDistance(p.distanceM)});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.s4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(Icons.local_hospital_rounded, size: 20, color: StatusColors.critical),
+          const SizedBox(width: Space.s8),
+          Expanded(child: Text(text(place), maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body)),
+          TextButton.icon(
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+            onPressed: () async {
+              final ok = await navigateTo(place.lat, place.lng, label: place.name);
+              if (!ok && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No map app found on this phone.')));
+              }
+            },
+            icon: const Icon(Icons.navigation_rounded, size: 18),
+            label: Text(L10n.t('incident.navigate'), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Share a live emergency link (3.16, item 17): "Share live link" creates
+/// `https://<origin>/e/<token>` (30 minutes, one per alert) and opens the
+/// phone's share sheet; while it is valid the line says until when, with
+/// Copy, Share and "Stop sharing". Used in the rider's own SOS sheet and, for
+/// another rider's open SOS, by the lead in the incident sheet.
+class LiveLinkControls extends StatefulWidget {
+  final String alertId;
+  const LiveLinkControls({super.key, required this.alertId});
+
+  /// Tests replace the system share sheet.
+  static Future<void> Function(String text)? shareOverride;
+
+  /// "Live link active until 3:42 PM" (pure, for tests).
+  static String untilText(BuildContext context, int expiresAtMs) {
+    final t = TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(expiresAtMs));
+    final clock = MaterialLocalizations.of(context).formatTimeOfDay(t, alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context));
+    return L10n.t('sos.share.until', {'time': clock});
+  }
+
+  @override
+  State<LiveLinkControls> createState() => _LiveLinkControlsState();
+}
+
+class _LiveLinkControlsState extends State<LiveLinkControls> {
+  bool _busy = false;
+
+  Future<void> _share(String url) async {
+    final text = L10n.t('sos.share.text', {'url': url});
+    final override = LiveLinkControls.shareOverride;
+    if (override != null) {
+      await override(text);
+      return;
+    }
+    await SharePlus.instance.share(ShareParams(text: text));
+  }
+
+  Future<void> _create(ConvoyService service) async {
+    setState(() => _busy = true);
+    final link = await service.createLiveLink(widget.alertId);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (link == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L10n.t('sos.share.failed'))));
+      return;
+    }
+    await _share(link.url);
+  }
+
+  Future<void> _revoke(ConvoyService service) async {
+    setState(() => _busy = true);
+    await service.revokeLiveLink(widget.alertId);
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final service = context.watch<ConvoyService>();
+    final link = service.liveLinkFor(widget.alertId);
+    if (link == null) {
+      return OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        onPressed: _busy ? null : () => _create(service),
+        icon: const Icon(Icons.share_location_rounded),
+        label: Text(L10n.t('sos.share'), maxLines: 1, overflow: TextOverflow.ellipsis),
+      );
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.share_location_rounded, size: 20, color: StatusColors.success),
+            const SizedBox(width: Space.s8),
+            Expanded(
+              child: Text(LiveLinkControls.untilText(context, link.expiresAt), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body),
+            ),
+          ],
+        ),
+        const SizedBox(height: Space.s4),
+        Wrap(
+          spacing: Space.s8,
+          runSpacing: Space.s4,
+          children: [
+            TextButton.icon(
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: link.url));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L10n.t('sos.share.copied'))));
+              },
+              icon: const Icon(Icons.copy_rounded, size: 18),
+              label: const Text('Copy link', maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            TextButton.icon(
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              onPressed: () => _share(link.url),
+              icon: const Icon(Icons.share_rounded, size: 18),
+              label: Text(L10n.t('sos.share'), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            TextButton.icon(
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: StatusColors.critical),
+              onPressed: _busy ? null : () => _revoke(service),
+              icon: const Icon(Icons.link_off_rounded, size: 18),
+              label: Text(L10n.t('sos.share.revoke'), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

@@ -105,7 +105,7 @@ def find_ubuntu_arm_image(compute_client):
     ).data
 
     for img in images:
-        if "aarch64" in img.display_name.lower() or "arm" in img.display_name.lower():
+        if ("aarch64" in img.display_name.lower() or "arm" in img.display_name.lower()) and "minimal" not in img.display_name.lower():
             print(f"  ✓ Found Image: {img.display_name} ({img.id})")
             return img.id
 
@@ -145,7 +145,7 @@ def wait_for_ssh(ip, port=22, timeout=180):
     return False
 
 
-def run_remote_cutover(new_ip):
+def run_remote_cutover(new_ip, max_attempts=5):
     """Executes the setup and DNS cutover command on the new instance."""
     print("\n" + "=" * 70)
     print(f" Executing Automated Setup & Cutover on New VM ({new_ip})")
@@ -156,16 +156,23 @@ def run_remote_cutover(new_ip):
         "ssh",
         "-o", "StrictHostKeyChecking=no",
         "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "ConnectTimeout=15",
     ]
     if os.path.exists(SSH_PRIVATE_KEY_PATH):
         ssh_cmd.extend(["-i", SSH_PRIVATE_KEY_PATH])
 
-    remote_command = "curl -fsSL https://raw.githubusercontent.com/Santhosh-Guptha/coroute_app/main/gateway/deploy/setup_new_vm.sh | sudo bash"
+    remote_command = "curl -fsSL https://raw.githubusercontent.com/Santhosh-Guptha/coroute_app/main/coroute_app/gateway/deploy/setup_new_vm.sh | sudo bash"
     ssh_cmd.extend([f"ubuntu@{new_ip}", remote_command])
 
     print(f"Running: {' '.join(ssh_cmd)}")
-    result = subprocess.run(ssh_cmd)
-    return result.returncode == 0
+    for attempt in range(1, max_attempts + 1):
+        print(f"[*] Cutover execution attempt {attempt}/{max_attempts}...")
+        result = subprocess.run(ssh_cmd)
+        if result.returncode == 0:
+            return True
+        print(f"[!] Cutover attempt {attempt} exited with code {result.returncode}. Retrying in 10s...")
+        time.sleep(10)
+    return False
 
 
 def main():

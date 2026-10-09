@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/emergency_nav_constants.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/network_models.dart';
@@ -58,17 +59,28 @@ AssistStage assistStageOf(AssistRequest a, {bool near = false}) {
 class AssistTexts {
   AssistTexts._();
 
-  static const String requestTitle = 'RIDER EMERGENCY NEARBY';
-  static const String faster = 'Your group may be able to reach them before their own group.';
-  static const String responding = 'You are responding';
-  static const String arrivalQuestion = 'Have you reached the rider?';
-  static const String takenTitle = 'Another nearby rider is responding';
-  static const String takenBody = 'No assistance is currently required.';
+  /// "RIDER EMERGENCY NEARBY" (the rider's language, read at build time).
+  static String get requestTitle => L10n.t('assist.title').toUpperCase();
+  static String get faster => L10n.t('assist.faster');
+  static String get responding => L10n.t('assist.responding');
+  static String get arrivalQuestion => L10n.t('assist.arrival');
+  static String get takenTitle => L10n.t('assist.taken');
+  static String get takenBody => L10n.t('assist.taken.body');
+  static String get withRider => L10n.t('assist.withRider');
+  static String get farLabel => L10n.t('assist.far');
 
   /// "A rider from another group may have met with an accident."
-  static String what(AssistRequest a) => a.kind.toUpperCase() == 'EMERGENCY'
-      ? 'A rider from another group may need help.'
-      : 'A rider from another group may have met with an accident.';
+  static String what(AssistRequest a) => a.kind.toUpperCase() == 'EMERGENCY' ? L10n.t('assist.what.help') : L10n.t('assist.what.accident');
+
+  /// "Far by road: 9.4 km by road, about 12 min. Your group may still be the closest
+  /// riders." (3.16, item 5), or null when the request is not a far-by-road ask.
+  static String? farBody(AssistRequest a) {
+    if (!a.farByRoad) return null;
+    final km = formatDistanceRounded(a.routeDistanceM ?? a.distanceM);
+    final eta = a.etaS;
+    final min = eta == null ? '?' : '${(eta / 60).ceil()}';
+    return L10n.t('alert.far.body', {'km': km, 'min': min});
+  }
 
   /// Metres to the point: the in-app route when it leads there, else straight from me, else what the server said.
   static double distanceOf(AssistRequest a, {double? myLat, double? myLng, double? liveM}) {
@@ -94,7 +106,30 @@ class AssistTexts {
 
   /// "RIDER EMERGENCY 1.2 km ahead" (after I accepted).
   static String respondingTitle(AssistRequest a, double distanceM) =>
-      'RIDER EMERGENCY ${Relation.distanceText(distanceM)} ${a.aheadOnRoute ? 'ahead' : 'away'}';
+      L10n.t(a.aheadOnRoute ? 'assist.ahead' : 'assist.away', {'dist': Relation.distanceText(distanceM)});
+}
+
+/// "Far by road" label chip (3.16, item 5): the rider is close in a straight
+/// line but far by road; the body says the road distance and ETA.
+class FarByRoadChip extends StatelessWidget {
+  const FarByRoadChip({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color fg = StatusColors.onCritical;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: 2),
+      decoration: BoxDecoration(border: Border.all(color: fg), borderRadius: Radii.smAll),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.alt_route_rounded, size: 14, color: fg),
+          const SizedBox(width: Space.s4),
+          Flexible(child: Text(AssistTexts.farLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: fg, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+  }
 }
 
 /// Sends an answer and says so when it could not be queued.
@@ -173,13 +208,18 @@ class AssistBanner extends StatelessWidget {
 
     String title;
     final lines = <String>[];
+    final far = AssistTexts.farBody(a);
     switch (stage) {
       case AssistStage.request:
       case AssistStage.closed:
         title = AssistTexts.requestTitle;
         lines.add(AssistTexts.what(a));
         lines.add(AssistTexts.where(a, myLat: myLat, myLng: myLng, route: route));
-        if (a.fasterThanGroup && !compact) lines.add(AssistTexts.faster);
+        if (far != null) {
+          lines.add(far);
+        } else if (a.fasterThanGroup && !compact) {
+          lines.add(AssistTexts.faster);
+        }
         break;
       case AssistStage.responding:
         title = AssistTexts.respondingTitle(a, distance);
@@ -188,11 +228,11 @@ class AssistBanner extends StatelessWidget {
         break;
       case AssistStage.arrivalCheck:
         title = AssistTexts.arrivalQuestion;
-        lines.add('The emergency point is ${Relation.distanceText(distance)} away.');
+        lines.add(L10n.t('assist.point', {'dist': Relation.distanceText(distance)}));
         break;
       case AssistStage.onScene:
-        title = 'You are with the rider';
-        lines.add('Call emergency services 112 if they need more help.');
+        title = AssistTexts.withRider;
+        lines.add(L10n.t('assist.call112.more'));
         break;
     }
     if (updated != null && !compact && stage != AssistStage.onScene) lines.add(updated);
@@ -228,21 +268,21 @@ class AssistBanner extends StatelessWidget {
       case AssistStage.request:
       case AssistStage.closed:
         actions = [
-          filled(Icons.volunteer_activism_rounded, "I Can Help", () => acceptAssist(context, a)),
+          filled(Icons.volunteer_activism_rounded, L10n.t('assist.help'), () => acceptAssist(context, a)),
           const SizedBox(height: Space.s8),
           pair(
-            outline(Icons.navigation_rounded, 'Navigate', () => navigateToAssist(context, a)),
-            outline(Icons.block_rounded, "Can't Assist", () => sendAssistAnswer(context, a.incidentId, AssistAnswer.decline)),
+            outline(Icons.navigation_rounded, L10n.t('incident.navigate'), () => navigateToAssist(context, a)),
+            outline(Icons.block_rounded, L10n.t('assist.cant'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.decline)),
           ),
         ];
         break;
       case AssistStage.responding:
         actions = [
-          filled(Icons.navigation_rounded, 'Navigate', () => navigateToAssist(context, a)),
+          filled(Icons.navigation_rounded, L10n.t('incident.navigate'), () => navigateToAssist(context, a)),
           const SizedBox(height: Space.s8),
           pair(
-            outline(Icons.do_not_disturb_on_rounded, 'Unable to Assist', () => sendAssistAnswer(context, a.incidentId, AssistAnswer.unable)),
-            outline(Icons.flag_rounded, 'Arrived', () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived)),
+            outline(Icons.do_not_disturb_on_rounded, L10n.t('assist.unable'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.unable)),
+            outline(Icons.flag_rounded, L10n.t('assist.arrived'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived)),
           ),
         ];
         break;
@@ -250,7 +290,7 @@ class AssistBanner extends StatelessWidget {
         actions = [
           filled(
             Icons.check_circle_rounded,
-            'Yes, I Found Them',
+            L10n.t('assist.found'),
             () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived),
             style: FilledButton.styleFrom(
               backgroundColor: StatusColors.success,
@@ -261,14 +301,14 @@ class AssistBanner extends StatelessWidget {
             ),
           ),
           const SizedBox(height: Space.s8),
-          outline(Icons.location_searching_rounded, 'Unable to Locate', () => sendAssistAnswer(context, a.incidentId, AssistAnswer.notFound)),
+          outline(Icons.location_searching_rounded, L10n.t('assist.notFound'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.notFound)),
         ];
         break;
       case AssistStage.onScene:
         actions = [
           pair(
-            outline(Icons.local_hospital_rounded, 'Call 112', () => dialNumber(context, '112')),
-            outline(Icons.open_in_full_rounded, 'Details', open),
+            outline(Icons.local_hospital_rounded, L10n.t('assist.call112.short'), () => dialNumber(context, '112')),
+            outline(Icons.open_in_full_rounded, L10n.t('assist.details'), open),
           ),
         ];
         break;
@@ -284,7 +324,7 @@ class AssistBanner extends StatelessWidget {
     return Semantics(
       container: true,
       liveRegion: true,
-      label: [title, ...lines].join('. '),
+      label: [title, if (a.farByRoad) AssistTexts.farLabel, ...lines].join('. '),
       child: Material(
         color: bg,
         elevation: 2,
@@ -311,6 +351,8 @@ class AssistBanner extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg, fontWeight: FontWeight.w800)),
+                            if (a.farByRoad && stage != AssistStage.onScene)
+                              const Padding(padding: EdgeInsets.only(top: 2, bottom: 2), child: FarByRoadChip()),
                             for (var i = 0; i < lines.length; i++)
                               Text(
                                 lines[i],
@@ -328,7 +370,7 @@ class AssistBanner extends StatelessWidget {
                 ),
                 if (stage == AssistStage.responding) ...[
                   const SizedBox(height: Space.s8),
-                  const PositiveLine(text: AssistTexts.responding),
+                  PositiveLine(text: AssistTexts.responding),
                 ],
                 const SizedBox(height: Space.s8),
                 ...actions,

@@ -1,4 +1,5 @@
 import '../../core/constants/ride_notification_constants.dart';
+import '../../core/l10n/l10n.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/network_models.dart';
 import '../../data/models/network_wire.dart';
@@ -6,6 +7,7 @@ import '../../data/models/rider_model.dart';
 import '../../data/models/safety_wire.dart';
 import '../../data/models/sos_alert_model.dart';
 import '../../data/models/timeline_event_model.dart';
+import '../../data/services/auth_service.dart';
 import '../../data/services/timeline_service.dart';
 import '../ride/ride_facts.dart';
 import '../timeline/timeline_text.dart';
@@ -59,6 +61,39 @@ enum NotifContextAction {
         NotifContextAction.navigateEmergency => NotifConstants.actionNavEmergency,
         NotifContextAction.iCanHelp => NotifConstants.actionAssistAccept,
       };
+}
+
+/// The rider's own medical ID for the lock screen during their own SOS (3.16,
+/// opt-in setting "Show my medical ID on the lock screen during an SOS").
+/// Blanks read "not given"; nothing of it appears unless the setting is on.
+class MedicalId {
+  final String bloodGroup;
+  final String allergies;
+  final String contactName;
+  final String contactPhone;
+
+  const MedicalId({this.bloodGroup = '', this.allergies = '', this.contactName = '', this.contactPhone = ''});
+
+  /// From the signed-in rider's profile.
+  factory MedicalId.fromAuth(AuthService a) => MedicalId(
+        bloodGroup: a.bloodGroup.trim(),
+        allergies: a.allergies.trim(),
+        contactName: (a.emergencyContactName ?? '').trim(),
+        contactPhone: (a.emergencyContact ?? '').trim(),
+      );
+
+  bool get isEmpty => bloodGroup.isEmpty && allergies.isEmpty && contactName.isEmpty && contactPhone.isEmpty;
+
+  /// "Blood group O+. Allergies: penicillin. Emergency contact: Asha 98765 43210."
+  String line() {
+    final none = L10n.t('notif.medical.none');
+    final contact = [if (contactName.isNotEmpty) contactName, if (contactPhone.isNotEmpty) contactPhone].join(' ');
+    return L10n.t('notif.medical', {
+      'blood': bloodGroup.isEmpty ? none : bloodGroup,
+      'allergies': allergies.isEmpty ? none : allergies,
+      'contact': contact.isEmpty ? none : contact,
+    });
+  }
 }
 
 /// One rider in the notification ladder ("Arjun  1.2 km ahead", "No signal").
@@ -123,6 +158,10 @@ class NotificationSnapshot {
   final bool showSos;
   final bool showWait;
 
+  /// Lock screen text that replaces the minimal public version (3.16: the rider's own
+  /// SOS with their medical ID, opt-in). Null = the usual minimal version.
+  final String? customPublicText;
+
   const NotificationSnapshot({
     required this.mode,
     required this.tone,
@@ -139,11 +178,13 @@ class NotificationSnapshot {
     this.lockScreenPublic = true,
     this.showSos = true,
     this.showWait = true,
+    this.customPublicText,
   });
 
-  /// Lock screen text when the content is hidden: never names, places or numbers.
-  String get publicTitle => NotifConstants.publicTitle;
-  String get publicText => mode.isEmergency ? NotifConstants.publicEmergencyText : '';
+  /// Lock screen text when the content is hidden: never names, places or numbers,
+  /// unless the rider chose to show their own medical ID during their own SOS.
+  String get publicTitle => customPublicText != null ? NotifConstants.appTitle : NotifConstants.publicTitle;
+  String get publicText => customPublicText ?? (mode.isEmergency ? NotifConstants.publicEmergencyText : '');
 
   static const String sosLabel = 'SOS';
   static const String waitLabel = 'Wait for me';
@@ -190,6 +231,7 @@ class NotificationSnapshot {
         lockScreenPublic,
         showSos,
         showWait,
+        customPublicText ?? '',
       ].join('\u0001');
 }
 
@@ -219,6 +261,7 @@ class NotificationSnapshotBuilder {
     required int nowMs,
     required bool lockScreenPublic,
     String? Function(int ms)? clockText,
+    MedicalId? medicalId,
   }) {
     final clock = clockText ?? defaultClock;
     final events = timeline?.events ?? timelineEvents;
@@ -231,7 +274,7 @@ class NotificationSnapshotBuilder {
     // 1. Own group emergency (mine or another member's).
     final sos = openEmergency(convoy);
     if (sos != null) {
-      return _groupEmergency(convoy, myUserId, me, sos, ladder, header, rideStatus, clock, lockScreenPublic);
+      return _groupEmergency(convoy, myUserId, me, sos, ladder, header, rideStatus, clock, lockScreenPublic, medicalId);
     }
 
     // 2. Assistance request to me (accepted first, then the newest pending one).
@@ -381,41 +424,63 @@ class NotificationSnapshotBuilder {
     String rideStatus,
     String? Function(int ms) clock,
     bool lockScreenPublic,
+    MedicalId? medicalId,
   ) {
     final updated = clock(sos.lastKnownAt) ?? '';
     final progress = _emergencyProgress(sos);
-    if (sos.userId == myUserId) {
+    // A nearby "Rider down here" I reported is raised in my name but is not my SOS: no medical
+    // ID on the lock screen for it, and the group wording below (never "Your SOS is active").
+    final selfReport = sos.isReport && sos.reportedBy == myUserId && sos.userId == myUserId;
+    if (sos.userId == myUserId && !selfReport) {
+      final mine = L10n.t('notif.sos.mine');
+      // Opt-in (3.16): the medical ID is visible on the lock screen while my SOS is open.
+      final medical = medicalId != null && !medicalId.isEmpty ? medicalId.line() : null;
       return NotificationSnapshot(
         mode: NotifMode.groupEmergency,
         tone: NotifTone.critical,
-        title: 'Your SOS is active',
-        subtitle: progress.text ?? 'Your group can see where you are.',
+        title: mine,
+        subtitle: medical ?? progress.text ?? L10n.t('notif.sos.mine.body'),
         header: header,
         statusLine: progress.text ?? rideStatus,
         statusPositive: progress.positive,
         ahead: ladder.ahead,
         behind: ladder.behind,
+        // The medical line travels in the public version, so the "Show ride on lock screen"
+        // choice still decides whether the rest of the ride (names, distances) is visible there.
         lockScreenPublic: lockScreenPublic,
         showSos: false,
         showWait: false,
+        customPublicText: medical == null ? null : '$mine. $medical',
       );
     }
     final name = _first(sos.userName);
     final where = _whereFromMe(convoy, me, sos.lat, sos.lng);
     final when = updated.isEmpty ? '' : 'updated $updated';
     final sub = [if (where.isNotEmpty) where, if (when.isNotEmpty) when].join(', ');
+    // "Rider down here" by another rider (3.16): the reporter saw someone, nothing was detected,
+    // so never "may have met with an accident". A nearby report is raised by the reporter themself.
+    final String what;
+    if (sos.isReport) {
+      final reporter = _first(sos.reportedByName.trim().isEmpty ? sos.userName : sos.reportedByName);
+      final subject = sos.reportedBy.isNotEmpty && sos.reportedBy != sos.userId;
+      what = subject
+          ? L10n.t('incident.report.summary.named', {'reporter': reporter, 'name': name})
+          : L10n.t('incident.report.summary', {'reporter': reporter});
+    } else {
+      what = sos.isAccident ? '$name may have met with an accident' : '$name needs help';
+    }
     return NotificationSnapshot(
       mode: NotifMode.groupEmergency,
       tone: NotifTone.critical,
-      title: sos.isAccident ? 'EMERGENCY: $name may have met with an accident' : 'EMERGENCY: $name needs help',
+      title: 'EMERGENCY: $what',
       subtitle: sub.isEmpty ? 'Open CoRoute to see where.' : _cap(sub),
       header: header,
       statusLine: progress.text ?? rideStatus,
       statusPositive: progress.positive,
       ahead: ladder.ahead,
       behind: ladder.behind,
-      contextAction: NotifContextAction.navigateEmergency,
-      contextLabel: 'Navigate to $name',
+      contextAction: selfReport ? NotifContextAction.none : NotifContextAction.navigateEmergency,
+      contextLabel: selfReport ? null : 'Navigate to $name',
       contextRef: sos.alertId,
       lockScreenPublic: lockScreenPublic,
       showWait: ladder.othersCount > 0,

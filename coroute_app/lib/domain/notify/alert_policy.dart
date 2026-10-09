@@ -1,4 +1,5 @@
 import '../../core/constants/network_constants.dart';
+import '../../core/l10n/l10n.dart';
 import '../../data/models/network_models.dart';
 import '../../data/models/network_wire.dart';
 import '../../data/models/safety_wire.dart';
@@ -105,6 +106,27 @@ class AlertPolicy {
   static const String localFatigueKey = 'LOCAL:FATIGUE';
   static const String localCheckInKey = 'LOCAL:CHECK_IN';
 
+  /// Key prefixes of the 3.16 alerts: a rider's updates stopped, low battery, behind the sweeper.
+  static const String stalePrefix = 'STALE:';
+  static const String batteryPrefix = 'BATTERY:';
+  static const String behindPrefix = 'BEHIND:';
+
+  /// Keys of the 3.16 rider-only prompts (fuel reminder, post-crash follow-up).
+  static const String fuelKey = 'LOCAL:FUEL';
+  static const String followUpKey = 'LOCAL:FOLLOW_UP';
+
+  /// Source names of a "Rider down" report (the subject did not raise it themself).
+  static bool _reportSource(String source) =>
+      source == EmergencySource.memberReport.wire || source == EmergencySource.nearbyReport.wire;
+
+  /// A timeline SOS entry that is a report by another rider: the live alert says so, or a
+  /// 3.16 gateway put `source` (or `reportedByName` on a RIDER_DOWN) in the entry data.
+  static bool isReportEntry(TimelineEventModel e, [SosAlertModel? alert]) {
+    if (alert != null) return alert.isReport;
+    if (_reportSource(e.dataString('source').toUpperCase())) return true;
+    return e.dataString('alertType') == SosTypes.riderDown && e.dataString('reportedByName').isNotEmpty;
+  }
+
   /// "1.8 km north-east of you" from the viewer to a point, or '' when either position is unknown.
   static String directionFromMe(AlertViewer me, double? lat, double? lng) {
     final myLat = me.lat, myLng = me.lng;
@@ -151,7 +173,11 @@ class AlertPolicy {
   /// has its live alert here (or the entry carries a 3.15 status), it is shown in the
   /// EMERGENCY form with the latest position, "Last location update" and the nearby
   /// assistance state.
-  List<AlertSpec> standing(Iterable<TimelineEventModel> events, AlertViewer me, {required int nowMs, Iterable<SosAlertModel> alerts = const []}) {
+  ///
+  /// [speechLang] (3.16) is the language of the spoken lines ('en', 'hi', 'te'): what the
+  /// phone's voice can say, which may differ from the screen language.
+  List<AlertSpec> standing(Iterable<TimelineEventModel> events, AlertViewer me,
+      {required int nowMs, Iterable<SosAlertModel> alerts = const [], String speechLang = 'en'}) {
     final out = <AlertSpec>[];
     final live = <String, SosAlertModel>{for (final a in alerts) a.alertId: a};
     for (final e in events) {
@@ -162,12 +188,18 @@ class AlertPolicy {
       final where = e.placeName.isNotEmpty ? ' near ${e.placeName}' : '';
       switch (e.type) {
         case 'SOS':
-          if (mine) break; // the sender already knows
           final kind = e.dataString('alertType');
           final key = '$sosPrefix${e.dataString('alertId').isEmpty ? e.eventId : e.dataString('alertId')}';
           final a = live[e.dataString('alertId')];
+          if (isReportEntry(e, a)) {
+            // "Rider down here" by another rider: never "may have met with an accident".
+            final spec = report(key, who: who, event: e, alert: a, me: me, nowMs: nowMs, speechLang: speechLang);
+            if (spec != null) out.add(spec);
+            break;
+          }
+          if (mine) break; // the sender already knows
           if (a != null || e.data.containsKey('status') || e.data.containsKey('source') || (kind == SosTypes.crash && e.data['auto'] == true) || kind == SosTypes.riderDown) {
-            out.add(emergency(key, who: who, event: e, alert: a, me: me, nowMs: nowMs));
+            out.add(emergency(key, who: who, event: e, alert: a, me: me, nowMs: nowMs, speechLang: speechLang));
             break;
           }
           final dir = directionFromMe(me, e.lat, e.lng);
@@ -200,16 +232,67 @@ class AlertPolicy {
         case 'STOPPED':
           if (mine || dur < stationaryAlert || !(me.isLead || me.isSweeper)) break;
           final r = e.dataString('reason');
-          out.add(AlertSpec('STOPPED:${e.userId}', AlertChannel.alerts, '$who has been stopped for ${TimelineText.duration(dur)}',
-              '${r.isEmpty ? 'No reason given' : TimelineText.reason(r)}$where.'));
+          final d = TimelineText.duration(dur);
+          out.add(AlertSpec('STOPPED:${e.userId}', AlertChannel.alerts, '$who has been stopped for $d',
+              '${r.isEmpty ? 'No reason given' : TimelineText.reason(r)}$where.',
+              speech: L10n.t('speech.stopped', {'name': who, 'dur': d}, speechLang)));
           break;
         case 'SEPARATED':
           final km = TimelineText.distance(e.dataNum('maxDistanceM') ?? e.dataNum('distanceM') ?? 0);
           if (mine) {
-            out.add(AlertSpec('SEPARATED:${e.userId}', AlertChannel.alerts, 'You are $km from your group', 'Slow down or wait for them to catch up.'));
+            out.add(AlertSpec('SEPARATED:${e.userId}', AlertChannel.alerts, 'You are $km from your group', 'Slow down or wait for them to catch up.',
+                speech: L10n.t('speech.separated.self', {'km': km}, speechLang)));
           } else if (me.isLead || me.isSweeper) {
-            out.add(AlertSpec('SEPARATED:${e.userId}', AlertChannel.alerts, '$who is $km from the group', 'Separated for ${TimelineText.duration(dur)}.'));
+            out.add(AlertSpec('SEPARATED:${e.userId}', AlertChannel.alerts, '$who is $km from the group', 'Separated for ${TimelineText.duration(dur)}.',
+                speech: L10n.t('speech.separated', {'name': who, 'km': km}, speechLang)));
           }
+          break;
+        case SafetyEventTypes.staleUpdate:
+          // 3.16: riding but no update for far longer than the group's usual gap (lead and sweeper).
+          if (mine || !(me.isLead || me.isSweeper)) break;
+          final ago = TimelineText.duration(dur);
+          final typical = TimelineText.duration(Duration(seconds: (e.dataNum('typicalS') ?? 20).round()));
+          out.add(AlertSpec(
+            '$stalePrefix${e.userId}',
+            AlertChannel.alerts,
+            L10n.t('alert.stale.title', {'name': who, 'ago': ago}),
+            L10n.t('alert.stale.body', {'typical': typical}),
+            speech: L10n.t('speech.stale', {'name': who, 'ago': ago}, speechLang),
+          ));
+          break;
+        case SafetyEventTypes.lowBattery:
+          // 3.16: the rider is reminded; the lead and sweeper see it too.
+          final level = (e.dataNum('level') ?? 0).round();
+          if (mine) {
+            out.add(AlertSpec('$batteryPrefix${e.userId}', AlertChannel.alerts, L10n.t('alert.battery.self.title', {'n': level}),
+                L10n.t('alert.battery.self.body'),
+                aboutMe: true));
+            break;
+          }
+          if (!(me.isLead || me.isSweeper)) break;
+          out.add(AlertSpec(
+            '$batteryPrefix${e.userId}',
+            AlertChannel.alerts,
+            L10n.t('alert.battery.title', {'name': who, 'n': level}),
+            L10n.t('alert.battery.body'),
+            speech: L10n.t('speech.battery', {'name': who}, speechLang),
+          ));
+          break;
+        case SafetyEventTypes.behindSweeper:
+          // 3.16: a rider dropped behind the sweeper (sweeper and lead); the rider gets a gentle note.
+          if (mine) {
+            out.add(AlertSpec('$behindPrefix${e.userId}', AlertChannel.updates, L10n.t('alert.behind.self'), L10n.t('alert.behind.self.body'), aboutMe: true));
+            break;
+          }
+          if (!(me.isLead || me.isSweeper)) break;
+          final behindKm = TimelineText.distance(e.dataNum('distanceM') ?? e.dataNum('maxDistanceM') ?? 0);
+          out.add(AlertSpec(
+            '$behindPrefix${e.userId}',
+            AlertChannel.alerts,
+            L10n.t('alert.behind.title', {'name': who}),
+            L10n.t('alert.behind.body', {'km': behindKm, 'dur': TimelineText.duration(dur)}),
+            speech: L10n.t('speech.behind', {'name': who}, speechLang),
+          ));
           break;
         case 'OFFLINE':
           if (mine) break;
@@ -267,7 +350,11 @@ class AlertPolicy {
         if (e.data['notify'] == false) return null;
         final limit = e.dataNum('limitKmh')?.round();
         final top = e.dataNum('maxKmh')?.round();
-        final lim = limit == null ? 'the group speed limit' : 'the group limit of $limit km/h';
+        // 3.16: within 1 km of a stop, the start or the destination the lower town limit applies.
+        final town = e.dataString('context').toUpperCase() == 'TOWN';
+        final lim = limit == null
+            ? (town ? 'the limit ${L10n.t('alert.overspeed.town')}' : 'the group speed limit')
+            : (town ? 'the limit of $limit km/h ${L10n.t('alert.overspeed.town')}' : 'the group limit of $limit km/h');
         final body = mine
             ? ['Please slow down.', if (top != null) 'You reached $top km/h.'].join(' ')
             : [if (top != null) 'Reached $top km/h', if (e.placeName.isNotEmpty) 'near ${e.placeName}'].join(' ');
@@ -314,7 +401,8 @@ class AlertPolicy {
 
   /// The own-group EMERGENCY alert for someone else's open SOS (crash, RIDER_DOWN, manual).
   /// [alert] is the live alert when known (latest position, network state).
-  static AlertSpec emergency(String key, {required String who, required TimelineEventModel event, SosAlertModel? alert, required AlertViewer me, required int nowMs}) {
+  static AlertSpec emergency(String key,
+      {required String who, required TimelineEventModel event, SosAlertModel? alert, required AlertViewer me, required int nowMs, String speechLang = 'en'}) {
     final a = alert;
     final kind = a?.alertType ?? event.dataString('alertType');
     final source = a?.effectiveSource ?? EmergencySource.fromWire(event.dataString('source'));
@@ -325,11 +413,11 @@ class AlertPolicy {
     final atMs = a?.lastKnownAt ?? event.startedAt;
     final String what;
     if (accident) {
-      what = '$who may have met with an accident';
+      what = L10n.t('alert.accident.body', {'name': who});
     } else if (kind.isEmpty || kind == SosTypes.emergency || kind == SosTypes.crashOrEmergency) {
-      what = '$who needs help';
+      what = L10n.t('alert.help.body', {'name': who});
     } else {
-      what = '$who needs help (${TimelineText.reason(kind)})';
+      what = L10n.t('alert.help.kind', {'name': who, 'kind': TimelineText.reason(kind)});
     }
     final automatic = source == EmergencySource.crashAuto || (kind == SosTypes.crash && auto);
     var rel = '', spoken = '';
@@ -337,9 +425,13 @@ class AlertPolicy {
       rel = Relation.text(myLat: me.lat!, myLng: me.lng!, lat: lat, lng: lng, route: me.route);
       spoken = Relation.spoken(myLat: me.lat!, myLng: me.lng!, lat: lat, lng: lng, route: me.route);
     }
-    final speech = accident
-        ? 'Emergency. $what${spoken.isEmpty ? '' : ' $spoken'}.'
-        : 'Emergency. $what${spoken.isEmpty ? '' : ', $spoken'}.';
+    final String speech;
+    if (accident) {
+      speech = spoken.isEmpty ? L10n.t('speech.emergency.nowhere', {'name': who}, speechLang) : L10n.t('speech.emergency', {'name': who, 'where': spoken}, speechLang);
+    } else {
+      speech = spoken.isEmpty ? L10n.t('speech.help.nowhere', {'name': who}, speechLang) : L10n.t('speech.help', {'name': who, 'where': spoken}, speechLang);
+    }
+    final hospital = hospitalLine(a);
 
     final net = a?.network;
     final responder = net?.activeResponder;
@@ -354,18 +446,66 @@ class AlertPolicy {
           'Nearby assistance accepted. A nearby rider is responding.',
           if (responder.etaS != null) 'Responder ${etaText(responder.etaS!)}.',
           if (own != null) 'Your nearest group rider ${etaText(own.etaS)}.',
+          if (hospital.isNotEmpty) hospital,
         ].join(' ');
       }
     } else {
       body = [
-        '$what.',
-        if (automatic) 'Automatic alert.',
+        what,
+        if (automatic) L10n.t('alert.automatic'),
         if (rel.isNotEmpty) '${_cap(rel)}.',
         '${Relation.lastUpdate(atMs, nowMs)}.',
         if (net != null && net.onScene) 'A nearby rider reported they are at the scene.',
+        if (hospital.isNotEmpty) hospital,
       ].join(' ');
     }
-    return AlertSpec(key, AlertChannel.sos, 'EMERGENCY', body, speech: speech);
+    return AlertSpec(key, AlertChannel.sos, L10n.t('alert.emergency.title'), body, speech: speech);
+  }
+
+  /// "Nearest hospital: Apollo, 4.2 km." when the server found one (3.16), else ''.
+  static String hospitalLine(SosAlertModel? a) {
+    final h = a?.nearestHospital;
+    if (h == null) return '';
+    return '${L10n.t('alert.hospital', {'name': h.name, 'km': Relation.distanceText(h.distanceM)})}.';
+  }
+
+  /// The own-group alert for a "Rider down here" report (3.16 wording fix): the reporter's
+  /// name and the place, never "may have met with an accident". Null for the reporter.
+  /// The subject of a member report gets "{reporter} reported that you are down".
+  static AlertSpec? report(String key,
+      {required String who, required TimelineEventModel event, SosAlertModel? alert, required AlertViewer me, required int nowMs, String speechLang = 'en'}) {
+    final a = alert;
+    final reporterId = a?.reportedBy ?? event.dataString('reportedBy');
+    final source = a?.effectiveSource ?? EmergencySource.fromWire(event.dataString('source'));
+    // A nearby report is raised by the reporter themself (the subject is not in the group).
+    final nearby = source == EmergencySource.nearbyReport;
+    final reportedById = reporterId.isNotEmpty ? reporterId : (nearby ? (event.userId ?? '') : '');
+    if (reportedById.isNotEmpty && reportedById == me.userId) return null;
+    var reporter = (a?.reportedByName ?? event.dataString('reportedByName')).trim();
+    if (reporter.isEmpty) reporter = nearby ? who : 'A rider';
+    final title = L10n.t('alert.report.title');
+    final hospital = hospitalLine(a);
+    if (!nearby && event.userId == me.userId) {
+      return AlertSpec(key, AlertChannel.sos, title, L10n.t('alert.report.self', {'reporter': reporter}), aboutMe: true);
+    }
+    final lat = a?.lat ?? event.lat, lng = a?.lng ?? event.lng;
+    var rel = '', spoken = '';
+    if (me.hasPosition && lat != null && lng != null) {
+      rel = Relation.text(myLat: me.lat!, myLng: me.lng!, lat: lat, lng: lng, route: me.route);
+      spoken = Relation.spoken(myLat: me.lat!, myLng: me.lng!, lat: lat, lng: lng, route: me.route);
+    }
+    final String line;
+    if (event.placeName.isNotEmpty) {
+      line = L10n.t('alert.report.body', {'reporter': reporter, 'place': event.placeName});
+    } else if (rel.isNotEmpty) {
+      line = L10n.t('alert.report.body.at', {'reporter': reporter, 'where': rel});
+    } else {
+      line = L10n.t('alert.report.body.noplace', {'reporter': reporter});
+    }
+    final speech = spoken.isEmpty
+        ? L10n.t('speech.report.nowhere', {'reporter': reporter}, speechLang)
+        : L10n.t('speech.report', {'reporter': reporter, 'where': spoken}, speechLang);
+    return AlertSpec(key, AlertChannel.sos, title, [line, if (hospital.isNotEmpty) hospital].join(' '), speech: speech);
   }
 
   /// Where a point is for assistance and hazard texts: live from my position when known,
@@ -393,6 +533,7 @@ class AlertPolicy {
     required AlertViewer me,
     required int nowMs,
     bool anyEmergency = false,
+    String speechLang = 'en',
   }) {
     final out = <AlertSpec>[];
     var anyAssist = false;
@@ -412,18 +553,25 @@ class AlertPolicy {
         ].join(' ')));
       } else {
         final what = r.isAccident ? 'A rider from another group may have met with an accident.' : 'A rider from another group needs help.';
+        final String body;
+        if (r.farByRoad) {
+          // 3.16: asked after escalation although the road is long (straight-line close).
+          final roadM = r.routeDistanceM ?? r.distanceM;
+          final min = r.etaS == null ? null : (r.etaS! <= 60 ? 1 : (r.etaS! / 60).round());
+          body = L10n.t('alert.far.body', {'km': Relation.distanceText(roadM), 'min': min ?? '?'});
+        } else {
+          body = [
+            what,
+            '${_cap(where)}.',
+            if (r.fasterThanGroup) 'Your group may be able to reach them before their own group.',
+          ].join(' ');
+        }
         out.add(AlertSpec(
           key,
           AlertChannel.sos,
           'Rider emergency nearby',
-          [
-            what,
-            '${_cap(where)}.',
-            if (r.fasterThanGroup) 'Your group may be able to reach them before their own group.',
-          ].join(' '),
-          speech: r.isAccident
-              ? 'Emergency alert. A rider may have had an accident $spoken. Your group may be the closest riders.'
-              : 'Emergency alert. A rider needs help $spoken. Your group may be the closest riders.',
+          body,
+          speech: L10n.t(r.isAccident ? 'speech.assist' : 'speech.assist.help', {'where': spoken}, speechLang),
         ));
       }
     }
@@ -456,7 +604,9 @@ class AlertPolicy {
         AlertChannel.hazard,
         'Caution',
         'Rider accident reported $where.$level Reduce speed and stay alert.',
-        speech: dist == null ? 'Caution. Rider accident reported nearby.' : 'Caution. Rider accident reported ${Relation.spokenDistance(dist)} ahead.',
+        speech: dist == null
+            ? L10n.t('speech.hazard.nearby', const {}, speechLang)
+            : L10n.t('speech.hazard', {'where': '${Relation.spokenDistance(dist)} ahead'}, speechLang),
       ));
     }
     if (AlertArbiter.socialAllowed(anyEmergency: anyEmergency, anyAssist: anyAssist, anyHazard: hazards.isNotEmpty)) {

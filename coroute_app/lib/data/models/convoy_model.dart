@@ -43,6 +43,18 @@ class ConvoyModel {
   /// Group default for "Ask nearby riders to help our riders" (a rider's own switch wins).
   final bool assistDefault;
 
+  /// 3.16: lower speed limit (km/h) within 1 km of planned stops, the start and the
+  /// destination; 0 = off. Lead only.
+  final int townLimitKmh;
+
+  /// The rider the lead made the sweeper (3.16), if any.
+  String? get sweeperId {
+    for (final r in riders.values) {
+      if (r.isSweeper) return r.userId;
+    }
+    return null;
+  }
+
   /// The route line to draw and measure against: the planned route when there is one.
   List<(double, double)> get routeLine {
     final r = route;
@@ -86,6 +98,7 @@ class ConvoyModel {
     this.visibility = GroupVisibility.private,
     this.discovery = false,
     this.assistDefault = true,
+    this.townLimitKmh = 0,
   });
 
   ConvoyModel copyWith({
@@ -119,6 +132,7 @@ class ConvoyModel {
     GroupVisibility? visibility,
     bool? discovery,
     bool? assistDefault,
+    int? townLimitKmh,
   }) {
     return ConvoyModel(
       groupId: groupId ?? this.groupId,
@@ -150,6 +164,7 @@ class ConvoyModel {
       visibility: visibility ?? this.visibility,
       discovery: discovery ?? this.discovery,
       assistDefault: assistDefault ?? this.assistDefault,
+      townLimitKmh: townLimitKmh ?? this.townLimitKmh,
     );
   }
 
@@ -183,6 +198,7 @@ class ConvoyModel {
       'visibility': visibility.wire,
       'discovery': discovery,
       'assistDefault': assistDefault,
+      'townLimitKmh': townLimitKmh,
     };
   }
 
@@ -260,6 +276,7 @@ class ConvoyModel {
       visibility: GroupVisibility.fromWire(json['visibility']?.toString()),
       discovery: json['discovery'] == true,
       assistDefault: json['assistDefault'] != false,
+      townLimitKmh: (json['townLimitKmh'] as num?)?.toInt() ?? 0,
     );
   }
 }

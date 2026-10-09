@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/safety_wire.dart';
@@ -536,6 +537,47 @@ Future<void> _resetFalseAlarms(BuildContext context, AdminEmergency e) async {
   }
 }
 
+/// Tests replace the phone app launch (tel: URI).
+Future<bool> Function(Uri uri)? adminDialOverride;
+
+/// "Call emergency contact" (3.16, item 20): confirm first, then the gateway
+/// answers the number for this open alert (audited there, never shown here,
+/// never logged) and the phone app opens with it.
+Future<void> callEmergencyContact(BuildContext context, AdminEmergency e) async {
+  final ok = await confirmAction(
+    context,
+    title: "Call ${e.who}'s emergency contact?",
+    message: 'This call is logged.',
+    confirmLabel: 'Call',
+  );
+  if (!ok || !context.mounted) return;
+  Map<String, dynamic> res;
+  try {
+    final r = await context.read<ApiClient>().post(
+      '/admin/emergencies/${Uri.encodeComponent(e.groupId)}/${Uri.encodeComponent(e.alertId)}/contact',
+      const <String, dynamic>{},
+    );
+    res = r is Map ? Map<String, dynamic>.from(r) : <String, dynamic>{};
+  } on ApiException catch (err) {
+    if (context.mounted) adminSnack(context, err.statusCode == 404 ? 'No emergency contact on file.' : 'Could not get the contact. Try again.');
+    return;
+  } catch (_) {
+    if (context.mounted) adminSnack(context, 'Could not get the contact. Try again.');
+    return;
+  }
+  final phone = (res['phone']?.toString() ?? '').replaceAll(RegExp(r'[^0-9+]'), '');
+  if (phone.isEmpty) {
+    if (context.mounted) adminSnack(context, 'No emergency contact on file.');
+    return;
+  }
+  final uri = Uri(scheme: 'tel', path: phone);
+  var launched = false;
+  try {
+    launched = await (adminDialOverride ?? launchUrl)(uri);
+  } catch (_) {}
+  if (!launched && context.mounted) adminSnack(context, 'Could not open the phone app.');
+}
+
 class _EmergencyCard extends StatelessWidget {
   final AdminEmergency emergency;
   final int nowMs;
@@ -617,6 +659,13 @@ class _EmergencyCard extends StatelessWidget {
                       onPressed: onOpenRide,
                       icon: const Icon(Icons.two_wheeler_rounded),
                       label: const Text('Open ride'),
+                    ),
+                  if (e.alertId.isNotEmpty && e.groupId.isNotEmpty)
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(foregroundColor: fg, side: BorderSide(color: fg), minimumSize: const Size(48, 48)),
+                      onPressed: () => callEmergencyContact(context, e),
+                      icon: const Icon(Icons.contact_phone_rounded),
+                      label: const Text('Call emergency contact'),
                     ),
                   if (e.falseAlarms30d > 0 && e.userId.isNotEmpty)
                     OutlinedButton.icon(

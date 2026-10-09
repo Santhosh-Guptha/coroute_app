@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/network_wire.dart';
@@ -201,7 +202,7 @@ class IncidentBanner extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(horizontal: Space.s8),
                           ),
                           icon: const Icon(Icons.navigation_rounded),
-                          label: const Text('Navigate', maxLines: 1, overflow: TextOverflow.ellipsis),
+                          label: Text(L10n.t('incident.navigate'), maxLines: 1, overflow: TextOverflow.ellipsis),
                         ),
                       ),
                       const SizedBox(width: Space.s8),
@@ -216,7 +217,7 @@ class IncidentBanner extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(horizontal: Space.s8),
                         ),
                         icon: const Icon(Icons.open_in_full_rounded),
-                        label: const Text('Open', maxLines: 1, overflow: TextOverflow.ellipsis),
+                        label: Text(L10n.t('incident.open'), maxLines: 1, overflow: TextOverflow.ellipsis),
                       ),
                     ),
                   ],
@@ -254,7 +255,7 @@ class IncidentBanner extends StatelessWidget {
           );
     }
     final call = phone.trim().isEmpty ? null : () => dialNumber(context, phone);
-    final semantics = ['Emergency', i.summary, ?where, ?updated, ?nearby, ?helping, ?nearest].join('. ');
+    final semantics = [L10n.t('incident.emergency'), i.summary, ?where, ?updated, ?nearby, ?helping, ?nearest].join('. ');
 
     ButtonStyle outlined() => OutlinedButton.styleFrom(
           foregroundColor: fg,
@@ -292,7 +293,7 @@ class IncidentBanner extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('EMERGENCY', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg, fontWeight: FontWeight.w800)),
+                            Text(L10n.t('incident.emergency'), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg, fontWeight: FontWeight.w800)),
                             Text(i.summary, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(color: fg, fontWeight: FontWeight.w600)),
                             if (where != null)
                               Text(where, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w700)),
@@ -323,7 +324,7 @@ class IncidentBanner extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: Space.s8),
                     ),
                     icon: const Icon(Icons.navigation_rounded),
-                    label: Text('Navigate to ${i.firstName}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                    label: Text(L10n.t('incident.navigateTo', {'name': i.firstName}), maxLines: 1, overflow: TextOverflow.ellipsis),
                   ),
                 const SizedBox(height: Space.s8),
                 Row(
@@ -334,7 +335,7 @@ class IncidentBanner extends StatelessWidget {
                           onPressed: call,
                           style: outlined(),
                           icon: const Icon(Icons.call_rounded),
-                          label: Text('Call ${i.firstName}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                          label: Text(L10n.t('incident.call', {'name': i.firstName}), maxLines: 1, overflow: TextOverflow.ellipsis),
                         ),
                       ),
                       const SizedBox(width: Space.s8),
@@ -344,7 +345,7 @@ class IncidentBanner extends StatelessWidget {
                         onPressed: onOpen,
                         style: outlined(),
                         icon: const Icon(Icons.open_in_full_rounded),
-                        label: const Text('View Emergency', maxLines: 1, overflow: TextOverflow.ellipsis),
+                        label: Text(L10n.t('incident.view'), maxLines: 1, overflow: TextOverflow.ellipsis),
                       ),
                     ),
                   ],

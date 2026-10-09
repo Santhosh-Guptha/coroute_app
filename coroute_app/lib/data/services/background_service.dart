@@ -13,8 +13,11 @@ import '../../core/constants/ride_notification_constants.dart';
 /// Android 14+ refuses a microphone-type service without that permission, which
 /// would leave the rider with no background location at all) with a persistent notification
 /// that shows the convoy name and offers two actions riders can use without
-/// unlocking the phone: SOS and Leave. The Dart code of the app keeps running
-/// in the main isolate; the service's own isolate only forwards button taps.
+/// unlocking the phone: SOS and Leave ride. Neither acts by itself (3.16): SOS
+/// opens the hold-to-send screen and Leave ride opens a confirm in the app
+/// (ConvoyService only flags `leaveRequestedFromNotification`). The Dart code of
+/// the app keeps running in the main isolate; the service's own isolate only
+/// forwards button taps.
 ///
 /// 3.15: during a ride RideNotificationService replaces this plain notification
 /// in place with the big ride notification (same id [NotifConstants.serviceNotificationId],
@@ -161,7 +164,7 @@ class BackgroundService {
         notificationText: text,
         notificationButtons: const [
           NotificationButton(id: buttonSos, text: 'SOS'),
-          NotificationButton(id: buttonLeave, text: 'Leave convoy'),
+          NotificationButton(id: buttonLeave, text: 'Leave ride'),
         ],
         callback: coRouteForegroundCallback,
       );
@@ -284,7 +287,8 @@ class _CoRouteTaskHandler extends TaskHandler {
   @override
   void onNotificationButtonPressed(String id) {
     FlutterForegroundTask.sendDataToMain(id);
-    if (id == BackgroundService.buttonSos) FlutterForegroundTask.launchApp();
+    // Both buttons open the app: SOS to the hold screen, Leave ride to its confirm (3.16).
+    if (id == BackgroundService.buttonSos || id == BackgroundService.buttonLeave) FlutterForegroundTask.launchApp();
   }
 
   @override

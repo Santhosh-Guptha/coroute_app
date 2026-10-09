@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/emergency_nav_constants.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/network_models.dart';
 import '../../data/models/network_wire.dart';
 import '../../data/services/convoy_service.dart';
 import '../../domain/notify/relation.dart';
+import '../safety/safety_card_sheet.dart';
 import 'assist_banner.dart';
 import 'emergency_guidance.dart';
 import 'incident_banner.dart';
@@ -49,6 +51,13 @@ class AssistSheetBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: L10n.changes,
+      builder: (context, _, _) => _body(context),
+    );
+  }
+
+  Widget _body(BuildContext context) {
     final service = context.watch<ConvoyService>();
     final guidance = context.watch<EmergencyGuidance?>();
     final now = nowMs ?? DateTime.now().millisecondsSinceEpoch;
@@ -73,7 +82,7 @@ class AssistSheetBody extends StatelessWidget {
       AssistStage.request || AssistStage.closed => AssistTexts.requestTitle,
       AssistStage.responding => AssistTexts.respondingTitle(a, distance),
       AssistStage.arrivalCheck => AssistTexts.arrivalQuestion,
-      AssistStage.onScene => 'You are with the rider',
+      AssistStage.onScene => AssistTexts.withRider,
     };
 
     Widget big(IconData icon, String label, VoidCallback onTap, {bool outlined = false, Color? color}) {
@@ -104,11 +113,11 @@ class AssistSheetBody extends StatelessWidget {
       case AssistStage.request:
       case AssistStage.closed:
         actions = [
-          big(Icons.volunteer_activism_rounded, 'I Can Help', () => acceptAssist(context, a), color: StatusColors.critical),
+          big(Icons.volunteer_activism_rounded, L10n.t('assist.help'), () => acceptAssist(context, a), color: StatusColors.critical),
           const SizedBox(height: Space.s8),
-          big(Icons.navigation_rounded, 'Navigate', () => navigateToAssist(context, a), outlined: true),
+          big(Icons.navigation_rounded, L10n.t('incident.navigate'), () => navigateToAssist(context, a), outlined: true),
           const SizedBox(height: Space.s8),
-          big(Icons.block_rounded, "Can't Assist", () {
+          big(Icons.block_rounded, L10n.t('assist.cant'), () {
             sendAssistAnswer(context, a.incidentId, AssistAnswer.decline);
             Navigator.of(context).maybePop();
           }, outlined: true),
@@ -116,18 +125,18 @@ class AssistSheetBody extends StatelessWidget {
         break;
       case AssistStage.responding:
         actions = [
-          big(Icons.navigation_rounded, 'Navigate', () => navigateToAssist(context, a), color: StatusColors.critical),
+          big(Icons.navigation_rounded, L10n.t('incident.navigate'), () => navigateToAssist(context, a), color: StatusColors.critical),
           const SizedBox(height: Space.s8),
-          big(Icons.flag_rounded, 'Arrived', () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived), outlined: true),
+          big(Icons.flag_rounded, L10n.t('assist.arrived'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived), outlined: true),
           const SizedBox(height: Space.s8),
-          big(Icons.do_not_disturb_on_rounded, 'Unable to Assist', () => sendAssistAnswer(context, a.incidentId, AssistAnswer.unable), outlined: true),
+          big(Icons.do_not_disturb_on_rounded, L10n.t('assist.unable'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.unable), outlined: true),
         ];
         break;
       case AssistStage.arrivalCheck:
         actions = [
-          big(Icons.check_circle_rounded, 'Yes, I Found Them', () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived), color: StatusColors.success),
+          big(Icons.check_circle_rounded, L10n.t('assist.found'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived), color: StatusColors.success),
           const SizedBox(height: Space.s8),
-          big(Icons.location_searching_rounded, 'Unable to Locate', () => sendAssistAnswer(context, a.incidentId, AssistAnswer.notFound), outlined: true),
+          big(Icons.location_searching_rounded, L10n.t('assist.notFound'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.notFound), outlined: true),
         ];
         break;
       case AssistStage.onScene:
@@ -140,6 +149,7 @@ class AssistSheetBody extends StatelessWidget {
         : [subject.vehicleColor.trim(), subject.vehicleType.trim()].where((x) => x.isNotEmpty).join(' ');
     final updated = a.lastUpdateAt > 0 ? Relation.lastUpdate(a.lastUpdateAt, now) : null;
     final eta = etaWords(etaS);
+    final far = stage == AssistStage.request ? AssistTexts.farBody(a) : null;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -168,6 +178,11 @@ class AssistSheetBody extends StatelessWidget {
                       child: Text(title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontWeight: FontWeight.w800)),
                     ),
                     const SizedBox(height: 2),
+                    if (a.farByRoad)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: Text(AssistTexts.farLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: StatusColors.warning)),
+                      ),
                     Text(AssistTexts.what(a), maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: StatusColors.critical)),
                     Text(
                       AssistTexts.where(a, myLat: myLat, myLng: myLng, route: convoy?.routeLine ?? const []),
@@ -184,20 +199,30 @@ class AssistSheetBody extends StatelessWidget {
           ),
         ),
         const SizedBox(height: Space.s12),
-        if (stage == AssistStage.request && a.fasterThanGroup) ...[
+        if (far != null) ...[
+          Text(far, style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+          const SizedBox(height: Space.s12),
+        ] else if (stage == AssistStage.request && a.fasterThanGroup) ...[
           Text(AssistTexts.faster, style: AppText.body.copyWith(color: AppTheme.textSecondary)),
           const SizedBox(height: Space.s12),
         ],
         if (accepted && stage != AssistStage.onScene) ...[
-          const PositiveLine(text: AssistTexts.responding),
+          PositiveLine(text: AssistTexts.responding),
           const SizedBox(height: Space.s12),
         ],
         if (subject != null && subject.firstName.trim().isNotEmpty)
-          InfoLine(icon: Icons.person_rounded, text: 'Rider: ${subject.firstName.trim()}'),
-        if (vehicle.isNotEmpty) InfoLine(icon: Icons.two_wheeler_rounded, text: 'Vehicle: $vehicle'),
+          InfoLine(icon: Icons.person_rounded, text: L10n.t('assist.rider', {'name': subject.firstName.trim()})),
+        if (vehicle.isNotEmpty) InfoLine(icon: Icons.two_wheeler_rounded, text: L10n.t('assist.vehicle', {'vehicle': vehicle})),
         if (medical != null && !medical.isEmpty) ...[
           const SizedBox(height: Space.s8),
           MedicalCard(info: medical),
+          const SizedBox(height: Space.s8),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            onPressed: () => SafetyCardSheet.show(context, name: subject?.firstName.trim() ?? '', medical: medical),
+            icon: const Icon(Icons.medical_information_rounded),
+            label: Text(L10n.t('incident.card'), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
         ],
         if (subject != null || vehicle.isNotEmpty || medical != null) const SizedBox(height: Space.s12),
         ...actions,
@@ -210,7 +235,7 @@ class AssistSheetBody extends StatelessWidget {
           ),
           onPressed: () => dialNumber(context, '112'),
           icon: const Icon(Icons.local_hospital_rounded),
-          label: const Text('Call emergency services 112', maxLines: 1, overflow: TextOverflow.ellipsis),
+          label: Text(L10n.t('assist.call112'), maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
         const SizedBox(height: Space.s8),
         TextButton.icon(

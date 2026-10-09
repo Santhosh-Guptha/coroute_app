@@ -2,9 +2,9 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { requireAuth, requireAdmin, AuthError } = require('./auth');
-const { ValidationError, tripRecord, sitePath } = require('./validate');
+const { ValidationError, tripRecord, sitePath, weatherPoints, liveTokenOf } = require('./validate');
 const { identity } = require('./anonymise');
-const { ConvoyError, falseAlarmCount } = require('./convoys');
+const { ConvoyError, falseAlarmCount, sha256 } = require('./convoys');
 const config = require('./config');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 const { toWire, toGpx, filterPoints, validateChunk, uploadPermission, TrackError } = require('./tracks');
@@ -14,8 +14,9 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate, network = null, audit = null }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate, network = null, audit = null, publicLiveLimiter = null }) {
   const r = express.Router();
+  const originOf = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
 
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again later.' } });
   const apiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 240, standardHeaders: 'draft-7', legacyHeaders: false });
@@ -93,6 +94,28 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     });
     res.status(201).json({ ok: true });
   }));
+
+  // ---- live emergency link (3.16): public, no auth, per-IP limited, never cached or indexed ----
+  // The token is only ever compared by hash; a malformed token is a 404, a dead link a 410, and neither
+  // says anything about other links. Views are audited at most once per link per 5 minutes (no IP, no token).
+  const liveLimiter = publicLiveLimiter || rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests.' } });
+  const viewAudited = new Map(); // hash -> last audit time
+  r.get('/public/live/:token', liveLimiter, (req, res) => {
+    res.set('Cache-Control', 'no-store').set('X-Robots-Tag', 'noindex').set('Referrer-Policy', 'no-referrer');
+    const token = liveTokenOf(req.params.token);
+    if (!token) return res.status(404).json({ error: 'Not found' });
+    const hash = sha256(token);
+    const view = convoys.liveView(hash);
+    if (!view) return res.status(410).json({ error: 'This link has expired.' });
+    const t = Date.now();
+    if (audit && t - (viewAudited.get(hash) || 0) >= 5 * 60000) {
+      viewAudited.set(hash, t);
+      const ref = convoys.liveLinks.get(hash);
+      audit.add({ kind: 'LIVE_LINK', alertId: ref?.alertId, groupId: ref?.gid, detail: 'VIEW' });
+      if (viewAudited.size > 2000) for (const [k, at] of viewAudited) if (t - at >= 5 * 60000) viewAudited.delete(k);
+    }
+    res.json(view);
+  });
 
   // ---- authenticated ----
   r.use(requireAuth(gate), apiLimiter);
@@ -191,6 +214,24 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   });
   r.get('/convoys/:groupId/emergency-roster', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, rosterLimiter, wrap(async (req, res) => {
     res.json(await convoys.emergencyRoster(String(req.params.groupId || ''), req.user.userId));
+  }));
+  // Live emergency link (3.16): the alert owner or the lead shares https://<origin>/e/<token> for 30 minutes.
+  const liveLinkLimiter = rateLimit({
+    windowMs: 60 * 1000, limit: 6, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `live:${req.user.userId}`, message: { error: 'Too many requests. Try again in a minute.', code: 'RATE_LIMITED' },
+  });
+  r.post('/convoys/:groupId/alerts/:alertId/live-link', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, liveLinkLimiter, wrap(async (req, res) => {
+    try {
+      const out = await convoys.createLiveLink(String(req.params.groupId || ''), req.user, String(req.params.alertId || ''));
+      res.json({ token: out.token, url: `${originOf(req)}/e/${out.token}`, expiresAt: out.expiresAt });
+    } catch (e) {
+      if (e instanceof ConvoyError && e.reason === 'LINK_ACTIVE') return res.status(409).json({ error: e.message, code: 'LINK_ACTIVE', expiresAt: e.expiresAt || 0 });
+      throw e;
+    }
+  }));
+  r.delete('/convoys/:groupId/alerts/:alertId/live-link', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, liveLinkLimiter, wrap(async (req, res) => {
+    await convoys.revokeLiveLink(String(req.params.groupId || ''), req.user, String(req.params.alertId || ''));
+    res.json({ ok: true });
   }));
   r.post('/convoys/:groupId/leave', wrap(async (req, res) => { await convoys.leave(req.params.groupId, req.user.userId); res.json({ ok: true }); }));
   r.post('/convoys/:groupId/status', wrap(async (req, res) => {
@@ -369,6 +410,18 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     if (!route) return res.status(502).json({ error: 'Route is not available right now.' });
     res.json(route);
   }));
+  // Weather on the route (3.16): 1 to 5 points with their ETA, answered from a 0.1 degree grid cache (Open-Meteo).
+  const weatherLimiter = rateLimit({
+    windowMs: 60 * 1000, limit: config.weatherUserPerMin, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `wx:${req.user.userId}`, message: { error: 'Too many weather checks. Wait a moment.', code: 'RATE_LIMITED' },
+  });
+  r.post('/geo/weather', weatherLimiter, wrap(async (req, res) => {
+    if (!geo.weatherEnabled) return res.status(503).json({ error: 'Weather is not available.', code: 'WEATHER_OFF' });
+    const points = weatherPoints(req.body?.points);
+    const out = await geo.weather(points);
+    if (!out) return res.status(503).json({ error: 'Weather is not available.', code: 'WEATHER_OFF' });
+    res.set('Cache-Control', 'private, max-age=600').json(out);
+  }));
 
   r.delete('/trips/:tripId', wrap(async (req, res) => res.json({ removed: await repo.deleteTrip(req.params.tripId, req.user.userId) })));
 
@@ -377,6 +430,24 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // Every open SOS and crash alert across convoys (3.14). No medical info, no phone numbers.
   r.get('/admin/emergencies', requireAdmin, wrap(async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ serverTime: Date.now(), emergencies: await convoys.emergencies() });
+  }));
+  // 3.16: an admin calls the rider's emergency contact from the emergencies panel. The number is answered
+  // once for the call and never stored in the audit (actor, rider, alert and time only).
+  const adminContactLimiter = rateLimit({
+    windowMs: 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `contact:${req.user.userId}`, message: { error: 'Too many requests. Try again in a minute.', code: 'RATE_LIMITED' },
+  });
+  r.post('/admin/emergencies/:groupId/:alertId/contact', requireAdmin, adminContactLimiter, wrap(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const gid = String(req.params.groupId || ''), alertId = String(req.params.alertId || '');
+    const room = gid.length <= 64 ? await convoys.getRoom(gid, { required: false }).catch(() => null) : null;
+    const a = room && alertId.length <= 80 ? room.alerts.get(alertId) : null;
+    if (!a || a.resolved) return res.status(404).json({ error: 'That alert is no longer open.', code: 'ALERT_CLOSED' });
+    const u = await repo.findUserById(a.userId).catch(() => null);
+    const name = String(u?.emergencyContactName || '').trim(), phone = String(u?.emergencyContact || '').trim();
+    if (!name && !phone) return res.status(404).json({ error: 'No emergency contact on file.', code: 'NO_CONTACT' });
+    if (audit) audit.add({ kind: 'ADMIN_CONTACT', actorId: req.user.userId, subjectId: a.userId, alertId: a.alertId, groupId: gid, detail: 'CALL' });
+    res.json({ name, phone, riderName: a.userName || room.riders.get(a.userId)?.name || '' });
   }));
   // Rider safety network (3.15): open incidents, users with false alarms, the latest audit rows.
   r.get('/admin/safety', requireAdmin, wrap(async (req, res) => {

@@ -2,15 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/app_bottom_sheet.dart';
 import '../../core/ui/ui_tokens.dart';
+import '../../data/models/network_models.dart';
 import '../../data/models/network_wire.dart';
+import '../../data/models/safety_wire.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/settings_service.dart';
 import '../ride/incident_banner.dart' show PositiveLine;
+import '../ride/incident_sheet.dart' show HospitalLine, LiveLinkControls;
 import '../ride/incident_view.dart' show etaWords, networkStateWords;
 
 /// What the SOS sheet tells the rider about delivery.
@@ -23,6 +27,7 @@ enum SosSheetStatus { delivered, sending, waitingForSignal, unknown }
 /// * Calls or texts the rider's emergency contact (with a map link to the position).
 /// * Dials 112.
 /// * Says whether nearby riders of other groups are being asked or one is coming (3.15).
+/// * Shows the nearest hospital with Navigate and lets the rider share a live link (3.16).
 /// * "Help reached me" or "False alarm" closes the rider's own SOS from any screen.
 class EmergencySosSheet extends StatelessWidget {
   final double lat;
@@ -103,6 +108,17 @@ class EmergencySosSheet extends StatelessWidget {
     return (null, false);
   }
 
+  /// The nearest hospital the gateway found for my open SOS, or null.
+  static NearbyPlace? hospitalOf(ConvoyService? s) {
+    final c = s?.activeConvoy;
+    final id = s?.myOpenSosAlertId;
+    if (c == null || id == null) return null;
+    for (final a in c.activeAlerts) {
+      if (a.alertId == id) return a.nearestHospital;
+    }
+    return null;
+  }
+
   void _close(BuildContext context, ConvoyService? convoyService, ResolveReason reason) {
     // Resolves this rider's own open SOS on the server (also when the sheet was
     // opened without an alert id) and drops one that is still waiting to be sent.
@@ -173,6 +189,10 @@ class EmergencySosSheet extends StatelessWidget {
     final smsLine = smsStatus?.text ?? '';
     final showSmsButton = smsOn && pending && status != SosSheetStatus.delivered;
     final (netLine, netPositive) = context.select<ConvoyService?, (String?, bool)>(networkLineOf);
+    // 3.16: the nearest hospital of my open alert, and the live link for it (3.16 gateway only).
+    final hospital = context.select<ConvoyService?, NearbyPlace?>(hospitalOf);
+    final ride316 = context.select<ConvoyService?, bool>((s) => s?.supports(ProtocolFeatures.ride316) ?? false);
+    final linkId = ride316 ? (alertId ?? openAlertId) : null;
 
     return Column(
           mainAxisSize: MainAxisSize.min,
@@ -243,6 +263,10 @@ class EmergencySosSheet extends StatelessWidget {
                 ),
               const SizedBox(height: Space.s12),
             ],
+            if (hospital != null) ...[
+              HospitalLine(place: hospital),
+              const SizedBox(height: Space.s8),
+            ],
 
             // Location Box
             Container(
@@ -279,6 +303,10 @@ class EmergencySosSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
+            if (linkId != null) ...[
+              LiveLinkControls(alertId: linkId),
+              const SizedBox(height: Space.s12),
+            ],
 
             if (smsLine.isNotEmpty) ...[
               Semantics(
@@ -383,7 +411,7 @@ class EmergencySosSheet extends StatelessWidget {
               ),
               icon: const Icon(Icons.verified_user_rounded),
               onPressed: () => _close(context, convoyService, ResolveReason.resolved),
-              label: const Text('Help reached me', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              label: Text(L10n.t('sos.ok'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
             ),
             const SizedBox(height: Space.s8),
             FilledButton.icon(
@@ -395,7 +423,7 @@ class EmergencySosSheet extends StatelessWidget {
               ),
               icon: const Icon(Icons.do_not_disturb_on_rounded),
               onPressed: () => _close(context, convoyService, ResolveReason.falseAlarm),
-              label: const Text('False alarm', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              label: Text(L10n.t('sos.false'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
             ),
             const SizedBox(height: Space.s4),
             TextButton(

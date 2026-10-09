@@ -50,7 +50,7 @@ test('privacy, terms, 404 page, robots, sitemap, static assets, download redirec
   assert.ok(!sm.includes('/download<'), 'the download redirect is not a page');
 
   for (const p of ['/og-image.png', '/favicon.svg', '/favicon-32.png', '/apple-touch-icon.png', '/site.webmanifest',
-    '/assets/site.css', '/assets/site.js', '/assets/icons.svg', '/assets/topo.svg', '/fonts/barlow-condensed-700.woff2', '/fonts/barlow-400.woff2', '/fonts/barlow-600.woff2', '/fonts/OFL-Barlow.txt']) {
+    '/assets/site.css', '/assets/site.js', '/assets/icons.svg', '/assets/topo.svg', '/assets/live.css', '/assets/live.js', '/fonts/barlow-condensed-700.woff2', '/fonts/barlow-400.woff2', '/fonts/barlow-600.woff2', '/fonts/OFL-Barlow.txt']) {
     assert.equal((await fetch(base + p)).status, 200, p);
   }
   const al = await fetch(base + '/.well-known/assetlinks.json');

@@ -173,9 +173,13 @@ class PreRideChecklist {
 }
 
 /// Shown before creating or joining a ride. It never blocks: "Start the ride" always works;
-/// items that need attention are amber with a "Fix" button.
+/// items that need attention are amber with a "Fix" button. The first line (3.16, item 9)
+/// reminds about helmet, licence and documents; it follows the "Helmet and documents
+/// reminder" setting.
 class PreRideChecklistSheet extends StatefulWidget {
   final List<AutoCheck> checks;
+
+  static const String documentsLine = 'Helmet on, licence and documents with you?';
 
   /// Asks for a permission (tests pass a fake); defaults to [PermissionsService.request].
   final Future<bool> Function(String key)? requestPermission;
@@ -287,6 +291,18 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
               shrinkWrap: true,
               padding: EdgeInsets.zero,
               children: [
+                if (Provider.of<SettingsService?>(context)?.documentsReminder ?? false)
+                  Padding(
+                    padding: const EdgeInsets.only(top: Space.s4, bottom: Space.s8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.sports_motorsports_rounded, size: 22, color: AppTheme.neonCyan),
+                        const SizedBox(width: Space.s12),
+                        Expanded(child: Text(PreRideChecklistSheet.documentsLine, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body)),
+                      ],
+                    ),
+                  ),
                 for (var i = 0; i < _checks.length; i++) _autoRow(i),
                 ..._safetyRows(),
                 const Divider(),

@@ -406,7 +406,12 @@ class RideNotification(private val activity: Activity, private val channel: Meth
             .setShowWhen(false)
             .setOnlyAlertOnce(true)
             .setContentIntent(content)
-        if (publicText.isNotEmpty()) publicVersion.setContentText(publicText)
+        // The public text is the minimal emergency line, or (3.16, opt-in) the rider's own
+        // medical ID during their own SOS: BigText so the lock screen shows all of it.
+        if (publicText.isNotEmpty()) {
+            publicVersion.setContentText(publicText)
+            publicVersion.setStyle(Notification.BigTextStyle().bigText(publicText))
+        }
         if (toneColor != null) publicVersion.setColor(toneColor) else publicVersion.setColor(color(R.color.ride_notif_accent))
 
         val extras = Bundle()
