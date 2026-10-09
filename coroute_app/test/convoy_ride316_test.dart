@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:coroute_app/data/models/convoy_model.dart';
+import 'package:coroute_app/data/models/network_models.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/models/safety_wire.dart';
 import 'package:coroute_app/data/models/sos_alert_model.dart';
@@ -22,7 +23,7 @@ class Rt extends RealtimeService {
   Rt(Set<String> features) : features = {...features};
 
   Set<String> features;
-  bool _connected = true;
+  final bool _connected = true;
   final List<Map<String, dynamic>> sent = [];
   final StreamController<Map<String, dynamic>> _ctrl = StreamController<Map<String, dynamic>>.broadcast();
 

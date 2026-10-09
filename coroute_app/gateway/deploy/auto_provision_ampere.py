@@ -61,7 +61,12 @@ DEFAULT_SSH_PUBLIC_KEY = (
     "Pxrqr ssh-key-2026-10-01"
 )
 
-SSH_PRIVATE_KEY_PATH = os.path.expanduser("~/Downloads/ssh-key-2026-10-01 (1).key")
+SSH_PRIVATE_KEY_PATHS = [
+    os.path.expanduser("~/.ssh/vm_provision_ssh.key"),
+    os.path.expanduser("~/Downloads/ssh-key-2026-10-01 (1).key"),
+    os.path.expanduser("~/.ssh/id_rsa"),
+]
+SSH_PRIVATE_KEY_PATH = next((p for p in SSH_PRIVATE_KEY_PATHS if os.path.exists(p)), SSH_PRIVATE_KEY_PATHS[0])
 RETRY_DELAY_SECONDS = 45
 
 

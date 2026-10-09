@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
+import 'package:provider/single_child_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:coroute_app/core/l10n/l10n.dart';
@@ -122,7 +123,7 @@ void main() {
     final api = ApiClient(httpClient: MockClient((_) async => http.Response('{}', 200)), storage: const FlutterSecureStorage());
     final auth = AuthService(api);
     await render(tester, const SizedBox(height: 600, child: ProfileForm()), providers: [ChangeNotifierProvider<AuthService>.value(value: auth)]);
-    final list = find.byType(Scrollable).last;
+    final list = find.byType(Scrollable).first;
     await tester.scrollUntilVisible(find.byKey(const ValueKey('allergies')), 200, scrollable: list);
     await tester.enterText(find.byKey(const ValueKey('allergies')), 'dust');
     await tester.scrollUntilVisible(find.byKey(const ValueKey('safetyCard')), 200, scrollable: list);
@@ -130,7 +131,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('safetyCard')));
     await tester.pumpAndSettle();
     expect(find.text('Safety card'), findsOneWidget);
-    expect(find.text('dust'), findsOneWidget);
+    expect(find.descendant(of: find.byType(SafetyCardSheet), matching: find.text('dust')), findsOneWidget);
     expect(find.textContaining('Call'), findsNothing, reason: 'my own card');
   });
 

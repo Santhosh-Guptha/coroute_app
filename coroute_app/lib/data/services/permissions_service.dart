@@ -32,7 +32,6 @@ class PermissionsService {
     final notif = await Permission.notification.status;
     final battery = await BackgroundService.isIgnoringBatteryOptimizations();
     final android = Platform.isAndroid;
-    final sms = android ? (await Permission.sms.status).isGranted : false;
     // Full-screen alarms can be denied only on Android 14 (SDK 34) and newer.
     final sdk = android ? (await SafetyNative.deviceInfo()).sdkInt : 0;
     final fullScreen = sdk >= 34 ? await SafetyNative.canUseFullScreenIntent() : true;
@@ -43,8 +42,6 @@ class PermissionsService {
       PermissionItem(key: 'notification', title: 'Notifications', reason: 'Enable ride alerts to receive group separation and emergency updates.', required: false, granted: notif.isGranted),
       if (Platform.isAndroid)
         PermissionItem(key: 'battery', title: 'Unrestricted battery use', reason: 'Stops the phone from closing CoRoute during long rides.', required: false, granted: battery),
-      if (android)
-        PermissionItem(key: 'sms', title: 'Send texts (SMS)', reason: 'Only if you switch on "Text the group if there is no internet": when an SOS cannot be sent, your phone texts your emergency contact and riders with a map link.', required: false, granted: sms),
       if (sdk >= 34)
         PermissionItem(key: 'fullScreen', title: 'Alarm on the lock screen', reason: 'Shows the crash alarm over the lock screen, so you can cancel it without unlocking.', required: false, granted: fullScreen),
     ];

@@ -207,7 +207,7 @@ class VoiceService extends ChangeNotifier {
       ok = false;
     }
     final e = _engine;
-    final got = ok && e is VoiceEngineLanguage ? e.language.toLowerCase() : '';
+    final got = ok && e is VoiceEngineLanguage ? (e as VoiceEngineLanguage).language.toLowerCase() : '';
     _speechLang = _requested != 'en' && got.startsWith(_requested) ? _requested : 'en';
     if (ok != _available) {
       _available = ok;

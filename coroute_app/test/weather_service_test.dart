@@ -89,8 +89,9 @@ void main() {
 
   test('hourText rounds to the hour', () {
     final local = DateTime.fromMillisecondsSinceEpoch(departS * 1000);
-    final expected = local.hour % 12 == 0 ? 12 : local.hour % 12;
-    expect(WeatherService.hourText(departS), '$expected ${local.hour < 12 ? 'AM' : 'PM'}');
+    final rounded = (local.minute >= 30 ? local.hour + 1 : local.hour) % 24;
+    final expected = rounded % 12 == 0 ? 12 : rounded % 12;
+    expect(WeatherService.hourText(departS), '$expected ${rounded < 12 ? 'AM' : 'PM'}');
   });
 
   test('rain after a named place around 3 PM', () async {

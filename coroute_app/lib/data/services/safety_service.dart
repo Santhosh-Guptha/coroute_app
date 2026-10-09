@@ -352,14 +352,11 @@ class SafetyService extends ChangeNotifier {
     this._sms,
     this._clock,
     this._native, {
-    VoiceService? voice,
-    WeatherService? weather,
-    TilePrefetcher? tiles,
+    this._voice,
+    this._weather,
+    this._tiles,
     Future<String> Function()? networkKind,
-  })  : _voice = voice,
-        _weather = weather,
-        _tiles = tiles,
-        _networkKind = networkKind ?? SafetyNative.networkKind {
+  })  : _networkKind = networkKind ?? SafetyNative.networkKind {
     _port.addListener(_onConvoy);
     _settings.addListener(_onSettings);
     _fixSub = _port.myFixes.listen(_onFix, onError: (Object _) {});

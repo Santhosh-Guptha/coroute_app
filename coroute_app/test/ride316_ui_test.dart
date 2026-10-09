@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
+import 'package:provider/single_child_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:coroute_app/core/l10n/l10n.dart';
@@ -117,7 +118,7 @@ class _Convoys extends ConvoyService {
 
 /// A WeatherService whose answer is fixed (no gateway).
 class _Weather extends WeatherService {
-  _Weather(ApiClient api, SettingsService settings, this.answer) : super(api, settings);
+  _Weather(super.api, super.settings, this.answer);
   final WeatherSummary? answer;
   int checks = 0;
   @override
@@ -287,7 +288,7 @@ void main() {
       expect(find.text('Sweeper: Kiran'), findsOneWidget);
       await tester.tap(find.text('50'));
       expect(lead.townLimits, [50]);
-      await tester.tap(find.text('Off'));
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Off').last);
       expect(lead.townLimits, [50, 0]);
 
       final pack = _Convoys(api(), convoy(), lead: false);

@@ -222,7 +222,7 @@ class CachedTileImage extends ImageProvider<CachedTileImage> {
     if (saved != null) {
       try {
         final bytes = await saved.readAsBytes();
-        if (bytes.isNotEmpty) return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+        if (bytes.isNotEmpty) return await decode(await ui.ImmutableBuffer.fromUint8List(bytes));
       } catch (_) {
         // unreadable file: fetched again below
       }
