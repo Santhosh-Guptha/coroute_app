@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Safety | Coroute</title>
+<meta name="description" content="How Coroute handles an emergency on a group ride: SOS, your group's response, crash detection, texts without internet, help from nearby riders, and what is shared with whom.">
+<link rel="canonical" href="__ORIGIN__/safety">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Coroute">
+<meta property="og:title" content="Safety | Coroute">
+<meta property="og:description" content="How Coroute handles an emergency on a group ride: SOS, your group's response, crash detection, texts without internet, help from nearby riders, and what is shared with whom.">
+<meta property="og:url" content="__ORIGIN__/safety">
+<meta property="og:image" content="__ORIGIN__/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Safety | Coroute">
+<meta name="twitter:description" content="How Coroute handles an emergency on a group ride: SOS, your group's response, crash detection, texts without internet, help from nearby riders, and what is shared with whom.">
+<meta name="twitter:image" content="__ORIGIN__/og-image.png">
+<meta name="theme-color" content="#0B0D0E">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<script>document.documentElement.classList.add('js')</script>
+<script src="/assets/site.js" defer></script>
+</head>
+<body data-page="safety">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="page-hero topo">
+    <div class="container">
+      <div class="page-hero__inner">
+        <p class="eyebrow">Safety</p>
+        <h1>Look out for each other.</h1>
+        <p class="t-lead">What Coroute does when something goes wrong on a ride, what it shares and with whom, and what it cannot do.</p>
+        <div class="pg-notice" role="note">
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg>
+          <div>
+            <p class="pg-notice__title">Coroute does not replace emergency services.</p>
+            <p>In an emergency in India, <strong>call 112</strong> first. Coroute helps your group and nearby riders know and respond. It cannot promise that anyone will.</p>
+          </div>
+        </div>
+        <nav class="pg-jump" aria-label="Jump to a safety topic">
+          <a href="#sos">SOS</a>
+          <a href="#crash">Crash detection</a>
+          <a href="#nearby">Nearby help</a>
+          <a href="#privacy">Who sees what</a>
+          <a href="#false-alarms">False alarms</a>
+        </nav>
+      </div>
+    </div>
+    <svg class="page-hero__route" viewBox="0 0 1440 160" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
+      <path class="road__edge" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
+      <path class="road" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
+      <path class="road__centre" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
+      <path class="route-line" data-route="reveal" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
+    </svg>
+  </section>
+
+  <!-- Philosophy -->
+  <section class="section section--flush-top" aria-labelledby="principles-title">
+    <div class="container">
+      <div class="section-intro" data-reveal>
+        <p class="eyebrow">How we think about it</p>
+        <h2 class="section-intro__title" id="principles-title">Calm, simple, and honest about limits.</h2>
+      </div>
+      <div class="pg-principles" data-reveal-stagger="80">
+        <div class="pg-principle" data-reveal>
+          <span class="pg-principle__n">01</span>
+          <h3>Your own group first</h3>
+          <p>Every alert goes to your own ride group first. Always. Nothing else changes that.</p>
+        </div>
+        <div class="pg-principle" data-reveal>
+          <span class="pg-principle__n">02</span>
+          <h3>Share the least</h3>
+          <p>Each person sees only what they need to help, and only while the emergency is open.</p>
+        </div>
+        <div class="pg-principle" data-reveal>
+          <span class="pg-principle__n">03</span>
+          <h3>You decide</h3>
+          <p>Crash detection, emergency texts and help from other groups can each be switched off.</p>
+        </div>
+        <div class="pg-principle" data-reveal>
+          <span class="pg-principle__n">04</span>
+          <h3>No promises we cannot keep</h3>
+          <p>Phones miss things and networks drop. Coroute adds a way to get help. It does not guarantee it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Lifecycle -->
+  <section class="section section--surface" aria-labelledby="life-title">
+    <div class="container">
+      <div class="section-intro" data-reveal>
+        <p class="eyebrow">Step by step</p>
+        <h2 class="section-intro__title" id="life-title">What happens in an emergency.</h2>
+        <p class="t-lead">From the moment an alert is raised to the moment it is closed.</p>
+      </div>
+      <ol class="pg-life" role="list" data-reveal-stagger="90">
+        <li class="pg-life__step pg-life__step--red" data-reveal>
+          <span class="pg-life__dot"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg></span>
+          <div class="pg-life__body"><span class="pg-life__k">1. Raised</span><span class="pg-life__t">SOS or crash alarm</span><span class="pg-life__d">You hold SOS, or a crash alarm runs out. Without signal it waits on your phone and sends later.</span></div>
+        </li>
+        <li class="pg-life__step pg-life__step--accent" data-reveal>
+          <span class="pg-life__dot"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></span>
+          <div class="pg-life__body"><span class="pg-life__k">2. Group alerted</span><span class="pg-life__t">Your group knows</span><span class="pg-life__d">Every rider in your group gets the alert with your position, distance and direction.</span></div>
+        </li>
+        <li class="pg-life__step pg-life__step--nav" data-reveal>
+          <span class="pg-life__dot"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-navigate"/></svg></span>
+          <div class="pg-life__body"><span class="pg-life__k">3. Response</span><span class="pg-life__t">Someone is going</span><span class="pg-life__d">Riders answer "I'm going" or "I'm with them" and can navigate to you.</span></div>
+        </li>
+        <li class="pg-life__step pg-life__step--nav" data-reveal>
+          <span class="pg-life__dot"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-network"/></svg></span>
+          <div class="pg-life__body"><span class="pg-life__k">4. Nearby help</span><span class="pg-life__t">If it is on</span><span class="pg-life__d">A few riders of other groups on the same road may be asked to help.</span></div>
+        </li>
+        <li class="pg-life__step pg-life__step--amber" data-reveal>
+          <span class="pg-life__dot"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg></span>
+          <div class="pg-life__body"><span class="pg-life__k">5. Warning</span><span class="pg-life__t">Others slow down</span><span class="pg-life__d">Groups riding toward the place get a short caution, with no names.</span></div>
+        </li>
+        <li class="pg-life__step pg-life__step--green" data-reveal>
+          <span class="pg-life__dot"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg></span>
+          <div class="pg-life__body"><span class="pg-life__k">6. Closed</span><span class="pg-life__t">Access ends</span><span class="pg-life__d">Riders of other groups lose access at once. The medical info copy is removed.</span></div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- SOS -->
+  <section class="section" id="sos" aria-labelledby="sos-title">
+    <div class="container">
+      <div class="pg-story" style="padding-top:0">
+        <div class="pg-story__text" data-reveal>
+          <p class="eyebrow">SOS</p>
+          <h2 class="t-h2" id="sos-title">Hold to send.</h2>
+          <p>Hold the SOS button to send it, so a tap in a pocket does not raise an alarm. The alert reaches your whole group with your position. It stays on every screen until it is resolved.</p>
+          <p>Pick a reason if you can: medical, breakdown, crash, or your own words. From the same screen you can call or text your emergency contact.</p>
+          <p>You can also start SOS from the ride notification on the lock screen. Nothing is sent until you hold the button.</p>
+          <ul class="pg-ticks" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-wifi-off"/></svg><span><strong>No signal?</strong> The SOS is kept on your phone and sent once, as soon as the connection returns.</span></li>
+          </ul>
+        </div>
+        <div class="pg-story__visual stack stack--16" data-reveal>
+          <div class="card pg-hold" role="img" aria-label="Illustration: the SOS button with a ring that fills while you hold it.">
+            <div class="pg-hold__btn" aria-hidden="true">
+              <svg viewBox="0 0 132 132" focusable="false"><circle class="pg-hold__track" cx="66" cy="66" r="62"/><circle class="pg-hold__ring" cx="66" cy="66" r="62" pathLength="100" stroke-dasharray="64 100"/></svg>
+              <span class="pg-hold__core">SOS</span>
+            </div>
+            <p class="pg-hold__label" aria-hidden="true">Press and hold to send</p>
+            <p class="pg-hold__sub" aria-hidden="true">Nothing is sent until the ring is full.</p>
+          </div>
+          <div class="alert-card alert-card--warn" role="img" aria-label="Illustration: a card saying No signal, SOS not sent yet. It is sent as soon as the phone is back online.">
+            <p class="alert-card__kicker" aria-hidden="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-wifi-off"/></svg>No signal</p>
+            <p class="alert-card__title" aria-hidden="true">SOS not sent yet</p>
+            <p class="alert-card__meta" aria-hidden="true"><span>It is sent as soon as the phone is back online.</span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Own group response + emergency location -->
+  <section class="section section--surface" id="response" aria-labelledby="response-title">
+    <div class="container">
+      <div class="pg-story pg-story--flip" style="padding-block:0">
+        <div class="pg-story__text" data-reveal>
+          <p class="eyebrow">Your group responds</p>
+          <h2 class="t-h2" id="response-title">When something goes wrong, distance matters.</h2>
+          <p>Every rider sees the alert with the distance and direction to you, and when your position was last updated. Your position keeps updating for your group while the emergency is open.</p>
+          <p>Riders answer <strong>I'm going</strong> or <strong>I'm with them</strong>, so everyone knows who is on the way. The emergency view shows the nearest member of your group.</p>
+          <p>Tap <strong>Navigate</strong> to ride to the rider in trouble, with spoken distances along the way.</p>
+        </div>
+        <figure class="pg-story__visual" data-reveal>
+          <div class="map" style="--map-ratio:640/400" data-progress="enter" role="img" aria-label="Illustration: a rider has raised an SOS 7.8 kilometres behind. Another rider from the group is riding to them on a highlighted route.">
+            <svg class="map__svg" viewBox="0 0 640 400" aria-hidden="true" focusable="false">
+              <path class="road__edge" d="M40 370 C 150 340 200 260 300 240 S 470 200 520 130 S 590 50 620 30"/>
+              <path class="road" d="M40 370 C 150 340 200 260 300 240 S 470 200 520 130 S 590 50 620 30"/>
+              <path class="road__centre" d="M40 370 C 150 340 200 260 300 240 S 470 200 520 130 S 590 50 620 30"/>
+              <path class="route-line route-line--help" data-route d="M520 130 C 470 200 400 220 300 240"/>
+            </svg>
+            <span class="emergency-marker" style="--x:46.9%;--y:60%"></span>
+            <span class="marker rider rider--sos" style="--x:46.9%;--y:60%">RJ<span class="marker__label marker__label--below"><span class="distance-label distance-label--danger">SOS</span></span></span>
+            <span class="marker rider rider--helper" style="--x:81.25%;--y:32.5%">AK<span class="marker__label marker__label--left"><span class="distance-label distance-label--nav">I'm going</span></span></span>
+            <span class="marker rider rider--ok rider--sm" style="--x:96.9%;--y:7.5%">PN</span>
+          </div>
+          <div class="alert-card alert-card--danger" style="margin-top:var(--sp-16)" aria-hidden="true">
+            <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg>Emergency</p>
+            <p class="alert-card__title">Rahul, 7.8 km behind</p>
+            <p class="alert-card__meta"><span>Nearest member: Arjun</span><span>Updated 10:42</span></p>
+            <div class="alert-card__actions"><span class="chip-btn chip-btn--ok">I'm going</span><span class="chip-btn">Navigate</span></div>
+          </div>
+          <figcaption class="pg-story__caption">Illustration with example names and distances.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Crash detection -->
+  <section class="section" id="crash" aria-labelledby="crash-title">
+    <div class="container">
+      <div class="pg-story" style="padding-top:0">
+        <div class="pg-story__text" data-reveal>
+          <p class="cluster cluster--8"><span class="eyebrow">Automatic crash detection</span><span class="badge badge--new">New in 3.15</span></p>
+          <h2 class="t-h2" id="crash-title">If you cannot press SOS.</h2>
+          <p>During a ride, above 25 km/h, your phone reads its motion sensor to notice a crash. This happens on your phone only. Motion data is not sent anywhere and not stored.</p>
+          <ol class="pg-install" role="list">
+            <li><span>After a hard impact and a sudden stop, an alarm sounds: <strong>"Possible accident detected. Are you okay?"</strong></span></li>
+            <li><span>A <strong>15 second countdown</strong> starts. The alarm can show over the lock screen, so you can answer without unlocking.</span></li>
+            <li><span>Tap <strong>I'm OK</strong> and nothing is sent.</span></li>
+            <li><span>Tap <strong>Need Help</strong>, or do not answer, and an SOS marked as automatic goes to your group. It carries your position, direction, speed before the impact and the time.</span></li>
+          </ol>
+          <p>Our server also watches for a rider who stops suddenly from high speed and does not move for 2 minutes, or loses signal right after riding fast. It then asks the lead and the nearest riders to check on that rider.</p>
+        </div>
+        <figure class="pg-story__visual" data-reveal>
+          <div class="phone phone--sm center" role="img" aria-label="Illustration: the crash alarm screen. It asks: Possible accident detected. Are you okay? A countdown shows 12 seconds left, with buttons I'm OK and Need Help.">
+            <div class="phone__screen" aria-hidden="true">
+              <div class="phone__island"></div>
+              <div class="phone__status"><span>10:41</span><span>4G</span></div>
+              <div class="phone__content">
+                <div class="pg-alarm">
+                  <span class="pg-alarm__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg>Possible accident detected</span>
+                  <span class="pg-alarm__q">Are you okay?</span>
+                  <span class="pg-alarm__count">
+                    <svg viewBox="0 0 104 104" focusable="false"><circle class="pg-hold__track" cx="52" cy="52" r="48"/><circle class="pg-hold__ring" cx="52" cy="52" r="48" pathLength="15" stroke-dasharray="12 15"/></svg>
+                    <span><b data-count="12" data-count-from="15">12</b><small>seconds</small></span>
+                  </span>
+                  <span class="pg-alarm__btns"><span class="pg-alarm__ok">I'm OK</span><span class="pg-alarm__help">Need Help</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <figcaption class="pg-story__caption t-center">Illustration of the alarm screen.</figcaption>
+        </figure>
+      </div>
+
+      <div class="pg-notice" style="border-color:var(--c-line-strong);border-left-color:var(--c-amber)" data-reveal>
+        <svg class="icon" style="color:var(--c-amber)" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg>
+        <div>
+          <p class="pg-notice__title">What crash detection cannot do</p>
+          <ul class="pg-bullets stack stack--8" role="list" style="margin-top:var(--sp-12);color:var(--c-text-2);font-size:var(--fs-small)">
+            <li>It runs only during a ride and above 25 km/h. Slow falls and low speed crashes are not detected.</li>
+            <li>A phone that is thrown far, broken or out of battery cannot raise the alarm.</li>
+            <li>It can go off when nothing happened, for example if the phone falls hard. Tap I'm OK.</li>
+            <li>On some phones, Do Not Disturb may keep the alarm quiet.</li>
+            <li>You can switch crash detection off in the app at any time.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SMS fallback -->
+  <section class="section section--surface" id="sms" aria-labelledby="sms-title">
+    <div class="container">
+      <div class="pg-story pg-story--flip" style="padding-block:0">
+        <div class="pg-story__text" data-reveal>
+          <p class="cluster cluster--8"><span class="eyebrow">Emergency texts</span><span class="badge badge--new">New in 3.15</span></p>
+          <h2 class="t-h2" id="sms-title">When there is no internet.</h2>
+          <p>This is off until you switch it on. When it is on and your SOS cannot reach our server, your own phone sends a text message (SMS) with a map link to your position.</p>
+          <p>The texts go from your phone and your SIM, not from us. Your carrier may charge for them.</p>
+          <p>To make this work, your phone keeps the numbers of the other riders in your group during the ride. They are stored encrypted, never shown on screen, and deleted when the ride ends.</p>
+          <p class="t-small t-muted">Do not want to receive these texts? Switch off "Receive emergency texts from my ride group" in your profile.</p>
+        </div>
+        <div class="pg-story__visual" data-reveal>
+          <div class="card">
+            <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg></div>
+            <h3>Who gets the text</h3>
+            <ul class="pg-ticks" role="list" style="margin-top:var(--sp-16)">
+              <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Your emergency contact</li>
+              <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Your lead</li>
+              <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>The nearest riders in your group</li>
+            </ul>
+            <p class="t-small t-muted" style="margin-top:var(--sp-16)">At most 10 people. Only when the SOS could not be sent over the internet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Safety Network -->
+  <section class="section" id="nearby" aria-labelledby="nearby-title">
+    <div class="container">
+      <div class="section-intro" data-reveal>
+        <p class="cluster cluster--8"><span class="eyebrow">Coroute Safety Network</span><span class="badge badge--new">New in 3.15</span></p>
+        <h2 class="section-intro__title" id="nearby-title">What if another rider can reach them first?</h2>
+        <p class="t-lead">The closest rider may be the first person able to help. Sometimes that rider is in another group.</p>
+      </div>
+
+      <div class="pg-story" style="padding-top:0">
+        <div class="pg-story__text" data-reveal>
+          <p>When you raise an SOS or a crash alert, your own group is always alerted first. Coroute also looks for a few riders of other groups who are already riding toward you on the same road, and who may reach you sooner.</p>
+          <p>At most 3 riders are asked at a time, never everyone nearby. If one says no, the next may be asked.</p>
+          <h3 class="pg-subhead">Before they agree, they see only</h3>
+          <ul class="pg-ticks" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg>The place of the emergency</li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>How far it is, and roughly how long it takes to get there</li>
+          </ul>
+          <p class="t-small t-muted">Not your name, your group, your phone number, your ride mates or anyone's position.</p>
+          <h3 class="pg-subhead">If they tap "I Can Help"</h3>
+          <p>They also see your first name and your vehicle type and colour, so they can find you. Your medical info only if you switched that on. Phone numbers are never given to riders of other groups.</p>
+          <p>Your group sees that a nearby rider is coming, their first name, how far away they are and where they are on the way. Not their group.</p>
+        </div>
+        <figure class="pg-story__visual" data-reveal>
+          <div class="map" style="--map-ratio:640/400" data-progress="enter" role="img" aria-label="Illustration: an emergency on a road. The rider's own group is 8 kilometres away, about 12 minutes. A rider from another group is 1.6 kilometres away, about 3 minutes, and is responding.">
+            <svg class="map__svg" viewBox="0 0 640 400" aria-hidden="true" focusable="false">
+              <path class="road--minor road" d="M380 400 C 400 320 420 260 470 205"/>
+              <path class="road__edge" d="M20 300 C 160 300 240 220 340 210 S 520 230 620 120"/>
+              <path class="road" d="M20 300 C 160 300 240 220 340 210 S 520 230 620 120"/>
+              <path class="road__centre" d="M20 300 C 160 300 240 220 340 210 S 520 230 620 120"/>
+              <path class="route-line route-line--group route-line--thin" data-route style="--from:0;--to:.7" d="M60 298 C 150 296 240 222 340 210"/>
+              <path class="route-line route-line--help" data-route style="--from:.2;--to:1" d="M480 202 C 430 200 390 206 340 210"/>
+            </svg>
+            <span class="emergency-marker" style="--x:53.1%;--y:52.5%"></span>
+            <span class="marker rider rider--sos" style="--x:53.1%;--y:52.5%">RJ</span>
+            <span class="marker group-marker group-marker--own" style="--x:9.4%;--y:74.5%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>5<span class="marker__label"><span class="distance-label distance-label--warn">8 km <span class="distance-label__k">ETA</span>12 min</span></span></span>
+            <span class="marker rider rider--helper" style="--x:75%;--y:50.6%">NR<span class="marker__label marker__label--above"><span class="distance-label distance-label--nav">1.6 km <span class="distance-label__k">ETA</span>3 min</span></span></span>
+          </div>
+          <dl class="pg-eta">
+            <div><dt>Own group</dt><dd>8 km, 12 min</dd></div>
+            <div class="is-nav"><dt>Nearby rider, other group</dt><dd>1.6 km, 3 min</dd></div>
+          </dl>
+          <div class="alert-card alert-card--nav" style="margin-top:var(--sp-12)" aria-hidden="true">
+            <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-network"/></svg>Nearby help</p>
+            <p class="alert-card__title">Nearby rider responding, ETA 3 min</p>
+          </div>
+          <figcaption class="pg-story__caption">Illustration with example distances and times.</figcaption>
+        </figure>
+      </div>
+
+      <div class="grid grid--3" data-reveal-stagger="80">
+        <div class="card" data-reveal>
+          <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg></div>
+          <h3>Only where Coroute groups ride</h3>
+          <p>Nearby help works only when other Coroute groups are riding on the same road at that moment. On many roads there will be nobody. Do not count on it.</p>
+        </div>
+        <div class="card" data-reveal>
+          <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></div>
+          <h3>You can opt out</h3>
+          <p>Switch off "Help nearby riders" and you are never asked. Switch off "Ask nearby riders to help me" and other groups are never asked for you. Your own group still is.</p>
+        </div>
+        <div class="card" data-reveal>
+          <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg></div>
+          <h3>Separate from Public or Private</h3>
+          <p>Nearby help works the same whether your group is Public or Private. Safety settings are separate from social visibility.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Approaching warnings -->
+  <section class="section section--surface" id="warnings" aria-labelledby="warn-title">
+    <div class="container">
+      <div class="pg-story pg-story--flip" style="padding-block:0">
+        <div class="pg-story__text" data-reveal>
+          <p class="cluster cluster--8"><span class="eyebrow">Accident warnings</span><span class="badge badge--new">New in 3.15</span></p>
+          <h2 class="t-h2" id="warn-title">One emergency should not become another.</h2>
+          <p>Riders of other groups who are heading toward an accident on the same road get a short caution, with the place only and no names. The phone can read it out as they get closer.</p>
+          <p class="t-small t-muted">A warning is a reason to slow down and look. It does not mean the road is closed or that help has arrived.</p>
+        </div>
+        <div class="pg-story__visual" data-reveal>
+          <div class="alert-card alert-card--warn" style="max-width:420px" role="img" aria-label="Illustration: a caution card saying Rider accident reported 2 km ahead.">
+            <p class="alert-card__kicker" aria-hidden="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg>Caution</p>
+            <p class="alert-card__title" aria-hidden="true">Rider accident reported 2 km ahead</p>
+            <p class="alert-card__meta" aria-hidden="true"><span>Slow down and ride with care.</span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Privacy during emergencies -->
+  <section class="section" id="privacy" aria-labelledby="privacy-title">
+    <div class="container">
+      <div class="section-intro" data-reveal>
+        <p class="eyebrow">Privacy in an emergency</p>
+        <h2 class="section-intro__title" id="privacy-title">Who sees what, and when.</h2>
+        <p class="t-lead">Help needs some information. Coroute shares the least it can, for the shortest time.</p>
+      </div>
+      <div class="pg-table-wrap" data-reveal>
+        <table class="pg-table">
+          <caption>Medical info is never shown to administrators, never written into the ride timeline and never put in notifications. Full details in the <a class="link" href="/privacy">privacy policy</a>.</caption>
+          <thead><tr><th scope="col">Who</th><th scope="col">What they see</th><th scope="col">When</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Your ride group</th><td data-label="What they see">Your position, distance, direction and the time of the last update. Your medical info, if you filled it in.</td><td data-label="When">While the SOS or crash alert is open. Medical info only during that time.</td></tr>
+            <tr><th scope="row">A nearby rider who is asked</th><td data-label="What they see">The place of the emergency, how far it is and roughly how long it takes.</td><td data-label="When">While the request is open.</td></tr>
+            <tr><th scope="row">A nearby rider who taps "I Can Help"</th><td data-label="What they see">Also your first name and your vehicle type and colour. Medical info only if you switched on sharing it with a helper from another group. Never phone numbers.</td><td data-label="When">Until the emergency is closed. Then access ends and their phone drops what it was shown.</td></tr>
+            <tr><th scope="row">Your group, about that helper</th><td data-label="What they see">That a nearby rider is coming, their first name, distance and position on the way. Not their group.</td><td data-label="When">While they are on the way.</td></tr>
+            <tr><th scope="row">Groups approaching on the same road</th><td data-label="What they see">The place of the accident only. No names.</td><td data-label="When">As they ride toward it.</td></tr>
+            <tr><th scope="row">Service administrators</th><td data-label="What they see">Open SOS alerts, who raised them, where, and who is going to help. Never medical info, never intercom audio.</td><td data-label="When">For safety operations.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- False alarms -->
+  <section class="section section--surface" id="false-alarms" aria-labelledby="fa-title">
+    <div class="container">
+      <div class="split">
+        <div class="stack stack--16" data-reveal>
+          <p class="eyebrow">False alarms</p>
+          <h2 class="t-h2" id="fa-title">Mistakes happen. Say so.</h2>
+          <p class="t-lead">If an alarm went off by mistake, tap I'm OK. Your group sees that you said you are OK.</p>
+        </div>
+        <ul class="pg-ticks pg-ticks--ok stack stack--16" role="list" data-reveal>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Cancel before it is sent.</strong> During the 15 second crash countdown, I'm OK sends nothing. Letting go of SOS before it fills sends nothing.</span></li>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Cancel a sent SOS.</strong> It is closed as a false alarm, and your group sees that it was one.</span></li>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Repeated false alarms limit outside requests.</strong> Coroute keeps the times of your last 10 false alarms that other groups were asked to help with. An account with many gets fewer requests sent to other groups.</span></li>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Never your own group.</strong> Your own group is always alerted, whatever your history.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Disclaimer -->
+  <section class="section" aria-labelledby="disclaimer-title">
+    <div class="container container--reading">
+      <div class="pg-notice pg-notice--lg" data-reveal>
+        <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg>
+        <div>
+          <h2 class="pg-notice__title" id="disclaimer-title">Coroute complements emergency services. It does not replace them.</h2>
+          <p style="margin-top:var(--sp-12)">In an emergency in India, <strong>call 112</strong>. Elsewhere, call your local emergency number.</p>
+          <p>Coroute depends on phones, batteries, GPS, mobile networks, and on other people being nearby and able to help. Any of these can fail. No response is guaranteed, and no alert is a substitute for professional help.</p>
+          <p>Read the <a class="link" href="/privacy">privacy policy</a> and the <a class="link" href="/terms">terms of use</a> for the full details.</p>
+        </div>
+      </div>
+      <div class="cluster cluster--16" style="margin-top:var(--sp-32);justify-content:center">
+        <a class="btn btn--primary btn--lg" href="/download"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
+        <a class="link-arrow" href="/features"><span>All features</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+      </div>
+    </div>
+  </section>
+
+</main>
+<!--#include footer-->
+</body>
+</html>

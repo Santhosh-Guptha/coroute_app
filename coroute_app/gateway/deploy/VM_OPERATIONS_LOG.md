@@ -70,3 +70,12 @@
   3. Pre-configured production secrets preserving `JWT_SECRET` for seamless user session continuity.
   4. Implemented pre-cutover APK prefetching and automatic DuckDNS dynamic DNS cutover.
   5. Added comprehensive deployment runbook documentation in [`gateway/deploy/RUNBOOK.md`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/gateway/deploy/RUNBOOK.md).
+
+### Website Redesign: Production Deployment (2026-10-09)
+- **Operator User**: `antigravity` (password authentication only, zero key files)
+- **Activities**:
+  1. Ran full test suite in `gateway/`: 180/180 tests passed.
+  2. Deployed 33 website redesign assets, templates, partials, and self-hosted fonts to `/opt/coroute/gateway/`.
+  3. Restarted `coroute-gateway.service`.
+  4. Verified all public routes (`/`, `/features`, `/safety`, `/how-it-works`, `/about`, `/get`, `/privacy`, `/terms`, `/download`, `/api/health`) returning HTTP 200/302.
+  5. Verified release APK downloads (`coroute.apk`, `coroute-32bit.apk`) remained intact and downloadable.

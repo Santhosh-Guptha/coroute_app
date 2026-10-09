@@ -23,6 +23,7 @@ const { SafetyNetwork } = require('./safety_network');
 const { Discovery } = require('./discovery');
 const { SafetyAudit } = require('./safety_audit');
 const { RouteIndexCache, gridSize } = require('./net_geo');
+const { loadSite, isHiddenPath, SITE_PAGES, SITEMAP } = require('./pages');
 
 function createSoda() {
   if (config.sodaUrl === 'memory' || config.sodaUrl === 'http://mock') return new MemorySoda();
@@ -67,16 +68,19 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   discovery.attach(hub);
   // ---- Public website, served from here so no extra hosting is needed ----
   const path = require('path');
-  const fs = require('fs');
   const pub = (f) => path.join(__dirname, '..', 'public', f);
   const originOf = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
-  // index.html carries __ORIGIN__ placeholders so canonical/og:image/sitemap are right for any domain.
-  const indexTemplate = fs.readFileSync(pub('index.html'), 'utf8');
+  // Pages are assembled once at startup (shared header/footer partials, asset version); per request only
+  // __ORIGIN__ (canonical, og:image, sitemap work for any domain) and __MAX_RIDERS__ are filled in.
+  const site = loadSite(pub(''));
+  const pageVars = (req) => ({ __ORIGIN__: originOf(req), __MAX_RIDERS__: String(config.maxConvoyRiders) });
   const sendPage = (res, html) => res.type('html').set('Cache-Control', 'public, max-age=300').send(html);
+  const notFoundPage = (req, res) => res.status(404).type('html').set('Cache-Control', 'no-store').send(site.render('404.html', pageVars(req)));
 
-  app.get(['/', '/index.html'], (req, res) => sendPage(res, indexTemplate.replaceAll('__ORIGIN__', originOf(req)).replaceAll('__MAX_RIDERS__', String(config.maxConvoyRiders))));
-  app.get(['/privacy', '/privacy.html'], (req, res) => res.sendFile(pub('privacy.html')));
-  app.get(['/terms', '/terms.html'], (req, res) => res.sendFile(pub('terms.html')));
+  for (const [route, file] of Object.entries(SITE_PAGES)) {
+    const paths = route === '/' ? ['/', '/index.html'] : [route, `${route}.html`];
+    app.get(paths, (req, res) => sendPage(res, site.render(file, pageVars(req))));
+  }
   // One download link that never breaks: Play Store when configured, otherwise the APK this server hosts
   // (public/coroute.apk, 64-bit ARM). Older 32-bit phones use /download/32bit.
   app.get('/download', (req, res) => res.redirect(302, config.playStoreUrl || config.apkUrl || `${originOf(req)}${config.apkPath}`));
@@ -85,7 +89,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.get('/sitemap.xml', (req, res) => {
     const o = originOf(req);
     const today = new Date().toISOString().slice(0, 10);
-    const urls = [['/', '1.0'], ['/privacy', '0.3'], ['/terms', '0.3']]
+    const urls = SITEMAP
       .map(([u, pr]) => `  <url><loc>${o}${u}</loc><lastmod>${today}</lastmod><priority>${pr}</priority></url>`).join('\n');
     res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
   });
@@ -93,12 +97,14 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.get('/join/:code', (req, res) => {
     const code = String(req.params.code || '').toUpperCase();
     if (!/^[A-Z0-9]{4,10}$/.test(code)) return res.redirect(302, '/');
-    const html = fs.readFileSync(pub('join.html'), 'utf8').replaceAll('__CODE__', code).replaceAll('__ORIGIN__', originOf(req));
+    const html = site.render('join.html', { ...pageVars(req), __CODE__: code });
     res.type('html').set('Cache-Control', 'no-store').send(html);
   });
   // Android App Links verification (express.static ignores dot-directories, so serve it explicitly).
   app.get('/.well-known/assetlinks.json', (req, res) => res.type('application/json').set('Cache-Control', 'public, max-age=86400').sendFile(pub('.well-known/assetlinks.json')));
   app.get('/status', (req, res) => res.json({ service: 'CoRoute Gateway', version: require('../package.json').version, status: 'ONLINE' }));
+  // Partials, templates (_*.html) and raw page sources are never served directly: every page has a route above.
+  app.use((req, res, next) => (!req.path.startsWith('/api/') && isHiddenPath(req.path) ? notFoundPage(req, res) : next()));
   app.use(express.static(pub(''), {
     index: false, maxAge: '7d', extensions: false,
     setHeaders: (res, p) => {
@@ -114,7 +120,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
-    res.status(404).type('html').send(fs.readFileSync(pub('404.html'), 'utf8'));
+    notFoundPage(req, res);
   });
 
   const retention = new Retention({ repo, soda, convoys, logger });

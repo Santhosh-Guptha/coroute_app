@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--
+  Coroute page template. Not served (files starting with "_" are blocked).
+  Copy to public/<page>.html, add the route to SITE_PAGES and SITEMAP in gateway/src/pages.js,
+  then replace every PAGE_* value below. Rules: unique title and description per page,
+  title as "Topic | Coroute" or "Coroute: Topic" (colon or pipe, never a dash), no em/en dashes, no emoji.
+-->
+<title>PAGE_TITLE | Coroute</title>
+<meta name="description" content="PAGE_DESCRIPTION">
+<link rel="canonical" href="__ORIGIN__PAGE_PATH">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Coroute">
+<meta property="og:title" content="PAGE_TITLE | Coroute">
+<meta property="og:description" content="PAGE_DESCRIPTION">
+<meta property="og:url" content="__ORIGIN__PAGE_PATH">
+<meta property="og:image" content="__ORIGIN__/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="PAGE_TITLE | Coroute">
+<meta name="twitter:description" content="PAGE_DESCRIPTION">
+<meta name="twitter:image" content="__ORIGIN__/og-image.png">
+<meta name="theme-color" content="#0B0D0E">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<script>document.documentElement.classList.add('js')</script>
+<script src="/assets/site.js" defer></script>
+<!-- Optional page-only styles go here, in one <style> block, using the tokens from site.css. -->
+</head>
+<body data-page="PAGE_KEY">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="page-hero topo">
+    <div class="container">
+      <div class="page-hero__inner">
+        <p class="eyebrow">PAGE_EYEBROW</p>
+        <h1>PAGE_HEADLINE</h1>
+        <p class="t-lead">PAGE_LEAD</p>
+        <div class="cluster cluster--16">
+          <a class="btn btn--primary btn--lg" href="/download">Download for Android</a>
+          <a class="link-arrow" href="/how-it-works"><span>See how it works</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+        </div>
+      </div>
+    </div>
+    <svg class="page-hero__route" viewBox="0 0 1440 160" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
+      <path class="road__edge" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
+      <path class="road" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
+      <path class="road__centre" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
+      <path class="route-line" data-route="reveal" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
+    </svg>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="section-intro">
+        <p class="eyebrow">Section eyebrow</p>
+        <h2 class="section-intro__title">Section headline</h2>
+        <p class="t-lead">One or two short sentences.</p>
+      </div>
+      <!-- content -->
+    </div>
+  </section>
+
+</main>
+<!--#include footer-->
+</body>
+</html>

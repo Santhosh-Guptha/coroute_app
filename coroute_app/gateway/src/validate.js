@@ -158,7 +158,7 @@ function tripRecord(t, { maxPoints = config.tripMaxTrailPoints } = {}) {
 }
 
 // ---------------------------------------------------------- page views
-const SITE_PATHS = new Set(['/', '/privacy', '/terms', '/join']);
+const SITE_PATHS = new Set(['/', '/features', '/safety', '/how-it-works', '/about', '/get', '/privacy', '/terms', '/join']);
 
 /** The site page a beacon path belongs to, or null for anything else (not stored). */
 function sitePath(raw) {

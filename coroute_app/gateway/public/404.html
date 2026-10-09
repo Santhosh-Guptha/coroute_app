@@ -2,26 +2,76 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>Page not found</title>
+<title>Page not found | Coroute</title>
+<meta name="description" content="This page is not on the Coroute site. Head back to the home page, or see the features, safety tools and download.">
+<meta name="theme-color" content="#0B0D0E">
+<meta name="color-scheme" content="dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<script>document.documentElement.classList.add('js')</script>
+<script src="/assets/site.js" defer></script>
 <style>
-  :root{color-scheme:dark;--bg:#0b0f14;--fg:#e9eef4;--muted:#93a1b1;--accent:#3ee0ec;--accent-ink:#06282c}
-  @media (prefers-color-scheme:light){:root{color-scheme:light;--bg:#f4f6f8;--fg:#121a22;--muted:#55657a;--accent:#087680;--accent-ink:#fff}}
-  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box}
-  main{max-width:460px;text-align:center}
-  h1{font-size:26px;margin:16px 0 8px}p{color:var(--muted);margin:0 0 22px}
-  a.btn{display:inline-block;padding:12px 18px;border-radius:8px;background:var(--accent);color:var(--accent-ink);font-weight:600;text-decoration:none}
-  svg{width:72px;height:72px}
+  .nf{min-height:calc(100svh - var(--header-h));display:flex;flex-direction:column;padding-top:clamp(48px,8vw,104px)}
+  .nf > .container{margin-block:auto;width:100%}
+  .nf__inner{display:flex;flex-direction:column;gap:var(--sp-24);max-width:760px}
+  .nf__code{font-family:var(--font-display);font-weight:700;font-size:var(--fs-label);letter-spacing:var(--tr-label);text-transform:uppercase;color:var(--c-amber);display:inline-flex;align-items:center;gap:10px}
+  .nf__code .icon{width:18px;height:18px}
+  .nf h1{font-size:var(--fs-h1);line-height:var(--lh-display);letter-spacing:var(--tr-display);max-width:12em}
+  .nf .t-lead{color:var(--c-text-2);max-width:32em}
+  .nf__more{display:flex;flex-direction:column;gap:var(--sp-12);margin-top:var(--sp-8)}
+  .nf__more-label{color:var(--c-text-3)}
+  .nf__links{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:var(--sp-8) var(--sp-32)}
+  .nf__links .link-arrow{min-height:44px}
+  .nf__scene{position:relative;flex:none;margin-top:clamp(40px,6vw,72px);height:clamp(120px,16vw,200px)}
+  .nf__scene svg{position:absolute;inset:0;width:100%;height:100%}
+  .nf__end-stripe{fill:var(--c-amber)}
+  .nf__end-bar{fill:var(--c-surface-2);stroke:var(--c-amber);stroke-width:2}
+  .nf__end-post{stroke:var(--c-line-strong);stroke-width:4;stroke-linecap:round}
+  .nf__dot{fill:var(--c-accent);stroke:var(--c-asphalt);stroke-width:4}
 </style>
 </head>
-<body>
-<main>
-  <svg viewBox="0 0 100 100" role="img" aria-label="CoRoute logo"><rect width="100" height="100" rx="22" fill="#0b0f14"/><path d="M20 82 C20 36 80 64 80 18" fill="none" stroke="#3ee0ec" stroke-width="15" stroke-linecap="round"/><path d="M20 82 C20 36 80 64 80 18" fill="none" stroke="#0b0f14" stroke-width="2.2" stroke-dasharray="4.5 4.5"/></svg>
-  <h1>That page is not on the route</h1>
-  <p>The address may be out of date or mistyped. The home page has everything about the app.</p>
-  <a class="btn" href="/">Back to CoRoute</a>
+<body data-page="404">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+  <section class="nf topo" aria-labelledby="nf-title">
+    <div class="container">
+      <div class="nf__inner">
+        <p class="nf__code"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg>Error 404: page not found</p>
+        <h1 id="nf-title">This road doesn't go anywhere.</h1>
+        <p class="t-lead">The address may be out of date or mistyped. Turn around and pick up the route from the home page.</p>
+        <div class="cluster cluster--16">
+          <a class="btn btn--primary btn--lg" href="/">Back to Coroute</a>
+        </div>
+        <nav class="nf__more" aria-label="Popular pages">
+          <p class="t-label nf__more-label">Or take another road</p>
+          <ul class="nf__links" role="list">
+            <li><a class="link-arrow" href="/features"><span>Features</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></li>
+            <li><a class="link-arrow" href="/safety"><span>Safety</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></li>
+            <li><a class="link-arrow" href="/get"><span>Download</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+    <div class="nf__scene" aria-hidden="true">
+      <svg viewBox="0 0 1200 200" preserveAspectRatio="xMaxYMax slice" focusable="false">
+        <path class="road__edge" d="M-20 170 C 240 170 380 96 620 104 S 880 140 1000 140"/>
+        <path class="road" d="M-20 170 C 240 170 380 96 620 104 S 880 140 1000 140"/>
+        <path class="road__centre" d="M-20 170 C 240 170 380 96 620 104 S 880 140 990 140"/>
+        <path class="route-line" data-route="reveal" d="M-20 170 C 240 170 380 96 620 104 S 860 136 940 140"/>
+        <circle class="nf__dot" cx="940" cy="140" r="9"/>
+        <line class="nf__end-post" x1="1022" y1="112" x2="1022" y2="174"/>
+        <line class="nf__end-post" x1="1078" y1="112" x2="1078" y2="174"/>
+        <rect class="nf__end-bar" x="1008" y="116" width="84" height="22" rx="3"/>
+        <path class="nf__end-stripe" d="M1018 118h10l-8 18h-10zM1040 118h10l-8 18h-10zM1062 118h10l-8 18h-10z"/>
+      </svg>
+    </div>
+  </section>
 </main>
+<!--#include footer-->
 </body>
 </html>
