@@ -79,3 +79,4 @@
   3. Restarted `coroute-gateway.service`.
   4. Verified all public routes (`/`, `/features`, `/safety`, `/how-it-works`, `/about`, `/get`, `/privacy`, `/terms`, `/download`, `/api/health`) returning HTTP 200/302.
   5. Verified release APK downloads (`coroute.apk`, `coroute-32bit.apk`) remained intact and downloadable.
+  6. Removed all public GitHub repository links from homepage, footer, and about page (180/180 tests pass).
