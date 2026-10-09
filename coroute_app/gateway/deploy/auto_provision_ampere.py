@@ -21,6 +21,14 @@ import socket
 import subprocess
 from datetime import datetime
 
+# Configure UTF-8 encoding for Windows console compatibility
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Attempt to import OCI SDK, install if missing
 try:
     import oci
@@ -106,11 +114,11 @@ def find_ubuntu_arm_image(compute_client):
 
     for img in images:
         if ("aarch64" in img.display_name.lower() or "arm" in img.display_name.lower()) and "minimal" not in img.display_name.lower():
-            print(f"  ✓ Found Image: {img.display_name} ({img.id})")
+            print(f"  [OK] Found Image: {img.display_name} ({img.id})")
             return img.id
 
     if images:
-        print(f"  ✓ Using Image: {images[0].display_name} ({images[0].id})")
+        print(f"  [OK] Using Image: {images[0].display_name} ({images[0].id})")
         return images[0].id
 
     raise RuntimeError("No compatible Ubuntu ARM64 image found in tenancy.")
@@ -122,7 +130,7 @@ def find_public_subnet(network_client):
     subnets = network_client.list_subnets(compartment_id=COMPARTMENT_OCID).data
     for sub in subnets:
         if not sub.prohibit_public_ip_on_vnic:
-            print(f"  ✓ Found Public Subnet: {sub.display_name} ({sub.id})")
+            print(f"  [OK] Found Public Subnet: {sub.display_name} ({sub.id})")
             return sub.id
 
     if subnets:
@@ -138,7 +146,7 @@ def wait_for_ssh(ip, port=22, timeout=180):
     while time.time() - start < timeout:
         try:
             with socket.create_connection((ip, port), timeout=4):
-                print(f"  ✓ SSH port is open on {ip}!")
+                print(f"  [OK] SSH port is open on {ip}!")
                 return True
         except (socket.timeout, ConnectionRefusedError, OSError):
             time.sleep(3)
@@ -282,14 +290,14 @@ def main():
         success = run_remote_cutover(public_ip)
         if success:
             print("\n" + "=" * 70)
-            print(" 🎉 AMPERE MIGRATION AND CUTOVER COMPLETE!")
+            print(" [SUCCESS] AMPERE MIGRATION AND CUTOVER COMPLETE!")
             print(f" Public Domain:  https://coroute.duckdns.org")
             print(f" New VM Host:    {public_ip}")
             print(f" Status:         100% Configured, Live, & Healthy.")
             print("=" * 70)
         else:
             print(f"\n[!] Cutover script encountered an issue. You can manually re-run on {public_ip}:")
-            print(f"    ssh ubuntu@{public_ip} 'curl -fsSL https://raw.githubusercontent.com/Santhosh-Guptha/coroute_app/main/gateway/deploy/setup_new_vm.sh | sudo bash'")
+            print(f"    ssh ubuntu@{public_ip} 'curl -fsSL https://raw.githubusercontent.com/Santhosh-Guptha/coroute_app/main/coroute_app/gateway/deploy/setup_new_vm.sh | sudo bash'")
 
 
 if __name__ == "__main__":
