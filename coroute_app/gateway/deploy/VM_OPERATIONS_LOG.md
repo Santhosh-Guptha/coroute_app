@@ -61,3 +61,12 @@
   4. Environment configuration: Updated `/etc/coroute/gateway.env` (`LATEST_APP_BUILD=75`).
   5. APK publication: Installed release binaries in `/opt/coroute/gateway/public/`.
   6. Service reload: `coroute-gateway.service` restarted and verified `latestBuild: 75`, `version: 3.15.0`.
+
+### Tooling: Automated VM Setup & Zero-Downtime Cutover (2026-10-09)
+- **Operator User**: `antigravity`
+- **Activities**:
+  1. Authored turnkey deployment script [`gateway/deploy/setup_new_vm.sh`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/gateway/deploy/setup_new_vm.sh).
+  2. Integrated full stack bootstrapping: Node.js 22, Caddy with automated Let's Encrypt TLS, firewall hardening.
+  3. Pre-configured production secrets preserving `JWT_SECRET` for seamless user session continuity.
+  4. Implemented pre-cutover APK prefetching and automatic DuckDNS dynamic DNS cutover.
+  5. Added comprehensive deployment runbook documentation in [`gateway/deploy/RUNBOOK.md`](file:///C:/Users/santhosh/Documents/antigravity/wise-chandrasekhar/coroute_app/gateway/deploy/RUNBOOK.md).

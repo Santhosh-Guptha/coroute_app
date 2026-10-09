@@ -236,3 +236,25 @@ Operations:
 
 ## After the Play Store listing is live
 Add `PLAY_STORE_URL=https://play.google.com/store/apps/details?id=space.devmonks.coroute_app` to `/etc/coroute/gateway.env` and restart the gateway. `/download` (used by the website buttons and the app's update screen) then opens the Play Store instead of the APK.
+
+---
+
+## 8. Zero-Downtime VM Migration & Automatic Cutover
+
+When replacing or upgrading your Oracle Cloud VM (e.g. migrating from `VM.Standard.E2.1.Micro` to `VM.Standard.A1.Flex` Ampere ARM64), the entire setup and DNS cutover can be executed with **a single command on the new VM**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Santhosh-Guptha/coroute_app/main/gateway/deploy/setup_new_vm.sh | sudo bash
+```
+
+### Why Existing Users Are Not Disturbed:
+1. **Decoupled Database**: All accounts, convoys, emergency profiles, and telemetry live in Oracle Cloud Autonomous Database (`ATP 26ai` SODA in Hyderabad). No database data lives on the VM.
+2. **Session Continuity**: The setup script automatically configures the exact same `JWT_SECRET` in `/etc/coroute/gateway.env`. Existing users on Google Play Store will **not** be logged out.
+3. **Domain Indirection**: Mobile apps connect to `coroute.duckdns.org`, not an IP address. The script automatically updates DuckDNS to point to the new VM IP upon setup completion.
+4. **Resilient Sockets**: The mobile app's WebSocket engine automatically detects connection drops and reconnects within 1–3 seconds, re-joining active rides without rider action.
+5. **Pre-Fetched APKs**: Before switching DNS, the script automatically downloads the release APK binaries from the active server into `/opt/coroute/gateway/public/`.
+
+### Administrative Accounts Created:
+* `santhosh` (password `Santhosh@180901`) with passwordless sudo.
+* `antigravity` (password `Antigravity@CoRoute2026#VM`) with passwordless sudo for automated deployments.
+* SSH Password authentication enabled in `/etc/ssh/sshd_config.d/50-password-auth.conf`.
