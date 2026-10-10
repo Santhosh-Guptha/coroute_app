@@ -10,6 +10,7 @@ import '../models/timeline_event_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'alarm_notifier.dart';
 import 'convoy_service.dart';
+import 'settings_service.dart';
 import 'timeline_service.dart';
 import 'voice_service.dart';
 
@@ -30,9 +31,10 @@ import 'voice_service.dart';
 /// when "Speak more after dark" is on), the rest are warnings. A language change
 /// re-words the alerts on screen; nothing is spoken again.
 class AlertService with WidgetsBindingObserver {
-  AlertService(this._convoys, this._timeline, {FlutterLocalNotificationsPlugin? plugin, AlertPolicy? policy, this._voice})
+  AlertService(this._convoys, this._timeline, {FlutterLocalNotificationsPlugin? plugin, AlertPolicy? policy, this._voice, SettingsService? settings})
       : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
-        _policy = policy ?? AlertPolicy() {
+        _policy = policy ?? AlertPolicy(),
+        _explicitSettings = settings {
     _timeline.addListener(_onTimeline);
     _convoys.addListener(_onConvoy);
     L10n.changes.addListener(_onLanguage);
@@ -44,6 +46,8 @@ class AlertService with WidgetsBindingObserver {
   final FlutterLocalNotificationsPlugin _plugin;
   final AlertPolicy _policy;
   final VoiceService? _voice;
+  final SettingsService? _explicitSettings;
+  SettingsService? get _settings => _explicitSettings ?? _voice?.settings ?? _convoys.settings;
 
   bool _ready = false;
   bool _foreground = true;
@@ -254,20 +258,21 @@ class AlertService with WidgetsBindingObserver {
     }
 
     _speak(want.values); // also where notifications are not available
-    if (!_ready) return;
-    for (final key in _shown.keys.toList()) {
-      // Timeline not loaded yet for this ride: keep its alerts until it is.
-      if (!timelineReady && !_isNetworkKey(key)) continue;
-      if (!want.containsKey(key) && !key.startsWith('EV:')) {
-        _plugin.cancel(_shown.remove(key)!.id).ignore();
+    if (_ready) {
+      for (final key in _shown.keys.toList()) {
+        // Timeline not loaded yet for this ride: keep its alerts until it is.
+        if (!timelineReady && !_isNetworkKey(key)) continue;
+        if (!want.containsKey(key) && !key.startsWith('EV:')) {
+          _plugin.cancel(_shown.remove(key)!.id).ignore();
+        }
       }
-    }
-    for (final a in want.values) {
-      final quiet = _foreground && a.channel != AlertChannel.sos;
-      if (quiet || _shown[a.key] == a) continue;
-      // Already showing (for example only the distance changed): update it without ringing again.
-      final isUpdate = _shown.containsKey(a.key) || _shownKeys.contains(a.key);
-      _show(a, sticky: a.channel == AlertChannel.sos, update: isUpdate);
+      for (final a in want.values) {
+        final quiet = _foreground && a.channel != AlertChannel.sos;
+        if (quiet || _shown[a.key] == a) continue;
+        // Already showing (for example only the distance changed): update it without ringing again.
+        final isUpdate = _shown.containsKey(a.key) || _shownKeys.contains(a.key);
+        _show(a, sticky: a.channel == AlertChannel.sos, update: isUpdate);
+      }
     }
 
     // One-time alerts: only for entries that arrived live and are recent.
@@ -280,9 +285,13 @@ class AlertService with WidgetsBindingObserver {
         oneshotsChanged = true;
         if (firstLoad || now - e.startedAt > const Duration(minutes: 2).inMilliseconds) continue;
         final a = _policy.oneShot(e, me);
-        // Safety alerts (the alerts channel) show even while the app is open; the rest only in the background.
-        if (a == null || (_foreground && !AlertPolicy.showWhileOpen(a))) continue;
-        _show(a, timeout: const Duration(minutes: 10));
+        if (a == null) continue;
+        _speak([a]);
+        if (_ready) {
+          // Safety alerts (the alerts channel) show even while the app is open; the rest only in the background.
+          if (_foreground && !AlertPolicy.showWhileOpen(a)) continue;
+          _show(a, timeout: const Duration(minutes: 10));
+        }
       }
       if (oneshotsChanged) _persistOneShots();
     }
@@ -292,15 +301,25 @@ class AlertService with WidgetsBindingObserver {
   void _speak(Iterable<AlertSpec> specs) {
     final voice = _voice;
     if (voice == null) return;
+    final announceAll = _settings?.voiceAnnounceAllAlerts ?? true;
     var changed = false;
     for (final a in specs) {
-      final line = a.speech;
-      if (line == null || line.isEmpty || !_spoken.add(a.key)) continue;
+      String? line = a.speech;
+      if ((line == null || line.trim().isEmpty) && announceAll) {
+        line = a.body.isNotEmpty ? '${a.title}. ${a.body}' : a.title;
+      }
+      if (line == null || line.trim().isEmpty || !_spoken.add(a.key)) continue;
       changed = true;
       voice.speak(line, priority: speechPriority(a), key: a.key).ignore();
     }
     if (changed) _persistSpoken();
   }
+
+  @visibleForTesting
+  void speakAlerts(Iterable<AlertSpec> specs) => _speak(specs);
+
+  @visibleForTesting
+  Future<void> reconcile() => _reconcile();
 
   /// SOS channel: critical. Group alerts and accident warnings (the important tier, spoken
   /// after dark too): important. Anything else: warning.

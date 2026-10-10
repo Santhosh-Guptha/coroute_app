@@ -9,6 +9,7 @@ import 'reroute_policy.dart';
 import 'route_plan.dart';
 import 'route_progress.dart';
 import '../timeline/timeline_text.dart';
+import '../tracking/dead_reckoning_engine.dart';
 
 /// Asks the route service for a route through these points; null when it
 /// is not available (offline, error, timeout). Never throws.
@@ -148,6 +149,7 @@ class RouteGuide extends ChangeNotifier {
     required int nowMs,
     required bool online,
     required bool lowData,
+    bool isTunnelCoasting = false,
   }) {
     if (_disposed) return;
     final plan = _plan;
@@ -191,6 +193,9 @@ class RouteGuide extends ChangeNotifier {
       return;
     }
 
+    final nearPortal = DeadReckoningEngine.isNearTunnelPortal(lat, lng);
+    final suppressOff = isTunnelCoasting || nearPortal;
+
     final personal = _personalProgress;
     if (personal != null) {
       if (onPlan != null) {
@@ -200,6 +205,7 @@ class RouteGuide extends ChangeNotifier {
           alongM: onPlan.onLine ? onPlan.alongM : null,
           accuracyM: accuracyM,
           speedKmh: speedKmh,
+          isTunnelCoasting: suppressOff,
         );
         if (!_rejoin.isOff) {
           _clearPersonal();
@@ -211,11 +217,25 @@ class RouteGuide extends ChangeNotifier {
       }
       final m = personal.update(lat, lng, acceptM: limit, accuracyM: accuracyM);
       if (m != null) {
-        _detector.onFix(tsMs: nowMs, offM: m.offM, alongM: m.onLine ? m.alongM : null, accuracyM: accuracyM, speedKmh: speedKmh);
+        _detector.onFix(
+          tsMs: nowMs,
+          offM: m.offM,
+          alongM: m.onLine ? m.alongM : null,
+          accuracyM: accuracyM,
+          speedKmh: speedKmh,
+          isTunnelCoasting: suppressOff,
+        );
       }
     } else if (onPlan != null) {
       final wasOff = _detector.isOff;
-      _detector.onFix(tsMs: nowMs, offM: onPlan.offM, alongM: onPlan.onLine ? onPlan.alongM : null, accuracyM: accuracyM, speedKmh: speedKmh);
+      _detector.onFix(
+        tsMs: nowMs,
+        offM: onPlan.offM,
+        alongM: onPlan.onLine ? onPlan.alongM : null,
+        accuracyM: accuracyM,
+        speedKmh: speedKmh,
+        isTunnelCoasting: suppressOff,
+      );
       if (wasOff && !_detector.isOff) {
         _generation++; // a request still on its way is no longer needed
         _setStatus('Back on the planned route', untilMs: nowMs + RouteConstants.backOnRouteNoticeFor.inMilliseconds);

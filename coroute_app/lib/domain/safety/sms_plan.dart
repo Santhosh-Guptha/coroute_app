@@ -129,16 +129,41 @@ class SmsText {
     required double lng,
     required DateTime at,
     String? convoyName,
+    bool indianCorridor = false,
   }) {
     final who = name.trim().isEmpty ? 'A rider' : name.trim();
     final time = '${_two(at.hour)}:${_two(at.minute)}';
     final link = 'https://maps.google.com/?q=${lat.toStringAsFixed(5)},${lng.toStringAsFixed(5)}';
     final ride = (convoyName ?? '').trim();
+    if (indianCorridor) {
+      final act = auto ? 'crashed' : 'needs help';
+      final ridePart = ride.isEmpty ? '' : ' Ride: $ride.';
+      return 'CoRoute SOS: $who $act at $time. Lat:${lat.toStringAsFixed(5)}, Lng:${lng.toStringAsFixed(5)}. Maps: $link$ridePart NHAI: 1073. ERSS: 112';
+    }
     final head = auto
         ? 'CoRoute automatic alert: $who may have crashed at $time and did not answer.'
         : 'CoRoute SOS: $who needs help ($time).';
     final tail = ride.isEmpty ? '' : ' Ride: $ride.';
     return '$head Map: $link$tail';
+  }
+
+  static String indianEmergencySos({
+    required String name,
+    required bool auto,
+    required double lat,
+    required double lng,
+    required DateTime at,
+    String? convoyName,
+  }) {
+    return sos(
+      name: name,
+      auto: auto,
+      lat: lat,
+      lng: lng,
+      at: at,
+      convoyName: convoyName,
+      indianCorridor: true,
+    );
   }
 
   static String _two(int v) => v < 10 ? '0$v' : '$v';

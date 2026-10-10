@@ -65,7 +65,13 @@ class OffRouteDetector {
     double? alongM,
     double? accuracyM,
     required double speedKmh,
+    bool isTunnelCoasting = false,
+    bool suppressOffRoute = false,
   }) {
+    if (isTunnelCoasting || suppressOffRoute) {
+      if (_state == OffRouteState.leaving) reset(OffRouteState.onRoute);
+      return _state;
+    }
     final acc = accuracyM;
     if (acc != null && acc > RouteConstants.maxUsableAccuracyM) return _state;
     if (!offM.isFinite) return _state;

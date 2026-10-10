@@ -133,6 +133,17 @@ class _EssentialsSheetState extends State<_EssentialsSheet> {
 
     ], total: convoy?.riders.length ?? 0, now: now);
 
+    final groupStop = convoy == null || !convoy.featurePolicy.groupFuelEnabled ? null : commonFuelStop(
+      riders: [for (final r in convoy.riders.values)
+        if (r.userId == convoyService?.myUserId) ...[
+          if (settings?.shareFuelEstimate == true && fuel != null && safety?.fuelEstimateUncertain == false)
+            PositionedFuelRange(SharedFuelRange(r.userId, fuel, now, r.lastSeenEpochMs), r.lat, r.lng)
+        ] else ...[
+          if (r.fuelUsableKm != null) PositionedFuelRange(SharedFuelRange(r.userId, r.fuelUsableKm!, r.fuelUpdatedAt, r.lastSeenEpochMs), r.lat, r.lng)
+        ]
+      ], total: convoy.riders.length, now: now, route: convoy.route?.points ?? [],
+      stations: service.upcoming, reliable: service.reliable && convoy.route?.approximate == false);
+
     final moving = widget.moving || (convoy?.riders[convoyService?.myUserId]?.speedKmh ?? 0) > 5;
 
     final upcoming = service.upcoming;
@@ -189,6 +200,14 @@ class _EssentialsSheetState extends State<_EssentialsSheet> {
 
           child: Text('Group fuel: ${group.contributors}/${group.total} current estimates${group.lowestKm == null ? '' : ' · lowest ${group.lowestKm!.floor()} km'}. Distances to a shared stop differ by rider.', style: AppText.label)),
 
+        if (widget.leader && group.total > 0)
+          Text(groupStop == null
+            ? "No common station can be confirmed from all riders' current estimates and route positions."
+            : 'Common mapped stop: ${groupStop.station.name}. Smallest estimated usable range left after arrival: ${groupStop.smallestRemainingKm.floor()} km. Opening and fuel availability are unconfirmed.', style: AppText.label),
+        if (widget.leader && groupStop != null)
+          for (final entry in groupStop.distanceKm.entries)
+            Text('${convoy?.riders[entry.key]?.name ?? 'Rider'}: ${entry.value.toStringAsFixed(1)} km to station', style: AppText.caption),
+
         if (!moving && safety != null) TextButton(onPressed: () => showFuelSheet(context), child: const Text('Refuel / fuel profile')),
 
         if (following != null && next != null) Text('Next after this: ${formatDistanceRounded(following.routePositionM - next.routePositionM)} along the route', style: AppText.label),
@@ -199,7 +218,7 @@ class _EssentialsSheetState extends State<_EssentialsSheet> {
 
         Text('${service.offline || !snapshot.freshAt(DateTime.now().millisecondsSinceEpoch) ? 'Cached · ' : ''}Updated ${DateTime.fromMillisecondsSinceEpoch(snapshot.fetchedAt).toLocal()}', style: AppText.caption),
 
-        Text('Coverage: ${formatDistanceRounded(snapshot.fromM)}–${formatDistanceRounded(snapshot.toM)} into route. ${snapshot.complete ? 'Mapped results are not exhaustive.' : 'Partial results; other places may be missing.'}', style: AppText.caption),
+        Text('Coverage: ${formatDistanceRounded(snapshot.fromM)}-${formatDistanceRounded(snapshot.toM)} into route. ${snapshot.complete ? 'Mapped results are not exhaustive.' : 'Partial results; other places may be missing.'}', style: AppText.caption),
 
       ],
 

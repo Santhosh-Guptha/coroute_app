@@ -1,6 +1,7 @@
 import 'data/services/ride_essentials_coordinator.dart';
 import 'data/services/route_essentials_service.dart';
 import 'data/services/fuel_sharing_binding.dart';
+import 'data/services/fuel_settings_binding.dart';
 import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
@@ -98,6 +99,9 @@ class CoRouteApp extends StatelessWidget {
           ctx.read<RealtimeService>().onAuthRejected = auth.revalidate;
           return auth;
         }),
+        Provider<FuelSettingsBinding>(lazy: false,
+          create: (ctx) => FuelSettingsBinding(ctx.read<AuthService>(), ctx.read<SettingsService>()),
+          dispose: (_, binding) => binding.dispose()),
         ChangeNotifierProvider(create: (ctx) => MetaService(ctx.read<ApiClient>())..load()),
         ChangeNotifierProvider(create: (ctx) => TripStorageService(ctx.read<ApiClient>())),
         ChangeNotifierProvider(create: (ctx) => TimelineService(ctx.read<ApiClient>(), ctx.read<RealtimeService>())),

@@ -3,10 +3,15 @@ class RouteEssential {
   final double lat, lng, routePositionM, entryM, exitM, accessDistanceM, detourDistanceM;
   final int detourDurationS;
   final String? openingHours;
+  final bool isCoco;
+  final String? operatorName;
+  final bool isTraumaCenter;
+  final int priority;
   const RouteEssential({required this.placeId, required this.visitId, required this.name,
     required this.category, required this.source, required this.lat, required this.lng,
     required this.routePositionM, required this.entryM, required this.exitM,
-    required this.accessDistanceM, required this.detourDistanceM, required this.detourDurationS, this.openingHours});
+    required this.accessDistanceM, required this.detourDistanceM, required this.detourDurationS, this.openingHours,
+    this.isCoco = false, this.operatorName, this.isTraumaCenter = false, this.priority = 2});
 
   /// Access was routed from the entry anchor. After passing it, that road distance
   /// is no longer valid: don't subtract progress from an off-route access road.
@@ -22,11 +27,16 @@ class RouteEssential {
     return RouteEssential(placeId: j['placeId'], visitId: j['visitId'], name: j['name'], category: j['category'], source: j['source'],
       lat: n('lat'), lng: n('lng'), routePositionM: n('routePositionM'), entryM: n('entryM'), exitM: n('exitM'),
       accessDistanceM: n('accessDistanceM'), detourDistanceM: n('detourDistanceM'), detourDurationS: n('detourDurationS').round(),
-      openingHours: j['openingHours'] is String ? j['openingHours'] : null);
+      openingHours: j['openingHours'] is String ? j['openingHours'] : null,
+      isCoco: j['isCoco'] == true,
+      operatorName: j['operator'] is String ? j['operator'] as String : (j['operatorName'] is String ? j['operatorName'] as String : null),
+      isTraumaCenter: j['isTraumaCenter'] == true,
+      priority: j['priority'] is num ? (j['priority'] as num).toInt() : 2);
   }
   Map<String, dynamic> toJson() => {'placeId': placeId, 'visitId': visitId, 'name': name, 'category': category,
     'source': source, 'lat': lat, 'lng': lng, 'routePositionM': routePositionM, 'entryM': entryM, 'exitM': exitM,
-    'accessDistanceM': accessDistanceM, 'detourDistanceM': detourDistanceM, 'detourDurationS': detourDurationS, 'openingHours': openingHours};
+    'accessDistanceM': accessDistanceM, 'detourDistanceM': detourDistanceM, 'detourDurationS': detourDurationS, 'openingHours': openingHours,
+    'isCoco': isCoco, 'operator': operatorName, 'isTraumaCenter': isTraumaCenter, 'priority': priority};
 }
 
 class EssentialsSnapshot {

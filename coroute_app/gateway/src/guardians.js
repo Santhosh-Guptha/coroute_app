@@ -1,6 +1,7 @@
 'use strict';
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const { featurePolicy } = require('./feature_policy');
 
 const HOUR = 3600000;
 const EVENT_LABELS = { TRIP_STARTED: 'Ride started', TRIP_PAUSED: 'Ride paused', TRIP_RESUMED: 'Ride resumed', TRIP_ENDED: 'Ride ended', STOP_REACHED: 'Planned stop reached', DESTINATION_REACHED: 'Destination arrival reported', SOS: 'Emergency status updated', SOS_RESPONSE: 'Assistance status updated', STOPPED: 'Extended stop', OFFLINE: 'Location updates unavailable', OFF_ROUTE: 'Route deviation reported', SEPARATED: 'Group separation reported' };
@@ -59,6 +60,10 @@ class GuardianService {
     if (!member || !user || (user.status && user.status !== 'ACTIVE') || !['PLANNING', 'STARTED', 'PAUSED'].includes(meta.tripStatus)) {
       throw new GuardianError('An active personal ride membership is required.', 403);
     }
+    const policy = featurePolicy(meta.featurePolicy);
+    if (!policy.guardianEnabled) throw new GuardianError('Guardian sharing is disabled for this group.', 403);
+    if (policy.guardianRequirePin && !input.pin) throw new GuardianError('The lead requires a PIN for Guardian links.', 400);
+    if (input.expiresAt !== undefined && expiresAt > now + policy.guardianMaxHours * HOUR) throw new GuardianError('Expiry exceeds the group limit.', 400);
     const subject = input.subject || 'PERSONAL';
     const subjects = [];
     if (subject === 'GROUP') {
@@ -74,7 +79,7 @@ class GuardianService {
     const secret = token();
     const grant = { grantId: crypto.randomUUID(), tokenHash: hash(secret), creatorId: userId,
       subjectId: userId, subject, subjects, groupId, level: input.level,
-      label: (input.label || '').trim(), joinedAt: member.joinedAt, createdAt: now, expiresAt };
+      label: (input.label || '').trim(), joinedAt: member.joinedAt, createdAt: now, expiresAt: Math.min(expiresAt, now + policy.guardianMaxHours * HOUR) };
     if (input.pin) grant.pinHash = await bcrypt.hash(input.pin, 10);
     await this.repo.createGuardianGrant(grant); // Do not issue a token if persistence fails.
     return { ...summary(grant, false, now), token: secret };
@@ -121,11 +126,13 @@ class GuardianService {
         !['PLANNING', 'STARTED', 'PAUSED', 'ENDED'].includes(meta.tripStatus) || now >= expiry(grant, meta)) {
       throw new GuardianError();
     }
+    const policy = featurePolicy(meta.featurePolicy);
+    if (!policy.guardianEnabled || (policy.guardianRequirePin && !grant.pinHash) || now >= grant.createdAt + policy.guardianMaxHours * HOUR) throw new GuardianError();
     if (grant.subject === 'GROUP' && member.role !== 'LEAD' && meta.createdByUserId !== grant.creatorId) throw new GuardianError();
     if (await this.repo.guardianPaused(grant.grantId)) {
       const error = new GuardianError('The rider has paused this link.', 423); error.code = 'GUARDIAN_PAUSED'; throw error;
     }
-    return { meta, expiresAt: expiry(grant, meta) };
+    return { meta, expiresAt: Math.min(expiry(grant, meta), grant.createdAt + policy.guardianMaxHours * HOUR) };
   }
 
   async setConsent(userId, groupId, allowed) {
@@ -227,14 +234,15 @@ class GuardianService {
       if (JSON.stringify(ids) !== JSON.stringify(await this._groupSubjects(grant, access.meta))) throw new GuardianError();
     } else out = projectPersonal(grant, access.meta, room, now);
     const events = await this.repo.guardianEvents(grant.groupId, grant.createdAt);
+    const policy = featurePolicy(access.meta.featurePolicy);
     out.timeline = events.filter((e) => {
       if (!EVENT_LABELS[e.type] || !Number.isFinite(e.startedAt) || e.startedAt > now) return false;
       if (grant.level === 'EMERGENCY_ONLY' && !['SOS', 'SOS_RESPONSE'].includes(e.type)) return false;
       if (!e.type.startsWith('TRIP_') && !permittedIds.includes(e.userId)) return false;
       const duration = (e.endedAt || now) - e.startedAt;
-      if (e.type === 'STOPPED' && duration < 15 * 60000) return false;
-      if (e.type === 'OFFLINE' && duration < 10 * 60000) return false;
-      if (['OFF_ROUTE', 'SEPARATED'].includes(e.type) && duration < 5 * 60000) return false;
+      if (e.type === 'STOPPED' && duration < policy.guardianStopMinutes * 60000) return false;
+      if (e.type === 'OFFLINE' && duration < policy.guardianOfflineMinutes * 60000) return false;
+      if (['OFF_ROUTE', 'SEPARATED'].includes(e.type) && duration < policy.guardianDeviationMinutes * 60000) return false;
       if (['STOPPED', 'OFFLINE', 'OFF_ROUTE', 'SEPARATED'].includes(e.type)) {
         if (e.open && access.meta.tripStatus !== 'STARTED') return false;
         // Suppress a routine warning whose start belongs to a known planned stop or pause.

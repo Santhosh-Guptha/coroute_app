@@ -9,6 +9,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(nex
 /** Separate observer endpoints: guest sessions are never accepted by rider auth. */
 function guardianRouter({ service, gate, origin, push = null }) {
   const r = express.Router();
+  r.use((req, res, next) => { const started = Date.now(); res.once('finish', () => service.convoys?.featureAnalytics?.record('guardian', res.statusCode < 400, Date.now() - started)); next(); });
   r.use((req, res, next) => {
     res.set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer')
       .set('X-Robots-Tag', 'noindex, nofollow');

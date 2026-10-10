@@ -27,7 +27,7 @@ class SodaClient {
     this.fetch = opts.fetchImpl || globalThis.fetch;
   }
 
-  async _request(method, path, body, { retries = 1 } = {}) {
+  async _request(method, path, body, { retries = 1, contentType = 'application/json' } = {}) {
     const url = `${this.baseUrl}${path}`;
     let lastErr;
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -37,7 +37,7 @@ class SodaClient {
           headers: {
             Authorization: this.authHeader,
             Accept: 'application/json',
-            ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+            ...(body !== undefined ? { 'Content-Type': contentType } : {}),
           },
           body: body !== undefined ? JSON.stringify(body) : undefined,
           signal: AbortSignal.timeout(this.timeoutMs),
@@ -110,6 +110,19 @@ class SodaClient {
   async replace(collection, key, doc) {
     await this._request('PUT', `/${encodeURIComponent(collection)}/${encodeURIComponent(key)}`, doc, { retries: 0 });
     return key;
+  }
+
+  /** Atomic JSON Patch test + replacement (Oracle SODA 18c+). Never retry an ambiguous write. */
+  async compareAndReplace(collection, key, expected, replacement) {
+    try {
+      await this._request('PATCH', `/${encodeURIComponent(collection)}/${encodeURIComponent(key)}`,
+        [{ op: 'test', path: '', value: expected }, { op: 'replace', path: '', value: replacement }],
+        { retries: 0, contentType: 'application/json-patch+json' });
+      return true;
+    } catch (e) {
+      if (e instanceof SodaError && [400, 404, 409, 412, 422].includes(e.status)) return false;
+      throw e;
+    }
   }
 
   /** Returns the raw document under key or null. */

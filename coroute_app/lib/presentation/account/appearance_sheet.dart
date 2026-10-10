@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../core/constants/network_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../core/ui/ui.dart';
+import '../../data/services/settings_service.dart';
 
 /// Light, dark or automatic. Opened from Account.
 class AppearanceSheet extends StatelessWidget {
@@ -69,6 +71,43 @@ class AppearanceSheet extends StatelessWidget {
                 ),
                 onTap: () => t.setPreference(pref),
               ),
+            Builder(
+              builder: (context) {
+                final s = context.watch<SettingsService?>();
+                if (s == null) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: Space.s16, left: Space.s4, right: Space.s4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Divider(),
+                      const SizedBox(height: Space.s8),
+                      Semantics(header: true, child: Text('Map HUD & Alerts', style: AppText.title)),
+                      const SizedBox(height: Space.s4),
+                      Text(
+                        s.mapAlertDismissSeconds == 0
+                            ? 'Manual dismissal only on map'
+                            : 'Alerts dismiss from map HUD after ${s.mapAlertDismissSeconds}s (kept in notifications)',
+                        style: AppText.caption,
+                      ),
+                      const SizedBox(height: Space.s8),
+                      Wrap(
+                        spacing: Space.s8,
+                        runSpacing: Space.s4,
+                        children: [
+                          for (final sec in NetworkConstants.mapAlertDismissChoices)
+                            ChoiceChip(
+                              label: Text(sec == 0 ? 'Manual' : '${sec}s'),
+                              selected: s.mapAlertDismissSeconds == sec,
+                              onSelected: (_) => s.setMapAlertDismissSeconds(sec),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ],
         ),
     );

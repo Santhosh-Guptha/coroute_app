@@ -135,10 +135,35 @@ class EmergencySosSheet extends StatelessWidget {
     ));
   }
 
+  /// Indian nationwide emergency numbers supported for offline/zero-signal dialing.
+  static const List<String> indianEmergencyNumbers = ['112', '108', '100', '1073'];
+
+  /// Generates a standardized Google Maps location pin link.
+  static String formatMapsLink(double lat, double lng) =>
+      'https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng.toStringAsFixed(6)}';
+
+  /// Constructs a tel: URI for direct phone dialing.
+  static Uri buildEmergencyCallUri(String phone) {
+    final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    return Uri.parse('tel:$clean');
+  }
+
+  /// Constructs a zero-permission sms: URI intent with pre-filled distress location message.
+  static Uri buildEmergencySmsUri(String phone, double lat, double lng) {
+    final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    final mapsLink = formatMapsLink(lat, lng);
+    final body = 'Emergency. I need help. My location: $mapsLink';
+    return Uri(
+      scheme: 'sms',
+      path: clean,
+      queryParameters: {'body': body},
+    );
+  }
+
   Future<void> _makeCall(BuildContext context, String phone) async {
     final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
     if (clean.isEmpty) return;
-    final uri = Uri.parse('tel:$clean');
+    final uri = buildEmergencyCallUri(clean);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else if (context.mounted) {
@@ -150,13 +175,7 @@ class EmergencySosSheet extends StatelessWidget {
 
   Future<void> _sendSms(BuildContext context, String phone, double lat, double lng) async {
     final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
-    final mapsLink = 'https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng.toStringAsFixed(6)}';
-    final body = 'Emergency. I need help. My location: $mapsLink';
-    final uri = Uri(
-      scheme: 'sms',
-      path: clean,
-      queryParameters: {'body': body},
-    );
+    final uri = buildEmergencySmsUri(clean, lat, lng);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else if (context.mounted) {
@@ -194,7 +213,8 @@ class EmergencySosSheet extends StatelessWidget {
     final ride316 = context.select<ConvoyService?, bool>((s) => s?.supports(ProtocolFeatures.ride316) ?? false);
     final linkId = ride316 ? (alertId ?? openAlertId) : null;
 
-    return Column(
+    return SingleChildScrollView(
+      child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -437,6 +457,20 @@ class EmergencySosSheet extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => _makeCall(context, '1073'),
+              icon: Icon(Icons.emergency_rounded, color: AppTheme.hyperAmber, size: 18),
+              label: Text(
+                'Dial 1073 (NHAI Highway Helpline)',
+                style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.hyperAmber, fontSize: 12),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: AppTheme.hyperAmber.withOpacity(0.8)),
+                minimumSize: const Size.fromHeight(44),
+                shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+              ),
+            ),
             const SizedBox(height: 12),
 
             // Close my SOS: help reached me, or it was a false alarm. Then "Keep it on".
@@ -470,6 +504,7 @@ class EmergencySosSheet extends StatelessWidget {
               child: const Text('Keep it on', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
             ),
           ],
+        ),
     );
   }
 }

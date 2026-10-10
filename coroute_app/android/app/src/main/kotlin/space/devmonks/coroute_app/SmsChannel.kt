@@ -52,7 +52,29 @@ class SmsChannel(context: Context) : MethodChannel.MethodCallHandler {
                 }
                 send(to, body, result)
             }
+            "launchSmsIntent" -> {
+                val to = call.argument<String>("to")?.trim().orEmpty()
+                val body = call.argument<String>("body").orEmpty()
+                launchSmsIntent(to, body, result)
+            }
             else -> result.notImplemented()
+        }
+    }
+
+    private fun launchSmsIntent(to: String, body: String, result: MethodChannel.Result) {
+        try {
+            val cleanTo = to.replace(Regex("[^0-9+]"), "")
+            val uri = if (cleanTo.isNotEmpty()) android.net.Uri.parse("smsto:$cleanTo") else android.net.Uri.parse("smsto:")
+            val intent = Intent(Intent.ACTION_SENDTO, uri).apply {
+                if (body.isNotEmpty()) {
+                    putExtra("sms_body", body)
+                }
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            app.startActivity(intent)
+            result.success(true)
+        } catch (e: Exception) {
+            result.success(false)
         }
     }
 

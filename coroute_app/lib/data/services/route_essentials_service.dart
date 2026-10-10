@@ -54,6 +54,7 @@ class RouteEssentialsService extends ChangeNotifier {
   Future<void> _writes = Future.value();
   double progressM = 0;
   String category = 'FUEL';
+  String? groupId;
   List<RouteEssential> get upcoming => snapshot?.places.where((p) => p.routePositionM >= progressM).toList() ?? const [];
   bool get reliable => !offline && error == null && snapshot?.complete == true && snapshot!.freshAt(_clock());
 
@@ -89,6 +90,15 @@ class RouteEssentialsService extends ChangeNotifier {
     await (_restore ??= _restoreCache());
     if (_disposed || generation != _generation) return;
     snapshot ??= _cache[key];
+    if (snapshot == null && !online) {
+      final prefix = '${route.polyline}|$category|';
+      for (final entry in _cache.entries.toList().reversed) {
+        if (entry.key.startsWith(prefix) && entry.value.toM >= progressM) {
+          snapshot = entry.value;
+          break;
+        }
+      }
+    }
     if (snapshot != null && (_clock() < snapshot!.fetchedAt || _clock() - snapshot!.fetchedAt >= const Duration(days: 7).inMilliseconds)) {
       snapshot = null; _cache.remove(key);
     }
@@ -98,7 +108,7 @@ class RouteEssentialsService extends ChangeNotifier {
     if (loading || (!force && (snapshot?.freshAt(_clock()) == true || _clock() < _retryAt))) { notifyListeners(); return; }
     loading = true; error = null; notifyListeners();
     try {
-      final raw = await api.post('/geo/essentials', {'polyline': route.polyline, 'category': category, 'fromM': progressM}, const Duration(seconds: 55));
+      final raw = await api.post('/geo/essentials', {if (groupId != null) 'groupId': groupId, 'polyline': route.polyline, 'category': category, 'fromM': progressM}, const Duration(seconds: 55));
       if (_disposed || generation != _generation) return;
       final result = EssentialsSnapshot.fromJson(raw);
       if (result == null || result.category != category || result.fromM > progressM || result.toM < progressM || result.fetchedAt > _clock() + 60000) throw const FormatException('Invalid essentials response');
@@ -115,7 +125,7 @@ class RouteEssentialsService extends ChangeNotifier {
     } catch (e) {
       if (_disposed || generation != _generation) return;
       if (e is ApiException && e.isOffline) offline = true;
-      if (e is ApiException && (e.statusCode == 401 || e.statusCode == 403)) { _authBlocked = true; _blockedToken = api.token; }
+      if (e is ApiException && (e.statusCode == 401 || (e.statusCode == 403 && e.code != 'FEATURE_DISABLED'))) { _authBlocked = true; _blockedToken = api.token; }
       error = 'Could not refresh route essentials.';
       _failures = (_failures + 1).clamp(1, 5);
       _retryAt = _clock() + 30000 * (1 << _failures);

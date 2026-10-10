@@ -1,4 +1,5 @@
 import 'network_wire.dart';
+import 'ride_feature_policy.dart';
 import 'rider_model.dart';
 import 'sos_alert_model.dart';
 import 'group_message_model.dart';
@@ -46,6 +47,8 @@ class ConvoyModel {
   /// 3.16: lower speed limit (km/h) within 1 km of planned stops, the start and the
   /// destination; 0 = off. Lead only.
   final int townLimitKmh;
+  final RideFeaturePolicy featurePolicy;
+  final Map<String, dynamic> featureAnalytics;
 
   /// The rider the lead made the sweeper (3.16), if any.
   String? get sweeperId {
@@ -99,6 +102,8 @@ class ConvoyModel {
     this.discovery = false,
     this.assistDefault = true,
     this.townLimitKmh = 0,
+    this.featurePolicy = const RideFeaturePolicy(),
+    this.featureAnalytics = const {},
   });
 
   ConvoyModel copyWith({
@@ -133,6 +138,8 @@ class ConvoyModel {
     bool? discovery,
     bool? assistDefault,
     int? townLimitKmh,
+    RideFeaturePolicy? featurePolicy,
+    Map<String, dynamic>? featureAnalytics,
   }) {
     return ConvoyModel(
       groupId: groupId ?? this.groupId,
@@ -165,6 +172,8 @@ class ConvoyModel {
       discovery: discovery ?? this.discovery,
       assistDefault: assistDefault ?? this.assistDefault,
       townLimitKmh: townLimitKmh ?? this.townLimitKmh,
+      featurePolicy: featurePolicy ?? this.featurePolicy,
+      featureAnalytics: featureAnalytics ?? this.featureAnalytics,
     );
   }
 
@@ -199,6 +208,8 @@ class ConvoyModel {
       'discovery': discovery,
       'assistDefault': assistDefault,
       'townLimitKmh': townLimitKmh,
+      'featurePolicy': featurePolicy.toJson(),
+      'featureAnalytics': featureAnalytics,
     };
   }
 
@@ -277,6 +288,8 @@ class ConvoyModel {
       discovery: json['discovery'] == true,
       assistDefault: json['assistDefault'] != false,
       townLimitKmh: (json['townLimitKmh'] as num?)?.toInt() ?? 0,
+      featurePolicy: RideFeaturePolicy.fromJson(json['featurePolicy']),
+      featureAnalytics: json['featureAnalytics'] is Map ? Map<String, dynamic>.from(json['featureAnalytics']) : const {},
     );
   }
 }

@@ -75,8 +75,8 @@ void main() {
         tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNull,
       );
-      await tester.ensureVisible(find.byType(TextField));
-      await tester.enterText(find.byType(TextField), 'abc');
+      await tester.ensureVisible(find.byKey(const ValueKey('guardianPin')));
+      await tester.enterText(find.byKey(const ValueKey('guardianPin')), 'abc');
       await tester.ensureVisible(find.byType(CheckboxListTile));
       await tester.tap(find.byType(CheckboxListTile));
       await tester.pump();
@@ -85,7 +85,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(creates, 0);
       expect(find.text('Use a PIN of 4 to 8 digits.'), findsOneWidget);
-      await tester.enterText(find.byType(TextField), '1234');
+      await tester.enterText(find.byKey(const ValueKey('guardianPin')), '1234');
       await tester.ensureVisible(find.text('Create Guardian link'));
       await tester.tap(find.text('Create Guardian link'));
       await tester.pumpAndSettle();

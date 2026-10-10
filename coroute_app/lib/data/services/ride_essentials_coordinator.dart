@@ -141,11 +141,13 @@ class RideEssentialsCoordinator extends ChangeNotifier {
   }
 
   Future<void> refresh({String? category, bool force = false, bool allowNetwork = true}) {
-    final valid = hasCurrentPosition && _guide.active?.last?.onLine == true;
+    essentials.groupId = groupId;
+    final policy = port.activeConvoy?.featurePolicy;
+    final valid = policy?.essentialsEnabled != false && hasCurrentPosition && _guide.active?.last?.onLine == true;
     return essentials.update(valid ? _guide.activeRoute : null,
         fromM: valid ? _guide.active!.matched!.alongM : 0,
         online: port.isOnline,
-        lowData: !allowNetwork || settings.lowData || port.conservingBattery,
+        lowData: !allowNetwork || policy?.autoDiscovery == false || settings.lowData || port.conservingBattery,
         selectedCategory: category ?? essentials.category,
         force: force && allowNetwork);
   }

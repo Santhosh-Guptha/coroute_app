@@ -5,9 +5,12 @@ const { decodePolyline, cumulative, pointToSegment } = require('./geo_math');
 // Provider objects stay here; the wire contract uses metres, seconds and epoch ms.
 const FILTERS = Object.freeze({
   FUEL: '[amenity=fuel]', FOOD: '[amenity~"^(restaurant|cafe|fast_food)$"]',
-  HOSPITAL: '[amenity=hospital]', REPAIR: '[shop=motorcycle]["service:motorcycle:repair"=yes]',
+  HOSPITAL: '[amenity~"^(hospital|clinic|doctors)$"],[healthcare~"^(hospital|centre|clinic)$"]',
+  REPAIR: '[shop~"^(motorcycle|two_wheeler|mechanic)$"],["service:motorcycle:repair"=yes],[craft=welder]',
   REST: '[highway=rest_area]', STAY: '[tourism~"^(hotel|motel|hostel|guest_house)$"]',
-  PHARMACY: '[amenity=pharmacy]', TYRE: '[shop=tyres]', WASHROOM: '[amenity=toilets]',
+  PHARMACY: '[amenity=pharmacy]',
+  TYRE: '[shop~"^(tyres|tyre_repair)$"],["service:vehicle:tyres"=yes],[amenity=vehicle_inspection],[craft=welder]',
+  WASHROOM: '[amenity=toilets]',
   ATM: '[amenity=atm]', POLICE: '[amenity=police]', PARKING: '[amenity=parking]', SCENIC: '[tourism=viewpoint]',
 });
 class EssentialsError extends Error {
@@ -57,17 +60,33 @@ class OverpassPlacesProvider {
     const pts = [pointAt(r, r.fromM), ...r.line.filter((_, i) => r.cum[i] > r.fromM && r.cum[i] < r.toM), pointAt(r, r.toM)];
     if (pts.length > 4000) throw new EssentialsError(422, 'ESSENTIALS_ROUTE_TOO_DENSE');
     const coords = pts.map(p => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join(',');
-    const query = `[out:json][timeout:12];nwr${FILTERS[r.category]}(around:1500,${coords});out center tags 501;`;
+    const filter = FILTERS[r.category];
+    const clauses = filter.split(',').map(c => c.trim()).filter(Boolean);
+    const query = clauses.length === 1
+      ? `[out:json][timeout:12];nwr${clauses[0]}(around:1500,${coords});out center tags 501;`
+      : `[out:json][timeout:12];(${clauses.map(c => `nwr${c}(around:1500,${coords});`).join('')});out center tags 501;`;
     const res = await this.fetch(this.url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'CoRoute route essentials' }, body: `data=${encodeURIComponent(query)}`, signal: AbortSignal.timeout(14000) });
     if (!res.ok) throw new EssentialsError(503, 'ESSENTIALS_PROVIDER_UNAVAILABLE');
     const j = await res.json();
     if (!Array.isArray(j.elements) || j.remark) throw new EssentialsError(503, 'ESSENTIALS_PROVIDER_INCOMPLETE');
-    const places = j.elements.slice(0, 500).map(e => ({
-      placeId: `osm:${e.type}:${e.id}`, name: String(e.tags?.name || 'Mapped place').slice(0, 120),
-      lat: e.lat ?? e.center?.lat, lng: e.lon ?? e.center?.lon, category: r.category,
-      openingHours: typeof e.tags?.opening_hours === 'string' ? e.tags.opening_hours.slice(0, 200) : null,
-      source: 'OpenStreetMap',
-    })).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng) && Math.abs(p.lat) <= 85 && Math.abs(p.lng) <= 180);
+    const places = j.elements.slice(0, 500).map(e => {
+      const tags = e.tags || {};
+      const name = String(tags.name || 'Mapped place').slice(0, 120);
+      const op = String(tags.operator || tags.brand || '');
+      const isCoco = /\bcoco\b/i.test(name) || /\bcoco\b/i.test(op) || /\bcoco\b/i.test(tags.description || '') || tags['fuel:coco'] === 'yes' || tags.coco === 'yes';
+      const isVerified = /(iocl|indian\s*oil|bpcl|bharat\s*petroleum|hpcl|hindustan\s*petroleum|shell)/i.test(`${op} ${name}`);
+      const isTrauma = /trauma/i.test(name) || /trauma/i.test(tags['healthcare:speciality'] || '') || tags.emergency === 'yes' || /\b(chc|community health|district hospital)\b/i.test(name);
+      return {
+        placeId: `osm:${e.type}:${e.id}`, name,
+        lat: e.lat ?? e.center?.lat, lng: e.lon ?? e.center?.lon, category: r.category,
+        openingHours: typeof tags.opening_hours === 'string' ? tags.opening_hours.slice(0, 200) : null,
+        source: 'OpenStreetMap',
+        operator: op || null,
+        isCoco: isCoco || undefined,
+        isTraumaCenter: isTrauma || undefined,
+        priority: (isCoco || isVerified) ? 1 : 2,
+      };
+    }).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng) && Math.abs(p.lat) <= 85 && Math.abs(p.lng) <= 180);
     return { places, complete: j.elements.length < 501 };
   }
 }

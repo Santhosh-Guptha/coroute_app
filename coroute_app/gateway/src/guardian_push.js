@@ -26,6 +26,7 @@ function stateOf(view) {
 class GuardianPush {
   constructor({ repo, service, send, publicKey, clock = Date.now }) {
     this.repo = repo; this.service = service; this.send = send; this.publicKey = publicKey;
+    this.workerId = crypto.randomUUID();
     this.clock = clock; this.running = false; this.stopped = false; this.offset = 0;
   }
   start() {
@@ -78,14 +79,16 @@ class GuardianPush {
               subscriptionId: sub.subscriptionId, grantId: sub.grantId, subscriptionVersion: sub.version, state: 'PENDING',
               target: state, attempts: 0, nextAttemptAt: now, expiresAt: now + 10 * 60000 });
           }
-          if (digest(state) !== digest(sub.state)) await this.repo.saveGuardianSubscription({ ...sub, state, sequence: (sub.sequence || 0) + 1 });
+          if (digest(state) !== digest(sub.state)) await this.repo.advanceGuardianSubscription(sub, state);
         } catch (e) {
           if (e instanceof GuardianError && e.code !== 'GUARDIAN_PAUSED') await this.repo.removeGuardianSubscription(sub.subscriptionId);
           // A temporary database failure retains the subscription and cursor.
         }
       }
-      for (const job of await this.repo.listGuardianJobs(now)) {
+      for (const candidate of await this.repo.listGuardianJobs(now)) {
         if (this.stopped) break;
+        const job = await this.repo.claimGuardianJob(candidate.jobId, this.workerId, this.clock());
+        if (!job) continue;
         try {
           const sub = await this.repo.getGuardianSubscription(job.subscriptionId);
           if (!sub || sub.version !== job.subscriptionVersion || await this.repo.guardianRevoked(job.subscriptionId) || now >= job.expiresAt || now >= sub.expiresAt) { job.state = 'CANCELLED'; }
@@ -96,8 +99,8 @@ class GuardianPush {
             else {
               const ticket = await this.service.ticket(job.grantId);
               const latest = await this.repo.getGuardianSubscription(job.subscriptionId);
-              if (this.stopped || !latest || latest.version !== sub.version || await this.repo.guardianRevoked(job.subscriptionId)) {
-                job.state = 'CANCELLED'; await this.repo.saveGuardianJob(job); continue;
+              if (this.stopped || this.clock() + 10000 >= job.leaseUntil || !latest || latest.version !== sub.version || await this.repo.guardianRevoked(job.subscriptionId)) {
+                job.state = 'CANCELLED'; await this.repo.finishGuardianJob(job, this.workerId); continue;
               }
               await this.send(sub.subscription, JSON.stringify({ title: 'CoRoute trip update',
                 body: 'Open Ride Guardian for the latest shared update.', tag: job.jobId,
@@ -116,7 +119,7 @@ class GuardianPush {
             if (job.attempts >= 5) job.state = 'FAILED';
           }
         }
-        await this.repo.saveGuardianJob(job);
+        await this.repo.finishGuardianJob(job, this.workerId);
       }
     } finally { this.running = false; }
   }

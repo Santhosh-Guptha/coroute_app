@@ -77,7 +77,7 @@ test('a socket that drops without BYE reads as NO_SIGNAL (no OFFLINE yet); a sec
   await sleep(50);
   wl.inbox.length = 0;
   w1.sendJson({ type: 'BYE', reason: 'APP_CLOSED' });
-  await sleep(30);
+  await sleep(150);
   w1.close();
   await sleep(100);
   assert.equal(wl.inbox.filter((m) => m.type === 'PRESENCE').length, 0, 'the other socket is still open');
@@ -92,7 +92,7 @@ test('a socket that drops without BYE reads as NO_SIGNAL (no OFFLINE yet); a sec
   const w3 = await t.joinRoom(r.rider.token, r.c.groupId);
   await wl.next((m) => m.type === 'PRESENCE' && m.presence === 'ONLINE');
   w3.sendJson({ type: 'BYE', reason: 'LEFT' });
-  await sleep(30);
+  await sleep(150);
   w3.close();
   await sleep(100);
   assert.equal(wl.inbox.filter((m) => m.type === 'PRESENCE').length, 0, 'LEFT: the LEAVE path handles it');

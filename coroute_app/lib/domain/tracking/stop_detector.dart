@@ -44,7 +44,8 @@ class StopDetector {
   }
 
   /// Feeds one fix. Returns a [StopEvent] when a stop starts or ends.
-  StopEvent? add(TrackPoint p) {
+  StopEvent? add(TrackPoint p, {bool isTunnelCoasting = false}) {
+    if (isTunnelCoasting) return null;
     if (_first == null) {
       _startCluster(p);
       return null;

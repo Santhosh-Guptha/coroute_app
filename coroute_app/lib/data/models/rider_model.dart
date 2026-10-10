@@ -1,6 +1,40 @@
 import '../../core/constants/network_constants.dart';
 import 'safety_wire.dart';
 
+enum TrackingConfidence {
+  gpsFix,
+  tunnelCoasting,
+  degradedMultipath,
+  lost;
+
+  String toWire() {
+    switch (this) {
+      case TrackingConfidence.gpsFix:
+        return 'GPS_FIX';
+      case TrackingConfidence.tunnelCoasting:
+        return 'TUNNEL_COASTING';
+      case TrackingConfidence.degradedMultipath:
+        return 'DEGRADED_MULTIPATH';
+      case TrackingConfidence.lost:
+        return 'LOST';
+    }
+  }
+
+  static TrackingConfidence fromWire(String? wire) {
+    switch (wire) {
+      case 'TUNNEL_COASTING':
+        return TrackingConfidence.tunnelCoasting;
+      case 'DEGRADED_MULTIPATH':
+        return TrackingConfidence.degradedMultipath;
+      case 'LOST':
+        return TrackingConfidence.lost;
+      case 'GPS_FIX':
+      default:
+        return TrackingConfidence.gpsFix;
+    }
+  }
+}
+
 class RiderModel {
   final double? fuelUsableKm;
   final int fuelUpdatedAt;
@@ -32,6 +66,9 @@ class RiderModel {
   /// When [presence] last changed (epoch ms, 0 when unknown).
   final int presenceAt;
 
+  /// Tracking confidence for tunnel coasting and GPS degradation (REQ-03).
+  final TrackingConfidence trackingConfidence;
+
   RiderPresence get presenceState => RiderPresence.fromWire(presence);
 
   /// The lead made this rider the sweeper (3.16).
@@ -39,6 +76,9 @@ class RiderModel {
 
   /// Battery at or below [NetworkConstants.lowBatteryChipPct] and not charging (the "{n}% battery" chip).
   bool get lowBattery => batteryLevel <= NetworkConstants.lowBatteryChipPct && !isCharging;
+
+  /// Whether this rider is coasting inside a tunnel or dead zone.
+  bool get isTunnelCoasting => trackingConfidence == TrackingConfidence.tunnelCoasting;
 
   RiderModel({
     this.fuelUsableKm,
@@ -66,6 +106,7 @@ class RiderModel {
     this.stoppedSince = 0,
     this.presence = '',
     this.presenceAt = 0,
+    this.trackingConfidence = TrackingConfidence.gpsFix,
   });
 
   RiderModel copyWith({
@@ -92,6 +133,7 @@ class RiderModel {
     int? stoppedSince,
     String? presence,
     int? presenceAt,
+    TrackingConfidence? trackingConfidence,
   }) {
     return RiderModel(
       fuelUsableKm: fuelUsableKm,
@@ -119,6 +161,7 @@ class RiderModel {
       stoppedSince: stoppedSince ?? this.stoppedSince,
       presence: presence ?? this.presence,
       presenceAt: presenceAt ?? this.presenceAt,
+      trackingConfidence: trackingConfidence ?? this.trackingConfidence,
     );
   }
 
@@ -148,6 +191,7 @@ class RiderModel {
       'stoppedSince': stoppedSince,
       if (presence.isNotEmpty) 'presence': presence,
       if (presenceAt > 0) 'presenceAt': presenceAt,
+      'trackingConfidence': trackingConfidence.toWire(),
     };
   }
 
@@ -178,6 +222,7 @@ class RiderModel {
       stoppedSince: (json['stoppedSince'] as num?)?.toInt() ?? 0,
       presence: json['presence']?.toString() ?? '',
       presenceAt: (json['presenceAt'] as num?)?.toInt() ?? 0,
+      trackingConfidence: TrackingConfidence.fromWire(json['trackingConfidence'] as String?),
     );
   }
 }

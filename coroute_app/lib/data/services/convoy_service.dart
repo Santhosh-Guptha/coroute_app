@@ -1,4 +1,5 @@
 import '../../domain/tracking/ride_power_policy.dart';
+import '../models/ride_feature_policy.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math' as math;
@@ -843,6 +844,7 @@ class ConvoyService extends ChangeNotifier {
           discovery: e['discovery'] is bool ? e['discovery'] as bool : null,
           assistDefault: e['assistDefault'] is bool ? e['assistDefault'] as bool : null,
           townLimitKmh: (e['townLimitKmh'] as num?)?.toInt(),
+          featurePolicy: e['featurePolicy'] is Map ? RideFeaturePolicy.fromJson(e['featurePolicy']) : null,
         );
         break;
       case 'TRIP_STATUS':
@@ -1222,7 +1224,7 @@ class ConvoyService extends ChangeNotifier {
     }
     _rt.send({
       'type': 'TELEMETRY',
-      'fuelEstimate': fuelEstimate?.call(),
+      'fuelEstimate': activeConvoy?.featurePolicy.groupFuelEnabled == false ? null : fuelEstimate?.call(),
       'lat': r.lat,
       'lng': r.lng,
       'speedKmh': double.parse(r.speedKmh.toStringAsFixed(1)),
@@ -1414,13 +1416,14 @@ class ConvoyService extends ChangeNotifier {
   }
 
   /// Lead: group settings. [townLimitKmh] (3.16, 0 = off) goes only to a gateway that supports it.
-  void updateGroupConfig({double? distanceThresholdMeters, int? stopThresholdSeconds, bool? voiceGuidanceEnabled, int? speedLimitKmh, int? townLimitKmh}) {
+  void updateGroupConfig({double? distanceThresholdMeters, int? stopThresholdSeconds, bool? voiceGuidanceEnabled, int? speedLimitKmh, int? townLimitKmh, Map<String, dynamic>? featurePolicy}) {
     final payload = <String, dynamic>{'type': 'CONFIG'};
     if (distanceThresholdMeters != null) payload['distanceThresholdMeters'] = distanceThresholdMeters;
     if (stopThresholdSeconds != null) payload['stopThresholdSeconds'] = stopThresholdSeconds;
     if (voiceGuidanceEnabled != null) payload['voiceGuidanceEnabled'] = voiceGuidanceEnabled;
     if (speedLimitKmh != null) payload['speedLimitKmh'] = speedLimitKmh;
     if (townLimitKmh != null && _ride316) payload['townLimitKmh'] = townLimitKmh;
+    if (featurePolicy != null && supports(ProtocolFeatures.featurePolicy) && isOnline && canEditRoute) payload['featurePolicy'] = featurePolicy;
     if (payload.length == 1) return;
     _rt.send(payload);
   }

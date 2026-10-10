@@ -5,6 +5,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import 'admin_ui.dart';
+import 'feature_analytics_view.dart';
 
 /// Master admin: website/app feedback, first-party page-view counts and the
 /// app builds riders use (to know when the minimum build can be raised).
@@ -17,7 +18,7 @@ class AdminInsightsScreen extends StatefulWidget {
 }
 
 class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 3, vsync: this);
+  late final TabController _tabs = TabController(length: 4, vsync: this);
   List<Map<String, dynamic>> _feedback = [];
   List<Map<String, dynamic>> _views = [];
   Map<String, dynamic> _builds = {};
@@ -99,6 +100,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
             Tab(height: 48, text: _loaded ? 'Feedback (${_feedback.length})' : 'Feedback'),
             const Tab(height: 48, text: 'Page views'),
             const Tab(height: 48, text: 'App versions'),
+            const Tab(height: 48, text: 'Live features'),
           ],
         ),
       ),
@@ -107,7 +109,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
           constraints: const BoxConstraints(maxWidth: 760),
           child: TabBarView(
             controller: _tabs,
-            children: [_tab(_feedbackList), _tab(_viewsList), _tab(_buildsList)],
+            children: [_tab(_feedbackList), _tab(_viewsList), _tab(_buildsList), const FeatureAnalyticsView()],
           ),
         ),
       ),

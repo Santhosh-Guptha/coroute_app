@@ -146,6 +146,9 @@ class VoiceService extends ChangeNotifier {
   /// else 'en' (texts for speech are built in this language).
   String get speechLang => _speechLang;
 
+  /// The settings used by this voice service.
+  SettingsService get settings => _settings;
+
   bool _allowed(VoicePriority p) => switch (p) {
         VoicePriority.critical => _settings.voiceCritical,
         VoicePriority.warning => _settings.voiceWarnings && _groupVoice,
@@ -191,6 +194,29 @@ class VoiceService extends ChangeNotifier {
     final start = _queueEnds.isEmpty ? at : _queueEnds.reduce((a, b) => a > b ? a : b);
     _queueEnds.add(start + estimateMs(said));
     return true;
+  }
+
+  /// High-priority alert when Sweeper has halted or encountered distress (REQ-13).
+  Future<bool> speakSweeperDistress({required String name, double? distanceKm}) {
+    final dist = distanceKm != null ? ' ${distanceKm.toStringAsFixed(1)} kilometers behind' : '';
+    return speak('Alert: Sweeper stopped$dist', priority: VoicePriority.critical, key: 'sweeper_distress');
+  }
+
+  /// Important alert when convoy splits into separate packs (REQ-11).
+  Future<bool> speakConvoySplit({int? leadCount, int? trailCount, double? gapKm}) {
+    final gap = gapKm != null ? ', ${gapKm.toStringAsFixed(1)} kilometers behind' : '';
+    return speak('Warning: Convoy split into two packs$gap', priority: VoicePriority.important, key: 'convoy_split');
+  }
+
+  /// Important alert when lead sets a regroup rendezvous point (REQ-12).
+  Future<bool> speakRegroupAlert({required String locationName}) {
+    final loc = locationName.trim().isEmpty ? 'ahead' : 'at ${locationName.trim()}';
+    return speak('Regroup point designated $loc', priority: VoicePriority.important, key: 'regroup_ahead');
+  }
+
+  /// Low fuel advisory warning (REQ-07, REQ-08).
+  Future<bool> speakFuelRangeWarning({required double usableKm}) {
+    return speak('Low fuel warning: ${usableKm.round()} kilometers remaining', priority: VoicePriority.warning, key: 'fuel_low');
   }
 
   Future<bool> _ensureEngine() async {

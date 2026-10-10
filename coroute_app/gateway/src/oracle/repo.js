@@ -266,6 +266,13 @@ class Repo {
       { limit: 100, orderBy: [{ path: 'startedAt', datatype: 'number', order: 'desc' }] })).map((r) => r.value);
   }
   async saveGuardianSubscription(doc) { return this.soda.upsertBy(C.guardianSubscriptions, { subscriptionId: doc.subscriptionId }, doc); }
+  async advanceGuardianSubscription(expected, state) {
+    const row = await this.soda.findOne(C.guardianSubscriptions, { subscriptionId: expected.subscriptionId });
+    if (!row) return false;
+    // Compare the entire observed cursor: never restore deleted or newly opted-out preferences.
+    return this.soda.compareAndReplace(C.guardianSubscriptions, row.key, expected,
+      { ...expected, state, sequence: (expected.sequence || 0) + 1 });
+  }
   async listGuardianSubscriptions(now, offset = 0) {
     return (await this.soda.query(C.guardianSubscriptions, { expiresAt: { $gt: now } }, { limit: 100, offset })).map((r) => r.value);
   }
@@ -277,6 +284,18 @@ class Repo {
   }
   async listGuardianJobs(now) {
     return (await this.soda.query(C.guardianJobs, { state: 'PENDING', nextAttemptAt: { $lte: now } }, { limit: 100 })).map((r) => r.value);
+  }
+  async claimGuardianJob(jobId, owner, now) {
+    const row = await this.soda.findOne(C.guardianJobs, { jobId });
+    if (!row || row.value.state !== 'PENDING' || row.value.nextAttemptAt > now ||
+        (row.value.leaseUntil || 0) > now) return null;
+    const claimed = { ...row.value, leaseOwner: owner, leaseUntil: now + 120000 };
+    return await this.soda.compareAndReplace(C.guardianJobs, row.key, row.value, claimed) ? claimed : null;
+  }
+  async finishGuardianJob(doc, owner) {
+    const row = await this.soda.findOne(C.guardianJobs, { jobId: doc.jobId });
+    if (!row || row.value.leaseOwner !== owner) return false;
+    return this.soda.compareAndReplace(C.guardianJobs, row.key, row.value, { ...doc, leaseOwner: null, leaseUntil: 0 });
   }
   async saveGuardianJob(doc) { await this.soda.upsertBy(C.guardianJobs, { jobId: doc.jobId }, doc); }
   async getGuardianSubscription(subscriptionId) {

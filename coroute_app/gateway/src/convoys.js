@@ -12,6 +12,8 @@
 const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const config = require('./config');
+const { featurePolicy, policyPatch, roomAnalytics } = require('./feature_policy');
+const { FeatureAnalytics } = require('./feature_analytics');
 const { ACTIVE_STATUSES } = require('./oracle/repo');
 const { haversine, encodePolyline, decodePolyline, pointToSegment } = require('./geo_math');
 const { scrub, scrubConvoyMeta, mentions } = require('./anonymise');
@@ -97,6 +99,7 @@ class ConvoyManager extends EventEmitter {
     super();
     this.repo = repo;
     this.rooms = new Map(); // groupId -> room
+    this.featureAnalytics = new FeatureAnalytics();
     this.persistIntervalMs = opts.persistIntervalMs ?? config.riderPersistIntervalMs;
     this.log = opts.logger || console;
     /** async (waypoints[]) => { distanceM, durationS, polyline, legs[] } | null. Set by app.js (GeoProxy). */
@@ -129,6 +132,7 @@ class ConvoyManager extends EventEmitter {
       dirty: new Set(),
       lastPersist: new Map(),
       persistTimer: null,
+      regroup: meta.activeRegroup || null,
     };
     this.rooms.set(groupId, room);
     // 3.16: live link index from the open alerts (the token itself is never stored, only its hash).
@@ -177,6 +181,8 @@ class ConvoyManager extends EventEmitter {
       voiceGuidanceEnabled: m.voiceGuidanceEnabled ?? true,
       speedLimitKmh: m.speedLimitKmh || 0,
       townLimitKmh: m.townLimitKmh || 0,
+      featurePolicy: featurePolicy(m.featurePolicy),
+      featureAnalytics: roomAnalytics(room),
       routeBreadcrumbs: m.routeBreadcrumbs || [],
       start: m.start || null,
       route: m.route ? publicRoute(m.route) : null,
@@ -186,6 +192,7 @@ class ConvoyManager extends EventEmitter {
       visibility: m.visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
       discovery: m.discovery === true,
       assistDefault: m.assistDefault !== false,
+      activeRegroup: room.regroup || m.activeRegroup || null,
     };
   }
 
@@ -202,6 +209,7 @@ class ConvoyManager extends EventEmitter {
   }
 
   _emit(groupId, type, payload = {}) {
+    if (['ALERT', 'ALERT_RESOLVED', 'SOS_RESPONSE'].includes(type)) this.featureAnalytics.record('safety', true);
     this.emit('event', groupId, { type, ts: now(), ...payload });
   }
 
@@ -247,7 +255,7 @@ class ConvoyManager extends EventEmitter {
 
     const room = {
       groupId, meta, riders: new Map([[rider.userId, rider]]), messages: [], alerts: new Map(),
-      dirty: new Set(), lastPersist: new Map(), persistTimer: null,
+      dirty: new Set(), lastPersist: new Map(), persistTimer: null, regroup: null,
     };
     this.rooms.set(groupId, room);
     this.emit('fleet');
@@ -350,6 +358,7 @@ class ConvoyManager extends EventEmitter {
     const current = room.riders.get(userId);
     if (!current) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const next = { ...current, ...sanitizeTelemetry(patch) };
+    if (!featurePolicy(room.meta.featurePolicy).groupFuelEnabled) next.fuelEstimate = null;
     if (trusted && patch) {
       if (patch.isCoRiding !== undefined) next.isCoRiding = !!patch.isCoRiding;
       if (patch.ridingWithUserId !== undefined && patch.ridingWithUserId !== null) next.ridingWithUserId = String(patch.ridingWithUserId).slice(0, 64);
@@ -1278,29 +1287,125 @@ class ConvoyManager extends EventEmitter {
     this._emit(groupId, 'STOPS', { stopPoints: room.meta.stopPoints });
   }
 
+  async setRegroup(groupId, user, payload = {}) {
+    const room = await this.getRoom(groupId);
+    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    const rider = room.riders.get(user.userId);
+    const isLeadOrSweeper = rider.role === 'LEAD' || rider.role === 'SWEEPER' || room.meta.createdByUserId === user.userId || user.role === 'MASTER_ADMIN';
+    if (!isLeadOrSweeper) {
+      throw new ConvoyError('Only the lead or sweeper can designate a regroup point.', 403, 'NOT_AUTHORIZED');
+    }
+    const lat = num(payload.lat);
+    const lng = num(payload.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new ConvoyError('Valid coordinates required for regroup point.', 400);
+    }
+    const t = now();
+    const regroup = {
+      regroupId: `RG-${shortId(4)}`,
+      stopId: payload.stopId ? String(payload.stopId) : null,
+      lat: clampLat(lat),
+      lng: clampLng(lng),
+      name: String(payload.name || 'Regroup Ahead').trim().slice(0, 100) || 'Regroup Ahead',
+      suggestedByUserId: user.userId,
+      suggestedByName: user.name || rider.name || '',
+      targetAction: String(payload.targetAction || 'PULL_OVER_AND_WAIT').slice(0, 50),
+      targetKmh: Number.isFinite(num(payload.targetKmh)) ? Math.round(num(payload.targetKmh)) : 40,
+      createdAt: t,
+      expiresAt: t + (config.regroupTimeoutMin || 25) * 60000,
+      resolved: false,
+    };
+    room.regroup = regroup;
+    room.meta.activeRegroup = regroup;
+    this._touch(room);
+    await this.repo.saveConvoyMeta(room.meta);
+    this._emit(groupId, 'REGROUP_ACTIVE', { groupId, regroup });
+    this.emit('activity', groupId, {
+      type: 'REGROUP_INITIATED',
+      user,
+      lat: regroup.lat,
+      lng: regroup.lng,
+      placeName: regroup.name,
+      regroup,
+    });
+    return regroup;
+  }
+
+  async clearRegroup(groupId, user, reason = 'COMPLETED') {
+    const room = await this.getRoom(groupId, { required: false });
+    if (!room || (!room.regroup && !room.meta?.activeRegroup)) return null;
+    const prev = room.regroup || room.meta.activeRegroup;
+    room.regroup = null;
+    delete room.meta.activeRegroup;
+    this._touch(room);
+    await this.repo.saveConvoyMeta(room.meta);
+    const completedAt = now();
+    this._emit(groupId, 'REGROUP_COMPLETED', {
+      groupId,
+      regroup: prev,
+      reason,
+      completedAt,
+    });
+    this.emit('activity', groupId, {
+      type: 'REGROUP_COMPLETED',
+      user: user || { userId: 'SYSTEM', name: 'System' },
+      lat: prev ? prev.lat : null,
+      lng: prev ? prev.lng : null,
+      placeName: prev ? prev.name : '',
+      reason,
+      completedAt,
+    });
+    return prev;
+  }
+
   async updateConfig(groupId, user, patch) {
+    const room = await this.getRoom(groupId);
+    const operation = (room.configWrite || Promise.resolve()).catch(() => {}).then(() => this._updateConfig(groupId, user, patch));
+    room.configWrite = operation;
+    try { return await operation; }
+    catch (e) { this.featureAnalytics.record('configuration', false); throw e; }
+  }
+
+  async _updateConfig(groupId, user, patch) {
     const room = await this.getRoom(groupId);
     const rider = room.riders.get(user.userId);
     if (!rider) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     if (rider.role !== 'LEAD' && room.meta.createdByUserId !== user.userId && user.role !== 'MASTER_ADMIN') {
       throw new ConvoyError('Only the convoy lead can change settings.', 403);
     }
-    if (patch.distanceThresholdMeters !== undefined) room.meta.distanceThresholdMeters = Math.max(100, Math.min(20000, num(patch.distanceThresholdMeters, 1000)));
-    if (patch.stopThresholdSeconds !== undefined) room.meta.stopThresholdSeconds = Math.max(30, Math.min(3600, num(patch.stopThresholdSeconds, 180)));
-    if (patch.voiceGuidanceEnabled !== undefined) room.meta.voiceGuidanceEnabled = !!patch.voiceGuidanceEnabled;
-    if (patch.speedLimitKmh !== undefined) room.meta.speedLimitKmh = speedLimit(patch.speedLimitKmh);
+    const updated = structuredClone(room.meta);
+    let nextPolicy;
+    if (patch.featurePolicy !== undefined) {
+      try { nextPolicy = policyPatch(updated.featurePolicy, patch.featurePolicy); }
+      catch (e) { throw new ConvoyError(e.message, 400); }
+    }
+    if (patch.distanceThresholdMeters !== undefined) updated.distanceThresholdMeters = Math.max(100, Math.min(20000, num(patch.distanceThresholdMeters, 1000)));
+    if (patch.stopThresholdSeconds !== undefined) updated.stopThresholdSeconds = Math.max(30, Math.min(3600, num(patch.stopThresholdSeconds, 180)));
+    if (patch.voiceGuidanceEnabled !== undefined) updated.voiceGuidanceEnabled = !!patch.voiceGuidanceEnabled;
+    if (patch.speedLimitKmh !== undefined) updated.speedLimitKmh = speedLimit(patch.speedLimitKmh);
     // 3.16: lower limit near stops and in towns (0 = off; wrong types read as off).
-    if (patch.townLimitKmh !== undefined && patch.townLimitKmh !== null && typeof patch.townLimitKmh !== 'boolean') room.meta.townLimitKmh = townLimit(patch.townLimitKmh);
+    if (patch.townLimitKmh !== undefined && patch.townLimitKmh !== null && typeof patch.townLimitKmh !== 'boolean') updated.townLimitKmh = townLimit(patch.townLimitKmh);
     // 3.15: social visibility and the group default for nearby assistance (wrong types are ignored).
-    if (patch.visibility === 'PUBLIC' || patch.visibility === 'PRIVATE') room.meta.visibility = patch.visibility;
-    if (typeof patch.discovery === 'boolean') room.meta.discovery = patch.discovery;
-    if (typeof patch.assistDefault === 'boolean') room.meta.assistDefault = patch.assistDefault;
-    this._touch(room);
-    await this.repo.saveConvoyMeta(room.meta);
+    if (patch.visibility === 'PUBLIC' || patch.visibility === 'PRIVATE') updated.visibility = patch.visibility;
+    if (typeof patch.discovery === 'boolean') updated.discovery = patch.discovery;
+    if (typeof patch.assistDefault === 'boolean') updated.assistDefault = patch.assistDefault;
+    if (nextPolicy) updated.featurePolicy = nextPolicy;
+    updated.updatedAt = now();
+    await this.repo.saveConvoyMeta(updated);
+    room.meta = updated;
+    this.featureAnalytics.record('configuration', true);
+    if (nextPolicy && !nextPolicy.groupFuelEnabled) {
+      for (const [id, rider] of room.riders) {
+        rider.fuelEstimate = null; room.dirty.add(id);
+        this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(rider) });
+      }
+      this._schedulePersist(room);
+    }
     const { distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled } = room.meta;
     this._emit(groupId, 'CONFIG', {
       distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled, speedLimitKmh: room.meta.speedLimitKmh || 0,
       townLimitKmh: room.meta.townLimitKmh || 0,
+      featurePolicy: featurePolicy(room.meta.featurePolicy),
       visibility: room.meta.visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE', discovery: room.meta.discovery === true, assistDefault: room.meta.assistDefault !== false,
     });
   }

@@ -445,7 +445,7 @@ class RideNotificationService {
     final quick = _quickKey(NotificationSnapshotBuilder.quickState(convoy: convoy, myUserId: uid, assists: _port.assistRequests, hazards: _port.hazards));
     final args = snap.toChannelArgs();
     final shared = essentials;
-    if (snap.mode == NotifMode.ride && shared != null) {
+    if (snap.mode == NotifMode.ride && shared != null && convoy.featurePolicy.notificationInsights) {
       final fuel = FuelNotification.build(snapshot: shared.essentials.snapshot,
         progressM: shared.essentials.progressM, usableKm: safety?.estimatedUsableKm,
         uncertain: safety?.fuelEstimateUncertain ?? true, online: !shared.essentials.offline,

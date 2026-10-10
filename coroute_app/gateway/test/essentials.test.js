@@ -101,3 +101,46 @@ test('Overpass sends fixed category query and preserves unknown opening status',
   assert.match(request, /amenity=fuel/); assert.match(request, /around:1500/);
   assert.equal(result.places[0].openingHours, '24/7'); assert.equal(result.complete, true);
 });
+test('Overpass expands tags for roadside puncture repair, welders, and CHC trauma centres', async () => {
+  let tyreRequest, hospitalRequest;
+  const pTyre = new OverpassPlacesProvider({ url: 'https://provider.invalid', fetchImpl: async (_, opts) => {
+    tyreRequest = decodeURIComponent(opts.body);
+    return { ok: true, json: async () => ({ elements: [
+      { type: 'node', id: 10, lat: 17.1, lon: 78, tags: { name: 'Raju Puncture Works', shop: 'tyres' } },
+      { type: 'node', id: 11, lat: 17.2, lon: 78, tags: { name: 'Highway Welder', craft: 'welder' } },
+    ] }) };
+  } });
+  const tyreResult = await pTyre.corridor(requestOf({ ...body, category: 'TYRE' }));
+  assert.match(tyreRequest, /tyres/);
+  assert.match(tyreRequest, /craft=welder/);
+  assert.match(tyreRequest, /amenity=vehicle_inspection/);
+  assert.equal(tyreResult.places.length, 2);
+
+  const pHospital = new OverpassPlacesProvider({ url: 'https://provider.invalid', fetchImpl: async (_, opts) => {
+    hospitalRequest = decodeURIComponent(opts.body);
+    return { ok: true, json: async () => ({ elements: [
+      { type: 'node', id: 20, lat: 17.1, lon: 78, tags: { name: 'CHC Shoolagiri', amenity: 'clinic' } },
+      { type: 'node', id: 21, lat: 17.2, lon: 78, tags: { name: 'District Trauma Centre', healthcare: 'hospital', 'healthcare:speciality': 'trauma' } },
+    ] }) };
+  } });
+  const hospitalResult = await pHospital.corridor(requestOf({ ...body, category: 'HOSPITAL' }));
+  assert.match(hospitalRequest, /healthcare/);
+  assert.equal(hospitalResult.places[0].isTraumaCenter, true);
+  assert.equal(hospitalResult.places[1].isTraumaCenter, true);
+});
+test('Overpass identifies and prioritizes COCO and verified Indian fuel pumps (IOCL, BPCL, HPCL, Shell)', async () => {
+  const p = new OverpassPlacesProvider({ url: 'https://provider.invalid', fetchImpl: async () => ({
+    ok: true,
+    json: async () => ({ elements: [
+      { type: 'node', id: 1, lat: 17.1, lon: 78, tags: { name: 'BPCL COCO Shoolagiri', operator: 'BPCL', 'fuel:coco': 'yes' } },
+      { type: 'node', id: 2, lat: 17.2, lon: 78, tags: { name: 'IOCL Retail Outlet', operator: 'Indian Oil Corporation' } },
+      { type: 'node', id: 3, lat: 17.3, lon: 78, tags: { name: 'Local Village Pump' } },
+    ] })
+  }) });
+  const result = await p.corridor(requestOf(body));
+  assert.equal(result.places[0].isCoco, true);
+  assert.equal(result.places[0].priority, 1);
+  assert.equal(result.places[1].isCoco, undefined);
+  assert.equal(result.places[1].priority, 1); // verified Indian brand
+  assert.equal(result.places[2].priority, 2); // unbranded
+});

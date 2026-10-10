@@ -48,18 +48,44 @@ class SettingsService extends ChangeNotifier {
   int _fuelRangeKm = 0;
   FuelProfile? _fuelProfile;
   bool _shareFuelEstimate = false;
+  String? _fuelUser;
+  bool _fuelScoped = false;
+  int _fuelGeneration = 0;
+  String _fuelKey(String base) => _fuelScoped ? '$base:user:${_fuelUser ?? "signed-out"}' : base;
+  Future<void> selectFuelUser(String? userId) async {
+    if (_fuelScoped && _fuelUser == userId) return;
+    _fuelScoped = true; _fuelUser = userId;
+    final generation = ++_fuelGeneration;
+    _shareFuelEstimate = false; _fuelProfile = null; _fuelRangeKm = 0;
+    notifyListeners();
+    final prefs = await _p();
+    if (generation != _fuelGeneration || userId == null) return;
+    _shareFuelEstimate = prefs.getBool(_fuelKey('share_fuel_estimate_v1')) ?? false;
+    _fuelRangeKm = _clampRange(prefs.getInt(_fuelKey(NetworkConstants.keyFuelRangeKm)) ?? 0);
+    try {
+      final raw = prefs.getString(_fuelKey('fuel_profile_v1'));
+      final decoded = raw == null ? null : jsonDecode(raw);
+      final profile = decoded is Map ? FuelProfile.fromJson(decoded) : null;
+      _fuelProfile = profile?.valid == true ? profile : null;
+    } catch (_) { _fuelProfile = null; }
+    notifyListeners();
+  }
   bool get shareFuelEstimate => _shareFuelEstimate;
   Future<void> setShareFuelEstimate(bool value) async {
+    final generation = _fuelGeneration, key = _fuelKey('share_fuel_estimate_v1');
     final prefs = await _p();
-    if (!await prefs.setBool('share_fuel_estimate_v1', value)) throw StateError('Could not save sharing preference');
+    if (!await prefs.setBool(key, value)) throw StateError('Could not save sharing preference');
+    if (generation != _fuelGeneration) return;
     _shareFuelEstimate = value;
     notifyListeners();
   }
   FuelProfile get fuelProfile => _fuelProfile ?? FuelProfile(fullRangeKm: _fuelRangeKm.toDouble());
   Future<void> setFuelProfile(FuelProfile profile) async {
     if (!profile.valid) throw ArgumentError('Invalid fuel profile');
+    final generation = _fuelGeneration, key = _fuelKey('fuel_profile_v1');
     final prefs = await _p();
-    if (!await prefs.setString('fuel_profile_v1', jsonEncode(profile.toJson()))) throw StateError('Fuel settings could not be saved');
+    if (!await prefs.setString(key, jsonEncode(profile.toJson()))) throw StateError('Fuel settings could not be saved');
+    if (generation != _fuelGeneration) return;
     _fuelProfile = profile;
     notifyListeners();
   }
@@ -67,6 +93,8 @@ class SettingsService extends ChangeNotifier {
   bool _medicalIdOnLockScreen = false;
   bool _documentsReminder = true;
   bool _saveRouteMaps = true;
+  bool _voiceAnnounceAllAlerts = true;
+  int _mapAlertDismissSeconds = 5;
 
   bool get lowData => _lowData;
   bool get crashDetection => _crashDetection;
@@ -115,6 +143,12 @@ class SettingsService extends ChangeNotifier {
   /// Save map tiles along the planned route on Wi-Fi before the ride (on by default).
   bool get saveRouteMaps => _saveRouteMaps;
 
+  /// Announce all notifications and alerts via voice TTS (on by default).
+  bool get voiceAnnounceAllAlerts => _voiceAnnounceAllAlerts;
+
+  /// Auto-dismiss map overlay alert after seconds (default 5; 0 for manual).
+  int get mapAlertDismissSeconds => _mapAlertDismissSeconds;
+
   Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
 
   /// Reads the saved settings. Safe to call more than once.
@@ -135,6 +169,7 @@ class SettingsService extends ChangeNotifier {
       _netConsentSeen = prefs.getBool(NetworkConstants.keyNetConsentSeen) ?? false;
       _netConsentPrompts = prefs.getInt(NetworkConstants.keyNetConsentPrompts) ?? 0;
       _language = AppLanguage.fromCode(prefs.getString(NetworkConstants.keyLanguage));
+      if (!_fuelScoped) {
       _shareFuelEstimate = prefs.getBool('share_fuel_estimate_v1') ?? false;
       _fuelRangeKm = _clampRange(prefs.getInt(NetworkConstants.keyFuelRangeKm) ?? 0);
       try {
@@ -143,10 +178,13 @@ class SettingsService extends ChangeNotifier {
         final p = j is Map ? FuelProfile.fromJson(j) : null;
         _fuelProfile = p?.valid == true ? p : null;
       } catch (_) { _fuelProfile = null; }
+      }
       _speakMoreAfterDark = prefs.getBool(NetworkConstants.keySpeakAfterDark) ?? true;
       _medicalIdOnLockScreen = prefs.getBool(NetworkConstants.keyMedicalIdLock) ?? false;
       _documentsReminder = prefs.getBool(NetworkConstants.keyDocsReminder) ?? true;
       _saveRouteMaps = prefs.getBool(NetworkConstants.keySaveRouteMaps) ?? true;
+      _voiceAnnounceAllAlerts = prefs.getBool(NetworkConstants.keyVoiceAnnounceAllAlerts) ?? true;
+      _mapAlertDismissSeconds = prefs.getInt(NetworkConstants.keyMapAlertDismissSeconds) ?? 5;
     } catch (e) {
       debugPrint('settings load note: $e');
     }
@@ -272,13 +310,14 @@ class SettingsService extends ChangeNotifier {
 
   /// Tank range in km (0 turns the fuel reminder off; at most [NetworkConstants.fuelRangeMaxKm]).
   Future<void> setFuelRangeKm(int km) async {
+    final key = _fuelKey(NetworkConstants.keyFuelRangeKm);
     final v = _clampRange(km);
     if (v == _fuelRangeKm) return;
     _fuelRangeKm = v;
     notifyListeners();
     try {
       final prefs = await _p();
-      await prefs.setInt(NetworkConstants.keyFuelRangeKm, v);
+      await prefs.setInt(key, v);
     } catch (e) {
       debugPrint('settings save note: $e');
     }
@@ -310,6 +349,26 @@ class SettingsService extends ChangeNotifier {
     _saveRouteMaps = value;
     notifyListeners();
     await _save(NetworkConstants.keySaveRouteMaps, value);
+  }
+
+  Future<void> setVoiceAnnounceAllAlerts(bool value) async {
+    if (value == _voiceAnnounceAllAlerts) return;
+    _voiceAnnounceAllAlerts = value;
+    notifyListeners();
+    await _save(NetworkConstants.keyVoiceAnnounceAllAlerts, value);
+  }
+
+  Future<void> setMapAlertDismissSeconds(int seconds) async {
+    final v = seconds < 0 ? 0 : seconds;
+    if (v == _mapAlertDismissSeconds) return;
+    _mapAlertDismissSeconds = v;
+    notifyListeners();
+    try {
+      final prefs = await _p();
+      await prefs.setInt(NetworkConstants.keyMapAlertDismissSeconds, v);
+    } catch (e) {
+      debugPrint('settings save note: $e');
+    }
   }
 
   Future<void> markOemGuideSeen() async {

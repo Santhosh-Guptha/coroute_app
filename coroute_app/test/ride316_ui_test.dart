@@ -42,11 +42,13 @@ const int now = 1800000000000;
 
 /// ConvoyService with a fixed convoy and recorded 3.16 calls (no socket).
 class _Convoys extends ConvoyService {
-  _Convoys(ApiClient api, this.convoy, {this.lead = false, this.ride316 = true, this.me = 'u_me'})
+  _Convoys(ApiClient api, this.convoy, {this.lead = false, this.ride316 = true, this.me = 'u_me', this.online = true, this.policySupported = true})
       : super(api, RealtimeService(), TripStorageService(api));
 
   ConvoyModel convoy;
   final bool lead;
+  final bool online, policySupported;
+  final List<Map<String, dynamic>> featureChanges = [];
   final bool ride316;
   final String me;
   final List<(String, bool)> sweeperCalls = [];
@@ -69,9 +71,9 @@ class _Convoys extends ConvoyService {
   @override
   bool get canEditRoute => lead;
   @override
-  bool get isOnline => true;
+  bool get isOnline => online;
   @override
-  bool supports(String feature) => feature == ProtocolFeatures.ride316 ? ride316 : feature != ProtocolFeatures.discovery;
+  bool supports(String feature) => feature == ProtocolFeatures.featurePolicy ? policySupported : feature == ProtocolFeatures.ride316 ? ride316 : feature != ProtocolFeatures.discovery;
   @override
   List<OutboxItem> get outbox => const [];
   @override
@@ -81,8 +83,9 @@ class _Convoys extends ConvoyService {
   }
 
   @override
-  void updateGroupConfig({double? distanceThresholdMeters, int? stopThresholdSeconds, bool? voiceGuidanceEnabled, int? speedLimitKmh, int? townLimitKmh}) {
+  void updateGroupConfig({double? distanceThresholdMeters, int? stopThresholdSeconds, bool? voiceGuidanceEnabled, int? speedLimitKmh, int? townLimitKmh, Map<String, dynamic>? featurePolicy}) {
     if (townLimitKmh != null) townLimits.add(townLimitKmh);
+    if (featurePolicy != null) featureChanges.add(featurePolicy);
   }
 
   @override
@@ -278,6 +281,25 @@ void main() {
   });
 
   group('group settings (items 11, 13)', () {
+    testWidgets('ride features require a connected lead and supported gateway; wait for echo', (tester) async {
+      for (final settings in [(true, true, true), (false, true, true), (true, false, true), (true, true, false)]) {
+        final c = _Convoys(api(), convoy(), lead: settings.$1, online: settings.$2, policySupported: settings.$3);
+        await render(tester, const GroupSettingsView(convoyId: 'G1'), providers: [ChangeNotifierProvider<ConvoyService>.value(value: c)]);
+        final control = find.widgetWithText(SwitchListTile, 'Route essentials');
+        await tester.scrollUntilVisible(control, 150, scrollable: find.byType(Scrollable).first);
+        final tile = tester.widget<SwitchListTile>(control);
+        final allowed = settings.$1 && settings.$2 && settings.$3;
+        expect(tile.onChanged != null, allowed);
+        if (allowed) {
+          tile.onChanged!(false);
+          expect(c.featureChanges, [{'essentialsEnabled': false}]);
+          await tester.pump();
+          expect(tester.widget<SwitchListTile>(control).value, true, reason: 'server confirmation required');
+        }
+        await tester.pumpWidget(const SizedBox());
+      }
+    });
+
     testWidgets('town limit: the lead picks a value, a pack rider only reads it; the sweeper line', (tester) async {
       final lead = _Convoys(api(), convoy(sweeper: 'u_k', townLimit: 40), lead: true);
       await render(tester, const GroupSettingsView(convoyId: 'G1'), providers: [ChangeNotifierProvider<ConvoyService>.value(value: lead)]);

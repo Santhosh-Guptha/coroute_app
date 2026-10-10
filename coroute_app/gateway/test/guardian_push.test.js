@@ -83,3 +83,34 @@ test('shutdown prevents delivery and concurrent ticks share one worker', async (
   await Promise.all([t.push.tick(), t.push.tick()]); assert.equal(t.sends.length, 1);
   t.push.stop(); t.view.emergency = false; await t.push.tick(); assert.equal(t.sends.length, 1);
 });
+
+
+test('two worker instances atomically claim one delivery', async () => {
+  const t = await setup();
+  const second = new GuardianPush({ repo: new Repo(t.repo.soda), service: t.push.service,
+    send: t.push.send, clock: t.push.clock, publicKey: 'public' });
+  t.view.emergency = true;
+  await Promise.all([t.push.tick(), second.tick()]);
+  assert.equal(t.sends.length, 1);
+});
+
+test('expired worker lease is recoverable and old worker cannot finish the new claim', async () => {
+  const t = await setup(), now = t.push.clock();
+  await t.repo.enqueueGuardianJob({ jobId: 'lease-test', state: 'PENDING', nextAttemptAt: now });
+  const first = await t.repo.claimGuardianJob('lease-test', 'one', now); assert.ok(first);
+  assert.equal(await t.repo.claimGuardianJob('lease-test', 'two', now + 119999), null);
+  const second = await t.repo.claimGuardianJob('lease-test', 'two', now + 120000); assert.ok(second);
+  assert.equal(await t.repo.finishGuardianJob({ ...first, state: 'SENT' }, 'one'), false);
+  assert.equal(await t.repo.finishGuardianJob({ ...second, state: 'SENT' }, 'two'), true);
+});
+
+test('stale cursor cannot restore old preferences or a deleted subscription', async () => {
+  const t = await setup();
+  const old = await t.repo.getGuardianSubscription(t.sub.subscriptionId);
+  await t.push.subscribe('credential', subscription, { emergencies: false, trip: false });
+  assert.equal(await t.repo.advanceGuardianSubscription(old, { emergency: true }), false);
+  assert.equal((await t.repo.getGuardianSubscription(t.sub.subscriptionId)).preferences.emergencies, false);
+  await t.push.unsubscribe('credential', t.sub.subscriptionId);
+  assert.equal(await t.repo.advanceGuardianSubscription(old, { emergency: true }), false);
+  assert.equal(await t.repo.getGuardianSubscription(t.sub.subscriptionId), null);
+});

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
@@ -278,6 +279,13 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
           _section(SafetyTexts.voiceSection),
           SafetySwitch(
             icon: Icons.record_voice_over_rounded,
+            title: 'Announce all alerts',
+            subtitle: 'Read out all notifications and alerts via voice',
+            value: s.voiceAnnounceAllAlerts,
+            onChanged: (v) => s.setVoiceAnnounceAllAlerts(v),
+          ),
+          SafetySwitch(
+            icon: Icons.record_voice_over_rounded,
             title: SafetyTexts.voiceCriticalTitle,
             subtitle: SafetyTexts.voiceCriticalExplain,
             value: s.voiceCritical,
@@ -298,6 +306,47 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
             onChanged: (v) => s.setSpeakMoreAfterDark(v),
           ),
           _section(SafetyTexts.notificationSection),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.timer_outlined, color: AppTheme.textSecondary, size: 22),
+                    const SizedBox(width: Space.s12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Map alert banner duration', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                          Text(
+                            s.mapAlertDismissSeconds == 0
+                                ? 'Manual dismissal only on map'
+                                : 'Dismisses from map after ${s.mapAlertDismissSeconds} seconds (saved in notifications)',
+                            style: AppText.caption,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: Space.s8),
+                Wrap(
+                  spacing: Space.s8,
+                  runSpacing: Space.s4,
+                  children: [
+                    for (final sec in NetworkConstants.mapAlertDismissChoices)
+                      ChoiceChip(
+                        label: Text(sec == 0 ? 'Manual' : '${sec}s'),
+                        selected: s.mapAlertDismissSeconds == sec,
+                        onSelected: (_) => s.setMapAlertDismissSeconds(sec),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
           SafetySwitch(
             icon: Icons.lock_open_rounded,
             title: SafetyTexts.lockTitle,

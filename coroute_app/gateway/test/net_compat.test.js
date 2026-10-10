@@ -21,7 +21,7 @@ test('HELLO keeps the 3.14 features first and appends net1, discovery1, ride316'
   const u = await h.rider('Hello');
   const ws = await h.t.connect(u.token);
   const hello = await ws.next((m) => m.type === 'HELLO');
-  assert.deepEqual(hello.features, ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster', 'net1', 'discovery1', 'ride316']);
+  assert.deepEqual(hello.features, ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster', 'net1', 'discovery1', 'ride316', 'featurePolicy1', 'bin1']);
   ws.close();
 });
 

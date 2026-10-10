@@ -6,6 +6,7 @@ const { ValidationError, tripRecord, sitePath, weatherPoints, liveTokenOf } = re
 const { identity } = require('./anonymise');
 const { ConvoyError, falseAlarmCount, sha256 } = require('./convoys');
 const config = require('./config');
+const { featurePolicy } = require('./feature_policy');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 const { toWire, toGpx, filterPoints, validateChunk, uploadPermission, TrackError } = require('./tracks');
 
@@ -16,6 +17,14 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
  */
 function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network = null, audit = null, publicLiveLimiter = null }) {
   const r = express.Router();
+  r.use((req, res, next) => {
+    const feature = req.path.startsWith('/geo/essentials') ? 'essentials' : req.path.startsWith('/geo/weather') ? 'weather'
+      : req.path.startsWith('/geo/route') ? 'route' : req.path.startsWith('/geo/') ? 'places'
+      : req.path.startsWith('/trips') ? 'trips' : null;
+    const started = Date.now();
+    if (feature) res.once('finish', () => convoys.featureAnalytics?.record(feature, res.statusCode < 400, Date.now() - started));
+    next();
+  });
   const originOf = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
 
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again later.' } });
@@ -407,7 +416,15 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     res.json({ name: await geo.reverse(lat, lng) });
   }));
   r.post('/geo/essentials', geoLimiter, wrap(async (req, res) => {
-    try { res.set('Cache-Control', 'no-store').json(await essentials.query(req.body)); }
+    try {
+      const { groupId, ...query } = req.body || {};
+      if (groupId !== undefined) {
+        if (typeof groupId !== 'string' || !await convoys.isMember(groupId, req.user.userId)) return res.status(403).json({ error: 'Active membership required.' });
+        const room = await convoys.getRoom(groupId);
+        if (!featurePolicy(room.meta.featurePolicy).essentialsEnabled) return res.status(403).json({ error: 'Route essentials are disabled for this group.', code: 'FEATURE_DISABLED' });
+      }
+      res.set('Cache-Control', 'no-store').json(await essentials.query(query));
+    }
     catch (e) { res.status(e.status || 503).json({ error: 'Route essentials are unavailable.', code: e.code || 'ESSENTIALS_UNAVAILABLE' }); }
   }));
   r.post('/geo/route', geoLimiter, wrap(async (req, res) => {
@@ -477,6 +494,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     res.json({ ok: true });
   }));
   r.post('/admin/broadcast', requireAdmin, wrap(async (req, res) => res.json(await convoys.adminBroadcast(req.user, req.body?.message))));
+  r.get('/admin/feature-analytics', requireAdmin, (req, res) => res.set('Cache-Control', 'no-store').json(convoys.featureAnalytics.snapshot()));
   r.get('/admin/analytics', requireAdmin, wrap(async (req, res) => {
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
     const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);

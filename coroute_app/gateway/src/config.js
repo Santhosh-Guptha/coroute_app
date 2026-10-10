@@ -209,6 +209,14 @@ const config = {
   staleFactor: int('STALE_FACTOR', 3),
   // Sweeper: a rider this far behind the sweeper (held 60 s) is reported to the sweeper and lead.
   sweeperBehindM: int('SWEEPER_BEHIND_M', 300),
+  // Convoy sub-clustering & safety watchdog (REQ-11, REQ-12, REQ-13)
+  convoySplitThresholdM: int('CONVOY_SPLIT_THRESHOLD_M', 1200),
+  convoySplitHoldS: int('CONVOY_SPLIT_HOLD_S', 45),
+  regroupReachRadiusM: int('REGROUP_REACH_RADIUS_M', 150),
+  regroupTimeoutMin: int('REGROUP_TIMEOUT_MIN', 25),
+  sweeperHaltKmh: int('SWEEPER_HALT_KMH', 5),
+  sweeperPackMovingKmh: int('SWEEPER_PACK_MOVING_KMH', 35),
+  sweeperDistressHoldS: int('SWEEPER_DISTRESS_HOLD_S', 90),
   // Low battery: alert at or under BATTERY_LOW_PCT (not charging), closed at BATTERY_OK_PCT or charging.
   batteryLowPct: int('BATTERY_LOW_PCT', 15),
   batteryOkPct: int('BATTERY_OK_PCT', 25),

@@ -1,6 +1,7 @@
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// What this phone can do for emergency texts (no READ_PHONE_STATE needed).
 class SmsCapability {
@@ -17,10 +18,36 @@ class SmsCapability {
 
 enum SmsStatus { sent, failed, noService, noPermission, timeout }
 
-/// Sends one text directly (no composer). Numbers and text are never logged.
 abstract class SmsSender {
   Future<SmsCapability> capability();
   Future<SmsStatus> send(String to, String body);
+
+  /// Launches the system SMS composer using intent/URL without runtime permissions.
+  static Future<bool> launchSmsIntent({required String to, required String body}) async {
+    final clean = to.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        final ok = await const MethodChannel('coroute/sms').invokeMethod<bool>(
+          'launchSmsIntent',
+          <String, dynamic>{'to': clean, 'body': body},
+        );
+        if (ok == true) return true;
+      } catch (_) {}
+    }
+    final uri = Uri(
+      scheme: 'sms',
+      path: clean,
+      queryParameters: body.isEmpty ? null : {'body': body},
+    );
+    try {
+      if (await canLaunchUrl(uri)) {
+        return await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
 /// Android SmsManager through the `coroute/sms` MethodChannel (SmsChannel.kt):

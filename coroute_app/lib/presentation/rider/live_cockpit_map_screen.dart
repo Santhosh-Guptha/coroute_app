@@ -180,6 +180,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   Timer? _hideTimer;
   int _hideTimerAt = 0;
 
+  // Auto-dismiss HUD alert banner timer on the map.
+  Timer? _autoDismissTimer;
+  String? _autoDismissKey;
+  int? _autoDismissDurationSec;
+  int _activeAlertCount = 0;
+
   // Route following: fed with my own fixes by the convoy listener (never by a timer).
   late final RouteGuide _localGuide = RouteGuide(fetchRoute: _fetchRoute);
   RideEssentialsCoordinator? _rideEssentials;
@@ -244,10 +250,43 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
   void _dismissAlert(String key) {
     if (!mounted) return;
+    if (_autoDismissKey == key) {
+      _autoDismissTimer?.cancel();
+      _autoDismissTimer = null;
+      _autoDismissKey = null;
+      _autoDismissDurationSec = null;
+    }
     setState(() => _dismissed.add(key));
     SharedPreferences.getInstance().then((prefs) {
       prefs.setStringList('coroute_dismissed_alerts_${widget.convoyId}', _dismissed.toList()).ignore();
     }).ignore();
+  }
+
+  void _scheduleAutoDismiss(String key, int seconds, {required bool dismissible}) {
+    if (seconds <= 0 || !dismissible || key == 'MY_SOS') {
+      _autoDismissTimer?.cancel();
+      _autoDismissTimer = null;
+      _autoDismissKey = key;
+      _autoDismissDurationSec = seconds;
+      return;
+    }
+    if (_autoDismissKey == key && _autoDismissDurationSec == seconds && _autoDismissTimer != null) return;
+    _autoDismissTimer?.cancel();
+    _autoDismissKey = key;
+    _autoDismissDurationSec = seconds;
+    _autoDismissTimer = Timer(Duration(seconds: seconds), () {
+      _autoDismissTimer = null;
+      _autoDismissKey = null;
+      _autoDismissDurationSec = null;
+      _dismissAlert(key);
+    });
+  }
+
+  void _cancelAutoDismiss() {
+    _autoDismissTimer?.cancel();
+    _autoDismissTimer = null;
+    _autoDismissKey = null;
+    _autoDismissDurationSec = null;
   }
 
   @override
@@ -406,6 +445,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     _waitTimer?.cancel();
     _staleTimer?.cancel();
     _hideTimer?.cancel();
+    _autoDismissTimer?.cancel();
     _sheetTop.dispose();
     if (_keepScreenOn) WakelockPlus.disable();
     super.dispose();
@@ -935,6 +975,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         ));
       }
     }
+    _activeAlertCount = out.length;
     final visible = out.where((s) => !_dismissed.contains(s.key)).toList();
     // Priority first (SOS, assistance, hazard, group safety, route, social), then
     // critical before important before normal; within that the order above (stable).
@@ -1050,6 +1091,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     );
     final topSlot = slots.isEmpty ? null : slots.first;
     final extra = slots.length - 1;
+    final dismissSec = context.select<SettingsService?, int>((s) => s?.mapAlertDismissSeconds ?? 5);
+
+    if (topSlot != null) {
+      if (topSlot.key != _autoDismissKey || _autoDismissDurationSec != dismissSec) {
+        _scheduleAutoDismiss(topSlot.key, dismissSec, dismissible: topSlot.dismissible || topSlot.key != 'MY_SOS');
+      }
+    } else if (_autoDismissKey != null) {
+      _cancelAutoDismiss();
+    }
     // Why other riders' positions are old, and who has a possible incident (ladder words and chip).
     final offlinePlaces = <String, String>{};
     final possible = <String>{};
@@ -1097,19 +1147,31 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     emergencyRoute: guidance?.statusLine != null,
                     onStopNavigation: guidance?.target == null ? null : guidance?.stop,
                     onBack: widget.embedded ? null : () => Navigator.of(context).maybePop(),
+                    isTunnelCoasting: me.isTunnelCoasting,
                   ),
-                  if (topSlot != null) ...[
-                    const SizedBox(height: Space.s8),
-                    topSlot.child ??
-                        RideAlert(
-                          tier: topSlot.tier,
-                          title: topSlot.title,
-                          message: topSlot.message,
-                          actionLabel: topSlot.actionLabel,
-                          onAction: topSlot.onAction,
-                          onDismiss: topSlot.onDismiss ?? (topSlot.dismissible ? () => _dismissAlert(topSlot.key) : null),
-                        ),
-                  ],
+                  AnimatedSwitcher(
+                    duration: Motion.screen,
+                    switchInCurve: Motion.curve,
+                    switchOutCurve: Motion.curve,
+                    child: topSlot == null
+                        ? const SizedBox.shrink()
+                        : KeyedSubtree(
+                            key: ValueKey<String>(topSlot.key),
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: Space.s8),
+                              child: topSlot.child ??
+                                  RideAlert(
+                                    tier: topSlot.tier,
+                                    title: topSlot.title,
+                                    message: topSlot.message,
+                                    actionLabel: topSlot.actionLabel,
+                                    onAction: topSlot.onAction,
+                                    onDismiss: topSlot.onDismiss ??
+                                        (topSlot.key != 'MY_SOS' ? () => _dismissAlert(topSlot.key) : null),
+                                  ),
+                            ),
+                          ),
+                  ),
                   if (extra > 0)
                     Align(
                       alignment: AlignmentDirectional.centerEnd,
@@ -1121,6 +1183,20 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         ),
                         onPressed: () => RiderHomeScreen.selectTab(context, HomeTab.alerts),
                         child: Text('+$extra more', maxLines: 1),
+                      ),
+                    )
+                  else if (topSlot == null && _activeAlertCount > 0)
+                    Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: TextButton.icon(
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(48, 48),
+                          backgroundColor: AppTheme.slateCard,
+                          foregroundColor: AppTheme.textPrimary,
+                        ),
+                        onPressed: () => RiderHomeScreen.selectTab(context, HomeTab.alerts),
+                        icon: const Icon(Icons.notifications_none_rounded, size: 18),
+                        label: Text('$_activeAlertCount in notifications', maxLines: 1),
                       ),
                     ),
                   if (showSpeed) ...[
@@ -1703,6 +1779,9 @@ class _TopBar extends StatelessWidget {
   /// Stops the navigation to an emergency.
   final VoidCallback? onStopNavigation;
 
+  /// Whether current rider is coasting through a tunnel without GPS fix.
+  final bool isTunnelCoasting;
+
   const _TopBar({
     required this.title,
     required this.connection,
@@ -1711,6 +1790,7 @@ class _TopBar extends StatelessWidget {
     this.route,
     this.emergencyRoute = false,
     this.onStopNavigation,
+    this.isTunnelCoasting = false,
   });
 
   @override
@@ -1747,7 +1827,25 @@ class _TopBar extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
-                    if (warn)
+                    if (isTunnelCoasting)
+                      Semantics(
+                        liveRegion: true,
+                        child: Row(
+                          children: [
+                            Icon(Icons.tune_rounded, size: 16, color: AppTheme.neonCyan),
+                            const SizedBox(width: Space.s4),
+                            Expanded(
+                              child: Text(
+                                'Tunnel Coasting (Dead-Reckoning)',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppText.caption.copyWith(color: AppTheme.neonCyan, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else if (warn)
                       Semantics(
                         liveRegion: true,
                         child: Row(
@@ -1819,8 +1917,12 @@ class _RiderMarker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final first = rider.name.split(' ').first;
+    final isTunnel = rider.isTunnelCoasting;
+    final effectiveColor = isTunnel ? AppTheme.neonCyan : color;
     String? label;
-    if (status.isStale && !isMe && rider.lastSeenEpochMs > 0) {
+    if (isTunnel) {
+      label = isMe ? 'Tunnel Coasting' : '$first (Tunnel)';
+    } else if (status.isStale && !isMe && rider.lastSeenEpochMs > 0) {
       label = '$first, ${formatAgo(Duration(milliseconds: nowMs - rider.lastSeenEpochMs))}';
     } else if (selected) {
       label = isMe ? 'You' : '$first, ${status.label}';
@@ -1836,7 +1938,7 @@ class _RiderMarker extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          RiderAvatar(name: rider.name, color: color, status: status, size: isMe ? 44 : 40, onTap: onTap),
+          RiderAvatar(name: rider.name, color: effectiveColor, status: status, size: isMe ? 44 : 40, onTap: onTap),
           if (l != null)
             Positioned(
               top: 72,

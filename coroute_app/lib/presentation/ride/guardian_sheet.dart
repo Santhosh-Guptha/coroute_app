@@ -35,9 +35,12 @@ class _GuardianContent extends StatefulWidget {
 
 class _GuardianSheetState extends State<_GuardianContent> {
   final _pin = TextEditingController();
+  final _label = TextEditingController();
+  int _hours = 72;
   @override
   void dispose() {
     _pin.dispose();
+    _label.dispose();
     super.dispose();
   }
 
@@ -101,7 +104,12 @@ class _GuardianSheetState extends State<_GuardianContent> {
     if (_pin.text.isNotEmpty && !RegExp(r'^[0-9]{4,8}$').hasMatch(_pin.text)) {
       throw const ApiException(400, 'Use a PIN of 4 to 8 digits.');
     }
+    final policy = context.read<ConvoyService?>()?.activeConvoy?.featurePolicy;
+    if (policy?.guardianRequirePin == true && _pin.text.isEmpty) throw const ApiException(400, 'The lead requires a PIN for Guardian links.');
+    final hours = _hours.clamp(1, policy?.guardianMaxHours ?? 336);
     final data = await context.read<ApiClient>().post('/guardian/links', {
+      'label': _label.text.trim(),
+      'expiresAt': DateTime.now().millisecondsSinceEpoch + Duration(hours: hours).inMilliseconds,
       if (_pin.text.isNotEmpty) 'pin': _pin.text,
       'groupId': widget.groupId,
       'subject': _subject,
@@ -175,10 +183,10 @@ class _GuardianSheetState extends State<_GuardianContent> {
           ),
         const SizedBox(height: Space.s16),
         for (final option in const {
-          'BASIC': 'Basic — status without exact location',
-          'LIVE': 'Live — your last reported location',
+          'BASIC': 'Basic - status without exact location',
+          'LIVE': 'Live - your last reported location',
           'EMERGENCY_ONLY':
-              'Emergency only — incident location when help is requested',
+              'Emergency only - incident location when help is requested',
         }.entries)
           RadioListTile<String>(
             value: option.key,
@@ -192,9 +200,15 @@ class _GuardianSheetState extends State<_GuardianContent> {
                   }),
           ),
         const Text(
-          'Expires within 72 hours, or 6 hours after the ride ends, whichever comes first. Live updates work while the page is open. Browser alerts require support, server configuration and the guardian’s permission.',
+          'Links expire at the selected time or 6 hours after the ride ends, whichever comes first. The lead can shorten the group limit. Browser alerts require support, server configuration and permission.',
         ),
+        TextField(controller: _label, enabled: !_busy, maxLength: 80,
+          decoration: const InputDecoration(labelText: 'Guardian link label', helperText: 'For your reference; not a verified identity.')),
+        DropdownButtonFormField<int>(initialValue: _hours, decoration: const InputDecoration(labelText: 'Maximum hours'),
+          items: [for (final hours in [1, 6, 24, 72, 168, 336]) DropdownMenuItem(value: hours, child: Text('$hours hours'))],
+          onChanged: _busy ? null : (hours) => setState(() { _hours = hours!; })),
         TextField(
+          key: const ValueKey('guardianPin'),
           controller: _pin,
           enabled: !_busy,
           obscureText: true,

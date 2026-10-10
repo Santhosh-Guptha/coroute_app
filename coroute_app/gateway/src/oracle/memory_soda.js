@@ -5,6 +5,7 @@
  * so the gateway can be exercised with no database at all.
  */
 const { SodaClient } = require('./soda');
+const { isDeepStrictEqual } = require('node:util');
 
 function matches(doc, filter) {
   for (const [path, cond] of Object.entries(filter)) {
@@ -34,6 +35,7 @@ class MemorySoda extends SodaClient {
     super({ baseUrl: 'http://memory', user: 'x', password: 'x' });
     this.collections = new Map();
     this.seq = 0;
+    this.indexes = new Map();
   }
   _coll(name) {
     if (!this.collections.has(name)) this.collections.set(name, new Map());
@@ -42,8 +44,22 @@ class MemorySoda extends SodaClient {
   async ping() { return true; }
   async listCollections() { return [...this.collections.keys()]; }
   async ensureCollection(name) { this._coll(name); }
-  async ensureIndex() { /* no-op */ }
+  async ensureIndex(collection, spec) {
+    if (!spec.unique) return;
+    const indexes = this.indexes.get(collection) || new Map();
+    indexes.set(spec.name, spec.fields.map(f => f.path)); this.indexes.set(collection, indexes);
+  }
+  async compareAndReplace(collection, key, expected, replacement) {
+    if (!isDeepStrictEqual(this._coll(collection).get(key), expected)) return false;
+    this._coll(collection).set(key, structuredClone(replacement)); return true;
+  }
   async insert(collection, doc) {
+    for (const fields of this.indexes.get(collection)?.values() || []) {
+      if (fields.some(f => doc[f] === undefined || doc[f] === null)) continue;
+      if ([...this._coll(collection).values()].some(other => fields.every(f => other[f] === doc[f]))) {
+        throw Object.assign(new Error('unique constraint'), { status: 409 });
+      }
+    }
     const key = `K${++this.seq}`;
     this._coll(collection).set(key, structuredClone(doc));
     return key;

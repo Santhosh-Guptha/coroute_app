@@ -19,6 +19,7 @@ void main() {
   group('Admin role comes only from the server', () {
     setUp(() {
       SharedPreferences.setMockInitialValues({});
+      FlutterSecureStorage.setMockInitialValues({});
     });
 
     test('The former hard-coded e-mail with role RIDER from the server is not an admin', () async {

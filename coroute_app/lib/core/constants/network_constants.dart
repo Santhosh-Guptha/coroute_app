@@ -45,6 +45,9 @@ class NetworkConstants {
   static const String keyMedicalIdLock = 'coroute_medical_id_lock';
   static const String keyDocsReminder = 'coroute_docs_reminder';
   static const String keySaveRouteMaps = 'coroute_save_route_maps';
+  static const String keyVoiceAnnounceAllAlerts = 'coroute_voice_announce_all_alerts';
+  static const String keyMapAlertDismissSeconds = 'coroute_map_alert_dismiss_seconds';
+  static const List<int> mapAlertDismissChoices = [0, 3, 5, 8, 12];
 
   /// Tank range (km) bounds of the fuel reminder setting (0 = off).
   static const int fuelRangeMaxKm = 1500;

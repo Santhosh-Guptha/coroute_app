@@ -270,6 +270,56 @@ class RealtimeService extends ChangeNotifier {
     }
   }
 
+  /// Sends a compact 24-byte binary telemetry frame (REQ-06) if connected.
+  bool sendBinaryTelemetry({
+    required int timestampMs,
+    required double lat,
+    required double lng,
+    required double speedKmh,
+    required double heading,
+    required int batteryLevel,
+    required bool isCharging,
+    required int usableFuelKm,
+    required bool stopped,
+    required bool offRoute,
+    required bool sos,
+    required bool tunnel,
+    int sequence = 0,
+  }) {
+    if (!isConnected || _groupId == null) return false;
+    final data = ByteData(24);
+    data.setUint8(0, 0x10); // Frame type TELEMETRY_V2
+    data.setUint32(1, timestampMs & 0xFFFFFFFF, Endian.big);
+    data.setInt32(5, (lat * 1e6).round(), Endian.big);
+    data.setInt32(9, (lng * 1e6).round(), Endian.big);
+    data.setUint16(13, (speedKmh * 10).round().clamp(0, 65535), Endian.big);
+    data.setUint16(15, (heading * 10).round().clamp(0, 3600), Endian.big);
+    final bat = (batteryLevel.clamp(0, 100)) | (isCharging ? 0x80 : 0);
+    data.setUint8(17, bat);
+    data.setUint8(18, (usableFuelKm ~/ 2).clamp(0, 255));
+    var flags = 0;
+    if (stopped) flags |= 0x01;
+    if (offRoute) flags |= 0x02;
+    if (sos) flags |= 0x04;
+    if (tunnel) flags |= 0x08;
+    data.setUint8(19, flags);
+    data.setUint32(20, sequence & 0xFFFFFFFF, Endian.big);
+
+    final bytes = data.buffer.asUint8List();
+    final sink = debugSink;
+    if (sink != null) {
+      sink(jsonEncode({'type': 'BINARY_TELEMETRY', 'bytes': bytes.length}));
+      return true;
+    }
+    try {
+      _channel?.sink.add(bytes);
+      return true;
+    } catch (e) {
+      debugPrint('ws sendBinaryTelemetry note: $e');
+      return false;
+    }
+  }
+
   // ------------------------------------------------------------ internals
   void _open() {
     if (!_wantConnection || _token == null || _refused) return;
@@ -365,9 +415,48 @@ class RealtimeService extends ChangeNotifier {
     if (data is List<int>) {
       if (_groupId == null) return; // audio for a room we already left
       final bytes = data is Uint8List ? data : Uint8List.fromList(data);
+      if (bytes.isNotEmpty && bytes[0] == 0x10) {
+        final telemetryMsg = _decodeBinaryTelemetry(bytes);
+        if (telemetryMsg != null) _events.add(telemetryMsg);
+        return;
+      }
       final pkt = _decodeVoice(bytes);
       if (pkt != null) _voice.add(pkt);
     }
+  }
+
+  Map<String, dynamic>? _decodeBinaryTelemetry(Uint8List buf) {
+    if (buf.length < 24) return null;
+    final view = ByteData.sublistView(buf);
+    final lat = view.getInt32(5, Endian.big) / 1e6;
+    final lng = view.getInt32(9, Endian.big) / 1e6;
+    final speedKmh = view.getUint16(13, Endian.big) / 10.0;
+    final heading = view.getUint16(15, Endian.big) / 10.0;
+    final batByte = view.getUint8(17);
+    final batteryLevel = batByte & 0x7F;
+    final isCharging = (batByte & 0x80) != 0;
+    final fuelKm = view.getUint8(18) * 2;
+    final flags = view.getUint8(19);
+    final stopped = (flags & 0x01) != 0;
+    final offRoute = (flags & 0x02) != 0;
+    final sos = (flags & 0x04) != 0;
+    final tunnel = (flags & 0x08) != 0;
+
+    return {
+      'type': 'RIDER_UPDATE',
+      'rider': {
+        'lat': lat,
+        'lng': lng,
+        'speedKmh': speedKmh,
+        'heading': heading,
+        'batteryLevel': batteryLevel,
+        'isCharging': isCharging,
+        'fuelKm': fuelKm,
+        'stoppedSince': stopped ? DateTime.now().millisecondsSinceEpoch : 0,
+        'statusReason': sos ? 'SOS' : (offRoute ? 'OFF_ROUTE' : null),
+        'trackingConfidence': tunnel ? 'tunnelCoasting' : 'gpsFix',
+      },
+    };
   }
 
   VoicePacket? _decodeVoice(Uint8List buf) {

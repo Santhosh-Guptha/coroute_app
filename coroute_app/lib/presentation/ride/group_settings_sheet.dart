@@ -1,14 +1,17 @@
 import 'guardian_sheet.dart';
+import 'ride_feature_summary.dart';
 import '../../data/services/meta_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/constants/network_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/network_wire.dart';
 import '../../data/models/safety_wire.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/settings_service.dart';
 
 /// Opens the group settings: separation limit, stop alert, speed limit,
 /// spoken alerts, group visibility (Private / Public), nearby group
@@ -46,6 +49,7 @@ class GroupSettingsView extends StatelessWidget {
     final convoy = service.allConvoys[convoyId];
     if (convoy == null) return const SizedBox.shrink();
     final lead = service.canEditRoute;
+    final featureControls = lead && service.isOnline && service.supports(ProtocolFeatures.featurePolicy);
 
     Widget section({required String title, required String value, required String help, required Widget control}) {
       return Padding(
@@ -77,9 +81,35 @@ class GroupSettingsView extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.shield_outlined),
               title: const Text('Share with a Ride Guardian'),
-              subtitle: const Text('Share your personal ride with someone you trust.'),
-              onTap: () => showGuardianSheet(context, groupId: convoyId),
+              subtitle: Text(convoy.featurePolicy.guardianEnabled ? 'Share your personal ride with someone you trust.' : 'Guardian links are disabled for this group.'),
+              onTap: convoy.featurePolicy.guardianEnabled ? () => showGuardianSheet(context, groupId: convoyId) : null,
             ),
+          RideFeatureSummary(groupId: convoyId),
+          const Text('Ride feature controls'),
+          if (!service.supports(ProtocolFeatures.featurePolicy)) const Text('Connect to an updated gateway to change ride features.'),
+          if (!service.isOnline) const Text('Reconnect to change group settings.'),
+          if (service.lastError != null) Text(service.lastError!),
+          for (final entry in const {
+            'essentialsEnabled': 'Route essentials', 'autoDiscovery': 'Automatic essentials refresh',
+            'groupFuelEnabled': 'Allow opt-in group fuel estimates', 'guardianEnabled': 'Allow Ride Guardian links',
+            'guardianRequirePin': 'Require PIN on Guardian links', 'notificationInsights': 'Expanded notification insights',
+          }.entries)
+            SwitchListTile(contentPadding: EdgeInsets.zero, title: Text(entry.value),
+              value: convoy.featurePolicy.toJson()[entry.key] == true,
+              onChanged: featureControls ? (v) => service.updateGroupConfig(featurePolicy: {entry.key: v}) : null),
+          for (final entry in const {
+            'guardianMaxHours': ('Guardian maximum hours', [1, 6, 24, 72, 168, 336]),
+            'guardianStopMinutes': ('Guardian stopped warning minutes', [5, 15, 30, 60, 120]),
+            'guardianOfflineMinutes': ('Guardian offline warning minutes', [2, 5, 10, 30, 60]),
+            'guardianDeviationMinutes': ('Guardian deviation warning minutes', [1, 5, 10, 15, 30]),
+          }.entries)
+            Padding(padding: const EdgeInsets.only(bottom: Space.s12), child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start, children: [Text(entry.value.$1),
+                Wrap(spacing: Space.s8, children: [for (final v in entry.value.$2)
+                  ChoiceChip(label: Text('$v'), selected: convoy.featurePolicy.toJson()[entry.key] == v,
+                    onSelected: featureControls ? (_) => service.updateGroupConfig(featurePolicy: {entry.key: v}) : null)]),
+              ])),
+          const Text('Changes apply after server confirmation. Rider consent and emergency safeguards remain in control of each rider.'),
           if (!lead)
             Padding(
               padding: const EdgeInsets.only(bottom: Space.s12),
@@ -180,6 +210,47 @@ class GroupSettingsView extends StatelessWidget {
             subtitle: Text('Separation and emergency warnings are read out.', style: AppText.caption),
             value: convoy.voiceGuidanceEnabled,
             onChanged: lead ? (v) => service.updateGroupConfig(voiceGuidanceEnabled: v) : null,
+          ),
+          Builder(
+            builder: (context) {
+              final riderSettings = context.watch<SettingsService?>();
+              if (riderSettings == null) return const SizedBox.shrink();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('Announce all alerts', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                    subtitle: Text('Read out all notifications and alerts via voice.', style: AppText.caption),
+                    value: riderSettings.voiceAnnounceAllAlerts,
+                    onChanged: (v) => riderSettings.setVoiceAnnounceAllAlerts(v),
+                  ),
+                  section(
+                    title: 'Map alert banner duration',
+                    value: riderSettings.mapAlertDismissSeconds == 0 ? 'Manual' : '${riderSettings.mapAlertDismissSeconds}s',
+                    help: riderSettings.mapAlertDismissSeconds == 0
+                        ? 'Manual dismissal only on map HUD.'
+                        : 'Auto-dismisses from map after ${riderSettings.mapAlertDismissSeconds}s (remains in notifications).',
+                    control: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: Space.s8),
+                      child: Wrap(
+                        spacing: Space.s8,
+                        runSpacing: Space.s4,
+                        children: [
+                          for (final sec in NetworkConstants.mapAlertDismissChoices)
+                            ChoiceChip(
+                              label: Text(sec == 0 ? 'Manual' : '${sec}s'),
+                              selected: riderSettings.mapAlertDismissSeconds == sec,
+                              materialTapTargetSize: MaterialTapTargetSize.padded,
+                              onSelected: (_) => riderSettings.setMapAlertDismissSeconds(sec),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
           if (service.supports(ProtocolFeatures.safetyNet) || service.supports(ProtocolFeatures.discovery))
             GroupNetworkSettings(

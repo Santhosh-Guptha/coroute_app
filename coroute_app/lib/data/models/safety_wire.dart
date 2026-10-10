@@ -149,4 +149,5 @@ class ProtocolFeatures {
 
   /// 3.16: sweeper role, town speed limit, follow-up check-in, live links, nearest hospital.
   static const String ride316 = 'ride316';
+  static const String featurePolicy = 'featurePolicy1';
 }

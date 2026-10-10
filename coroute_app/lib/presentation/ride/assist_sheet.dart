@@ -7,6 +7,7 @@ import '../../core/ui/ui.dart';
 import '../../data/models/network_models.dart';
 import '../../data/models/network_wire.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/sms_sender.dart';
 import '../../domain/notify/relation.dart';
 import '../safety/safety_card_sheet.dart';
 import 'assist_banner.dart';
@@ -268,6 +269,31 @@ class AssistSheetBody extends StatelessWidget {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: Space.s8),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(44),
+            foregroundColor: AppTheme.hyperAmber,
+            side: BorderSide(color: AppTheme.hyperAmber.withOpacity(0.8)),
+          ),
+          onPressed: () => dialNumber(context, '1073'),
+          icon: Icon(Icons.emergency_rounded, color: AppTheme.hyperAmber, size: 18),
+          label: const Text('Call 1073 (NHAI Highway Helpline)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        ),
+        const SizedBox(height: Space.s8),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+            foregroundColor: AppTheme.textPrimary,
+            side: BorderSide(color: AppTheme.subtleBorder),
+          ),
+          onPressed: () => SmsSender.launchSmsIntent(
+            to: '',
+            body: 'Emergency Assist at Lat:${a.lat.toStringAsFixed(5)}, Lng:${a.lng.toStringAsFixed(5)}. Maps: https://maps.google.com/?q=${a.lat.toStringAsFixed(5)},${a.lng.toStringAsFixed(5)} NHAI: 1073. ERSS: 112',
+          ),
+          icon: const Icon(Icons.sms_rounded, size: 18),
+          label: const Text('Send Emergency SMS (No Permission Required)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
         ),
         const SizedBox(height: Space.s8),
         TextButton.icon(

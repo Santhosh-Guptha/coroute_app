@@ -30,7 +30,7 @@ const { scrub, mentions } = require('./anonymise');
 const { ConvoyError, sourceOf } = require('./convoys');
 
 const INTERVAL_TYPES = new Set(['STOPPED', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'SOS', 'CORIDE', 'MOVING', 'STOP_REACHED', 'DESTINATION_REACHED', 'OVERSPEED', 'POSSIBLE_INCIDENT', 'NO_REPLY',
-  'STALE_UPDATE', 'LOW_BATTERY', 'BEHIND_SWEEPER']);
+  'STALE_UPDATE', 'LOW_BATTERY', 'BEHIND_SWEEPER', 'CONVOY_SPLIT', 'REGROUP', 'SWEEPER_DISTRESS']);
 /** Stale rule: gaps longer than this are dead zones, not the rider's rhythm; ring of the last GAP_RING gaps. */
 const GAP_MAX_S = 300;
 const GAP_RING = 10;
@@ -116,7 +116,7 @@ class TimelineEngine {
   async _state(gid) {
     let st = this.states.get(gid);
     if (st) { await st.ready; return st; }
-    st = { open: new Map(), riders: new Map(), routeRef: null, route: null, lastSepCheck: 0, ready: null };
+    st = { open: new Map(), riders: new Map(), routeRef: null, route: null, lastSepCheck: 0, ready: null, isSplit: false, splitSince: 0, splitPacks: null };
     st.ready = (async () => {
       const open = await this.repo.listOpenEvents(gid).catch(() => []);
       for (const ev of open) if (ev.slot) st.open.set(ev.slot, ev);
@@ -128,7 +128,7 @@ class TimelineEngine {
 
   _rs(st, userId) {
     let r = st.riders.get(userId);
-    if (!r) { r = { cluster: null, sepSince: 0, offSince: 0, visits: {}, lastFixAt: 0, gaps: [], behindSince: 0, segIndex: null }; st.riders.set(userId, r); }
+    if (!r) { r = { cluster: null, sepSince: 0, offSince: 0, visits: {}, lastFixAt: 0, gaps: [], behindSince: 0, segIndex: null, distressSince: 0 }; st.riders.set(userId, r); }
     return r;
   }
 
@@ -138,7 +138,9 @@ class TimelineEngine {
   }
 
   _route(st, meta) {
-    const src = meta.route?.polyline || meta.routeBreadcrumbs;
+    const src = (Array.isArray(meta.route?.waypoints) && meta.route.waypoints.length >= 2)
+      ? meta.route.waypoints
+      : (meta.route?.polyline || meta.routeBreadcrumbs);
     if (src !== st.routeRef) {
       st.routeRef = src;
       st.route = typeof src === 'string' ? decodePolyline(src) : (Array.isArray(src) && src.length >= 2 ? src : null);
@@ -284,11 +286,14 @@ class TimelineEngine {
     // Group speed limit, lowered near stops and in towns (3.16) when the lead set a town limit.
     await this._speed(gid, st, rs, rider, p, t, m.speedLimitKmh || 0, this._activeLimit(m, p));
 
-    // Separation and the sweeper rule (3.16), at most every 5 s per convoy.
-    if (t - st.lastSepCheck >= 5000) {
+    // Separation and the sweeper rules, at most every 5 s per convoy, or on same-timestamp batches.
+    if (t - st.lastSepCheck >= 5000 || t === st.lastSepCheck) {
       st.lastSepCheck = t;
+      await this._checkSubClusters(gid, st, room, t);
       await this._checkSeparation(gid, st, room, t);
       await this._checkSweeper(gid, st, room, t);
+      await this._checkSweeperDistress(gid, st, room, t);
+      await this._checkRegroupConvergence(gid, st, room, t);
     }
   }
 
@@ -462,6 +467,8 @@ class TimelineEngine {
         const over = `OVERSPEED:${r.userId}`;
         if (rs?.underSince && st.open.has(over) && t - rs.underSince >= config.overspeedClearMs) await this._endOverspeed(gid, st, rs, over);
       }
+      await this._checkSweeperDistress(gid, st, room, t);
+      await this._checkRegroupConvergence(gid, st, room, t);
     }
   }
 
@@ -565,6 +572,41 @@ class TimelineEngine {
       }
       case 'ROLE_CHANGED':
         return this._instant(gid, { ...who, type: 'ROLE_CHANGED', data: { role: act.role, byUserId: act.byUserId || '' } });
+      case 'REGROUP_INITIATED': {
+        const rg = act.regroup;
+        await this._open(gid, st, 'REGROUP', {
+          ...who,
+          type: 'REGROUP_INITIATED',
+          startedAt: rg?.createdAt || this.now(),
+          lat: act.lat,
+          lng: act.lng,
+          placeName: act.placeName || '',
+          data: {
+            regroupId: rg?.regroupId,
+            suggestedByUserId: rg?.suggestedByUserId,
+            targetAction: rg?.targetAction,
+            targetKmh: rg?.targetKmh,
+          },
+        });
+        return null;
+      }
+      case 'REGROUP_COMPLETED': {
+        if (st.open.has('REGROUP')) {
+          await this._close(gid, st, 'REGROUP', act.completedAt || this.now(), {
+            data: { reason: act.reason || 'COMPLETED' },
+          });
+        }
+        await this._instant(gid, {
+          ...who,
+          type: 'REGROUP_COMPLETED',
+          startedAt: act.completedAt || this.now(),
+          lat: act.lat,
+          lng: act.lng,
+          placeName: act.placeName || '',
+          data: { reason: act.reason || 'COMPLETED' },
+        });
+        return null;
+      }
       case 'CORIDE': {
         const slot = `CORIDE:${act.user.userId}`;
         if (act.withUserId) return this._open(gid, st, slot, { ...who, type: 'CORIDE', startedAt: this.now(), data: { withUserId: act.withUserId, withName: this._name(gid, act.withUserId) } });
@@ -651,9 +693,20 @@ class TimelineEngine {
   /** Lead(s) and sweeper(s), plus the INCIDENT_NEAREST nearest other riders seen in the last 2 minutes. */
   _incidentNotify(room, subjectId, at, t) {
     const notify = [];
+    const subject = room.riders.get(subjectId);
+    const isSweeperDistress = subject?.role === 'SWEEPER';
+
     for (const r of room.riders.values()) {
       if (r.userId === subjectId) continue;
-      if (r.role === 'LEAD' || r.role === 'SWEEPER' || room.meta.createdByUserId === r.userId) notify.push(r.userId);
+      if (r.role === 'LEAD' || room.meta.createdByUserId === r.userId) {
+        notify.push(r.userId);
+      } else if (!isSweeperDistress && r.role === 'SWEEPER') {
+        notify.push(r.userId);
+      }
+    }
+    // Reverse-escalation: sweeper distress is routed only to Lead(s) to avoid moving pack panic
+    if (isSweeperDistress) {
+      return notify;
     }
     const near = [...room.riders.values()]
       .filter((r) => r.userId !== subjectId && !notify.includes(r.userId) && t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng))
@@ -872,6 +925,270 @@ class TimelineEngine {
         rs.behindSince = 0;
         if (open) await this._close(gid, st, slot, t);
       }
+    }
+  }
+
+  /**
+   * REQ-11: Sub-cluster split detection.
+   * Along-route 1D clustering detects splits (e.g. Lead Pack and Trail Pack split by toll plazas or signals)
+   * when gap exceeds convoySplitThresholdM for convoySplitHoldS. Suppresses individual SEPARATED alarms.
+   */
+  async _checkSubClusters(gid, st, room, t) {
+    const fresh = [...room.riders.values()].filter((r) => t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng));
+    if (fresh.length < 2) {
+      if (st.isSplit) {
+        st.isSplit = false;
+        st.splitSince = 0;
+        st.splitPacks = null;
+        if (st.open.has('CONVOY_SPLIT')) {
+          await this._close(gid, st, 'CONVOY_SPLIT', t, { data: { result: 'INSUFFICIENT_RIDERS' } });
+        }
+        this.convoys._emit(gid, 'CONVOY_SPLIT_RESOLVED', { type: 'CONVOY_SPLIT_RESOLVED', groupId: gid, timestamp: t });
+      }
+      return;
+    }
+
+    const route = this._route(st, room.meta);
+    let mapped = [];
+    if (route && route.length >= 2) {
+      for (const r of fresh) {
+        const rs = this._rs(st, r.userId);
+        const on = alongRoute({ lat: r.lat, lng: r.lng }, route, { fromIndex: rs.segIndex });
+        if (on) {
+          rs.segIndex = on.segIndex;
+          mapped.push({ rider: r, alongM: on.alongM });
+        }
+      }
+    }
+
+    let maxGapM = 0;
+    let splitIdx = -1;
+    let leadPackRiders = [];
+    let trailPackRiders = [];
+    let leadAlongMin = 0, leadAlongMax = 0;
+    let trailAlongMin = 0, trailAlongMax = 0;
+
+    const threshold = room.meta.convoySplitThresholdM || config.convoySplitThresholdM || 1200;
+    const holdMs = (room.meta.convoySplitHoldS || config.convoySplitHoldS || 45) * 1000;
+
+    if (route && mapped.length >= 4) {
+      mapped.sort((a, b) => b.alongM - a.alongM);
+      for (let i = 0; i < mapped.length - 1; i++) {
+        const gap = mapped[i].alongM - mapped[i + 1].alongM;
+        if (gap > maxGapM) {
+          maxGapM = gap;
+          splitIdx = i;
+        }
+      }
+      if (splitIdx >= 0) {
+        const candLead = mapped.slice(0, splitIdx + 1).map((m) => m.rider);
+        const candTrail = mapped.slice(splitIdx + 1).map((m) => m.rider);
+        if (candLead.length >= 2 && candTrail.length >= 2) {
+          leadPackRiders = candLead;
+          trailPackRiders = candTrail;
+          const leadAlongs = mapped.slice(0, splitIdx + 1).map((m) => m.alongM);
+          const trailAlongs = mapped.slice(splitIdx + 1).map((m) => m.alongM);
+          leadAlongMin = Math.round(Math.min(...leadAlongs));
+          leadAlongMax = Math.round(Math.max(...leadAlongs));
+          trailAlongMin = Math.round(Math.min(...trailAlongs));
+          trailAlongMax = Math.round(Math.max(...trailAlongs));
+        } else {
+          maxGapM = 0;
+        }
+      }
+    }
+
+    if (maxGapM >= threshold && leadPackRiders.length > 0 && trailPackRiders.length > 0) {
+      if (!st.splitSince) st.splitSince = t;
+      if (t - st.splitSince >= holdMs) {
+        const leadSpeeds = leadPackRiders.map((r) => Number(r.speedKmh) || 0);
+        const trailSpeeds = trailPackRiders.map((r) => Number(r.speedKmh) || 0);
+        const avgLeadSpeed = leadSpeeds.reduce((a, b) => a + b, 0) / leadPackRiders.length;
+        const avgTrailSpeed = trailSpeeds.reduce((a, b) => a + b, 0) / trailPackRiders.length;
+
+        const packs = [
+          {
+            packId: 'LEAD',
+            name: 'Lead Pack',
+            count: leadPackRiders.length,
+            riderCount: leadPackRiders.length,
+            leadUserId: leadPackRiders[0].userId,
+            leadName: leadPackRiders[0].name,
+            leadRider: leadPackRiders[0].name,
+            avgSpeedKmh: +avgLeadSpeed.toFixed(1),
+            speedKmh: Math.round(avgLeadSpeed),
+            alongRouteMinM: leadAlongMin,
+            alongRouteMaxM: leadAlongMax,
+            riderIds: leadPackRiders.map((r) => r.userId),
+          },
+          {
+            packId: 'TRAIL',
+            name: 'Trail Pack',
+            count: trailPackRiders.length,
+            riderCount: trailPackRiders.length,
+            leadUserId: trailPackRiders[0].userId,
+            leadName: trailPackRiders[0].name,
+            leadRider: trailPackRiders[0].name,
+            avgSpeedKmh: +avgTrailSpeed.toFixed(1),
+            speedKmh: Math.round(avgTrailSpeed),
+            alongRouteMinM: trailAlongMin,
+            alongRouteMaxM: trailAlongMax,
+            gapMeters: Math.round(maxGapM),
+            splitReason: 'TOLL_PLAZA_OR_SIGNAL',
+            riderIds: trailPackRiders.map((r) => r.userId),
+          },
+        ];
+
+        st.isSplit = true;
+        st.splitPacks = packs;
+
+        const open = st.open.get('CONVOY_SPLIT');
+        if (!open) {
+          await this._open(gid, st, 'CONVOY_SPLIT', {
+            type: 'CONVOY_SPLIT',
+            startedAt: st.splitSince,
+            lat: leadPackRiders[0].lat,
+            lng: leadPackRiders[0].lng,
+            data: {
+              gapMeters: Math.round(maxGapM),
+              leadCount: leadPackRiders.length,
+              trailCount: trailPackRiders.length,
+              leadName: leadPackRiders[0].name,
+              trailLeadName: trailPackRiders[0].name,
+              reason: 'TOLL_PLAZA_OR_SIGNAL',
+            },
+          });
+        } else {
+          open.data = {
+            ...open.data,
+            gapMeters: Math.round(maxGapM),
+            leadCount: leadPackRiders.length,
+            trailCount: trailPackRiders.length,
+          };
+          open.updatedAt = this.now();
+        }
+
+        this.convoys._emit(gid, 'CONVOY_SPLIT', {
+          type: 'CONVOY_SPLIT',
+          groupId: gid,
+          timestamp: t,
+          packs,
+        });
+      }
+    } else if (maxGapM < threshold * 0.7) {
+      st.splitSince = 0;
+      if (st.isSplit) {
+        st.isSplit = false;
+        st.splitPacks = null;
+        if (st.open.has('CONVOY_SPLIT')) {
+          await this._close(gid, st, 'CONVOY_SPLIT', t, { data: { result: 'REGROUPED' } });
+        }
+        this.convoys._emit(gid, 'CONVOY_SPLIT_RESOLVED', {
+          type: 'CONVOY_SPLIT_RESOLVED',
+          groupId: gid,
+          timestamp: t,
+        });
+      }
+    }
+  }
+
+  /**
+   * REQ-13: Dedicated Sweeper Distress Monitor & Reverse-Escalation Safeguard.
+   * If Sweeper halts (< 5 km/h) or drops offline (> 90 s) while Lead or main pack
+   * is moving (> 35 km/h) for > 90 s, triggers SWEEPER_DISTRESS alert.
+   */
+  async _checkSweeperDistress(gid, st, room, t) {
+    const sweeper = [...room.riders.values()].find((r) => r.role === 'SWEEPER');
+    if (!sweeper) {
+      for (const slot of [...st.open.keys()]) {
+        if (slot.startsWith('SWEEPER_DISTRESS:')) await this._close(gid, st, slot, t, { data: { result: 'NO_SWEEPER' } });
+      }
+      return;
+    }
+    const lead = [...room.riders.values()].find((r) => r.role === 'LEAD' || r.userId === room.meta.createdByUserId);
+    const leadSpeed = Number(lead?.speedKmh) || 0;
+    const packMoving = [...room.riders.values()].some((r) => r.userId !== sweeper.userId && (Number(r.speedKmh) || 0) > config.sweeperPackMovingKmh);
+    const mainPackMoving = leadSpeed > config.sweeperPackMovingKmh || packMoving;
+
+    const sweeperSpeed = Number(sweeper.speedKmh) || 0;
+    const lastSeen = sweeper.lastSeenEpochMs || 0;
+    const holdMs = config.sweeperDistressHoldS * 1000;
+    const sweeperOffline = !lastSeen || (t - lastSeen > holdMs);
+    const sweeperHalted = !sweeperOffline && (sweeperSpeed < config.sweeperHaltKmh);
+
+    const srs = this._rs(st, sweeper.userId);
+    const slot = `SWEEPER_DISTRESS:${sweeper.userId}`;
+
+    if (mainPackMoving && (sweeperHalted || sweeperOffline)) {
+      if (!srs.distressSince) {
+        srs.distressSince = sweeperOffline ? lastSeen : t;
+      }
+      const dur = t - srs.distressSince;
+      if (dur >= holdMs) {
+        if (!st.open.has(slot)) {
+          const distBehindLead = (lead && Number.isFinite(lead.lat) && Number.isFinite(sweeper.lat))
+            ? haversine(sweeper.lat, sweeper.lng, lead.lat, lead.lng) : 0;
+          const status = sweeperHalted ? 'HALTED_UNEXPECTEDLY' : 'DROPPED_OFFLINE';
+          const payload = {
+            type: 'SWEEPER_DISTRESS',
+            groupId: gid,
+            timestamp: t,
+            sweeperId: sweeper.userId,
+            sweeperName: sweeper.name || 'Sweeper',
+            lat: sweeper.lat,
+            lng: sweeper.lng,
+            status,
+            distanceBehindLeadM: Math.round(distBehindLead),
+            haltDurationSec: Math.round(dur / 1000),
+            notify: this._leadsAndSweeper(room, sweeper.userId).filter((id) => id !== sweeper.userId),
+          };
+          await this._open(gid, st, slot, {
+            userId: sweeper.userId,
+            userName: sweeper.name,
+            type: 'SWEEPER_DISTRESS',
+            startedAt: srs.distressSince,
+            lat: sweeper.lat,
+            lng: sweeper.lng,
+            data: payload,
+          });
+          this.convoys._emit(gid, 'SWEEPER_DISTRESS', payload);
+        }
+      }
+    } else {
+      if (sweeperSpeed >= 15 || (!mainPackMoving && sweeperSpeed >= 5)) {
+        srs.distressSince = 0;
+        if (st.open.has(slot)) {
+          await this._close(gid, st, slot, t, { data: { result: 'RESOLVED' } });
+          this.convoys._emit(gid, 'SWEEPER_DISTRESS_RESOLVED', {
+            type: 'SWEEPER_DISTRESS_RESOLVED',
+            groupId: gid,
+            sweeperId: sweeper.userId,
+            timestamp: t,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * REQ-12: Dynamic Rendezvous & Regroup Ahead convergence tracking.
+   * Tracks convergence when activeRegroup is set; completes when all active riders are within 150m,
+   * or expires after regroupTimeoutMin (25 min).
+   */
+  async _checkRegroupConvergence(gid, st, room, t) {
+    const rg = room.regroup || room.meta?.activeRegroup;
+    if (!rg || rg.resolved) return;
+    if (t >= (rg.expiresAt || (rg.createdAt + config.regroupTimeoutMin * 60000))) {
+      await this.convoys.clearRegroup(gid, { userId: 'SYSTEM', name: 'System' }, 'EXPIRED');
+      return;
+    }
+    const fresh = [...room.riders.values()].filter((r) => t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng));
+    if (fresh.length < 2) return;
+    const R = config.regroupReachRadiusM || 150;
+    const allWithin = fresh.every((r) => haversine(r.lat, r.lng, rg.lat, rg.lng) <= R);
+    if (allWithin) {
+      rg.resolved = true;
+      await this.convoys.clearRegroup(gid, { userId: 'SYSTEM', name: 'System' }, 'COMPLETED');
     }
   }
 

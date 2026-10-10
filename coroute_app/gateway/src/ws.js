@@ -45,18 +45,20 @@ const ACTION_TYPES = new Set([
   'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE',
   // 3.16
   'ROLE_SET',
+  // 4.0
+  'REGROUP_SET', 'REGROUP_CLEAR', 'LAST_GASP_BEACON',
 ]);
 /** Socket messages that alert the whole convoy: a few per 10 seconds, each type with its own budget
  * (a rider who just asked the group to wait must still be able to raise an SOS). */
 const ALARM_TYPES = new Set(['WAIT', 'SOS', 'CHECK_IN', 'REPORT_DOWN']);
 /** Messages that may carry a clientId (phone outbox): applied once, answered with ACK. */
-const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN', 'REPORT_DOWN', 'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE', 'ROLE_SET']);
+const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN', 'REPORT_DOWN', 'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE', 'ROLE_SET', 'REGROUP_SET', 'REGROUP_CLEAR']);
 const BYE_REASONS = new Set(['APP_CLOSED', 'SIGN_OUT', 'LEFT']);
 /** Protocol features this gateway offers (HELLO.features); 3.14 apps use a feature only when listed. */
 const FEATURES_314 = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster'];
 /** 3.15: safety network and discovery, appended when switched on. */
 /** 3.16: sweeper role, follow-up check-in, town limit, live links (always on). */
-const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), 'ride316'];
+const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), 'ride316', 'featurePolicy1', 'bin1'];
 /** Client capabilities a 3.15 app sends with JOIN. Server-to-client types added in 3.15 go only to sockets with 'net1'. */
 const CAP = /^[a-z0-9]{1,16}$/;
 const INCIDENT_ID = /^NET-[0-9A-F]{12}$/;
@@ -97,6 +99,7 @@ class Hub {
     convoys.on('event', (groupId, payload) => this.broadcast(groupId, payload));
     convoys.on('broadcast', (entry) => this.broadcastAll({ type: 'BROADCAST', message: entry.message, ts: entry.timestamp }));
     convoys.on('fleet', () => this._scheduleFleet());
+    convoys.featureAnalytics?.on('change', () => this._scheduleFleet());
     // 3.15: room messages only 3.15 apps understand (EMERGENCY_UPDATE).
     convoys.on('capEvent', (groupId, cap, payload) => this.broadcastCap(groupId, cap, payload));
 
@@ -199,7 +202,7 @@ class Hub {
     await Promise.all([...this.admins].map((ws) => this._gateCheck(ws)));
     if (this.admins.size === 0) return;
     const fleet = await this.convoys.fleet();
-    const msg = JSON.stringify({ type: 'FLEET', convoys: fleet, ts: Date.now() });
+    const msg = JSON.stringify({ type: 'FLEET', convoys: fleet, featureAnalytics: this.convoys.featureAnalytics?.snapshot(), ts: Date.now() });
     for (const ws of this.admins) if (ws.readyState === WebSocket.OPEN && ws.allowed && ws.user.role === ROLE_ADMIN) ws.send(msg);
   }
 
@@ -228,7 +231,16 @@ class Hub {
     ws.caps = new Set();
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('message', (data, isBinary) => {
-      if (isBinary) { if (ws.allowed) this._onVoice(ws, data); return; }
+      if (isBinary) {
+        if (!ws.allowed) return;
+        const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+        if (buf.length > 0 && buf[0] === 0x10) {
+          this._onBinaryTelemetry(ws, buf).catch((e) => this._handleError(ws, e));
+          return;
+        }
+        this._onVoice(ws, data);
+        return;
+      }
       this._onJson(ws, data).catch((e) => this._handleError(ws, e));
     });
     ws.on('close', () => {
@@ -331,6 +343,61 @@ class Hub {
   _requireRoom(ws) {
     if (!ws.groupId) throw new ConvoyError('Join a convoy first.', 409);
     return ws.groupId;
+  }
+
+  async _onBinaryTelemetry(ws, buf) {
+    if (!Buffer.isBuffer(buf) || buf.length < 24) return;
+    if (!(await ws.ready)) return;
+    if (!(await this._gateCheck(ws))) return;
+    const gid = ws.groupId;
+    if (!gid) return;
+    if (!this._allow(ws, 'telemetry', 3)) return; // silently drop bursts
+    const room = await this.convoys.getRoom(gid);
+    const tsOffset = buf.readUInt32BE(1);
+    const lat = buf.readInt32BE(5) / 1e6;
+    const lng = buf.readInt32BE(9) / 1e6;
+    const speedKmh = buf.readUInt16BE(13) / 10;
+    const heading = buf.readUInt16BE(15) / 10;
+    const batByte = buf.readUInt8(17);
+    const batteryLevel = batByte & 0x7F;
+    const isCharging = (batByte & 0x80) !== 0;
+    const usableFuelKm = buf.readUInt8(18) * 2;
+    const flags = buf.readUInt8(19);
+    const stopped = Boolean(flags & 0x01);
+    const offRoute = Boolean(flags & 0x02);
+    const sos = Boolean(flags & 0x04);
+    const tunnel = Boolean(flags & 0x08);
+    const seq = buf.readUInt32BE(20);
+
+    const patch = {
+      lat,
+      lng,
+      speedKmh,
+      heading,
+      batteryLevel,
+      isCharging,
+      ...(usableFuelKm > 0 ? { fuelEstimate: { usableRangeKm: usableFuelKm } } : {}),
+    };
+    if (stopped) {
+      patch.statusReason = 'STOPPED';
+    } else if (offRoute) {
+      patch.statusReason = 'OFF_ROUTE';
+    }
+    const rider = this.convoys.patchRider(room, ws.user.userId, patch, { emit: false });
+
+    // Relay to room peers
+    const set = this.rooms.get(gid);
+    if (set) {
+      const jsonMsg = JSON.stringify({ type: 'RIDER_UPDATE', rider: publicRider(rider), ts: Date.now() });
+      for (const peer of set) {
+        if (peer === ws || peer.readyState !== WebSocket.OPEN) continue;
+        if (peer.caps && peer.caps.has('bin1')) {
+          peer.send(buf);
+        } else {
+          peer.send(jsonMsg);
+        }
+      }
+    }
   }
 
   async _onJson(ws, data) {
@@ -497,6 +564,14 @@ class Hub {
         const gid = this._requireRoom(ws);
         return this._once(ws, cid, 'ROLE_SET', () => this.convoys.setRole(gid, u, msg.userId, msg.role));
       }
+      case 'REGROUP_SET': {
+        const gid = this._requireRoom(ws);
+        return this._once(ws, cid, 'REGROUP_SET', () => this.convoys.setRegroup(gid, u, msg));
+      }
+      case 'REGROUP_CLEAR': {
+        const gid = this._requireRoom(ws);
+        return this._once(ws, cid, 'REGROUP_CLEAR', () => this.convoys.clearRegroup(gid, u, msg.reason));
+      }
       case 'STOP_ADD': return void await this.convoys.addStop(this._requireRoom(ws), u, msg);
       case 'STOP_SUGGEST': return void await this.convoys.suggestStop(this._requireRoom(ws), u, msg);
       case 'STOP_ACCEPT': return void await this.convoys.decideStop(this._requireRoom(ws), u, String(msg.stopId || ''), true);
@@ -520,6 +595,78 @@ class Hub {
           throw new ConvoyError('Only the convoy lead can change the trip state.', 403);
         }
         await this.convoys.setTripStatus(gid, String(msg.status || ''));
+        return;
+      }
+      case 'REGROUP_SET': {
+        const gid = this._requireRoom(ws);
+        const room = await this.convoys.getRoom(gid);
+        const rider = room.riders.get(u.userId);
+        if (!rider || (rider.role !== 'LEAD' && rider.role !== 'SWEEPER' && room.meta.createdByUserId !== u.userId && u.role !== ROLE_ADMIN)) {
+          throw new ConvoyError('Only the lead or sweeper can initiate a regroup.', 403);
+        }
+        const regroupData = {
+          stopId: msg.stopId ? String(msg.stopId) : null,
+          lat: Number(msg.lat) || 0,
+          lng: Number(msg.lng) || 0,
+          name: String(msg.name || 'Regroup Point').slice(0, 120),
+          targetKmh: Number(msg.targetKmh) || 40,
+          suggestedByUserId: u.userId,
+          suggestedByName: u.name,
+          targetAction: String(msg.targetAction || 'PULL_OVER_AND_WAIT'),
+          createdAt: Date.now(),
+        };
+        room.meta.regroup = regroupData;
+        this.broadcast(gid, { type: 'REGROUP_ACTIVE', regroup: regroupData, ts: Date.now() });
+        if (this.timeline) {
+          await this.timeline.onActivity(gid, {
+            type: 'REGROUP_INITIATED',
+            user: u,
+            regroup: regroupData,
+            lat: regroupData.lat,
+            lng: regroupData.lng,
+          });
+        }
+        return;
+      }
+      case 'LAST_GASP_BEACON': {
+        const gid = this._requireRoom(ws);
+        const room = await this.convoys.getRoom(gid);
+        const lat = Number(msg.lat) || 0;
+        const lng = Number(msg.lng) || 0;
+        const fuelKm = Number(msg.fuelKm ?? msg.usableFuelKm) || 0;
+        const speedKmh = Number(msg.speedKmh) || 0;
+        const batteryLevel = Math.min(100, Math.max(0, Number(msg.batteryLevel ?? 5)));
+        const patch = {
+          lat,
+          lng,
+          speedKmh,
+          batteryLevel,
+          isCharging: false,
+          statusReason: 'BATTERY_SHUTDOWN',
+        };
+        const rider = this.convoys.patchRider(room, u.userId, patch);
+        this.broadcast(gid, {
+          type: 'RIDER_BATTERY_SHUTDOWN',
+          userId: u.userId,
+          userName: u.name,
+          lat,
+          lng,
+          fuelKm,
+          speedKmh,
+          batteryLevel,
+          ts: Date.now(),
+        });
+        if (this.timeline) {
+          await this.timeline.onActivity(gid, {
+            type: 'BATTERY_SHUTDOWN',
+            user: u,
+            lat,
+            lng,
+            fuelKm,
+            speedKmh,
+            batteryLevel,
+          });
+        }
         return;
       }
 
@@ -593,6 +740,7 @@ class Hub {
       };
       if (to) state.private.set(ws.user.userId, stream); else state.group = stream;
       ws.voiceStream = stream;
+      this.convoys.featureAnalytics?.record('voice', true);
       this._relay(gid, stream, VOICE_START, { ...this._hdr(stream), sampleRate: stream.sampleRate, codec: stream.codec }, null);
       return;
     }

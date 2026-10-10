@@ -124,6 +124,13 @@ void main() {
       await restored.update(route(lat: 18), fromM: 0, online: false); expect(restored.snapshot, isNull);
       restored.dispose();
     });
+    test('offline forward progression retains overlapping route cache snapshot', () async {
+      await update();
+      await service.update(route(), fromM: 6000, online: false);
+      expect(service.snapshot, isNotNull);
+      expect(service.offline, true);
+      expect(service.upcoming.length, 1);
+    });
     test('late old route response cannot overwrite rerouted results', () async {
       final pending = Completer<http.Response>(); handler = (_) => pending.future;
       final first = update(); await Future<void>.delayed(Duration.zero);
