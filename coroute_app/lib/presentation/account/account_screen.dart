@@ -1,3 +1,4 @@
+import '../ride/fuel_sheet.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -130,6 +131,7 @@ class AccountScreen extends StatelessWidget {
               row(theme.isLight ? Icons.light_mode_rounded : Icons.dark_mode_rounded, 'Theme',
                   subtitle: AppearanceSheet.summary(theme), onTap: () => AppearanceSheet.show(context)),
               const DataSaverTile(),
+              if (settings != null) row(Icons.local_gas_station_rounded, 'Fuel profile', subtitle: 'Range, mileage, reserve and buffer', onTap: () => showFuelSheet(context, configure: true)),
               if (settings != null)
                 row(Icons.health_and_safety_rounded, 'Ride safety',
                     subtitle: SafetySettingsSheet.summary(settings), onTap: () => SafetySettingsSheet.show(context)),

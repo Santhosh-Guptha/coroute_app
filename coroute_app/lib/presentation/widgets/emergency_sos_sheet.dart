@@ -385,7 +385,7 @@ class EmergencySosSheet extends StatelessWidget {
               const SizedBox(height: 8),
             ],
 
-            // Action 3: Dial 112 National Emergency
+            // Action 3: Dial 112 National Emergency, 108 Ambulance, 100 Police
             OutlinedButton.icon(
               onPressed: () => _makeCall(context, '112'),
               icon: Icon(Icons.local_hospital_rounded, color: AppTheme.laserRed),
@@ -398,6 +398,44 @@ class EmergencySosSheet extends StatelessWidget {
                 minimumSize: const Size.fromHeight(56),
                 shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
               ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _makeCall(context, '108'),
+                    icon: Icon(Icons.local_hospital_rounded, color: AppTheme.laserRed, size: 18),
+                    label: Text(
+                      'Dial 108 (Ambulance)',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.laserRed, fontSize: 12),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: AppTheme.laserRed),
+                      minimumSize: const Size.fromHeight(48),
+                      shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _makeCall(context, '100'),
+                    icon: Icon(Icons.local_police_rounded, color: AppTheme.laserRed, size: 18),
+                    label: Text(
+                      'Dial 100 (Police)',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.laserRed, fontSize: 12),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: AppTheme.laserRed),
+                      minimumSize: const Size.fromHeight(48),
+                      shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
 

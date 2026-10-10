@@ -51,6 +51,8 @@ class Retention {
   async runOnce(nowMs = Date.now()) {
     const stats = { autoEnded: 0, convoysStripped: 0, riderDocsRemoved: 0, tripsStripped: 0, voiceLogsRemoved: 0, trackChunksRemoved: 0, eventsStripped: 0, alertsStripped: 0, geoCacheRemoved: 0, medicalStripped: 0, auditRemoved: 0 };
 
+    stats.guardianRemoved = await this.repo.purgeGuardianAccess(nowMs);
+
     // 1. End convoys nobody has touched for a long time (phones died, app uninstalled, ...).
     stats.autoEnded = await this.convoys.autoEndStaleConvoys(nowMs - config.retentionStaleConvoyHours * 3600000);
 

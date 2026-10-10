@@ -238,6 +238,38 @@ class AssistSheetBody extends StatelessWidget {
           label: Text(L10n.t('assist.call112'), maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
         const SizedBox(height: Space.s8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                  foregroundColor: StatusColors.critical,
+                  side: BorderSide(color: StatusColors.critical),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                ),
+                onPressed: () => dialNumber(context, '108'),
+                icon: const Icon(Icons.local_hospital_rounded, size: 18),
+                label: const Text('Call 108 (Ambulance)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12)),
+              ),
+            ),
+            const SizedBox(width: Space.s8),
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                  foregroundColor: StatusColors.critical,
+                  side: BorderSide(color: StatusColors.critical),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                ),
+                onPressed: () => dialNumber(context, '100'),
+                icon: const Icon(Icons.local_police_rounded, size: 18),
+                label: const Text('Call 100 (Police)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12)),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: Space.s8),
         TextButton.icon(
           style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.textPrimary),
           onPressed: () async {

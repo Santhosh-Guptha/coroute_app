@@ -17,7 +17,7 @@ const { haversine, encodePolyline, decodePolyline, pointToSegment } = require('.
 const { scrub, scrubConvoyMeta, mentions } = require('./anonymise');
 const { validPhone, roleOf } = require('./validate');
 
-const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'MEETING', 'SCENIC', 'TOLL', 'OTHER']);
+const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'MEETING', 'SCENIC', 'TOLL', 'OTHER', 'HOSPITAL', 'REPAIR', 'STAY', 'PHARMACY', 'TYRE', 'WASHROOM', 'ATM', 'POLICE', 'PARKING']);
 /** The chat card posted when a rider asks the group to wait (plain text, no emoji). */
 const WAIT_MESSAGE = 'Asked the group for a 2 minute stop. Please regroup safely.';
 const MAX_STOPS = 20;
@@ -72,7 +72,7 @@ class ConvoyError extends Error {
  * emergency contact) and co-riding are never taken from a socket message: role and
  * co-riding are set by server code paths only, the profile comes from the users table.
  */
-const TELEMETRY_FIELDS = ['lat', 'lng', 'speedKmh', 'heading', 'batteryLevel', 'isCharging', 'statusReason', 'statusMessage', 'stoppedSince'];
+const TELEMETRY_FIELDS = ['lat', 'lng', 'speedKmh', 'heading', 'batteryLevel', 'isCharging', 'statusReason', 'statusMessage', 'stoppedSince', 'fuelEstimate'];
 /** Extra fields only trusted server code may set (CORIDER handler). */
 const TRUSTED_FIELDS = ['isCoRiding', 'ridingWithUserId'];
 
@@ -1441,6 +1441,12 @@ function sanitizeTelemetry(patch) {
   if (has('statusReason')) out.statusReason = String(patch.statusReason).slice(0, 24);
   if (has('statusMessage')) out.statusMessage = String(patch.statusMessage).slice(0, 140);
   if (has('stoppedSince')) out.stoppedSince = Math.max(0, Math.min(now() + 60000, Math.round(num(patch.stoppedSince))));
+  if (Object.hasOwn(patch, 'fuelEstimate')) {
+    const f = patch.fuelEstimate;
+    out.fuelEstimate = f && Number.isFinite(f.usableKm) && f.usableKm >= 0 && f.usableKm <= 15000
+      && Number.isFinite(f.confirmedAt) && f.confirmedAt > 0 && f.confirmedAt <= now() + 60000
+      ? { usableKm: Math.floor(f.usableKm), confirmedAt: f.confirmedAt, updatedAt: now() } : null;
+  }
   return out;
 }
 
@@ -1511,6 +1517,7 @@ function publicRider(r) {
     phone: r.phone || '', emergencyContact: r.emergencyContact || '', emergencyContactName: r.emergencyContactName || '',
     vehicleNo: r.vehicleNo || '', isCoRiding: !!r.isCoRiding, ridingWithUserId: r.ridingWithUserId || '', stoppedSince: r.stoppedSince || 0,
     presence: r.presence || '', presenceAt: r.presenceAt || 0,
+    fuelEstimate: r.fuelEstimate && now() - r.fuelEstimate.updatedAt < 120000 ? r.fuelEstimate : null,
   };
 }
 

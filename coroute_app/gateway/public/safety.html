@@ -50,11 +50,15 @@
         </div>
         <nav class="pg-jump" aria-label="Jump to a safety topic">
           <a href="#sos">SOS</a>
+          <a href="#convoy-safety">Sweeper &amp; radar</a>
+          <a href="#essentials">Route essentials</a>
+          <a href="#fuel">Smart fuel</a>
+          <a href="#guardian">Ride Guardian</a>
           <a href="#crash">Crash detection</a>
           <a href="#nearby">Nearby help</a>
           <a href="#privacy">Who sees what</a>
           <a href="#false-alarms">False alarms</a>
-          <a href="#new-316">New in 3.16</a>
+          <a href="#new-316">New in 3.16 &amp; 3.17</a>
         </nav>
       </div>
     </div>
@@ -145,8 +149,17 @@
           <p>Hold the SOS button to send it, so a tap in a pocket does not raise an alarm. The alert reaches your whole group with your position. It stays on every screen until it is resolved.</p>
           <p>Pick a reason if you can: medical, breakdown, crash, or your own words. From the same screen you can call or text your emergency contact.</p>
           <p>You can also start SOS from the ride notification on the lock screen. Nothing is sent until you hold the button.</p>
+          <h3 class="pg-subhead">Quick access to Indian Emergency Services</h3>
+          <p>In the emergency sheet and the assist sheet, dedicated quick-dial buttons let you reach official emergency response services immediately:</p>
           <ul class="pg-ticks" role="list">
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-wifi-off"/></svg><span><strong>No signal?</strong> The SOS is kept on your phone and sent once, as soon as the connection returns.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-phone"/></svg><span><strong>112 National Emergency:</strong> Direct dial to India's unified emergency helpline.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-phone"/></svg><span><strong>108 Ambulance:</strong> One-tap access to emergency medical and ambulance dispatch.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-phone"/></svg><span><strong>100 Police:</strong> Quick connection to local police assistance.</span></li>
+          </ul>
+          <h3 class="pg-subhead">Report a rider down on the route</h3>
+          <p>If you see a motorcyclist down on the road, do not wait for them to reach their phone. Any rider in the convoy can long-press the map to report a rider down. The report immediately alerts your whole group and nearby riders on the Safety Network with the exact position and direction.</p>
+          <ul class="pg-ticks" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-wifi-off"/></svg><span><strong>No signal?</strong> The SOS or rider down report is kept on your phone and sent once, as soon as the connection returns.</span></li>
           </ul>
         </div>
         <div class="pg-story__visual stack stack--16" data-reveal>
@@ -157,6 +170,11 @@
             </div>
             <p class="pg-hold__label" aria-hidden="true">Press and hold to send</p>
             <p class="pg-hold__sub" aria-hidden="true">Nothing is sent until the ring is full.</p>
+          </div>
+          <div class="alert-card alert-card--danger" role="img" aria-label="Illustration: quick access to emergency services 112, 108 and 100.">
+            <p class="alert-card__kicker" aria-hidden="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg>Emergency services</p>
+            <p class="alert-card__title" aria-hidden="true">Quick-dial 112, 108 or 100</p>
+            <p class="alert-card__meta" aria-hidden="true"><span>One tap opens the phone dialler with the number ready.</span></p>
           </div>
           <div class="alert-card alert-card--warn" role="img" aria-label="Illustration: a card saying No signal, SOS not sent yet. It is sent as soon as the phone is back online.">
             <p class="alert-card__kicker" aria-hidden="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-wifi-off"/></svg>No signal</p>
@@ -204,8 +222,44 @@
     </div>
   </section>
 
+  <!-- Sweeper and convoy radar -->
+  <section class="section" id="convoy-safety" aria-labelledby="convoy-safety-title">
+    <div class="container">
+      <div class="section-intro" data-reveal>
+        <p class="cluster cluster--8"><span class="eyebrow">Convoy cohesion</span><span class="badge badge--new">New in 3.16</span></p>
+        <h2 class="section-intro__title" id="convoy-safety-title">Nobody left behind.</h2>
+        <p class="t-lead">A designated sweeper at the tail and live radar on your lock screen keep the group together without constant phone checks.</p>
+      </div>
+
+      <div class="grid grid--2" data-reveal-stagger="80">
+        <div class="card" data-reveal>
+          <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></div>
+          <h3>Designated sweeper role</h3>
+          <p>The ride lead can assign a trusted rider as the sweeper at the tail of the convoy. The app continuously tracks the distance between each rider and the sweeper along the planned route.</p>
+          <ul class="pg-ticks" role="list" style="margin-top:var(--sp-12)">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong>Behind the sweeper:</strong> If a rider falls more than 500 metres behind the sweeper for 60 seconds, both the lead and sweeper hear an alert.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong>Stale updates:</strong> If a rider stops updating or loses signal on a remote stretch, the tail is alerted to check on them.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong>Low-battery alerts:</strong> The lead and sweeper hear when any rider's battery falls to 15%, before their phone shuts down.</span></li>
+          </ul>
+        </div>
+
+        <div class="card" data-reveal>
+          <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-bell"/></svg></div>
+          <h3>Smart Ride Lock-Screen Notification</h3>
+          <p>Glance at your convoy status from a handlebar mount without unlocking the screen or wearing down your battery.</p>
+          <ul class="pg-ticks" role="list" style="margin-top:var(--sp-12)">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong>Convoy radar:</strong> See who is riding ahead and behind with live road distances at a glance.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg><span><strong>Next fuel distance:</strong> Shows road kilometres to the next upcoming fuel stop on your route.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-battery"/></svg><span><strong>Battery-efficient telemetry:</strong> Adjusts background update cadence based on speed and battery level, conserving power on long rides while pushing emergencies instantly.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong>One-tap actions:</strong> Hold SOS over the lock screen, tap Wait for me, or open the full map with gloved hands.</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Crash detection -->
-  <section class="section" id="crash" aria-labelledby="crash-title">
+  <section class="section section--surface" id="crash" aria-labelledby="crash-title">
     <div class="container">
       <div class="pg-story" style="padding-top:0">
         <div class="pg-story__text" data-reveal>
@@ -259,7 +313,7 @@
   </section>
 
   <!-- SMS fallback -->
-  <section class="section section--surface" id="sms" aria-labelledby="sms-title">
+  <section class="section" id="sms" aria-labelledby="sms-title">
     <div class="container">
       <div class="pg-story pg-story--flip" style="padding-block:0">
         <div class="pg-story__text" data-reveal>
@@ -280,6 +334,132 @@
               <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>The nearest riders in your group</li>
             </ul>
             <p class="t-small t-muted" style="margin-top:var(--sp-16)">At most 10 people. Only when the SOS could not be sent over the internet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Route Essentials for safety -->
+  <section class="section section--surface" id="essentials" aria-labelledby="essentials-title">
+    <div class="container">
+      <div class="pg-story" style="padding-top:0">
+        <div class="pg-story__text" data-reveal>
+          <p class="cluster cluster--8"><span class="eyebrow">Route Essentials</span><span class="badge badge--new">New in 3.17</span></p>
+          <h2 class="t-h2" id="essentials-title">Safety along your corridor.</h2>
+          <p class="t-lead">When a tyre punctures or someone needs medical attention on a highway, knowing what lies ahead on your exact road matters far more than straight-line pins on a generic map.</p>
+          <p>Route Essentials scans a safety corridor within <strong>1.5 km of your planned route</strong> for vital facilities, calculating actual road access and return distance rather than straight-line estimates.</p>
+          <ul class="pg-ticks" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-medical"/></svg><span><strong>Medical and hospitals:</strong> Discovers hospitals and emergency medical facilities along the road corridor, showing detour distances and one-tap navigation.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong>Punctures and mechanics:</strong> Finds motorcycle repair shops and tyre puncture repair points on your route so minor mechanical issues do not strand you.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg><span><strong>Fuel corridor discovery:</strong> Maps verified fuel stations within 1.5 km of your route, checking highway access and detour kilometres.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-wifi-off"/></svg><span><strong>Cached on your device:</strong> Discovered essentials stay cached on your phone, remaining accessible even when cellular data drops along remote roads.</span></li>
+          </ul>
+          <p class="t-small t-muted" style="margin-top:var(--sp-12)">Any rider can suggest or add a discovered safety stop directly to the group itinerary.</p>
+        </div>
+        <div class="pg-story__visual stack stack--16" data-reveal>
+          <div class="card">
+            <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg></div>
+            <h3>1.5 km safety corridor</h3>
+            <p class="t-small" style="color:var(--c-text-2)">Coroute checks OpenStreetMap facilities within 1.5 km of your route polyline, filtering out places across unbridged rivers or divided highways without exits.</p>
+            <div class="stack stack--8" style="margin-top:var(--sp-16)">
+              <div class="alert-card alert-card--nav">
+                <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-medical"/></svg>Medical</p>
+                <p class="alert-card__title">Hospital, 12 km ahead</p>
+                <p class="alert-card__meta"><span>Detour: 400 m off route</span></p>
+              </div>
+              <div class="alert-card alert-card--warn">
+                <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg>Puncture &amp; repair</p>
+                <p class="alert-card__title">Tyre puncture shop, 4.2 km ahead</p>
+                <p class="alert-card__meta"><span>Direct highway access</span></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Smart Fuel Profile -->
+  <section class="section" id="fuel" aria-labelledby="fuel-title">
+    <div class="container">
+      <div class="pg-story pg-story--flip" style="padding-block:0">
+        <div class="pg-story__text" data-reveal>
+          <p class="cluster cluster--8"><span class="eyebrow">Smart Fuel Profile</span><span class="badge badge--new">New in 3.17</span></p>
+          <h2 class="t-h2" id="fuel-title">Never run dry on remote stretches.</h2>
+          <p class="t-lead">Motorcycle fuel gauges can be unreliable, and remote Indian highways often have long gaps between open petrol pumps. Coroute helps your group plan fuel stops well before reserve.</p>
+          <ul class="pg-ticks" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg><span><strong>Tank range and reserve buffer:</strong> Configure your full tank range and reserve. Coroute adds a safety buffer (default 20 km) so you never budget fuel down to an empty tank.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong>80% range reminder:</strong> When 80% of your usable fuel range is covered, the app sounds a timely reminder to find fuel before you touch your reserve buffer.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg><span><strong>Opt-in group fuel estimation:</strong> Riders can choose to share their remaining usable range with the group. The lead sees who has the shortest range and can schedule stops that keep everyone moving safely.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg><span><strong>Private by design:</strong> Your tank size, mileage and litres never leave your device. Only the calculated usable kilometres are shared with the active ride group, and sharing stops immediately when you opt out or end the ride.</span></li>
+          </ul>
+        </div>
+        <div class="pg-story__visual" data-reveal>
+          <div class="card">
+            <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg></div>
+            <h3>Safety buffer calculation</h3>
+            <p class="t-small" style="color:var(--c-text-2);margin-bottom:var(--sp-16)">A 300 km tank range with a 50 km reserve and a 20 km safety buffer gives 230 km of safe usable range before refueling.</p>
+            <div class="stack stack--8">
+              <div class="alert-card alert-card--ok">
+                <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Usable range</p>
+                <p class="alert-card__title">160 km ridden, 70 km usable left</p>
+                <p class="alert-card__meta"><span>Next pump on route in 38 km</span></p>
+              </div>
+              <div class="alert-card alert-card--warn">
+                <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg>80% reminder</p>
+                <p class="alert-card__title">Plan your fuel stop soon</p>
+                <p class="alert-card__meta"><span>Reserve buffer untouched (70 km)</span></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Ride Guardian -->
+  <section class="section section--surface" id="guardian" aria-labelledby="guardian-title">
+    <div class="container">
+      <div class="pg-story" style="padding-top:0">
+        <div class="pg-story__text" data-reveal>
+          <p class="cluster cluster--8"><span class="eyebrow">Ride Guardian</span><span class="badge badge--new">New in 3.17</span></p>
+          <h2 class="t-h2" id="guardian-title">Keep family close without an app.</h2>
+          <p class="t-lead">Let family and loved ones follow your ride from any web browser on phone or desktop. No Coroute account, login, or app installation is required.</p>
+          <p>Every Ride Guardian link provides strong privacy protections and clear control:</p>
+          <ul class="pg-ticks" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg><span><strong>Optional PIN protection:</strong> Secure your tracking link with an optional 4 to 8 digit PIN that viewers must enter to view your ride.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg><span><strong>Three privacy tiers:</strong> Select the exact degree of visibility you want to share:</span></li>
+          </ul>
+          <div class="stack stack--8" style="margin-block:var(--sp-12);padding-left:var(--sp-24)">
+            <p><strong>1. Basic tier:</strong> Shows ride milestones (started, paused, resumed, ended), planned stop arrivals, and overall group rider count without sharing live GPS coordinates.</p>
+            <p><strong>2. Live tier:</strong> Displays real-time location updates, progress along the route and timeline updates while the ride is active.</p>
+            <p><strong>3. Emergency tier:</strong> Keeps your position completely private during normal riding, sharing location and emergency details only if an SOS or crash alarm is actively open.</p>
+          </div>
+          <ul class="pg-ticks" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg><span><strong>Automatic expiry:</strong> Links expire automatically 6 hours after the ride ends, or after a chosen period of up to 14 days.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg><span><strong>Instant pause or revoke:</strong> Pause or revoke any link at any moment in the app. When hidden or revoked, the browser view immediately removes private location data.</span></li>
+          </ul>
+        </div>
+        <div class="pg-story__visual" data-reveal>
+          <div class="card">
+            <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></div>
+            <h3>Guardian privacy tiers</h3>
+            <div class="stack stack--12" style="margin-top:var(--sp-16)">
+              <div class="pg-feature-tile" style="padding:var(--sp-12);border:1px solid var(--c-line);border-radius:var(--r-card)">
+                <p style="font-weight:600;color:var(--c-text)">Basic</p>
+                <p class="t-small" style="color:var(--c-text-2)">Milestones and stop status only. No live coordinates.</p>
+              </div>
+              <div class="pg-feature-tile" style="padding:var(--sp-12);border:1px solid var(--c-line);border-radius:var(--r-card)">
+                <p style="font-weight:600;color:var(--c-text)">Live</p>
+                <p class="t-small" style="color:var(--c-text-2)">Real-time map location while riding, updated over mobile data.</p>
+              </div>
+              <div class="pg-feature-tile" style="padding:var(--sp-12);border:1px solid var(--c-line);border-radius:var(--r-card)">
+                <p style="font-weight:600;color:var(--c-text)">Emergency</p>
+                <p class="t-small" style="color:var(--c-text-2)">Location shared only during an active SOS or crash alarm.</p>
+              </div>
+            </div>
+            <p class="t-small t-muted" style="margin-top:var(--sp-16)">Riders control their own links. Group sharing requires explicit rider consent.</p>
           </div>
         </div>
       </div>
@@ -377,22 +557,25 @@
     </div>
   </section>
 
-  <!-- 3.16 additions -->
+  <!-- 3.16 and 3.17 additions -->
   <section class="section" id="new-316" aria-labelledby="new-316-title">
     <div class="container">
       <div class="split">
         <div class="stack stack--16" data-reveal>
-          <p class="cluster cluster--8"><span class="eyebrow">Live link and nearest hospital</span><span class="badge badge--new">New in 3.16</span></p>
+          <p class="cluster cluster--8"><span class="eyebrow">Release additions</span><span class="badge badge--new">New in 3.16</span><span class="badge badge--new">New in 3.17</span></p>
           <h2 class="t-h2" id="new-316-title">Help from outside the app.</h2>
           <p class="t-lead">During an open SOS, the rider or the lead can share a live emergency link with anyone, for example family or the emergency services. It opens a plain web page with the rider's first name, last position, the time of that position and a Call 112 button. Nothing else.</p>
           <p>The link works for 30 minutes, or until the rider's group closes the alert or the link is revoked in the app. When an SOS or crash alert opens, the incident sheet can also show the nearest hospital from OpenStreetMap, with its distance and a Navigate button. The alert never waits for that lookup, and in some places no hospital is listed.</p>
         </div>
         <ul class="pg-ticks stack stack--16" role="list" data-reveal>
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Weather on the route.</strong> One plain line at review time and at ride start, such as "Rain likely after Warangal around 3 PM". Off in data saver.</span></li>
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">After dark.</strong> The review tells you when you will arrive after sunset, and spoken alerts can say more after dark.</span></li>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Route weather forecast.</strong> Open-Meteo forecasts rain and thunderstorms along your planned road corridor based on projected arrival times. One clear summary at trip review and ride start (such as "Rain likely after Warangal around 3 PM"), with automated warnings for impending rain. Disabled in data saver mode.</span></li>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Route Essentials discovery.</strong> Scans a 1.5 km corridor along the route for hospitals, motorcycle mechanics, tyre puncture repair and fuel stations with road access distances.</span></li>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Smart Fuel safety buffer.</strong> Tank range with 80% reminder, reserve buffer, and opt-in group fuel estimation so the convoy avoids running dry on remote stretches.</span></li>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Ride Guardian links.</strong> Secure browser tracking for family with optional PIN protection and 3 privacy tiers (Basic, Live, Emergency).</span></li>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Lock-screen convoy radar.</strong> Ongoing notification with Ahead and Behind radar, next fuel distance, battery-efficient telemetry, and low-battery alerts.</span></li>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Sweeper role.</strong> The lead can designate a sweeper at the tail. Both lead and sweeper hear alerts if someone drops behind the sweeper or stops updating.</span></li>
           <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Route map saved on the phone.</strong> Map tiles along the planned route can be kept on the phone before departure, for roads with no signal.</span></li>
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Sweeper, low battery and quiet riders.</strong> The lead can name a sweeper. The lead and the sweeper hear when a rider drops behind, runs low on battery or has not updated for a while.</span></li>
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Safety card and Hindi or Telugu.</strong> A one-screen safety card for a responder, and the safety screens and spoken alerts in Hindi or Telugu if you choose.</span></li>
+          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><span><strong class="t-body" style="color:var(--c-text)">Safety card and Hindi or Telugu.</strong> A one-screen safety card for a responder, and safety screens and spoken alerts in Hindi or Telugu if you choose.</span></li>
         </ul>
       </div>
       <p class="t-small t-muted" style="margin-top:var(--sp-24)">These are new and depend on phones, networks and public map and weather services. Treat them as help, not as promises. Details in the <a class="link" href="/privacy#live-links">privacy policy</a>.</p>
@@ -417,6 +600,7 @@
             <tr><th scope="row">A nearby rider who taps "I Can Help"</th><td data-label="What they see">Also your first name and your vehicle type and colour. Medical info only if you switched on sharing it with a helper from another group. Never phone numbers.</td><td data-label="When">Until the emergency is closed. Then access ends and their phone drops what it was shown.</td></tr>
             <tr><th scope="row">Your group, about that helper</th><td data-label="What they see">That a nearby rider is coming, their first name, distance and position on the way. Not their group.</td><td data-label="When">While they are on the way.</td></tr>
             <tr><th scope="row">Groups approaching on the same road</th><td data-label="What they see">The place of the accident only. No names.</td><td data-label="When">As they ride toward it.</td></tr>
+            <tr><th scope="row">Ride Guardian observers</th><td data-label="What they see">Depends on the chosen tier (Basic milestone status, Live route position, or Emergency-only position during an active SOS). Requires PIN if configured. Never phone numbers or account data.</td><td data-label="When">Until the link expires (at most 6 hours after ride end or 14 days) or is paused or revoked by the rider.</td></tr>
             <tr><th scope="row">Service administrators</th><td data-label="What they see">Open SOS alerts, who raised them, where, and who is going to help. Never medical info, never intercom audio.</td><td data-label="When">For safety operations.</td></tr>
           </tbody>
         </table>

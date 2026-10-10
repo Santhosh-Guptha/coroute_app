@@ -2,6 +2,7 @@
 <!-- Big ride notification, collapsed (DecoratedCustomViewStyle, content at most 64 dp).
      RemoteViews: only LinearLayout and TextView here. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ride_notif_collapsed_surface"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:gravity="center_vertical"

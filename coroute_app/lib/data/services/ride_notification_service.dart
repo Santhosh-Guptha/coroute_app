@@ -1,3 +1,8 @@
+import 'dart:convert';
+import '../../domain/notify/fuel_notification.dart';
+import 'ride_essentials_coordinator.dart';
+import 'safety_service.dart';
+import '../../domain/tracking/ride_power_policy.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -13,7 +18,7 @@ import 'settings_service.dart';
 import 'timeline_service.dart';
 
 /// A button of the big ride notification, as the app sees it.
-enum RideNotifActionKind { sos, wait, openMap, navigateEmergency, assistAccept }
+enum RideNotifActionKind { sos, wait, openMap, navigateEmergency, assistAccept, openFuel, viewGroup, viewFuel }
 
 class RideNotifAction {
   final RideNotifActionKind kind;
@@ -28,6 +33,12 @@ class RideNotifAction {
     final ref = raw['ref']?.toString();
     final r = (ref == null || ref.isEmpty) ? null : ref;
     switch (raw['action']?.toString()) {
+      case 'FUEL':
+        return RideNotifAction(RideNotifActionKind.openFuel, r);
+      case 'VIEW_GROUP':
+        return const RideNotifAction(RideNotifActionKind.viewGroup);
+      case 'VIEW_FUEL':
+        return const RideNotifAction(RideNotifActionKind.viewFuel);
       case NotifConstants.actionSos:
         return const RideNotifAction(RideNotifActionKind.sos);
       case NotifConstants.actionWait:
@@ -171,6 +182,8 @@ class RideNotificationService {
     RideNotificationChannel? channel,
     int Function()? clock,
     MedicalId? Function()? medicalId,
+    RideEssentialsCoordinator? essentials,
+    SafetyService? safety,
   }) : this.forPort(
           ConvoyRideNotifPort(convoys),
           settings,
@@ -179,6 +192,8 @@ class RideNotificationService {
           channel: channel,
           clock: clock,
           medicalId: medicalId,
+          essentials: essentials,
+          safety: safety,
         );
 
   /// For tests: any port, any timeline source. [medicalId] (3.16) returns the rider's
@@ -192,10 +207,14 @@ class RideNotificationService {
     int Function()? clock,
     this._clockText,
     MedicalId? Function()? medicalId,
+    this.essentials,
+    this.safety,
   })  : _events = timelineEvents ?? (() => const <TimelineEventModel>[]),
         _channel = channel ?? RideNotificationChannel(),
         _clock = clock ?? _wallClock,
         _medicalId = medicalId ?? _noMedicalId {
+    essentials?.addListener(_onChange);
+    safety?.addListener(_onChange);
     _port.addListener(_onChange);
     _timeline?.addListener(_onChange);
     _settings.addListener(_onChange);
@@ -212,6 +231,11 @@ class RideNotificationService {
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
   static MedicalId? _noMedicalId() => null;
 
+  final RideEssentialsCoordinator? essentials;
+  final SafetyService? safety;
+  bool _fuelView = false;
+  final String _actionSession = DateTime.now().microsecondsSinceEpoch.toString();
+  String get _fuelRef => jsonEncode([_actionSession, _port.myUserId, _port.activeConvoy?.groupId, essentials?.guide.routeVersion]);
   final RideNotifPort _port;
   final SettingsService _settings;
   final Listenable? _timeline;
@@ -224,6 +248,7 @@ class RideNotificationService {
 
   final ValueNotifier<RideNotifAction?> _pending = ValueNotifier<RideNotifAction?>(null);
 
+  Timer? _freshnessTimer;
   Timer? _timer;
   Timer? _recheck;
   bool _disposed = false;
@@ -234,6 +259,7 @@ class RideNotificationService {
   bool _gaveUp = false;
   bool? _supported;
   int _failures = 0;
+  final RidePowerPolicy _power = RidePowerPolicy();
   int _lastPushMs = -1 << 40;
   int _lastEnsureMs = -1 << 40;
   String? _lastKey;
@@ -294,6 +320,7 @@ class RideNotificationService {
 
   void _startRide(String gid) {
     _rideGroup = gid;
+    _fuelView = false;
     _failures = 0;
     _gaveUp = false;
     _lastKey = null;
@@ -302,6 +329,7 @@ class RideNotificationService {
   }
 
   void _endRide() {
+    _freshnessTimer?.cancel();
     _timer?.cancel();
     _timer = null;
     _recheck?.cancel();
@@ -319,6 +347,7 @@ class RideNotificationService {
 
   /// Rich notification switched off or given up: the plain one comes back.
   void _deactivate() {
+    _freshnessTimer?.cancel();
     _timer?.cancel();
     _timer = null;
     _dirty = false;
@@ -343,10 +372,17 @@ class RideNotificationService {
     _push().ignore();
   }
 
+  Duration get _normalRefreshInterval {
+    final c = _port.activeConvoy;
+    final me = c?.riders[_port.myUserId];
+    if (me != null) _power.updateBattery(me.batteryLevel, charging: me.isCharging);
+    return _power.notificationInterval(critical: c?.activeAlerts.isNotEmpty == true || _port.assistRequests.isNotEmpty || _port.hazards.isNotEmpty);
+  }
+
   void _schedule() {
     _dirty = true;
     if (_timer != null || _inFlight) return;
-    final wait = _lastPushMs + NotifConstants.minInterval.inMilliseconds - _clock();
+    final wait = _lastPushMs + _normalRefreshInterval.inMilliseconds - _clock();
     if (wait <= 0) {
       _push().ignore();
       return;
@@ -394,6 +430,7 @@ class RideNotificationService {
     final uid = _port.myUserId;
     if (convoy == null || uid == null || convoy.tripStatus == 'ENDED') return;
     final now = _clock();
+    _armFreshness(convoy, now);
     final snap = NotificationSnapshotBuilder.build(
       convoy: convoy,
       myUserId: uid,
@@ -406,7 +443,27 @@ class RideNotificationService {
       medicalId: _medicalId(),
     );
     final quick = _quickKey(NotificationSnapshotBuilder.quickState(convoy: convoy, myUserId: uid, assists: _port.assistRequests, hazards: _port.hazards));
-    final key = snap.dedupeKey;
+    final args = snap.toChannelArgs();
+    final shared = essentials;
+    if (snap.mode == NotifMode.ride && shared != null) {
+      final fuel = FuelNotification.build(snapshot: shared.essentials.snapshot,
+        progressM: shared.essentials.progressM, usableKm: safety?.estimatedUsableKm,
+        uncertain: safety?.fuelEstimateUncertain ?? true, online: !shared.essentials.offline,
+        currentPosition: shared.hasCurrentPosition, now: now);
+      args['view'] = _fuelView ? 'FUEL' : 'GROUP';
+      args['fuelRef'] = _fuelRef;
+      args['routeLine'] = _fuelView ? fuel.line : [
+        if (snap.behind.isNotEmpty) '${snap.behind.first.name} · ${snap.behind.first.detail}${snap.behind.first.flag == null ? '' : ' · ${snap.behind.first.flag}'}',
+        'You',
+        if (snap.ahead.isNotEmpty) '${snap.ahead.first.name} · ${snap.ahead.first.detail}${snap.ahead.first.flag == null ? '' : ' · ${snap.ahead.first.flag}'}',
+      ].join(' → ');
+      args['routeDetail'] = _fuelView ? fuel.detail : 'Distances from you · not to scale';
+      if (_fuelView) {
+        args['subtitle'] = fuel.detail;
+        if (fuel.warning && snap.tone == NotifTone.normal) args['tone'] = 'WARNING';
+      }
+    }
+    final key = jsonEncode(args);
     if (!force && key == _lastKey && _richActive) {
       _lastQuick = quick;
       await _ensureShowing(now);
@@ -414,7 +471,7 @@ class RideNotificationService {
     }
     var shown = false;
     try {
-      shown = await _channel.show(snap.toChannelArgs());
+      shown = await _channel.show(args);
     } on MissingPluginException {
       shown = false;
       _gaveUp = true; // no native side (tests of other screens, other platforms)
@@ -433,6 +490,23 @@ class RideNotificationService {
     } else {
       _failed();
     }
+  }
+
+  void _armFreshness(ConvoyModel convoy, int now) {
+    _freshnessTimer?.cancel();
+    final deadlines = <int>[
+      for (final rider in convoy.riders.values) ...[
+        rider.lastSeenEpochMs + NotifConstants.noSignalAfter.inMilliseconds + 1,
+        if (rider.stoppedSince > 0) rider.stoppedSince + NotifConstants.stoppedFlagAfter.inMilliseconds + 1,
+      ],
+      if (essentials?.essentials.snapshot != null)
+        essentials!.essentials.snapshot!.fetchedAt + const Duration(minutes: 30).inMilliseconds + 1,
+    ].where((at) => at > now).toList()..sort();
+    if (deadlines.isEmpty) return;
+    _freshnessTimer = Timer(Duration(milliseconds: deadlines.first - now), () {
+      _freshnessTimer = null;
+      _onChange();
+    });
   }
 
   /// The content did not change: once per interval make sure the plugin did not put its own back.
@@ -480,6 +554,17 @@ class RideNotificationService {
   void _onAction(RideNotifAction a) {
     if (_disposed) return;
     switch (a.kind) {
+      case RideNotifActionKind.viewGroup:
+      case RideNotifActionKind.viewFuel:
+        if (!_rideActive) return;
+        _fuelView = a.kind == RideNotifActionKind.viewFuel;
+        if (_fuelView) essentials?.refresh(category: 'FUEL').ignore();
+        _pushNow(force: true);
+        break;
+      case RideNotifActionKind.openFuel:
+        if (!_rideActive) return;
+        _pending.value = a.ref == _fuelRef ? a : const RideNotifAction(RideNotifActionKind.openMap);
+        break;
       case RideNotifActionKind.sos:
         // Never sends: the app opens the hold-to-send screen.
         _port.openSosFromNotification();
@@ -504,8 +589,11 @@ class RideNotificationService {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _freshnessTimer?.cancel();
     _timer?.cancel();
     _recheck?.cancel();
+    essentials?.removeListener(_onChange);
+    safety?.removeListener(_onChange);
     _port.removeListener(_onChange);
     _timeline?.removeListener(_onChange);
     _settings.removeListener(_onChange);

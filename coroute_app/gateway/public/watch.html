@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
+<title>Ride Guardian | Coroute</title>
+<link rel="manifest" href="/watch.webmanifest">
+<link rel="stylesheet" href="/assets/site.css"><link rel="stylesheet" href="/assets/guardian.css">
+<script src="/assets/guardian.js" defer></script>
+</head><body data-page="guardian">
+<main class="guardian" id="main">
+<a class="guardian__brand" href="/">COROUTE</a>
+<p class="guardian__eyebrow">RIDE GUARDIAN</p>
+<h1>Stay close to the journey.</h1>
+<p class="guardian__intro">Private trip updates, shared with you. No account needed.</p>
+<section class="guardian__card" aria-labelledby="ride-title">
+<p id="connection" role="status" aria-live="polite">Opening shared access…</p>
+<h2 id="ride-title">Personal ride</h2>
+<p id="ride-status">Waiting for trip information.</p>
+<p id="freshness"></p>
+<div id="incident" role="status"></div>
+<div id="riders"></div>
+<h3>Shared updates</h3><ol id="timeline"></ol>
+<a id="location" hidden target="_blank" rel="noreferrer noopener">View last reported location</a>
+<p id="expiry"></p>
+<div id="push-controls" hidden>
+<p>Get important trip updates even when this page is closed. Delivery depends on your browser, connection and notification settings.</p>
+<label><input type="checkbox" id="push-emergencies" checked> Emergency updates</label>
+<label><input type="checkbox" id="push-trip" checked> Trip starts, pauses and ends</label>
+<button id="enable-alerts" type="button">Enable alerts</button>
+<button id="disable-alerts" type="button" hidden>Disable alerts for this link</button>
+<p id="push-status" role="status"></p>
+</div>
+<div id="pin-box" hidden><label>Link PIN <input id="pin" inputmode="numeric" type="password" maxlength="8" autocomplete="off"></label></div>
+<button id="retry" type="button" hidden>Try again</button>
+</section>
+<p class="guardian__note">Live updates refresh while this page is open. Optional browser alerts appear when supported and enabled. On iPhone, add this page to your Home Screen to enable web alerts. Missing location updates do not necessarily mean an emergency.</p>
+<noscript>Enable JavaScript to view this private ride. No location is included in this page's source.</noscript>
+</main></body></html>

@@ -14,7 +14,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate, network = null, audit = null, publicLiveLimiter = null }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network = null, audit = null, publicLiveLimiter = null }) {
   const r = express.Router();
   const originOf = (req) => config.publicOrigin || `${req.protocol}://${req.get('host')}`;
 
@@ -46,6 +46,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       termsUrl: `${origin}/terms`,
       supportEmail: config.supportEmail,
       googleSignIn: config.googleClientIds.length > 0,
+      guardianPersonal: process.env.GUARDIAN_ENABLED === 'true',
     });
   });
 
@@ -404,6 +405,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     const lat = Number(req.query.lat), lng = Number(req.query.lng);
     if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) return res.status(400).json({ error: 'Invalid coordinates.' });
     res.json({ name: await geo.reverse(lat, lng) });
+  }));
+  r.post('/geo/essentials', geoLimiter, wrap(async (req, res) => {
+    try { res.set('Cache-Control', 'no-store').json(await essentials.query(req.body)); }
+    catch (e) { res.status(e.status || 503).json({ error: 'Route essentials are unavailable.', code: e.code || 'ESSENTIALS_UNAVAILABLE' }); }
   }));
   r.post('/geo/route', geoLimiter, wrap(async (req, res) => {
     const route = await geo.route(req.body?.waypoints);

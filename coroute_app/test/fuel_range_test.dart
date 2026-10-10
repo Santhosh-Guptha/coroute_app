@@ -151,7 +151,7 @@ void main() {
       await end(tester);
     });
 
-    testWidgets('arriving at a FUEL stop resets the count', (tester) async {
+    testWidgets('arriving at a FUEL stop never assumes refuelling', (tester) async {
       await start(tester);
       await ride(tester, fromKm: 0, toKm: 5.0);
       expect(safety.riddenSinceFillM, greaterThan(4500));
@@ -161,10 +161,10 @@ void main() {
       ]);
       port.changed();
       await tester.pump();
-      expect(safety.riddenSinceFillM, 0);
+      expect(safety.riddenSinceFillM, greaterThan(4500));
       port.changed();
       await tester.pump();
-      expect(safety.riddenSinceFillM, 0, reason: 'the same arrival does not reset twice');
+      expect(safety.riddenSinceFillM, greaterThan(4500), reason: 'only explicit confirmation resets fuel');
       await end(tester);
     });
 

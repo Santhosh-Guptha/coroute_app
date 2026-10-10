@@ -56,8 +56,8 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         const val NAV_EMERGENCY = "NAV_EMERGENCY"
         const val ASSIST_ACCEPT = "ASSIST_ACCEPT"
 
-        private val ACTIVITY_ACTIONS = setOf(SOS, MAP, NAV_EMERGENCY, WAIT, ASSIST_ACCEPT)
-        private val BROADCAST_ACTIONS = setOf(WAIT, ASSIST_ACCEPT)
+        private val ACTIVITY_ACTIONS = setOf(SOS, MAP, NAV_EMERGENCY, WAIT, ASSIST_ACCEPT, "FUEL")
+        private val BROADCAST_ACTIONS = setOf(WAIT, ASSIST_ACCEPT, "VIEW_GROUP", "VIEW_FUEL")
 
         private const val RC_CONTENT = 7101
         private const val RC_SOS = 7102
@@ -343,14 +343,25 @@ class RideNotification(private val activity: Activity, private val channel: Meth
             else -> null
         }
 
+        // A restrained, theme-aware surface: no flashing, animated gradients or extra updates.
+        // System notification chrome stays native; OEMs may choose their own outer colours.
+        val surface = when (tone) {
+            "CRITICAL" -> R.drawable.ride_notif_surface_critical
+            "WARNING" -> R.drawable.ride_notif_surface_warning
+            "POSITIVE" -> R.drawable.ride_notif_surface_positive
+            else -> R.drawable.ride_notif_surface_normal
+        }
+
         // Collapsed: two lines.
         val collapsed = RemoteViews(app.packageName, R.layout.ride_notif_collapsed)
+        collapsed.setInt(R.id.ride_notif_collapsed_surface, "setBackgroundResource", surface)
         collapsed.setTextViewText(R.id.ride_notif_c_title, title)
         collapsed.setTextViewText(R.id.ride_notif_c_subtitle, subtitle)
         if (toneColor != null && tone != "POSITIVE") collapsed.setTextColor(R.id.ride_notif_c_title, toneColor)
 
         // Expanded: title, convoy line, ladder, status, buttons.
         val expanded = RemoteViews(app.packageName, R.layout.ride_notif_expanded)
+        expanded.setInt(R.id.ride_notif_expanded_surface, "setBackgroundResource", surface)
         expanded.setTextViewText(R.id.ride_notif_title, title)
         if (toneColor != null && tone != "POSITIVE") expanded.setTextColor(R.id.ride_notif_title, toneColor)
         setOptionalText(expanded, R.id.ride_notif_header, header)
@@ -372,6 +383,23 @@ class RideNotification(private val activity: Activity, private val channel: Meth
             setOptionalText(expanded, ROW_FLAG_IDS[i], str(row, "flag"))
         }
         expanded.setViewVisibility(R.id.ride_notif_rows, if (shownRows > 0) View.VISIBLE else View.GONE)
+
+        val smartView = str(args, "view")
+        val smart = mode == "RIDE" && smartView.isNotEmpty()
+        expanded.setViewVisibility(R.id.ride_notif_smart, if (smart) View.VISIBLE else View.GONE)
+        if (smart) {
+            expanded.setViewVisibility(R.id.ride_notif_rows, View.GONE)
+            expanded.setTextViewText(R.id.ride_notif_route_line, str(args, "routeLine"))
+            expanded.setTextViewText(R.id.ride_notif_route_detail, str(args, "routeDetail"))
+            expanded.setContentDescription(R.id.ride_notif_route_line, str(args, "routeLine") + ". " + str(args, "routeDetail"))
+            expanded.setTextViewText(R.id.ride_notif_view_group, if (smartView == "GROUP") "Group •" else "Group")
+            expanded.setTextViewText(R.id.ride_notif_view_fuel, if (smartView == "FUEL") "Fuel •" else "Fuel")
+            expanded.setOnClickPendingIntent(R.id.ride_notif_view_group, broadcastIntent("VIEW_GROUP", "", 7107))
+            expanded.setOnClickPendingIntent(R.id.ride_notif_view_fuel, broadcastIntent("VIEW_FUEL", "", 7108))
+            val details = if (smartView == "FUEL") activityIntent("FUEL", str(args, "fuelRef"), 7109) else activityIntent(MAP, "", RC_MAP)
+            expanded.setOnClickPendingIntent(R.id.ride_notif_route_line, details)
+            expanded.setOnClickPendingIntent(R.id.ride_notif_route_detail, details)
+        }
 
         // Buttons (48 dp high, one tap each). SOS only opens the hold-to-send screen.
         val sosLabel = str(args, "sosLabel").ifEmpty { "SOS" }

@@ -170,4 +170,4 @@ function medianCentre(points) {
   return { lat: med(points.map((p) => p.lat)), lng: med(points.map((p) => p.lng)) };
 }
 
-module.exports = { haversine, pointToSegment, distanceToPolyline, alongRoute, polylineLength, encodePolyline, decodePolyline, simplify, medianCentre };
+module.exports = { cumulative, haversine, pointToSegment, distanceToPolyline, alongRoute, polylineLength, encodePolyline, decodePolyline, simplify, medianCentre };

@@ -2,6 +2,8 @@ import '../../core/constants/network_constants.dart';
 import 'safety_wire.dart';
 
 class RiderModel {
+  final double? fuelUsableKm;
+  final int fuelUpdatedAt;
   final String userId;
   final String name;
   final String vehicleType;
@@ -39,6 +41,8 @@ class RiderModel {
   bool get lowBattery => batteryLevel <= NetworkConstants.lowBatteryChipPct && !isCharging;
 
   RiderModel({
+    this.fuelUsableKm,
+    this.fuelUpdatedAt = 0,
     required this.userId,
     required this.name,
     this.vehicleType = 'Motorcycle',
@@ -90,6 +94,8 @@ class RiderModel {
     int? presenceAt,
   }) {
     return RiderModel(
+      fuelUsableKm: fuelUsableKm,
+      fuelUpdatedAt: fuelUpdatedAt,
       userId: userId ?? this.userId,
       name: name ?? this.name,
       vehicleType: vehicleType ?? this.vehicleType,
@@ -118,6 +124,7 @@ class RiderModel {
 
   Map<String, dynamic> toJson() {
     return {
+      if (fuelUsableKm != null) 'fuelEstimate': {'usableKm': fuelUsableKm, 'updatedAt': fuelUpdatedAt},
       'userId': userId,
       'name': name,
       'vehicleType': vehicleType,
@@ -146,6 +153,8 @@ class RiderModel {
 
   factory RiderModel.fromJson(Map<String, dynamic> json) {
     return RiderModel(
+      fuelUsableKm: json['fuelEstimate'] is Map ? (json['fuelEstimate']['usableKm'] as num?)?.toDouble() : null,
+      fuelUpdatedAt: json['fuelEstimate'] is Map ? (json['fuelEstimate']['updatedAt'] as num?)?.toInt() ?? 0 : 0,
       userId: json['userId'] ?? '',
       name: json['name'] ?? '',
       vehicleType: json['vehicleType'] ?? 'Motorcycle',

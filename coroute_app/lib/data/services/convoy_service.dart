@@ -1,3 +1,4 @@
+import '../../domain/tracking/ride_power_policy.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math' as math;
@@ -86,6 +87,8 @@ class ConvoyService extends ChangeNotifier {
   final SettingsService? settings;
   AppLifecycleListener? _lifecycle;
   bool _compassPaused = false;
+  final RidePowerPolicy _power = RidePowerPolicy();
+  bool get conservingBattery => _power.conserving;
 
   final ApiClient _api;
   final RealtimeService _rt;
@@ -1185,7 +1188,9 @@ class ConvoyService extends ChangeNotifier {
     final since = DateTime.now().difference(_lastTelemetryPush);
     final movedFar = current == null ||
         Geolocator.distanceBetween(current.lat, current.lng, position.latitude, position.longitude) > 40;
-    if (since >= AppConfig.telemetryInterval(settings?.lowData ?? false) || movedFar || (isMoving && wasStopped)) {
+    final critical = convoy.activeAlerts.isNotEmpty || assistRequests.isNotEmpty || hazards.isNotEmpty;
+    final interval = _power.telemetryInterval(moving: isMoving, lowData: settings?.lowData ?? false, critical: critical);
+    if (since >= interval || movedFar || (isMoving && wasStopped)) {
       _pushTelemetry(updated);
     }
   }
@@ -1196,6 +1201,14 @@ class ConvoyService extends ChangeNotifier {
     if (convoy == null) return;
     _allConvoys[gid!] = convoy.copyWith(riders: Map<String, RiderModel>.from(convoy.riders)..[rider.userId] = rider);
     notifyListeners();
+  }
+
+  /// Only an opted-in usable range, never tank contents or mileage.
+  Map<String, dynamic>? Function()? fuelEstimate;
+  void refreshFuelSharing() {
+    final uid = _myUserId;
+    final me = uid == null ? null : activeConvoy?.riders[uid];
+    if (me != null) _pushTelemetry(me);
   }
 
   void _pushTelemetry(RiderModel r) {
@@ -1209,6 +1222,7 @@ class ConvoyService extends ChangeNotifier {
     }
     _rt.send({
       'type': 'TELEMETRY',
+      'fuelEstimate': fuelEstimate?.call(),
       'lat': r.lat,
       'lng': r.lng,
       'speedKmh': double.parse(r.speedKmh.toStringAsFixed(1)),
@@ -1285,6 +1299,9 @@ class ConvoyService extends ChangeNotifier {
       _currentBatteryLevel = await _battery.batteryLevel;
       final state = await _battery.batteryState;
       _isCharging = state == BatteryState.charging || state == BatteryState.full;
+      final before = _power.conserving;
+      _power.updateBattery(_currentBatteryLevel, charging: _isCharging);
+      if (before != _power.conserving) notifyListeners();
     } catch (_) {}
   }
 

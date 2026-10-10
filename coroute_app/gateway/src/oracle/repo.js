@@ -34,6 +34,13 @@ const C = {
   events: 'trip_events',
   geoCache: 'geo_cache',
   audit: 'safety_audit',
+  guardianGrants: 'guardian_grants',
+  guardianSessions: 'guardian_sessions',
+  guardianRevocations: 'guardian_revocations',
+  guardianConsents: 'guardian_consents',
+  guardianSubscriptions: 'guardian_subscriptions',
+  guardianJobs: 'guardian_jobs',
+  guardianPauses: 'guardian_pauses',
 };
 
 /** Alert fields that live in memory only (filled by the safety network) and are never stored. */
@@ -70,6 +77,18 @@ class Repo {
     for (const name of Object.values(C)) await this.soda.ensureCollection(name);
     const idx = (coll, name, fields, unique = false) =>
       this.soda.ensureIndex(coll, { name, unique, fields: fields.map((f) => (typeof f === 'string' ? { path: f } : f)) });
+    await idx(C.guardianPauses, 'guardian_pause_ux', ['grantId'], true);
+    await idx(C.guardianSubscriptions, 'guardian_sub_ux', ['subscriptionId'], true);
+    await idx(C.guardianJobs, 'guardian_job_ux', ['jobId'], true);
+    await idx(C.guardianConsents, 'guardian_consent_ix', ['groupId', 'userId', { path: 'createdAt', datatype: 'number' }]);
+    await idx(C.guardianGrants, 'guardian_token_ux', ['tokenHash'], true);
+    await idx(C.guardianGrants, 'guardian_id_ux', ['grantId'], true);
+    await idx(C.guardianGrants, 'guardian_owner_ix', ['creatorId', 'groupId']);
+    await idx(C.guardianSessions, 'guardian_session_ux', ['sessionHash'], true);
+    await idx(C.guardianRevocations, 'guardian_revoke_ix', ['grantId']);
+    for (const coll of [C.guardianGrants, C.guardianSessions, C.guardianRevocations]) {
+      await idx(coll, `${coll}_expiry_ix`, [{ path: 'expiresAt', datatype: 'number' }]);
+    }
     await idx(C.users, 'users_userid_ux', ['userId'], true);
     await idx(C.users, 'users_email_ux', ['email'], true);
     await idx(C.convoys, 'convoys_groupid_ux', ['groupId'], true);
@@ -169,6 +188,20 @@ class Repo {
     const uid = user.userId;
     const groups = await this.groupsOfUser(user);
 
+    await this.soda.removeWhere(C.guardianConsents, { userId: uid });
+    // Remove guardian credentials and dependent sessions before erasing the owner.
+    for (;;) {
+      const grants = await this.soda.query(C.guardianGrants, { creatorId: uid }, { limit: 100 });
+      if (!grants.length) break;
+      for (const { key, value } of grants) {
+        await this.soda.removeWhere(C.guardianSessions, { grantId: value.grantId });
+        await this.soda.removeWhere(C.guardianSubscriptions, { grantId: value.grantId });
+        await this.soda.removeWhere(C.guardianJobs, { grantId: value.grantId });
+        await this.soda.removeWhere(C.guardianPauses, { grantId: value.grantId });
+        await this.soda.removeWhere(C.guardianRevocations, { grantId: value.grantId });
+        await this.soda.remove(C.guardianGrants, key);
+      }
+    }
     // The rider's own records.
     await this.soda.removeWhere(C.riders, { userId: uid });
     await this.soda.removeWhere(C.trips, { userId: uid });
@@ -226,6 +259,68 @@ class Repo {
     return doc;
   }
 
+  async setGuardianPause(doc) { await this.soda.upsertBy(C.guardianPauses, { grantId: doc.grantId }, doc); }
+  async guardianPaused(grantId) { return (await this.soda.findOne(C.guardianPauses, { grantId }))?.value.paused === true; }
+  async guardianEvents(groupId, since) {
+    return (await this.soda.query(C.events, { groupId, startedAt: { $gte: since } },
+      { limit: 100, orderBy: [{ path: 'startedAt', datatype: 'number', order: 'desc' }] })).map((r) => r.value);
+  }
+  async saveGuardianSubscription(doc) { return this.soda.upsertBy(C.guardianSubscriptions, { subscriptionId: doc.subscriptionId }, doc); }
+  async listGuardianSubscriptions(now, offset = 0) {
+    return (await this.soda.query(C.guardianSubscriptions, { expiresAt: { $gt: now } }, { limit: 100, offset })).map((r) => r.value);
+  }
+  async removeGuardianSubscription(subscriptionId) { await this.soda.removeWhere(C.guardianSubscriptions, { subscriptionId }); }
+  async enqueueGuardianJob(doc) {
+    if (await this.soda.findOne(C.guardianJobs, { jobId: doc.jobId })) return;
+    try { await this.soda.insert(C.guardianJobs, doc); }
+    catch (e) { if (!await this.soda.findOne(C.guardianJobs, { jobId: doc.jobId })) throw e; }
+  }
+  async listGuardianJobs(now) {
+    return (await this.soda.query(C.guardianJobs, { state: 'PENDING', nextAttemptAt: { $lte: now } }, { limit: 100 })).map((r) => r.value);
+  }
+  async saveGuardianJob(doc) { await this.soda.upsertBy(C.guardianJobs, { jobId: doc.jobId }, doc); }
+  async getGuardianSubscription(subscriptionId) {
+    return (await this.soda.findOne(C.guardianSubscriptions, { subscriptionId }))?.value || null;
+  }
+  async addGuardianConsent(doc) { await this.soda.insert(C.guardianConsents, doc); }
+  async guardianConsent(groupId, userId) {
+    const rows = await this.soda.query(C.guardianConsents, { groupId, userId },
+      { limit: 20, orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }] });
+    if (!rows.length) return null;
+    // Concurrent decisions at the same timestamp resolve conservatively to refusal.
+    const at = rows[0].value.createdAt;
+    return (rows.find((r) => r.value.createdAt === at && !r.value.allowed) || rows[0]).value;
+  }
+  // Guardian credentials never become user accounts or convoy membership.
+  async createGuardianGrant(doc) { await this.soda.insert(C.guardianGrants, doc); }
+  async guardianGrant(filter) {
+    const row = await this.soda.findOne(C.guardianGrants, filter);
+    return row ? row.value : null;
+  }
+  async listGuardianGrants(creatorId, groupId) {
+    const rows = await this.soda.query(C.guardianGrants, { creatorId, groupId },
+      { limit: 100, orderBy: [{ path: 'createdAt', order: 'desc' }] });
+    return rows.map((r) => r.value);
+  }
+  async createGuardianSession(doc) { await this.soda.insert(C.guardianSessions, doc); }
+  async guardianSession(sessionHash) {
+    const row = await this.soda.findOne(C.guardianSessions, { sessionHash });
+    return row ? row.value : null;
+  }
+  async guardianRevoked(grantId) {
+    return !!(await this.soda.findOne(C.guardianRevocations, { grantId }));
+  }
+  // Append-only tombstone: concurrent operations cannot resurrect a revoked grant.
+  async revokeGuardianGrant(doc) { await this.soda.insert(C.guardianRevocations, doc); }
+  async purgeGuardianAccess(nowMs) {
+    let count = 0;
+    // Remove grants before their tombstones; expiration is independently checked on reads.
+    for (const coll of [C.guardianGrants, C.guardianSessions, C.guardianRevocations, C.guardianSubscriptions, C.guardianJobs, C.guardianPauses]) {
+      count += await this.purgeOlderThan(coll, 'expiresAt', nowMs);
+    }
+    return count;
+  }
+
   // ---------- convoys ----------
   async getConvoyMeta(groupId) {
     const r = await this.soda.findOne(C.convoys, { groupId });
@@ -274,6 +369,27 @@ class Repo {
     return (await this.soda.query(C.trips, {}, { limit })).length;
   }
   async deleteConvoyCascade(groupId) {
+    // Invalidate access first, then erase dependent observer records in bounded pages.
+    await this.soda.removeWhere(C.convoys, { groupId });
+    await this.soda.removeWhere(C.guardianConsents, { groupId });
+    while (true) {
+      const grants = await this.soda.query(C.guardianGrants, { groupId }, { limit: 100 });
+      if (!grants.length) break;
+      for (const { key, value } of grants) {
+        while (true) {
+          const subs = await this.soda.query(C.guardianSubscriptions, { grantId: value.grantId }, { limit: 100 });
+          if (!subs.length) break;
+          for (const sub of subs) {
+            await this.soda.removeWhere(C.guardianRevocations, { grantId: sub.value.subscriptionId });
+            await this.soda.remove(C.guardianSubscriptions, sub.key);
+          }
+        }
+        for (const coll of [C.guardianSessions, C.guardianSubscriptions, C.guardianJobs, C.guardianPauses, C.guardianRevocations]) {
+          await this.soda.removeWhere(coll, { grantId: value.grantId });
+        }
+        await this.soda.remove(C.guardianGrants, key);
+      }
+    }
     await Promise.all([
       this.soda.removeWhere(C.riders, { groupId }),
       this.soda.removeWhere(C.messages, { groupId }),

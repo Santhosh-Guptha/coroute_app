@@ -10,4 +10,8 @@
     <color name="ride_notif_btn_text">#101418</color>
     <color name="ride_notif_sos_bg">#C62828</color>
     <color name="ride_notif_sos_text">#FFFFFF</color>
+    <color name="ride_notif_surface_normal">#EAF5F8</color>
+    <color name="ride_notif_surface_warning">#FFF3DE</color>
+    <color name="ride_notif_surface_critical">#FDEBEC</color>
+    <color name="ride_notif_surface_positive">#E8F5ED</color>
 </resources>

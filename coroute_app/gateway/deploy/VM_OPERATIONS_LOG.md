@@ -80,3 +80,15 @@
   4. Verified all public routes (`/`, `/features`, `/safety`, `/how-it-works`, `/about`, `/get`, `/privacy`, `/terms`, `/download`, `/api/health`) returning HTTP 200/302.
   5. Verified release APK downloads (`coroute.apk`, `coroute-32bit.apk`) remained intact and downloadable.
   6. Removed all public GitHub repository links from homepage, footer, and about page (180/180 tests pass).
+
+### Release 3.16.0+76 / Gateway v3.17.0 (2026-10-09)
+- **Operator User**: `antigravity`
+- **Activities**:
+  1. Ran automated gateway test suite: 273/273 tests passed locally and verified on VM.
+  2. Release split APKs compiled: `app-arm64-v8a-release.apk` (10.8 MB), `app-armeabi-v7a-release.apk` (10.4 MB).
+  3. Gateway deployment: Synced updated gateway codebase, new Ride Guardian (`watch.html`, `_watch-sw.js`, assets), Route Essentials (`essentials.js`), Web Push (`guardian_push.js`), updated public pages, and `package.json` (v3.17.0) to `/opt/coroute/gateway/`.
+  4. Dependencies updated: Installed `web-push` and runtime dependencies (`npm install --omit=dev`).
+  5. Environment configuration: Verified `/etc/coroute/gateway.env` (`LATEST_APP_BUILD=76`).
+  6. APK publication: Installed release binaries in `/opt/coroute/gateway/public/` as `coroute.apk` (10.8 MB) and `coroute-32bit.apk` (10.4 MB).
+  7. Service reload: `coroute-gateway.service` restarted and verified `HEALTHY` (`latestBuild: 76`, `version: 3.17.0`, `db: UP`).
+  8. Live verification: Verified public HTTPS endpoints (`https://coroute.duckdns.org/api/health`, `/api/meta`, `/`, `/features`, `/safety`, `/privacy`, `/about`, `/download`).

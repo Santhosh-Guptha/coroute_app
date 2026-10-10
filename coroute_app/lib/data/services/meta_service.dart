@@ -11,6 +11,7 @@ class AppMeta {
   final String termsUrl;
   final String supportEmail;
   final bool googleSignIn;
+  final bool guardianPersonal;
   const AppMeta({
     required this.minBuild,
     required this.latestBuild,
@@ -19,6 +20,7 @@ class AppMeta {
     required this.termsUrl,
     required this.supportEmail,
     required this.googleSignIn,
+    this.guardianPersonal = false,
   });
 
   factory AppMeta.fromJson(Map<String, dynamic> j) => AppMeta(
@@ -29,6 +31,7 @@ class AppMeta {
         termsUrl: j['termsUrl']?.toString() ?? '',
         supportEmail: j['supportEmail']?.toString() ?? '',
         googleSignIn: j['googleSignIn'] == true,
+        guardianPersonal: j['guardianPersonal'] == true,
       );
 }
 

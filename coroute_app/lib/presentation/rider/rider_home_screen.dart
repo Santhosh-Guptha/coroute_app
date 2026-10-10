@@ -1,3 +1,6 @@
+import '../../data/services/ride_essentials_coordinator.dart';
+import '../ride/essentials_sheet.dart';
+import '../../data/services/geo_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/l10n/l10n.dart';
@@ -121,6 +124,23 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
     rn.clearUiAction();
     _select(HomeTab.ride);
     switch (action.kind) {
+      case RideNotifActionKind.viewGroup:
+      case RideNotifActionKind.viewFuel:
+        break;
+      case RideNotifActionKind.openFuel:
+        final shared = context.read<RideEssentialsCoordinator?>();
+        final c = _convoys;
+        if (shared == null || c == null || shared.groupId != c.activeConvoy?.groupId) break;
+        shared.refresh(category: 'FUEL').ignore();
+        showEssentialsSheet(context, service: shared.essentials,
+          leader: c.canEditRoute, moving: (c.activeConvoy?.riders[c.myUserId]?.speedKmh ?? 0) > 5,
+          refresh: (category, force) => shared.refresh(category: category, force: force),
+          addStop: (place) {
+            if (!c.isOnline || (c.activeConvoy?.riders[c.myUserId]?.speedKmh ?? 0) > 5) return false;
+            final picked = PickedPlace(name: place.name, lat: place.lat, lng: place.lng, category: place.category);
+            return c.canEditRoute ? c.addStop(picked) : c.suggestStop(picked);
+          });
+        break;
       case RideNotifActionKind.openMap:
       case RideNotifActionKind.sos:
       case RideNotifActionKind.wait:

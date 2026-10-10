@@ -148,6 +148,32 @@ void main() {
     await tester.pump(d);
   }
 
+  testWidgets('freshness deadline updates without another location event and stops after disposal', (tester) async {
+    await setUp0(tester);
+    port.convoy = ride(); port.changed(); await tester.pump();
+    final first = channel.shows.length;
+    await advance(tester, const Duration(seconds: 121));
+    await tester.pump();
+    expect(channel.shows.length, greaterThan(first));
+    await tearDown0();
+    final count = channel.shows.length;
+    await advance(tester, const Duration(minutes: 5));
+    expect(channel.shows.length, count);
+  });
+
+  testWidgets('stale fuel action falls back to map and ended ride ignores fuel action', (tester) async {
+    await setUp0(tester);
+    port.convoy = ride(); port.changed(); await tester.pump();
+    channel.ctrl.add(const RideNotifAction(RideNotifActionKind.openFuel, 'old-route'));
+    await tester.pump();
+    expect(service!.pendingUiAction.value?.kind, RideNotifActionKind.openMap);
+    service!.clearUiAction();
+    port.convoy = ride(status: 'ENDED'); port.changed(); await tester.pump();
+    channel.ctrl.add(const RideNotifAction(RideNotifActionKind.openFuel, 'old-route'));
+    await tester.pump(); expect(service!.pendingUiAction.value, isNull);
+    await tearDown0();
+  });
+
   testWidgets('3.16: the medical ID provider is asked on every push; my own SOS shows it and the key changes', (tester) async {
     await setUp0(tester);
     port.convoy = ride();

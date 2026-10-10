@@ -1,3 +1,5 @@
+import 'dart:convert';
+import '../../domain/safety/fuel_profile.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
@@ -44,6 +46,23 @@ class SettingsService extends ChangeNotifier {
   // 3.16.
   AppLanguage _language = AppLanguage.system;
   int _fuelRangeKm = 0;
+  FuelProfile? _fuelProfile;
+  bool _shareFuelEstimate = false;
+  bool get shareFuelEstimate => _shareFuelEstimate;
+  Future<void> setShareFuelEstimate(bool value) async {
+    final prefs = await _p();
+    if (!await prefs.setBool('share_fuel_estimate_v1', value)) throw StateError('Could not save sharing preference');
+    _shareFuelEstimate = value;
+    notifyListeners();
+  }
+  FuelProfile get fuelProfile => _fuelProfile ?? FuelProfile(fullRangeKm: _fuelRangeKm.toDouble());
+  Future<void> setFuelProfile(FuelProfile profile) async {
+    if (!profile.valid) throw ArgumentError('Invalid fuel profile');
+    final prefs = await _p();
+    if (!await prefs.setString('fuel_profile_v1', jsonEncode(profile.toJson()))) throw StateError('Fuel settings could not be saved');
+    _fuelProfile = profile;
+    notifyListeners();
+  }
   bool _speakMoreAfterDark = true;
   bool _medicalIdOnLockScreen = false;
   bool _documentsReminder = true;
@@ -116,7 +135,14 @@ class SettingsService extends ChangeNotifier {
       _netConsentSeen = prefs.getBool(NetworkConstants.keyNetConsentSeen) ?? false;
       _netConsentPrompts = prefs.getInt(NetworkConstants.keyNetConsentPrompts) ?? 0;
       _language = AppLanguage.fromCode(prefs.getString(NetworkConstants.keyLanguage));
+      _shareFuelEstimate = prefs.getBool('share_fuel_estimate_v1') ?? false;
       _fuelRangeKm = _clampRange(prefs.getInt(NetworkConstants.keyFuelRangeKm) ?? 0);
+      try {
+        final raw = prefs.getString('fuel_profile_v1');
+        final j = raw == null ? null : jsonDecode(raw);
+        final p = j is Map ? FuelProfile.fromJson(j) : null;
+        _fuelProfile = p?.valid == true ? p : null;
+      } catch (_) { _fuelProfile = null; }
       _speakMoreAfterDark = prefs.getBool(NetworkConstants.keySpeakAfterDark) ?? true;
       _medicalIdOnLockScreen = prefs.getBool(NetworkConstants.keyMedicalIdLock) ?? false;
       _documentsReminder = prefs.getBool(NetworkConstants.keyDocsReminder) ?? true;

@@ -64,6 +64,11 @@
         <li>Medical info is optional. Your convoy sees it only while your SOS or crash alert is open, and administrators never see it.</li>
         <li>Emergency texts and Groups nearby are off until they are switched on.</li>
         <li>During an SOS you, or your lead, can share a live link that shows your first name, last position and update time for 30 minutes. Weather and nearest hospital lookups send only rounded route points or the alert position through our server. Saved map tiles stay on your phone.</li>
+        <li>Ride Guardian links offer PIN-protected web monitoring for family across 3 privacy tiers (Basic, Live, Emergency). Session and capability tokens are hashed, grants can be paused or revoked at any time by the rider, and access expires automatically.</li>
+        <li>Route Essentials searches for fuel, puncture repair, food, and medical within 1.5 km of the road via OpenStreetMap Overpass without sending rider identities or tracking profiles; responses are cached on the server.</li>
+        <li>Smart Fuel Profile keeps tank capacity, mileage, and reserve buffers stored locally on your device; raw tank inputs are never uploaded, and only opted-in usable range estimates are shared.</li>
+        <li>Quick dialing for 108 Ambulance, 112 National Emergency, and 100 Police connects through the device native dialer directly to public emergency operators; CoRoute does not record or route emergency calls.</li>
+        <li>Sweeper assignments and rider-down incident reports are shared only with the active group (and approaching riders for road safety warnings), with no private personal data leaked.</li>
         <li>Recorded routes and exact positions are deleted after 90 days. You can delete your account in the app at any time, and it is removed at once.</li>
       </ul>
       <p class="legal-summary__note">This is a short summary. The full text below has the details.</p>
@@ -82,10 +87,14 @@
           <li><a class="legal-toc__link" href="#spoken-alerts">Spoken alerts and the ride notification</a></li>
           <li><a class="legal-toc__link" href="#microphone">Microphone</a></li>
           <li><a class="legal-toc__link" href="#live-links">Live emergency links</a></li>
+          <li><a class="legal-toc__link" href="#guardian-links">Ride Guardian links</a></li>
           <li><a class="legal-toc__link" href="#weather">Weather on the route</a></li>
           <li><a class="legal-toc__link" href="#nearest-hospital">Nearest hospital</a></li>
           <li><a class="legal-toc__link" href="#offline-maps">Maps saved on your phone</a></li>
+          <li><a class="legal-toc__link" href="#route-essentials">Route Essentials</a></li>
+          <li><a class="legal-toc__link" href="#smart-fuel">Smart Fuel Profile</a></li>
           <li><a class="legal-toc__link" href="#ride-alerts">Sweeper, battery and update gaps</a></li>
+          <li><a class="legal-toc__link" href="#emergency-services">Indian emergency services</a></li>
           <li><a class="legal-toc__link" href="#hard-braking">Hard braking count</a></li>
           <li><a class="legal-toc__link" href="#medical-id-lock-screen">Medical ID on the lock screen</a></li>
           <li><a class="legal-toc__link" href="#bluetooth">Bluetooth</a></li>
@@ -124,6 +133,9 @@
       <tr><td data-label="Data"><b>Convoy records</b>: convoy name, join code, members, start/end time, settings, planned stops, chat and quick-status messages, SOS alerts</td><td data-label="Why">To run the convoy and show your trip history</td><td data-label="Kept for">Kept as part of your trip history; GPS traces inside them and the exact position of SOS alerts are deleted after 90 days</td></tr>
       <tr><td data-label="Data"><b>Trip history</b>: trip name, members, dates, distance and speed statistics, and the names of the places where each rider started and finished</td><td data-label="Why">Your personal ride log</td><td data-label="Kept for">Until you delete the trip or your account; the GPS trail of a trip is deleted after 90 days</td></tr>
       <tr><td data-label="Data"><b>Voice</b></td><td data-label="Why">Live intercom between convoy members (group, or privately to one rider you choose)</td><td data-label="Kept for"><b>Audio is never stored.</b> It is relayed in real time and discarded. We keep only who talked to whom and for how long, for 7 days, to detect abuse</td></tr>
+      <tr><td data-label="Data"><b>Ride Guardian links</b>: hashed session tokens and capability tokens, optional label, selected tier (Basic, Live, Emergency), hashed PIN, expiry time</td><td data-label="Why">To allow family or trusted contacts to monitor ride status or emergency location via PIN-protected web access</td><td data-label="Kept for">Until expired, revoked by the rider, or purged upon convoy deletion or account removal</td></tr>
+      <tr><td data-label="Data"><b>Smart Fuel Profile (local)</b>: tank capacity, mileage, reserve buffer</td><td data-label="Why">Calculates remaining range on device; only opted-in, fresh usable range estimates (in km) are shared with the convoy for fuel stop planning</td><td data-label="Kept for">Stored locally on your device; raw tank inputs are never uploaded</td></tr>
+      <tr><td data-label="Data"><b>Sweeper &amp; Rider Down reports</b>: sweeper assignment, rider-down incident location and report time</td><td data-label="Why">Shared only with the active group to coordinate assistance, and approaching riders as an anonymized road safety warning</td><td data-label="Kept for">Kept during the active convoy and purged with convoy records</td></tr>
       <tr><td data-label="Data"><b>Technical</b>: server logs with IP address and request time</td><td data-label="Why">Security and keeping the service running</td><td data-label="Kept for">Rotated automatically within a few weeks</td></tr>
       </tbody>
       </table></div>
@@ -226,6 +238,17 @@
       itself and never a position.</p>
       </section>
 
+      <section class="legal-section" id="guardian-links" aria-labelledby="guardian-links-h">
+      <h2 id="guardian-links-h">Ride Guardian links</h2>
+      <p>Ride Guardian links provide PIN-protected web monitoring for family and trusted contacts to follow your ride without needing a CoRoute account. You choose one of three privacy tiers for each link:</p>
+      <ul>
+        <li><b>Basic</b>: aggregate status and progress without exact coordinates.</li>
+        <li><b>Live</b>: personal location during active ride only.</li>
+        <li><b>Emergency</b>: location only when SOS or crash alert is open.</li>
+      </ul>
+      <p>Session tokens and capability tokens are stored only as cryptographic hashes on our servers, ensuring raw credentials cannot be extracted from database storage. Observers cannot see other convoy members, group chat, emergency contacts, or rider medical profiles. Grants can be paused or revoked at any time by the rider in the app. Access expires automatically when the ride ends or the chosen expiry duration lapses. All dependent records are purged upon convoy deletion or account removal.</p>
+      </section>
+
       <section class="legal-section" id="weather" aria-labelledby="weather-h">
       <h2 id="weather-h">Weather on the route</h2>
       <p>When you review a planned route and once more when the ride starts, the app can ask for a weather line such as
@@ -251,12 +274,31 @@
       and we do not know which tiles were saved.</p>
       </section>
 
+      <section class="legal-section" id="route-essentials" aria-labelledby="route-essentials-h">
+      <h2 id="route-essentials-h">Route Essentials</h2>
+      <p>Route Essentials helps you find critical services along your planned path. Corridor queries search for fuel, puncture repair, food, and medical within 1.5 km of the road.</p>
+      <p>CoRoute queries OpenStreetMap Overpass without sending rider identities or tracking profiles; queries use only the corridor coordinates around the route. Query responses are cached on the server so riders traveling the same route do not trigger duplicate external requests.</p>
+      </section>
+
+      <section class="legal-section" id="smart-fuel" aria-labelledby="smart-fuel-h">
+      <h2 id="smart-fuel-h">Smart Fuel Profile</h2>
+      <p>Smart Fuel Profile calculates estimated motorcycle range to help convoys plan collective fuel stops. Tank capacity, mileage, and reserve buffers remain stored locally on your device.</p>
+      <p>Only opted-in, fresh usable range estimates (in km) are shared with your ride group for collective fuel stop planning. Raw tank inputs are never uploaded. You can disable fuel range sharing in your settings at any time.</p>
+      </section>
+
       <section class="legal-section" id="ride-alerts" aria-labelledby="ride-alerts-h">
       <h2 id="ride-alerts-h">Sweeper, battery and update gaps</h2>
       <p>Your battery level and the time of your last position update are already shared with your ride group as part of your
       live location. Since 3.16 the app also uses them for alerts: the lead can make one rider the sweeper, and the lead and the
       sweeper are told when a rider's battery is low, when a rider has not sent an update for unusually long, or when a rider
       drops behind the sweeper. This adds no new data; it only shows what the group already sees in a clearer way.</p>
+      <p>Sweeper assignments and rider-down incident reports are shared only with the active group (and approaching riders for road safety warnings), with no private personal data leaked. When a rider-down report is filed, approaching riders of other groups on the same route receive only an anonymized road hazard alert and distance warning, without rider names, phone numbers, or group identities.</p>
+      </section>
+
+      <section class="legal-section" id="emergency-services" aria-labelledby="emergency-services-h">
+      <h2 id="emergency-services-h">Indian emergency services</h2>
+      <p>In emergency and safety screens, the app provides quick dialing shortcuts for Indian emergency services: 108 Ambulance, 112 National Emergency, and 100 Police.</p>
+      <p>Quick dialing for 108 Ambulance, 112 National Emergency, and 100 Police connects through the device native dialer directly to public emergency operators. CoRoute does not record or route emergency calls.</p>
       </section>
 
       <section class="legal-section" id="hard-braking" aria-labelledby="hard-braking-h">
@@ -289,6 +331,7 @@
       abusive convoy or send a safety announcement), open SOS alerts with who raised them, where and who is going to help, the
       safety log and false alarm counts; they cannot see medical info or listen to intercom audio. Riders of other groups see only
       what is described under "Help from nearby riders of other groups" and "Groups nearby".</p>
+      <p>Ride Guardian viewers see only the individual rider who created the grant, limited strictly to the chosen tier (Basic: aggregate status without exact coordinates; Live: personal location during active ride only; Emergency: location only when SOS or crash alert is open). They cannot see convoy chat, rider rosters, contact numbers, or medical profiles. Sweeper assignments and rider-down incident reports are shared only with the active group, and approaching riders on the same road receive road safety warnings with no private personal data leaked.</p>
       </section>
 
       <section class="legal-section" id="where-data-lives" aria-labelledby="where-data-lives-h">
@@ -308,6 +351,7 @@
       within 30 days. You may also request a copy of your data. You can revoke location and microphone permissions at any time in
       your phone's settings; the app will then work in a limited mode. You can switch crash detection, emergency texts, help from nearby riders, spoken alerts and the
       lock screen view off at any time in the app.</p>
+      <p>Ride Guardian grants can be paused or revoked at any time by the rider in the app, and dependent records are purged upon convoy deletion or account removal. Smart Fuel Profile sharing is entirely optional and can be toggled off at any time, keeping tank inputs stored only on your local device.</p>
       </section>
 
       <section class="legal-section" id="children" aria-labelledby="children-h">

@@ -88,10 +88,13 @@ test('5 points: one upstream call, grid rounding dedupes, per-point hour, cached
   assert.equal(calls.length - before, 1, 'cache hit within 30 minutes');
   assert.equal(r2.json.points[1].precipProb, 70);
   // The 48 hour limit: a point far in the future is clamped, a point beyond the forecast is null.
+  const beforeClamp = nowS();
   const r3 = await post([{ lat: 17.41, lng: 78.48, at: nowS() + 3600 }, { lat: 17.41, lng: 78.48, at: nowS() + 10 * 86400 }]);
   assert.equal(r3.status, 200);
   assert.ok(r3.json.points[0] && Number.isFinite(r3.json.points[0].precipProb));
-  assert.equal(r3.json.points[1].at, Math.round(nowS() + 48 * 3600), 'clamped to 48 h');
+  const afterClamp = nowS();
+  assert.ok(r3.json.points[1].at >= beforeClamp + 48 * 3600 &&
+    r3.json.points[1].at <= afterClamp + 48 * 3600, 'clamped to 48 h at request processing time');
 });
 
 test('global budget exhausted: cached cells answered, new cells null; upstream failure answers nulls', async () => {

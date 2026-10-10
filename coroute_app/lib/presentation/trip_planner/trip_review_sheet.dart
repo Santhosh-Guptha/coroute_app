@@ -1,3 +1,4 @@
+import '../ride/essentials_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
@@ -208,6 +209,7 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                       ? 'Route preview is not available right now. It is worked out when the ride starts.'
                       : 'No destination yet. You can set it during the ride.',
                 ),
+              if (r != null && !r.approximate) EssentialsPreview(route: r),
               if (r != null && r.approximate)
                 Padding(
                   padding: const EdgeInsets.only(top: Space.s8),

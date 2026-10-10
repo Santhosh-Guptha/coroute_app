@@ -1,3 +1,6 @@
+import 'data/services/ride_essentials_coordinator.dart';
+import 'data/services/route_essentials_service.dart';
+import 'data/services/fuel_sharing_binding.dart';
 import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
@@ -135,14 +138,18 @@ class CoRouteApp extends StatelessWidget {
         // Created at start so a crash alarm can open without any screen asking for it.
         ChangeNotifierProvider<SafetyService>(
           lazy: false,
-          create: (ctx) => SafetyService(
-            ctx.read<ConvoyService>(),
-            ctx.read<SettingsService>(),
-            ctx.read<AuthService>(),
-            voice: ctx.read<VoiceService>(),
-            weather: ctx.read<WeatherService>(),
-            tiles: ctx.read<TilePrefetcher>(),
-          ),
+          create: (ctx) {
+            final convoys = ctx.read<ConvoyService>();
+            final settings = ctx.read<SettingsService>();
+            final safety = SafetyService(convoys, settings, ctx.read<AuthService>(),
+              voice: ctx.read<VoiceService>(), weather: ctx.read<WeatherService>(), tiles: ctx.read<TilePrefetcher>());
+            return safety;
+          },
+        ),
+        Provider<FuelSharingBinding>(
+          lazy: false,
+          create: (ctx) => FuelSharingBinding(ctx.read<ConvoyService>(), ctx.read<SettingsService>(), ctx.read<SafetyService>()),
+          dispose: (_, binding) => binding.dispose(),
         ),
         // In-app navigation to an emergency and accident warnings on my route (voice works with
         // the screen off, from fixes the ride already has).
@@ -158,6 +165,15 @@ class CoRouteApp extends StatelessWidget {
             );
           },
         ),
+        ChangeNotifierProvider<RideEssentialsCoordinator>(
+          lazy: false,
+          create: (ctx) => RideEssentialsCoordinator(
+            ConvoyEssentialsPort(ctx.read<ConvoyService>()),
+            ctx.read<SettingsService>(),
+            RouteEssentialsService(ctx.read<ApiClient>()),
+            fetchRoute: GeoService(ctx.read<ApiClient>()).route,
+          ),
+        ),
         // The big ride notification on the home and lock screen (replaces the plain one in place).
         Provider<RideNotificationService>(
           lazy: false,
@@ -168,6 +184,8 @@ class CoRouteApp extends StatelessWidget {
               ctx.read<ConvoyService>(),
               ctx.read<TimelineService>(),
               settings,
+              essentials: ctx.read<RideEssentialsCoordinator>(),
+              safety: ctx.read<SafetyService>(),
               // Opt-in (3.16): the rider's medical ID on the lock screen during their own SOS.
               medicalId: () => settings.medicalIdOnLockScreen ? MedicalId.fromAuth(auth) : null,
             );

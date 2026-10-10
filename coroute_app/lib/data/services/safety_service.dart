@@ -425,6 +425,11 @@ class SafetyService extends ChangeNotifier {
   TrackPoint? _darkFix;
   String? _fuelLoadedFor;
   double _fuelSavedM = 0;
+  int _fuelMutation = 0;
+  String? _fuelUserId;
+  bool _fuelSavedUncertain = false;
+  Future<void> _fuelWrites = Future.value();
+  bool fuelSaveFailed = false;
   int _brakesSaved = 0;
   String? _weatherDoneFor;
   String? _tilesDoneFor;
@@ -447,6 +452,17 @@ class SafetyService extends ChangeNotifier {
 
   /// Metres ridden since the last fill (item 2), for the ride sheet line.
   double get riddenSinceFillM => _fuel.riddenM;
+  double? get estimatedUsableKm => _fuel.usableKm(_settings.fuelProfile);
+  bool get fuelEstimateUncertain => _fuel.uncertain;
+  int get fuelConfirmedAt => _fuel.lastFillAt;
+  bool refuel({bool full = false, double? addedL, double? currentL, double? currentKm}) {
+    if (!_fuel.refuel(_settings.fuelProfile, _now(), full: full, addedL: addedL, currentL: currentL, currentKm: currentKm)) return false;
+    _fuelMutation++;
+    _removePrompt(SafetyConstants.promptFuel, notify: false);
+    _saveFuel(force: true);
+    notifyListeners();
+    return true;
+  }
 
   /// The fuel reminder is showing.
   bool get fuelReminderActive => _prompts.containsKey(SafetyConstants.promptFuel);
@@ -463,7 +479,8 @@ class SafetyService extends ChangeNotifier {
 
   /// "Filled up" (quick action or the fuel prompt): the distance count starts again.
   void filledUp() {
-    _fuel.filledUp(_now());
+    if (!_fuel.refuel(_settings.fuelProfile, _now(), full: true)) _fuel.filledUp(_now());
+    _fuelMutation++;
     _removePrompt(SafetyConstants.promptFuel, notify: false);
     _saveFuel(force: true);
     notifyListeners();
@@ -597,7 +614,10 @@ class SafetyService extends ChangeNotifier {
     final convoy = _port.activeConvoy;
     final gid = convoy?.groupId;
     final active = _port.rideActive;
-    if (gid != _groupId || active != _rideActive) {
+    if (gid != _groupId || active != _rideActive || _fuelUserId != _port.myUserId) {
+      _fuelUserId = _port.myUserId;
+      _fuelMutation++;
+      _fuelLoadedFor = null;
       _endRideStats();
       // The ride ended or changed: a route map still being saved is for the old route (no data after the ride).
       if (_rideActive) _tiles?.cancel();
@@ -616,7 +636,6 @@ class SafetyService extends ChangeNotifier {
     }
     _watchPendingSos();
     _evalCheckIn();
-    _fuelStopArrival(convoy);
     _evalFollowUp(convoy);
     _updateSensor();
   }
@@ -996,43 +1015,34 @@ class SafetyService extends ChangeNotifier {
     }
   }
 
-  /// Arriving at a planned FUEL stop counts as a fill (the stop's arrival time of mine).
-  void _fuelStopArrival(ConvoyModel? convoy) {
-    final uid = _port.myUserId;
-    if (convoy == null || uid == null || !_rideActive) return;
-    var latest = 0;
-    for (final s in convoy.stopPoints) {
-      if (s.category != 'FUEL') continue;
-      final at = s.arrivals[uid]?.arrivedAt ?? 0;
-      if (at > latest) latest = at;
-    }
-    if (latest > 0 && latest > _fuel.lastFillAt) {
-      _fuel.filledUp(latest);
-      _removePrompt(SafetyConstants.promptFuel, notify: false);
-      _saveFuel(force: true);
-      notifyListeners();
-    }
-  }
-
   /// Written when the count moved by 500 m, on a fill or a reminder (cheap JSON, no timer).
   void _saveFuel({bool force = false}) {
     final gid = _groupId;
     if (gid == null || !_rideActive) return;
-    if (!force && (_fuel.riddenM - _fuelSavedM).abs() < 500) return;
+    if (!force && !fuelSaveFailed && _fuel.uncertain == _fuelSavedUncertain && (_fuel.riddenM - _fuelSavedM).abs() < 500) return;
     _fuelSavedM = _fuel.riddenM;
-    final json = jsonEncode({'g': gid, 's': _fuel.toJson()});
-    SharedPreferences.getInstance().then((prefs) => prefs.setString(SafetyConstants.keyFuelState, json)).catchError((Object _) => false);
+    _fuelSavedUncertain = _fuel.uncertain;
+    final json = jsonEncode({'g': gid, 'u': _port.myUserId, 's': _fuel.toJson()});
+    _fuelWrites = _fuelWrites.then((_) async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        fuelSaveFailed = !await prefs.setString(SafetyConstants.keyFuelState, json);
+      } catch (_) { fuelSaveFailed = true; }
+      if (!_disposed) notifyListeners();
+    });
   }
 
   Future<void> _restoreFuel(String gid) async {
     if (_fuelLoadedFor == gid) return;
     _fuelLoadedFor = gid;
+    final mutation = _fuelMutation;
+    final uid = _port.myUserId;
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(SafetyConstants.keyFuelState);
-      if (_disposed || raw == null || raw.isEmpty || _groupId != gid) return;
+      if (_disposed || raw == null || raw.isEmpty || _groupId != gid || _port.myUserId != uid || mutation != _fuelMutation) return;
       final j = jsonDecode(raw);
-      if (j is! Map || j['g'] != gid) return;
+      if (j is! Map || j['g'] != gid || j['u'] != uid) return;
       final saved = FuelRangeTracker.fromJson(j['s'] is Map ? j['s'] as Map : null);
       if (saved == null) return;
       // Fixes that came in while loading are few; the saved count is the larger one.

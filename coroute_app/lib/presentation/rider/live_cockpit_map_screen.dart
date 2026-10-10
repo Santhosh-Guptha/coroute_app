@@ -1,3 +1,7 @@
+import '../../data/services/ride_essentials_coordinator.dart';
+import '../../data/services/route_essentials_service.dart';
+import 'package:coroute_app/presentation/ride/essentials_sheet.dart';
+import 'package:coroute_app/presentation/ride/fuel_sheet.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +9,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/config/app_config.dart';
@@ -176,25 +181,90 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   int _hideTimerAt = 0;
 
   // Route following: fed with my own fixes by the convoy listener (never by a timer).
-  late final RouteGuide _guide = RouteGuide(fetchRoute: _fetchRoute);
+  late final RouteGuide _localGuide = RouteGuide(fetchRoute: _fetchRoute);
+  RideEssentialsCoordinator? _rideEssentials;
+  RouteGuide get _guide => _rideEssentials?.guide ?? _localGuide;
   ConvoyService? _convoys;
   AuthService? _auth;
   GeoService? _geo;
 
   // The active line as map points, rebuilt only when the line is replaced or my matched point moves.
   RouteProgress? _lineSource;
+  RouteEssentialsService? _essentials;
+
+  Future<void> _syncEssentials({String? category, bool force = false}) async {
+    if (!mounted) return;
+    final shared = _rideEssentials;
+    if (shared != null) {
+      await shared.refresh(category: category, force: force);
+      return;
+    }
+    final api = context.read<ApiClient?>();
+    if (api == null) return;
+    _essentials ??= RouteEssentialsService(api)..addListener(_essentialsChanged);
+    final s = _convoys;
+    final active = _guide.active;
+    await _essentials!.update(active?.last?.onLine == false ? null : _guide.activeRoute,
+      fromM: active?.matched?.alongM ?? 0, online: s?.isOnline ?? false,
+      lowData: s?.settings?.lowData ?? false, selectedCategory: category ?? _essentials!.category, force: force);
+  }
+  void _essentialsChanged() { if (mounted) setState(() {}); }
+  void _openEssentials() {
+    final e = _essentials, s = _convoys;
+    if (e == null || s == null) return;
+    final c = s.allConvoys[widget.convoyId];
+    final me = c?.riders[s.myUserId];
+    final leader = me?.role == 'LEAD';
+    showEssentialsSheet(context, service: e, leader: leader, moving: (me?.speedKmh ?? 0) > 5,
+      refresh: (category, force) => _syncEssentials(category: category, force: force),
+      addStop: (place) {
+        if ((s.activeConvoy?.riders[s.myUserId]?.speedKmh ?? 0) > 5 || !s.isOnline) return false;
+        final picked = PickedPlace(name: place.name, lat: place.lat, lng: place.lng, category: place.category);
+        final ok = leader ? s.addStop(picked) : s.suggestStop(picked);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Stop request sent. Waiting for the group plan to update.' : 'Could not send. Reconnect and try again.')));
+        return ok;
+      });
+  }
+
   int _lineVersion = -1;
   List<LatLng> _lineFull = const [];
   RouteMatch? _trimKey;
   List<LatLng> _lineTrimmed = const [];
 
+  Future<void> _loadDismissed() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      final saved = prefs.getStringList('coroute_dismissed_alerts_${widget.convoyId}');
+      if (saved != null && saved.isNotEmpty) {
+        setState(() => _dismissed.addAll(saved));
+      }
+    } catch (_) {}
+  }
+
+  void _dismissAlert(String key) {
+    if (!mounted) return;
+    setState(() => _dismissed.add(key));
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setStringList('coroute_dismissed_alerts_${widget.convoyId}', _dismissed.toList()).ignore();
+    }).ignore();
+  }
+
   @override
   void initState() {
     super.initState();
-    _guide.addListener(_onGuide);
+    _loadDismissed();
+
     widget.focus?.addListener(_onFocusRequest);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _rideEssentials = context.read<RideEssentialsCoordinator?>();
+      if (_rideEssentials != null) {
+        _essentials = _rideEssentials!.essentials;
+        _rideEssentials!.addListener(_essentialsChanged);
+      } else {
+        _localGuide.addListener(_onGuide);
+      }
       _auth = context.read<AuthService>();
       final s = context.read<ConvoyService>();
       _convoys = s;
@@ -211,12 +281,17 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       oldWidget.focus?.removeListener(_onFocusRequest);
       widget.focus?.addListener(_onFocusRequest);
     }
+    if (oldWidget.convoyId != widget.convoyId) {
+      _dismissed.clear();
+      _loadDismissed();
+    }
   }
 
   /// The route status or the active line changed (a new route arrived, or I
   /// am back on the plan). Called from a convoy update or a finished route
   /// request, never while building.
   void _onGuide() {
+    if (mounted) _syncEssentials();
     if (mounted) setState(() {});
   }
 
@@ -236,6 +311,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     final convoy = s.allConvoys[widget.convoyId];
     final uid = _auth?.currentUserId ?? s.myUserId ?? '';
     if (convoy == null || uid.isEmpty) return;
+    if (_rideEssentials != null) return;
     _guide.setConvoy(convoy, uid);
     if (!s.isRealGpsActive) return;
     final life = WidgetsBinding.instance.lifecycleState;
@@ -251,6 +327,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       online: s.isOnline,
       lowData: s.settings?.lowData ?? false,
     );
+    _syncEssentials();
   }
 
   /// "Show on map" from the Alerts tab: centre on the rider and open their card.
@@ -319,8 +396,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   void dispose() {
     _convoys?.removeListener(_onConvoyUpdate);
     widget.focus?.removeListener(_onFocusRequest);
-    _guide.removeListener(_onGuide);
-    _guide.dispose();
+    _rideEssentials?.removeListener(_essentialsChanged);
+    if (_rideEssentials == null) {
+      _localGuide.removeListener(_onGuide);
+      _localGuide.dispose();
+      _essentials?.removeListener(_essentialsChanged);
+      _essentials?.dispose();
+    }
     _waitTimer?.cancel();
     _staleTimer?.cancel();
     _hideTimer?.cancel();
@@ -709,7 +791,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           hazard: h,
           view: views[h.hazardId],
           onTap: () => _focus(h.lat, h.lng),
-          onDismiss: () => setState(() => _dismissed.add(key)),
+          onDismiss: () => _dismissAlert(key),
         ),
       ));
     }
@@ -1025,7 +1107,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                           message: topSlot.message,
                           actionLabel: topSlot.actionLabel,
                           onAction: topSlot.onAction,
-                          onDismiss: topSlot.onDismiss ?? (topSlot.dismissible ? () => setState(() => _dismissed.add(topSlot.key)) : null),
+                          onDismiss: topSlot.onDismiss ?? (topSlot.dismissible ? () => _dismissAlert(topSlot.key) : null),
                         ),
                   ],
                   if (extra > 0)
@@ -1206,6 +1288,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             spreadM: snap.spreadM,
             onTap: toggle,
           ),
+        if (_essentials != null && convoy.activeAlerts.isEmpty)
+          EssentialsRow(service: _essentials!, onTap: _openEssentials),
         Padding(
           padding: const EdgeInsets.fromLTRB(Space.s16, 0, Space.s16, Space.s12),
           child: IntercomDock(convoy: convoy, me: me, compact: true),
@@ -1308,20 +1392,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               ),
         onTap: () => RiderStatusSheet.show(context, userId: me.userId),
       ),
-      if (fuelRangeKm > 0)
-        SheetRow(
-          icon: Icons.local_gas_station_rounded,
-          title: '$riddenKm km since last fill',
-          subtitle: 'Tank range $fuelRangeKm km',
-          trailing: TextButton(
-            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-            onPressed: () {
-              context.read<SafetyService?>()?.filledUp();
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Fuel count reset.')));
-            },
-            child: const Text('Filled up', maxLines: 1),
-          ),
-        ),
+      SheetRow(
+        icon: Icons.local_gas_station_rounded,
+        title: 'Fuel estimate / refuel',
+        subtitle: 'Confirm a fill or update your fuel estimate while stopped',
+        onTap: me.speedKmh > 5 ? null : () => showFuelSheet(context),
+      ),
       if (pf != null && canSaveMap)
         SaveRouteMapRow(
           running: pf.running,
@@ -1452,6 +1528,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   : AppTheme.neonCyan.withOpacity(0.75),
             ),
           ]),
+        if (_essentials != null && convoy.activeAlerts.isEmpty)
+          MarkerLayer(markers: [for (final p in _essentials!.upcoming.take(3)) Marker(
+            point: LatLng(p.lat, p.lng), width: 40, height: 40,
+            child: IconButton(tooltip: '${p.name}, mapped ${essentialCategories[p.category]}',
+              onPressed: _openEssentials, icon: const Icon(Icons.local_offer_rounded), color: AppTheme.neonCyan),
+          )]),
         // The way to an emergency I navigate to (red), above the group route.
         if (navLine.length >= 2)
           PolylineLayer(polylines: [

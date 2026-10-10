@@ -1,3 +1,5 @@
+import 'guardian_sheet.dart';
+import '../../data/services/meta_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
@@ -71,6 +73,13 @@ class GroupSettingsView extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (context.watch<MetaService?>()?.meta?.guardianPersonal == true)
+            ListTile(
+              leading: const Icon(Icons.shield_outlined),
+              title: const Text('Share with a Ride Guardian'),
+              subtitle: const Text('Share your personal ride with someone you trust.'),
+              onTap: () => showGuardianSheet(context, groupId: convoyId),
+            ),
           if (!lead)
             Padding(
               padding: const EdgeInsets.only(bottom: Space.s12),

@@ -18,6 +18,7 @@ const { Retention } = require('./retention');
 const { buildRouter } = require('./routes');
 const { TrackStore } = require('./tracks');
 const { GeoProxy } = require('./geo');
+const { EssentialsService, OverpassPlacesProvider } = require('./essentials');
 const { TimelineEngine } = require('./timeline');
 const { SafetyNetwork } = require('./safety_network');
 const { Discovery } = require('./discovery');
@@ -27,6 +28,9 @@ const { loadSite, isHiddenPath, SITE_PAGES, SITEMAP } = require('./pages');
 const rateLimit = require('express-rate-limit');
 const { liveTokenOf } = require('./validate');
 const { sha256 } = require('./convoys');
+const { GuardianService } = require('./guardians');
+const { GuardianPush } = require('./guardian_push');
+const { guardianRouter } = require('./guardian_routes');
 
 function createSoda() {
   if (config.sodaUrl === 'memory' || config.sodaUrl === 'http://mock') return new MemorySoda();
@@ -47,6 +51,12 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   auth.onProfileChanged = (user, keys) => convoys.applyProfile(user.userId, user, keys);
   const tracks = new TrackStore(repo);
   const geo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
+  // Dedicated queue: background POI checks never block emergency hospital routing.
+  const essentialsGeo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
+  const essentials = new EssentialsService({ repo,
+    places: process.env.ESSENTIALS_OVERPASS_URL ? new OverpassPlacesProvider({ url: process.env.ESSENTIALS_OVERPASS_URL, ...(geoFetch ? { fetchImpl: geoFetch } : {}) }) : null,
+    routing: (wp) => essentialsGeo.route(wp),
+  });
   convoys.router = (wp) => geo.route(wp);
   convoys.geo = geo; // 3.16: nearest hospital lookups (never awaited by the SOS path)
   const timeline = new TimelineEngine({ convoys, repo, tracks, geo, logger, ...(clock ? { clock } : {}) });
@@ -72,6 +82,23 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate, network, discovery });
   network.attach(hub);
   discovery.attach(hub);
+  let guardianPush = null;
+  // Pilot is disabled by default; an explicit HTTPS origin prevents host-header links.
+  if (process.env.GUARDIAN_ENABLED === 'true') {
+    const origin = new URL(config.publicOrigin);
+    if (origin.protocol !== 'https:' || origin.origin !== config.publicOrigin) throw new Error('Guardian requires an HTTPS PUBLIC_ORIGIN');
+    const service = new GuardianService({ repo, convoys });
+    if (process.env.GUARDIAN_PUSH_ENABLED === 'true') {
+      const webpush = require('web-push');
+      const publicKey = process.env.GUARDIAN_VAPID_PUBLIC_KEY;
+      webpush.setVapidDetails(process.env.GUARDIAN_VAPID_SUBJECT,
+        publicKey, process.env.GUARDIAN_VAPID_PRIVATE_KEY);
+      guardianPush = new GuardianPush({ repo, service, publicKey,
+        send: (subscription, payload, options) => webpush.sendNotification(subscription, payload, options) });
+      guardianPush.start();
+    }
+    app.use('/api/guardian', guardianRouter({ service, gate, origin: origin.origin, push: guardianPush }));
+  }
   // ---- Public website, served from here so no extra hosting is needed ----
   const path = require('path');
   const pub = (f) => path.join(__dirname, '..', 'public', f);
@@ -98,6 +125,17 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     const urls = SITEMAP
       .map(([u, pr]) => `  <url><loc>${o}${u}</loc><lastmod>${today}</lastmod><priority>${pr}</priority></url>`).join('\n');
     res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
+  });
+  app.get('/watch-sw.js', (req, res) => {
+    if (process.env.GUARDIAN_ENABLED !== 'true') return notFoundPage(req, res);
+    res.set('Cache-Control', 'no-cache').set('Service-Worker-Allowed', '/watch').type('application/javascript').sendFile(pub('_watch-sw.js'));
+  });
+  app.get('/watch', (req, res) => {
+    if (process.env.GUARDIAN_ENABLED !== 'true') return notFoundPage(req, res);
+    res.set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer')
+      .set('X-Robots-Tag', 'noindex, nofollow')
+      .set('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'")
+      .type('html').send(site.render('watch.html', pageVars(req)));
   });
   // Join link shared from the app: opens the app via its custom scheme, with the download as fallback.
   app.get('/join/:code', (req, res) => {
@@ -142,7 +180,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       }
     },
   }));
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, gate, network, audit, publicLiveLimiter }));
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network, audit, publicLiveLimiter }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -152,6 +190,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const retention = new Retention({ repo, soda, convoys, logger });
 
   async function shutdown() {
+    guardianPush?.stop();
     retention.stop();
     timeline.stop();
     network.stop();

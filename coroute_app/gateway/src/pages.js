@@ -25,7 +25,7 @@ const SITE_PAGES = {
   '/terms': 'terms.html',
 };
 /** Pages rendered by other handlers (not routes of their own). 3.16: the live emergency link pages (/e/<token>). */
-const SPECIAL_PAGES = ['404.html', 'join.html', 'live.html', 'live_expired.html'];
+const SPECIAL_PAGES = ['404.html', 'join.html', 'live.html', 'live_expired.html', 'watch.html'];
 /** Special pages a deployment may still lack (the server then answers with a built-in plain page). */
 const OPTIONAL_PAGES = new Set(['live.html', 'live_expired.html']);
 /** Sitemap entries: path and priority. */

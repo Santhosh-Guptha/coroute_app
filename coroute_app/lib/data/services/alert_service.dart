@@ -7,6 +7,7 @@ import '../../core/constants/network_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../domain/notify/alert_policy.dart';
 import '../models/timeline_event_model.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'alarm_notifier.dart';
 import 'convoy_service.dart';
 import 'timeline_service.dart';
@@ -49,11 +50,63 @@ class AlertService with WidgetsBindingObserver {
   String? _groupId;
   Timer? _tick;
   final Map<String, AlertSpec> _shown = {};
+  final Set<String> _shownKeys = {};
   final Set<String> _oneShotsSeen = {};
   int _lastEventCount = 0;
   final Set<String> _spoken = {};
   int _networkRevision = -1;
   bool? _groupVoice;
+  Future<void>? _restoreFuture;
+
+  static String _spokenKey(String gid) => 'coroute_alerts_spoken_$gid';
+  static String _shownKey(String gid) => 'coroute_alerts_shown_$gid';
+  static String _oneShotsKey(String gid) => 'coroute_alerts_oneshots_$gid';
+
+  Future<void> _restoreGroupState(String gid) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_groupId != gid) return;
+      final spoken = prefs.getStringList(_spokenKey(gid));
+      if (spoken != null) _spoken.addAll(spoken);
+      final shown = prefs.getStringList(_shownKey(gid));
+      if (shown != null) _shownKeys.addAll(shown);
+      final oneShots = prefs.getStringList(_oneShotsKey(gid));
+      if (oneShots != null) _oneShotsSeen.addAll(oneShots);
+    } catch (_) {}
+  }
+
+  void _persistSpoken() {
+    final gid = _groupId;
+    if (gid == null) return;
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setStringList(_spokenKey(gid), _spoken.toList()).ignore();
+    }).ignore();
+  }
+
+  void _persistShown() {
+    final gid = _groupId;
+    if (gid == null) return;
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setStringList(_shownKey(gid), _shownKeys.toList()).ignore();
+    }).ignore();
+  }
+
+  void _persistOneShots() {
+    final gid = _groupId;
+    if (gid == null) return;
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setStringList(_oneShotsKey(gid), _oneShotsSeen.toList()).ignore();
+    }).ignore();
+  }
+
+  void _clearPersisted(String gid) {
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.remove(_spokenKey(gid)).ignore();
+      prefs.remove(_shownKey(gid)).ignore();
+      prefs.remove(_oneShotsKey(gid)).ignore();
+      prefs.remove('coroute_dismissed_alerts_$gid').ignore();
+    }).ignore();
+  }
 
   static const _channels = {
     AlertChannel.sos: ('coroute_sos', 'SOS alerts', 'A rider in your convoy needs help.', Importance.max),
@@ -84,10 +137,15 @@ class AlertService with WidgetsBindingObserver {
 
   void _onConvoy() {
     final gid = _convoys.activeGroupId;
-    final groupVoice = _convoys.activeConvoy?.voiceGuidanceEnabled;
+    final convoy = _convoys.activeConvoy;
+    final groupVoice = convoy?.voiceGuidanceEnabled;
     if (groupVoice != null && groupVoice != _groupVoice) {
       _groupVoice = groupVoice;
       _voice?.setGroupVoice(groupVoice);
+    }
+    if (convoy != null && convoy.tripStatus == 'ENDED') {
+      final endedGid = _groupId ?? gid;
+      if (endedGid != null) _clearPersisted(endedGid);
     }
     if (gid == _groupId) {
       // Network state changed (request, hazard, emergency update): show it now, not at the next tick.
@@ -98,16 +156,25 @@ class AlertService with WidgetsBindingObserver {
       }
       return;
     }
+    final oldGid = _groupId;
     _groupId = gid;
     _oneShotsSeen.clear();
     _spoken.clear();
+    _shownKeys.clear();
     _lastEventCount = 0;
     _networkRevision = _convoys.networkRevision;
     _clearAll();
     _tick?.cancel();
-    if (gid != null) {
-      _init().then((_) => _reconcile());
+    if (gid != null && convoy?.tripStatus != 'ENDED') {
+      final restore = _restoreGroupState(gid);
+      _restoreFuture = restore;
+      Future.wait([_init(), restore]).then((_) {
+        if (_groupId == gid) _reconcile();
+      });
       _tick = Timer.periodic(const Duration(seconds: 30), (_) => _reconcile());
+    } else {
+      _restoreFuture = null;
+      if (oldGid != null) _clearPersisted(oldGid);
     }
   }
 
@@ -141,8 +208,13 @@ class AlertService with WidgetsBindingObserver {
   static bool _isNetworkKey(String k) =>
       k.startsWith(AlertPolicy.assistPrefix) || k.startsWith(AlertPolicy.assistTakenPrefix) || k.startsWith(AlertPolicy.hazardPrefix) || k.startsWith(AlertPolicy.encounterPrefix);
 
-  void _reconcile() {
-    if (_groupId == null) return;
+  Future<void> _reconcile() async {
+    final gid = _groupId;
+    if (gid == null) return;
+    if (_restoreFuture != null) {
+      await _restoreFuture;
+    }
+    if (_groupId != gid) return;
     final me = _viewer();
     if (me == null) return;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -166,6 +238,21 @@ class AlertService with WidgetsBindingObserver {
       ))
         a.key: a,
     };
+
+    // Clean up spoken/shown records for resolved standing alerts (so if the situation reoccurs later, it can alert again).
+    if (timelineReady) {
+      final resolvedSpoken = _spoken.where((k) => !want.containsKey(k) && !k.startsWith('EV:')).toList();
+      if (resolvedSpoken.isNotEmpty) {
+        _spoken.removeAll(resolvedSpoken);
+        _persistSpoken();
+      }
+      final resolvedShown = _shownKeys.where((k) => !want.containsKey(k) && !k.startsWith('EV:')).toList();
+      if (resolvedShown.isNotEmpty) {
+        _shownKeys.removeAll(resolvedShown);
+        _persistShown();
+      }
+    }
+
     _speak(want.values); // also where notifications are not available
     if (!_ready) return;
     for (final key in _shown.keys.toList()) {
@@ -179,21 +266,25 @@ class AlertService with WidgetsBindingObserver {
       final quiet = _foreground && a.channel != AlertChannel.sos;
       if (quiet || _shown[a.key] == a) continue;
       // Already showing (for example only the distance changed): update it without ringing again.
-      _show(a, sticky: a.channel == AlertChannel.sos, update: _shown.containsKey(a.key));
+      final isUpdate = _shown.containsKey(a.key) || _shownKeys.contains(a.key);
+      _show(a, sticky: a.channel == AlertChannel.sos, update: isUpdate);
     }
 
     // One-time alerts: only for entries that arrived live and are recent.
     if (timelineReady && events.length != _lastEventCount) {
       final firstLoad = _lastEventCount == 0;
       _lastEventCount = events.length;
+      var oneshotsChanged = false;
       for (final TimelineEventModel e in events) {
         if (!_oneShotsSeen.add(e.eventId)) continue;
+        oneshotsChanged = true;
         if (firstLoad || now - e.startedAt > const Duration(minutes: 2).inMilliseconds) continue;
         final a = _policy.oneShot(e, me);
         // Safety alerts (the alerts channel) show even while the app is open; the rest only in the background.
         if (a == null || (_foreground && !AlertPolicy.showWhileOpen(a))) continue;
         _show(a, timeout: const Duration(minutes: 10));
       }
+      if (oneshotsChanged) _persistOneShots();
     }
   }
 
@@ -201,11 +292,14 @@ class AlertService with WidgetsBindingObserver {
   void _speak(Iterable<AlertSpec> specs) {
     final voice = _voice;
     if (voice == null) return;
+    var changed = false;
     for (final a in specs) {
       final line = a.speech;
       if (line == null || line.isEmpty || !_spoken.add(a.key)) continue;
+      changed = true;
       voice.speak(line, priority: speechPriority(a), key: a.key).ignore();
     }
+    if (changed) _persistSpoken();
   }
 
   /// SOS channel: critical. Group alerts and accident warnings (the important tier, spoken
@@ -241,6 +335,9 @@ class AlertService with WidgetsBindingObserver {
     );
     _plugin.show(a.id, a.title, a.body.isEmpty ? null : a.body, NotificationDetails(android: details)).ignore();
     _shown[a.key] = a;
+    if (_shownKeys.add(a.key)) {
+      _persistShown();
+    }
   }
 
   void _clearAll() {
