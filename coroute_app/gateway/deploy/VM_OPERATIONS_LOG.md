@@ -92,3 +92,15 @@
   6. APK publication: Installed release binaries in `/opt/coroute/gateway/public/` as `coroute.apk` (10.8 MB) and `coroute-32bit.apk` (10.4 MB).
   7. Service reload: `coroute-gateway.service` restarted and verified `HEALTHY` (`latestBuild: 76`, `version: 3.17.0`, `db: UP`).
   8. Live verification: Verified public HTTPS endpoints (`https://coroute.duckdns.org/api/health`, `/api/meta`, `/`, `/features`, `/safety`, `/privacy`, `/about`, `/download`).
+
+### Release 3.17.0+77 / Gateway v3.17.0 (2026-10-10)
+- **Operator User**: `antigravity`
+- **Activities**:
+  1. Ran full test suites: Flutter (scenario, voice HUD, regression suites 100% passed) and Gateway (294/294 passed).
+  2. Bumped app version to `3.17.0+77` in `pubspec.yaml`.
+  3. Release split APKs compiled with obfuscation and symbol splitting: `app-arm64-v8a-release.apk` (10.4 MB), `app-armeabi-v7a-release.apk` (9.9 MB).
+  4. Gateway deployment: Synced updated gateway codebase, sweeper distress watchdog, toll cluster splitting, COCO fuel prioritization, and Indian repair tags to `/opt/coroute/gateway/`.
+  5. Environment configuration: Updated `/etc/coroute/gateway.env` (`LATEST_APP_BUILD=77`).
+  6. APK publication: Installed release binaries in `/opt/coroute/gateway/public/` as `coroute.apk` (10.4 MB) and `coroute-32bit.apk` (9.9 MB).
+  7. Service reload: `coroute-gateway.service` restarted and verified `HEALTHY` (`latestBuild: 77`, `version: 3.17.0`, `db: UP`).
+  8. Live verification: Verified public HTTPS endpoints (`https://coroute.duckdns.org/api/health`, `/api/meta`, `/download`, `/coroute.apk`, `/coroute-32bit.apk`).
