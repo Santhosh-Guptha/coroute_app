@@ -78,7 +78,7 @@ void main() {
     final (auth, patches) = authWithPatches();
     await host(tester, const SafetySettingsSheet(), settings: settings, auth: auth);
     expect(tester.takeException(), isNull);
-    expect(find.byType(Switch), findsNWidgets(16));
+    expect(find.byType(Switch), findsNWidgets(17));
     final list = find.byType(Scrollable).first;
 
     await tester.scrollUntilVisible(find.text(SafetyTexts.helpTitle), 80, scrollable: list);

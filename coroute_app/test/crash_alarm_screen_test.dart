@@ -214,9 +214,9 @@ void main() {
     ));
     await tester.pump();
     expect(tester.takeException(), isNull);
-    // 4 ride safety + documents reminder + accident warnings + 3 voice + 3 notification + route maps
+    // 4 ride safety + documents reminder + accident warnings + 4 voice + 3 notification + route maps
     // (the nearby riders switches need AuthService).
-    expect(find.byType(Switch), findsNWidgets(13));
+    expect(find.byType(Switch), findsNWidgets(14));
     expect(find.text(SafetyTexts.crashTitle), findsOneWidget);
     await tester.tap(find.text(SafetyTexts.smsTitle));
     await tester.pump();

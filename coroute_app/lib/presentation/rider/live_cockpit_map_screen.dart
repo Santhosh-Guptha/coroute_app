@@ -71,8 +71,11 @@ import '../trip_planner/route_stops_panel.dart';
 import '../widgets/connection_banner.dart';
 import '../widgets/emergency_sos_sheet.dart';
 import '../widgets/intercom_dock.dart';
+import '../../data/services/intercom_service.dart';
 import '../widgets/rider_status_sheet.dart';
 import 'rider_home_screen.dart';
+import 'widgets/cockpit_hud_toast.dart';
+import 'widgets/cockpit_shortcuts_dock.dart';
 
 /// The active ride: the map first, a compact top bar (next stop or
 /// destination, connection and GPS in words), one alert slot, the SOS
@@ -155,6 +158,30 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   String? _selectedRiderId;
   bool _sosNoticeScheduled = false;
   bool _leaveNoticeScheduled = false;
+
+  String? _hudToastMessage;
+  IconData? _hudToastIcon;
+  Color? _hudToastColor;
+  Timer? _hudToastTimer;
+
+  void _showHudToast(String message, IconData icon, [Color? color]) {
+    _hudToastTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _hudToastMessage = message;
+      _hudToastIcon = icon;
+      _hudToastColor = color;
+    });
+    _hudToastTimer = Timer(const Duration(milliseconds: 2400), () {
+      if (mounted) {
+        setState(() {
+          _hudToastMessage = null;
+          _hudToastIcon = null;
+          _hudToastColor = null;
+        });
+      }
+    });
+  }
 
   // The planned route as map points, rebuilt only when the convoy's route changes.
   List<LatLng> _routePoints = const [];
@@ -446,6 +473,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     _staleTimer?.cancel();
     _hideTimer?.cancel();
     _autoDismissTimer?.cancel();
+    _hudToastTimer?.cancel();
     _sheetTop.dispose();
     if (_keepScreenOn) WakelockPlus.disable();
     super.dispose();
@@ -1291,6 +1319,70 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 );
               },
             ),
+            // Cockpit Quick-Action Shortcuts Dock (1-tap glove-friendly floating dock)
+            ValueListenableBuilder<double>(
+              valueListenable: _sheetTop,
+              builder: (context, top, _) {
+                final hide = !side && top > h * 0.5;
+                final maxBottom = (h - 220).clamp(Space.s8, double.infinity).toDouble();
+                final bottom = (top + Space.s8).clamp(Space.s8, maxBottom).toDouble();
+                final dockBottom = side
+                    ? Space.s12 + sosRing + Space.s12
+                    : (bottom + sosRing + Space.s8).clamp(Space.s8, h - 160).toDouble();
+                return Positioned(
+                  left: side ? panelW + Space.s12 : Space.s12,
+                  right: side ? null : Space.s12,
+                  bottom: dockBottom,
+                  child: IgnorePointer(
+                    ignoring: hide,
+                    child: AnimatedOpacity(
+                      opacity: hide ? 0 : 1,
+                      duration: Motion.button,
+                      child: Center(
+                        child: CockpitShortcutsDock(
+                          convoy: convoy,
+                          me: me,
+                          essentialsService: _essentials,
+                          settingsService: context.watch<SettingsService?>(),
+                          intercomService: context.watch<IntercomService?>(),
+                          keepScreenOn: _keepScreenOn,
+                          autoFollow: _autoFollow,
+                          onToggleKeepScreenOn: _toggleKeepScreenOn,
+                          onToggleAutoFollow: () {
+                            setState(() => _autoFollow = !_autoFollow);
+                            if (_autoFollow && (me.lat != 0 || me.lng != 0)) {
+                              _lastFollowed = null;
+                              _mapController.move(LatLng(me.lat, me.lng), 16.0);
+                            }
+                            _showHudToast(
+                              _autoFollow ? 'Auto-Follow: ON' : 'Auto-Follow: OFF',
+                              Icons.my_location_rounded,
+                              _autoFollow ? AppTheme.neonCyan : AppTheme.textSecondary,
+                            );
+                          },
+                          onEssentialsRadarTap: _openEssentials,
+                          onHudToast: _showHudToast,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            // Instant HUD Toast Banner
+            if (_hudToastMessage != null)
+              Positioned(
+                top: MediaQuery.paddingOf(context).top + 60,
+                left: side ? panelW + Space.s16 : Space.s16,
+                right: Space.s16,
+                child: Center(
+                  child: CockpitHudToast(
+                    message: _hudToastMessage!,
+                    icon: _hudToastIcon ?? Icons.info_outline_rounded,
+                    color: _hudToastColor,
+                  ),
+                ),
+              ),
           ],
         );
       }),
