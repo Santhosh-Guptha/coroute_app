@@ -88,7 +88,10 @@ async function run() {
     // Read design tokens
     const tokensPath = path.join(__dirname, 'coroute_figma_tokens.json');
     const tokens = JSON.parse(fs.readFileSync(tokensPath, 'utf8'));
-    console.log(`Loaded ${Object.keys(tokens.color).length} color token groups and ${Object.keys(tokens.touchTarget).length} touch target constraints.`);
+    const colorCount = tokens.color ? Object.keys(tokens.color).length : (tokens.global && tokens.global.color ? Object.keys(tokens.global.color).length : 'multiple');
+    console.log(`Loaded design tokens (${colorCount} color groups).`);
+
+
 
     console.log('\nReady to sync vectors and tokens into Figma.');
     console.log(`Open your Figma file: https://www.figma.com/design/${FIGMA_FILE_KEY}`);

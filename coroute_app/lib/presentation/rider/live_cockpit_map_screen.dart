@@ -21,8 +21,8 @@ import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/map_tiles.dart';
 import '../../core/ui/ui.dart';
-import '../../core/widgets/cockpit_hud.dart';
 import '../../data/models/convoy_model.dart';
+
 import '../../data/models/network_models.dart';
 import '../../data/models/network_wire.dart';
 import '../../data/models/outbox_item.dart';
@@ -77,9 +77,11 @@ import '../../data/services/intercom_service.dart';
 import '../widgets/rider_status_sheet.dart';
 import 'rider_home_screen.dart';
 import 'widgets/cockpit_hud_toast.dart';
-import 'widgets/cockpit_shortcuts_dock.dart';
 import 'widgets/coroute_orbit_control.dart';
 import 'widgets/glove_quick_settings_modal.dart';
+import 'widgets/minimal_cockpit_overlay.dart';
+
+
 
 /// The active ride: the map first, a compact top bar (next stop or
 /// destination, connection and GPS in words), one alert slot, the SOS
@@ -1154,33 +1156,59 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       body: LayoutBuilder(builder: (context, box) {
         final h = box.maxHeight;
         final w = box.maxWidth;
-        // Landscape (phone on its side, tablets): the sheet becomes a panel on the left so the
-        // map stays visible beside it, and SOS and the map controls sit on the map, never under it.
         final side = w > h && w >= 560;
         final panelW = side ? (w * 0.45).clamp(320.0, 420.0).toDouble() : w;
-        const sosRing = 56.0 + 12.0; // RideSosButton: 56 dp button plus its hold ring
+        const sosSize = 60.0;
+
         return Stack(
           children: [
-            _map(convoy, service, me, uid, routePoints, colors, statuses, lowData, now, guidance: guidance, incidents: incidents),
-            // Top: one compact bar, the alert slot, and my speed when near or over the group limit.
+            // 1. Full-screen map (hero layer)
+            _map(convoy, service, me, uid, routePoints, colors, statuses, lowData, now,
+                guidance: guidance, incidents: incidents),
+
+            // 2. Draggable Ride Sheet (bottom sheet in portrait, left panel in landscape)
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: panelW,
+              child: SafeArea(
+                top: false,
+                child: RideSheet(
+                  key: _sheetKey,
+                  onTopChanged: (v) => _sheetTop.value = v,
+                  header: _sheetHeader(convoy, me, snap, stoppedFor, now),
+                  body: _sheetBody(convoy, service, me, uid, snap, stoppedFor, colors, statuses, lead, now,
+                      offlinePlaces: offlinePlaces,
+                      possibleIncident: possible,
+                      fuelRangeKm: fuelRangeKm,
+                      riddenKm: riddenKm,
+                      weatherLine: weatherLine,
+                      prefetcher: prefetcher),
+                ),
+              ),
+            ),
+
+            // 3. Minimal frosted-glass top pill bar (Destination, GPS dot, tunnel & alerts)
             Positioned(
               top: MediaQuery.paddingOf(context).top + Space.s8,
               left: side ? panelW + Space.s12 : Space.s12,
               right: Space.s12,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _TopBar(
+                  MinimalCockpitTopBar(
                     title: _topTitle(convoy, snap),
                     connection: connection,
                     gps: gps,
-                    route: guidance?.statusLine ?? _guide.statusLine,
+                    routeStatus: guidance?.statusLine ?? _guide.statusLine,
                     emergencyRoute: guidance?.statusLine != null,
                     onStopNavigation: guidance?.target == null ? null : guidance?.stop,
                     onBack: widget.embedded ? null : () => Navigator.of(context).maybePop(),
                     isTunnelCoasting: me.isTunnelCoasting,
                   ),
+                  // In-cockpit alert slot
                   AnimatedSwitcher(
                     duration: Motion.screen,
                     switchInCurve: Motion.curve,
@@ -1207,103 +1235,122 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   if (extra > 0)
                     Align(
                       alignment: AlignmentDirectional.centerEnd,
-                      child: TextButton(
-                        style: TextButton.styleFrom(
-                          minimumSize: const Size(48, 48),
-                          backgroundColor: AppTheme.slateCard,
-                          foregroundColor: AppTheme.textPrimary,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: Space.s4),
+                        child: TextButton(
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(48, 40),
+                            backgroundColor: AppTheme.slateCard,
+                            foregroundColor: AppTheme.textPrimary,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
+                          onPressed: () => RiderHomeScreen.selectTab(context, HomeTab.alerts),
+                          child: Text('+$extra more', maxLines: 1, style: AppText.caption),
                         ),
-                        onPressed: () => RiderHomeScreen.selectTab(context, HomeTab.alerts),
-                        child: Text('+$extra more', maxLines: 1),
                       ),
                     )
                   else if (topSlot == null && _activeAlertCount > 0)
                     Align(
                       alignment: AlignmentDirectional.centerEnd,
-                      child: TextButton.icon(
-                        style: TextButton.styleFrom(
-                          minimumSize: const Size(48, 48),
-                          backgroundColor: AppTheme.slateCard,
-                          foregroundColor: AppTheme.textPrimary,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: Space.s4),
+                        child: TextButton.icon(
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(48, 40),
+                            backgroundColor: AppTheme.slateCard,
+                            foregroundColor: AppTheme.textPrimary,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
+                          onPressed: () => RiderHomeScreen.selectTab(context, HomeTab.alerts),
+                          icon: const Icon(Icons.notifications_none_rounded, size: 16),
+                          label: Text('$_activeAlertCount in notifications', style: AppText.caption),
                         ),
-                        onPressed: () => RiderHomeScreen.selectTab(context, HomeTab.alerts),
-                        icon: const Icon(Icons.notifications_none_rounded, size: 18),
-                        label: Text('$_activeAlertCount in notifications', maxLines: 1),
                       ),
                     ),
+                  // Minimal speed warning if near/over speed limit
                   if (showSpeed) ...[
                     const SizedBox(height: Space.s8),
                     Align(
                       alignment: AlignmentDirectional.centerStart,
-                      child: CockpitHud(speedKmh: me.speedKmh, speedLimitKmh: speedLimit),
+                      child: MinimalSpeedAlert(speedKmh: me.speedKmh, limitKmh: speedLimit),
                     ),
                   ],
                 ],
               ),
             ),
-            // Map controls on the right, just above the sheet (landscape: above SOS on the map).
-            ValueListenableBuilder<double>(
-              valueListenable: _sheetTop,
-              builder: (context, top, _) {
-                final hide = !side && top > h * 0.5;
-                return Positioned(
-                  right: Space.s12,
-                  bottom: side ? Space.s12 + sosRing + Space.s12 : top + Space.s12,
-                  child: IgnorePointer(
-                    ignoring: hide,
-                    child: AnimatedOpacity(
-                      opacity: hide ? 0 : 1,
-                      duration: Motion.button,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          MapControl(
-                            icon: _keepScreenOn ? Icons.light_mode_rounded : Icons.brightness_low_rounded,
-                            tooltip: _keepScreenOn ? 'Screen stays on. Tap to allow sleep.' : 'Keep screen on while riding',
-                            active: _keepScreenOn,
-                            onPressed: _toggleKeepScreenOn,
-                          ),
-                          const SizedBox(height: Space.s12),
-                          MapControl(
-                            icon: Icons.my_location_rounded,
-                            tooltip: 'Centre on me',
-                            active: _autoFollow,
-                            onPressed: () {
-                              setState(() => _autoFollow = true);
-                              _lastFollowed = null;
-                              if (me.lat != 0 || me.lng != 0) _mapController.move(LatLng(me.lat, me.lng), 16.0);
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
+
+            // 4. Instant HUD Toast Banner
+            if (_hudToastMessage != null)
+              Positioned(
+                top: MediaQuery.paddingOf(context).top + 60,
+                left: side ? panelW + Space.s16 : Space.s16,
+                right: Space.s16,
+                child: Center(
+                  child: CockpitHudToast(
+                    message: _hudToastMessage!,
+                    icon: _hudToastIcon ?? Icons.info_outline_rounded,
+                    color: _hudToastColor,
                   ),
-                );
-              },
-            ),
-            Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: panelW,
-              child: SafeArea(
-                top: false,
-                child: RideSheet(
-                  key: _sheetKey,
-                  onTopChanged: (v) => _sheetTop.value = v,
-                  header: _sheetHeader(convoy, me, snap, stoppedFor, now),
-                  body: _sheetBody(convoy, service, me, uid, snap, stoppedFor, colors, statuses, lead, now,
-                      offlinePlaces: offlinePlaces,
-                      possibleIncident: possible,
-                      fuelRangeKm: fuelRangeKm,
-                      riddenKm: riddenKm,
-                      weatherLine: weatherLine,
-                      prefetcher: prefetcher),
                 ),
               ),
-            ),
-            // SOS is painted after the sheet so it is always visible: just above the collapsed
-            // sheet, over the sheet when it is pulled up high, and on the map in landscape.
+
+            // 5. Right-side floating controls (Portrait: brightness, recenter, toggle sheet)
+            if (!side)
+              ValueListenableBuilder<double>(
+                valueListenable: _sheetTop,
+                builder: (context, top, _) {
+                  final visible = top < h * 0.55;
+                  return Positioned(
+                    right: Space.s12,
+                    bottom: top + Space.s12,
+                    child: MapSideControls(
+                      keepScreenOn: _keepScreenOn,
+                      autoFollow: _autoFollow,
+                      onToggleKeepScreenOn: _toggleKeepScreenOn,
+                      onCentre: () {
+                        setState(() => _autoFollow = true);
+                        _lastFollowed = null;
+                        if (me.lat != 0 || me.lng != 0) {
+                          _mapController.move(LatLng(me.lat, me.lng), 16.0);
+                        }
+                      },
+                      onOpenSheet: () => _sheetKey.currentState?.toggle(),
+                      visible: visible,
+                    ),
+                  );
+                },
+              ),
+
+            // 6. Right-side floating controls (Landscape)
+            if (side)
+              Positioned(
+                right: Space.s12,
+                bottom: Space.s12 + sosSize + Space.s12,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    MapControl(
+                      icon: _keepScreenOn ? Icons.light_mode_rounded : Icons.brightness_low_rounded,
+                      tooltip: _keepScreenOn ? 'Screen stays on. Tap to allow sleep.' : 'Keep screen on while riding',
+                      active: _keepScreenOn,
+                      onPressed: _toggleKeepScreenOn,
+                    ),
+                    const SizedBox(height: Space.s12),
+                    MapControl(
+                      icon: Icons.my_location_rounded,
+                      tooltip: 'Centre on me',
+                      active: _autoFollow,
+                      onPressed: () {
+                        setState(() => _autoFollow = true);
+                        _lastFollowed = null;
+                        if (me.lat != 0 || me.lng != 0) _mapController.move(LatLng(me.lat, me.lng), 16.0);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+            // 7. Hold-to-SOS Button (always visible, bottom-left)
             ValueListenableBuilder<double>(
               valueListenable: _sheetTop,
               builder: (context, top, _) {
@@ -1323,71 +1370,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 );
               },
             ),
-            // Cockpit Quick-Action Shortcuts Dock (1-tap glove-friendly floating dock)
-            ValueListenableBuilder<double>(
-              valueListenable: _sheetTop,
-              builder: (context, top, _) {
-                final hide = !side && top > h * 0.5;
-                final maxBottom = (h - 220).clamp(Space.s8, double.infinity).toDouble();
-                final bottom = (top + Space.s8).clamp(Space.s8, maxBottom).toDouble();
-                final dockBottom = side
-                    ? Space.s12 + sosRing + Space.s12
-                    : bottom;
-                return Positioned(
-                  left: side ? panelW + Space.s12 : Space.s12 + sosRing + Space.s8,
-                  right: side ? null : Space.s12 + 48 + Space.s8,
-                  bottom: dockBottom,
-                  child: IgnorePointer(
-                    ignoring: hide,
-                    child: AnimatedOpacity(
-                      opacity: hide ? 0 : 1,
-                      duration: Motion.button,
-                      child: Center(
-                        child: CockpitShortcutsDock(
-                          convoy: convoy,
-                          me: me,
-                          essentialsService: _essentials,
-                          settingsService: context.watch<SettingsService?>(),
-                          intercomService: context.watch<IntercomService?>(),
-                          keepScreenOn: _keepScreenOn,
-                          autoFollow: _autoFollow,
-                          onToggleKeepScreenOn: _toggleKeepScreenOn,
-                          onToggleAutoFollow: () {
-                            setState(() => _autoFollow = !_autoFollow);
-                            if (_autoFollow && (me.lat != 0 || me.lng != 0)) {
-                              _lastFollowed = null;
-                              _mapController.move(LatLng(me.lat, me.lng), 16.0);
-                            }
-                            _showHudToast(
-                              _autoFollow ? 'Auto-Follow: ON' : 'Auto-Follow: OFF',
-                              Icons.my_location_rounded,
-                              _autoFollow ? AppTheme.neonCyan : AppTheme.textSecondary,
-                            );
-                          },
-                          onEssentialsRadarTap: _openEssentials,
-                          onHudToast: _showHudToast,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-            // Instant HUD Toast Banner
-            if (_hudToastMessage != null)
-              Positioned(
-                top: MediaQuery.paddingOf(context).top + 60,
-                left: side ? panelW + Space.s16 : Space.s16,
-                right: Space.s16,
-                child: Center(
-                  child: CockpitHudToast(
-                    message: _hudToastMessage!,
-                    icon: _hudToastIcon ?? Icons.info_outline_rounded,
-                    color: _hudToastColor,
-                  ),
-                ),
-              ),
-            // Draggable CoRoute Orbit Control FAB & In-Cockpit Quick Access HUD Popup
+
+            // 8. Draggable CoRoute Orbit Control FAB & In-Cockpit Quick Access HUD Popup
             CorouteOrbitControl(
               onIntercomTap: () {
                 final intercom = context.read<IntercomService?>();
@@ -1944,137 +1928,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   }
 }
 
-/// The compact top bar: next stop or destination on one line; a second short
-/// line only when the connection or the GPS needs a word.
-class _TopBar extends StatelessWidget {
-  final String title;
-  final String? connection;
-  final GpsState gps;
-  final VoidCallback? onBack;
-
-  /// The quiet route status ("New route, 42 km"), or the way to an emergency, or null.
-  final String? route;
-
-  /// [route] is the in-app navigation to an emergency (red icon, Stop button).
-  final bool emergencyRoute;
-
-  /// Stops the navigation to an emergency.
-  final VoidCallback? onStopNavigation;
-
-  /// Whether current rider is coasting through a tunnel without GPS fix.
-  final bool isTunnelCoasting;
-
-  const _TopBar({
-    required this.title,
-    required this.connection,
-    required this.gps,
-    this.onBack,
-    this.route,
-    this.emergencyRoute = false,
-    this.onStopNavigation,
-    this.isTunnelCoasting = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final back = onBack;
-    final stop = onStopNavigation;
-    final c = connection;
-    final words = <String>[
-      ?c,
-      if (gps != GpsState.accurate) 'GPS ${gps.label.toLowerCase()}',
-    ];
-    final warn = words.isNotEmpty;
-    final r = route;
-    return Material(
-      color: AppTheme.slateCard,
-      elevation: 2,
-      shadowColor: AppTheme.shadow,
-      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 48),
-        child: Padding(
-          padding: EdgeInsetsDirectional.fromSTEB(back == null ? Space.s12 : 0.0, Space.s4, Space.s12, Space.s4),
-          child: Row(
-            children: [
-              if (back != null)
-                IconButton(
-                  tooltip: 'Back',
-                  icon: Icon(Icons.arrow_back_rounded, color: AppTheme.textPrimary),
-                  onPressed: back,
-                ),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
-                    if (isTunnelCoasting)
-                      Semantics(
-                        liveRegion: true,
-                        child: Row(
-                          children: [
-                            Icon(Icons.tune_rounded, size: 16, color: AppTheme.neonCyan),
-                            const SizedBox(width: Space.s4),
-                            Expanded(
-                              child: Text(
-                                'Tunnel Coasting (Dead-Reckoning)',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppText.caption.copyWith(color: AppTheme.neonCyan, fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else if (warn)
-                      Semantics(
-                        liveRegion: true,
-                        child: Row(
-                          children: [
-                            Icon(c != null ? Icons.cloud_off_rounded : Icons.gps_not_fixed_rounded, size: 16, color: StatusColors.warning),
-                            const SizedBox(width: Space.s4),
-                            Expanded(
-                              child: Text(words.join(', '), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    if (r != null)
-                      Semantics(
-                        liveRegion: true,
-                        child: Row(
-                          children: [
-                            Icon(
-                              emergencyRoute ? Icons.emergency_rounded : Icons.alt_route_rounded,
-                              size: 16,
-                              color: emergencyRoute ? StatusColors.critical : StatusColors.info,
-                            ),
-                            const SizedBox(width: Space.s4),
-                            Expanded(
-                              child: Text(r, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              if (stop != null)
-                IconButton(
-                  tooltip: 'Stop navigation',
-                  icon: Icon(Icons.close_rounded, color: AppTheme.textPrimary),
-                  onPressed: stop,
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// A rider on the map: initials and a status dot, no animation. The name
+
 /// shows only for the selected rider and for riders whose position is old
 /// ("Kiran, 6 min ago"). Tapping it opens the rider card.
 class _RiderMarker extends StatelessWidget {

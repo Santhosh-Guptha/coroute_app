@@ -166,3 +166,28 @@
      - Verified APK download headers (`HTTP 200 OK`, `application/vnd.android.package-archive`).
   8. Audited system logs: Appended operation to `/var/log/coroute_operations.log` and user activity logs.
 
+### Release 3.21.0+81 / Gateway v3.21.0 (2026-10-12)
+- **Operator User**: `antigravity` / `ubuntu`
+- **Activities**:
+  1. Ran full automated test suites:
+     - Flutter: 1,031/1,031 tests passed (100%), `flutter analyze` 0 issues.
+     - Gateway: 314/314 tests passed (100%).
+  2. Bumped app version to `3.21.0+81` in `coroute_app/pubspec.yaml` and gateway version to `3.21.0` in `gateway/package.json` & `gateway/src/config.js`.
+  3. Feature Implementations & Cockpit UI/UX Overhaul:
+     - **100% Map-Hero Focus**: Completely decluttered the main live cockpit map. Removed the crowded horizontal 7-button dock overlay that overlapped with the bottom sheet and Orbit FAB.
+     - **Minimal Frosted-Glass Top Pill Bar (`MinimalCockpitTopBar`)**: Ultra-compact 48dp frosted glass pill showing destination, distance, live GPS status dot, and quiet route updates with zero screen intrusion.
+     - **Right-Edge Map Controls (`MapSideControls`)**: 3 clean floating circular controls (Keep Screen On, Recenter On Me, Open Ride Sheet) that smoothly fade out when the bottom sheet expands.
+     - **Hold-to-SOS Button**: Anchored bottom-left above the collapsed sheet for instant thumb reflex access.
+     - **Draggable CoRoute Orbit Control FAB**: Primary access point for in-cockpit popups (Intercom VOX, Group, Fuel Radar, Route Essentials, Guardian, Glove Quick Settings).
+     - **Live Speed Badges on Convoy Markers**: All riders display live speed pills directly on the map.
+     - **Zero Emojis & Strict Ergonomics**: All controls maintain minimum 48-56dp motorcycle glove touch targets and pure vector icons.
+  4. Compiled production split APKs with R8 code shrinking and ABI splitting:
+     - `app-arm64-v8a-release.apk` (11.1 MB, SHA-256: `B3E0FAB3AA8E3EC10FC7C33E7A1850E5EB737394FEC418FD11379E31026F425C`)
+     - `app-armeabi-v7a-release.apk` (10.8 MB, SHA-256: `95528C898FD162E2C090ADFB84AF3272E43160F6104FBDA99C22E82F30752069`)
+  5. APK Publication & Deployment:
+     - Published to `/opt/coroute/gateway/public/coroute.apk` and `/opt/coroute/gateway/public/coroute-32bit.apk`.
+     - Synchronized gateway configuration (`src/config.js` and `package.json`).
+     - Updated environment configuration (`/etc/coroute/gateway.env` -> `LATEST_APP_BUILD=81`).
+     - Restarted `coroute-gateway.service` and verified `HEALTHY` (status: `HEALTHY`, version: `3.21.0`, db: `UP`).
+     - Appended audit entries to `/var/log/coroute_operations.log` and activity logs.
+

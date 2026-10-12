@@ -10,10 +10,13 @@ import 'package:coroute_app/data/services/convoy_service.dart';
 import 'package:coroute_app/data/services/intercom_service.dart';
 import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
+import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/presentation/ride/group_settings_sheet.dart';
 import 'package:coroute_app/presentation/rider/widgets/cockpit_shortcuts_dock.dart';
 import 'package:coroute_app/presentation/rider/widgets/coroute_orbit_control.dart';
 import 'package:coroute_app/presentation/rider/widgets/glove_quick_settings_modal.dart';
+import 'package:coroute_app/presentation/rider/widgets/minimal_cockpit_overlay.dart';
+
 
 class MockConvoyService extends ChangeNotifier implements ConvoyService {
   @override
@@ -287,4 +290,130 @@ void main() {
     expect(fuelTapped, isFalse);
     expect(find.text('COROUTE ORBIT'), findsNothing);
   });
+
+  testWidgets('MinimalCockpitTopBar renders destination title, GPS status, and back button', (tester) async {
+    bool backPressed = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MinimalCockpitTopBar(
+            title: 'To Hampi, 142 km',
+            connection: null,
+            gps: GpsState.accurate,
+            onBack: () => backPressed = true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('To Hampi, 142 km'), findsOneWidget);
+    expect(find.byType(MinimalCockpitTopBar), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Back'));
+    expect(backPressed, isTrue);
+  });
+
+  testWidgets('MinimalRideStatsBar renders 4 key metrics and handles tap', (tester) async {
+    bool tapped = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MinimalRideStatsBar(
+            remainingText: '142 km',
+            etaText: '4:35 PM',
+            ridingCount: 5,
+            totalCount: 8,
+            spreadText: '2.1 km',
+            onTap: () => tapped = true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('142 km'), findsOneWidget);
+    expect(find.text('4:35 PM'), findsOneWidget);
+    expect(find.text('5/8'), findsOneWidget);
+    expect(find.text('2.1 km'), findsOneWidget);
+
+    await tester.tap(find.byType(MinimalRideStatsBar));
+    expect(tapped, isTrue);
+  });
+
+  testWidgets('MinimalStoppedBar renders duration and triggers onTellWhy', (tester) async {
+    bool tellWhyTapped = false;
+    bool barTapped = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MinimalStoppedBar(
+            stoppedFor: const Duration(minutes: 8),
+            nearbyCount: 2,
+            onTap: () => barTapped = true,
+            onTellWhy: () => tellWhyTapped = true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('stopped 8m'), findsOneWidget);
+    expect(find.text('2 riders nearby'), findsOneWidget);
+
+    await tester.tap(find.text('Tell why'));
+    expect(tellWhyTapped, isTrue);
+
+    await tester.tap(find.text('stopped 8m'));
+    expect(barTapped, isTrue);
+  });
+
+  testWidgets('MinimalSpeedAlert renders speed and semantics', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MinimalSpeedAlert(
+            speedKmh: 94.0,
+            limitKmh: 80,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('94 km/h'), findsOneWidget);
+    expect(find.byType(MinimalSpeedAlert), findsOneWidget);
+  });
+
+  testWidgets('MapSideControls renders quick controls and responds to taps', (tester) async {
+    bool screenOnToggled = false;
+    bool centred = false;
+    bool sheetOpened = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MapSideControls(
+            keepScreenOn: false,
+            autoFollow: true,
+            onToggleKeepScreenOn: () => screenOnToggled = true,
+            onCentre: () => centred = true,
+            onOpenSheet: () => sheetOpened = true,
+            visible: true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(MapSideControls), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Keep screen on'));
+    expect(screenOnToggled, isTrue);
+
+    await tester.tap(find.byTooltip('Centre on me'));
+    expect(centred, isTrue);
+
+    await tester.tap(find.byTooltip('Open ride sheet'));
+    expect(sheetOpened, isTrue);
+  });
 }
+
