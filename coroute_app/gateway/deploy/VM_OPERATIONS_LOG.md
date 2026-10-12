@@ -104,3 +104,19 @@
   6. APK publication: Installed release binaries in `/opt/coroute/gateway/public/` as `coroute.apk` (10.4 MB) and `coroute-32bit.apk` (9.9 MB).
   7. Service reload: `coroute-gateway.service` restarted and verified `HEALTHY` (`latestBuild: 77`, `version: 3.17.0`, `db: UP`).
   8. Live verification: Verified public HTTPS endpoints (`https://coroute.duckdns.org/api/health`, `/api/meta`, `/download`, `/coroute.apk`, `/coroute-32bit.apk`).
+
+### Release 3.18.0+78 / Gateway v3.18.0 (2026-10-12)
+- **Operator User**: `antigravity`
+- **Activities**:
+  1. Ran full automated test suites: Flutter (1,019/1,019 passed) and Gateway (314/314 passed). Static analysis `flutter analyze` 0 issues.
+  2. Bumped app version to `3.18.0+78` in `pubspec.yaml` and gateway version to `3.18.0` in `package.json`.
+  3. Integrated glove-friendly Cockpit Shortcuts Dock suite, high-speed haptic tactile controls, and quick settings modal.
+  4. Resolved deep security audit findings:
+     - Enforced system-only CA trust and prohibited cleartext traffic via `network_security_config.xml`.
+     - Hardened Gateway HTTP headers with Content-Security-Policy, Permissions-Policy, X-Frame-Options DENY, and nosniff.
+     - Enforced emergency monotonicity and persistent alert existence validation in `resolveSos`.
+  5. Compiled production split APKs with R8 code shrinking and ABI splitting:
+     - `app-arm64-v8a-release.apk` (11.1 MB)
+     - `app-armeabi-v7a-release.apk` (10.8 MB)
+  6. APK publication: Installed release binaries in `gateway/public/` as `coroute.apk` (11.1 MB) and `coroute-32bit.apk` (10.8 MB).
+  7. Gateway & Website update: Built-in website dynamically serves version `3.18` with origin-aware canonical metadata and live APK download endpoints.
