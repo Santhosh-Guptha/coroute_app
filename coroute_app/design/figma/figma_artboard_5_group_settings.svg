@@ -1,0 +1,135 @@
+<svg width="412" height="870" viewBox="0 0 412 870" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="glow-sos" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="glow-amber" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="glow-red" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="glow-purple" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <clipPath id="screen-clip">
+      <rect width="412" height="870" rx="36" fill="#070A0F" />
+    </clipPath>
+  </defs>
+  <g id="CoRoute_Group_Settings" clip-path="url(#screen-clip)">
+    <rect width="412" height="870" fill="#0A0E17" />
+    <!-- System Status Bar -->
+    <g id="System_Status_Bar" transform="translate(24, 14)">
+      <!-- Interactive Theme Toggle Button -->
+      <g id="btn_theme_toggle">
+        <rect x="0" y="0" width="76" height="22" rx="11" fill="#1E293B" stroke="#334155" stroke-width="1" />
+        <text x="38" y="15" text-anchor="middle" fill="#00E5FF" font-size="10" font-weight="800" font-family="JetBrains Mono, monospace">DARK &#x21C4;</text>
+      </g>
+      <text x="94" y="16" fill="#94A3B8" font-size="12" font-weight="700" font-family="JetBrains Mono, monospace">12:40</text>
+      <text x="296" y="16" fill="#00E5FF" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">5G</text>
+      <text x="322" y="16" fill="#94A3B8" font-size="11" font-weight="700" font-family="JetBrains Mono, monospace">&#x25B2;&#x25B2;&#x25B2;</text>
+      <text x="344" y="16" fill="#94A3B8" font-size="11" font-weight="700" font-family="JetBrains Mono, monospace">88%</text>
+    </g>
+
+    <!-- Header Frame -->
+    <g id="Modal_Header" transform="translate(20, 48)">
+      <text x="0" y="24" fill="#FFFFFF" font-size="20" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">Group Settings</text>
+      <text x="0" y="44" fill="#94A3B8" font-size="12" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">Bangalore Highway Convoy &#x2022; Lead Controls</text>
+      <!-- Done Button -> Links to Screen 1 -->
+      <g id="btn_close_group">
+        <rect x="312" y="4" width="60" height="36" rx="14" fill="#1E293B" stroke="#1E293B" stroke-width="1" />
+        <text x="342" y="26" text-anchor="middle" fill="#FFFFFF" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Done</text>
+      </g>
+      <line x1="0" y1="58" x2="372" y2="58" stroke="#1E293B" stroke-width="1" />
+    </g>
+
+    <!-- 1. Top Ride Guardian Hero Card -->
+    <g id="Hero_Guardian_Monitoring_Card" transform="translate(20, 126)">
+      <rect width="372" height="132" rx="24" fill="#083344" fill-opacity="0.6" stroke="#00E5FF" stroke-width="1.5" filter="url(#glow-cyan)"  />
+      
+      <circle cx="24" cy="28" r="5" fill="#00E5FF" />
+      <text x="38" y="32" fill="#FFFFFF" font-size="13" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">Ride Guardian Monitoring</text>
+      <rect x="290" y="18" width="66" height="20" rx="10" fill="#0E7490" />
+      <text x="323" y="32" text-anchor="middle" fill="#FFFFFF" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">ACTIVE</text>
+
+      <text x="24" y="60" fill="#FFFFFF" font-size="11" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">Allow family members or ride marshals to track live convoy</text>
+      <text x="24" y="76" fill="#FFFFFF" font-size="11" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">progress without downloading the app.</text>
+
+      <!-- Share Button -> Links to Screen 3: Guardian Link -->
+      <g id="btn_group_guardian_share">
+        <rect x="24" y="88" width="324" height="34" rx="12" fill="rgba(0,229,255,0.2)" stroke="#00E5FF" stroke-width="1" />
+        <!-- Pure SVG Link Chain Icon (ZERO RAW EMOJIS) -->
+        <path d="M72 105 L78 99 M75 97 L81 91" stroke="#00E5FF" stroke-width="2" stroke-linecap="round" />
+        <text x="186" y="110" text-anchor="middle" fill="#00E5FF" font-size="11" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">Share Guardian Link with Family</text>
+      </g>
+    </g>
+
+    <!-- 2. Ride Feature Controls -->
+    <g id="Section_Feature_Controls" transform="translate(20, 276)">
+      <text x="4" y="16" fill="#94A3B8" font-size="11" font-weight="800" font-family="Plus Jakarta Sans, sans-serif" letter-spacing="1">RIDE FEATURE CONTROLS</text>
+      <rect y="26" width="372" height="152" rx="20" fill="#0F172A" stroke="#1E293B" stroke-width="1.5"  />
+      
+      <!-- Row 1: Route Essentials -->
+      <text x="18" y="58" fill="#FFFFFF" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Route Essentials</text>
+      <text x="18" y="74" fill="#94A3B8" font-size="10" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">Verified fuel pumps &amp; emergency POIs</text>
+      <text x="354" y="66" text-anchor="end" fill="#00E5FF" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">ON</text>
+      <line x1="18" y1="84" x2="354" y2="84" stroke="#1E293B" stroke-width="1" />
+
+      <!-- Row 2: Group Fuel Estimates -->
+      <text x="18" y="106" fill="#FFFFFF" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Group Fuel Estimates</text>
+      <text x="18" y="122" fill="#94A3B8" font-size="10" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">Share remaining range &amp; low-fuel radar</text>
+      <text x="354" y="114" text-anchor="end" fill="#00E5FF" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">ON</text>
+      <line x1="18" y1="132" x2="354" y2="132" stroke="#1E293B" stroke-width="1" />
+
+      <!-- Row 3: Allow Guardian Links -->
+      <text x="18" y="154" fill="#FFFFFF" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Allow Ride Guardian Links</text>
+      <text x="354" y="156" text-anchor="end" fill="#00E5FF" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">ON</text>
+    </g>
+
+    <!-- 3. Convoy Safety Limits -->
+    <g id="Section_Safety_Limits" transform="translate(20, 472)">
+      <text x="4" y="16" fill="#94A3B8" font-size="11" font-weight="800" font-family="Plus Jakarta Sans, sans-serif" letter-spacing="1">CONVOY SAFETY LIMITS</text>
+      <rect y="26" width="372" height="142" rx="20" fill="#0F172A" stroke="#1E293B" stroke-width="1.5"  />
+
+      <!-- Separation Alert Slider -->
+      <text x="18" y="58" fill="#FFFFFF" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Separation distance alert</text>
+      <text x="354" y="58" text-anchor="end" fill="#00E5FF" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">1,500 m</text>
+      <rect x="18" y="70" width="336" height="8" rx="4" fill="#070A0F" />
+      <rect x="18" y="70" width="224" height="8" rx="4" fill="#00E5FF" />
+      <circle cx="242" cy="74" r="8" fill="#00E5FF" stroke="#0F172A" stroke-width="2" />
+
+      <!-- Speed Cap Slider -->
+      <text x="18" y="114" fill="#FFFFFF" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Speed warning cap</text>
+      <text x="354" y="114" text-anchor="end" fill="#F59E0B" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">85 km/h</text>
+      <rect x="18" y="126" width="336" height="8" rx="4" fill="#070A0F" />
+      <rect x="18" y="126" width="250" height="8" rx="4" fill="#F59E0B" />
+      <circle cx="268" cy="130" r="8" fill="#F59E0B" stroke="#0F172A" stroke-width="2" />
+    </g>
+
+    <!-- 4. Group Visibility -->
+    <g id="Section_Visibility" transform="translate(20, 656)">
+      <text x="4" y="16" fill="#94A3B8" font-size="11" font-weight="800" font-family="Plus Jakarta Sans, sans-serif" letter-spacing="1">GROUP VISIBILITY</text>
+      <rect y="26" width="372" height="64" rx="20" fill="#0F172A" stroke="#1E293B" stroke-width="1.5"  />
+      <text x="18" y="62" fill="#FFFFFF" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Convoy Visibility</text>
+      
+      <rect x="228" y="42" width="128" height="32" rx="12" fill="#070A0F" stroke="#1E293B" stroke-width="1" />
+      <rect x="230" y="44" width="62" height="28" rx="10" fill="#00E5FF" />
+      <text x="261" y="62" text-anchor="middle" fill="#070A0F" font-size="10" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">PUBLIC</text>
+      <text x="323" y="62" text-anchor="middle" fill="#94A3B8" font-size="10" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">PRIVATE</text>
+    </g>
+
+    <!-- Save & Return Action Button -> Links to Screen 1 -->
+    <g id="btn_save_group" transform="translate(20, 780)">
+      <rect width="372" height="52" rx="16" fill="#00E5FF" filter="url(#glow-cyan)"  />
+      <text x="186" y="32" text-anchor="middle" fill="#070A0F" font-size="13" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">SAVE &amp; RETURN TO COCKPIT</text>
+    </g>
+  </g>
+</svg>

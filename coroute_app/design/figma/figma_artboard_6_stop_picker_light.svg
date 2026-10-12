@@ -1,0 +1,93 @@
+<svg width="412" height="870" viewBox="0 0 412 870" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="shadow-card-light" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#64748B" flood-opacity="0.12" />
+    </filter>
+    <clipPath id="screen-clip">
+      <rect width="412" height="870" rx="36" fill="#F8FAFC" />
+    </clipPath>
+  </defs>
+  <g id="CoRoute_Quick_Stop_Picker" clip-path="url(#screen-clip)">
+    <rect width="412" height="870" fill="#F8FAFC" />
+    <!-- System Status Bar -->
+    <g id="System_Status_Bar" transform="translate(24, 14)">
+      <!-- Interactive Theme Toggle Button -->
+      <g id="btn_theme_toggle">
+        <rect x="0" y="0" width="76" height="22" rx="11" fill="#E2E8F0" stroke="#CBD5E1" stroke-width="1" />
+        <text x="38" y="15" text-anchor="middle" fill="#00838F" font-size="10" font-weight="800" font-family="JetBrains Mono, monospace">LIGHT &#x21C4;</text>
+      </g>
+      <text x="94" y="16" fill="#64748B" font-size="12" font-weight="700" font-family="JetBrains Mono, monospace">12:40</text>
+      <text x="296" y="16" fill="#00838F" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">5G</text>
+      <text x="322" y="16" fill="#64748B" font-size="11" font-weight="700" font-family="JetBrains Mono, monospace">&#x25B2;&#x25B2;&#x25B2;</text>
+      <text x="344" y="16" fill="#64748B" font-size="11" font-weight="700" font-family="JetBrains Mono, monospace">88%</text>
+    </g>
+
+    <!-- Header Frame -->
+    <g id="Modal_Header" transform="translate(20, 48)">
+      <text x="0" y="24" fill="#0F172A" font-size="20" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">Broadcast Stop Reason</text>
+      <text x="0" y="44" fill="#64748B" font-size="12" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">1-Tap glove announcement to all convoy riders</text>
+      <!-- Done Button -> Links to Screen 1 -->
+      <g id="btn_close_stop">
+        <rect x="312" y="4" width="60" height="36" rx="14" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1" />
+        <text x="342" y="26" text-anchor="middle" fill="#0F172A" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Done</text>
+      </g>
+      <line x1="0" y1="58" x2="372" y2="58" stroke="#E2E8F0" stroke-width="1" />
+    </g>
+
+    <!-- 4 Oversized Glove Action Tiles (180x200dp) -->
+    <g id="Oversized_Stop_Grid" transform="translate(20, 160)">
+      <!-- 1. Fuel Stop -> Links to Screen 1 -->
+      <g id="btn_stop_fuel" transform="translate(0, 0)">
+        <rect width="180" height="200" rx="32" fill="#FEF3C7" fill-opacity="1" stroke="#D97706" stroke-width="2" filter="url(#shadow-card-light)" />
+        <g transform="translate(70, 40)">
+          <path d="M4 36 V6 H24 V36 M30 14 H34 V26 H30" stroke="#D97706" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+          <line x1="8" y1="12" x2="20" y2="12" stroke="#D97706" stroke-width="2" />
+        </g>
+        <text x="90" y="126" text-anchor="middle" fill="#78350F" font-size="16" font-weight="900" font-family="Plus Jakarta Sans, sans-serif">Fuel Stop</text>
+        <rect x="32" y="144" width="116" height="24" rx="12" fill="#FEF3C7" stroke="#D97706" stroke-width="1" />
+        <text x="90" y="160" text-anchor="middle" fill="#B45309" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">PUMP ARRIVAL</text>
+      </g>
+
+      <!-- 2. Mechanical Issue -> Links to Screen 1 -->
+      <g id="btn_stop_mechanical" transform="translate(192, 0)">
+        <rect width="180" height="200" rx="32" fill="#FEE2E2" fill-opacity="1" stroke="#DC2626" stroke-width="2" filter="url(#shadow-card-light)" />
+        <g transform="translate(70, 40)">
+          <path d="M26 10 L30 14 L14 30 L10 26 Z M26 10 C24 8 20 8 18 10 L22 14 Z" stroke="#DC2626" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+        </g>
+        <text x="90" y="126" text-anchor="middle" fill="#991B1B" font-size="16" font-weight="900" font-family="Plus Jakarta Sans, sans-serif">Mechanical</text>
+        <rect x="32" y="144" width="116" height="24" rx="12" fill="#FEE2E2" stroke="#DC2626" stroke-width="1" />
+        <text x="90" y="160" text-anchor="middle" fill="#B91C1C" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">BIKE ISSUE</text>
+      </g>
+
+      <!-- 3. Rest & Chai -> Links to Screen 1 -->
+      <g id="btn_stop_rest" transform="translate(0, 220)">
+        <rect width="180" height="200" rx="32" fill="#E0F2FE" fill-opacity="1" stroke="#00838F" stroke-width="2" filter="url(#shadow-card-light)" />
+        <g transform="translate(68, 40)">
+          <path d="M4 14 H32 V26 C32 32 26 36 18 36 C10 36 4 32 4 26 Z M32 18 H38 C40 18 42 20 42 22 C42 24 40 26 38 26 H32" stroke="#00838F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12 6 V10 M20 4 V10 M28 6 V10" stroke="#00838F" stroke-width="2" stroke-linecap="round" />
+        </g>
+        <text x="90" y="126" text-anchor="middle" fill="#0F172A" font-size="16" font-weight="900" font-family="Plus Jakarta Sans, sans-serif">Rest &amp; Chai</text>
+        <rect x="32" y="144" width="116" height="24" rx="12" fill="#E0F2FE" stroke="#00838F" stroke-width="1" />
+        <text x="90" y="160" text-anchor="middle" fill="#0369A1" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">5-10 MIN BREAK</text>
+      </g>
+
+      <!-- 4. Wait / Regroup -> Links to Screen 1 -->
+      <g id="btn_stop_regroup" transform="translate(192, 220)">
+        <rect width="180" height="200" rx="32" fill="#F3E8FF" fill-opacity="1" stroke="#7C3AED" stroke-width="2" filter="url(#shadow-card-light)" />
+        <g transform="translate(70, 40)">
+          <circle cx="20" cy="12" r="6" stroke="#7C3AED" stroke-width="3" />
+          <path d="M8 34 C8 26 14 22 20 22 C26 22 32 26 32 34" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" />
+        </g>
+        <text x="90" y="126" text-anchor="middle" fill="#4C1D95" font-size="16" font-weight="900" font-family="Plus Jakarta Sans, sans-serif">Wait / Regroup</text>
+        <rect x="32" y="144" width="116" height="24" rx="12" fill="#F3E8FF" stroke="#7C3AED" stroke-width="1" />
+        <text x="90" y="160" text-anchor="middle" fill="#6D28D9" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">HOLD PACK</text>
+      </g>
+    </g>
+
+    <!-- Clear Stop Reason Button -> Links to Screen 1 -->
+    <g id="btn_clear_stop" transform="translate(20, 780)">
+      <rect width="372" height="52" rx="16" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5" filter="url(#shadow-card-light)" />
+      <text x="186" y="32" text-anchor="middle" fill="#0F172A" font-size="12" font-weight="800" font-family="Plus Jakarta Sans, sans-serif" letter-spacing="0.5">CLEAR STOP REASON (RESUME RIDING)</text>
+    </g>
+  </g>
+</svg>

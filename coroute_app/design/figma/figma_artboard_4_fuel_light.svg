@@ -1,0 +1,116 @@
+<svg width="412" height="870" viewBox="0 0 412 870" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="shadow-card-light" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#64748B" flood-opacity="0.12" />
+    </filter>
+    <clipPath id="screen-clip">
+      <rect width="412" height="870" rx="36" fill="#F8FAFC" />
+    </clipPath>
+  </defs>
+  <g id="CoRoute_Fuel_Range_Radar" clip-path="url(#screen-clip)">
+    <rect width="412" height="870" fill="#F8FAFC" />
+    <!-- System Status Bar -->
+    <g id="System_Status_Bar" transform="translate(24, 14)">
+      <!-- Interactive Theme Toggle Button -->
+      <g id="btn_theme_toggle">
+        <rect x="0" y="0" width="76" height="22" rx="11" fill="#E2E8F0" stroke="#CBD5E1" stroke-width="1" />
+        <text x="38" y="15" text-anchor="middle" fill="#00838F" font-size="10" font-weight="800" font-family="JetBrains Mono, monospace">LIGHT &#x21C4;</text>
+      </g>
+      <text x="94" y="16" fill="#64748B" font-size="12" font-weight="700" font-family="JetBrains Mono, monospace">12:40</text>
+      <text x="296" y="16" fill="#00838F" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">5G</text>
+      <text x="322" y="16" fill="#64748B" font-size="11" font-weight="700" font-family="JetBrains Mono, monospace">&#x25B2;&#x25B2;&#x25B2;</text>
+      <text x="344" y="16" fill="#64748B" font-size="11" font-weight="700" font-family="JetBrains Mono, monospace">88%</text>
+    </g>
+
+    <!-- Header Frame -->
+    <g id="Modal_Header" transform="translate(20, 48)">
+      <text x="0" y="24" fill="#0F172A" font-size="20" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">Fuel Estimation &amp; Radar</text>
+      <text x="0" y="44" fill="#64748B" font-size="12" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">Convoy tank ranges &amp; highway station radar</text>
+      <!-- Done Button -> Links to Screen 1 -->
+      <g id="btn_close_fuel">
+        <rect x="312" y="4" width="60" height="36" rx="14" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1" />
+        <text x="342" y="26" text-anchor="middle" fill="#0F172A" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Done</text>
+      </g>
+      <line x1="0" y1="58" x2="372" y2="58" stroke="#E2E8F0" stroke-width="1" />
+    </g>
+
+    <!-- Usable Range Hero Card -->
+    <g id="Hero_Range_Card" transform="translate(20, 126)">
+      <rect width="372" height="136" rx="24" fill="#FEF3C7" fill-opacity="1" stroke="#BD5B00" stroke-width="1.5"  filter="url(#shadow-card-light)" />
+      
+      <text x="20" y="32" fill="#BD5B00" font-size="11" font-weight="800" font-family="Plus Jakarta Sans, sans-serif" letter-spacing="1">YOUR USABLE RANGE</text>
+      <text x="20" y="78" fill="#0F172A" font-size="42" font-weight="900" font-family="JetBrains Mono, monospace">185</text>
+      <text x="110" y="74" fill="#64748B" font-size="14" font-weight="700" font-family="JetBrains Mono, monospace">KM</text>
+      
+      <text x="20" y="106" fill="#15803D" font-size="11" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">&#x2714; Destination Reachable (82 km remaining)</text>
+
+      <g id="Tank_Gauge" transform="translate(276, 24)">
+        <circle cx="44" cy="44" r="36" fill="none" stroke="#E2E8F0" stroke-width="8" />
+        <circle cx="44" cy="44" r="36" fill="none" stroke="#BD5B00" stroke-width="8" stroke-dasharray="146 80" stroke-linecap="round" transform="rotate(-90 44 44)" />
+        <text x="44" y="44" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="800" font-family="JetBrains Mono, monospace">65%</text>
+        <text x="44" y="58" text-anchor="middle" fill="#BD5B00" font-size="8" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">TANK</text>
+      </g>
+    </g>
+
+    <!-- Convoy Member Fuel Ranges Card -->
+    <g id="Convoy_Ranges_Card" transform="translate(20, 282)">
+      <rect width="372" height="236" rx="24" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" filter="url(#shadow-card-light)" />
+      <text x="20" y="30" fill="#64748B" font-size="12" font-weight="800" font-family="Plus Jakarta Sans, sans-serif" letter-spacing="0.5">CONVOY FUEL RANGES</text>
+      <text x="352" y="30" text-anchor="end" fill="#64748B" font-size="10" font-weight="700" font-family="JetBrains Mono, monospace">UPDATED LIVE</text>
+
+      <!-- Member 1: Lead SB -->
+      <g transform="translate(16, 44)">
+        <rect width="340" height="52" rx="16" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1" />
+        <rect x="12" y="12" width="28" height="28" rx="8" fill="#E0F2FE" />
+        <text x="26" y="30" text-anchor="middle" fill="#00838F" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">SB</text>
+        <text x="50" y="26" fill="#0F172A" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Lead SB (KTM 390 Adv)</text>
+        <text x="50" y="42" fill="#64748B" font-size="10" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">14.5L Tank &#x2022; 32 km/L avg</text>
+        <text x="326" y="32" text-anchor="end" fill="#15803D" font-size="13" font-weight="800" font-family="JetBrains Mono, monospace">185 km</text>
+      </g>
+
+      <!-- Member 2: Pack VP -->
+      <g transform="translate(16, 104)">
+        <rect width="340" height="52" rx="16" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1" />
+        <rect x="12" y="12" width="28" height="28" rx="8" fill="#F1F5F9" />
+        <text x="26" y="30" text-anchor="middle" fill="#64748B" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">VP</text>
+        <text x="50" y="26" fill="#0F172A" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Rider VP (Himalayan 450)</text>
+        <text x="50" y="42" fill="#64748B" font-size="10" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">17L Tank &#x2022; 30 km/L avg</text>
+        <text x="326" y="32" text-anchor="end" fill="#15803D" font-size="13" font-weight="800" font-family="JetBrains Mono, monospace">210 km</text>
+      </g>
+
+      <!-- Member 3: Sweeper RK (WARNING DEFICIT) -->
+      <g transform="translate(16, 164)">
+        <rect width="340" height="56" rx="16" fill="#FEF3C7" fill-opacity="0.8" stroke="#BD5B00" stroke-width="1.2" />
+        <rect x="12" y="14" width="28" height="28" rx="8" fill="#FEF3C7" />
+        <text x="26" y="32" text-anchor="middle" fill="#BD5B00" font-size="11" font-weight="800" font-family="JetBrains Mono, monospace">RK</text>
+        <text x="50" y="26" fill="#78350F" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">Sweeper RK (Interceptor 650)</text>
+        <text x="50" y="44" fill="#BD5B00" font-size="10" font-weight="600" font-family="Plus Jakarta Sans, sans-serif">Low Fuel: Needs pump before km 64</text>
+        <text x="326" y="34" text-anchor="end" fill="#BD5B00" font-size="13" font-weight="900" font-family="JetBrains Mono, monospace">64 km &#x26A0;</text>
+      </g>
+    </g>
+
+    <!-- Nearest Verified Pump Card -->
+    <g id="Nearest_Pump_Card" transform="translate(20, 538)">
+      <rect width="372" height="98" rx="24" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" filter="url(#shadow-card-light)" />
+      <text x="20" y="26" fill="#64748B" font-size="11" font-weight="800" font-family="Plus Jakarta Sans, sans-serif" letter-spacing="0.5">NEAREST VERIFIED PUMP ON ROUTE</text>
+      <rect x="290" y="12" width="66" height="20" rx="10" fill="#E0F2FE" />
+      <text x="323" y="26" text-anchor="middle" fill="#00838F" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">24/7 OPEN</text>
+
+      <g transform="translate(16, 38)">
+        <rect width="340" height="48" rx="14" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1" />
+        <text x="14" y="22" fill="#0F172A" font-size="12" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">Indian Oil Swagat COCO NH48</text>
+        <text x="14" y="38" fill="#64748B" font-size="10" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">4.2 km ahead &#x2022; Left service lane &#x2022; Restrooms &amp; Air</text>
+        <g id="btn_stop_here">
+          <rect x="256" y="8" width="72" height="32" rx="10" fill="#00838F" />
+          <text x="292" y="28" text-anchor="middle" fill="#FFFFFF" font-size="11" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">Stop Here</text>
+        </g>
+      </g>
+    </g>
+
+    <!-- Broadcast Refuel Stop Button -> Links to Screen 1 -->
+    <g id="btn_broadcast_refuel" transform="translate(20, 780)">
+      <rect width="372" height="52" rx="16" fill="#BD5B00"  filter="url(#shadow-card-light)" />
+      <text x="186" y="32" text-anchor="middle" fill="#FFFFFF" font-size="13" font-weight="900" font-family="Plus Jakarta Sans, sans-serif" letter-spacing="0.5">BROADCAST REFUEL STOP TO CONVOY</text>
+    </g>
+  </g>
+</svg>

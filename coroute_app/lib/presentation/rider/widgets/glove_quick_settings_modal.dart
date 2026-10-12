@@ -3,6 +3,8 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui_tokens.dart';
 import '../../../data/services/intercom_service.dart';
 import '../../../data/services/settings_service.dart';
+import '../../ride/fuel_sheet.dart';
+import '../../ride/guardian_sheet.dart';
 
 /// Glove-friendly modal displaying an oversized 2x3 grid of in-flight toggle cards.
 ///
@@ -26,6 +28,9 @@ class GloveQuickSettingsModal extends StatelessWidget {
   final VoidCallback onToggleKeepScreenOn;
   final VoidCallback onToggleAutoFollow;
   final void Function(String name, bool isEnabled)? onSettingToggled;
+  final String? groupId;
+  final VoidCallback? onOpenGuardian;
+  final VoidCallback? onOpenFuel;
 
   const GloveQuickSettingsModal({
     super.key,
@@ -36,6 +41,9 @@ class GloveQuickSettingsModal extends StatelessWidget {
     required this.onToggleKeepScreenOn,
     required this.onToggleAutoFollow,
     this.onSettingToggled,
+    this.groupId,
+    this.onOpenGuardian,
+    this.onOpenFuel,
   });
 
   static Future<void> show(
@@ -47,6 +55,9 @@ class GloveQuickSettingsModal extends StatelessWidget {
     required VoidCallback onToggleKeepScreenOn,
     required VoidCallback onToggleAutoFollow,
     void Function(String name, bool isEnabled)? onSettingToggled,
+    String? groupId,
+    VoidCallback? onOpenGuardian,
+    VoidCallback? onOpenFuel,
   }) {
     return showDialog<void>(
       context: context,
@@ -62,6 +73,9 @@ class GloveQuickSettingsModal extends StatelessWidget {
           onToggleKeepScreenOn: onToggleKeepScreenOn,
           onToggleAutoFollow: onToggleAutoFollow,
           onSettingToggled: onSettingToggled,
+          groupId: groupId,
+          onOpenGuardian: onOpenGuardian,
+          onOpenFuel: onOpenFuel,
         ),
       ),
     );
@@ -238,6 +252,67 @@ class GloveQuickSettingsModal extends StatelessWidget {
             ],
           ),
           const SizedBox(height: Space.s16),
+          // In-flight Quick Actions (Ride Guardian & Fuel)
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('quick_action_guardian_share'),
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: AppTheme.neonCyan.withOpacity(0.08),
+                    foregroundColor: AppTheme.neonCyan,
+                    side: BorderSide(color: AppTheme.neonCyan, width: 1.5),
+                    minimumSize: const Size(0, 52),
+                    shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+                  ),
+                  icon: const Icon(Icons.shield_rounded, size: 20),
+                  label: const Text(
+                    'Guardian Link',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    if (onOpenGuardian != null) {
+                      onOpenGuardian!();
+                    } else if (groupId != null && context.mounted) {
+                      showGuardianSheet(context, groupId: groupId!);
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: Space.s12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('quick_action_fuel_sheet'),
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: AppTheme.neonCyan.withOpacity(0.08),
+                    foregroundColor: AppTheme.neonCyan,
+                    side: BorderSide(color: AppTheme.neonCyan, width: 1.5),
+                    minimumSize: const Size(0, 52),
+                    shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+                  ),
+                  icon: const Icon(Icons.local_gas_station_rounded, size: 20),
+                  label: const Text(
+                    'Fuel / Refuel',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    if (onOpenFuel != null) {
+                      onOpenFuel!();
+                    } else if (context.mounted) {
+                      showFuelSheet(context);
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.s12),
           FilledButton(
             key: const Key('quick_settings_done'),
             style: FilledButton.styleFrom(

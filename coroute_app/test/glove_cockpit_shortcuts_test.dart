@@ -332,7 +332,13 @@ void main() {
     );
 
     // Verify fuel icon is displayed on Radar button
-    expect(find.byIcon(Icons.local_gas_station_rounded), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('cockpit_dock_essentials_radar')),
+        matching: find.byIcon(Icons.local_gas_station_rounded),
+      ),
+      findsOneWidget,
+    );
 
     // Tap Radar Jump button
     await tester.tap(find.byKey(const Key('cockpit_dock_essentials_radar')));
@@ -531,5 +537,90 @@ void main() {
       expect(text.contains('\u2013'), isFalse, reason: 'Must not contain en-dash: $text');
       expect(text.contains('\u2014'), isFalse, reason: 'Must not contain em-dash: $text');
     }
+  });
+
+  testWidgets('CockpitShortcutsDock renders Ride Guardian and Fuel quick shortcuts with glove targets', (tester) async {
+    final me = makeRider('rider_me', 'Eagle One');
+    final convoy = makeConvoy(me);
+    final settings = SettingsService();
+    await settings.load();
+
+    await tester.pumpWidget(
+      wrapWithTheme(
+        CockpitShortcutsDock(
+          convoy: convoy,
+          me: me,
+          settingsService: settings,
+          keepScreenOn: false,
+          autoFollow: true,
+          onToggleKeepScreenOn: () {},
+          onToggleAutoFollow: () {},
+          onEssentialsRadarTap: () {},
+        ),
+      ),
+    );
+
+    // Verify Guardian and Fuel buttons exist in the dock
+    expect(find.byKey(const Key('cockpit_dock_guardian')), findsOneWidget);
+    expect(find.byKey(const Key('cockpit_dock_fuel')), findsOneWidget);
+
+    // Verify glove touch targets >= 48dp
+    final guardianSize = tester.getSize(find.byKey(const Key('cockpit_dock_guardian')));
+    expect(guardianSize.width, greaterThanOrEqualTo(48.0));
+    expect(guardianSize.height, greaterThanOrEqualTo(48.0));
+
+    final fuelSize = tester.getSize(find.byKey(const Key('cockpit_dock_fuel')));
+    expect(fuelSize.width, greaterThanOrEqualTo(48.0));
+    expect(fuelSize.height, greaterThanOrEqualTo(48.0));
+  });
+
+  testWidgets('GloveQuickSettingsModal renders Guardian and Fuel action buttons', (tester) async {
+    final settings = SettingsService();
+    await settings.load();
+
+    bool guardianOpened = false;
+    bool fuelOpened = false;
+
+    await tester.pumpWidget(
+      wrapWithTheme(
+        Builder(builder: (ctx) {
+          return ElevatedButton(
+            onPressed: () {
+              GloveQuickSettingsModal.show(
+                ctx,
+                settingsService: settings,
+                keepScreenOn: false,
+                autoFollow: true,
+                onToggleKeepScreenOn: () {},
+                onToggleAutoFollow: () {},
+                onOpenGuardian: () => guardianOpened = true,
+                onOpenFuel: () => fuelOpened = true,
+              );
+            },
+            child: const Text('Open Modal'),
+          );
+        }),
+      ),
+    );
+
+    await tester.tap(find.text('Open Modal'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('quick_action_guardian_share')), findsOneWidget);
+    expect(find.byKey(const Key('quick_action_fuel_sheet')), findsOneWidget);
+
+    // Tap Guardian button
+    await tester.ensureVisible(find.byKey(const Key('quick_action_guardian_share')));
+    await tester.tap(find.byKey(const Key('quick_action_guardian_share')));
+    await tester.pumpAndSettle();
+    expect(guardianOpened, isTrue);
+
+    // Reopen and tap Fuel button
+    await tester.tap(find.text('Open Modal'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('quick_action_fuel_sheet')));
+    await tester.tap(find.byKey(const Key('quick_action_fuel_sheet')));
+    await tester.pumpAndSettle();
+    expect(fuelOpened, isTrue);
   });
 }

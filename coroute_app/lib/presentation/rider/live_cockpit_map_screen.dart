@@ -2,6 +2,8 @@ import '../../data/services/ride_essentials_coordinator.dart';
 import '../../data/services/route_essentials_service.dart';
 import 'package:coroute_app/presentation/ride/essentials_sheet.dart';
 import 'package:coroute_app/presentation/ride/fuel_sheet.dart';
+import 'package:coroute_app/presentation/ride/guardian_sheet.dart';
+import 'package:coroute_app/domain/safety/fuel_profile.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -76,6 +78,8 @@ import '../widgets/rider_status_sheet.dart';
 import 'rider_home_screen.dart';
 import 'widgets/cockpit_hud_toast.dart';
 import 'widgets/cockpit_shortcuts_dock.dart';
+import 'widgets/coroute_orbit_control.dart';
+import 'widgets/glove_quick_settings_modal.dart';
 
 /// The active ride: the map first, a compact top bar (next stop or
 /// destination, connection and GPS in words), one alert slot, the SOS
@@ -1328,10 +1332,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 final bottom = (top + Space.s8).clamp(Space.s8, maxBottom).toDouble();
                 final dockBottom = side
                     ? Space.s12 + sosRing + Space.s12
-                    : (bottom + sosRing + Space.s8).clamp(Space.s8, h - 160).toDouble();
+                    : bottom;
                 return Positioned(
-                  left: side ? panelW + Space.s12 : Space.s12,
-                  right: side ? null : Space.s12,
+                  left: side ? panelW + Space.s12 : Space.s12 + sosRing + Space.s8,
+                  right: side ? null : Space.s12 + 48 + Space.s8,
                   bottom: dockBottom,
                   child: IgnorePointer(
                     ignoring: hide,
@@ -1383,6 +1387,45 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   ),
                 ),
               ),
+            // Draggable CoRoute Orbit Control FAB & In-Cockpit Quick Access HUD Popup
+            CorouteOrbitControl(
+              onIntercomTap: () {
+                final intercom = context.read<IntercomService?>();
+                if (intercom != null) {
+                  if (intercom.isMicMuted) {
+                    intercom.setMicMuted(false);
+                    intercom.setMode(IntercomMode.vox);
+                    _showHudToast('Intercom: VOX Active', Icons.record_voice_over_rounded, AppTheme.neonCyan);
+                  } else {
+                    intercom.setMicMuted(true);
+                    _showHudToast('Intercom: Mic Muted', Icons.mic_off_rounded, AppTheme.laserRed);
+                  }
+                }
+              },
+              onGroupTap: () => showGroupSettings(context, convoyId: widget.convoyId),
+              onFuelTap: () => showFuelSheet(context),
+              onRouteTap: _openEssentials,
+              onGuardianTap: () => showGuardianSheet(context, groupId: convoy.groupId),
+              onMoreTap: () {
+                final settings = context.read<SettingsService?>();
+                final intercom = context.read<IntercomService?>();
+                GloveQuickSettingsModal.show(
+                  context,
+                  settingsService: settings,
+                  intercomService: intercom,
+                  keepScreenOn: _keepScreenOn,
+                  autoFollow: _autoFollow,
+                  onToggleKeepScreenOn: _toggleKeepScreenOn,
+                  onToggleAutoFollow: () => setState(() => _autoFollow = !_autoFollow),
+                  groupId: convoy.groupId,
+                  onSettingToggled: (name, isEnabled) => _showHudToast(
+                    '$name: ${isEnabled ? "ON" : "OFF"}',
+                    Icons.tune_rounded,
+                    isEnabled ? AppTheme.neonCyan : AppTheme.textSecondary,
+                  ),
+                );
+              },
+            ),
           ],
         );
       }),
@@ -1560,11 +1603,58 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               ),
         onTap: () => RiderStatusSheet.show(context, userId: me.userId),
       ),
+      Builder(
+        builder: (ctx) {
+          final safety = ctx.watch<SafetyService?>();
+          final settings = ctx.watch<SettingsService?>();
+          final estimate = safety?.estimatedUsableKm;
+          final profile = settings?.fuelProfile;
+          final nearestFuel = _essentials?.upcoming.where((e) => e.category == 'FUEL').firstOrNull;
+          final fuelAheadM = nearestFuel?.aheadM(_essentials?.progressM ?? 0);
+          final fuelAheadKm = (fuelAheadM != null && fuelAheadM > 0) ? fuelAheadM / 1000 : null;
+          final advice = fuelAdvice(
+            usableKm: estimate,
+            nextKm: fuelAheadKm,
+            reliable: !(safety?.fuelEstimateUncertain ?? false),
+          );
+
+          String fuelTitle;
+          String fuelSubtitle;
+          if (estimate != null) {
+            fuelTitle = 'Fuel range: ${estimate.floor()} km remaining';
+            if (advice == FuelAdvice.rangeRisk) {
+              fuelSubtitle = 'CRITICAL: Next fuel station is beyond current usable range!';
+            } else if (fuelAheadM != null) {
+              fuelSubtitle = 'Next station in ${formatDistanceRounded(fuelAheadM)} • Tap to manage';
+            } else if (safety?.fuelEstimateUncertain == true) {
+              fuelSubtitle = 'Tracking gaps detected • Tap to update estimate';
+            } else {
+              fuelSubtitle = 'Ridden ${(safety!.riddenSinceFillM / 1000).toStringAsFixed(1)} km since fill • Tap to manage';
+            }
+          } else if (profile != null && profile.valid) {
+            fuelTitle = 'Fuel profile: ${profile.rangeKm.floor()} km full range';
+            fuelSubtitle = 'Confirm filled tank to start live range tracking';
+          } else {
+            fuelTitle = 'Fuel estimate / refuel';
+            fuelSubtitle = 'Set up fuel capacity & mileage for range warnings';
+          }
+
+          return SheetRow(
+            key: const Key('sheet_row_fuel_status'),
+            icon: Icons.local_gas_station_rounded,
+            title: fuelTitle,
+            subtitle: fuelSubtitle,
+            onTap: () => showFuelSheet(ctx),
+          );
+        },
+      ),
       SheetRow(
-        icon: Icons.local_gas_station_rounded,
-        title: 'Fuel estimate / refuel',
-        subtitle: 'Confirm a fill or update your fuel estimate while stopped',
-        onTap: me.speedKmh > 5 ? null : () => showFuelSheet(context),
+        key: const Key('sheet_row_guardian'),
+        icon: Icons.shield_rounded,
+        title: 'Share Ride Guardian link',
+        subtitle: 'Live web tracking link with PIN protection for family or friends',
+        onTap: () => showGuardianSheet(context, groupId: convoy.groupId),
+        trailing: Icon(Icons.share_rounded, size: 20, color: AppTheme.neonCyan),
       ),
       if (pf != null && canSaveMap)
         SaveRouteMapRow(
@@ -2011,43 +2101,65 @@ class _RiderMarker extends StatelessWidget {
     final first = rider.name.split(' ').first;
     final isTunnel = rider.isTunnelCoasting;
     final effectiveColor = isTunnel ? AppTheme.neonCyan : color;
-    String? label;
+    final isMoving = rider.speedKmh >= 5;
+    final speedBadge = isMoving
+        ? '${rider.speedKmh.round()} km/h'
+        : (rider.statusReason.isNotEmpty ? RiderStatusSheet.getStatusLabel(rider.statusReason) : '0 km/h');
+
+    String label;
     if (isTunnel) {
       label = isMe ? 'Tunnel Coasting' : '$first (Tunnel)';
     } else if (status.isStale && !isMe && rider.lastSeenEpochMs > 0) {
-      label = '$first, ${formatAgo(Duration(milliseconds: nowMs - rider.lastSeenEpochMs))}';
-    } else if (selected) {
-      label = isMe ? 'You' : '$first, ${status.label}';
+      label = '$first · ${formatAgo(Duration(milliseconds: nowMs - rider.lastSeenEpochMs))}';
+    } else {
+      label = isMe ? 'You · $speedBadge' : '$first · $speedBadge';
     }
-    final l = label;
+
     final reason = rider.statusReason.isEmpty ? '' : RiderStatusSheet.getStatusLabel(rider.statusReason);
     return Semantics(
       container: true,
       button: true,
-      label: '${riderSemanticsLabel(rider, isMe: isMe, statusLabel: reason)}, ${status.label}',
+      label: '${riderSemanticsLabel(rider, isMe: isMe, statusLabel: reason)}, ${rider.speedKmh.round()} km/h, ${status.label}',
       excludeSemantics: true,
       onTap: onTap,
       child: Stack(
         alignment: Alignment.center,
         children: [
           RiderAvatar(name: rider.name, color: effectiveColor, status: status, size: isMe ? 44 : 40, onTap: onTap),
-          if (l != null)
-            Positioned(
-              top: 72,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: Space.s4, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppTheme.slateCard,
-                    borderRadius: Radii.smAll,
-                    border: Border.all(color: AppTheme.subtleBorder),
+          Positioned(
+            top: isMe ? 50 : 46,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.slateCard.withOpacity(0.92),
+                  borderRadius: Radii.smAll,
+                  border: Border.all(
+                    color: isMoving ? (effectiveColor ?? AppTheme.neonCyan) : AppTheme.subtleBorder,
+                    width: isMoving ? 1.2 : 1,
                   ),
-                  child: Text(l, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textPrimary)),
+                  boxShadow: [
+                    if (isMoving)
+                      BoxShadow(
+                        color: (effectiveColor ?? AppTheme.neonCyan).withOpacity(0.25),
+                        blurRadius: 4,
+                      ),
+                  ],
+                ),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: isMoving ? (isMe ? AppTheme.neonCyan : AppTheme.textPrimary) : AppTheme.textSecondary,
+                  ),
                 ),
               ),
             ),
+          ),
         ],
       ),
     );

@@ -120,3 +120,49 @@
      - `app-armeabi-v7a-release.apk` (10.8 MB)
   6. APK publication: Installed release binaries in `gateway/public/` as `coroute.apk` (11.1 MB) and `coroute-32bit.apk` (10.8 MB).
   7. Gateway & Website update: Built-in website dynamically serves version `3.18` with origin-aware canonical metadata and live APK download endpoints.
+
+### Release 3.19.0+79 / Gateway v3.19.0 (2026-10-12)
+- **Operator User**: `antigravity` (password authentication only, zero key files)
+- **Activities**:
+  1. Ran full automated test suites: Flutter (1,025/1,025 passed, 100%) and Gateway (314/314 passed, 100%). Static analysis `flutter analyze` 0 issues.
+  2. Bumped app version to `3.19.0+79` in `pubspec.yaml` and gateway version to `3.19.0` in `gateway/package.json`.
+  3. UI/UX decluttering & feature implementation:
+     - Decluttered live cockpit: Floating center dock removed; repositioned horizontally atop collapsed sheet alongside 56dp Glove SOS button and Recenter button.
+     - 7-button Glove Shortcuts Dock: Added dedicated Ride Guardian share link (`LINK`) and live Fuel usable range (`185k`) buttons with full backwards compatibility.
+     - Glove Quick Settings Modal: Added top in-flight primary action cards for Guardian Link and Fuel/Range.
+     - Group Settings Sheet: Redesigned into structured cards with top Ride Guardian card and compliant ListTile hierarchy.
+     - Quick Stop Reason Picker: 4 oversized glove buttons with clean SVG vector icons and ZERO raw emojis.
+  4. Compiled production split APKs with R8 shrinking and ABI splitting:
+     - `app-arm64-v8a-release.apk` (11.1 MB)
+     - `app-armeabi-v7a-release.apk` (10.8 MB)
+  5. APK publication: Installed release binaries in `/opt/coroute/gateway/public/` as `coroute.apk` (11.1 MB) and `coroute-32bit.apk` (10.8 MB).
+  6. Environment configuration: Updated `/etc/coroute/gateway.env` (`LATEST_APP_BUILD=79`).
+  7. Service reload: `coroute-gateway.service` restarted and verified `HEALTHY` (`latestBuild: 79`, `version: 3.19.0`, `db: UP`).
+  8. Live verification: Public HTTPS endpoints verified (`https://coroute.duckdns.org/api/health`, `/api/meta`, `/download`, `/coroute.apk`, `/coroute-32bit.apk`).
+
+### Release 3.20.0+80 / Gateway v3.20.0 (2026-10-12)
+- **Operator User**: `antigravity`
+- **Activities**:
+  1. Ran full automated test suites:
+     - Flutter: 1,026/1,026 tests passed (100%), `flutter analyze` 0 issues.
+     - Gateway: 314/314 tests passed (100%).
+  2. Bumped app version to `3.20.0+80` in `coroute_app/pubspec.yaml` and gateway version to `3.20.0` in `gateway/package.json`.
+  3. Feature Implementations:
+     - **In-Cockpit Popups Only**: Eliminated all jarring full-screen route deviations; all overlays (Orbit HUD, Quick Settings, Guardian, Fuel Radar, Group Settings, Stop Picker) now render directly over the live map canvas.
+     - **Draggable CoRoute Orbit Control FAB**: 52dp thumb-accessible floating button with smooth inertial drag, magnetic screen-edge snapping, glowing amber orbit rings, and 6-tile Quick Access popup HUD.
+     - **Live Speed Badging**: Real-time speeds displayed directly on all convoy rider markers on the map (`SB • 72 KM/H`, `VP • 68 KM/H`, etc.) with high-contrast pills.
+     - **Figma Design System & Interactive Plugin**: 14 pixel-perfect In-Cockpit Popup artboards generated across Dark & Light modes with native prototyping reactions via compiled Figma plugin.
+  4. Compiled production split APKs with R8 code shrinking and ABI splitting:
+     - `app-arm64-v8a-release.apk` (11.1 MB, SHA-256: `EF99DF34D76CA017E0913933429F424C9418637E293B1ECF1C94FFFB708D4BC9`)
+     - `app-armeabi-v7a-release.apk` (10.8 MB, SHA-256: `79B6B081879697F317F4181256969A50B1AA17D3DF7F06F0BBDD35D9F3640E95`)
+  5. APK Publication & Deployment:
+     - Published to `/opt/coroute/gateway/public/coroute.apk` and `/opt/coroute/gateway/public/coroute-32bit.apk`.
+     - Synchronized gateway configuration (`src/config.js` and `package.json`).
+  6. Environment Configuration:
+     - Updated `/etc/coroute/gateway.env` with `LATEST_APP_BUILD=80`.
+  7. Service Reload & Health Verification:
+     - Restarted `coroute-gateway.service`.
+     - Verified live health via HTTPS: `version: 3.20.0`, `latestBuild: 80`, `status: HEALTHY`, `db: UP`.
+     - Verified APK download headers (`HTTP 200 OK`, `application/vnd.android.package-archive`).
+  8. Audited system logs: Appended operation to `/var/log/coroute_operations.log` and user activity logs.
+

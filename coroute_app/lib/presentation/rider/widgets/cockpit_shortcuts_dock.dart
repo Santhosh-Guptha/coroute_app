@@ -8,7 +8,10 @@ import '../../../data/models/rider_model.dart';
 import '../../../data/services/convoy_service.dart';
 import '../../../data/services/intercom_service.dart';
 import '../../../data/services/route_essentials_service.dart';
+import '../../../data/services/safety_service.dart';
 import '../../../data/services/settings_service.dart';
+import '../../ride/fuel_sheet.dart';
+import '../../ride/guardian_sheet.dart';
 import 'glove_quick_settings_modal.dart';
 import 'quick_stop_reason_modal.dart';
 
@@ -219,6 +222,7 @@ class _CockpitShortcutsDockState extends State<CockpitShortcutsDock> {
       autoFollow: widget.autoFollow,
       onToggleKeepScreenOn: widget.onToggleKeepScreenOn,
       onToggleAutoFollow: widget.onToggleAutoFollow,
+      groupId: widget.convoy.groupId,
       onSettingToggled: (name, isEnabled) {
         widget.onHudToast?.call(
           '$name: ${isEnabled ? "ON" : "OFF"}',
@@ -261,6 +265,24 @@ class _CockpitShortcutsDockState extends State<CockpitShortcutsDock> {
       }
     }
 
+    // Safety & Fuel info
+    final safety = context.mounted
+        ? Provider.of<SafetyService?>(context, listen: false)
+        : null;
+    final estimate = safety?.estimatedUsableKm;
+    String? fuelBadge;
+    Color fuelColor = AppTheme.neonCyan;
+    bool fuelActive = false;
+    if (estimate != null) {
+      fuelBadge = '${estimate.floor()}k';
+      fuelActive = true;
+      if (estimate < 25) {
+        fuelColor = AppTheme.laserRed;
+      } else if (estimate < 50) {
+        fuelColor = AppTheme.hyperAmber;
+      }
+    }
+
     // Intercom status
     final isMicMuted = intercom?.isMicMuted ?? false;
     final isVoxMode = (intercom?.mode == IntercomMode.vox);
@@ -284,78 +306,106 @@ class _CockpitShortcutsDockState extends State<CockpitShortcutsDock> {
           ),
         ],
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 1. Voice Mode Quick Toggle
-          _DockButton(
-            key: const Key('cockpit_dock_voice_toggle'),
-            icon: _voiceMode.icon,
-            tooltip: 'Voice: ${_voiceMode.label}',
-            activeColor: _voiceMode == CockpitVoiceMode.nightLoud
-                ? AppTheme.devmonksPurple
-                : (_voiceMode == CockpitVoiceMode.criticalOnly
-                    ? AppTheme.hyperAmber
-                    : AppTheme.neonCyan),
-            isActive: true,
-            onTap: () => _cycleVoiceMode(settings),
-          ),
-          const SizedBox(width: Space.s8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 1. Voice Mode Quick Toggle
+            _DockButton(
+              key: const Key('cockpit_dock_voice_toggle'),
+              icon: _voiceMode.icon,
+              tooltip: 'Voice: ${_voiceMode.label}',
+              activeColor: _voiceMode == CockpitVoiceMode.nightLoud
+                  ? AppTheme.devmonksPurple
+                  : (_voiceMode == CockpitVoiceMode.criticalOnly
+                      ? AppTheme.hyperAmber
+                      : AppTheme.neonCyan),
+              isActive: true,
+              onTap: () => _cycleVoiceMode(settings),
+            ),
+            const SizedBox(width: Space.s8),
 
-          // 2. Quick Stop Reason Picker
-          _DockButton(
-            key: const Key('cockpit_dock_stop_reason'),
-            icon: isStopped ? Icons.pause_circle_filled_rounded : Icons.report_problem_rounded,
-            tooltip: isStopped ? 'Stop: ${widget.me.statusReason}' : 'Report Stop Reason',
-            activeColor: AppTheme.hyperAmber,
-            isActive: isStopped,
-            onTap: () {
-              if (convoyService != null) {
-                _openStopReasonPicker(context, convoyService);
-              }
-            },
-          ),
-          const SizedBox(width: Space.s8),
+            // 2. Ride Guardian Link Share
+            _DockButton(
+              key: const Key('cockpit_dock_guardian'),
+              icon: Icons.shield_rounded,
+              badgeText: 'Share',
+              tooltip: 'Ride Guardian: Share live tracking link',
+              activeColor: AppTheme.neonCyan,
+              isActive: true,
+              onTap: () => showGuardianSheet(context, groupId: widget.convoy.groupId),
+            ),
+            const SizedBox(width: Space.s8),
 
-          // 3. Quick Essentials Radar Jump
-          _DockButton(
-            key: const Key('cockpit_dock_essentials_radar'),
-            icon: radarIcon,
-            badgeText: radarLabel != 'Radar' ? radarLabel : null,
-            tooltip: 'Essentials Radar: $radarLabel',
-            activeColor: AppTheme.neonCyan,
-            isActive: nearest != null,
-            onTap: widget.onEssentialsRadarTap,
-          ),
-          const SizedBox(width: Space.s8),
+            // 3. Fuel Range & Quick Refuel
+            _DockButton(
+              key: const Key('cockpit_dock_fuel'),
+              icon: Icons.local_gas_station_rounded,
+              badgeText: fuelBadge,
+              tooltip: estimate != null ? 'Fuel Range: ${estimate.floor()} km' : 'Fuel: Confirm refuel or profile',
+              activeColor: fuelColor,
+              isActive: fuelActive,
+              onTap: () => showFuelSheet(context),
+            ),
+            const SizedBox(width: Space.s8),
 
-          // 4. Intercom Mic Mute / VOX Toggle
-          _DockButton(
-            key: const Key('cockpit_dock_intercom_toggle'),
-            icon: isMicMuted
-                ? Icons.mic_off_rounded
-                : (isVoxMode ? Icons.record_voice_over_rounded : Icons.mic_rounded),
-            tooltip: isMicMuted
-                ? 'Mic Muted - Tap for VOX'
-                : (isVoxMode ? 'VOX Active - Tap to Mute' : 'PTT - Tap to Mute'),
-            activeColor: isMicMuted
-                ? AppTheme.laserRed
-                : (isVoxMode ? AppTheme.neonCyan : AppTheme.hyperAmber),
-            isActive: isMicMuted || isVoxMode,
-            onTap: () => _toggleIntercom(intercom),
-          ),
-          const SizedBox(width: Space.s8),
+            // 4. Quick Stop Reason Picker
+            _DockButton(
+              key: const Key('cockpit_dock_stop_reason'),
+              icon: isStopped ? Icons.pause_circle_filled_rounded : Icons.report_problem_rounded,
+              tooltip: isStopped ? 'Stop: ${widget.me.statusReason}' : 'Report Stop Reason',
+              activeColor: AppTheme.hyperAmber,
+              isActive: isStopped,
+              onTap: () {
+                if (convoyService != null) {
+                  _openStopReasonPicker(context, convoyService);
+                }
+              },
+            ),
+            const SizedBox(width: Space.s8),
 
-          // 5. Glove Quick Settings Grid Button
-          _DockButton(
-            key: const Key('cockpit_dock_quick_settings'),
-            icon: Icons.tune_rounded,
-            tooltip: 'Glove Quick Settings',
-            activeColor: AppTheme.neonCyan,
-            isActive: false,
-            onTap: () => _openQuickSettings(context, settings, intercom),
-          ),
-        ],
+            // 5. Quick Essentials Radar Jump
+            _DockButton(
+              key: const Key('cockpit_dock_essentials_radar'),
+              icon: radarIcon,
+              badgeText: radarLabel != 'Radar' ? radarLabel : null,
+              tooltip: 'Essentials Radar: $radarLabel',
+              activeColor: AppTheme.neonCyan,
+              isActive: nearest != null,
+              onTap: widget.onEssentialsRadarTap,
+            ),
+            const SizedBox(width: Space.s8),
+
+            // 6. Intercom Mic Mute / VOX Toggle
+            _DockButton(
+              key: const Key('cockpit_dock_intercom_toggle'),
+              icon: isMicMuted
+                  ? Icons.mic_off_rounded
+                  : (isVoxMode ? Icons.record_voice_over_rounded : Icons.mic_rounded),
+              tooltip: isMicMuted
+                  ? 'Mic Muted - Tap for VOX'
+                  : (isVoxMode ? 'VOX Active - Tap to Mute' : 'PTT - Tap to Mute'),
+              activeColor: isMicMuted
+                  ? AppTheme.laserRed
+                  : (isVoxMode ? AppTheme.neonCyan : AppTheme.hyperAmber),
+              isActive: isMicMuted || isVoxMode,
+              onTap: () => _toggleIntercom(intercom),
+            ),
+            const SizedBox(width: Space.s8),
+
+            // 7. Glove Quick Settings Grid Button
+            _DockButton(
+              key: const Key('cockpit_dock_quick_settings'),
+              icon: Icons.tune_rounded,
+              tooltip: 'Glove Quick Settings',
+              activeColor: AppTheme.neonCyan,
+              isActive: false,
+              onTap: () => _openQuickSettings(context, settings, intercom),
+            ),
+          ],
+        ),
       ),
     );
   }

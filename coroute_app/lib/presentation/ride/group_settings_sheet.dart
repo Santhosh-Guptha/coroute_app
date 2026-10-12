@@ -1,6 +1,6 @@
 import 'guardian_sheet.dart';
 import 'ride_feature_summary.dart';
-import '../../data/services/meta_service.dart';
+import 'ride_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
@@ -77,44 +77,125 @@ class GroupSettingsView extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (context.watch<MetaService?>()?.meta?.guardianPersonal == true)
-            ListTile(
-              leading: const Icon(Icons.shield_outlined),
-              title: const Text('Share with a Ride Guardian'),
-              subtitle: Text(convoy.featurePolicy.guardianEnabled ? 'Share your personal ride with someone you trust.' : 'Guardian links are disabled for this group.'),
-              onTap: convoy.featurePolicy.guardianEnabled ? () => showGuardianSheet(context, groupId: convoyId) : null,
+          // 1. Ride Guardian Live Link Banner
+          Container(
+            margin: const EdgeInsets.only(bottom: Space.s16),
+            padding: const EdgeInsets.all(Space.s16),
+            decoration: BoxDecoration(
+              color: AppTheme.slateCard,
+              borderRadius: Radii.mdAll,
+              border: Border.all(color: AppTheme.neonCyan, width: 1.5),
             ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(Space.s8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.neonCyan.withOpacity(0.15),
+                        borderRadius: Radii.smAll,
+                      ),
+                      child: Icon(Icons.shield_rounded, color: AppTheme.neonCyan, size: 24),
+                    ),
+                    const SizedBox(width: Space.s12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Ride Guardian', style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                          Text(
+                            convoy.featurePolicy.guardianEnabled
+                                ? 'Share your personal ride with someone you trust.'
+                                : 'Guardian links are disabled for this group.',
+                            style: AppText.caption,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: Space.s12),
+                FilledButton.icon(
+                  key: const Key('group_settings_guardian_share_btn'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: convoy.featurePolicy.guardianEnabled ? AppTheme.neonCyan : Colors.white12,
+                    foregroundColor: convoy.featurePolicy.guardianEnabled ? Colors.black : AppTheme.textMuted,
+                    minimumSize: const Size.fromHeight(48),
+                    shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+                  ),
+                  icon: const Icon(Icons.share_rounded, size: 18),
+                  label: const Text('Share with a Ride Guardian', style: TextStyle(fontWeight: FontWeight.w700)),
+                  onPressed: convoy.featurePolicy.guardianEnabled ? () => showGuardianSheet(context, groupId: convoyId) : null,
+                ),
+              ],
+            ),
+          ),
+
           RideFeatureSummary(groupId: convoyId),
-          const Text('Ride feature controls'),
-          if (!service.supports(ProtocolFeatures.featurePolicy)) const Text('Connect to an updated gateway to change ride features.'),
-          if (!service.isOnline) const Text('Reconnect to change group settings.'),
-          if (service.lastError != null) Text(service.lastError!),
+          const SizedBox(height: Space.s12),
+
+          // 2. Ride Feature Controls
+          SheetSectionTitle('Ride feature controls'),
+          if (!service.supports(ProtocolFeatures.featurePolicy))
+            Text('Connect to an updated gateway to change ride features.', style: AppText.caption.copyWith(color: StatusColors.warning)),
+          if (!service.isOnline)
+            Text('Reconnect to change group settings.', style: AppText.caption.copyWith(color: StatusColors.warning)),
+          if (service.lastError != null)
+            Text(service.lastError!, style: AppText.caption.copyWith(color: StatusColors.critical)),
           for (final entry in const {
-            'essentialsEnabled': 'Route essentials', 'autoDiscovery': 'Automatic essentials refresh',
-            'groupFuelEnabled': 'Allow opt-in group fuel estimates', 'guardianEnabled': 'Allow Ride Guardian links',
-            'guardianRequirePin': 'Require PIN on Guardian links', 'notificationInsights': 'Expanded notification insights',
+            'essentialsEnabled': 'Route essentials',
+            'autoDiscovery': 'Automatic essentials refresh',
+            'groupFuelEnabled': 'Allow opt-in group fuel estimates',
+            'guardianEnabled': 'Allow Ride Guardian links',
+            'guardianRequirePin': 'Require PIN on Guardian links',
+            'notificationInsights': 'Expanded notification insights',
           }.entries)
-            SwitchListTile(contentPadding: EdgeInsets.zero, title: Text(entry.value),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(entry.value, style: AppText.body),
               value: convoy.featurePolicy.toJson()[entry.key] == true,
-              onChanged: featureControls ? (v) => service.updateGroupConfig(featurePolicy: {entry.key: v}) : null),
+              onChanged: featureControls ? (v) => service.updateGroupConfig(featurePolicy: {entry.key: v}) : null,
+            ),
+          const Divider(),
           for (final entry in const {
             'guardianMaxHours': ('Guardian maximum hours', [1, 6, 24, 72, 168, 336]),
             'guardianStopMinutes': ('Guardian stopped warning minutes', [5, 15, 30, 60, 120]),
             'guardianOfflineMinutes': ('Guardian offline warning minutes', [2, 5, 10, 30, 60]),
             'guardianDeviationMinutes': ('Guardian deviation warning minutes', [1, 5, 10, 15, 30]),
           }.entries)
-            Padding(padding: const EdgeInsets.only(bottom: Space.s12), child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start, children: [Text(entry.value.$1),
-                Wrap(spacing: Space.s8, children: [for (final v in entry.value.$2)
-                  ChoiceChip(label: Text('$v'), selected: convoy.featurePolicy.toJson()[entry.key] == v,
-                    onSelected: featureControls ? (_) => service.updateGroupConfig(featurePolicy: {entry.key: v}) : null)]),
-              ])),
-          const Text('Changes apply after server confirmation. Rider consent and emergency safeguards remain in control of each rider.'),
-          if (!lead)
             Padding(
               padding: const EdgeInsets.only(bottom: Space.s12),
-              child: Text('Only the lead can change these.', style: AppText.label),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(entry.value.$1, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: Space.s4),
+                  Wrap(
+                    spacing: Space.s8,
+                    children: [
+                      for (final v in entry.value.$2)
+                        ChoiceChip(
+                          label: Text('$v'),
+                          selected: convoy.featurePolicy.toJson()[entry.key] == v,
+                          onSelected: featureControls ? (_) => service.updateGroupConfig(featurePolicy: {entry.key: v}) : null,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
+          Text('Changes apply after server confirmation. Rider consent and emergency safeguards remain in control of each rider.', style: AppText.caption),
+          if (!lead) ...[
+            const SizedBox(height: Space.s8),
+            Text('Only the lead can change these.', style: AppText.label),
+          ],
+          const SizedBox(height: Space.s16),
+          const Divider(),
+
+          // 3. Convoy Safety Limits
+          SheetSectionTitle('Convoy safety limits'),
           section(
             title: 'Too far behind after',
             value: formatDistance(convoy.distanceThresholdMeters),
@@ -204,6 +285,11 @@ class GroupSettingsView extends StatelessWidget {
                 ],
               ),
             ),
+          const SizedBox(height: Space.s8),
+          const Divider(),
+
+          // 4. Alerts & Voice Guidance
+          SheetSectionTitle('Audio & guidance alerts'),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: Text('Spoken alerts', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
@@ -252,6 +338,9 @@ class GroupSettingsView extends StatelessWidget {
               );
             },
           ),
+          const SizedBox(height: Space.s8),
+
+          // 5. Network & Discovery Settings
           if (service.supports(ProtocolFeatures.safetyNet) || service.supports(ProtocolFeatures.discovery))
             GroupNetworkSettings(
               visibility: convoy.visibility,
@@ -267,12 +356,15 @@ class GroupSettingsView extends StatelessWidget {
                 }
               },
             ),
+
+          // 6. Location Status
           const Divider(),
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Icon(
               service.isRealGpsActive ? Icons.location_on_rounded : Icons.location_off_rounded,
               color: service.isRealGpsActive ? StatusColors.success : StatusColors.warning,
+              size: 28,
             ),
             title: Text(service.isRealGpsActive ? 'Sharing my location' : 'Location not shared', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
             subtitle: Text(
