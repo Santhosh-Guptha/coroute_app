@@ -1,6 +1,6 @@
 'use strict';
 /**
- * ConvoyManager — the single authority for live convoy state.
+ * ConvoyManager - the single authority for live convoy state.
  *
  *  - Holds each active convoy ("room") in memory for sub-millisecond reads.
  *  - Applies every mutation server-side (per-rider patches, never whole-document
@@ -586,12 +586,21 @@ class ConvoyManager extends EventEmitter {
     if (!room.riders.has(user.userId) && user.role !== 'MASTER_ADMIN') throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const a = room.alerts.get(alertId);
     if (!a || a.resolved) {
-      // Unknown here or already closed: answered as before (idempotent for the phones).
-      if (a) { delete a.medical; }
-      await this.repo.resolveAlert(groupId, alertId, user.userId);
-      this._emit(groupId, 'ALERT_RESOLVED', { alertId, by: user.userId, status: a ? statusOf(a) : 'RESOLVED' });
-      this.emit('fleet');
-      return true;
+      if (a) {
+        delete a.medical;
+        await this.repo.resolveAlert(groupId, alertId, user.userId);
+        this._emit(groupId, 'ALERT_RESOLVED', { alertId, by: user.userId, status: statusOf(a) });
+        this.emit('fleet');
+        return true;
+      }
+      // If alert is not in memory, ensure it actually exists in persistent storage before emitting resolution
+      const exists = await this.repo.resolveAlert(groupId, alertId, user.userId);
+      if (exists) {
+        this._emit(groupId, 'ALERT_RESOLVED', { alertId, by: user.userId, status: 'RESOLVED' });
+        this.emit('fleet');
+        return true;
+      }
+      return false;
     }
     const r = typeof reason === 'string' && RESOLVE_REASONS.has(reason.toUpperCase()) ? reason.toUpperCase() : 'RESOLVED';
     let next = 'RESOLVED';

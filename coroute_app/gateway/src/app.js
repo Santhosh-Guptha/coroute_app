@@ -73,7 +73,28 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1); // behind Caddy/nginx on the VM
-  app.use(helmet({ contentSecurityPolicy: false }));
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+      },
+    },
+    frameguard: { action: 'deny' },
+    xContentTypeOptions: true,
+  }));
+  app.use((req, res, next) => {
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    next();
+  });
   app.use(cors(config.corsOrigins.length ? { origin: config.corsOrigins } : { origin: false }));
   app.use(express.json({ limit: '2mb' }));
 
