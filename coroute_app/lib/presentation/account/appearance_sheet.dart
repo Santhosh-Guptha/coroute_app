@@ -82,7 +82,7 @@ class AppearanceSheet extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Semantics(header: true, child: DsSectionHeader('Map HUD & Alerts')),
+                    Semantics(header: true, child: DsSectionHeader('Map HUD & Alerts')),
                     const SizedBox(height: 10),
                     DsCard(
                       child: Column(

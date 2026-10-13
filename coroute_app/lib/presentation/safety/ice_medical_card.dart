@@ -358,7 +358,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                             Expanded(
                               child: ElevatedButton.icon(
                                 onPressed: () => _makeCall(contactPhone),
-                                icon: const Icon(Icons.phone_outlined, size: 18),
+                                icon: const Icon(Icons.phone_rounded, size: 18),
                                 label: const Text('CALL', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1)),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: AppTheme.brand,
@@ -373,7 +373,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                             Expanded(
                               child: ElevatedButton.icon(
                                 onPressed: () => _sendSms(contactPhone),
-                                icon: const Icon(Icons.sms_outlined, size: 18),
+                                icon: const Icon(Icons.sms_rounded, size: 18),
                                 label: const Text('SMS', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1)),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.white,

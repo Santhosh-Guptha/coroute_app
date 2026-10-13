@@ -180,7 +180,7 @@ class DsScreenHeader extends StatelessWidget {
             ],
           ),
         ),
-        if (trailing != null) trailing!,
+        ?trailing,
       ],
     );
   }
@@ -473,7 +473,7 @@ class DsListRow extends StatelessWidget {
           Expanded(child: Text(label, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
           if (value != null)
             Text(value!, style: AppText.body.copyWith(fontWeight: FontWeight.w800, color: valueColor ?? AppTheme.accentText)),
-          if (trailing != null) trailing!,
+          ?trailing,
           if (onTap != null) Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
         ],
       ),

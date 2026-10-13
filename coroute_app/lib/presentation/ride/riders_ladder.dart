@@ -310,8 +310,8 @@ class _RiderRow extends StatelessWidget {
       if (sweeper) SweeperMarker.label,
       if (distText.isNotEmpty) distText,
       if (tooFar) 'too far behind',
-      if (speed != null) speed,
-      if (fuel != null) fuel,
+      ?speed,
+      ?fuel,
       if (extra.isNotEmpty) extra,
       if (isLead) 'Lead',
     ].join(', ');
@@ -340,19 +340,20 @@ class _RiderRow extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Flexible(
-                        child: Text(
-                          rung.isMe ? '${r.name} (You)' : r.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppText.title,
-                        ),
+                      Text(
+                        rung.isMe ? '${r.name} (You)' : r.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.title,
                       ),
-                      if (isLead) ...[const SizedBox(width: 8), const DsChip('Lead')]
-                      else if (tooFar) ...[const SizedBox(width: 8), const DsChip('Falling back', warning: true)]
-                      else if (rung.isMe) ...[const SizedBox(width: 8), const DsChip('Pack', inverse: true)],
+                      if (isLead) const DsChip('Lead')
+                      else if (tooFar) const DsChip('Falling back', warning: true)
+                      else if (rung.isMe) const DsChip('Pack', inverse: true),
                     ],
                   ),
                   const SizedBox(height: 4),

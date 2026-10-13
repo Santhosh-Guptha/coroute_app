@@ -74,10 +74,14 @@ class GroupSettingsView extends StatelessWidget {
 
     /// The canvas settings group: a `bg` filled block with 18 dp corners.
     Widget group(List<Widget> children) {
-      return Container(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        decoration: BoxDecoration(color: AppTheme.bg, borderRadius: BorderRadius.circular(Radii.lg)),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+      return Material(
+        color: AppTheme.bg,
+        borderRadius: BorderRadius.circular(Radii.lg),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+        ),
       );
     }
 

@@ -380,21 +380,17 @@ class _BigButton extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
   final bool outlined;
-  final Color? color;
 
-  const _BigButton({required this.icon, required this.label, required this.onPressed, this.outlined = false, this.color});
+  const _BigButton({required this.icon, required this.label, required this.onPressed, this.outlined = false});
 
   @override
   Widget build(BuildContext context) {
-    final c = color;
-    final tone = outlined
-        ? DsButtonTone.outline
-        : c == AppTheme.sos
-            ? DsButtonTone.sos
-            : c == AppTheme.warnText
-                ? DsButtonTone.warn
-                : DsButtonTone.brand;
-    return DsButton(label: label, icon: icon, tone: tone, onPressed: onPressed);
+    return DsButton(
+      label: label,
+      icon: icon,
+      tone: outlined ? DsButtonTone.outline : DsButtonTone.brand,
+      onPressed: onPressed,
+    );
   }
 }
 

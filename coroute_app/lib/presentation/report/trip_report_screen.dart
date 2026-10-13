@@ -380,7 +380,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             ),
           )
         else ...[
-          const Semantics(header: true, child: DsSectionHeader('Your ride')),
+          Semantics(header: true, child: DsSectionHeader('Your ride')),
           const SizedBox(height: 10),
           DsHeroCard(
             padding: const EdgeInsets.all(20),
@@ -424,7 +424,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
         ],
         if (!widget.adminView && r != null && others.isNotEmpty) ...[
           const SizedBox(height: 20),
-          const Semantics(header: true, child: DsSectionHeader('Rode with')),
+          Semantics(header: true, child: DsSectionHeader('Rode with')),
           const SizedBox(height: 10),
           _RodeWithCard(members: others, colors: _colors, allArrived: r.arrived >= r.memberCount, arrived: r.arrived, total: r.memberCount),
         ],

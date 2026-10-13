@@ -449,7 +449,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Map HUD & Alerts'), findsOneWidget);
+      expect(find.text('MAP HUD & ALERTS'), findsOneWidget);
       expect(find.text('3s'), findsWidgets);
       expect(find.text('5s'), findsWidgets);
 

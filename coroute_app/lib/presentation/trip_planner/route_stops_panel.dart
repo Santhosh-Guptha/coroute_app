@@ -337,7 +337,6 @@ class _TimelineRow extends StatelessWidget {
   final bool last;
 
   const _TimelineRow({
-    super.key,
     required this.ring,
     this.fill,
     required this.title,

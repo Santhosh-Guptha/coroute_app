@@ -57,6 +57,10 @@ void main() {
   });
 
   testWidgets('failed stop submission stays retryable; successful request disables it', (tester) async {
+    tester.view.physicalSize = const Size(800, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final service = RouteEssentialsService(ApiClient(), load: () async => null, save: (_) async {});
     service.snapshot = EssentialsSnapshot(category: 'FUEL', routeKey: 'r', attribution: 'OpenStreetMap', fromM: 0, toM: 100000,
       fetchedAt: DateTime.now().millisecondsSinceEpoch, complete: true, stale: false, places: const [
@@ -67,9 +71,9 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(builder: (context) => TextButton(onPressed: () =>
       showEssentialsSheet(context, service: service, leader: true, refresh: (_, _) async {}, addStop: (_) { attempts++; return accepted; }), child: const Text('Open'))))));
     await tester.tap(find.text('Open')); await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Add stop')); await tester.tap(find.text('Add stop')); await tester.pump();
+    await tester.scrollUntilVisible(find.text('Add stop'), 100); await tester.tap(find.text('Add stop')); await tester.pump();
     expect(attempts, 1); expect(find.text('Requested'), findsNothing);
-    accepted = true; await tester.tap(find.text('Add stop')); await tester.pump();
+    accepted = true; await tester.scrollUntilVisible(find.text('Add stop'), 100); await tester.tap(find.text('Add stop')); await tester.pump();
     expect(attempts, 2); expect(find.text('Requested'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink()); service.dispose();
