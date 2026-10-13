@@ -191,3 +191,25 @@
      - Restarted `coroute-gateway.service` and verified `HEALTHY` (status: `HEALTHY`, version: `3.21.0`, db: `UP`).
      - Appended audit entries to `/var/log/coroute_operations.log` and activity logs.
 
+### Release 3.22.0+82 / Gateway v3.22.0 (2026-10-13)
+- **Operator User**: `antigravity` / `ubuntu`
+- **Activities**:
+  1. Ran full automated test suites:
+     - Flutter: 1,037/1,037 tests passed (100%), `dart analyze .` 0 issues.
+     - Gateway: 314/314 tests passed (100%).
+     - Safety Engine Suite: 106 tests across mobile & gateway (crash detection, crash alarm, safety service, speed calculation, overspeed, SOS, incident response, network reliability, emergency telemetry).
+  2. Bumped app version to `3.22.0+82` in `coroute_app/pubspec.yaml` and gateway version to `3.22.0` in `gateway/package.json`.
+  3. Feature Implementations & Design Canvas Overhaul:
+     - **Complete Design Canvas Restyle**: 93+ files updated to match the CoRoute Rider App design canvas (teal palette for light and dark modes, Manrope variable font, and unified `lib/core/ui/design_kit.dart` component system).
+     - **Speed-Limit Badge Dynamics**: Dynamic speed limit pill in `minimal_cockpit_overlay.dart` showing neutral styling when compliant and amber warning alerts exclusively during overspeed episodes.
+     - **Ride Order Ladder & Responsive Ergonomics**: Auto-scrolling and flex adaptations preventing viewport clipping on low-dpi and small form factors.
+     - **Safety Telemetry & Incident Location Analytics**:
+       - `TripReportScreen`: Hard stops count, peak speed, duration, and geo-pinned route events.
+       - `ReplayScreen`: Time-scrubbing telemetry replay with pin dropping on incident GPS coordinates.
+       - `TimelineList`: Reverse-geocoded place names with camera focus navigation.
+       - `AdminEmergenciesPanel`: Live GPS coordinates, responder status, and native navigation intents.
+  4. Compiled production split APKs with R8 code shrinking and ABI splitting:
+     - `app-arm64-v8a-release.apk` (10.51 MB, SHA-256: `C0589E9D5BC8007A1693BAD7641C84C586BC08F541D067ADFC51154773372ED6`)
+     - `app-armeabi-v7a-release.apk` (10.12 MB, SHA-256: `06F4A5F6832CDDC66FD9C20918CF50C6D8C1ED604834158843EEB130DCFC139B`)
+
+
