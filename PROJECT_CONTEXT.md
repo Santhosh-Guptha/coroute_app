@@ -2,7 +2,7 @@
 **Organization**: devmonks.space  
 **Product**: CoRoute — Group Motorcycle & Convoy Safety Telemetry Platform  
 **Package Identifier**: `space.devmonks.coroute_app`  
-**Current Active Version**: `2.0.0 (Build 46)` / `1.0.0+46`  
+**Current Active Version**: `3.23.0 (Build 83)` / `3.23.0+83`  
 **Target Environment**: Single Unified Project `corout-uat` (GCP / Firebase) & Oracle 26ai Cloud  
 **Primary Maintainer / Master Admin**: `santhoshbukka5@gmail.com`
 
@@ -237,5 +237,10 @@ firebase appdistribution:distribute "build\app\outputs\flutter-apk\app-release.a
    - `santhoshbukka5@gmail.com` must always resolve to `MASTER_ADMIN`. Any future changes to role-based access control (RBAC) must maintain this invariant.
 4. **Preserve Oracle Cloud Decoupling**:
    - Never tie business logic strictly to Firebase RTDB. Keep persistent storage routed to Oracle 26ai Cloud SODA REST endpoints.
-5. **Keep APK Size Under 65 MB**:
-   - Use vector SVG or tree-shaken icons. Avoid uncompressed audio files or bulky 3rd-party binary SDKs.
+5. **Keep APK Size Under 65 MB (Split APKs ~10.5 MB)**:
+   - Use vector SVG or tree-shaken icons. Avoid bulky 3rd-party binary SDKs or embedded C++ NDK engines.
+6. **UI Architecture & Design Canvas**:
+   - UI follows the CoRoute design canvas; tokens in `core/theme`, primitives in `core/ui/design_kit.dart`.
+7. **Offline Navigation & Voice Guidance**:
+   - Offline turn-by-turn routing delegates to Organic Maps via `om://route` and `om://map` schemes with fallback cascade.
+   - Route packs are exported as standard GPX 1.1 documents in memory via `OfflineNavService`.

@@ -213,3 +213,21 @@
      - `app-armeabi-v7a-release.apk` (10.12 MB, SHA-256: `06F4A5F6832CDDC66FD9C20918CF50C6D8C1ED604834158843EEB130DCFC139B`)
 
 
+
+### Release 3.23.0+83 / Gateway v3.23.0 (2026-10-13)
+- **Operator User**: `antigravity` / `santhosh`
+- **Activities**:
+  1. Ran full automated test suites:
+     - Flutter: 1,048/1,048 tests passed (100%), `dart analyze .` 0 issues.
+     - Gateway: 314/314 tests passed (100%).
+  2. Bumped app version to `3.23.0+83` in `coroute_app/pubspec.yaml` and gateway version to `3.23.0` in `gateway/package.json` & `gateway/src/config.js`.
+  3. Feature Implementations — Organic Maps Offline Navigation & GPX Route Sync:
+     - **Prioritized Turn-by-Turn Navigation**: Deep-link integration with Organic Maps via `om://route` with start (`sll`) and destination (`dll`) vehicle routing, `om://map` fallback with `backurl=coroute://cockpit`, and graceful cascade to Google Navigation, `geo:`, and Google Maps web.
+     - **In-Memory GPX 1.1 Exporter**: Valid GPX XML generator in `OfflineNavService` exporting track segments, waypoints, and elevation without disk writes or heavy C++ NDK offline engines.
+     - **Pre-Ride Route Pack Card**: Integrated `_OfflineNavigationRow` in `TripReviewSheet` allowing riders to export GPX route packs and pre-cache regional `.mwm` maps before entering network dead zones.
+     - **Motorcycle Glove Quick Action**: Added 52dp `quick_action_offline_nav` button in `GloveQuickSettingsModal` accessible directly via the live cockpit Orbit menu.
+     - **Lost-Rider Offline Recovery**: Added `launchHomingNavigation` in `LostRiderRecoveryCoordinator` to guide disconnected or stray riders back to convoy waypoints along real roads.
+     - **Platform Scheme Queries**: Configured Android `<queries>` for `om` scheme and `app.organicmaps`, iOS `LSApplicationQueriesSchemes`, and bidirectional return scheme `coroute://cockpit`.
+  4. Git Operations:
+     - Merged `feature/organic-maps-integration` into `main`.
+     - Tagged release as `v3.23.0+83` and pushed to `origin/main`.
