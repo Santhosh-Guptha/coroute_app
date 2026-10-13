@@ -1215,6 +1215,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     emergencyRoute: guidance?.statusLine != null,
                     onStopNavigation: guidance?.target == null ? null : guidance?.stop,
                     onBack: widget.embedded ? null : () => Navigator.of(context).maybePop(),
+                    onNavigationTap: () => _launchOfflineNav(convoy, me, snap),
                     isTunnelCoasting: me.isTunnelCoasting,
                     subtitle: convoy.name,
                     roadName: _guide.currentRoadName,
@@ -1429,19 +1430,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   groupId: convoy.groupId,
                   onOpenGuardian: () => showGuardianSheet(context, groupId: convoy.groupId),
                   onOpenFuel: () => showFuelSheet(context),
-                  onLaunchOfflineNav: () {
-                    if (convoy.destinationLat != 0 && convoy.destinationLng != 0) {
-                      navigateTo(
-                        convoy.destinationLat,
-                        convoy.destinationLng,
-                        label: convoy.destinationName.isEmpty ? 'Destination' : convoy.destinationName,
-                        startLat: RideFacts.hasPosition(me) ? me.lat : null,
-                        startLng: RideFacts.hasPosition(me) ? me.lng : null,
-                      );
-                    } else {
-                      _showHudToast('No destination set for offline routing', Icons.navigation_outlined, AppTheme.warnText);
-                    }
-                  },
+                  onLaunchOfflineNav: () => _launchOfflineNav(convoy, me, snap),
                   onSettingToggled: (name, isEnabled) => _showHudToast(
                     '$name: ${isEnabled ? "ON" : "OFF"}',
                     Icons.tune_rounded,
@@ -1712,6 +1701,16 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           error: pf.error,
           onSave: () => pf.start(routeLine, label: convoy.name),
         ),
+      if (hasDest || snap.nextStop != null)
+        SheetRow(
+          key: const Key('sheet_row_offline_nav'),
+          icon: Icons.navigation_rounded,
+          title: 'Organic Maps turn-by-turn',
+          subtitle: snap.nextStop != null
+              ? 'Route to ${snap.nextStop!.name.isEmpty ? "Next stop" : snap.nextStop!.name}'
+              : 'Route to ${convoy.destinationName.isEmpty ? "Destination" : convoy.destinationName}',
+          onTap: () => _launchOfflineNav(convoy, me, snap),
+        ),
       SheetRow(icon: Icons.tune_rounded, title: 'Group settings', onTap: () => showGroupSettings(context, convoyId: convoy.groupId)),
       SheetRow(icon: Icons.headset_mic_rounded, title: 'Intercom options', onTap: () => IntercomOptions.show(context)),
       if (hasDest)
@@ -1780,6 +1779,37 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       builder: (ctx) => Consumer<ConvoyService>(
         builder: (_, svc, _) => RouteStopsPanel(convoy: svc.allConvoys[convoy.groupId] ?? convoy),
       ),
+    );
+  }
+
+  void _launchOfflineNav(ConvoyModel convoy, RiderModel me, RideSnapshot snap) {
+    final next = snap.nextStop;
+    final hasDest = RideFacts.hasDestination(convoy);
+
+    final double destLat;
+    final double destLng;
+    final String label;
+
+    if (next != null) {
+      destLat = next.lat;
+      destLng = next.lng;
+      label = next.name.isEmpty ? 'Next stop' : next.name;
+    } else if (hasDest) {
+      destLat = convoy.destinationLat;
+      destLng = convoy.destinationLng;
+      label = convoy.destinationName.isEmpty ? 'Destination' : convoy.destinationName;
+    } else {
+      _showHudToast('No destination set for offline routing', Icons.navigation_outlined, AppTheme.warnText);
+      return;
+    }
+
+    _showHudToast('Navigating to $label', Icons.navigation_rounded, AppTheme.accentText);
+    navigateTo(
+      destLat,
+      destLng,
+      label: label,
+      startLat: RideFacts.hasPosition(me) ? me.lat : null,
+      startLng: RideFacts.hasPosition(me) ? me.lng : null,
     );
   }
 

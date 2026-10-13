@@ -11,6 +11,7 @@ import '../../data/services/geo_service.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../map_picker/map_picker_screen.dart';
 import '../ride/incident_sheet.dart';
+import '../ride/navigate_to.dart';
 
 /// The route during a ride: start, stops (with suggestions from members),
 /// destination and the route summary. The lead can add, reorder, skip and
@@ -168,6 +169,13 @@ class RouteStopsPanel extends StatelessWidget {
               onSkip: () => service.skipStop(s.stopId),
               onRemove: () => service.removeStop(s.stopId),
               onMove: (to) => move(i, to),
+              onNavigate: () => navigateTo(
+                s.lat,
+                s.lng,
+                label: s.name.isEmpty ? 'Stop ${i + 1}' : s.name,
+                startLat: hasMe ? meLat : null,
+                startLng: hasMe ? meLng : null,
+              ),
             );
           },
         ),
@@ -188,9 +196,26 @@ class RouteStopsPanel extends StatelessWidget {
           hasDestination ? ['Destination', if (destinationDistance.isNotEmpty) destinationDistance].join(' · ') : 'Destination',
           if (destinationArrivals.isNotEmpty) destinationArrivals,
         ].join('\n'),
-        trailing: lead
-            ? IconButton(tooltip: 'Change destination', icon: Icon(Icons.edit_location_alt_outlined, color: AppTheme.accentText), onPressed: changeDestination)
-            : null,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasDestination)
+              IconButton(
+                key: const Key('destination_navigate_button'),
+                tooltip: 'Navigate to destination',
+                icon: Icon(Icons.navigation_rounded, color: AppTheme.accentText),
+                onPressed: () => navigateTo(
+                  convoy.destinationLat,
+                  convoy.destinationLng,
+                  label: convoy.destinationName.isEmpty ? 'Destination' : convoy.destinationName,
+                  startLat: hasMe ? meLat : null,
+                  startLng: hasMe ? meLng : null,
+                ),
+              ),
+            if (lead)
+              IconButton(tooltip: 'Change destination', icon: Icon(Icons.edit_location_alt_outlined, color: AppTheme.accentText), onPressed: changeDestination),
+          ],
+        ),
       ),
       const SizedBox(height: Space.s12),
       Row(
@@ -418,6 +443,7 @@ class _StopTile extends StatelessWidget {
   final VoidCallback onSkip;
   final VoidCallback onRemove;
   final ValueChanged<int> onMove;
+  final VoidCallback? onNavigate;
 
   const _StopTile({
     super.key,
@@ -433,6 +459,7 @@ class _StopTile extends StatelessWidget {
     required this.onSkip,
     required this.onRemove,
     required this.onMove,
+    this.onNavigate,
   });
 
   @override
@@ -467,6 +494,13 @@ class _StopTile extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (onNavigate != null)
+            IconButton(
+              key: Key('stop_navigate_button_${s.stopId}'),
+              tooltip: 'Navigate to stop',
+              icon: Icon(Icons.navigation_outlined, color: AppTheme.accentText, size: 20),
+              onPressed: onNavigate,
+            ),
           // One tick control: tap to mark visited, tap again to undo.
           IconButton(
             tooltip: s.isVisited ? 'Mark as not visited' : 'Mark as visited',

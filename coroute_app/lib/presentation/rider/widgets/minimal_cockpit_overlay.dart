@@ -49,6 +49,9 @@ class MinimalCockpitTopBar extends StatelessWidget {
   /// The group's speed limit; 0 or null hides the "LIMIT" badge.
   final int? speedLimitKmh;
 
+  /// Live turn-by-turn navigation tap handler (e.g. opens Organic Maps).
+  final VoidCallback? onNavigationTap;
+
   const MinimalCockpitTopBar({
     super.key,
     required this.title,
@@ -58,6 +61,7 @@ class MinimalCockpitTopBar extends StatelessWidget {
     this.emergencyRoute = false,
     this.onStopNavigation,
     this.onBack,
+    this.onNavigationTap,
     this.isTunnelCoasting = false,
     this.subtitle,
     this.roadName,
@@ -102,18 +106,22 @@ class MinimalCockpitTopBar extends StatelessWidget {
               ),
             )
           else
-            Container(
-              width: 60,
-              height: 60,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: emergencyRoute ? AppTheme.sos : AppTheme.brand,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Icon(
-                emergencyRoute ? Icons.emergency_rounded : Icons.navigation_rounded,
-                color: Colors.white,
-                size: 32,
+            GestureDetector(
+              key: const Key('top_bar_navigation_action'),
+              onTap: onNavigationTap,
+              child: Container(
+                width: 60,
+                height: 60,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: emergencyRoute ? AppTheme.sos : AppTheme.brand,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  emergencyRoute ? Icons.emergency_rounded : Icons.navigation_rounded,
+                  color: Colors.white,
+                  size: 32,
+                ),
               ),
             ),
           const SizedBox(width: 14),

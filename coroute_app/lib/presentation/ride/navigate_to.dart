@@ -41,9 +41,9 @@ List<Uri> navigationUris(
   if (startLat != null && startLng != null && startLat != 0 && startLng != 0) {
     final sLa = startLat.toStringAsFixed(6);
     final sLn = startLng.toStringAsFixed(6);
-    uris.add(Uri.parse('om://route?sll=$sLa,$sLn&saddr=My%20Location&dll=$la,$ln&daddr=$encName&type=vehicle'));
+    uris.add(Uri.parse('om://route?sll=$sLa,$sLn&saddr=My%20Location&dll=$la,$ln&daddr=$encName&type=vehicle&backurl=coroute://cockpit'));
   } else {
-    uris.add(Uri.parse('om://route?dll=$la,$ln&daddr=$encName&type=vehicle'));
+    uris.add(Uri.parse('om://route?dll=$la,$ln&daddr=$encName&type=vehicle&backurl=coroute://cockpit'));
   }
 
   // 2. Organic Maps Location Pin (with CoRoute return link)

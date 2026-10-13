@@ -71,27 +71,41 @@ class OfflineNavService {
   }
 
   /// Opens Organic Maps vehicle navigation route from start to destination coordinates
-  /// with a backlink to CoRoute (`coroute://cockpit`).
+  /// with a backlink to CoRoute (`coroute://cockpit`). If start coordinates are omitted or 0,
+  /// Organic Maps routes from the rider's current GPS position.
   static Future<bool> openOrganicMapsRoute({
-    required double startLat,
-    required double startLng,
+    double? startLat,
+    double? startLng,
     required double destLat,
     required double destLng,
     String? startName,
     String? destName,
   }) async {
-    if (!startLat.isFinite || !startLng.isFinite || !destLat.isFinite || !destLng.isFinite) {
+    if (!destLat.isFinite || !destLng.isFinite || (destLat == 0 && destLng == 0)) {
       return false;
     }
-    final sLa = startLat.toStringAsFixed(6);
-    final sLn = startLng.toStringAsFixed(6);
     final dLa = destLat.toStringAsFixed(6);
     final dLn = destLng.toStringAsFixed(6);
-    final sAddr = Uri.encodeComponent((startName ?? 'Start').trim());
     final dAddr = Uri.encodeComponent((destName ?? 'Destination').trim());
-    final uri = Uri.parse(
-      'om://route?sll=$sLa,$sLn&saddr=$sAddr&dll=$dLa,$dLn&daddr=$dAddr&type=vehicle&backurl=coroute://cockpit',
-    );
+
+    final Uri uri;
+    if (startLat != null &&
+        startLng != null &&
+        startLat.isFinite &&
+        startLng.isFinite &&
+        (startLat != 0 || startLng != 0)) {
+      final sLa = startLat.toStringAsFixed(6);
+      final sLn = startLng.toStringAsFixed(6);
+      final sAddr = Uri.encodeComponent((startName ?? 'Start').trim());
+      uri = Uri.parse(
+        'om://route?sll=$sLa,$sLn&saddr=$sAddr&dll=$dLa,$dLn&daddr=$dAddr&type=vehicle&backurl=coroute://cockpit',
+      );
+    } else {
+      uri = Uri.parse(
+        'om://route?dll=$dLa,$dLn&daddr=$dAddr&type=vehicle&backurl=coroute://cockpit',
+      );
+    }
+
     if (downloadRegionOverride != null) return downloadRegionOverride!(uri);
     try {
       if (await canLaunchUrl(uri)) {

@@ -1,12 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
+import 'package:coroute_app/data/models/convoy_model.dart';
+import 'package:coroute_app/data/models/rider_model.dart';
+import 'package:coroute_app/data/models/stop_point_model.dart';
+import 'package:coroute_app/data/services/convoy_service.dart';
+import 'package:coroute_app/presentation/trip_planner/route_stops_panel.dart';
 import 'package:coroute_app/data/models/route_model.dart';
 import 'package:coroute_app/domain/tracking/geo_math.dart';
 import 'package:coroute_app/presentation/trip_planner/widgets/organic_maps_card.dart';
 import 'package:coroute_app/data/services/offline_nav_service.dart';
 import 'package:coroute_app/domain/route/lost_rider_recovery_coordinator.dart';
 import 'package:coroute_app/presentation/ride/navigate_to.dart';
+import 'package:coroute_app/data/models/outbox_item.dart';
 import 'package:coroute_app/presentation/rider/widgets/glove_quick_settings_modal.dart';
+
+class _FakeConvoyService extends ChangeNotifier implements ConvoyService {
+  @override
+  String? myUserId = 'user_lead';
+
+  @override
+  bool canEditRoute = true;
+
+  @override
+  bool isOnline = true;
+
+  @override
+  List<OutboxItem> outbox = [];
+
+  @override
+  Map<String, ConvoyModel> allConvoys = {};
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -45,6 +72,7 @@ void main() {
       expect(uris[0].queryParameters['dll'], '17.500000,78.500000');
       expect(uris[0].queryParameters['daddr'], 'Fort & Lake');
       expect(uris[0].queryParameters['type'], 'vehicle');
+      expect(uris[0].queryParameters['backurl'], 'coroute://cockpit');
 
       // 2. Organic Maps Location Pin with CoRoute return link
       expect(uris[1].scheme, 'om');
@@ -72,6 +100,7 @@ void main() {
       expect(uris[0].queryParameters.containsKey('sll'), isFalse);
       expect(uris[0].queryParameters['dll'], '17.500000,78.500000');
       expect(uris[0].queryParameters['type'], 'vehicle');
+      expect(uris[0].queryParameters['backurl'], 'coroute://cockpit');
     });
 
     test('navigateTo tries links in order until one succeeds', () async {
@@ -320,6 +349,30 @@ void main() {
       expect(launchedUri!.queryParameters['type'], 'vehicle');
       expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
     });
+
+    test('openOrganicMapsRoute generates om://route without sll when start coordinates are omitted', () async {
+      Uri? launchedUri;
+      OfflineNavService.downloadRegionOverride = (uri) async {
+        launchedUri = uri;
+        return true;
+      };
+
+      final ok = await OfflineNavService.openOrganicMapsRoute(
+        destLat: 12.971600,
+        destLng: 77.594600,
+        destName: 'Bangalore',
+      );
+
+      expect(ok, isTrue);
+      expect(launchedUri, isNotNull);
+      expect(launchedUri!.scheme, 'om');
+      expect(launchedUri!.host, 'route');
+      expect(launchedUri!.queryParameters.containsKey('sll'), isFalse);
+      expect(launchedUri!.queryParameters['dll'], '12.971600,77.594600');
+      expect(launchedUri!.queryParameters['daddr'], 'Bangalore');
+      expect(launchedUri!.queryParameters['type'], 'vehicle');
+      expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
+    });
   });
 
   group('OrganicMapsCard Widget Tests in Trip Creation', () {
@@ -434,6 +487,129 @@ void main() {
       await tester.pump();
 
       expect(exportCalled, isTrue);
+    });
+  });
+
+  group('RouteStopsPanel In-Ride Navigation Tests', () {
+    testWidgets('destination navigate button triggers navigateTo with destination coords', (tester) async {
+      Uri? launchedUri;
+      navigateLauncherOverride = (uri) async {
+        launchedUri = uri;
+        return true;
+      };
+
+      final me = RiderModel(
+        userId: 'user_lead',
+        name: 'Lead Rider',
+        lat: 17.3850,
+        lng: 78.4867,
+        speedKmh: 40.0,
+        statusReason: '',
+        lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
+      );
+
+      final convoy = ConvoyModel(
+        groupId: 'GRP-TEST-NAV',
+        name: 'Highway Run',
+        joinCode: '112233',
+        createdByUserId: me.userId,
+        createdByUserName: me.name,
+        createdAtEpochMs: 1700000000000,
+        destinationLat: 17.5000,
+        destinationLng: 78.5000,
+        destinationName: 'Lake Viewpoint',
+        riders: {me.userId: me},
+      );
+
+      final fakeSvc = _FakeConvoyService();
+      fakeSvc.allConvoys[convoy.groupId] = convoy;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChangeNotifierProvider<ConvoyService>.value(
+              value: fakeSvc,
+              child: RouteStopsPanel(convoy: convoy),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('destination_navigate_button')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('destination_navigate_button')));
+      await tester.pump();
+
+      expect(launchedUri, isNotNull);
+      expect(launchedUri!.scheme, 'om');
+      expect(launchedUri!.host, 'route');
+      expect(launchedUri!.queryParameters['dll'], '17.500000,78.500000');
+      expect(launchedUri!.queryParameters['daddr'], 'Lake Viewpoint');
+      expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
+    });
+
+    testWidgets('stop navigate button triggers navigateTo with stop coords', (tester) async {
+      Uri? launchedUri;
+      navigateLauncherOverride = (uri) async {
+        launchedUri = uri;
+        return true;
+      };
+
+      final me = RiderModel(
+        userId: 'user_lead',
+        name: 'Lead Rider',
+        lat: 17.3850,
+        lng: 78.4867,
+        speedKmh: 40.0,
+        statusReason: '',
+        lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
+      );
+
+      final stop = StopPointModel(
+        stopId: 'stop_1',
+        name: 'Hilltop Dhaba',
+        category: 'FOOD',
+        lat: 17.4500,
+        lng: 78.4900,
+        orderIndex: 0,
+      );
+
+      final convoy = ConvoyModel(
+        groupId: 'GRP-TEST-NAV',
+        name: 'Highway Run',
+        joinCode: '112233',
+        createdByUserId: me.userId,
+        createdByUserName: me.name,
+        createdAtEpochMs: 1700000000000,
+        stopPoints: [stop],
+        riders: {me.userId: me},
+      );
+
+      final fakeSvc = _FakeConvoyService();
+      fakeSvc.allConvoys[convoy.groupId] = convoy;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChangeNotifierProvider<ConvoyService>.value(
+              value: fakeSvc,
+              child: RouteStopsPanel(convoy: convoy),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('stop_navigate_button_stop_1')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('stop_navigate_button_stop_1')));
+      await tester.pump();
+
+      expect(launchedUri, isNotNull);
+      expect(launchedUri!.scheme, 'om');
+      expect(launchedUri!.host, 'route');
+      expect(launchedUri!.queryParameters['dll'], '17.450000,78.490000');
+      expect(launchedUri!.queryParameters['daddr'], 'Hilltop Dhaba');
+      expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
     });
   });
 }

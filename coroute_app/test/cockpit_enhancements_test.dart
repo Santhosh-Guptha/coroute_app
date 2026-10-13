@@ -314,6 +314,27 @@ void main() {
     expect(backPressed, isTrue);
   });
 
+  testWidgets('MinimalCockpitTopBar renders navigation tile and handles onNavigationTap', (tester) async {
+    bool navPressed = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MinimalCockpitTopBar(
+            title: 'To Hampi, 142 km',
+            connection: null,
+            gps: GpsState.accurate,
+            onNavigationTap: () => navPressed = true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('top_bar_navigation_action')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('top_bar_navigation_action')));
+    expect(navPressed, isTrue);
+  });
+
   testWidgets('MinimalRideStatsBar renders 4 key metrics and handles tap', (tester) async {
     bool tapped = false;
 
