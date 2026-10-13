@@ -12,6 +12,7 @@ import '../../data/services/tile_cache_service.dart';
 import '../../data/services/weather_service.dart';
 import '../../domain/safety/sun_helper.dart';
 import '../ride/ride_sheet.dart' show SaveRouteMapRow, SheetRow;
+import 'widgets/route_map_pack_card.dart';
 
 /// The last step before a ride starts: what the trip looks like (distance,
 /// estimated time, stops, riders, departure), the weather along the route
@@ -234,12 +235,9 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
               if (r != null && pf != null && canSaveMap)
                 Padding(
                   padding: const EdgeInsets.only(top: Space.s8),
-                  child: SaveRouteMapRow(
-                    running: pf.running,
-                    done: pf.done,
-                    total: pf.total,
-                    error: pf.error,
-                    onSave: () => pf.start(r.points, label: widget.name),
+                  child: RouteMapPackCard(
+                    route: r,
+                    tripName: widget.name,
                   ),
                 ),
               if (r != null && r.points.isNotEmpty)

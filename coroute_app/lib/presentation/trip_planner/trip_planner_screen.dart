@@ -17,6 +17,7 @@ import '../map_picker/map_picker_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
 import 'trip_review_sheet.dart';
+import 'widgets/route_map_pack_card.dart';
 
 /// Plan a ride on one screen, map first: name, start, destination, stops
 /// (picked on the map or by long-pressing it), then Review and Start Ride.
@@ -474,7 +475,14 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text('Straight-line estimate: the road route is not available right now.', style: AppText.caption),
+            )
+          else ...[
+            const SizedBox(height: 14),
+            RouteMapPackCard(
+              route: r,
+              tripName: _name.text.trim().isNotEmpty ? _name.text.trim() : 'Planned Route',
             ),
+          ],
         ],
         const SizedBox(height: 16),
         _TimelineRow(

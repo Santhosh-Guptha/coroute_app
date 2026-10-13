@@ -290,6 +290,34 @@ class TilePrefetcher extends ChangeNotifier {
   /// Finished without an error and not cancelled.
   bool get complete => !_running && _finishedAt > 0 && _error == null && _total > 0 && _done >= _total;
 
+  /// Checks whether all tiles along [line] are already saved in the local cache.
+  bool isRouteCached(List<(double, double)> line) {
+    final cache = _cache;
+    if (cache == null || line.isEmpty) return false;
+    final tiles = tilesAlong(line);
+    if (tiles.isEmpty) return false;
+    for (final t in tiles) {
+      if (cache.lookup(t.$1, t.$2, t.$3) == null) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Counts how many tiles along [line] are already saved in the local cache.
+  int countCachedTiles(List<(double, double)> line) {
+    final cache = _cache;
+    if (cache == null || line.isEmpty) return 0;
+    final tiles = tilesAlong(line);
+    var count = 0;
+    for (final t in tiles) {
+      if (cache.lookup(t.$1, t.$2, t.$3) != null) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   /// Web Mercator tile of a point.
   static (int, int) tileOf(double lat, double lng, int z) {
     final n = 1 << z;
