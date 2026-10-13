@@ -1,6 +1,7 @@
 # CoRoute — Project Context
 
 Free, non-profit group-ride companion (Flutter) with a Node.js gateway and Oracle Autonomous DB.
+UI follows the CoRoute design canvas; tokens in `core/theme`, primitives in `core/ui/design_kit.dart`.
 Full architecture, audit and rollout plan: [PRODUCTION_PLAN.md](PRODUCTION_PLAN.md). Server deployment: [gateway/deploy/RUNBOOK.md](gateway/deploy/RUNBOOK.md).
 
 ## Quick reference

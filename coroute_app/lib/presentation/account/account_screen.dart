@@ -17,6 +17,7 @@ import '../admin/master_admin_dashboard.dart';
 import '../auth/access_gate_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../rider/rider_home_screen.dart';
+import '../rider/trip_history_screen.dart';
 import '../safety/safety_settings_sheet.dart';
 import '../widgets/data_saver_tile.dart';
 import 'appearance_sheet.dart';
@@ -107,7 +108,7 @@ class AccountScreen extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          DsAvatar(_initials(name.isEmpty ? '?' : name), size: 64, filled: true),
+                          DsAvatar(_initials(name.isEmpty ? '?' : name), size: 56, filled: true),
                           const SizedBox(width: 14),
                           Expanded(
                             child: Column(
@@ -285,13 +286,6 @@ class AccountScreen extends StatelessWidget {
                     children: [
                       if (settings != null)
                         _SettingsRow(
-                          icon: Icons.local_gas_station_rounded,
-                          title: 'Fuel',
-                          subtitle: 'Set your range and update fuel left',
-                          onTap: () => showFuelSheet(context, configure: true),
-                        ),
-                      if (settings != null)
-                        _SettingsRow(
                           icon: Icons.health_and_safety_rounded,
                           title: 'Ride safety',
                           subtitle: SafetySettingsSheet.summary(settings),
@@ -309,18 +303,37 @@ class AccountScreen extends StatelessWidget {
                 ),
 
                 const SizedBox(height: 20),
+                const DsSectionHeader('Bike & map'),
+                const SizedBox(height: 10),
+                DsCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Column(
+                    children: [
+                      if (settings != null)
+                        _SettingsRow(
+                          icon: Icons.local_gas_station_rounded,
+                          title: 'Tank size & fuel',
+                          subtitle: 'Set your range and update fuel left',
+                          onTap: () => showFuelSheet(context, configure: true),
+                        ),
+                      _SettingsRow(
+                        icon: theme.isLight ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                        title: 'Night mode',
+                        value: AppearanceSheet.summary(theme),
+                        onTap: () => AppearanceSheet.show(context),
+                        divider: false,
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
                 const DsSectionHeader('App'),
                 const SizedBox(height: 10),
                 DsCard(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Column(
                     children: [
-                      _SettingsRow(
-                        icon: theme.isLight ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                        title: 'Theme',
-                        value: AppearanceSheet.summary(theme),
-                        onTap: () => AppearanceSheet.show(context),
-                      ),
                       _SettingsRow(
                         icon: Icons.password_rounded,
                         title: 'Change password',
@@ -387,6 +400,19 @@ class AccountScreen extends StatelessWidget {
                       ),
                     ],
                   ),
+                ),
+                const SizedBox(height: 20),
+                DsButton(
+                  label: 'Ride history',
+                  icon: Icons.history_rounded,
+                  tone: DsButtonTone.outline,
+                  onPressed: () {
+                    if (embedded) {
+                      RiderHomeScreen.selectTab(context, HomeTab.trips);
+                    } else {
+                      _push(context, const TripHistoryScreen());
+                    }
+                  },
                 ),
                 const SizedBox(height: Space.s24),
                 Text(

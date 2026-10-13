@@ -117,7 +117,7 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(find.text('No active ride'), findsOneWidget);
         expect(find.text('Start Ride'), findsOneWidget);
-        expect(find.text('Join Ride'), findsOneWidget);
+        expect(find.text('Join Ride', skipOffstage: false), findsOneWidget);
         // At most one alert: the safety details.
         expect(find.byType(RideAlert), findsOneWidget);
         expect(find.text('Add your safety details'), findsOneWidget);

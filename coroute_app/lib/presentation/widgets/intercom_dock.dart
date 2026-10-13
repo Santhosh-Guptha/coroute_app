@@ -62,7 +62,9 @@ class IntercomDock extends StatelessWidget {
       notice = _Notice(icon: Icons.cloud_off_rounded, text: 'Reconnecting to convoy radio', color: AppTheme.muted);
     }
 
-    final talk = ic.mode == IntercomMode.ptt ? _PttButton(ic: ic, big: !compact) : _VoxButton(ic: ic, big: !compact);
+    final isShort = MediaQuery.sizeOf(context).height < 500;
+    final big = !compact && !isShort;
+    final talk = ic.mode == IntercomMode.ptt ? _PttButton(ic: ic, big: big) : _VoxButton(ic: ic, big: big);
     final mute = _MuteButton(ic: ic);
 
     if (compact) {
@@ -95,13 +97,13 @@ class IntercomDock extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          padding: EdgeInsets.fromLTRB(20, isShort ? 8 : 12, 20, isShort ? 12 : 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const _SheetHandle(),
-              const SizedBox(height: 14),
+              SizedBox(height: isShort ? 8 : 14),
               Row(
                 children: [
                   Expanded(
@@ -118,12 +120,12 @@ class IntercomDock extends StatelessWidget {
                   mute,
                 ],
               ),
-              const SizedBox(height: 18),
+              SizedBox(height: isShort ? 10 : 18),
               talk,
-              const SizedBox(height: 12),
+              SizedBox(height: isShort ? 8 : 12),
               _TalkTargetChip(others: others, ic: ic),
               if (notice != null) ...[
-                const SizedBox(height: 14),
+                SizedBox(height: isShort ? 8 : 14),
                 notice,
               ],
             ],
