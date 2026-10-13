@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import '../tracking/geo_math.dart';
 import '../tracking/track_point.dart';
+import '../../presentation/ride/navigate_to.dart';
 
 /// Guidance target for a lost or off-route rider.
 enum RecoveryTargetType { routeLine, sweeper, convoyLead, backtrackFork }
@@ -181,5 +182,17 @@ class LostRiderRecoveryCoordinator {
     const cardinals = ['North', 'Northeast', 'East', 'Southeast', 'South', 'Southwest', 'West', 'Northwest'];
     final idx = ((b + 22.5) % 360 / 45).floor();
     return cardinals[idx.clamp(0, cardinals.length - 1)];
+  }
+
+  /// Launches offline turn-by-turn homing navigation via Organic Maps or system map
+  /// along actual roads/trails to guide a lost rider back to the recovery target.
+  static Future<bool> launchHomingNavigation(RecoveryVector vector, double myLat, double myLng) {
+    return navigateTo(
+      vector.targetLat,
+      vector.targetLng,
+      label: 'Rejoin Convoy Route',
+      startLat: myLat,
+      startLng: myLng,
+    );
   }
 }

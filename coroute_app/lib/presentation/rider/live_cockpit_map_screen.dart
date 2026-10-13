@@ -5,6 +5,7 @@ import 'package:coroute_app/presentation/ride/fuel_sheet.dart';
 import 'package:coroute_app/presentation/ride/guardian_sheet.dart';
 import 'package:coroute_app/domain/safety/fuel_profile.dart';
 import 'dart:async';
+import '../ride/navigate_to.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -1422,6 +1423,21 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   onToggleKeepScreenOn: _toggleKeepScreenOn,
                   onToggleAutoFollow: () => setState(() => _autoFollow = !_autoFollow),
                   groupId: convoy.groupId,
+                  onOpenGuardian: () => showGuardianSheet(context, groupId: convoy.groupId),
+                  onOpenFuel: () => showFuelSheet(context),
+                  onLaunchOfflineNav: () {
+                    if (convoy.destinationLat != 0 && convoy.destinationLng != 0) {
+                      navigateTo(
+                        convoy.destinationLat,
+                        convoy.destinationLng,
+                        label: convoy.destinationName.isEmpty ? 'Destination' : convoy.destinationName,
+                        startLat: RideFacts.hasPosition(me) ? me.lat : null,
+                        startLng: RideFacts.hasPosition(me) ? me.lng : null,
+                      );
+                    } else {
+                      _showHudToast('No destination set for offline routing', Icons.navigation_outlined, AppTheme.warnText);
+                    }
+                  },
                   onSettingToggled: (name, isEnabled) => _showHudToast(
                     '$name: ${isEnabled ? "ON" : "OFF"}',
                     Icons.tune_rounded,

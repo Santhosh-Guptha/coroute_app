@@ -31,6 +31,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
   final String? groupId;
   final VoidCallback? onOpenGuardian;
   final VoidCallback? onOpenFuel;
+  final VoidCallback? onLaunchOfflineNav;
 
   const GloveQuickSettingsModal({
     super.key,
@@ -44,6 +45,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
     this.groupId,
     this.onOpenGuardian,
     this.onOpenFuel,
+    this.onLaunchOfflineNav,
   });
 
   static Future<void> show(
@@ -58,6 +60,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
     String? groupId,
     VoidCallback? onOpenGuardian,
     VoidCallback? onOpenFuel,
+    VoidCallback? onLaunchOfflineNav,
   }) {
     return showModalBottomSheet<void>(
       context: context,
@@ -76,6 +79,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
         groupId: groupId,
         onOpenGuardian: onOpenGuardian,
         onOpenFuel: onOpenFuel,
+        onLaunchOfflineNav: onLaunchOfflineNav,
       ),
     );
   }
@@ -290,6 +294,21 @@ class GloveQuickSettingsModal extends StatelessWidget {
                 ),
               ],
             ),
+            if (onLaunchOfflineNav != null) ...[
+              const SizedBox(height: 10),
+              DsButton(
+                key: const Key('quick_action_offline_nav'),
+                label: 'Offline voice nav',
+                icon: Icons.navigation_outlined,
+                tone: DsButtonTone.brand,
+                height: 52,
+                fontSize: 14,
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  onLaunchOfflineNav!();
+                },
+              ),
+            ],
             const SizedBox(height: 10),
             DsButton(
               key: const Key('quick_settings_done'),
