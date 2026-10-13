@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -12,6 +13,7 @@ import '../../core/theme/map_tiles.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/geo_service.dart';
+import '../../domain/tracking/coordinate_parser.dart';
 
 /// The stop category code sent to the gateway for a [StopKind].
 ///
@@ -146,6 +148,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   Timer? _searchDebounce;
   Timer? _reverseDebounce;
   List<PlaceResult> _results = [];
+  (double, double)? _parsedCoord;
   List<PickedPlace> _recent = const [];
   bool _searching = false;
   bool _naming = false;
@@ -236,14 +239,21 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
 
   void _onSearchChanged(String q) {
     _searchDebounce?.cancel();
-    if (q.trim().length < 3) {
+    final trimmed = q.trim();
+    final parsed = CoordinateParser.tryParse(trimmed);
+    setState(() {
+      _parsedCoord = parsed;
+    });
+
+    if (trimmed.length < 3) {
       setState(() => _results = []);
       return;
     }
+
     _searchDebounce = Timer(const Duration(milliseconds: 600), () async {
       if (!mounted) return;
       setState(() => _searching = true);
-      final r = await _geo.search(q, nearLat: _center.latitude, nearLng: _center.longitude);
+      final r = await _geo.search(trimmed, nearLat: _center.latitude, nearLng: _center.longitude);
       if (!mounted) return;
       setState(() {
         _searching = false;
@@ -252,9 +262,49 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     });
   }
 
+  Future<void> _pasteCoordinates() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim() ?? '';
+      if (text.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Clipboard is empty.')),
+          );
+        }
+        return;
+      }
+      final parsed = CoordinateParser.tryParse(text);
+      if (parsed != null) {
+        final lat = parsed.$1;
+        final lng = parsed.$2;
+        _search.text = '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}';
+        _choose(LatLng(lat, lng), 'Location (${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)})');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Pinned coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}')),
+          );
+        }
+      } else {
+        _search.text = text;
+        _onSearchChanged(text);
+        if (mounted) setState(() {});
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read clipboard.')),
+        );
+      }
+    }
+  }
+
   void _choose(LatLng p, String name) {
     FocusScope.of(context).unfocus();
-    setState(() => _results = []);
+    setState(() {
+      _results = [];
+      _parsedCoord = null;
+    });
     _moveTo(p, zoom: 15, name: name);
   }
 
@@ -344,8 +394,18 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _searchField(),
-              if (_results.isNotEmpty)
+              if (_parsedCoord != null || _results.isNotEmpty)
                 _resultList([
+                  if (_parsedCoord != null)
+                    _ResultRow(
+                      icon: Icons.my_location_rounded,
+                      title: 'Jump to coordinates',
+                      subtitle: '${_parsedCoord!.$1.toStringAsFixed(6)}, ${_parsedCoord!.$2.toStringAsFixed(6)}',
+                      onTap: () => _choose(
+                        LatLng(_parsedCoord!.$1, _parsedCoord!.$2),
+                        'Location (${_parsedCoord!.$1.toStringAsFixed(4)}, ${_parsedCoord!.$2.toStringAsFixed(4)})',
+                      ),
+                    ),
                   for (final r in _results)
                     _ResultRow(
                       icon: Icons.place_rounded,
@@ -353,6 +413,19 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                       subtitle: r.displayName,
                       onTap: () => _choose(LatLng(r.lat, r.lng), r.name),
                     ),
+                ])
+              else if (_search.text.trim().length >= 3 && !_searching && _results.isEmpty && _parsedCoord == null)
+                _resultList([
+                  Padding(
+                    padding: const EdgeInsets.all(Space.s16),
+                    child: Center(
+                      child: Text(
+                        'No matching places found. Try entering coordinates or a town name.',
+                        style: AppText.caption,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
                 ])
               else if (showRecent)
                 _resultList([
@@ -400,24 +473,34 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
           style: AppText.body,
           textInputAction: TextInputAction.search,
           decoration: InputDecoration(
-            hintText: 'Search a place, town or address',
+            hintText: 'Search place, town or coordinates',
             hintStyle: AppText.body.copyWith(color: AppTheme.muted),
             prefixIcon: Icon(Icons.search_rounded, color: AppTheme.accentText),
-            suffixIcon: _searching
-                ? Padding(
-                    padding: const EdgeInsets.all(14),
+            suffixIcon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Paste coordinates or text',
+                  icon: Icon(Icons.content_paste_rounded, color: AppTheme.accentText, size: 20),
+                  onPressed: _pasteCoordinates,
+                ),
+                if (_searching)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
                     child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accentText)),
                   )
-                : (_search.text.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: 'Clear search',
-                        icon: Icon(Icons.close_rounded, color: AppTheme.muted),
-                        onPressed: () => setState(() {
-                          _search.clear();
-                          _results = [];
-                        }),
-                      )),
+                else if (_search.text.isNotEmpty)
+                  IconButton(
+                    tooltip: 'Clear search',
+                    icon: Icon(Icons.close_rounded, color: AppTheme.muted),
+                    onPressed: () => setState(() {
+                      _search.clear();
+                      _results = [];
+                      _parsedCoord = null;
+                    }),
+                  ),
+              ],
+            ),
             filled: false,
             border: InputBorder.none,
             enabledBorder: InputBorder.none,

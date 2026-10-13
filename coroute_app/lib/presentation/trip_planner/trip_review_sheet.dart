@@ -11,8 +11,6 @@ import '../../data/services/settings_service.dart';
 import '../../data/services/tile_cache_service.dart';
 import '../../data/services/weather_service.dart';
 import '../../domain/safety/sun_helper.dart';
-import '../ride/ride_sheet.dart' show SaveRouteMapRow, SheetRow;
-import 'widgets/organic_maps_card.dart';
 import 'widgets/route_map_pack_card.dart';
 
 /// The last step before a ride starts: what the trip looks like (distance,
@@ -239,17 +237,6 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                   child: RouteMapPackCard(
                     route: r,
                     tripName: widget.name,
-                  ),
-                ),
-              if (r != null && r.points.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: Space.s8),
-                  child: OrganicMapsCard(
-                    route: r,
-                    tripName: widget.name,
-                    startPoint: r.points.isNotEmpty ? r.points.first : null,
-                    destinationPoint: r.points.length > 1 ? r.points.last : null,
-                    checkpoints: widget.namedStops.map((s) => (s.$1, s.$2, s.$3)).toList(),
                   ),
                 ),
               const SizedBox(height: Space.s16),

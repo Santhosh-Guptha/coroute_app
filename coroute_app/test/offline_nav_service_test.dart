@@ -6,9 +6,6 @@ import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/models/stop_point_model.dart';
 import 'package:coroute_app/data/services/convoy_service.dart';
 import 'package:coroute_app/presentation/trip_planner/route_stops_panel.dart';
-import 'package:coroute_app/data/models/route_model.dart';
-import 'package:coroute_app/domain/tracking/geo_math.dart';
-import 'package:coroute_app/presentation/trip_planner/widgets/organic_maps_card.dart';
 import 'package:coroute_app/data/services/offline_nav_service.dart';
 import 'package:coroute_app/domain/route/lost_rider_recovery_coordinator.dart';
 import 'package:coroute_app/presentation/ride/navigate_to.dart';
@@ -41,19 +38,15 @@ void main() {
   setUp(() {
     navigateLauncherOverride = null;
     OfflineNavService.exportOverride = null;
-    OfflineNavService.installedOverride = null;
-    OfflineNavService.downloadRegionOverride = null;
   });
 
   tearDown(() {
     navigateLauncherOverride = null;
     OfflineNavService.exportOverride = null;
-    OfflineNavService.installedOverride = null;
-    OfflineNavService.downloadRegionOverride = null;
   });
 
-  group('Organic Maps URI resolution (navigate_to.dart)', () {
-    test('navigationUris generates prioritized list with start and destination', () {
+  group('Standard Navigation URI resolution (navigate_to.dart)', () {
+    test('navigationUris generates prioritized list with standard intents', () {
       final uris = navigationUris(
         17.500000,
         78.500000,
@@ -62,65 +55,40 @@ void main() {
         startLng: 78.400000,
       );
 
-      expect(uris.length, 5);
+      expect(uris.length, 3);
 
-      // 1. Organic Maps Turn-by-Turn Route
-      expect(uris[0].scheme, 'om');
-      expect(uris[0].host, 'route');
-      expect(uris[0].queryParameters['sll'], '17.400000,78.400000');
-      expect(uris[0].queryParameters['saddr'], 'My Location');
-      expect(uris[0].queryParameters['dll'], '17.500000,78.500000');
-      expect(uris[0].queryParameters['daddr'], 'Fort & Lake');
-      expect(uris[0].queryParameters['type'], 'vehicle');
-      expect(uris[0].queryParameters['backurl'], 'coroute://cockpit');
+      // 1. Google Maps / Android Navigation Turn-by-Turn
+      expect(uris[0].scheme, 'google.navigation');
+      expect(uris[0].toString(), contains('mode=d'));
+      expect(uris[0].toString(), contains('17.500000,78.500000'));
 
-      // 2. Organic Maps Location Pin with CoRoute return link
-      expect(uris[1].scheme, 'om');
-      expect(uris[1].host, 'map');
-      expect(uris[1].queryParameters['ll'], '17.500000,78.500000');
-      expect(uris[1].queryParameters['n'], 'Fort & Lake');
-      expect(uris[1].queryParameters['backurl'], 'coroute://cockpit');
+      // 2. Any map app (geo:)
+      expect(uris[1].scheme, 'geo');
+      expect(uris[1].toString(), contains('17.500000,78.500000'));
 
-      // 3. Google Maps Turn-by-Turn
-      expect(uris[2].scheme, 'google.navigation');
-      expect(uris[2].toString(), contains('mode=d'));
-
-      // 4. Any map app (geo:)
-      expect(uris[3].scheme, 'geo');
-
-      // 5. Browser fallback
-      expect(uris[4].scheme, 'https');
-      expect(uris[4].host, 'www.google.com');
-    });
-
-    test('navigationUris generates om://route without start coordinates when omitted', () {
-      final uris = navigationUris(17.500000, 78.500000, label: 'Fort');
-      expect(uris[0].scheme, 'om');
-      expect(uris[0].host, 'route');
-      expect(uris[0].queryParameters.containsKey('sll'), isFalse);
-      expect(uris[0].queryParameters['dll'], '17.500000,78.500000');
-      expect(uris[0].queryParameters['type'], 'vehicle');
-      expect(uris[0].queryParameters['backurl'], 'coroute://cockpit');
+      // 3. Browser fallback
+      expect(uris[2].scheme, 'https');
+      expect(uris[2].host, 'www.google.com');
+      expect(uris[2].toString(), contains('17.500000,78.500000'));
     });
 
     test('navigateTo tries links in order until one succeeds', () async {
       final tried = <String>[];
       navigateLauncherOverride = (uri) async {
         tried.add(uri.toString());
-        // Simulate Organic Maps not installed (fails), but Google Maps succeeding
-        if (uri.scheme == 'om') return false;
+        // Simulate google.navigation not installed (fails), but geo succeeding
+        if (uri.scheme == 'google.navigation') return false;
         return true;
       };
 
       final ok = await navigateTo(17.5, 78.5, label: 'Target');
       expect(ok, isTrue);
-      expect(tried.length, 3); // Tried om://route, om://map, then succeeded on google.navigation
-      expect(tried[0], startsWith('om://route'));
-      expect(tried[1], startsWith('om://map'));
-      expect(tried[2], startsWith('google.navigation:'));
+      expect(tried.length, 2);
+      expect(tried[0], startsWith('google.navigation:'));
+      expect(tried[1], startsWith('geo:'));
     });
 
-    test('navigateTo succeeds on first link if Organic Maps is available', () async {
+    test('navigateTo succeeds on first link if google.navigation is available', () async {
       final tried = <String>[];
       navigateLauncherOverride = (uri) async {
         tried.add(uri.toString());
@@ -130,7 +98,7 @@ void main() {
       final ok = await navigateTo(17.5, 78.5, label: 'Target');
       expect(ok, isTrue);
       expect(tried.length, 1);
-      expect(tried[0], startsWith('om://route'));
+      expect(tried[0], startsWith('google.navigation:'));
     });
 
     test('navigateTo returns false on invalid coordinates', () async {
@@ -194,75 +162,77 @@ void main() {
       expect(xml, contains('<name>Cafe &lt;Brews&gt;</name>'));
     });
 
-    test('exportRouteToOrganicMaps rejects empty route points', () async {
-      final ok = await OfflineNavService.exportRouteToOrganicMaps(
-        tripName: 'Empty Trip',
+    test('exportGpxRoute rejects empty route points', () async {
+      final ok = await OfflineNavService.exportGpxRoute(
+        tripName: 'Empty Route',
         points: [],
       );
       expect(ok, isFalse);
     });
 
-    test('exportRouteToOrganicMaps delegates to exportOverride in tests', () async {
-      var overrideCalled = false;
+    test('exportGpxRoute delegates to exportOverride in tests', () async {
+      String? exportedName;
+      int pointsCount = 0;
+      int checkpointsCount = 0;
+
       OfflineNavService.exportOverride = ({
         required String tripName,
         required List<(double lat, double lng)> points,
         List<(String name, double lat, double lng)> checkpoints = const [],
       }) async {
-        overrideCalled = true;
-        expect(tripName, 'Monsoon Convoy');
-        expect(points.length, 2);
-        expect(checkpoints.length, 1);
+        exportedName = tripName;
+        pointsCount = points.length;
+        checkpointsCount = checkpoints.length;
         return true;
       };
 
-      final ok = await OfflineNavService.exportRouteToOrganicMaps(
-        tripName: 'Monsoon Convoy',
-        points: [(17.0, 78.0), (17.1, 78.1)],
-        checkpoints: [('Fuel', 17.05, 78.05)],
+      final ok = await OfflineNavService.exportGpxRoute(
+        tripName: 'Araku Valley Loop',
+        points: [(18.3, 82.8), (18.4, 82.9)],
+        checkpoints: [('Tunnel 1', 18.35, 82.85)],
       );
 
       expect(ok, isTrue);
-      expect(overrideCalled, isTrue);
+      expect(exportedName, 'Araku Valley Loop');
+      expect(pointsCount, 2);
+      expect(checkpointsCount, 1);
     });
   });
 
-  group('LostRiderRecoveryCoordinator offline homing navigation', () {
-    test('launchHomingNavigation delegates to navigateTo with correct coords', () async {
-      final tried = <String>[];
+  group('LostRiderRecoveryCoordinator Navigation Integration', () {
+    test('launchHomingNavigation delegates to navigateTo', () async {
+      Uri? launchedUri;
       navigateLauncherOverride = (uri) async {
-        tried.add(uri.toString());
+        launchedUri = uri;
         return true;
       };
 
       const vector = RecoveryVector(
         targetType: RecoveryTargetType.routeLine,
-        targetLat: 17.450000,
-        targetLng: 78.450000,
+        targetLat: 17.5000,
+        targetLng: 78.5000,
         distanceMeters: 450,
         bearingDegrees: 45,
-        instruction: 'Rejoin Route Line: Head NE for 450 m',
+        instruction: 'Turn North-East to rejoin route',
         usingGpsCourse: true,
       );
 
-      final ok = await LostRiderRecoveryCoordinator.launchHomingNavigation(
-        vector,
-        17.446000,
-        78.446000,
-      );
-
+      final ok = await LostRiderRecoveryCoordinator.launchHomingNavigation(vector, 17.4950, 78.4950);
       expect(ok, isTrue);
-      expect(tried.length, 1);
-      expect(tried[0], contains('om://route'));
-      expect(tried[0], contains('dll=17.450000,78.450000'));
-      expect(tried[0], contains('sll=17.446000,78.446000'));
-      expect(tried[0], contains('Rejoin%20Convoy%20Route'));
+      expect(launchedUri, isNotNull);
+      expect(launchedUri!.scheme, 'google.navigation');
+      expect(launchedUri!.toString(), contains('17.500000,78.500000'));
     });
   });
 
   group('GloveQuickSettingsModal offline navigation trigger', () {
     testWidgets('renders Offline voice nav button and calls callback when tapped', (tester) async {
-      var triggered = false;
+      var navTapped = false;
+
+      tester.view.physicalSize = const Size(600, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: GloveQuickSettingsModal(
@@ -270,223 +240,20 @@ void main() {
             autoFollow: true,
             onToggleKeepScreenOn: () {},
             onToggleAutoFollow: () {},
-            onLaunchOfflineNav: () => triggered = true,
+            onLaunchOfflineNav: () => navTapped = true,
           ),
         ),
       ));
 
-      expect(find.byKey(const Key('quick_action_offline_nav')), findsOneWidget);
       expect(find.text('Offline voice nav'), findsOneWidget);
+      expect(find.byIcon(Icons.navigation_outlined), findsOneWidget);
 
-      await tester.ensureVisible(find.byKey(const Key('quick_action_offline_nav')));
-      await tester.tap(find.byKey(const Key('quick_action_offline_nav')));
+      await tester.ensureVisible(find.text('Offline voice nav'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Offline voice nav'));
       await tester.pump();
 
-      expect(triggered, isTrue);
-    });
-  });
-
-  group('OfflineNavService On-Demand Region Download & Route Deep Links', () {
-    test('openOrganicMapsRegionDownload generates om://map with destination and backurl', () async {
-      Uri? launchedUri;
-      OfflineNavService.downloadRegionOverride = (uri) async {
-        launchedUri = uri;
-        return true;
-      };
-
-      final ok = await OfflineNavService.openOrganicMapsRegionDownload(
-        lat: 12.971600,
-        lng: 77.594600,
-        label: 'Bangalore Fort',
-      );
-
-      expect(ok, isTrue);
-      expect(launchedUri, isNotNull);
-      expect(launchedUri!.scheme, 'om');
-      expect(launchedUri!.host, 'map');
-      expect(launchedUri!.queryParameters['v'], '1');
-      expect(launchedUri!.queryParameters['ll'], '12.971600,77.594600');
-      expect(launchedUri!.queryParameters['n'], 'Bangalore Fort');
-      expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
-    });
-
-    test('openOrganicMapsRegionDownload rejects invalid coordinates', () async {
-      var called = false;
-      OfflineNavService.downloadRegionOverride = (_) async {
-        called = true;
-        return true;
-      };
-
-      expect(await OfflineNavService.openOrganicMapsRegionDownload(lat: 0, lng: 0), isFalse);
-      expect(await OfflineNavService.openOrganicMapsRegionDownload(lat: double.nan, lng: 77.0), isFalse);
-      expect(called, isFalse);
-    });
-
-    test('openOrganicMapsRoute generates om://route with sll, dll, and backurl', () async {
-      Uri? launchedUri;
-      OfflineNavService.downloadRegionOverride = (uri) async {
-        launchedUri = uri;
-        return true;
-      };
-
-      final ok = await OfflineNavService.openOrganicMapsRoute(
-        startLat: 17.385000,
-        startLng: 78.486700,
-        destLat: 12.971600,
-        destLng: 77.594600,
-        startName: 'Hyderabad',
-        destName: 'Bangalore',
-      );
-
-      expect(ok, isTrue);
-      expect(launchedUri, isNotNull);
-      expect(launchedUri!.scheme, 'om');
-      expect(launchedUri!.host, 'route');
-      expect(launchedUri!.queryParameters['sll'], '17.385000,78.486700');
-      expect(launchedUri!.queryParameters['saddr'], 'Hyderabad');
-      expect(launchedUri!.queryParameters['dll'], '12.971600,77.594600');
-      expect(launchedUri!.queryParameters['daddr'], 'Bangalore');
-      expect(launchedUri!.queryParameters['type'], 'vehicle');
-      expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
-    });
-
-    test('openOrganicMapsRoute generates om://route without sll when start coordinates are omitted', () async {
-      Uri? launchedUri;
-      OfflineNavService.downloadRegionOverride = (uri) async {
-        launchedUri = uri;
-        return true;
-      };
-
-      final ok = await OfflineNavService.openOrganicMapsRoute(
-        destLat: 12.971600,
-        destLng: 77.594600,
-        destName: 'Bangalore',
-      );
-
-      expect(ok, isTrue);
-      expect(launchedUri, isNotNull);
-      expect(launchedUri!.scheme, 'om');
-      expect(launchedUri!.host, 'route');
-      expect(launchedUri!.queryParameters.containsKey('sll'), isFalse);
-      expect(launchedUri!.queryParameters['dll'], '12.971600,77.594600');
-      expect(launchedUri!.queryParameters['daddr'], 'Bangalore');
-      expect(launchedUri!.queryParameters['type'], 'vehicle');
-      expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
-    });
-  });
-
-  group('OrganicMapsCard Widget Tests in Trip Creation', () {
-    final testPoints = [(17.385, 78.4867), (17.400, 78.5000), (17.420, 78.5200)];
-
-    testWidgets('renders empty shrink widget when route is null or approximate', (tester) async {
-      OfflineNavService.installedOverride = () async => true;
-
-      await tester.pumpWidget(const MaterialApp(
-        home: Scaffold(
-          body: OrganicMapsCard(route: null),
-        ),
-      ));
-
-      expect(find.byType(OrganicMapsCard), findsOneWidget);
-      expect(find.text('Organic Maps Offline'), findsNothing);
-
-      final approxRoute = RouteModel(
-        distanceM: 5000,
-        durationS: 600,
-        polyline: GeoMath.encodePolyline(testPoints),
-        approximate: true,
-      );
-
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: OrganicMapsCard(route: approxRoute),
-        ),
-      ));
-
-      expect(find.text('Organic Maps Offline'), findsNothing);
-    });
-
-    testWidgets('renders Install state when Organic Maps is not installed', (tester) async {
-      OfflineNavService.installedOverride = () async => false;
-
-      final route = RouteModel(
-        distanceM: 5000,
-        durationS: 600,
-        polyline: GeoMath.encodePolyline(testPoints),
-      );
-
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: OrganicMapsCard(
-            route: route,
-            tripName: 'Highway Ride',
-          ),
-        ),
-      ));
-      await tester.pump();
-
-      expect(find.text('Organic Maps Companion'), findsOneWidget);
-      expect(find.text('OFFLINE'), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'Install'), findsOneWidget);
-    });
-
-    testWidgets('renders READY state with Download Map and Sync Route when installed', (tester) async {
-      OfflineNavService.installedOverride = () async => true;
-      Uri? downloadTarget;
-      OfflineNavService.downloadRegionOverride = (uri) async {
-        downloadTarget = uri;
-        return true;
-      };
-
-      var exportCalled = false;
-      OfflineNavService.exportOverride = ({
-        required String tripName,
-        required List<(double lat, double lng)> points,
-        List<(String name, double lat, double lng)> checkpoints = const [],
-      }) async {
-        exportCalled = true;
-        return true;
-      };
-
-      final route = RouteModel(
-        distanceM: 5000,
-        durationS: 600,
-        polyline: GeoMath.encodePolyline(testPoints),
-      );
-
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: OrganicMapsCard(
-            route: route,
-            tripName: 'Srisailam Ghat Run',
-            destinationPoint: (17.420, 78.5200),
-            destinationName: 'Srisailam Dam',
-            checkpoints: const [('Ghat Viewpoint', 17.400, 78.500)],
-          ),
-        ),
-      ));
-      await tester.pump();
-
-      expect(find.text('Organic Maps Offline'), findsOneWidget);
-      expect(find.text('READY'), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, 'Download Map'), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, 'Sync Route GPX'), findsOneWidget);
-
-      // Tap Download Map -> triggers on-demand regional map deep link in Organic Maps
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Download Map'));
-      await tester.pump();
-
-      expect(downloadTarget, isNotNull);
-      expect(downloadTarget!.scheme, 'om');
-      expect(downloadTarget!.host, 'map');
-      expect(downloadTarget!.queryParameters['ll'], '17.420000,78.520000');
-      expect(downloadTarget!.queryParameters['backurl'], 'coroute://cockpit');
-
-      // Tap Sync Route GPX -> triggers GPX track export
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Sync Route GPX'));
-      await tester.pump();
-
-      expect(exportCalled, isTrue);
+      expect(navTapped, isTrue);
     });
   });
 
@@ -541,11 +308,8 @@ void main() {
       await tester.pump();
 
       expect(launchedUri, isNotNull);
-      expect(launchedUri!.scheme, 'om');
-      expect(launchedUri!.host, 'route');
-      expect(launchedUri!.queryParameters['dll'], '17.500000,78.500000');
-      expect(launchedUri!.queryParameters['daddr'], 'Lake Viewpoint');
-      expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
+      expect(launchedUri!.scheme, 'google.navigation');
+      expect(launchedUri!.toString(), contains('17.500000,78.500000'));
     });
 
     testWidgets('stop navigate button triggers navigateTo with stop coords', (tester) async {
@@ -605,12 +369,8 @@ void main() {
       await tester.pump();
 
       expect(launchedUri, isNotNull);
-      expect(launchedUri!.scheme, 'om');
-      expect(launchedUri!.host, 'route');
-      expect(launchedUri!.queryParameters['dll'], '17.450000,78.490000');
-      expect(launchedUri!.queryParameters['daddr'], 'Hilltop Dhaba');
-      expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
+      expect(launchedUri!.scheme, 'google.navigation');
+      expect(launchedUri!.toString(), contains('17.450000,78.490000'));
     });
   });
 }
-

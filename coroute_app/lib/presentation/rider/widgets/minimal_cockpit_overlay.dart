@@ -49,7 +49,7 @@ class MinimalCockpitTopBar extends StatelessWidget {
   /// The group's speed limit; 0 or null hides the "LIMIT" badge.
   final int? speedLimitKmh;
 
-  /// Live turn-by-turn navigation tap handler (e.g. opens Organic Maps).
+  /// Live turn-by-turn navigation tap handler.
   final VoidCallback? onNavigationTap;
 
   const MinimalCockpitTopBar({

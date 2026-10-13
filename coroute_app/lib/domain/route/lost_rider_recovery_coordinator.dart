@@ -184,7 +184,7 @@ class LostRiderRecoveryCoordinator {
     return cardinals[idx.clamp(0, cardinals.length - 1)];
   }
 
-  /// Launches offline turn-by-turn homing navigation via Organic Maps or system map
+  /// Launches turn-by-turn homing navigation via system map
   /// along actual roads/trails to guide a lost rider back to the recovery target.
   static Future<bool> launchHomingNavigation(RecoveryVector vector, double myLat, double myLng) {
     return navigateTo(

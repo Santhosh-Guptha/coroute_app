@@ -232,7 +232,7 @@ void main() {
     expect(find.text('Call Kiran'), findsNothing);
   });
 
-  testWidgets('Navigate tries Organic Maps offline schemes first, then google.navigation, geo:, and the browser', (tester) async {
+  testWidgets('Navigate tries google.navigation, geo:, and the browser', (tester) async {
     final tried = <Uri>[];
     navigateLauncherOverride = (u) async {
       tried.add(u);
@@ -243,12 +243,10 @@ void main() {
     await render(tester, IncidentBanner(incident: i, myLat: myLat, myLng: myLng, nowMs: now, onOpen: () => opened++), c: convoy(alerts: [crash()]));
     await tester.tap(find.text('Navigate to Kiran'));
     await tester.pump();
-    expect(tried, hasLength(5));
-    expect(tried[0].scheme, 'om');
-    expect(tried[1].scheme, 'om');
-    expect(tried[2].toString(), 'google.navigation:q=12.983034,77.606333&mode=d');
-    expect(tried[3].scheme, 'geo');
-    expect(tried[4].host, 'www.google.com');
+    expect(tried, hasLength(3));
+    expect(tried[0].toString(), 'google.navigation:q=12.983034,77.606333&mode=d');
+    expect(tried[1].scheme, 'geo');
+    expect(tried[2].host, 'www.google.com');
     expect(opened, 0, reason: 'Navigate does not open the sheet');
     await tester.tap(find.text('View Emergency'));
     expect(opened, 1);

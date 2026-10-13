@@ -1705,7 +1705,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         SheetRow(
           key: const Key('sheet_row_offline_nav'),
           icon: Icons.navigation_rounded,
-          title: 'Organic Maps turn-by-turn',
+          title: 'Turn-by-turn navigation',
           subtitle: snap.nextStop != null
               ? 'Route to ${snap.nextStop!.name.isEmpty ? "Next stop" : snap.nextStop!.name}'
               : 'Route to ${convoy.destinationName.isEmpty ? "Destination" : convoy.destinationName}',

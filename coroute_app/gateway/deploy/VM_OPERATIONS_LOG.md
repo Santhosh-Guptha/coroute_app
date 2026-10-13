@@ -214,20 +214,22 @@
 
 
 
-### Release 3.23.0+83 / Gateway v3.23.0 (2026-10-13)
+### Release 3.30.0+90 / Gateway v3.30.0 (2026-10-13)
 - **Operator User**: `antigravity` / `santhosh`
 - **Activities**:
-  1. Ran full automated test suites:
-     - Flutter: 1,048/1,048 tests passed (100%), `dart analyze .` 0 issues.
-     - Gateway: 314/314 tests passed (100%).
-  2. Bumped app version to `3.23.0+83` in `coroute_app/pubspec.yaml` and gateway version to `3.23.0` in `gateway/package.json` & `gateway/src/config.js`.
-  3. Feature Implementations — Organic Maps Offline Navigation & GPX Route Sync:
-     - **Prioritized Turn-by-Turn Navigation**: Deep-link integration with Organic Maps via `om://route` with start (`sll`) and destination (`dll`) vehicle routing, `om://map` fallback with `backurl=coroute://cockpit`, and graceful cascade to Google Navigation, `geo:`, and Google Maps web.
-     - **In-Memory GPX 1.1 Exporter**: Valid GPX XML generator in `OfflineNavService` exporting track segments, waypoints, and elevation without disk writes or heavy C++ NDK offline engines.
-     - **Pre-Ride Route Pack Card**: Integrated `_OfflineNavigationRow` in `TripReviewSheet` allowing riders to export GPX route packs and pre-cache regional `.mwm` maps before entering network dead zones.
-     - **Motorcycle Glove Quick Action**: Added 52dp `quick_action_offline_nav` button in `GloveQuickSettingsModal` accessible directly via the live cockpit Orbit menu.
-     - **Lost-Rider Offline Recovery**: Added `launchHomingNavigation` in `LostRiderRecoveryCoordinator` to guide disconnected or stray riders back to convoy waypoints along real roads.
-     - **Platform Scheme Queries**: Configured Android `<queries>` for `om` scheme and `app.organicmaps`, iOS `LSApplicationQueriesSchemes`, and bidirectional return scheme `coroute://cockpit`.
-  4. Git Operations:
-     - Merged `feature/organic-maps-integration` into `main`.
-     - Tagged release as `v3.23.0+83` and pushed to `origin/main`.
+  1. Automated test suites executed:
+     - Flutter Test Suites: All passed (100%), including `coordinate_parser_test.dart`, `map_picker_test.dart`, `trip_planner_test.dart`, `incident_ui_test.dart`, `offline_nav_service_test.dart`.
+     - Gateway Test Suite: 315/315 tests passed (100%).
+  2. Bumped app version to `3.30.0+90` in `coroute_app/pubspec.yaml` and gateway version to `3.30.0` in `gateway/package.json`.
+  3. Feature Implementations & Organic Maps Purge:
+     - **Coordinate Parsing & One-Tap Paste**: Introduced `CoordinateParser` supporting decimal degrees, DMS, and map URLs. Added dedicated clipboard paste button (`Icons.content_paste_rounded`) to `MapPickerScreen` allowing riders to jump directly to coordinates without relying on geocoders.
+     - **100% Self-Contained Trip Creation**: Removed `OrganicMapsCard` from `TripPlannerScreen` and `TripReviewSheet`. Trip creation is completely self-contained with lightweight 2D OSM maps and built-in corridor prefetch via `RouteMapPackCard`.
+     - **Codebase Cleanup & Purge**: Deleted `organic_maps_card.dart`, removed all `om://` schemes and Organic Maps references across `navigate_to.dart`, `offline_nav_service.dart`, `live_cockpit_map_screen.dart`, and all test suites. Turn-by-turn fallback now defaults to standard system navigation (`google.navigation:`, `geo:`).
+  4. Compiled production split APKs:
+     - `coroute.apk` (ARM64, 11.3 MB, SHA-256: `572FE8A81F0A4263C1D54ECF484D6EBF333A3250226155F7E39D467D62EEDC66`)
+     - `coroute-32bit.apk` (ARMv7, 11.0 MB, SHA-256: `631F6FF93BA572D664CEF8D1DF8AD3EC658A98D48A964AECD13EF7E59C487CE5`)
+     - `coroute-x86_64.apk` (x86_64, 11.5 MB, SHA-256: `F0F527B4C71BDBC77A04D52A9F2209DC572B79AF8156C558E16F8EE2F074DAF5`)
+  5. Deployed to Oracle Cloud VM `152.67.181.198` (`coroute.duckdns.org`):
+     - Published binaries to `/opt/coroute/gateway/public/`.
+     - Updated `/etc/coroute/gateway.env` to `LATEST_APP_BUILD=90`.
+     - Restarted `coroute-gateway.service`, verified status `HEALTHY` on v3.30.0.

@@ -17,7 +17,6 @@ import '../map_picker/map_picker_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
 import 'trip_review_sheet.dart';
-import 'widgets/organic_maps_card.dart';
 import 'widgets/route_map_pack_card.dart';
 
 /// Plan a ride on one screen, map first: name, start, destination, stops
@@ -482,16 +481,6 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
             RouteMapPackCard(
               route: r,
               tripName: _name.text.trim().isNotEmpty ? _name.text.trim() : 'Planned Route',
-            ),
-            const SizedBox(height: 12),
-            OrganicMapsCard(
-              route: r,
-              tripName: _name.text.trim().isNotEmpty ? _name.text.trim() : 'Planned Route',
-              startPoint: _start != null ? (_start!.lat, _start!.lng) : null,
-              startName: startName,
-              destinationPoint: _destination != null ? (_destination!.lat, _destination!.lng) : null,
-              destinationName: destinationName,
-              checkpoints: _stops.map((s) => (s.name.isNotEmpty ? s.name : StopKind.fromCategory(s.category).label, s.lat, s.lng)).toList(),
             ),
           ],
         ],
