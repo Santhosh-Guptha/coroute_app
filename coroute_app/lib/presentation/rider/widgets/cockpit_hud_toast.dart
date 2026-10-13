@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/ui/ui_tokens.dart';
+import '../../../core/ui/ui.dart';
 
 /// Instant high-contrast HUD toast banner for in-flight rider feedback.
 ///
 /// Designed for riders at high speed on vibrating mounts:
-/// - Glove-readable text and prominent high-contrast icon.
-/// - Glowing active border for immediate peripheral visual confirmation.
+/// - Glove-readable text and a prominent accent icon on a floating card.
+/// - A 2 px accent border for immediate peripheral visual confirmation.
 /// - Zero emojis and ASCII hyphens only.
 class CockpitHudToast extends StatelessWidget {
   final String message;
@@ -22,42 +22,39 @@ class CockpitHudToast extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = color ?? AppTheme.neonCyan;
+    final accent = color ?? AppTheme.accentText;
     return Semantics(
       liveRegion: true,
       label: message,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: AppTheme.obsidianVoid.withOpacity(0.95),
-          borderRadius: Radii.lgAll,
-          border: Border.all(color: accent, width: 2.0),
-          boxShadow: [
-            BoxShadow(
-              color: accent.withOpacity(0.35),
-              blurRadius: 12.0,
-              spreadRadius: 1.0,
-            ),
-            BoxShadow(
-              color: AppTheme.shadow,
-              blurRadius: 8.0,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          color: AppTheme.card,
+          borderRadius: BorderRadius.circular(Radii.lg),
+          border: Border.all(color: accent, width: 2),
+          boxShadow: dsFloatingShadow(),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: accent, size: 24),
-            const SizedBox(width: Space.s12),
+            Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: accent.withOpacity(0.14),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: accent, size: 22),
+            ),
+            const SizedBox(width: 12),
             Flexible(
               child: Text(
                 message,
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.text,
                   fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.3,
+                  fontWeight: FontWeight.w800,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,

@@ -4,8 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/ui/app_bottom_sheet.dart';
-import '../../core/ui/ui_tokens.dart';
+import '../../core/ui/ui.dart';
 import '../../data/models/network_models.dart';
 import '../../data/models/network_wire.dart';
 import '../../data/models/safety_wire.dart';
@@ -195,7 +194,6 @@ class EmergencySosSheet extends StatelessWidget {
     );
     final status = statusFor(hasService: hasService, pending: pending, online: online, hasOpenAlert: openAlertId != null || alertId != null);
     final (title, subtitle) = textFor(status);
-    final headerColor = status == SosSheetStatus.delivered ? AppTheme.emeraldSafe : AppTheme.laserRed;
     final emergencyPhone = auth.emergencyContact?.trim() ?? '';
     final emergencyName = auth.emergencyContactName?.trim() ?? '';
     final hasEmergencyContact = emergencyPhone.isNotEmpty;
@@ -213,6 +211,37 @@ class EmergencySosSheet extends StatelessWidget {
     final ride316 = context.select<ConvoyService?, bool>((s) => s?.supports(ProtocolFeatures.ride316) ?? false);
     final linkId = ride316 ? (alertId ?? openAlertId) : null;
 
+    final headerBg = status == SosSheetStatus.delivered
+        ? AppTheme.tint
+        : status == SosSheetStatus.waitingForSignal
+            ? AppTheme.warnTint
+            : AppTheme.card;
+    final headerBorder = status == SosSheetStatus.delivered
+        ? AppTheme.accentText
+        : status == SosSheetStatus.waitingForSignal
+            ? AppTheme.warnBorder
+            : AppTheme.sos;
+    final headerIconBg = status == SosSheetStatus.delivered
+        ? AppTheme.brand
+        : status == SosSheetStatus.waitingForSignal
+            ? AppTheme.warnText
+            : AppTheme.sos;
+    final headerText = status == SosSheetStatus.delivered
+        ? AppTheme.accentText
+        : status == SosSheetStatus.waitingForSignal
+            ? AppTheme.warnText
+            : AppTheme.sos;
+
+    ButtonStyle dial({required Color color, double height = 56, double fontSize = 14}) => OutlinedButton.styleFrom(
+          foregroundColor: color,
+          backgroundColor: AppTheme.card,
+          side: BorderSide(color: color.withValues(alpha: 0.7), width: 2),
+          minimumSize: Size.fromHeight(height),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          textStyle: TextStyle(fontFamily: AppTheme.fontFamily, fontWeight: FontWeight.w800, fontSize: fontSize),
+        );
+
     return SingleChildScrollView(
       child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -222,21 +251,16 @@ class EmergencySosSheet extends StatelessWidget {
             Semantics(
               liveRegion: true,
               container: true,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: headerColor.withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: headerColor.withOpacity(0.7)),
-                ),
+              child: DsCard(
+                color: headerBg,
+                borderColor: headerBorder,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: headerColor,
-                      ),
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(shape: BoxShape.circle, color: headerIconBg),
                       child: Icon(
                         status == SosSheetStatus.delivered
                             ? Icons.check_rounded
@@ -252,12 +276,12 @@ class EmergencySosSheet extends StatelessWidget {
                         children: [
                           Text(
                             title,
-                            style: AppText.body.copyWith(color: headerColor, fontWeight: FontWeight.w800),
+                            style: AppText.title.copyWith(color: headerText),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             subtitle,
-                            style: AppText.label.copyWith(color: AppTheme.textPrimary, fontWeight: FontWeight.w400),
+                            style: AppText.label.copyWith(color: AppTheme.text2),
                           ),
                         ],
                       ),
@@ -275,9 +299,9 @@ class EmergencySosSheet extends StatelessWidget {
                   liveRegion: true,
                   child: Row(
                     children: [
-                      Icon(Icons.person_search_rounded, size: 18, color: AppTheme.textSecondary),
+                      Icon(Icons.person_search_outlined, size: 20, color: AppTheme.accentText),
                       const SizedBox(width: Space.s8),
-                      Expanded(child: Text(netLine, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.textPrimary))),
+                      Expanded(child: Text(netLine, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body)),
                     ],
                   ),
                 ),
@@ -292,24 +316,24 @@ class EmergencySosSheet extends StatelessWidget {
             Container(
               padding: const EdgeInsets.only(left: Space.s12, right: Space.s4),
               decoration: BoxDecoration(
-                color: AppTheme.elevatedCard,
+                color: AppTheme.soft,
                 borderRadius: Radii.mdAll,
-                border: Border.all(color: AppTheme.subtleBorder),
+                border: Border.all(color: AppTheme.border, width: 2),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.my_location_rounded, color: AppTheme.neonCyan, size: 18),
+                  Icon(Icons.my_location_rounded, color: AppTheme.accentText, size: 20),
                   const SizedBox(width: Space.s8),
                   Expanded(
                     child: Text(
                       'Position: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: AppText.caption.copyWith(color: AppTheme.textSecondary, fontFeatures: const [FontFeature.tabularFigures()]),
+                      style: AppText.caption.copyWith(color: AppTheme.text2, fontWeight: FontWeight.w700, fontFeatures: const [FontFeature.tabularFigures()]),
                     ),
                   ),
                   TextButton.icon(
-                    style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: AppTheme.neonCyan),
+                    style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: AppTheme.accentText),
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: mapsUrl));
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -317,7 +341,7 @@ class EmergencySosSheet extends StatelessWidget {
                       );
                     },
                     icon: const Icon(Icons.copy_rounded, size: 18),
-                    label: const Text('Copy link', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    label: const Text('Copy link', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
                   ),
                 ],
               ),
@@ -334,14 +358,14 @@ class EmergencySosSheet extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.sms_rounded, size: 18, color: AppTheme.textSecondary),
+                    Icon(Icons.sms_outlined, size: 20, color: AppTheme.accentText),
                     const SizedBox(width: Space.s8),
                     Expanded(
                       child: Text(
                         smsLine,
                         maxLines: 4,
                         overflow: TextOverflow.ellipsis,
-                        style: AppText.label.copyWith(color: AppTheme.textPrimary, fontWeight: FontWeight.w400),
+                        style: AppText.label.copyWith(color: AppTheme.text2),
                       ),
                     ),
                   ],
@@ -350,158 +374,94 @@ class EmergencySosSheet extends StatelessWidget {
               const SizedBox(height: Space.s12),
             ],
             if (showSmsButton) ...[
-              OutlinedButton.icon(
+              DsButton(
+                label: 'Text the group now',
+                icon: Icons.sms_outlined,
+                tone: DsButtonTone.outline,
+                fontSize: 15,
                 onPressed: smsAvailable ? () => Provider.of<SafetyService?>(context, listen: false)?.sendSmsNow() : null,
-                icon: const Icon(Icons.sms_rounded),
-                label: const Text(
-                  'Text the group now',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.textPrimary,
-                  side: BorderSide(color: AppTheme.subtleBorder),
-                  minimumSize: const Size.fromHeight(56),
-                  shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
-                ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
             ],
 
             // Action 1: Call Emergency Contact
             if (hasEmergencyContact) ...[
-              ElevatedButton.icon(
+              DsButton(
+                label: 'Call ${emergencyName.isNotEmpty ? emergencyName : "emergency contact"} ($emergencyPhone)',
+                icon: Icons.phone_in_talk_rounded,
+                fontSize: 15,
                 onPressed: () => _makeCall(context, emergencyPhone),
-                icon: const Icon(Icons.phone_in_talk_rounded, color: Colors.white),
-                label: Text(
-                  'Call ${emergencyName.isNotEmpty ? emergencyName : "emergency contact"} ($emergencyPhone)',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.emeraldSafe,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(56),
-                  shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
-                ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
 
               // Action 2: Send SMS with Maps link
-              ElevatedButton.icon(
+              DsButton(
+                label: 'Text my location to $emergencyPhone',
+                icon: Icons.sms_outlined,
+                tone: DsButtonTone.outline,
+                fontSize: 15,
                 onPressed: () => _sendSms(context, emergencyPhone, lat, lng),
-                icon: const Icon(Icons.sms_rounded, color: Colors.black),
-                label: Text(
-                  'Text my location to $emergencyPhone',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.hyperAmber,
-                  foregroundColor: Colors.black,
-                  minimumSize: const Size.fromHeight(56),
-                  shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
-                ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
             ],
 
             // Action 3: Dial 112 National Emergency, 108 Ambulance, 100 Police
-            OutlinedButton.icon(
+            DsButton(
+              label: 'Dial 112 (emergency services)',
+              icon: Icons.local_hospital_outlined,
+              tone: DsButtonTone.sos,
+              fontSize: 15,
               onPressed: () => _makeCall(context, '112'),
-              icon: Icon(Icons.local_hospital_rounded, color: AppTheme.laserRed),
-              label: Text(
-                'Dial 112 (emergency services)',
-                style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.laserRed, fontSize: 14),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: AppTheme.laserRed),
-                minimumSize: const Size.fromHeight(56),
-                shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
-              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () => _makeCall(context, '108'),
-                    icon: Icon(Icons.local_hospital_rounded, color: AppTheme.laserRed, size: 18),
-                    label: Text(
-                      'Dial 108 (Ambulance)',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.laserRed, fontSize: 12),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: AppTheme.laserRed),
-                      minimumSize: const Size.fromHeight(48),
-                      shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                    ),
+                    icon: const Icon(Icons.local_hospital_outlined, size: 18),
+                    label: const Text('Dial 108 (Ambulance)', maxLines: 2, textAlign: TextAlign.center),
+                    style: dial(color: AppTheme.sos, height: 52, fontSize: 12),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () => _makeCall(context, '100'),
-                    icon: Icon(Icons.local_police_rounded, color: AppTheme.laserRed, size: 18),
-                    label: Text(
-                      'Dial 100 (Police)',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.laserRed, fontSize: 12),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: AppTheme.laserRed),
-                      minimumSize: const Size.fromHeight(48),
-                      shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                    ),
+                    icon: const Icon(Icons.local_police_outlined, size: 18),
+                    label: const Text('Dial 100 (Police)', maxLines: 2, textAlign: TextAlign.center),
+                    style: dial(color: AppTheme.sos, height: 52, fontSize: 12),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: () => _makeCall(context, '1073'),
-              icon: Icon(Icons.emergency_rounded, color: AppTheme.hyperAmber, size: 18),
-              label: Text(
-                'Dial 1073 (NHAI Highway Helpline)',
-                style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.hyperAmber, fontSize: 12),
-              ),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: AppTheme.hyperAmber.withOpacity(0.8)),
-                minimumSize: const Size.fromHeight(44),
-                shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
-              ),
+              icon: const Icon(Icons.emergency_outlined, size: 18),
+              label: const Text('Dial 1073 (NHAI Highway Helpline)', maxLines: 1, overflow: TextOverflow.ellipsis),
+              style: dial(color: AppTheme.warnText, height: 48, fontSize: 12),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 18),
 
             // Close my SOS: help reached me, or it was a false alarm. Then "Keep it on".
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.emeraldSafe,
-                foregroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(56),
-                shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
-              ),
-              icon: const Icon(Icons.verified_user_rounded),
+            DsButton(
+              label: L10n.t('sos.ok'),
+              icon: Icons.verified_user_outlined,
               onPressed: () => _close(context, convoyService, ResolveReason.resolved),
-              label: Text(L10n.t('sos.ok'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
             ),
-            const SizedBox(height: Space.s8),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.elevatedCard,
-                foregroundColor: AppTheme.textPrimary,
-                minimumSize: const Size.fromHeight(56),
-                shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
-              ),
-              icon: const Icon(Icons.do_not_disturb_on_rounded),
+            const SizedBox(height: 10),
+            DsButton(
+              label: L10n.t('sos.false'),
+              icon: Icons.do_not_disturb_on_outlined,
+              tone: DsButtonTone.outline,
               onPressed: () => _close(context, convoyService, ResolveReason.falseAlarm),
-              label: Text(L10n.t('sos.false'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
             ),
             const SizedBox(height: Space.s4),
             TextButton(
-              style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.neonCyan),
+              style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.accentText),
               onPressed: () => Navigator.pop(context),
-              child: const Text('Keep it on', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              child: const Text('Keep it on', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
             ),
           ],
         ),

@@ -93,7 +93,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     const pages = OnboardingScreen.pages;
     final last = _page == pages.length - 1;
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
+      backgroundColor: AppTheme.bg,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -103,10 +103,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 Align(
                   alignment: AlignmentDirectional.centerEnd,
                   child: Padding(
-                    padding: const EdgeInsets.all(Space.s8),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
                     child: TextButton(
                       onPressed: _finish,
-                      style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+                      style: TextButton.styleFrom(minimumSize: const Size(64, 44)),
                       child: const Text('Skip'),
                     ),
                   ),
@@ -131,7 +131,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             width: i == _page ? 24 : 8,
                             height: 8,
                             decoration: BoxDecoration(
-                              color: i == _page ? AppTheme.neonCyan : AppTheme.subtleBorder,
+                              color: i == _page ? AppTheme.brand : AppTheme.border2,
                               borderRadius: Radii.smAll,
                             ),
                           ),
@@ -140,11 +140,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(Space.s16, Space.s24, Space.s16, Space.s16),
-                  child: FilledButton(
+                  padding: const EdgeInsets.fromLTRB(20, Space.s24, 20, 28),
+                  child: DsButton(
+                    label: last ? 'Get started' : 'Next',
+                    icon: last ? Icons.two_wheeler_rounded : Icons.arrow_forward_rounded,
                     onPressed: _next,
-                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                    child: Text(last ? 'Get started' : 'Next'),
                   ),
                 ),
               ],
@@ -164,21 +164,27 @@ class _PageBody extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: Space.s24, vertical: Space.s16),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: Space.s16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(page.icon, size: 72, color: AppTheme.neonCyan),
+            // Canvas: a big teal icon on the pale teal tint.
+            Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(Radii.xl + 10)),
+              child: Icon(page.icon, size: 60, color: AppTheme.accentText),
+            ),
             const SizedBox(height: Space.s24),
             Semantics(
               header: true,
-              child: Text(page.title, textAlign: TextAlign.center, style: AppText.title),
+              child: Text(page.title, textAlign: TextAlign.center, style: AppText.headline),
             ),
             const SizedBox(height: Space.s12),
             Text(
               page.line,
               textAlign: TextAlign.center,
-              style: AppText.body.copyWith(color: AppTheme.textSecondary),
+              style: AppText.body.copyWith(color: AppTheme.text2),
             ),
           ],
         ),

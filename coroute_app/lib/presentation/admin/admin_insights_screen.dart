@@ -6,6 +6,7 @@ import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import 'admin_ui.dart';
 import 'feature_analytics_view.dart';
+import 'master_admin_dashboard.dart';
 
 /// Master admin: website/app feedback, first-party page-view counts and the
 /// app builds riders use (to know when the minimum build can be raised).
@@ -69,8 +70,7 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
   /// One tab body: error, spinner, or [child] with pull to refresh.
   Widget _tab(Widget Function() child) {
     if (!_loaded && _error != null) {
-      return RefreshIndicator(
-        color: AppTheme.neonCyan,
+      return adminRefresh(
         onRefresh: _load,
         child: AdminScrollFill(child: AdminErrorState(message: _error!, onRetry: _load)),
       );
@@ -78,38 +78,53 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
     return LoadingState(
       loading: _loading,
       hasData: _loaded,
-      child: RefreshIndicator(color: AppTheme.neonCyan, onRefresh: _load, child: child()),
+      child: adminRefresh(onRefresh: _load, child: child()),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(
-        title: const Text('Feedback and analytics'),
-        actions: [IconButton(icon: const Icon(Icons.refresh_rounded), tooltip: 'Refresh', onPressed: _load)],
-        bottom: TabBar(
-          controller: _tabs,
-          indicatorColor: AppTheme.neonCyan,
-          labelColor: AppTheme.neonCyan,
-          unselectedLabelColor: AppTheme.textSecondary,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          tabs: [
-            Tab(height: 48, text: _loaded ? 'Feedback (${_feedback.length})' : 'Feedback'),
-            const Tab(height: 48, text: 'Page views'),
-            const Tab(height: 48, text: 'App versions'),
-            const Tab(height: 48, text: 'Live features'),
-          ],
-        ),
-      ),
+    return AdminShell(
+      title: 'Feedback and analytics',
+      subtitle: 'Last 30 days',
+      onBack: () => Navigator.maybePop(context),
+      actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
+      nav: adminNavItems(context, AdminSection.insights),
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
-          child: TabBarView(
-            controller: _tabs,
-            children: [_tab(_feedbackList), _tab(_viewsList), _tab(_buildsList), const FeatureAnalyticsView()],
+          constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: AppTheme.border))),
+                child: TabBar(
+                  controller: _tabs,
+                  indicatorColor: AppTheme.brand,
+                  indicatorWeight: 3,
+                  dividerColor: Colors.transparent,
+                  labelColor: AppTheme.accentText,
+                  unselectedLabelColor: AppTheme.muted,
+                  labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                  unselectedLabelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  tabs: [
+                    Tab(height: 48, text: _loaded ? 'Feedback (${_feedback.length})' : 'Feedback'),
+                    const Tab(height: 48, text: 'Page views'),
+                    const Tab(height: 48, text: 'App versions'),
+                    const Tab(height: 48, text: 'Live features'),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: TabBarView(
+                  controller: _tabs,
+                  children: [_tab(_feedbackList), _tab(_viewsList), _tab(_buildsList), const FeatureAnalyticsView()],
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -129,26 +144,52 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
     final fmt = DateFormat('d MMM yyyy, HH:mm');
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
       itemCount: _feedback.length,
       itemBuilder: (ctx, i) {
         final f = _feedback[i];
         final ts = (f['createdAt'] as num?)?.toInt() ?? 0;
+        final name = (f['name']?.toString() ?? '').trim();
         final from = [f['name'], f['email']].where((x) => x != null && x.toString().isNotEmpty).join(', ');
         final meta = [f['source'], f['appVersion'], f['device']].where((x) => x != null && x.toString().isNotEmpty).join(', ');
         return Padding(
-          padding: const EdgeInsets.only(bottom: Space.s8),
-          child: AdminCard(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: DsCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(from.isEmpty ? 'Anonymous' : from, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-                if (ts > 0) Text(fmt.format(DateTime.fromMillisecondsSinceEpoch(ts)), style: AppText.caption),
-                const SizedBox(height: Space.s8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    DsAvatar(name.isEmpty ? '?' : name.substring(0, 1), size: 40),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(from.isEmpty ? 'Anonymous' : from, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                          if (ts > 0) Text(fmt.format(DateTime.fromMillisecondsSinceEpoch(ts)), style: AppText.caption),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
                 SelectableText(f['message']?.toString() ?? '', style: AppText.body),
                 if (meta.isNotEmpty) ...[
-                  const SizedBox(height: Space.s8),
-                  Text(meta, style: AppText.caption),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final m in meta.split(', '))
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(color: AppTheme.soft, borderRadius: BorderRadius.circular(7)),
+                          child: Text(m, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+                        ),
+                    ],
+                  ),
                 ],
               ],
             ),
@@ -183,15 +224,27 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
     }
     List<MapEntry<String, int>> sorted(Map<String, int> m) => m.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
     final days = byDay.entries.toList()..sort((a, b) => b.key.compareTo(a.key));
+    final busiest = days.isEmpty ? null : (days.toList()..sort((a, b) => b.value.compareTo(a.value))).first;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
       children: [
-        AdminCard(child: RideMetric(value: '$total', label: 'Page views, last 30 days', emphasis: true)),
-        _CountBlock(title: 'By page', rows: sorted(byPath)),
+        AdminKpiGrid(
+          tiles: [
+            AdminKpiTile(label: 'Page views, last 30 days', value: '$total', delta: '${byPath.length} ${byPath.length == 1 ? 'page' : 'pages'} visited'),
+            AdminKpiTile(label: 'Days with visits', value: '${days.length}', delta: busiest == null ? null : 'Busiest ${busiest.key}: ${busiest.value}'),
+            AdminKpiTile(label: 'Referrers', value: '${byRef.length}', delta: byRef.isEmpty ? 'None recorded' : 'Top ${sorted(byRef).first.key}'),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _DayChart(days: days),
+        AdminTwoUp(
+          left: _CountBlock(title: 'By page', rows: sorted(byPath)),
+          right: _CountBlock(title: 'By referrer', rows: sorted(byRef)),
+        ),
+        const SizedBox(height: 16),
         _CountBlock(title: 'By day', rows: days),
-        _CountBlock(title: 'By referrer', rows: sorted(byRef)),
-        const SizedBox(height: Space.s16),
+        const SizedBox(height: 16),
         Text('Counts only: no cookies, IP addresses or identifiers are stored.', style: AppText.caption),
       ],
     );
@@ -207,74 +260,164 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
       for (final l in (_builds['lockout'] as List? ?? const []).whereType<Map>()) (l['build'] as num).toInt(): (l['wouldLockOut'] as num).toInt(),
     };
     String pct(int part) => total == 0 ? '0%' : '${(part * 100 / total).round()}%';
+    final rows = <Widget>[
+      for (var i = 0; i < builds.length; i++)
+        _buildRow(
+          title: 'Build ${builds[i]['build']}',
+          note: (lockout[(builds[i]['build'] as num).toInt()] ?? 0) == 0
+              ? 'Safe as the minimum: nobody would be locked out.'
+              : 'As the minimum it would lock out ${lockout[(builds[i]['build'] as num).toInt()]} riders.',
+          safe: (lockout[(builds[i]['build'] as num).toInt()] ?? 0) == 0,
+          count: '${builds[i]['users']} (${pct((builds[i]['users'] as num).toInt())})',
+          share: total == 0 ? 0 : (builds[i]['users'] as num).toDouble() / total,
+          last: older == 0 && i == builds.length - 1,
+        ),
+      if (older > 0)
+        _buildRow(
+          title: 'Older than build 65',
+          note: 'These builds do not report their number.',
+          safe: false,
+          count: '$older (${pct(older)})',
+          share: total == 0 ? 0 : older / total,
+          last: true,
+        ),
+    ];
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
       children: [
-        AdminCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(child: RideMetric(value: '$total', label: 'Riders, 30 days')),
-                  Expanded(child: RideMetric(value: pct(onLatest), label: 'On latest')),
-                  Expanded(child: RideMetric(value: '$minBuild', label: 'Minimum build')),
-                  Expanded(child: RideMetric(value: '$latest', label: 'Latest build')),
-                ],
-              ),
-            ],
-          ),
+        AdminKpiGrid(
+          tiles: [
+            AdminKpiTile(label: 'Riders, 30 days', value: '$total', delta: 'Reported a build'),
+            AdminKpiTile(label: 'On latest', value: pct(onLatest), delta: '$onLatest riders'),
+            AdminKpiTile(label: 'Minimum build', value: '$minBuild', delta: 'Older builds are locked out'),
+            AdminKpiTile(label: 'Latest build', value: '$latest', delta: 'In the stores'),
+          ],
         ),
         const AdminSectionLabel('Builds in use'),
-        if (builds.isEmpty && older == 0) Text('No app versions reported yet.', style: AppText.body.copyWith(color: AppTheme.textSecondary)),
-        for (final b in builds)
-          Padding(
-            padding: const EdgeInsets.only(bottom: Space.s8),
-            child: _buildRow(
-              title: 'Build ${b['build']}',
-              note: (lockout[(b['build'] as num).toInt()] ?? 0) == 0
-                  ? 'Safe as the minimum: nobody would be locked out.'
-                  : 'As the minimum it would lock out ${lockout[(b['build'] as num).toInt()]} riders.',
-              safe: (lockout[(b['build'] as num).toInt()] ?? 0) == 0,
-              count: '${b['users']} (${pct((b['users'] as num).toInt())})',
-            ),
+        AdminTable(
+          columns: const ['Build', 'Riders'],
+          empty: Text('No app versions reported yet.', style: AppText.body.copyWith(color: AppTheme.text2)),
+          rows: rows,
+        ),
+        const SizedBox(height: 16),
+        DsCard(
+          tinted: true,
+          borderColor: AppTheme.tint,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Text(
+            'To raise the minimum build, set MIN_APP_BUILD in /etc/coroute/gateway.env on the server and restart the gateway. '
+            'Riders below it see "Update required" and a download link.',
+            style: AppText.caption.copyWith(color: AppTheme.text),
           ),
-        if (older > 0)
-          _buildRow(
-            title: 'Older than build 65',
-            note: 'These builds do not report their number.',
-            safe: false,
-            count: '$older (${pct(older)})',
-          ),
-        const SizedBox(height: Space.s16),
-        Text(
-          'To raise the minimum build, set MIN_APP_BUILD in /etc/coroute/gateway.env on the server and restart the gateway. '
-          'Riders below it see "Update required" and a download link.',
-          style: AppText.caption,
         ),
       ],
     );
   }
 
-  Widget _buildRow({required String title, required String note, required bool safe, required String count}) {
+  Widget _buildRow({required String title, required String note, required bool safe, required String count, required double share, required bool last}) {
+    final c = safe ? AppTheme.accentText : AppTheme.warnText;
     return AdminRow(
-      leading: AdminRowIcon(Icons.system_update_rounded, color: safe ? StatusColors.success : StatusColors.warning),
+      leading: AdminRowIcon(Icons.system_update_rounded, color: c),
       title: title,
-      status: StatusLine(
-        icon: safe ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
-        text: note,
-        color: safe ? StatusColors.success : StatusColors.warning,
-      ),
+      status: StatusLine(icon: safe ? Icons.check_circle_rounded : Icons.warning_amber_rounded, text: note, color: c),
       trailing: Padding(
-        padding: const EdgeInsets.only(left: Space.s8),
-        child: Text(count, style: AppText.label.copyWith(color: AppTheme.textPrimary, fontFeatures: const [FontFeature.tabularFigures()])),
+        padding: const EdgeInsets.only(left: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(count, style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800, fontFeatures: const [FontFeature.tabularFigures()])),
+            const SizedBox(height: 4),
+            SizedBox(width: 72, child: AdminMiniBar(value: share, height: 6, color: c)),
+          ],
+        ),
+      ),
+      divider: !last,
+    );
+  }
+}
+
+/// Page views per day as a bar chart card (newest 14 days, oldest at the
+/// left), the canvas "Rides and incidents" chart with the app's real data.
+class _DayChart extends StatelessWidget {
+  final List<MapEntry<String, int>> days;
+
+  const _DayChart({required this.days});
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = days.take(14).toList().reversed.toList();
+    if (shown.isEmpty) return const SizedBox.shrink();
+    var max = 0;
+    for (final d in shown) {
+      if (d.value > max) max = d.value;
+    }
+    String label(String day) {
+      // "2026-10-12" -> "12"; anything else as is, shortened.
+      final parts = day.split('-');
+      final s = parts.length == 3 ? parts[2] : day;
+      return s.length > 3 ? s.substring(0, 3) : s;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: AdminTitledCard(
+        title: 'Views by day',
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 10, height: 10, decoration: BoxDecoration(color: AppTheme.brand, borderRadius: BorderRadius.circular(3))),
+            const SizedBox(width: 5),
+            Text('Page views', style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+          ],
+        ),
+        child: SizedBox(
+          height: 160,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              for (var i = 0; i < shown.length; i++) ...[
+                if (i > 0) const SizedBox(width: 6),
+                Expanded(
+                  child: Semantics(
+                    label: '${shown[i].key}: ${shown[i].value}',
+                    excludeSemantics: true,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            child: FractionallySizedBox(
+                              widthFactor: 0.62,
+                              heightFactor: max == 0 ? 0.0 : (shown[i].value / max).clamp(0.03, 1.0),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: AppTheme.brand,
+                                  borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(label(shown[i].key), maxLines: 1, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
-/// A titled list of name and count rows (top 12).
+/// A titled card of name, count and bar rows (top 12), bars scaled to the
+/// largest count.
 class _CountBlock extends StatelessWidget {
   final String title;
   final List<MapEntry<String, int>> rows;
@@ -283,30 +426,25 @@ class _CountBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        AdminSectionLabel(title),
-        AdminCard(
-          padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s8),
-          child: Column(
-            children: [
-              if (rows.isEmpty) Padding(padding: const EdgeInsets.symmetric(vertical: Space.s8), child: Text('None', style: AppText.caption)),
-              for (final r in rows.take(12))
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: Space.s8),
-                  child: Row(
-                    children: [
-                      Expanded(child: Text(r.key.isEmpty ? '(none)' : r.key, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body)),
-                      const SizedBox(width: Space.s8),
-                      Text('${r.value}', style: AppText.body.copyWith(fontWeight: FontWeight.w600, fontFeatures: const [FontFeature.tabularFigures()])),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
+    final shown = rows.take(12).toList();
+    var max = 0;
+    for (final r in shown) {
+      if (r.value > max) max = r.value;
+    }
+    return AdminTitledCard(
+      title: title,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (shown.isEmpty) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('None', style: AppText.caption)),
+          for (final r in shown)
+            AdminBarRow(
+              label: r.key.isEmpty ? '(none)' : r.key,
+              value: '${r.value}',
+              fraction: max == 0 ? 0 : r.value / max,
+            ),
+        ],
+      ),
     );
   }
 }

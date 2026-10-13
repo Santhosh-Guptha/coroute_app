@@ -7,7 +7,6 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../core/widgets/devmonks_branding.dart';
-import '../../core/widgets/glass_card.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/meta_service.dart';
 import '../account/change_password_screen.dart';
@@ -128,7 +127,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           'If you registered with Google, use "Sign In with Google".\n\n'
           'Otherwise e-mail ${support.isNotEmpty ? support : 'the CoRoute team'} from the address you registered with. '
           'An administrator will give you a temporary password, and the app will ask you to set a new one when you sign in.',
-          style: AppText.body.copyWith(color: AppTheme.textSecondary),
+          style: AppText.body.copyWith(color: AppTheme.text2),
         ),
       ),
     );
@@ -241,7 +240,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Welcome to CoRoute, $name. Your account is ready.'),
-          backgroundColor: AppTheme.emeraldSafe,
+          backgroundColor: AppTheme.brand,
         ),
       );
       _enter(res['isAdmin'] == true);
@@ -287,84 +286,71 @@ class _AccessGateScreenState extends State<AccessGateScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
+      backgroundColor: AppTheme.bg,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 520),
               child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 10),
-              const CoRouteHeaderLogo(scale: 0.9),
-              const SizedBox(height: 20),
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 10),
+                  const CoRouteHeaderLogo(scale: 0.9),
+                  const SizedBox(height: 20),
 
-              // Tab Selector: SIGN IN vs REGISTER ACCOUNT
-              Container(
-                decoration: BoxDecoration(
-                  color: AppTheme.slateCard,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.glassBorder),
-                ),
-                child: TabBar(
-                  controller: _tabController,
-                  indicatorColor: AppTheme.neonCyan,
-                  labelColor: AppTheme.neonCyan,
-                  unselectedLabelColor: AppTheme.textSecondary,
-                  labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  tabs: const [
-                    Tab(icon: Icon(Icons.login_rounded, size: 18), text: 'Sign In'),
-                    Tab(icon: Icon(Icons.person_add_alt_1_rounded, size: 18), text: 'Register Account'),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Error Display Banner
-              if (_errorMessage != null) ...[
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.laserRed.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppTheme.laserRed.withOpacity(0.4)),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline_rounded, color: AppTheme.laserRed, size: 20),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _errorMessage!,
-                          style: TextStyle(color: AppTheme.laserRed, fontSize: 12),
-                        ),
+                  // Tab Selector: SIGN IN vs REGISTER ACCOUNT
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: AppTheme.soft,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: TabBar(
+                      controller: _tabController,
+                      dividerColor: Colors.transparent,
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      indicator: BoxDecoration(
+                        color: AppTheme.card,
+                        borderRadius: BorderRadius.circular(11),
+                        boxShadow: dsFloatingShadow(),
                       ),
-                    ],
+                      labelColor: AppTheme.text,
+                      unselectedLabelColor: AppTheme.muted,
+                      labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                      unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+                      tabs: const [
+                        Tab(height: 44, icon: Icon(Icons.login_rounded, size: 18), iconMargin: EdgeInsets.only(bottom: 2), text: 'Sign In'),
+                        Tab(height: 44, icon: Icon(Icons.person_add_alt_1_rounded, size: 18), iconMargin: EdgeInsets.only(bottom: 2), text: 'Register Account'),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-              ],
 
-              // Card with TabBarView
-              GlassCard(
-                padding: const EdgeInsets.all(20),
-                child: AnimatedBuilder(
-                  animation: _tabController,
-                  builder: (context, _) {
-                    return _tabController.index == 0
-                        ? _buildSignInForm()
-                        : _buildRegistrationForm();
-                  },
-                ),
+                  const SizedBox(height: 20),
+
+                  // Error Display Banner
+                  if (_errorMessage != null) ...[
+                    RideAlert(tier: AlertTier.important, title: _errorMessage!),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Card with the active form
+                  DsCard(
+                    radius: Radii.xl,
+                    padding: const EdgeInsets.all(20),
+                    child: AnimatedBuilder(
+                      animation: _tabController,
+                      builder: (context, _) {
+                        return _tabController.index == 0 ? _buildSignInForm() : _buildRegistrationForm();
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+                ],
               ),
-
-              const SizedBox(height: 16),
-            ],
-          ),
             ),
           ),
         ),
@@ -372,166 +358,114 @@ class _AccessGateScreenState extends State<AccessGateScreen>
     );
   }
 
+  /// Small uppercase label above a field (canvas overline).
+  Widget _fieldLabel(String text, {Color? color}) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(text, style: AppText.overline.copyWith(color: color)),
+      );
+
+  InputDecoration _dec({required String hint, IconData? icon, Widget? suffix, Color? iconColor}) => InputDecoration(
+        hintText: hint,
+        prefixIcon: icon == null ? null : Icon(icon, color: iconColor ?? AppTheme.accentText, size: 20),
+        suffixIcon: suffix,
+      );
+
+  Widget _eye(bool obscure, VoidCallback onTap) => IconButton(
+        tooltip: obscure ? 'Show password' : 'Hide password',
+        icon: Icon(obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: AppTheme.muted, size: 20),
+        onPressed: onTap,
+      );
+
+  Widget _or() => Row(
+        children: [
+          Expanded(child: Divider(color: AppTheme.border, thickness: 2)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text('OR', style: AppText.overline),
+          ),
+          Expanded(child: Divider(color: AppTheme.border, thickness: 2)),
+        ],
+      );
+
+  Widget _googleButton(String label) => Column(
+        children: [
+          DsButton(
+            label: label,
+            icon: Icons.g_mobiledata_rounded,
+            tone: DsButtonTone.outline,
+            fontSize: 15,
+            onPressed: _isLoading ? null : _handleGoogleSignIn,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'By continuing with Google you accept the Terms of Use and Privacy Policy.',
+              textAlign: TextAlign.center,
+              style: AppText.caption,
+            ),
+          ),
+        ],
+      );
+
   // --- SIGN IN FORM ---
   Widget _buildSignInForm() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Welcome back',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  'Sign in to ride with your group.',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                ),
-              ],
-            )),
-          ],
-        ),
+        Text('Welcome back', style: AppText.title.copyWith(fontSize: 18)),
+        const SizedBox(height: 2),
+        Text('Sign in to ride with your group.', style: AppText.label),
 
         const SizedBox(height: 18),
 
-        Text(
-          'EMAIL OR CALLSIGN',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 6),
+        _fieldLabel('EMAIL OR CALLSIGN'),
         TextField(
           controller: _loginIdentifierController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxEmailLength)],
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-          decoration: InputDecoration(
-            prefixIcon: Icon(Icons.person_outline_rounded, color: AppTheme.neonCyan, size: 20),
-            hintText: 'e.g. Maverick or rider@example.com',
-            hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 13),
-            filled: true,
-            fillColor: AppTheme.elevatedCard,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.glassBorder)),
-          ),
+          style: AppText.body,
+          decoration: _dec(hint: 'e.g. Maverick or rider@example.com', icon: Icons.person_outline_rounded),
         ),
 
         const SizedBox(height: 14),
 
-        Text(
-          'PASSWORD',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 6),
+        _fieldLabel('PASSWORD'),
         TextField(
           controller: _loginPasswordController,
           obscureText: _obscureLoginPassword,
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-          decoration: InputDecoration(
-            prefixIcon: Icon(Icons.lock_outline_rounded, color: AppTheme.neonCyan, size: 20),
-            suffixIcon: IconButton(
-              tooltip: _obscureLoginPassword ? 'Show password' : 'Hide password',
-              icon: Icon(
-                _obscureLoginPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-                color: AppTheme.textSecondary,
-                size: 18,
-              ),
-              onPressed: () => setState(() => _obscureLoginPassword = !_obscureLoginPassword),
-            ),
-            hintText: 'Enter your account password',
-            hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 13),
-            filled: true,
-            fillColor: AppTheme.elevatedCard,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.glassBorder)),
+          style: AppText.body,
+          decoration: _dec(
+            hint: 'Enter your account password',
+            icon: Icons.lock_outline_rounded,
+            suffix: _eye(_obscureLoginPassword, () => setState(() => _obscureLoginPassword = !_obscureLoginPassword)),
           ),
         ),
 
         const SizedBox(height: 20),
 
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: ElevatedButton(
-            onPressed: _isLoading ? null : _handleSignIn,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.neonCyan,
-              foregroundColor: Colors.black,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: _isLoading
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                : const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.login_rounded, size: 18),
-                      SizedBox(width: 8),
-                      Text('SIGN IN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    ],
-                  ),
-          ),
+        DsButton(
+          label: 'SIGN IN',
+          icon: _isLoading ? null : Icons.login_rounded,
+          onPressed: _isLoading ? null : _handleSignIn,
         ),
         Align(
           alignment: Alignment.centerRight,
           child: TextButton(
             onPressed: _showForgotPassword,
-            child: Text('Forgot password?', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+            child: const Text('Forgot password?'),
           ),
         ),
 
         const SizedBox(height: 6),
-
-        // Google Sign-In Button
-        Row(
-          children: [
-            Expanded(child: Divider(color: AppTheme.subtleBorder)),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text('OR', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-            ),
-            Expanded(child: Divider(color: AppTheme.subtleBorder)),
-          ],
-        ),
+        _or(),
         const SizedBox(height: 14),
-
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: OutlinedButton.icon(
-            onPressed: _isLoading ? null : _handleGoogleSignIn,
-            icon: Icon(Icons.g_mobiledata_rounded, color: AppTheme.textPrimary, size: 28),
-            label: Text(
-              'Sign In with Google',
-              style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
-            ),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: AppTheme.glassBorder),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(
-            'By continuing with Google you accept the Terms of Use and Privacy Policy.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-          ),
-        ),
+        _googleButton('Sign In with Google'),
 
         const SizedBox(height: 14),
 
         Center(
           child: TextButton(
             onPressed: () => _tabController.animateTo(1),
-            child: Text(
-              "Don't have an account? Register as New Rider",
-              style: TextStyle(color: AppTheme.neonCyan, fontSize: 12),
-            ),
+            child: const Text("Don't have an account? Register as New Rider", textAlign: TextAlign.center),
           ),
         ),
       ],
@@ -545,113 +479,69 @@ class _AccessGateScreenState extends State<AccessGateScreen>
       children: [
         Row(
           children: [
-            Icon(Icons.badge_rounded, color: AppTheme.hyperAmber, size: 20),
-            SizedBox(width: 8),
-            Expanded(child: Text(
-              'Create your account',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            Icon(Icons.badge_rounded, color: AppTheme.accentText, size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Create your account', style: AppText.title.copyWith(fontSize: 18), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
           ],
         ),
-        Text(
-          'Your group uses these details to reach you and your family in an emergency.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-        ),
+        const SizedBox(height: 2),
+        Text('Your group uses these details to reach you and your family in an emergency.', style: AppText.label),
 
         const SizedBox(height: 16),
 
         // 1. Callsign / Full Name
-        Text(
-          'CALLSIGN / FULL NAME *',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 4),
+        _fieldLabel('CALLSIGN / FULL NAME *'),
         TextField(
           controller: _regNameController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxCallsignLength)],
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-          decoration: InputDecoration(
-            prefixIcon: Icon(Icons.person_rounded, color: AppTheme.neonCyan, size: 18),
-            hintText: 'e.g. Phoenix, GhostRider, Santhosh',
-            hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-            filled: true,
-            fillColor: AppTheme.elevatedCard,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          ),
+          style: AppText.body,
+          decoration: _dec(hint: 'e.g. Phoenix, GhostRider, Santhosh', icon: Icons.person_rounded),
         ),
 
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
 
         // 2. Email Address
-        Text(
-          'EMAIL ADDRESS *',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 4),
+        _fieldLabel('EMAIL ADDRESS *'),
         TextField(
           controller: _regEmailController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxEmailLength)],
           keyboardType: TextInputType.emailAddress,
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-          decoration: InputDecoration(
-            prefixIcon: Icon(Icons.email_rounded, color: AppTheme.neonCyan, size: 18),
-            hintText: 'e.g. rider@example.com',
-            hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-            filled: true,
-            fillColor: AppTheme.elevatedCard,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          ),
+          style: AppText.body,
+          decoration: _dec(hint: 'e.g. rider@example.com', icon: Icons.email_rounded),
         ),
 
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
 
         // 3. Mobile Phone Number
-        Text(
-          'MOBILE PHONE NUMBER *',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 4),
+        _fieldLabel('MOBILE PHONE NUMBER *'),
         TextField(
           controller: _regPhoneController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
           keyboardType: TextInputType.phone,
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-          decoration: InputDecoration(
-            prefixIcon: Icon(Icons.phone_android_rounded, color: AppTheme.neonCyan, size: 18),
-            hintText: 'e.g. +91 98765 43210',
-            hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-            filled: true,
-            fillColor: AppTheme.elevatedCard,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          ),
+          style: AppText.body,
+          decoration: _dec(hint: 'e.g. +91 98765 43210', icon: Icons.phone_android_rounded),
         ),
 
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
 
         // 4. Passwords
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('PASSWORD *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
+                  _fieldLabel('PASSWORD *'),
                   TextField(
                     controller: _regPasswordController,
                     obscureText: _obscureRegPassword,
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                    decoration: InputDecoration(
-                      prefixIcon: Icon(Icons.lock_outline_rounded, color: AppTheme.neonCyan, size: 18),
-                      suffixIcon: IconButton(
-                        tooltip: _obscureRegPassword ? 'Show password' : 'Hide password',
-                        icon: Icon(_obscureRegPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: AppTheme.textSecondary, size: 16),
-                        onPressed: () => setState(() => _obscureRegPassword = !_obscureRegPassword),
-                      ),
-                      hintText: 'Min 8 chars',
-                      hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                      filled: true,
-                      fillColor: AppTheme.elevatedCard,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    style: AppText.body,
+                    decoration: _dec(
+                      hint: 'Min 8 chars',
+                      suffix: _eye(_obscureRegPassword, () => setState(() => _obscureRegPassword = !_obscureRegPassword)),
                     ),
                   ),
                 ],
@@ -662,24 +552,14 @@ class _AccessGateScreenState extends State<AccessGateScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('CONFIRM *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
+                  _fieldLabel('CONFIRM *'),
                   TextField(
                     controller: _regConfirmPasswordController,
                     obscureText: _obscureRegConfirmPassword,
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                    decoration: InputDecoration(
-                      prefixIcon: Icon(Icons.lock_reset_rounded, color: AppTheme.neonCyan, size: 18),
-                      suffixIcon: IconButton(
-                        tooltip: _obscureRegConfirmPassword ? 'Show password' : 'Hide password',
-                        icon: Icon(_obscureRegConfirmPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: AppTheme.textSecondary, size: 16),
-                        onPressed: () => setState(() => _obscureRegConfirmPassword = !_obscureRegConfirmPassword),
-                      ),
-                      hintText: 'Repeat pass',
-                      hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                      filled: true,
-                      fillColor: AppTheme.elevatedCard,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    style: AppText.body,
+                    decoration: _dec(
+                      hint: 'Repeat pass',
+                      suffix: _eye(_obscureRegConfirmPassword, () => setState(() => _obscureRegConfirmPassword = !_obscureRegConfirmPassword)),
                     ),
                   ),
                 ],
@@ -688,89 +568,37 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           ],
         ),
 
-        const SizedBox(height: 14),
-        Divider(color: AppTheme.glassBorder),
-        const SizedBox(height: 10),
+        const SizedBox(height: 18),
 
         // 5. Rider Role & Vehicle Setup
-        Text('RIDER ROLE & VEHICLE SETUP *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            Expanded(
-              child: ChoiceChip(
-                label: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.two_wheeler_rounded, size: 16),
-                    SizedBox(width: 6),
-                    Text('Bike Rider'),
-                  ],
-                ),
-                selected: !_isRegPillion,
-                onSelected: (val) {
-                  if (val) setState(() => _isRegPillion = false);
-                },
-                selectedColor: AppTheme.neonCyan,
-                labelStyle: TextStyle(
-                  color: !_isRegPillion ? Colors.black : AppTheme.textPrimary,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-                backgroundColor: AppTheme.elevatedCard,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: ChoiceChip(
-                label: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.airline_seat_recline_normal_rounded, size: 16),
-                    SizedBox(width: 6),
-                    Text('Pillion Rider'),
-                  ],
-                ),
-                selected: _isRegPillion,
-                onSelected: (val) {
-                  if (val) setState(() => _isRegPillion = true);
-                },
-                selectedColor: AppTheme.hyperAmber,
-                labelStyle: TextStyle(
-                  color: _isRegPillion ? Colors.black : AppTheme.textPrimary,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-                backgroundColor: AppTheme.elevatedCard,
-              ),
-            ),
-          ],
+        _fieldLabel('RIDER ROLE & VEHICLE SETUP *'),
+        DsSegment<bool>(
+          values: const [false, true],
+          selected: _isRegPillion,
+          label: (pillion) => pillion ? 'Pillion Rider' : 'Bike Rider',
+          onChanged: (pillion) => setState(() => _isRegPillion = pillion),
         ),
 
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
 
         if (!_isRegPillion)
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('VEHICLE TYPE', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      decoration: BoxDecoration(
-                        color: AppTheme.elevatedCard,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppTheme.glassBorder),
-                      ),
+                    _fieldLabel('VEHICLE TYPE'),
+                    InputDecorator(
+                      decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12)),
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           value: _selectedVehicle,
-                          dropdownColor: AppTheme.slateCard,
+                          dropdownColor: AppTheme.card,
                           isExpanded: true,
-                          style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+                          isDense: true,
+                          style: AppText.body.copyWith(fontSize: 13, fontWeight: FontWeight.w700),
                           items: _vehicleTypes.map((v) => DropdownMenuItem(value: v, child: Text(v, overflow: TextOverflow.ellipsis))).toList(),
                           onChanged: (val) {
                             if (val != null) setState(() => _selectedVehicle = val);
@@ -786,20 +614,13 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('BIKE / REG NO *', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
+                    _fieldLabel('BIKE / REG NO *'),
                     TextField(
                       controller: _regVehicleNoController,
                       inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxVehicleNoLength)],
                       textCapitalization: TextCapitalization.characters,
-                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 13, letterSpacing: 1.1),
-                      decoration: InputDecoration(
-                        hintText: 'e.g. KA 01 AB 1234',
-                        hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                        filled: true,
-                        fillColor: AppTheme.elevatedCard,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
+                      style: AppText.body.copyWith(letterSpacing: 1.1),
+                      decoration: _dec(hint: 'e.g. KA 01 AB 1234'),
                     ),
                   ],
                 ),
@@ -807,52 +628,36 @@ class _AccessGateScreenState extends State<AccessGateScreen>
             ],
           )
         else
-          Container(
+          DsCard(
+            warning: true,
+            color: AppTheme.warnTint,
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.hyperAmber.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.hyperAmber.withOpacity(0.3)),
-            ),
             child: Row(
               children: [
-                Icon(Icons.check_circle_outline_rounded, color: AppTheme.hyperAmber, size: 20),
+                Icon(Icons.check_circle_outline_rounded, color: AppTheme.warnText, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'Pillion Rider: You will participate in convoys without requiring a bike registration number.',
-                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    style: AppText.caption.copyWith(color: AppTheme.warnText, fontWeight: FontWeight.w700),
                   ),
                 ),
               ],
             ),
           ),
 
-        const SizedBox(height: 14),
-        Divider(color: AppTheme.glassBorder),
-        const SizedBox(height: 10),
+        const SizedBox(height: 18),
 
         // 6. Emergency ICE Contacts
-        Text(
-          'EMERGENCY CONTACT *',
-          style: TextStyle(color: AppTheme.laserRed, fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 4),
+        _fieldLabel('EMERGENCY CONTACT *', color: AppTheme.sos),
         Row(
           children: [
             Expanded(
               child: TextField(
                 controller: _regEmergencyNameController,
                 inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxContactNameLength)],
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.person_pin_rounded, color: AppTheme.laserRed, size: 18),
-                  hintText: 'Contact Name * (e.g. Brother)',
-                  hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                  filled: true,
-                  fillColor: AppTheme.elevatedCard,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
+                style: AppText.body,
+                decoration: _dec(hint: 'Contact Name * (e.g. Brother)', icon: Icons.person_pin_rounded, iconColor: AppTheme.sos),
               ),
             ),
             const SizedBox(width: 10),
@@ -861,15 +666,8 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 controller: _regEmergencyPhoneController,
                 inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
                 keyboardType: TextInputType.phone,
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-                decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.phone_in_talk_rounded, color: AppTheme.laserRed, size: 18),
-                  hintText: 'Emergency Phone *',
-                  hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                  filled: true,
-                  fillColor: AppTheme.elevatedCard,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
+                style: AppText.body,
+                decoration: _dec(hint: 'Emergency Phone *', icon: Icons.phone_in_talk_rounded, iconColor: AppTheme.sos),
               ),
             ),
           ],
@@ -883,7 +681,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           children: [
             Checkbox(
               value: _acceptedTerms,
-              activeColor: AppTheme.emeraldSafe,
+              activeColor: AppTheme.brand,
               onChanged: (v) => setState(() => _acceptedTerms = v ?? false),
             ),
             Expanded(
@@ -892,11 +690,17 @@ class _AccessGateScreenState extends State<AccessGateScreen>
                 child: Wrap(
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text('I accept the ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                    InkWell(onTap: () => _openUrl(_termsUrl), child: Text('Terms of Use', style: TextStyle(color: AppTheme.neonCyan, fontSize: 12, decoration: TextDecoration.underline))),
-                    Text(' and the ', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                    InkWell(onTap: () => _openUrl(_privacyUrl), child: Text('Privacy Policy', style: TextStyle(color: AppTheme.neonCyan, fontSize: 12, decoration: TextDecoration.underline))),
-                    Text('.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                    Text('I accept the ', style: AppText.caption),
+                    InkWell(
+                      onTap: () => _openUrl(_termsUrl),
+                      child: Text('Terms of Use', style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800, decoration: TextDecoration.underline)),
+                    ),
+                    Text(' and the ', style: AppText.caption),
+                    InkWell(
+                      onTap: () => _openUrl(_privacyUrl),
+                      child: Text('Privacy Policy', style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800, decoration: TextDecoration.underline)),
+                    ),
+                    Text('.', style: AppText.caption),
                   ],
                 ),
               ),
@@ -906,78 +710,24 @@ class _AccessGateScreenState extends State<AccessGateScreen>
 
         const SizedBox(height: 10),
 
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: ElevatedButton(
-            onPressed: _isLoading ? null : _handleRegistration,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.emeraldSafe,
-              foregroundColor: Colors.black,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: _isLoading
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                : const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.person_add_alt_1_rounded, size: 18),
-                      SizedBox(width: 8),
-                      Flexible(child: Text('REGISTER RIDER ACCOUNT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                    ],
-                  ),
-          ),
+        DsButton(
+          label: 'REGISTER RIDER ACCOUNT',
+          icon: _isLoading ? null : Icons.person_add_alt_1_rounded,
+          fontSize: 15,
+          onPressed: _isLoading ? null : _handleRegistration,
         ),
 
         const SizedBox(height: 14),
-
-        // Google Sign-Up Alternative
-        Row(
-          children: [
-            Expanded(child: Divider(color: AppTheme.subtleBorder)),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text('OR', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-            ),
-            Expanded(child: Divider(color: AppTheme.subtleBorder)),
-          ],
-        ),
+        _or(),
         const SizedBox(height: 14),
-
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: OutlinedButton.icon(
-            onPressed: _isLoading ? null : _handleGoogleSignIn,
-            icon: Icon(Icons.g_mobiledata_rounded, color: AppTheme.textPrimary, size: 28),
-            label: Text(
-              'Sign Up with Google',
-              style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
-            ),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: AppTheme.glassBorder),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(
-            'By continuing with Google you accept the Terms of Use and Privacy Policy.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-          ),
-        ),
+        _googleButton('Sign Up with Google'),
 
         const SizedBox(height: 12),
 
         Center(
           child: TextButton(
             onPressed: () => _tabController.animateTo(0),
-            child: Text(
-              'Already have an account? Sign In',
-              style: TextStyle(color: AppTheme.neonCyan, fontSize: 12),
-            ),
+            child: const Text('Already have an account? Sign In'),
           ),
         ),
       ],

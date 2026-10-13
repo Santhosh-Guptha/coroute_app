@@ -74,7 +74,7 @@ class _Connector extends StatelessWidget {
       child: SizedBox(
         width: _railWidth,
         height: Space.s8,
-        child: Center(child: Container(width: 2, color: AppTheme.subtleBorder)),
+        child: Center(child: Container(width: 2, color: AppTheme.border2)),
       ),
     );
   }
@@ -100,8 +100,8 @@ class _HereRow extends StatelessWidget {
                 height: 16,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppTheme.neonCyan,
-                  border: Border.all(color: AppTheme.slateCard, width: 3),
+                  color: AppTheme.brand,
+                  border: Border.all(color: AppTheme.card, width: 3),
                 ),
               ),
             ),
@@ -112,7 +112,7 @@ class _HereRow extends StatelessWidget {
               'You are here',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: AppText.label.copyWith(color: AppTheme.neonCyan),
+              style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800),
             ),
           ),
         ],
@@ -149,7 +149,7 @@ class _StopRow extends StatelessWidget {
               height: _railWidth,
               child: done
                   ? Icon(Icons.check_circle_rounded, size: 22, color: StatusColors.success)
-                  : Icon(stop.kind.icon, size: 22, color: upcoming ? AppTheme.textPrimary : AppTheme.textMuted),
+                  : Icon(stop.kind.icon, size: 22, color: upcoming ? AppTheme.accentText : AppTheme.muted),
             ),
             const SizedBox(width: Space.s12),
             Expanded(
@@ -157,7 +157,7 @@ class _StopRow extends StatelessWidget {
                 name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AppText.body.copyWith(color: done ? AppTheme.textSecondary : AppTheme.textPrimary),
+                style: AppText.body.copyWith(color: done ? AppTheme.text2 : AppTheme.text, fontWeight: FontWeight.w700),
               ),
             ),
             if (distance != null) ...[
@@ -166,7 +166,8 @@ class _StopRow extends StatelessWidget {
                 distance,
                 maxLines: 1,
                 style: AppText.label.copyWith(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.text,
+                  fontWeight: FontWeight.w800,
                   fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),

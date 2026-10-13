@@ -25,7 +25,7 @@ class DistanceIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base = style ?? AppText.label;
-    final color = warn ? StatusColors.warning : (base.color ?? AppTheme.textSecondary);
+    final color = warn ? AppTheme.warnText : (base.color ?? AppTheme.text2);
     final IconData icon = ahead == true
         ? Icons.arrow_upward_rounded
         : (ahead == false ? Icons.arrow_downward_rounded : Icons.near_me_rounded);
@@ -39,7 +39,7 @@ class DistanceIndicator extends StatelessWidget {
             describeDistance(meters, ahead: ahead),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: base.copyWith(color: color, fontFeatures: const [FontFeature.tabularFigures()]),
+            style: base.copyWith(color: color, fontWeight: FontWeight.w700, fontFeatures: const [FontFeature.tabularFigures()]),
           ),
         ),
       ],

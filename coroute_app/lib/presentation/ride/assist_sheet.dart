@@ -87,36 +87,32 @@ class AssistSheetBody extends StatelessWidget {
     };
 
     Widget big(IconData icon, String label, VoidCallback onTap, {bool outlined = false, Color? color}) {
-      final text = Text(label, maxLines: 1, overflow: TextOverflow.ellipsis);
-      if (outlined) {
-        return OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-          onPressed: onTap,
-          icon: Icon(icon),
-          label: text,
-        );
-      }
-      final c = color;
-      return FilledButton.icon(
-        style: FilledButton.styleFrom(
-          minimumSize: const Size.fromHeight(56),
-          backgroundColor: c,
-          foregroundColor: c == null ? null : StatusColors.onCritical,
-        ),
-        onPressed: onTap,
-        icon: Icon(icon),
-        label: text,
-      );
+      final tone = outlined
+          ? DsButtonTone.outline
+          : color == AppTheme.sos
+              ? DsButtonTone.sos
+              : DsButtonTone.brand;
+      return DsButton(label: label, icon: icon, tone: tone, onPressed: onTap);
     }
+
+    ButtonStyle dial({required Color color, double height = 56, double fontSize = 14}) => OutlinedButton.styleFrom(
+          foregroundColor: color,
+          backgroundColor: AppTheme.card,
+          side: BorderSide(color: color.withValues(alpha: 0.7), width: 2),
+          minimumSize: Size.fromHeight(height),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          textStyle: TextStyle(fontFamily: AppTheme.fontFamily, fontWeight: FontWeight.w800, fontSize: fontSize),
+        );
 
     final List<Widget> actions;
     switch (stage) {
       case AssistStage.request:
       case AssistStage.closed:
         actions = [
-          big(Icons.volunteer_activism_rounded, L10n.t('assist.help'), () => acceptAssist(context, a), color: StatusColors.critical),
+          big(Icons.volunteer_activism_outlined, L10n.t('assist.help'), () => acceptAssist(context, a), color: AppTheme.sos),
           const SizedBox(height: Space.s8),
-          big(Icons.navigation_rounded, L10n.t('incident.navigate'), () => navigateToAssist(context, a), outlined: true),
+          big(Icons.navigation_outlined, L10n.t('incident.navigate'), () => navigateToAssist(context, a), outlined: true),
           const SizedBox(height: Space.s8),
           big(Icons.block_rounded, L10n.t('assist.cant'), () {
             sendAssistAnswer(context, a.incidentId, AssistAnswer.decline);
@@ -126,16 +122,16 @@ class AssistSheetBody extends StatelessWidget {
         break;
       case AssistStage.responding:
         actions = [
-          big(Icons.navigation_rounded, L10n.t('incident.navigate'), () => navigateToAssist(context, a), color: StatusColors.critical),
+          big(Icons.navigation_outlined, L10n.t('incident.navigate'), () => navigateToAssist(context, a), color: AppTheme.sos),
           const SizedBox(height: Space.s8),
-          big(Icons.flag_rounded, L10n.t('assist.arrived'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived), outlined: true),
+          big(Icons.flag_outlined, L10n.t('assist.arrived'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived), outlined: true),
           const SizedBox(height: Space.s8),
           big(Icons.do_not_disturb_on_rounded, L10n.t('assist.unable'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.unable), outlined: true),
         ];
         break;
       case AssistStage.arrivalCheck:
         actions = [
-          big(Icons.check_circle_rounded, L10n.t('assist.found'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived), color: StatusColors.success),
+          big(Icons.check_circle_outline_rounded, L10n.t('assist.found'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived)),
           const SizedBox(height: Space.s8),
           big(Icons.location_searching_rounded, L10n.t('assist.notFound'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.notFound), outlined: true),
         ];
@@ -165,8 +161,8 @@ class AssistSheetBody extends StatelessWidget {
               Container(
                 width: 48,
                 height: 48,
-                decoration: BoxDecoration(color: StatusColors.critical.withOpacity(0.14), shape: BoxShape.circle),
-                child: Icon(Icons.emergency_share_rounded, color: StatusColors.critical, size: 28),
+                decoration: BoxDecoration(color: AppTheme.sos.withValues(alpha: 0.12), shape: BoxShape.circle),
+                child: Icon(Icons.emergency_share_outlined, color: AppTheme.sos, size: 26),
               ),
               const SizedBox(width: Space.s12),
               Expanded(
@@ -176,20 +172,20 @@ class AssistSheetBody extends StatelessWidget {
                   children: [
                     Semantics(
                       header: true,
-                      child: Text(title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontWeight: FontWeight.w800)),
+                      child: Text(title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 18)),
                     ),
                     const SizedBox(height: 2),
                     if (a.farByRoad)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 2),
-                        child: Text(AssistTexts.farLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: StatusColors.warning)),
+                        child: Text(AssistTexts.farLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.warnText, fontWeight: FontWeight.w700)),
                       ),
-                    Text(AssistTexts.what(a), maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: StatusColors.critical)),
+                    Text(AssistTexts.what(a), maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w700)),
                     Text(
                       AssistTexts.where(a, myLat: myLat, myLng: myLng, route: convoy?.routeLine ?? const []),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                      style: AppText.body.copyWith(fontWeight: FontWeight.w700),
                     ),
                     if (eta != null) Text(eta, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body),
                     if (updated != null) Text(updated, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
@@ -201,10 +197,10 @@ class AssistSheetBody extends StatelessWidget {
         ),
         const SizedBox(height: Space.s12),
         if (far != null) ...[
-          Text(far, style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+          Text(far, style: AppText.body.copyWith(color: AppTheme.text2)),
           const SizedBox(height: Space.s12),
         ] else if (stage == AssistStage.request && a.fasterThanGroup) ...[
-          Text(AssistTexts.faster, style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+          Text(AssistTexts.faster, style: AppText.body.copyWith(color: AppTheme.text2)),
           const SizedBox(height: Space.s12),
         ],
         if (accepted && stage != AssistStage.onScene) ...[
@@ -212,16 +208,16 @@ class AssistSheetBody extends StatelessWidget {
           const SizedBox(height: Space.s12),
         ],
         if (subject != null && subject.firstName.trim().isNotEmpty)
-          InfoLine(icon: Icons.person_rounded, text: L10n.t('assist.rider', {'name': subject.firstName.trim()})),
+          InfoLine(icon: Icons.person_outline_rounded, text: L10n.t('assist.rider', {'name': subject.firstName.trim()})),
         if (vehicle.isNotEmpty) InfoLine(icon: Icons.two_wheeler_rounded, text: L10n.t('assist.vehicle', {'vehicle': vehicle})),
         if (medical != null && !medical.isEmpty) ...[
           const SizedBox(height: Space.s8),
           MedicalCard(info: medical),
           const SizedBox(height: Space.s8),
           OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
             onPressed: () => SafetyCardSheet.show(context, name: subject?.firstName.trim() ?? '', medical: medical),
-            icon: const Icon(Icons.medical_information_rounded),
+            icon: const Icon(Icons.medical_information_outlined),
             label: Text(L10n.t('incident.card'), maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         ],
@@ -229,13 +225,9 @@ class AssistSheetBody extends StatelessWidget {
         ...actions,
         const SizedBox(height: Space.s16),
         OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(56),
-            foregroundColor: StatusColors.critical,
-            side: BorderSide(color: StatusColors.critical),
-          ),
+          style: dial(color: AppTheme.sos, fontSize: 15),
           onPressed: () => dialNumber(context, '112'),
-          icon: const Icon(Icons.local_hospital_rounded),
+          icon: const Icon(Icons.local_hospital_outlined),
           label: Text(L10n.t('assist.call112'), maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
         const SizedBox(height: Space.s8),
@@ -243,72 +235,54 @@ class AssistSheetBody extends StatelessWidget {
           children: [
             Expanded(
               child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
-                  foregroundColor: StatusColors.critical,
-                  side: BorderSide(color: StatusColors.critical),
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                ),
+                style: dial(color: AppTheme.sos, height: 52, fontSize: 12),
                 onPressed: () => dialNumber(context, '108'),
-                icon: const Icon(Icons.local_hospital_rounded, size: 18),
-                label: const Text('Call 108 (Ambulance)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12)),
+                icon: const Icon(Icons.local_hospital_outlined, size: 18),
+                label: const Text('Call 108 (Ambulance)', maxLines: 2, textAlign: TextAlign.center),
               ),
             ),
             const SizedBox(width: Space.s8),
             Expanded(
               child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
-                  foregroundColor: StatusColors.critical,
-                  side: BorderSide(color: StatusColors.critical),
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                ),
+                style: dial(color: AppTheme.sos, height: 52, fontSize: 12),
                 onPressed: () => dialNumber(context, '100'),
-                icon: const Icon(Icons.local_police_rounded, size: 18),
-                label: const Text('Call 100 (Police)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12)),
+                icon: const Icon(Icons.local_police_outlined, size: 18),
+                label: const Text('Call 100 (Police)', maxLines: 2, textAlign: TextAlign.center),
               ),
             ),
           ],
         ),
         const SizedBox(height: Space.s8),
         OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(44),
-            foregroundColor: AppTheme.hyperAmber,
-            side: BorderSide(color: AppTheme.hyperAmber.withOpacity(0.8)),
-          ),
+          style: dial(color: AppTheme.warnText, height: 48, fontSize: 12),
           onPressed: () => dialNumber(context, '1073'),
-          icon: Icon(Icons.emergency_rounded, color: AppTheme.hyperAmber, size: 18),
-          label: const Text('Call 1073 (NHAI Highway Helpline)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          icon: const Icon(Icons.emergency_outlined, size: 18),
+          label: const Text('Call 1073 (NHAI Highway Helpline)', maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
         const SizedBox(height: Space.s8),
         OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(48),
-            foregroundColor: AppTheme.textPrimary,
-            side: BorderSide(color: AppTheme.subtleBorder),
-          ),
+          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
           onPressed: () => SmsSender.launchSmsIntent(
             to: '',
             body: 'Emergency Assist at Lat:${a.lat.toStringAsFixed(5)}, Lng:${a.lng.toStringAsFixed(5)}. Maps: https://maps.google.com/?q=${a.lat.toStringAsFixed(5)},${a.lng.toStringAsFixed(5)} NHAI: 1073. ERSS: 112',
           ),
-          icon: const Icon(Icons.sms_rounded, size: 18),
-          label: const Text('Send Emergency SMS (No Permission Required)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          icon: const Icon(Icons.sms_outlined, size: 18),
+          label: const Text('Send Emergency SMS (No Permission Required)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13)),
         ),
         const SizedBox(height: Space.s8),
         TextButton.icon(
-          style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.textPrimary),
+          style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.text),
           onPressed: () async {
             final ok = await navigateTo(a.lat, a.lng, label: 'Emergency');
             if (!ok && context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No map app found on this phone.')));
             }
           },
-          icon: const Icon(Icons.map_rounded),
+          icon: const Icon(Icons.map_outlined),
           label: const Text('Open in Google Maps', maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
         TextButton.icon(
-          style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.textSecondary),
+          style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.muted),
           onPressed: () => reportFalseAssist(context, a.incidentId),
           icon: const Icon(Icons.report_gmailerrorred_rounded),
           label: const Text('Report false alert', maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -328,20 +302,26 @@ class AssistSheetBody extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(taken ? Icons.directions_run_rounded : Icons.check_circle_rounded, size: 40, color: taken ? StatusColors.info : StatusColors.success),
-          const SizedBox(height: Space.s8),
-          Text(taken ? AssistTexts.takenTitle : 'This request is closed', textAlign: TextAlign.center, style: AppText.title),
+          Container(
+            width: 56,
+            height: 56,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: AppTheme.tint, shape: BoxShape.circle),
+            child: Icon(taken ? Icons.directions_run_rounded : Icons.check_circle_outline_rounded, size: 32, color: AppTheme.accentText),
+          ),
+          const SizedBox(height: Space.s12),
+          Text(taken ? AssistTexts.takenTitle : 'This request is closed', textAlign: TextAlign.center, style: AppText.title.copyWith(fontSize: 18)),
           const SizedBox(height: Space.s4),
           Text(
             taken ? AssistTexts.takenBody : 'No assistance is needed from you any more.',
             textAlign: TextAlign.center,
-            style: AppText.body.copyWith(color: AppTheme.textSecondary),
+            style: AppText.body.copyWith(color: AppTheme.text2),
           ),
-          const SizedBox(height: Space.s16),
-          OutlinedButton(
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          const SizedBox(height: 20),
+          DsButton(
+            label: 'Close',
+            tone: DsButtonTone.outline,
             onPressed: () => Navigator.of(context).maybePop(),
-            child: const Text('Close'),
           ),
         ],
       ),

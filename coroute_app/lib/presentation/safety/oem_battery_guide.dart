@@ -130,29 +130,40 @@ class OemBatteryGuide extends StatelessWidget {
           Text(
             'Some phones close apps in the background to save battery. Then your group stops seeing you and crash detection stops. '
             'On ${brandLabel(brand)}:',
-            style: AppText.body.copyWith(color: AppTheme.textSecondary),
+            style: AppText.body.copyWith(color: AppTheme.text2),
           ),
-          const SizedBox(height: Space.s12),
-          for (var i = 0; i < steps.length; i++)
-            Padding(
-              padding: const EdgeInsets.only(bottom: Space.s12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 28,
-                    height: 28,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(color: AppTheme.elevatedCard, shape: BoxShape.circle, border: Border.all(color: AppTheme.subtleBorder)),
-                    child: Text('${i + 1}', style: AppText.label.copyWith(color: AppTheme.textPrimary)),
+          const SizedBox(height: 18),
+          DsCard(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < steps.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: Space.s12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 28,
+                          height: 28,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(color: AppTheme.tint, shape: BoxShape.circle),
+                          child: Text('${i + 1}', style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+                        ),
+                        const SizedBox(width: Space.s12),
+                        Expanded(child: Text(steps[i], style: AppText.body)),
+                      ],
+                    ),
                   ),
-                  const SizedBox(width: Space.s12),
-                  Expanded(child: Text(steps[i], style: AppText.body)),
-                ],
-              ),
+              ],
             ),
-          const SizedBox(height: Space.s4),
-          FilledButton.icon(
+          ),
+          const SizedBox(height: 18),
+          DsButton(
+            label: 'Open settings',
+            icon: Icons.settings_outlined,
             onPressed: () async {
               final ok = await SafetyNative.openOemBatterySettings();
               if (!ok && context.mounted) {
@@ -161,9 +172,6 @@ class OemBatteryGuide extends StatelessWidget {
                 );
               }
             },
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-            icon: const Icon(Icons.settings_rounded),
-            label: const Text('Open settings'),
           ),
           const SizedBox(height: Space.s8),
           TextButton(

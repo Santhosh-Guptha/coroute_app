@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/constants/telemetry_utils.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/map_tiles.dart';
 import '../../core/ui/ui.dart';
@@ -20,6 +21,53 @@ import 'admin_insights_screen.dart';
 import 'admin_ride_history_screen.dart';
 import 'admin_ui.dart';
 import 'admin_users_screen.dart';
+
+/// The sections of the admin console nav (rail on wide screens, chip row on phones).
+enum AdminSection { dashboard, users, rides, insights }
+
+/// The nav items for an admin screen that shows [current]. From the
+/// dashboard a section is pushed; from another section it replaces that
+/// section, so "Dashboard" is always one pop away.
+List<AdminNavItem> adminNavItems(BuildContext context, AdminSection current, {int emergencies = 0, VoidCallback? onSignOut}) {
+  void go(AdminSection s, Widget Function() screen) {
+    if (s == current) return;
+    final route = MaterialPageRoute<void>(builder: (_) => screen());
+    if (current == AdminSection.dashboard) {
+      Navigator.push(context, route);
+    } else {
+      Navigator.pushReplacement(context, route);
+    }
+  }
+
+  return [
+    AdminNavItem(
+      icon: Icons.space_dashboard_outlined,
+      label: 'Dashboard',
+      selected: current == AdminSection.dashboard,
+      badge: emergencies,
+      onTap: current == AdminSection.dashboard ? null : () => Navigator.maybePop(context),
+    ),
+    AdminNavItem(
+      icon: Icons.people_alt_outlined,
+      label: 'Users',
+      selected: current == AdminSection.users,
+      onTap: () => go(AdminSection.users, () => const AdminUsersScreen()),
+    ),
+    AdminNavItem(
+      icon: Icons.history_rounded,
+      label: 'Ride history',
+      selected: current == AdminSection.rides,
+      onTap: () => go(AdminSection.rides, () => const AdminRideHistoryScreen()),
+    ),
+    AdminNavItem(
+      icon: Icons.insights_rounded,
+      label: 'Insights',
+      selected: current == AdminSection.insights,
+      onTap: () => go(AdminSection.insights, () => const AdminInsightsScreen()),
+    ),
+    if (onSignOut != null) AdminNavItem(icon: Icons.logout_rounded, label: 'Sign out', danger: true, onTap: onSignOut),
+  ];
+}
 
 /// The admin home: what needs attention first (the Emergencies panel with
 /// every open SOS and crash and its alarm, live rides, accounts on hold),
@@ -136,34 +184,44 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
       ),
     ];
 
-    // 2. Live rides.
+    // 2. Live rides: a table card, one row per ride, with its spread at the right.
     final ridesSection = <Widget>[
-      const AdminSectionLabel('Live rides'),
-      if (convoys.isEmpty)
-        AdminRow(
-          leading: const AdminRowIcon(Icons.two_wheeler_rounded),
-          title: 'No live rides right now',
-          subtitle: 'Finished rides are in Ride history.',
-          onTap: () => _push(const AdminRideHistoryScreen()),
-        )
-      else
-        for (final c in convoys)
-          Padding(
-            padding: const EdgeInsets.only(bottom: Space.s8),
-            child: _ConvoyRow(
-              key: ValueKey(c.groupId),
-              convoy: c,
-              sosCount: sos.where((s) => s.$1.groupId == c.groupId).length,
-              onTap: () => _openConvoy(c),
-            ),
-          ),
+      const SizedBox(height: 20),
+      AdminTable(
+        title: 'Live rides',
+        trailing: convoys.isEmpty
+            ? null
+            : Text(
+                '${convoys.length} riding now',
+                style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700),
+              ),
+        rows: [
+          if (convoys.isEmpty)
+            AdminRow(
+              leading: const AdminRowIcon(Icons.two_wheeler_rounded),
+              title: 'No live rides right now',
+              subtitle: 'Finished rides are in Ride history.',
+              divider: false,
+              onTap: () => _push(const AdminRideHistoryScreen()),
+            )
+          else
+            for (var i = 0; i < convoys.length; i++)
+              _ConvoyRow(
+                key: ValueKey(convoys[i].groupId),
+                convoy: convoys[i],
+                sosCount: sos.where((s) => s.$1.groupId == convoys[i].groupId).length,
+                last: i == convoys.length - 1,
+                onTap: () => _openConvoy(convoys[i]),
+              ),
+        ],
+      ),
     ];
 
     // 3. Accounts on hold.
     final holdSection = <Widget>[
       if (onHold != null && onHold > 0)
         Padding(
-          padding: const EdgeInsets.only(top: Space.s16),
+          padding: const EdgeInsets.only(top: 16),
           child: RideAlert(
             tier: AlertTier.important,
             title: onHold == 1 ? '1 account on hold' : '$onHold accounts on hold',
@@ -174,25 +232,37 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
         ),
     ];
 
-    // 4. Numbers.
+    // 4. Numbers: the KPI tiles of the canvas.
+    final kpis = <Widget>[
+      AdminKpiTile(
+        label: 'Live rides',
+        value: '${convoys.length}',
+        delta: convoys.isEmpty ? 'Nobody out riding' : (sosGroups.isEmpty ? 'All clear' : '${sosGroups.length} with an open SOS'),
+        deltaColor: sosGroups.isEmpty ? null : AppTheme.sos,
+      ),
+      AdminKpiTile(
+        label: 'Riders online',
+        value: '$totalRiders',
+        delta: convoys.isEmpty ? 'In live rides' : 'Across ${convoys.length} ${convoys.length == 1 ? 'ride' : 'rides'}',
+      ),
+      AdminKpiTile(
+        label: 'Open SOS',
+        value: '${sos.length}',
+        valueColor: sos.isEmpty ? null : AppTheme.sos,
+        delta: sos.isEmpty ? 'None open' : 'Needs attention',
+        deltaColor: sos.isEmpty ? null : AppTheme.sos,
+      ),
+      if (users != null)
+        AdminKpiTile(
+          label: 'Accounts',
+          value: '${users.length}',
+          delta: (onHold ?? 0) > 0 ? '$onHold on hold' : 'All in good standing',
+          deltaColor: (onHold ?? 0) > 0 ? AppTheme.warnText : null,
+        ),
+    ];
     final stats = <Widget>[
       const AdminSectionLabel('Overview'),
-      AdminCard(
-        child: Row(
-          children: [
-            Expanded(child: RideMetric(value: '${convoys.length}', label: 'Live rides')),
-            Expanded(child: RideMetric(value: '$totalRiders', label: 'Riders online')),
-            Expanded(
-              child: RideMetric(
-                value: '${sos.length}',
-                label: 'Open SOS',
-                color: sos.isEmpty ? null : StatusColors.critical,
-              ),
-            ),
-            if (users != null) Expanded(child: RideMetric(value: '${users.length}', label: 'Accounts')),
-          ],
-        ),
-      ),
+      AdminKpiGrid(tiles: kpis),
     ];
 
     // Fleet map, only when someone is out riding.
@@ -204,82 +274,82 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
     final mapSection = <Widget>[
       if (points.isNotEmpty) ...[
         const AdminSectionLabel('Fleet map'),
-        SizedBox(height: 240, child: _fleetMap(convoys, points, now)),
+        SizedBox(height: 280, child: _fleetMap(convoys, points, now)),
       ],
     ];
 
-    // 5. Tools.
-    Widget tool(IconData icon, String title, String subtitle, VoidCallback onTap, {Color? color}) => ListTile(
-          contentPadding: EdgeInsets.zero,
-          minVerticalPadding: Space.s12,
-          leading: Icon(icon, color: color ?? AppTheme.textSecondary),
-          title: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(color: color ?? AppTheme.textPrimary)),
-          subtitle: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
-          trailing: color == null ? Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted) : null,
-          onTap: onTap,
-        );
-    final tools = <Widget>[
-      const AdminSectionLabel('Manage'),
-      tool(Icons.people_alt_rounded, 'Users', 'Accounts, hold, block, delete and their rides', () => _push(const AdminUsersScreen())),
-      tool(Icons.history_rounded, 'Ride history', 'Live and finished rides, retention and delete', () => _push(const AdminRideHistoryScreen())),
-      tool(Icons.insights_rounded, 'Feedback and analytics', 'Feedback, page views and app versions', () => _push(const AdminInsightsScreen())),
-      tool(Icons.logout_rounded, 'Sign out', 'Leave the admin console on this phone', _signOut, color: AppTheme.textPrimary),
-    ];
-
-    return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(
-        title: const Text('Admin'),
-        actions: [
-          IconButton(
-            tooltip: 'Safety broadcast',
-            icon: const Icon(Icons.campaign_rounded),
-            onPressed: () => _showBroadcastSheet(convoyService),
+    return AdminShell(
+      title: 'Admin',
+      subtitle: 'CoRoute operations console',
+      actions: [
+        AdminIconAction(icon: Icons.campaign_rounded, label: 'Safety broadcast', onTap: () => _showBroadcastSheet(convoyService)),
+      ],
+      // The badge is the open SOS count of the live fleet.
+      nav: adminNavItems(context, AdminSection.dashboard, emergencies: sos.length, onSignOut: _signOut),
+      railFooter: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Live fleet', style: AppText.caption.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text(
+            convoys.isEmpty ? 'No rides in progress' : '${convoys.length} ${convoys.length == 1 ? 'ride' : 'rides'} · $totalRiders riders online',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.caption.copyWith(color: AppTheme.accentText),
           ),
         ],
       ),
       body: LoadingState(
         loading: _loadingUsers,
-        child: RefreshIndicator(
-          color: AppTheme.neonCyan,
+        child: adminRefresh(
           onRefresh: _refresh,
           child: LayoutBuilder(builder: (context, c) {
             final wide = c.maxWidth >= adminWideBreakpoint;
             final Widget body;
             if (wide) {
-              body = Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              // Canvas order: numbers on top, then what needs attention beside the map.
+              body = Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: Column(
+                  ...stats,
+                  const SizedBox(height: 8),
+                  AdminTwoUp(
+                    left: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [...sosSection, ...ridesSection, ...holdSection],
                     ),
-                  ),
-                  const SizedBox(width: Space.s24),
-                  Expanded(
-                    child: Column(
+                    right: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [...stats, ...mapSection, ...tools],
+                      children: mapSection.isEmpty
+                          ? [
+                              const AdminSectionLabel('Fleet map'),
+                              DsCard(
+                                padding: const EdgeInsets.all(24),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.map_outlined, color: AppTheme.accentText, size: 24),
+                                    const SizedBox(width: 12),
+                                    Expanded(child: Text('The fleet map shows here as soon as a rider is out with a GPS fix.', style: AppText.label)),
+                                  ],
+                                ),
+                              ),
+                            ]
+                          : mapSection,
                     ),
                   ),
                 ],
               );
             } else {
+              // Phone: what needs attention first, then the numbers and the map.
               body = Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [...sosSection, ...ridesSection, ...holdSection, ...stats, ...mapSection, ...tools],
+                children: [...sosSection, ...ridesSection, ...holdSection, ...stats, ...mapSection],
               );
             }
             return SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(Space.s16, Space.s8, Space.s16, Space.s32),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: wide ? 1200 : 760),
-                  child: body,
-                ),
-              ),
+              child: AdminContent(wide: wide, child: body),
             );
           }),
         ),
@@ -307,47 +377,52 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
         ));
       }
     }
-    return ClipRRect(
-      borderRadius: Radii.mdAll,
-      child: DecoratedBox(
-        position: DecorationPosition.foreground,
-        decoration: BoxDecoration(borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.subtleBorder)),
-        child: FlutterMap(
-          // A new fleet (rides started or ended) fits the camera again.
-          key: ValueKey(convoys.map((c) => c.groupId).join(',')),
-          options: MapOptions(
-            initialCenter: _fleetCenter(points),
-            initialZoom: 12,
-            initialCameraFit: points.length > 1
-                ? CameraFit.coordinates(coordinates: points, padding: const EdgeInsets.all(32), maxZoom: 14)
-                : null,
-          ),
-          children: [
-            appTileLayer(),
-            MarkerLayer(markers: markers),
-          ],
+    return DsCard(
+      padding: EdgeInsets.zero,
+      child: FlutterMap(
+        // A new fleet (rides started or ended) fits the camera again.
+        key: ValueKey(convoys.map((c) => c.groupId).join(',')),
+        options: MapOptions(
+          initialCenter: _fleetCenter(points),
+          initialZoom: 12,
+          initialCameraFit: points.length > 1
+              ? CameraFit.coordinates(coordinates: points, padding: const EdgeInsets.all(32), maxZoom: 14)
+              : null,
         ),
+        children: [
+          appTileLayer(),
+          MarkerLayer(markers: markers),
+        ],
       ),
     );
   }
 }
 
-/// One live ride: name, code and lead, riders and destination, and an
-/// "Emergency" chip when someone in it has an open SOS.
+/// One live ride row: name, code and lead, riders and destination, an
+/// "Emergency" chip when someone in it has an open SOS, and the spread of
+/// the group at the right (teal, amber from 3 km, red from 6 km).
 class _ConvoyRow extends StatelessWidget {
   final ConvoyModel convoy;
   final int sosCount;
+  final bool last;
   final VoidCallback onTap;
 
-  const _ConvoyRow({super.key, required this.convoy, required this.sosCount, required this.onTap});
+  const _ConvoyRow({super.key, required this.convoy, required this.sosCount, required this.onTap, this.last = false});
 
   @override
   Widget build(BuildContext context) {
     final c = convoy;
     final n = c.riders.length;
     final dest = c.destinationName.trim();
+    final located = c.riders.values.where((r) => r.lat != 0 || r.lng != 0).toList();
+    final metrics = TelemetryUtils.calculateConvoyMetrics(located);
+    final spreadColor = metrics.spreadKm >= 6
+        ? AppTheme.sos
+        : metrics.spreadKm >= 3
+            ? AppTheme.warnText
+            : AppTheme.accentText;
     return AdminRow(
-      leading: AdminRowIcon(Icons.two_wheeler_rounded, color: sosCount > 0 ? StatusColors.critical : null),
+      leading: AdminRowIcon(Icons.two_wheeler_rounded, color: sosCount > 0 ? AppTheme.sos : null),
       title: c.name.isEmpty ? 'Ride' : c.name,
       subtitle: [
         if (c.joinCode.isNotEmpty) 'Code ${c.joinCode}',
@@ -355,6 +430,20 @@ class _ConvoyRow extends StatelessWidget {
       ].join(', '),
       detail: '$n ${n == 1 ? 'rider' : 'riders'}, ${dest.isEmpty ? 'no destination set' : 'to $dest'}',
       status: sosCount > 0 ? RiderStatusChip(status: RiderStatus.emergency, detail: sosCount == 1 ? '1 SOS' : '$sosCount SOS') : null,
+      trailing: located.length < 2
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(formatDistance(metrics.spreadKm * 1000), style: AppText.label.copyWith(color: spreadColor, fontWeight: FontWeight.w800)),
+                  Text('spread', style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
+      divider: !last,
       onTap: onTap,
     );
   }
@@ -396,9 +485,9 @@ class _BroadcastSheetState extends State<_BroadcastSheet> {
         children: [
           Text(
             'Every rider in a live ride sees this alert on their map right away.',
-            style: AppText.body.copyWith(color: AppTheme.textSecondary),
+            style: AppText.body.copyWith(color: AppTheme.text2),
           ),
-          const SizedBox(height: Space.s16),
+          const SizedBox(height: 16),
           TextField(
             controller: _ctrl,
             autofocus: true,
@@ -408,18 +497,21 @@ class _BroadcastSheetState extends State<_BroadcastSheet> {
             textCapitalization: TextCapitalization.sentences,
             onChanged: (_) => setState(() {}),
             style: AppText.body,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Message',
               hintText: 'Heavy rain on NH 48. Reduce speed and regroup.',
-              border: OutlineInputBorder(borderRadius: Radii.mdAll),
+              filled: true,
+              fillColor: AppTheme.card,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.border, width: 2)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.border, width: 2)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.accentText, width: 2)),
             ),
           ),
-          const SizedBox(height: Space.s8),
-          FilledButton.icon(
+          const SizedBox(height: 8),
+          DsButton(
+            label: 'Send to all live rides',
+            icon: Icons.campaign_rounded,
             onPressed: ready ? _send : null,
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-            icon: const Icon(Icons.campaign_rounded),
-            label: const Text('Send to all live rides'),
           ),
         ],
       ),

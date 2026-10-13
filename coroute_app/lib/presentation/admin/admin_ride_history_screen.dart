@@ -9,6 +9,7 @@ import '../../data/services/convoy_service.dart';
 import '../report/trip_report_screen.dart';
 import 'admin_convoy_inspector.dart';
 import 'admin_ui.dart';
+import 'master_admin_dashboard.dart';
 
 enum _RideFilter { all, live, ended, retention }
 
@@ -200,7 +201,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
       final children = <Widget>[
         _totals(),
         Padding(
-          padding: const EdgeInsets.only(top: Space.s16, bottom: Space.s12),
+          padding: const EdgeInsets.only(top: 16, bottom: 12),
           child: AdminSearchRow(
             hint: 'Ride, lead or place',
             onChanged: (v) => setState(() => _query = v),
@@ -214,7 +215,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
         ),
         if (display.isEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: Space.s24),
+            padding: const EdgeInsets.symmetric(vertical: 24),
             child: EmptyState(
               icon: Icons.route_rounded,
               title: q.isNotEmpty ? 'No matching rides' : 'No rides here',
@@ -224,109 +225,127 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
             ),
           )
         else
-          for (final c in display)
-            Padding(
-              padding: const EdgeInsets.only(bottom: Space.s8),
-              child: _RideRow(
-                key: ValueKey(c['groupId']),
-                ride: c,
-                live: _isLive(c),
-                onTap: () => _openGroup(c, isActive: _isLive(c)),
-                onDelete: () => _deleteGroupImmediately(c),
-              ),
+          AdminTable(
+            title: _filterLabel(_filter),
+            trailing: Text(
+              '${display.length} ${display.length == 1 ? 'ride' : 'rides'}',
+              style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700),
             ),
+            columns: const ['Ride', 'Status'],
+            rows: [
+              for (var i = 0; i < display.length; i++)
+                _RideRow(
+                  key: ValueKey(display[i]['groupId']),
+                  ride: display[i],
+                  live: _isLive(display[i]),
+                  last: i == display.length - 1,
+                  onTap: () => _openGroup(display[i], isActive: _isLive(display[i])),
+                  onDelete: () => _deleteGroupImmediately(display[i]),
+                ),
+            ],
+          ),
       ];
       content = ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
         children: children,
       );
     }
 
-    return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(
-        title: const Text('Ride history'),
-        actions: [IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh_rounded), onPressed: _load)],
-      ),
+    return AdminShell(
+      title: 'Ride history',
+      subtitle: 'Live and finished rides',
+      onBack: () => Navigator.maybePop(context),
+      actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
+      nav: adminNavItems(context, AdminSection.rides),
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
+          constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
           child: LoadingState(
             loading: _loading,
             hasData: _loaded || _error != null,
-            child: RefreshIndicator(color: AppTheme.neonCyan, onRefresh: _load, child: content),
+            child: adminRefresh(onRefresh: _load, child: content),
           ),
         ),
       ),
     );
   }
 
-  /// Totals for the chosen period, straight from /admin/stats.
+  /// Totals for the chosen period, straight from /admin/stats: a period
+  /// picker and the KPI tiles of the canvas, then the all-time line.
   Widget _totals() {
     final s = _stats;
-    final dist = formatDistance(_n2(s, 'distanceM', 'recent'));
-    final cut = dist.lastIndexOf(' ');
     final keep = _retentionDays;
-    return AdminCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(child: Text('Totals', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title)),
-              PopupMenuButton<int>(
-                tooltip: 'Period',
-                initialValue: _days,
-                onSelected: (v) {
-                  _days = v;
-                  _load();
-                },
-                itemBuilder: (_) => [
-                  for (final (d, label) in _periods) PopupMenuItem<int>(value: d, height: 48, child: Text(label, style: AppText.body)),
-                ],
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(_periodLabel(_days), style: AppText.label.copyWith(color: AppTheme.neonCyan)),
-                      Icon(Icons.arrow_drop_down_rounded, color: AppTheme.neonCyan),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: Space.s8),
-          Row(
-            children: [
-              Expanded(child: RideMetric(value: '${_n2(s, 'rides', 'recent')}', label: 'Rides')),
-              Expanded(
-                child: cut > 0
-                    ? RideMetric(value: dist.substring(0, cut), unit: dist.substring(cut + 1), label: 'Distance')
-                    : RideMetric(value: dist, label: 'Distance'),
-              ),
-              Expanded(child: RideMetric(value: formatDuration(Duration(milliseconds: _n2(s, 'rideMs', 'recent').toInt())), label: 'On the road')),
-              Expanded(child: RideMetric(value: '${adminNum(s, 'activeRiders')}', label: 'Active riders')),
-            ],
-          ),
-          const SizedBox(height: Space.s12),
-          Text(
-            'All time: ${_n2(s, 'rides', 'all')} rides, ${formatDistance(_n2(s, 'distanceM', 'all'))}, '
-            '${formatDuration(Duration(milliseconds: _n2(s, 'rideMs', 'all').toInt()))} on the road. '
-            '${adminNum(s, 'riders')} riders registered.',
-            style: AppText.label,
-          ),
-          const SizedBox(height: Space.s8),
-          Text(
-            keep == null
-                ? 'Routes are removed automatically after the retention period. You can delete a ride at any time.'
-                : 'Routes are kept for $keep days after a ride, then removed automatically. You can delete a ride at any time.',
-            style: AppText.caption,
-          ),
-        ],
+    final picker = PopupMenuButton<int>(
+      tooltip: 'Period',
+      initialValue: _days,
+      color: AppTheme.card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppTheme.border, width: 2)),
+      onSelected: (v) {
+        _days = v;
+        _load();
+      },
+      itemBuilder: (_) => [
+        for (final (d, label) in _periods) PopupMenuItem<int>(value: d, height: 48, child: Text(label, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
+      ],
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.fromLTRB(12, 0, 6, 0),
+        decoration: BoxDecoration(color: AppTheme.soft, borderRadius: BorderRadius.circular(12)),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_periodLabel(_days), style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800)),
+            Icon(Icons.arrow_drop_down_rounded, color: AppTheme.accentText),
+          ],
+        ),
       ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(2, 8, 0, 12),
+          child: Row(
+            children: [
+              Expanded(child: Semantics(header: true, child: Text('Totals', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title))),
+              picker,
+            ],
+          ),
+        ),
+        AdminKpiGrid(
+          tiles: [
+            AdminKpiTile(label: 'Rides', value: '${_n2(s, 'rides', 'recent')}', delta: _periodLabel(_days)),
+            AdminKpiTile(label: 'Distance', value: formatDistance(_n2(s, 'distanceM', 'recent')), delta: 'All rides together'),
+            AdminKpiTile(label: 'On the road', value: formatDuration(Duration(milliseconds: _n2(s, 'rideMs', 'recent').toInt())), delta: 'Riding time'),
+            AdminKpiTile(label: 'Active riders', value: '${adminNum(s, 'activeRiders')}', delta: '${adminNum(s, 'riders')} registered'),
+          ],
+        ),
+        const SizedBox(height: 12),
+        DsCard(
+          tinted: true,
+          borderColor: AppTheme.tint,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'All time: ${_n2(s, 'rides', 'all')} rides, ${formatDistance(_n2(s, 'distanceM', 'all'))}, '
+                '${formatDuration(Duration(milliseconds: _n2(s, 'rideMs', 'all').toInt()))} on the road. '
+                '${adminNum(s, 'riders')} riders registered.',
+                style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                keep == null
+                    ? 'Routes are removed automatically after the retention period. You can delete a ride at any time.'
+                    : 'Routes are kept for $keep days after a ride, then removed automatically. You can delete a ride at any time.',
+                style: AppText.caption,
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -344,10 +363,11 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
 class _RideRow extends StatelessWidget {
   final Map<String, dynamic> ride;
   final bool live;
+  final bool last;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
-  const _RideRow({super.key, required this.ride, required this.live, required this.onTap, required this.onDelete});
+  const _RideRow({super.key, required this.ride, required this.live, required this.onTap, required this.onDelete, this.last = false});
 
   @override
   Widget build(BuildContext context) {
@@ -378,11 +398,11 @@ class _RideRow extends StatelessWidget {
     final sos = adminNum(c, 'sos');
     final Widget? status;
     if (live) {
-      status = StatusLine(icon: Icons.sensors_rounded, text: 'Live now', color: StatusColors.success);
+      status = StatusTextChip(icon: Icons.sensors_rounded, text: 'Live now', color: AppTheme.accentText);
     } else if (c['gpsStripped'] == true) {
-      status = StatusLine(icon: Icons.location_off_rounded, text: 'Route removed (retention)', color: StatusColors.offline);
+      status = StatusTextChip(icon: Icons.location_off_rounded, text: 'Route removed (retention)', color: AppTheme.muted);
     } else if (c['isApproachingRetention'] == true) {
-      status = StatusLine(icon: Icons.schedule_rounded, text: 'Route removed in ${daysRemaining ?? 0} days', color: StatusColors.warning);
+      status = StatusTextChip(icon: Icons.schedule_rounded, text: 'Route removed in ${daysRemaining ?? 0} days', color: AppTheme.warnText);
     } else if (daysRemaining != null) {
       status = StatusLine(icon: Icons.inventory_2_rounded, text: 'Route kept $daysRemaining more days');
     } else {
@@ -390,22 +410,25 @@ class _RideRow extends StatelessWidget {
     }
 
     return AdminRow(
-      leading: AdminRowIcon(live ? Icons.two_wheeler_rounded : Icons.route_rounded, color: live ? StatusColors.success : null),
+      leading: AdminRowIcon(live ? Icons.two_wheeler_rounded : Icons.route_rounded, color: live ? AppTheme.accentText : AppTheme.muted),
       title: c['name']?.toString() ?? 'Ride',
       subtitle: when,
       detail: facts,
       status: sos > 0
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          ? Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                StatusLine(icon: Icons.sos_rounded, text: '$sos SOS during this ride', color: StatusColors.critical),
+                StatusTextChip(icon: Icons.sos_rounded, text: '$sos SOS during this ride', color: AppTheme.sos),
                 ?status,
               ],
             )
           : status,
       trailing: PopupMenuButton<String>(
         tooltip: 'More options',
-        icon: Icon(Icons.more_vert_rounded, color: AppTheme.textSecondary),
+        color: AppTheme.card,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppTheme.border, width: 2)),
         onSelected: (v) {
           if (v == 'delete') onDelete();
         },
@@ -414,13 +437,20 @@ class _RideRow extends StatelessWidget {
             value: 'delete',
             height: 48,
             child: Row(children: [
-              Icon(Icons.delete_outline_rounded, color: StatusColors.critical),
-              const SizedBox(width: Space.s12),
-              const Flexible(child: Text('Delete ride', maxLines: 1, overflow: TextOverflow.ellipsis)),
+              Icon(Icons.delete_outline_rounded, color: AppTheme.sos),
+              const SizedBox(width: 12),
+              Flexible(child: Text('Delete ride', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
             ]),
           ),
         ],
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: AppTheme.card, border: Border.all(color: AppTheme.border, width: 2)),
+          child: Icon(Icons.more_horiz_rounded, color: AppTheme.text, size: 22),
+        ),
       ),
+      divider: !last,
       onTap: onTap,
     );
   }

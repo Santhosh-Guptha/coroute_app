@@ -211,24 +211,25 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           AppSheetHeader(title: g['name']?.toString() ?? 'Ride', subtitle: route),
-          Text('Riders (${members.length})', style: AppText.label),
-          const SizedBox(height: Space.s8),
+          DsSectionHeader('Riders (${members.length})'),
+          const SizedBox(height: 8),
           Flexible(
             child: members.isEmpty
                 ? Padding(
-                    padding: const EdgeInsets.symmetric(vertical: Space.s8),
-                    child: Text('No member list was kept for this ride.', style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text('No member list was kept for this ride.', style: AppText.body.copyWith(color: AppTheme.text2)),
                   )
                 : ListView(
                     shrinkWrap: true,
                     children: [
                       for (final m in members)
-                        ConstrainedBox(
+                        Container(
                           constraints: const BoxConstraints(minHeight: 56),
+                          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: AppTheme.border))),
                           child: Row(
                             children: [
                               RiderAvatar(name: m['name']?.toString() ?? 'Rider', size: 36),
-                              const SizedBox(width: Space.s12),
+                              const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
@@ -238,7 +239,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
                                       '${m['name'] ?? 'Rider'}${m['userId'] == widget.userId ? ' (this user)' : ''}',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: AppText.body,
+                                      style: AppText.body.copyWith(fontWeight: FontWeight.w700),
                                     ),
                                     Text(
                                       [adminRoleLabel(m['role']), if ((m['vehicleType'] ?? '').toString().isNotEmpty) m['vehicleType'].toString()].join(', '),
@@ -255,15 +256,14 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
                     ],
                   ),
           ),
-          const SizedBox(height: Space.s16),
-          FilledButton.icon(
+          const SizedBox(height: 16),
+          DsButton(
+            label: live ? 'Open live ride' : 'Open trip report',
+            icon: live ? Icons.map_rounded : Icons.description_rounded,
             onPressed: () {
               Navigator.pop(ctx);
               _openGroupReport(g);
             },
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-            icon: Icon(live ? Icons.map_rounded : Icons.description_rounded),
-            label: Text(live ? 'Open live ride' : 'Open trip report'),
           ),
         ],
       ),
@@ -282,11 +282,11 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
       final status = AccountStatus.fromCode(u['status'] ?? 'ACTIVE');
       content = ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
+        padding: EdgeInsets.fromLTRB(20, widget.embedded ? 12 : 4, 20, 28),
         children: [
           _header(u, status, isMasterAdmin),
           if (_isInActiveConvoy) ...[
-            const SizedBox(height: Space.s16),
+            const SizedBox(height: 12),
             _activeRide(),
           ],
           const AdminSectionLabel('Profile'),
@@ -296,36 +296,30 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
             _actions(status),
           ],
           AdminSectionLabel('Rides (${_groups.length})'),
-          if (_groups.isEmpty)
-            Text(
+          AdminTable(
+            empty: Text(
               _loaded ? 'No rides yet.' : (_error != null ? 'Rides could not be loaded. Pull down to try again.' : 'Loading rides...'),
-              style: AppText.body.copyWith(color: AppTheme.textSecondary),
-            )
-          else
-            for (final g in _groups)
-              Padding(padding: const EdgeInsets.only(bottom: Space.s8), child: _groupRow(g)),
+              style: AppText.body.copyWith(color: AppTheme.text2),
+            ),
+            rows: [for (var i = 0; i < _groups.length; i++) _groupRow(_groups[i], last: i == _groups.length - 1)],
+          ),
         ],
       );
     }
 
-    return Scaffold(
+    return AdminShell(
       primary: !widget.embedded,
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(
-        primary: !widget.embedded,
-        automaticallyImplyLeading: !widget.embedded,
-        title: Text(title.isEmpty ? 'User' : title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: [
-          IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh_rounded), onPressed: _loadDetails),
-        ],
-      ),
+      title: title.isEmpty ? 'User' : title,
+      subtitle: widget.embedded ? null : 'Account and rides',
+      onBack: widget.embedded ? null : () => Navigator.maybePop(context),
+      actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _loadDetails)],
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
+          constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
           child: LoadingState(
             loading: _loading,
             hasData: _user != null || _error != null,
-            child: RefreshIndicator(color: AppTheme.neonCyan, onRefresh: _loadDetails, child: content),
+            child: adminRefresh(onRefresh: _loadDetails, child: content),
           ),
         ),
       ),
@@ -335,30 +329,32 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
   Widget _header(Map<String, dynamic> u, AccountStatus status, bool isMasterAdmin) {
     final name = (u['name']?.toString() ?? '').trim();
     final email = u['email']?.toString() ?? '';
-    return Row(
-      children: [
-        RiderAvatar(name: name.isEmpty ? '?' : name, size: 56, color: isMasterAdmin ? AppTheme.infoBlue : null),
-        const SizedBox(width: Space.s16),
-        Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(name.isEmpty ? 'Rider' : name, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
-              if (email.isNotEmpty) Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
-              const SizedBox(height: Space.s8),
-              Wrap(
-                spacing: Space.s8,
-                runSpacing: Space.s4,
-                children: [
-                  StatusTextChip.account(status),
-                  if (isMasterAdmin) StatusTextChip(icon: Icons.admin_panel_settings_rounded, text: 'Admin', color: StatusColors.info),
-                ],
-              ),
-            ],
+    return DsCard(
+      child: Row(
+        children: [
+          RiderAvatar(name: name.isEmpty ? '?' : name, size: 56, color: isMasterAdmin ? AppTheme.warnText : null),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name.isEmpty ? 'Rider' : name, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+                if (email.isNotEmpty) Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    StatusTextChip.account(status),
+                    if (isMasterAdmin) StatusTextChip(icon: Icons.admin_panel_settings_rounded, text: 'Admin', color: AppTheme.warnText),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -388,25 +384,26 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
       if (lastActive > 0) ('Last active', fmt.format(DateTime.fromMillisecondsSinceEpoch(lastActive))),
       if (reason.isNotEmpty) ('Status reason', reason),
     ];
-    return AdminCard(
-      padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s8),
+    return DsCard(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (var i = 0; i < rows.length; i++) ...[
-            if (i > 0) Divider(height: 1, color: AppTheme.subtleBorder),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: Space.s8),
+          for (var i = 0; i < rows.length; i++)
+            Container(
+              constraints: const BoxConstraints(minHeight: 52),
+              decoration: BoxDecoration(border: i < rows.length - 1 ? Border(bottom: BorderSide(color: AppTheme.border)) : null),
+              padding: const EdgeInsets.symmetric(vertical: 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(rows[i].$1, style: AppText.caption),
+                  Text(rows[i].$1, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 2),
-                  SelectableText(rows[i].$2, style: AppText.body),
+                  SelectableText(rows[i].$2, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
                 ],
               ),
             ),
-          ],
         ],
       ),
     );
@@ -416,67 +413,66 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
     final isHeld = status == AccountStatus.onHold;
     final isBlocked = status == AccountStatus.blocked;
     final locked = _isActionInProgress || _isInActiveConvoy;
-    const min = Size(48, 48);
-    final warn = StatusColors.warning;
-    final crit = StatusColors.critical;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_isInActiveConvoy)
-          Padding(
-            padding: const EdgeInsets.only(bottom: Space.s12),
-            child: StatusLine(
-              icon: Icons.info_rounded,
-              text: 'Status cannot change while they are in a live ride.',
-              color: warn,
+    return DsCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_isInActiveConvoy)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: StatusLine(
+                icon: Icons.info_rounded,
+                text: 'Status cannot change while they are in a live ride.',
+                color: AppTheme.warnText,
+              ),
             ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (isHeld)
+                _ActionButton(
+                  icon: Icons.play_circle_rounded,
+                  label: 'Release hold',
+                  tone: _ActionTone.brand,
+                  onTap: locked ? null : () => _updateStatus('ACTIVE'),
+                )
+              else
+                _ActionButton(
+                  icon: Icons.pause_circle_rounded,
+                  label: 'Put on hold',
+                  tone: _ActionTone.warn,
+                  onTap: locked ? null : () => _updateStatus('ON_HOLD'),
+                ),
+              if (isBlocked)
+                _ActionButton(
+                  icon: Icons.check_circle_rounded,
+                  label: 'Unblock',
+                  tone: _ActionTone.brand,
+                  onTap: locked ? null : () => _updateStatus('ACTIVE'),
+                )
+              else
+                _ActionButton(
+                  icon: Icons.block_rounded,
+                  label: 'Block',
+                  tone: _ActionTone.danger,
+                  onTap: locked ? null : () => _updateStatus('BLOCKED'),
+                ),
+              _ActionButton(
+                icon: Icons.delete_forever_rounded,
+                label: 'Delete account',
+                tone: _ActionTone.danger,
+                onTap: _isActionInProgress ? null : _deleteUser,
+              ),
+            ],
           ),
-        Wrap(
-          spacing: Space.s8,
-          runSpacing: Space.s8,
-          children: [
-            if (isHeld)
-              FilledButton.icon(
-                onPressed: locked ? null : () => _updateStatus('ACTIVE'),
-                style: FilledButton.styleFrom(minimumSize: min),
-                icon: const Icon(Icons.play_circle_rounded),
-                label: const Text('Release hold'),
-              )
-            else
-              OutlinedButton.icon(
-                onPressed: locked ? null : () => _updateStatus('ON_HOLD'),
-                style: OutlinedButton.styleFrom(minimumSize: min, foregroundColor: AppTheme.textPrimary),
-                icon: Icon(Icons.pause_circle_rounded, color: locked ? null : warn),
-                label: const Text('Put on hold'),
-              ),
-            if (isBlocked)
-              FilledButton.icon(
-                onPressed: locked ? null : () => _updateStatus('ACTIVE'),
-                style: FilledButton.styleFrom(minimumSize: min),
-                icon: const Icon(Icons.check_circle_rounded),
-                label: const Text('Unblock'),
-              )
-            else
-              OutlinedButton.icon(
-                onPressed: locked ? null : () => _updateStatus('BLOCKED'),
-                style: OutlinedButton.styleFrom(minimumSize: min, foregroundColor: crit, side: BorderSide(color: crit)),
-                icon: const Icon(Icons.block_rounded),
-                label: const Text('Block'),
-              ),
-            OutlinedButton.icon(
-              onPressed: _isActionInProgress ? null : _deleteUser,
-              style: OutlinedButton.styleFrom(minimumSize: min, foregroundColor: crit, side: BorderSide(color: crit)),
-              icon: const Icon(Icons.delete_forever_rounded),
-              label: const Text('Delete account'),
-            ),
-          ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _groupRow(Map<String, dynamic> g) {
+  Widget _groupRow(Map<String, dynamic> g, {bool last = false}) {
     final started = (g['startedAt'] as num?)?.toInt() ?? 0;
     final dateStr = started > 0 ? DateFormat('EEE d MMM yyyy, HH:mm').format(DateTime.fromMillisecondsSinceEpoch(started)) : 'Date unknown';
     final distanceKm = (g['totalDistanceKm'] as num?)?.toDouble() ?? 0.0;
@@ -489,12 +485,73 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
       '$members ${members == 1 ? 'rider' : 'riders'}',
     ].join(', ');
     return AdminRow(
-      leading: AdminRowIcon(live ? Icons.two_wheeler_rounded : Icons.route_rounded, color: live ? StatusColors.success : null),
+      leading: AdminRowIcon(live ? Icons.two_wheeler_rounded : Icons.route_rounded, color: live ? AppTheme.accentText : AppTheme.muted),
       title: g['name']?.toString() ?? 'Ride',
       subtitle: '$dateStr, ${adminRoleLabel(g['userRole'])}',
       detail: facts,
-      status: live ? StatusLine(icon: Icons.sensors_rounded, text: 'Live now', color: StatusColors.success) : null,
+      status: live ? StatusTextChip(icon: Icons.sensors_rounded, text: 'Live now', color: AppTheme.accentText) : null,
+      divider: !last,
       onTap: () => _showGroup(g),
+    );
+  }
+}
+
+enum _ActionTone { brand, warn, danger }
+
+/// 48 px account action: solid teal for the positive action, outlined amber
+/// or red for hold, block and delete. Greyed out while locked.
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final _ActionTone tone;
+  final VoidCallback? onTap;
+
+  const _ActionButton({required this.icon, required this.label, required this.tone, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    final Color fg;
+    final Color bg;
+    final Color border;
+    switch (tone) {
+      case _ActionTone.brand:
+        fg = Colors.white;
+        bg = AppTheme.brand;
+        border = AppTheme.brand;
+      case _ActionTone.warn:
+        fg = AppTheme.warnText;
+        bg = AppTheme.card;
+        border = AppTheme.warnBorder;
+      case _ActionTone.danger:
+        fg = AppTheme.sos;
+        bg = AppTheme.card;
+        border = AppTheme.sos;
+    }
+    return Opacity(
+      opacity: enabled ? 1 : 0.45,
+      child: Material(
+        color: bg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: border, width: 2)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            height: 48,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 20, color: fg),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontSize: 14, fontWeight: FontWeight.w800)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -523,37 +580,42 @@ class _ReasonSheetState extends State<_ReasonSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bg = widget.destructive ? StatusColors.critical : StatusColors.warning;
-    final fg = widget.destructive ? StatusColors.onCritical : Colors.black;
+    final side = BorderSide(color: AppTheme.border, width: 2);
     return SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(widget.message, style: AppText.body.copyWith(color: AppTheme.textSecondary)),
-          const SizedBox(height: Space.s16),
+          Text(widget.message, style: AppText.body.copyWith(color: AppTheme.text2)),
+          const SizedBox(height: 16),
           TextField(
             controller: _ctrl,
             maxLines: 2,
             minLines: 1,
             textCapitalization: TextCapitalization.sentences,
             style: AppText.body,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Reason (optional)',
-              border: OutlineInputBorder(borderRadius: Radii.mdAll),
+              filled: true,
+              fillColor: AppTheme.card,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: side),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: side),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppTheme.accentText, width: 2)),
             ),
           ),
-          const SizedBox(height: Space.s16),
-          FilledButton(
+          const SizedBox(height: 16),
+          DsButton(
+            label: widget.confirmLabel,
+            tone: widget.destructive ? DsButtonTone.sos : DsButtonTone.warn,
             onPressed: () => Navigator.pop(context, _ctrl.text.trim()),
-            style: FilledButton.styleFrom(backgroundColor: bg, foregroundColor: fg, minimumSize: const Size.fromHeight(56)),
-            child: Text(widget.confirmLabel),
           ),
-          const SizedBox(height: Space.s8),
-          TextButton(
+          const SizedBox(height: 8),
+          DsButton(
+            label: 'Cancel',
+            tone: DsButtonTone.outline,
+            height: 48,
+            fontSize: 15,
             onPressed: () => Navigator.pop(context),
-            style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.textPrimary),
-            child: const Text('Cancel'),
           ),
         ],
       ),

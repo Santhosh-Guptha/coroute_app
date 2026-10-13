@@ -249,34 +249,40 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   Widget build(BuildContext context) {
     final myId = context.read<AuthService>().currentUserId;
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
+      backgroundColor: AppTheme.bg,
       appBar: AppBar(
+        backgroundColor: AppTheme.bg,
+        foregroundColor: AppTheme.text,
         title: Text(widget.trip.tripName, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           if (widget.adminView)
-            IconButton(tooltip: 'Share summary', icon: const Icon(Icons.ios_share_rounded), onPressed: _shareSummary)
+            IconButton(tooltip: 'Share summary', icon: Icon(Icons.ios_share_rounded, color: AppTheme.accentText), onPressed: _shareSummary)
           else
             IconButton(
               tooltip: 'Share ride',
               icon: _preparingCard
-                  ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan))
-                  : const Icon(Icons.ios_share_rounded),
+                  ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accentText))
+                  : Icon(Icons.ios_share_rounded, color: AppTheme.accentText),
               onPressed: _preparingCard ? null : _openShareCard,
             ),
           if (!widget.adminView)
             IconButton(
               tooltip: 'Share my route (GPX)',
               icon: _sharing
-                  ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan))
-                  : Icon(Icons.route_rounded, color: AppTheme.neonCyan),
+                  ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accentText))
+                  : Icon(Icons.route_outlined, color: AppTheme.accentText),
               onPressed: _sharing ? null : _shareGpx,
             ),
         ],
         bottom: TabBar(
           controller: _tabs,
-          indicatorColor: AppTheme.neonCyan,
-          labelColor: AppTheme.neonCyan,
-          unselectedLabelColor: AppTheme.textMuted,
+          indicatorColor: AppTheme.brand,
+          indicatorWeight: 3,
+          dividerColor: AppTheme.border,
+          labelColor: AppTheme.accentText,
+          unselectedLabelColor: AppTheme.muted,
+          labelStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 14, fontWeight: FontWeight.w800),
+          unselectedLabelStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 14, fontWeight: FontWeight.w700),
           tabs: const [Tab(text: 'Summary'), Tab(text: 'Route')],
         ),
       ),
@@ -331,39 +337,41 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
     final longest = me != null && me.longestStopMs > 0 ? me.longestStopMs : _longestFromEvents(myId);
     final avg = me?.avgMovingKmh ?? t.avgSpeedKmh;
     final hasTimes = me != null || moving > 0 || rest > 0;
+    final sketch = widget.adminView ? const <LatLng>[] : _sketchPoints(myId);
 
-    final keyStats = <Widget>[
-      _distanceMetric(me?.distanceM ?? t.totalDistanceKm * 1000, 'Distance', emphasis: true),
-      RideMetric(value: dur(me?.durationMs ?? (t.endTimeEpochMs - t.startTimeEpochMs)), label: 'Duration', emphasis: true),
-      RideMetric(value: hasTimes ? dur(moving) : '-', label: 'Riding time'),
-      RideMetric(value: hasTimes ? dur(rest) : '-', label: 'Rest time'),
-      RideMetric(value: '$stops', label: stops == 1 ? 'Stop' : 'Stops'),
-      RideMetric(value: avg > 0 ? '${avg.round()}' : '-', unit: avg > 0 ? 'km/h' : null, label: 'Average speed'),
-      RideMetric(value: longest != null && longest > 0 ? dur(longest) : (stops == 0 ? 'None' : '-'), label: 'Longest stop'),
+    final heroStats = <_HeroStat>[
+      _HeroStat(label: 'Distance', value: formatDistance(me?.distanceM ?? t.totalDistanceKm * 1000)),
+      _HeroStat(label: 'Duration', value: dur(me?.durationMs ?? (t.endTimeEpochMs - t.startTimeEpochMs))),
+      _HeroStat(label: 'Average speed', value: avg > 0 ? '${avg.round()} km/h' : '-'),
     ];
+    final cells = <Widget>[
+      _StatCard(label: 'Riding time', value: hasTimes ? dur(moving) : '-'),
+      _StatCard(label: 'Rest time', value: hasTimes ? dur(rest) : '-'),
+      _StatCard(label: stops == 1 ? 'Stop' : 'Stops', value: '$stops'),
+      _StatCard(label: 'Longest stop', value: longest != null && longest > 0 ? dur(longest) : (stops == 0 ? 'None' : '-')),
+    ];
+    final route = t.startLocationName.isNotEmpty || t.destinationName.isNotEmpty
+        ? '${t.startLocationName.isEmpty ? 'Start' : t.startLocationName} to ${t.destinationName.isEmpty ? 'destination' : t.destinationName}'
+        : null;
+    final others = r == null ? const <MemberReport>[] : [for (final m in r.members) if (m.userId != myId) m];
 
     final error = _error;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
+      padding: dsScreenPadding,
       children: [
         if (error != null) ...[
           RideAlert(tier: AlertTier.normal, title: 'Could not load the group report', message: error, actionLabel: 'Try again', onAction: _load),
-          const SizedBox(height: Space.s16),
+          const SizedBox(height: 18),
         ],
-        Text(dateFmt.format(DateTime.fromMillisecondsSinceEpoch(t.startTimeEpochMs)), style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
-        if (t.startLocationName.isNotEmpty || t.destinationName.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: Space.s4),
-            child: Text(
-              '${t.startLocationName.isEmpty ? 'Start' : t.startLocationName} to ${t.destinationName.isEmpty ? 'destination' : t.destinationName}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.title,
-            ),
-          ),
-        const SizedBox(height: Space.s16),
+        if (route != null)
+          Text(route, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.headline.copyWith(fontSize: 20)),
+        Padding(
+          padding: EdgeInsets.only(top: route == null ? 0 : 2),
+          child: Text(dateFmt.format(DateTime.fromMillisecondsSinceEpoch(t.startTimeEpochMs)), style: AppText.label),
+        ),
+        const SizedBox(height: 18),
         if (widget.adminView)
-          _Panel(
+          DsCard(
             child: RouteSummary(
               distanceKm: (r?.distanceM ?? t.totalDistanceKm * 1000) / 1000,
               duration: Duration(milliseconds: r?.durationMs ?? (t.endTimeEpochMs - t.startTimeEpochMs)),
@@ -372,59 +380,113 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             ),
           )
         else ...[
-          Semantics(header: true, child: Text('Your ride', style: AppText.label)),
-          const SizedBox(height: Space.s8),
-          _MetricGrid(children: keyStats),
+          const Semantics(header: true, child: DsSectionHeader('Your ride')),
+          const SizedBox(height: 10),
+          DsHeroCard(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (sketch.length >= 2) ...[
+                  AspectRatio(
+                    aspectRatio: 350 / 110,
+                    child: CustomPaint(
+                      painter: RouteSketchPainter(
+                        points: sketch,
+                        lineColor: Colors.white.withValues(alpha: 0.9),
+                        startColor: Colors.white,
+                        endColor: Colors.white,
+                        ringColor: AppTheme.brand,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var i = 0; i < heroStats.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 10),
+                      Expanded(child: heroStats[i]),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          _StatGrid(children: cells),
           if (t.isEstimate && r == null && !_loading)
             Padding(
               padding: const EdgeInsets.only(top: Space.s12),
               child: Text('These numbers are from your phone. The exact report is ready about a minute after the trip ends.', style: AppText.caption),
             ),
         ],
-        const SizedBox(height: Space.s16),
+        if (!widget.adminView && r != null && others.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          const Semantics(header: true, child: DsSectionHeader('Rode with')),
+          const SizedBox(height: 10),
+          _RodeWithCard(members: others, colors: _colors, allArrived: r.arrived >= r.memberCount, arrived: r.arrived, total: r.memberCount),
+        ],
+        const SizedBox(height: 20),
         _moreDetails(r, me, myId),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: DsButton(
+                label: 'Share',
+                icon: Icons.ios_share_rounded,
+                tone: DsButtonTone.outline,
+                fontSize: 15,
+                onPressed: widget.adminView ? _shareSummary : (_preparingCard ? null : _openShareCard),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: DsButton(
+                label: 'Done',
+                fontSize: 15,
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+            ),
+          ],
+        ),
       ],
     );
-  }
-
-  /// "186 km" as value 186 and unit km.
-  static RideMetric _distanceMetric(double meters, String label, {bool emphasis = false}) {
-    final text = formatDistance(meters);
-    final cut = text.lastIndexOf(' ');
-    if (cut <= 0) return RideMetric(value: text, label: label, emphasis: emphasis);
-    return RideMetric(value: text.substring(0, cut), unit: text.substring(cut + 1), label: label, emphasis: emphasis);
   }
 
   Widget _moreDetails(TripReportModel? r, MemberReport? me, String? myId) {
     final t = widget.trip;
     String dur(int ms) => formatDuration(Duration(milliseconds: ms));
     final extra = <Widget>[
-      RideMetric(value: '${(me?.maxKmh ?? t.topSpeedKmh).round()}', unit: 'km/h', label: 'Top speed'),
+      _StatCard(value: '${(me?.maxKmh ?? t.topSpeedKmh).round()} km/h', label: 'Top speed'),
       if ((r?.speedLimitKmh ?? 0) > 0)
-        RideMetric(
+        _StatCard(
           value: (me?.overspeedCount ?? 0) == 0 ? 'Never' : '${me!.overspeedCount} times',
           label: 'Over ${r!.speedLimitKmh} km/h${(me?.overspeedMs ?? 0) > 0 ? ', ${dur(me!.overspeedMs)}' : ''}',
+          valueColor: (me?.overspeedCount ?? 0) == 0 ? AppTheme.accentText : AppTheme.warnText,
         ),
-      if (t.riderCount > 1 || (r?.memberCount ?? 0) > 1) RideMetric(value: '${r?.memberCount ?? t.riderCount}', label: 'Riders'),
+      if (t.riderCount > 1 || (r?.memberCount ?? 0) > 1) _StatCard(value: '${r?.memberCount ?? t.riderCount}', label: 'Riders'),
     ];
     final hardStops = _stats?.hardStops ?? 0;
     final children = <Widget>[
       if (!widget.adminView) ...[
-        _MetricGrid(children: extra),
+        _StatGrid(children: extra),
         // Hard braking count from this phone's sensors (3.16, item 14): rider only, never shared.
         if (hardStops > 0)
           Padding(
             padding: const EdgeInsets.only(top: Space.s12),
             child: Row(
               children: [
-                Icon(Icons.speed_rounded, size: 20, color: AppTheme.textSecondary),
+                Icon(Icons.speed_rounded, size: 20, color: AppTheme.accentText),
                 const SizedBox(width: Space.s8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(hardStopsText(hardStops), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                      Text(hardStopsText(hardStops), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
                       Text(hardStopsHint, style: AppText.caption),
                     ],
                   ),
@@ -436,7 +498,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
           Padding(
             padding: const EdgeInsets.only(top: Space.s12),
             child: Text('Your phone did not upload a route for this trip, so distance and riding time are estimates.',
-                style: AppText.caption.copyWith(color: StatusColors.warning)),
+                style: AppText.caption.copyWith(color: AppTheme.warnText)),
           ),
         const SizedBox(height: Space.s16),
       ],
@@ -444,16 +506,17 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
       else if (!_loading && _error == null)
         Text('The group report is being prepared. It is ready about a minute after the trip ends.', style: AppText.caption),
     ];
-    return _Panel(
+    return DsCard(
       padding: EdgeInsets.zero,
       child: ExpansionTile(
         shape: const Border(),
         collapsedShape: const Border(),
-        title: Text('More details', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        title: Text('More details', style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
         subtitle: Text(widget.adminView ? 'The group and every rider' : 'Top speed, the group and every rider', style: AppText.caption),
-        iconColor: AppTheme.neonCyan,
-        collapsedIconColor: AppTheme.textSecondary,
-        childrenPadding: const EdgeInsets.fromLTRB(Space.s12, 0, Space.s12, Space.s16),
+        iconColor: AppTheme.accentText,
+        collapsedIconColor: AppTheme.muted,
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
         children: children,
       ),
@@ -469,15 +532,16 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
       if (r.sos > 0) '${r.sos} SOS',
     ].join(', ');
     return [
-      Semantics(header: true, child: Text('The group', style: AppText.label)),
+      Semantics(header: true, child: Text('The group', style: AppText.overline)),
       const SizedBox(height: Space.s4),
       Text(summary, style: AppText.body),
       const SizedBox(height: Space.s8),
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-          headingTextStyle: AppText.label,
+          headingTextStyle: AppText.label.copyWith(fontWeight: FontWeight.w800),
           dataTextStyle: AppText.body.copyWith(fontSize: 14),
+          dividerThickness: 1,
           columnSpacing: Space.s16,
           horizontalMargin: Space.s8,
           columns: const [
@@ -511,10 +575,10 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
                 DataCell(Text(m.offlineMs > 0 ? dur(m.offlineMs) : '-')),
                 DataCell(Text(
                   m.overspeedCount > 0 ? '${m.overspeedCount} times, ${dur(m.overspeedMs)}, top ${m.overspeedMaxKmh.round()}' : '-',
-                  style: m.overspeedCount > 0 ? TextStyle(color: StatusColors.warning) : null,
+                  style: m.overspeedCount > 0 ? TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w700) : null,
                 )),
                 DataCell(Text(m.reachedDestination ? 'Yes' : 'No',
-                    style: TextStyle(color: m.reachedDestination ? StatusColors.success : AppTheme.textMuted))),
+                    style: TextStyle(color: m.reachedDestination ? AppTheme.accentText : AppTheme.muted, fontWeight: FontWeight.w700))),
               ]),
           ],
         ),
@@ -525,7 +589,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
           '${r.speedLimitKmh > 0 ? ' Over limit: times above the group limit of ${r.speedLimitKmh} km/h, total time and top speed.' : ''}',
           style: AppText.caption),
       const SizedBox(height: Space.s16),
-      Semantics(header: true, child: Text('Every rider: where they started, waited and finished', style: AppText.label)),
+      Semantics(header: true, child: Text('Every rider: where they started, waited and finished', style: AppText.overline)),
       const SizedBox(height: Space.s8),
       for (final m in r.members) _riderCard(m, myId),
     ];
@@ -533,7 +597,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
 
   /// One rider's day: start, every wait (when, how long, why, where), finish.
   Widget _riderCard(MemberReport m, String? myId) {
-    final c = _colors[m.userId] ?? AppTheme.neonCyan;
+    final c = _colors[m.userId] ?? AppTheme.accentText;
     final hm = DateFormat('HH:mm');
     String dur(int ms) => formatDuration(Duration(milliseconds: ms));
     String at(int ms) => ms > 0 ? hm.format(DateTime.fromMillisecondsSinceEpoch(ms)) : '';
@@ -545,8 +609,8 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 16, color: iconColor)),
           const SizedBox(width: Space.s8),
-          Expanded(child: Text(text, style: AppText.caption.copyWith(color: onTap == null ? AppTheme.textSecondary : AppTheme.textPrimary))),
-          if (onTap != null) Icon(Icons.map_rounded, size: 16, color: AppTheme.neonCyan),
+          Expanded(child: Text(text, style: AppText.caption.copyWith(color: onTap == null ? AppTheme.text2 : AppTheme.text))),
+          if (onTap != null) Icon(Icons.map_outlined, size: 16, color: AppTheme.accentText),
         ]),
       );
       if (onTap == null) return line;
@@ -562,28 +626,25 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
     }
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: Space.s8),
-      child: _Panel(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: DsCard(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             RiderAvatar(name: m.name, color: c, size: 32),
             const SizedBox(width: Space.s8),
             Expanded(
               child: Text(m.userId == myId ? '${m.name} (you)' : m.name,
-                  maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
             ),
-            if (m.reachedDestination) ...[
-              Icon(Icons.sports_score_rounded, size: 16, color: StatusColors.success),
-              const SizedBox(width: Space.s4),
-              Text('Arrived', style: AppText.caption.copyWith(color: StatusColors.success)),
-            ],
+            if (m.reachedDestination) const DsChip('Arrived'),
           ]),
           const SizedBox(height: Space.s8),
           Text(
             m.trackAvailable
                 ? '${formatDistance(m.distanceM)} · riding ${dur(m.movingMs)} · waited ${waits.length} ${waits.length == 1 ? 'time' : 'times'}, ${dur(m.restMs)}'
                 : 'No route was uploaded from this phone. Waits below come from the live updates.',
-            style: AppText.caption.copyWith(color: m.trackAvailable ? AppTheme.textPrimary : StatusColors.warning),
+            style: AppText.caption.copyWith(color: m.trackAvailable ? AppTheme.text : AppTheme.warnText),
           ),
           const SizedBox(height: Space.s4),
           row(Icons.play_circle_outline_rounded, c, ['Started ${at(started)}', if (m.startPlace.isNotEmpty) m.startPlace].join(' · ')),
@@ -600,7 +661,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             ),
           row(
             m.reachedDestination ? Icons.sports_score_rounded : Icons.flag_rounded,
-            m.reachedDestination ? StatusColors.success : c,
+            m.reachedDestination ? AppTheme.accentText : c,
             [
               m.reachedDestination ? 'Reached the destination' : 'Finished',
               if (m.lastFixAt > 0) at(m.lastFixAt),
@@ -613,36 +674,162 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   }
 }
 
-/// The one card surface on this screen: flat, medium radius, hairline border.
-class _Panel extends StatelessWidget {
-  final Widget child;
-  final EdgeInsetsGeometry padding;
-  const _Panel({required this.child, this.padding = const EdgeInsets.all(Space.s12)});
+/// One stat on the teal hero card: small pale label, 24/800 white value.
+class _HeroStat extends StatelessWidget {
+  final String label;
+  final String value;
+  const _HeroStat({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: padding,
-      decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.subtleBorder)),
-      child: child,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: DsHeroCard.overline, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1, height: 1.3),
+        ),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            maxLines: 1,
+            softWrap: false,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              height: 1.15,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
-/// RideMetric tiles, two per row on a phone and four on a wide screen.
-class _MetricGrid extends StatelessWidget {
+/// A stat card (card fill, 2 px border, 18 px radius): label over a 22/800 value.
+class _StatCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? valueColor;
+  const _StatCard({required this.label, required this.value, this.valueColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return DsCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              softWrap: false,
+              style: AppText.title.copyWith(fontSize: 22, color: valueColor, fontFeatures: const [FontFeature.tabularFigures()]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Stat cards, two per row on a phone and four on a wide screen.
+class _StatGrid extends StatelessWidget {
   final List<Widget> children;
-  const _MetricGrid({required this.children});
+  const _StatGrid({required this.children});
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
       final cols = c.maxWidth > 600 ? 4 : 2;
-      final w = (c.maxWidth - (cols - 1) * Space.s8) / cols;
-      return Wrap(spacing: Space.s8, runSpacing: Space.s8, children: [
-        for (final m in children) SizedBox(width: w, child: _Panel(child: m)),
+      final w = (c.maxWidth - (cols - 1) * 10) / cols;
+      return Wrap(spacing: 10, runSpacing: 10, children: [
+        for (final m in children) SizedBox(width: w, child: m),
       ]);
     });
+  }
+}
+
+/// "Rode with": the other riders' avatars (overlapping, in their map
+/// colours), their first names and whether everyone reached the destination.
+class _RodeWithCard extends StatelessWidget {
+  final List<MemberReport> members;
+  final Map<String, Color> colors;
+  final bool allArrived;
+  final int arrived;
+  final int total;
+
+  const _RodeWithCard({required this.members, required this.colors, required this.allArrived, required this.arrived, required this.total});
+
+  static const int maxAvatars = 4;
+
+  /// "Sandeep & Arjun", "Sandeep, Arjun & Kiran", "Sandeep, Arjun +3" (pure, for tests).
+  static String namesLine(List<String> names) {
+    final n = [for (final x in names) if (x.trim().isNotEmpty) x.trim().split(' ').first];
+    if (n.isEmpty) return '';
+    if (n.length == 1) return n.single;
+    if (n.length == 2) return '${n[0]} & ${n[1]}';
+    if (n.length == 3) return '${n[0]}, ${n[1]} & ${n[2]}';
+    return '${n[0]}, ${n[1]} +${n.length - 2}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = members.take(maxAvatars).toList();
+    final more = members.length - shown.length;
+    final names = namesLine([for (final m in members) m.name]);
+    final line = allArrived ? 'Everyone arrived safely' : '$arrived of $total reached the destination';
+    return DsCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Row(
+        children: [
+          SizedBox(
+            height: 40,
+            width: 40.0 + (shown.length - 1) * 30.0 + (more > 0 ? 30.0 : 0.0),
+            child: Stack(
+              children: [
+                for (var i = 0; i < shown.length; i++)
+                  Positioned(
+                    left: i * 30.0,
+                    child: DsAvatar(initialsOf(shown[i].name), size: 40, ringColor: colors[shown[i].userId]),
+                  ),
+                if (more > 0)
+                  Positioned(
+                    left: shown.length * 30.0,
+                    child: DsAvatar('+$more', size: 40, ringColor: AppTheme.border2),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(names.isEmpty ? '${members.length} riders' : names, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 1),
+                Text(line, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -762,7 +949,7 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
       builder: (_) => SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           for (final l in lines)
-            Padding(padding: const EdgeInsets.only(bottom: Space.s8), child: Text(l, style: AppText.body.copyWith(color: AppTheme.textSecondary))),
+            Padding(padding: const EdgeInsets.only(bottom: Space.s8), child: Text(l, style: AppText.body.copyWith(color: AppTheme.text2))),
         ]),
       ),
     );
@@ -825,16 +1012,16 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
                     setSheet(() {});
                   },
                   showCheckmark: true,
-                  checkmarkColor: AppTheme.textPrimary,
-                  selectedColor: (widget.colors[t.userId] ?? AppTheme.neonCyan).withOpacity(0.18),
-                  backgroundColor: AppTheme.slateCard,
-                  labelStyle: AppText.label.copyWith(color: AppTheme.textPrimary),
-                  side: BorderSide(color: AppTheme.subtleBorder),
-                  shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
+                  checkmarkColor: AppTheme.text,
+                  selectedColor: (widget.colors[t.userId] ?? AppTheme.accentText).withValues(alpha: 0.18),
+                  backgroundColor: AppTheme.card,
+                  labelStyle: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w700),
+                  side: BorderSide(color: AppTheme.border, width: 2),
+                  shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
                 ),
             ]),
             const SizedBox(height: Space.s16),
-            FilledButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Done')),
+            DsButton(label: 'Done', onPressed: () => Navigator.of(ctx).pop()),
           ]),
         ),
       ),
@@ -939,11 +1126,11 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
   Widget _playButton() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(Space.s12, Space.s8, Space.s12, Space.s4),
-      child: FilledButton.icon(
+      child: DsButton(
+        label: 'Play the ride',
+        icon: Icons.play_arrow_rounded,
+        height: 52,
         onPressed: _tracks.isEmpty ? null : () => _openReplay(),
-        icon: const Icon(Icons.play_arrow_rounded),
-        label: const Text('Play the ride', maxLines: 1, overflow: TextOverflow.ellipsis),
-        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
       ),
     );
   }
@@ -960,7 +1147,7 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
           SizedBox(
             width: side,
             child: ColoredBox(
-              color: AppTheme.darkCanvas,
+              color: AppTheme.bg,
               child: SafeArea(
                 left: false,
                 top: false,
@@ -972,10 +1159,10 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
       }
       return Column(children: [
         Expanded(flex: 5, child: _map()),
-        ColoredBox(color: AppTheme.darkCanvas, child: _playButton()),
+        ColoredBox(color: AppTheme.bg, child: _playButton()),
         Expanded(
           flex: 4,
-          child: ColoredBox(color: AppTheme.darkCanvas, child: SafeArea(top: false, child: _timeline())),
+          child: ColoredBox(color: AppTheme.bg, child: SafeArea(top: false, child: _timeline())),
         ),
       ]);
     });
@@ -998,15 +1185,17 @@ class _HighlightCard extends StatelessWidget {
     final detail = TimelineText.detail(event, nowMs: now);
     final time = DateFormat('HH:mm').format(DateTime.fromMillisecondsSinceEpoch(event.startedAt));
     return Material(
-      color: AppTheme.slateCard,
-      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
+      color: AppTheme.card,
+      elevation: 6,
+      shadowColor: AppTheme.shadow,
+      shape: RoundedRectangleBorder(borderRadius: Radii.lgAll, side: BorderSide(color: AppTheme.border, width: 2)),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Space.s12, Space.s8, 0, Space.s8),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Padding(
             padding: const EdgeInsets.only(top: Space.s8),
             child: event.isGroupEntry
-                ? Icon(Icons.groups_rounded, size: 28, color: AppTheme.textSecondary)
+                ? Icon(Icons.groups_outlined, size: 28, color: AppTheme.accentText)
                 : RiderAvatar(name: event.userName, color: color, size: 28),
           ),
           const SizedBox(width: Space.s8),
@@ -1014,16 +1203,16 @@ class _HighlightCard extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.only(top: Space.s4),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(TimelineText.title(event, nowMs: now), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-                Text(detail.isEmpty ? time : '$time · $detail', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
+                Text(TimelineText.title(event, nowMs: now), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                Text(detail.isEmpty ? time : '$time · $detail', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
                 if (!event.hasPlace)
                   Text('Shows where riders were at that time.', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
               ]),
             ),
           ),
           if (canReplay)
-            IconButton(tooltip: 'Play from here', onPressed: onReplay, icon: Icon(Icons.slow_motion_video_rounded, color: AppTheme.neonCyan)),
-          IconButton(tooltip: 'Clear', onPressed: onClose, icon: Icon(Icons.close_rounded, color: AppTheme.textSecondary)),
+            IconButton(tooltip: 'Play from here', onPressed: onReplay, icon: Icon(Icons.slow_motion_video_rounded, color: AppTheme.accentText)),
+          IconButton(tooltip: 'Clear', onPressed: onClose, icon: Icon(Icons.close_rounded, color: AppTheme.text2)),
         ]),
       ),
     );

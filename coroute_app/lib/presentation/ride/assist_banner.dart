@@ -116,16 +116,16 @@ class FarByRoadChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color fg = StatusColors.onCritical;
+    const Color fg = Colors.white;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: 2),
-      decoration: BoxDecoration(border: Border.all(color: fg), borderRadius: Radii.smAll),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(7)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.alt_route_rounded, size: 14, color: fg),
+          const Icon(Icons.alt_route_rounded, size: 14, color: fg),
           const SizedBox(width: Space.s4),
-          Flexible(child: Text(AssistTexts.farLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: fg, fontWeight: FontWeight.w700))),
+          Flexible(child: Text(AssistTexts.farLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: fg, fontWeight: FontWeight.w800, fontSize: 10, letterSpacing: 1))),
         ],
       ),
     );
@@ -202,8 +202,8 @@ class AssistBanner extends StatelessWidget {
     final stage = assistStageOf(a, near: near);
     final compact = MediaQuery.sizeOf(context).height < 480;
     final updated = a.lastUpdateAt > 0 ? Relation.lastUpdate(a.lastUpdateAt, now) : null;
-    final Color bg = StatusColors.critical;
-    final Color fg = StatusColors.onCritical;
+    final Color bg = AppTheme.sos;
+    const Color fg = Colors.white;
     final open = onOpen ?? () => showAssistSheet(context, incidentId: a.incidentId);
 
     String title;
@@ -239,15 +239,20 @@ class AssistBanner extends StatelessWidget {
 
     final ButtonStyle outlined = OutlinedButton.styleFrom(
       foregroundColor: fg,
-      side: BorderSide(color: fg, width: 1.5),
+      backgroundColor: Colors.transparent,
+      side: BorderSide(color: Colors.white.withValues(alpha: 0.6), width: 2),
       minimumSize: const Size.fromHeight(48),
       padding: const EdgeInsets.symmetric(horizontal: Space.s8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 15, fontWeight: FontWeight.w800),
     );
     final ButtonStyle primary = FilledButton.styleFrom(
       backgroundColor: fg,
       foregroundColor: bg,
       minimumSize: const Size.fromHeight(56),
       padding: const EdgeInsets.symmetric(horizontal: Space.s8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 16, fontWeight: FontWeight.w800),
     );
     Widget filled(IconData icon, String label, VoidCallback onTap, {ButtonStyle? style}) => FilledButton.icon(
           onPressed: onTap,
@@ -268,37 +273,31 @@ class AssistBanner extends StatelessWidget {
       case AssistStage.request:
       case AssistStage.closed:
         actions = [
-          filled(Icons.volunteer_activism_rounded, L10n.t('assist.help'), () => acceptAssist(context, a)),
+          filled(Icons.volunteer_activism_outlined, L10n.t('assist.help'), () => acceptAssist(context, a)),
           const SizedBox(height: Space.s8),
           pair(
-            outline(Icons.navigation_rounded, L10n.t('incident.navigate'), () => navigateToAssist(context, a)),
+            outline(Icons.navigation_outlined, L10n.t('incident.navigate'), () => navigateToAssist(context, a)),
             outline(Icons.block_rounded, L10n.t('assist.cant'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.decline)),
           ),
         ];
         break;
       case AssistStage.responding:
         actions = [
-          filled(Icons.navigation_rounded, L10n.t('incident.navigate'), () => navigateToAssist(context, a)),
+          filled(Icons.navigation_outlined, L10n.t('incident.navigate'), () => navigateToAssist(context, a)),
           const SizedBox(height: Space.s8),
           pair(
             outline(Icons.do_not_disturb_on_rounded, L10n.t('assist.unable'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.unable)),
-            outline(Icons.flag_rounded, L10n.t('assist.arrived'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived)),
+            outline(Icons.flag_outlined, L10n.t('assist.arrived'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived)),
           ),
         ];
         break;
       case AssistStage.arrivalCheck:
         actions = [
           filled(
-            Icons.check_circle_rounded,
+            Icons.check_circle_outline_rounded,
             L10n.t('assist.found'),
             () => sendAssistAnswer(context, a.incidentId, AssistAnswer.arrived),
-            style: FilledButton.styleFrom(
-              backgroundColor: StatusColors.success,
-              foregroundColor: fg,
-              side: BorderSide(color: fg, width: 1.5),
-              minimumSize: const Size.fromHeight(56),
-              padding: const EdgeInsets.symmetric(horizontal: Space.s8),
-            ),
+            style: primary,
           ),
           const SizedBox(height: Space.s8),
           outline(Icons.location_searching_rounded, L10n.t('assist.notFound'), () => sendAssistAnswer(context, a.incidentId, AssistAnswer.notFound)),
@@ -307,7 +306,7 @@ class AssistBanner extends StatelessWidget {
       case AssistStage.onScene:
         actions = [
           pair(
-            outline(Icons.local_hospital_rounded, L10n.t('assist.call112.short'), () => dialNumber(context, '112')),
+            outline(Icons.local_hospital_outlined, L10n.t('assist.call112.short'), () => dialNumber(context, '112')),
             outline(Icons.open_in_full_rounded, L10n.t('assist.details'), open),
           ),
         ];
@@ -327,14 +326,14 @@ class AssistBanner extends StatelessWidget {
       label: [title, if (a.farByRoad) AssistTexts.farLabel, ...lines].join('. '),
       child: Material(
         color: bg,
-        elevation: 2,
+        elevation: 4,
         shadowColor: AppTheme.shadow,
-        shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+        shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: open,
           child: Padding(
-            padding: const EdgeInsets.all(Space.s12),
+            padding: const EdgeInsets.all(14),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -343,14 +342,14 @@ class AssistBanner extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.emergency_share_rounded, color: fg, size: 28),
+                      const Icon(Icons.emergency_share_outlined, color: fg, size: 26),
                       const SizedBox(width: Space.s12),
                       Expanded(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg, fontWeight: FontWeight.w800)),
+                            Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg)),
                             if (a.farByRoad && stage != AssistStage.onScene)
                               const Padding(padding: EdgeInsets.only(top: 2, bottom: 2), child: FarByRoadChip()),
                             for (var i = 0; i < lines.length; i++)
@@ -360,7 +359,7 @@ class AssistBanner extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: (i == 1 && stage == AssistStage.request)
                                     ? AppText.label.copyWith(color: fg, fontWeight: FontWeight.w700)
-                                    : AppText.label.copyWith(color: fg, fontWeight: FontWeight.w400),
+                                    : AppText.label.copyWith(color: sosPaleRose),
                               ),
                           ],
                         ),
@@ -381,14 +380,14 @@ class AssistBanner extends StatelessWidget {
                       liveRegion: true,
                       child: Row(
                         children: [
-                          Icon(p.state == OutboxState.failed ? Icons.error_outline_rounded : Icons.schedule_rounded, size: 16, color: fg),
+                          Icon(p.state == OutboxState.failed ? Icons.error_outline_rounded : Icons.schedule_rounded, size: 16, color: sosPaleRose),
                           const SizedBox(width: Space.s4),
                           Expanded(
                             child: Text(
                               QueuedLine.textFor(failed: p.state == OutboxState.failed, sending: service.isOnline, what: 'Your answer'),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: AppText.caption.copyWith(color: fg),
+                              style: AppText.caption.copyWith(color: sosPaleRose),
                             ),
                           ),
                         ],

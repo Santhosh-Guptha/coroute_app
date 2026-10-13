@@ -75,7 +75,7 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
+      backgroundColor: AppTheme.bg,
       body: SafeArea(
         child: Column(
           children: [
@@ -86,14 +86,23 @@ class _SplashScreenState extends State<SplashScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      ClipRRect(
-                        borderRadius: Radii.lgAll,
-                        child: Image.asset(
-                          'assets/branding/coroute_icon.png',
-                          width: 88,
-                          height: 88,
-                          cacheWidth: 264,
-                          filterQuality: FilterQuality.medium,
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: AppTheme.card,
+                          borderRadius: BorderRadius.circular(Radii.xl + 4),
+                          border: Border.all(color: AppTheme.border, width: 2),
+                          boxShadow: dsFloatingShadow(),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: Radii.xlAll,
+                          child: Image.asset(
+                            'assets/branding/coroute_icon.png',
+                            width: 88,
+                            height: 88,
+                            cacheWidth: 264,
+                            filterQuality: FilterQuality.medium,
+                          ),
                         ),
                       ),
                       const SizedBox(height: Space.s24),
@@ -106,7 +115,7 @@ class _SplashScreenState extends State<SplashScreen> {
                       Text(
                         AppConstants.appTagline,
                         textAlign: TextAlign.center,
-                        style: AppText.label,
+                        style: AppText.label.copyWith(fontWeight: FontWeight.w700),
                       ),
                     ],
                   ),

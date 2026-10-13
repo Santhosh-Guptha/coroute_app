@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/ui/ui_tokens.dart';
+import '../../../core/ui/ui.dart';
 import '../../../data/services/intercom_service.dart';
 import '../../../data/services/settings_service.dart';
 import '../../ride/fuel_sheet.dart';
 import '../../ride/guardian_sheet.dart';
 
-/// Glove-friendly modal displaying an oversized 2x3 grid of in-flight toggle cards.
+/// Glove-friendly sheet listing the six in-flight toggles as oversized
+/// switch rows on one card.
 ///
 /// Designed for riders wearing thick motorcycle gloves:
-/// - Oversized touch targets (>64dp tall).
+/// - Oversized touch targets (58 dp rows; the whole row toggles).
 /// - 6 critical in-flight settings:
 ///   1. Voice Alerts
 ///   2. Screen Always On
@@ -17,8 +18,7 @@ import '../../ride/guardian_sheet.dart';
 ///   4. Intercom VOX
 ///   5. Battery Conserve
 ///   6. Ride Guardian
-/// - High-contrast glowing borders when active.
-/// - Clear ON / OFF badge indicators.
+/// - Teal switch when on, grey when off.
 /// - ZERO emojis, ASCII hyphens only.
 class GloveQuickSettingsModal extends StatelessWidget {
   final SettingsService? settingsService;
@@ -59,24 +59,23 @@ class GloveQuickSettingsModal extends StatelessWidget {
     VoidCallback? onOpenGuardian,
     VoidCallback? onOpenFuel,
   }) {
-    return showDialog<void>(
+    return showModalBottomSheet<void>(
       context: context,
-      barrierColor: Colors.black.withOpacity(0.75),
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s24),
-        child: GloveQuickSettingsModal(
-          settingsService: settingsService,
-          intercomService: intercomService,
-          keepScreenOn: keepScreenOn,
-          autoFollow: autoFollow,
-          onToggleKeepScreenOn: onToggleKeepScreenOn,
-          onToggleAutoFollow: onToggleAutoFollow,
-          onSettingToggled: onSettingToggled,
-          groupId: groupId,
-          onOpenGuardian: onOpenGuardian,
-          onOpenFuel: onOpenFuel,
-        ),
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: const Color(0xFF15232E).withOpacity(0.5),
+      builder: (ctx) => GloveQuickSettingsModal(
+        settingsService: settingsService,
+        intercomService: intercomService,
+        keepScreenOn: keepScreenOn,
+        autoFollow: autoFollow,
+        onToggleKeepScreenOn: onToggleKeepScreenOn,
+        onToggleAutoFollow: onToggleAutoFollow,
+        onSettingToggled: onSettingToggled,
+        groupId: groupId,
+        onOpenGuardian: onOpenGuardian,
+        onOpenFuel: onOpenFuel,
       ),
     );
   }
@@ -96,7 +95,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
         key: const Key('quick_setting_voice_alerts'),
         label: 'Voice Alerts',
         subtitle: 'Announce all alerts',
-        icon: Icons.campaign_rounded,
+        icon: Icons.campaign_outlined,
         isActive: voiceAlertsOn,
         onToggle: () {
           final next = !voiceAlertsOn;
@@ -108,7 +107,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
         key: const Key('quick_setting_screen_always_on'),
         label: 'Screen Always On',
         subtitle: 'Prevent sleep',
-        icon: Icons.light_mode_rounded,
+        icon: Icons.light_mode_outlined,
         isActive: keepScreenOn,
         onToggle: () {
           onToggleKeepScreenOn();
@@ -130,7 +129,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
         key: const Key('quick_setting_intercom_vox'),
         label: 'Intercom VOX',
         subtitle: 'Hands-free voice',
-        icon: Icons.record_voice_over_rounded,
+        icon: Icons.record_voice_over_outlined,
         isActive: intercomVoxOn,
         onToggle: () {
           final next = !intercomVoxOn;
@@ -147,7 +146,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
         key: const Key('quick_setting_battery_conserve'),
         label: 'Battery Conserve',
         subtitle: 'Low data & battery',
-        icon: Icons.battery_saver_rounded,
+        icon: Icons.battery_saver_outlined,
         isActive: batteryConserveOn,
         onToggle: () {
           final next = !batteryConserveOn;
@@ -159,7 +158,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
         key: const Key('quick_setting_ride_guardian'),
         label: 'Ride Guardian',
         subtitle: 'Crash detection active',
-        icon: Icons.shield_rounded,
+        icon: Icons.verified_user_outlined,
         isActive: rideGuardianOn,
         onToggle: () {
           final next = !rideGuardianOn;
@@ -169,172 +168,139 @@ class GloveQuickSettingsModal extends StatelessWidget {
       ),
     ];
 
+    final media = MediaQuery.of(context);
+    final bottom = media.padding.bottom;
+
     return Container(
-      constraints: const BoxConstraints(maxWidth: 440),
+      constraints: BoxConstraints(maxHeight: media.size.height * 0.9),
       decoration: BoxDecoration(
-        color: AppTheme.obsidianVoid,
-        borderRadius: Radii.lgAll,
-        border: Border.all(color: AppTheme.glassBorder, width: 2.0),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.shadow,
-            blurRadius: 16.0,
-            offset: const Offset(0, 6),
-          ),
+        color: AppTheme.card,
+        borderRadius: Radii.sheetTop,
+        boxShadow: const [
+          BoxShadow(color: Color(0x40000000), blurRadius: 40, offset: Offset(0, -12)),
         ],
       ),
-      padding: const EdgeInsets.all(Space.s16),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 28 + bottom),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Center(
+              child: Container(
+                width: 44,
+                height: 5,
+                decoration: BoxDecoration(color: AppTheme.border2, borderRadius: BorderRadius.circular(3)),
+              ),
+            ),
+            const SizedBox(height: 18),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(16)),
+                  child: Icon(Icons.tune_rounded, color: AppTheme.accentText, size: 28),
+                ),
+                const SizedBox(width: 14),
                 Expanded(
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.tune_rounded, color: AppTheme.neonCyan, size: 28),
-                      const SizedBox(width: Space.s8),
-                      Expanded(
-                        child: Text(
-                          'Glove Quick Settings',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                      Text('Quick settings', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.headline),
+                      const SizedBox(height: 2),
+                      Text(
+                        'In-flight toggles sized for gloves',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.label,
                       ),
                     ],
                   ),
                 ),
-                IconButton(
+                const SizedBox(width: 8),
+                DsRoundButton(
                   key: const Key('quick_settings_close'),
-                  tooltip: 'Close settings',
-                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                  icon: Icon(Icons.close_rounded, color: AppTheme.textSecondary, size: 26),
-                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icons.close_rounded,
+                  label: 'Close settings',
+                  onTap: () => Navigator.of(context).pop(),
                 ),
               ],
             ),
-          const SizedBox(height: Space.s4),
-          Text(
-            'High-contrast in-flight toggles for gloved riding',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: Space.s16),
-          // 2x3 Grid of oversized toggle cards
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: Space.s12,
-            crossAxisSpacing: Space.s12,
-            childAspectRatio: 1.45,
-            children: [
-              for (final card in cards)
-                _GloveSettingCard(
-                  key: card.key,
-                  label: card.label,
-                  subtitle: card.subtitle,
-                  icon: card.icon,
-                  isActive: card.isActive,
-                  onToggle: card.onToggle,
-                ),
-            ],
-          ),
-          const SizedBox(height: Space.s16),
-          // In-flight Quick Actions (Ride Guardian & Fuel)
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  key: const Key('quick_action_guardian_share'),
-                  style: OutlinedButton.styleFrom(
-                    backgroundColor: AppTheme.neonCyan.withOpacity(0.08),
-                    foregroundColor: AppTheme.neonCyan,
-                    side: BorderSide(color: AppTheme.neonCyan, width: 1.5),
-                    minimumSize: const Size(0, 52),
-                    shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
-                  ),
-                  icon: const Icon(Icons.shield_rounded, size: 20),
-                  label: const Text(
-                    'Guardian Link',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    if (onOpenGuardian != null) {
-                      onOpenGuardian!();
-                    } else if (groupId != null && context.mounted) {
-                      showGuardianSheet(context, groupId: groupId!);
-                    }
-                  },
-                ),
-              ),
-              const SizedBox(width: Space.s12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  key: const Key('quick_action_fuel_sheet'),
-                  style: OutlinedButton.styleFrom(
-                    backgroundColor: AppTheme.neonCyan.withOpacity(0.08),
-                    foregroundColor: AppTheme.neonCyan,
-                    side: BorderSide(color: AppTheme.neonCyan, width: 1.5),
-                    minimumSize: const Size(0, 52),
-                    shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
-                  ),
-                  icon: const Icon(Icons.local_gas_station_rounded, size: 20),
-                  label: const Text(
-                    'Fuel / Refuel',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    if (onOpenFuel != null) {
-                      onOpenFuel!();
-                    } else if (context.mounted) {
-                      showFuelSheet(context);
-                    }
-                  },
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: Space.s12),
-          FilledButton(
-            key: const Key('quick_settings_done'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.slateCard,
-              foregroundColor: AppTheme.neonCyan,
-              minimumSize: const Size.fromHeight(52),
-              shape: const RoundedRectangleBorder(
-                borderRadius: Radii.mdAll,
-                side: BorderSide(color: Colors.white24, width: 1.5),
+            const SizedBox(height: 18),
+            DsCard(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < cards.length; i++)
+                    _GloveSettingRow(
+                      key: cards[i].key,
+                      label: cards[i].label,
+                      subtitle: cards[i].subtitle,
+                      icon: cards[i].icon,
+                      isActive: cards[i].isActive,
+                      divider: i < cards.length - 1,
+                      onToggle: cards[i].onToggle,
+                    ),
+                ],
               ),
             ),
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
-              'Done',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            const SizedBox(height: 18),
+            // In-flight Quick Actions (Ride Guardian & Fuel)
+            Row(
+              children: [
+                Expanded(
+                  child: DsButton(
+                    key: const Key('quick_action_guardian_share'),
+                    label: 'Guardian link',
+                    icon: Icons.verified_user_outlined,
+                    tone: DsButtonTone.outline,
+                    height: 52,
+                    fontSize: 14,
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      if (onOpenGuardian != null) {
+                        onOpenGuardian!();
+                      } else if (groupId != null && context.mounted) {
+                        showGuardianSheet(context, groupId: groupId!);
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: DsButton(
+                    key: const Key('quick_action_fuel_sheet'),
+                    label: 'Fuel / Refuel',
+                    icon: Icons.local_gas_station_outlined,
+                    tone: DsButtonTone.outline,
+                    height: 52,
+                    fontSize: 14,
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      if (onOpenFuel != null) {
+                        onOpenFuel!();
+                      } else if (context.mounted) {
+                        showFuelSheet(context);
+                      }
+                    },
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 10),
+            DsButton(
+              key: const Key('quick_settings_done'),
+              label: 'Done',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 }
 
 class _QuickSettingItem {
@@ -355,111 +321,45 @@ class _QuickSettingItem {
   });
 }
 
-class _GloveSettingCard extends StatelessWidget {
+/// One switch row: teal icon, label, subtitle and a switch. The whole row
+/// toggles, so a gloved thumb never has to hit the switch itself.
+class _GloveSettingRow extends StatelessWidget {
   final String label;
   final String subtitle;
   final IconData icon;
   final bool isActive;
+  final bool divider;
   final VoidCallback onToggle;
 
-  const _GloveSettingCard({
+  const _GloveSettingRow({
     super.key,
     required this.label,
     required this.subtitle,
     required this.icon,
     required this.isActive,
+    required this.divider,
     required this.onToggle,
   });
 
   @override
   Widget build(BuildContext context) {
-    final activeBorderColor = AppTheme.neonCyan;
-    return Semantics(
-      button: true,
-      label: '$label: ${isActive ? "ON" : "OFF"}',
-      child: Material(
-        color: isActive ? activeBorderColor.withOpacity(0.16) : AppTheme.slateCard,
-        borderRadius: Radii.mdAll,
-        child: InkWell(
-          borderRadius: Radii.mdAll,
-          onTap: onToggle,
-          child: Container(
-            padding: const EdgeInsets.all(Space.s12),
-            decoration: BoxDecoration(
-              borderRadius: Radii.mdAll,
-              border: Border.all(
-                color: isActive ? activeBorderColor : AppTheme.subtleBorder,
-                width: isActive ? 2.5 : 1.5,
+    return MergeSemantics(
+      child: InkWell(
+        onTap: onToggle,
+        child: Row(
+          children: [
+            Icon(icon, size: 22, color: isActive ? AppTheme.accentText : AppTheme.muted),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DsSwitchRow(
+                label: label,
+                subtitle: subtitle,
+                value: isActive,
+                divider: divider,
+                onChanged: (_) => onToggle(),
               ),
-              boxShadow: isActive
-                  ? [
-                      BoxShadow(
-                        color: activeBorderColor.withOpacity(0.3),
-                        blurRadius: 10,
-                        spreadRadius: 1,
-                      )
-                    ]
-                  : null,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Icon(
-                      icon,
-                      size: 26,
-                      color: isActive ? activeBorderColor : AppTheme.textSecondary,
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: isActive ? activeBorderColor : Colors.white12,
-                        borderRadius: Radii.smAll,
-                      ),
-                      child: Text(
-                        isActive ? 'ON' : 'OFF',
-                        style: TextStyle(
-                          color: isActive ? Colors.black : AppTheme.textMuted,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: TextStyle(
-                        color: isActive ? AppTheme.textPrimary : AppTheme.textSecondary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        color: AppTheme.textMuted,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+          ],
         ),
       ),
     );

@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import 'ui_tokens.dart';
 
-/// The one way to open a bottom sheet: same handle, 20 dp top corners,
-/// 16 dp side padding, safe area, keyboard-aware, 230 ms open/close.
+/// The one way to open a bottom sheet: same 44 x 5 handle, 28 dp top corners,
+/// 20 dp side padding, safe area, keyboard-aware, 230 ms open/close.
 ///
 /// [title] adds an [AppSheetHeader]. The [builder] content is placed in a
 /// Flexible, so a ListView inside it scrolls instead of overflowing. Use
@@ -24,7 +24,7 @@ Future<T?> showAppSheet<T>(
     enableDrag: enableDrag,
     showDragHandle: enableDrag,
     useSafeArea: true,
-    backgroundColor: AppTheme.slateCard,
+    backgroundColor: AppTheme.card,
     shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),
     clipBehavior: Clip.antiAlias,
     sheetAnimationStyle: AnimationStyle(duration: Motion.sheet, reverseDuration: Motion.sheet),
@@ -34,7 +34,7 @@ Future<T?> showAppSheet<T>(
       return SafeArea(
         top: false,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(Space.s16, enableDrag ? 0.0 : Space.s16, Space.s16, Space.s16 + bottomInset),
+          padding: EdgeInsets.fromLTRB(20, enableDrag ? 0.0 : Space.s16, 20, 24 + bottomInset),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -80,7 +80,7 @@ class AppSheetHeader extends StatelessWidget {
               children: [
                 Semantics(
                   header: true,
-                  child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+                  child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 18)),
                 ),
                 if (sub != null && sub.isNotEmpty)
                   Padding(
@@ -95,7 +95,7 @@ class AppSheetHeader extends StatelessWidget {
             IconButton(
               onPressed: () => Navigator.of(context).maybePop(),
               tooltip: 'Close',
-              icon: Icon(Icons.close_rounded, color: AppTheme.textSecondary),
+              icon: Icon(Icons.close_rounded, color: AppTheme.text2),
             ),
         ],
       ),

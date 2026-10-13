@@ -34,13 +34,19 @@ class EmptyState extends StatelessWidget {
       if (p != null && onPrimary != null)
         FilledButton(
           onPressed: onPrimary,
-          style: FilledButton.styleFrom(minimumSize: const Size(120, 48)),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(140, 56),
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(16))),
+          ),
           child: Text(p, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       if (s != null && onSecondary != null)
         OutlinedButton(
           onPressed: onSecondary,
-          style: OutlinedButton.styleFrom(minimumSize: const Size(120, 48)),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(140, 56),
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(16))),
+          ),
           child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
     ];
@@ -52,11 +58,16 @@ class EmptyState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 48, color: AppTheme.textMuted),
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: AppTheme.tint),
+                child: Icon(icon, size: 34, color: AppTheme.accentText),
+              ),
               const SizedBox(height: Space.s16),
               Semantics(
                 header: true,
-                child: Text(title, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+                child: Text(title, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 18)),
               ),
               if (m != null && m.isNotEmpty) ...[
                 const SizedBox(height: Space.s8),
@@ -65,7 +76,7 @@ class EmptyState extends StatelessWidget {
                   textAlign: TextAlign.center,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: AppText.body.copyWith(color: AppTheme.textSecondary),
+                  style: AppText.body.copyWith(color: AppTheme.text2),
                 ),
               ],
               if (actions.isNotEmpty) ...[

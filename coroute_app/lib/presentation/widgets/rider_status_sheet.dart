@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/ui/app_bottom_sheet.dart';
-import '../../core/ui/ui_tokens.dart';
+import '../../core/ui/ui.dart';
 import '../../data/models/outbox_item.dart';
 import '../../data/services/convoy_service.dart';
 import '../ride/incident_sheet.dart';
@@ -172,15 +171,15 @@ class _StatusPickerState extends State<StatusPicker> {
           const SizedBox(height: Space.s8),
           if (!_more)
             TextButton.icon(
-              style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.neonCyan),
+              style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.accentText),
               onPressed: () => setState(() => _more = true),
               icon: const Icon(Icons.expand_more_rounded),
               label: const Text('More reasons'),
             )
           else ...[
             _grid(RiderStatusSheet.moreCodes),
-            const SizedBox(height: Space.s12),
-            Text('Or type a reason', style: AppText.label),
+            const SizedBox(height: Space.s16),
+            Text('OR TYPE A REASON', style: AppText.overline),
             const SizedBox(height: Space.s8),
             Row(
               children: [
@@ -191,33 +190,20 @@ class _StatusPickerState extends State<StatusPicker> {
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _sendCustom(),
                     style: AppText.body,
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       hintText: 'For example: waiting for a mechanic',
-                      hintStyle: AppText.caption,
                       counterText: '',
-                      filled: true,
-                      fillColor: AppTheme.elevatedCard,
-                      border: const OutlineInputBorder(borderRadius: Radii.mdAll, borderSide: BorderSide.none),
                     ),
                   ),
                 ),
                 const SizedBox(width: Space.s8),
-                FilledButton(
-                  style: FilledButton.styleFrom(minimumSize: const Size(64, 48)),
-                  onPressed: _sendCustom,
-                  child: const Text('Set'),
-                ),
+                SizedBox(width: 76, child: DsButton(label: 'Set', height: 52, fontSize: 15, onPressed: _sendCustom)),
               ],
             ),
           ],
           if (widget.currentCode.isNotEmpty) ...[
             const SizedBox(height: Space.s8),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.textPrimary),
-              onPressed: widget.onClear,
-              icon: const Icon(Icons.check_rounded),
-              label: const Text('Clear status'),
-            ),
+            DsButton(label: 'Clear status', icon: Icons.check_rounded, tone: DsButtonTone.outline, height: 52, fontSize: 15, onPressed: widget.onClear),
           ],
         ],
       ),
@@ -235,7 +221,8 @@ class _ReasonTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color accent = selected ? AppTheme.neonCyan : AppTheme.subtleBorder;
+    // Canvas tile: card with a 2 px border; the selected one is tinted with a teal border.
+    final Color accent = selected ? AppTheme.accentText : AppTheme.border;
     return Semantics(
       button: true,
       selected: selected,
@@ -243,23 +230,23 @@ class _ReasonTile extends StatelessWidget {
       excludeSemantics: true,
       onTap: onTap,
       child: Material(
-        color: selected ? AppTheme.neonCyan.withOpacity(0.12) : AppTheme.elevatedCard,
-        shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: accent)),
+        color: selected ? AppTheme.tint : AppTheme.card,
+        shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: accent, width: 2)),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 56),
+            constraints: const BoxConstraints(minHeight: 60),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: Space.s8),
               child: Row(
                 children: [
-                  Icon(icon, size: 22, color: AppTheme.neonCyan),
+                  Icon(icon, size: 22, color: AppTheme.accentText),
                   const SizedBox(width: Space.s8),
                   Expanded(
-                    child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                    child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
                   ),
-                  if (selected) Icon(Icons.check_rounded, size: 20, color: AppTheme.neonCyan),
+                  if (selected) Icon(Icons.check_rounded, size: 20, color: AppTheme.accentText),
                 ],
               ),
             ),

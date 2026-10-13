@@ -79,6 +79,7 @@ class SettingsService extends ChangeNotifier {
     _shareFuelEstimate = value;
     notifyListeners();
   }
+  bool get hasFuelProfile => _fuelProfile != null;
   FuelProfile get fuelProfile => _fuelProfile ?? FuelProfile(fullRangeKm: _fuelRangeKm.toDouble());
   Future<void> setFuelProfile(FuelProfile profile) async {
     if (!profile.valid) throw ArgumentError('Invalid fuel profile');

@@ -137,18 +137,15 @@ function renderCockpitBase(isDark, orbitSide = 'right') {
 
 ${statusBar(isDark)}
 
-    <!-- Top Turn-by-Turn HUD Card -->
-    <g id="Top_Guidance_HUD" transform="translate(16, 48)">
-      <rect width="380" height="74" rx="24" fill="${hudBg}" stroke="${hudStroke}" stroke-width="1.5" ${shadowAttr} />
-      <rect x="14" y="13" width="48" height="48" rx="16" fill="${cyanLight}" stroke="${cyan}" stroke-width="1.2" />
-      <path d="M38 24 L38 48 M38 24 L30 32 M38 24 L46 32" stroke="${cyan}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-      <text x="74" y="34" fill="${textPrimary}" font-size="14" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">In 800 m <tspan fill="${textMuted}">&#x2022;</tspan> Keep Right</text>
-      <text x="74" y="52" fill="${textMuted}" font-size="11" font-weight="500" font-family="Plus Jakarta Sans, sans-serif">NH 48 Expressway &#x2022; Toward Hosur</text>
-      <line x1="290" y1="12" x2="290" y2="62" stroke="${hudStroke}" stroke-width="1" />
-      <text x="332" y="38" text-anchor="middle" fill="${textPrimary}" font-size="28" font-weight="800" font-family="JetBrains Mono, monospace">68</text>
-      <text x="364" y="30" fill="${textMuted}" font-size="10" font-weight="700" font-family="JetBrains Mono, monospace">KM/H</text>
-      <rect x="298" y="44" width="70" height="18" rx="6" fill="${isDark ? '#064E3B' : '#DCFCE7'}" stroke="${isDark ? '#059669' : '#86EFAC'}" stroke-width="0.8" />
-      <text x="333" y="56" text-anchor="middle" fill="${isDark ? '#34D399' : '#15803D'}" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">LIMIT 80</text>
+    <!-- Minimal Frosted-Glass Top Status Pill (MinimalCockpitTopBar) -->
+    <g id="Minimal_Cockpit_Top_Bar" transform="translate(16, 44)">
+      <rect width="380" height="48" rx="24" fill="${isDark ? 'rgba(7,10,15,0.85)' : 'rgba(255,255,255,0.92)'}" stroke="${isDark ? 'rgba(0,229,255,0.35)' : 'rgba(0,131,143,0.3)'}" stroke-width="1.2" ${shadowAttr} />
+      <!-- Left: Destination & Distance -->
+      <text x="20" y="27" fill="${textPrimary}" font-size="14" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">To Hampi, 142 km</text>
+      <text x="20" y="40" fill="${textMuted}" font-size="10" font-weight="600" font-family="Plus Jakarta Sans, sans-serif">NH 48 Expressway &#x2022; Next stop 42 km</text>
+      <!-- Right: Live GPS Status Dot -->
+      <circle cx="340" cy="24" r="4" fill="${cyan}" ${glowCyan} />
+      <text x="352" y="27" fill="${cyan}" font-size="10" font-weight="800" font-family="JetBrains Mono, monospace">GPS</text>
     </g>
 
     <!-- Draggable CoRoute Orbit Control FAB -->
@@ -162,87 +159,78 @@ ${statusBar(isDark)}
       </g>
     </g>
 
-    <!-- Bottom Controls Layer -->
-    <g id="Bottom_Cockpit_Controls" transform="translate(0, 680)">
-      <!-- Glance Row: SOS + 5 Dock Shortcuts (MIC, STOP, FUEL, LINK, MORE) -->
-      <g id="Dock_Row" transform="translate(16, 0)">
-        <!-- 1. SOS Button -->
-        <g id="btn_dock_sos">
-          <rect width="56" height="56" rx="18" fill="#DC2626" stroke="#EF4444" stroke-width="1.5" ${glowSos} ${shadowAttr} />
-          <!-- Triangle warning icon -->
-          <path d="M28 16 L40 38 H16 Z" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linejoin="round" />
-          <line x1="28" y1="24" x2="28" y2="30" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" />
-          <circle cx="28" cy="34" r="1.2" fill="#FFFFFF" />
-          <text x="28" y="48" text-anchor="middle" fill="#FFFFFF" font-size="9" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">SOS</text>
-        </g>
-
-        <!-- Shortcuts Dock Frame -->
-        <g id="Shortcuts_Dock" transform="translate(66, 0)">
-          <rect width="314" height="56" rx="18" fill="${dockBg}" stroke="${dockStroke}" stroke-width="1.5" ${shadowAttr} />
-
-          <!-- 2. MIC Button -->
-          <g id="btn_dock_mic" transform="translate(6, 6)">
-            <rect width="56" height="44" rx="12" fill="${dockBtnBg}" stroke="${dockBtnBorder}" stroke-width="1" />
-            <path d="M28 14 V24 M24 18 C24 22 32 22 32 18" stroke="${cyan}" stroke-width="2" stroke-linecap="round" />
-            <text x="28" y="34" text-anchor="middle" fill="${cyan}" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">MIC</text>
-          </g>
-
-          <!-- 3. STOP Button -> Links to Stop Picker Popup -->
-          <g id="btn_dock_stop" transform="translate(68, 6)">
-            <rect width="56" height="44" rx="12" fill="${dockBtnBg}" stroke="${dockBtnBorder}" stroke-width="1" />
-            <rect x="22" y="14" width="12" height="12" rx="3" stroke="${isDark ? '#FBBF24' : '#BD5B00'}" stroke-width="2" fill="none" />
-            <text x="28" y="34" text-anchor="middle" fill="${isDark ? '#FBBF24' : '#BD5B00'}" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">STOP</text>
-          </g>
-
-          <!-- 4. FUEL Button -> Links to Fuel Radar Popup -->
-          <g id="btn_dock_fuel" transform="translate(130, 6)">
-            <rect width="56" height="44" rx="12" fill="${dockBtnBg}" stroke="${dockBtnBorder}" stroke-width="1" />
-            <path d="M24 26 V16 H30 V26 M32 18 H34 V22 H32" stroke="${cyan}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-            <text x="28" y="34" text-anchor="middle" fill="${cyan}" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">FUEL</text>
-          </g>
-
-          <!-- 5. LINK Button -> Links to Guardian Link Popup -->
-          <g id="btn_dock_guardian" transform="translate(192, 6)">
-            <rect width="56" height="44" rx="12" fill="${cyanLight}" stroke="${cyan}" stroke-width="1.3" />
-            <path d="M24 22 L28 18 M26 17 L30 13" stroke="${cyan}" stroke-width="2" stroke-linecap="round" />
-            <text x="28" y="34" text-anchor="middle" fill="${cyan}" font-size="9" font-weight="900" font-family="JetBrains Mono, monospace">LINK</text>
-          </g>
-
-          <!-- 6. MORE Button -> Links to Glove Quick Settings Popup -->
-          <g id="btn_dock_more" transform="translate(254, 6)">
-            <rect width="54" height="44" rx="12" fill="${dockBtnBg}" stroke="${dockBtnBorder}" stroke-width="1" />
-            <rect x="23" y="14" width="4" height="4" rx="1" fill="${cyan}" />
-            <rect x="29" y="14" width="4" height="4" rx="1" fill="${cyan}" />
-            <rect x="23" y="20" width="4" height="4" rx="1" fill="${cyan}" />
-            <rect x="29" y="20" width="4" height="4" rx="1" fill="${cyan}" />
-            <text x="27" y="34" text-anchor="middle" fill="${cyan}" font-size="9" font-weight="800" font-family="JetBrains Mono, monospace">MORE</text>
-          </g>
-        </g>
+    <!-- Floating Right-Side Controls (MapSideControls: Brightness, Re-center, Sheet) -->
+    <g id="Map_Side_Controls" transform="translate(352, 530)">
+      <!-- 1. Screen On / Brightness -->
+      <g id="btn_side_brightness" transform="translate(0, 0)">
+        <circle cx="22" cy="22" r="22" fill="${isDark ? '#0F172A' : '#FFFFFF'}" stroke="${isDark ? '#334155' : '#CBD5E1'}" stroke-width="1.2" ${shadowAttr} />
+        <circle cx="22" cy="22" r="6" fill="none" stroke="${isDark ? '#F59E0B' : '#D97706'}" stroke-width="2" />
+        <line x1="22" y1="10" x2="22" y2="13" stroke="${isDark ? '#F59E0B' : '#D97706'}" stroke-width="2" stroke-linecap="round" />
+        <line x1="22" y1="31" x2="22" y2="34" stroke="${isDark ? '#F59E0B' : '#D97706'}" stroke-width="2" stroke-linecap="round" />
       </g>
+      <!-- 2. Re-Center on Me Crosshair (Active Cyan Glow) -->
+      <g id="btn_side_recenter" transform="translate(0, 52)">
+        <circle cx="22" cy="22" r="22" fill="${isDark ? '#0F172A' : '#FFFFFF'}" stroke="${cyan}" stroke-width="1.8" ${glowCyan} ${shadowAttr} />
+        <circle cx="22" cy="22" r="7" fill="none" stroke="${cyan}" stroke-width="2" />
+        <circle cx="22" cy="22" r="2.5" fill="${cyan}" />
+        <line x1="22" y1="9" x2="22" y2="12" stroke="${cyan}" stroke-width="2" />
+        <line x1="22" y1="32" x2="22" y2="35" stroke="${cyan}" stroke-width="2" />
+        <line x1="9" y1="22" x2="12" y2="22" stroke="${cyan}" stroke-width="2" />
+        <line x1="32" y1="22" x2="35" y2="22" stroke="${cyan}" stroke-width="2" />
+      </g>
+      <!-- 3. Open Ride Sheet Chevron -->
+      <g id="btn_side_sheet" transform="translate(0, 104)">
+        <circle cx="22" cy="22" r="22" fill="${isDark ? '#0F172A' : '#FFFFFF'}" stroke="${isDark ? '#334155' : '#CBD5E1'}" stroke-width="1.2" ${shadowAttr} />
+        <path d="M15 25 L22 18 L29 25" fill="none" stroke="${textPrimary}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+      </g>
+    </g>
 
-      <!-- Collapsed Bottom Sheet -->
-      <g id="Collapsed_Bottom_Sheet" transform="translate(0, 68)">
-        <path d="M0 24 C0 10.745 10.745 0 24 0 H388 C401.255 0 412 10.745 412 24 V130 H0 Z" fill="${sheetBg}" stroke="${sheetStroke}" stroke-width="1.5" ${shadowAttr} />
-        <rect x="186" y="8" width="40" height="5" rx="2.5" fill="${isDark ? '#334155' : '#CBD5E1'}" />
+    <!-- Hold-to-SOS Button (Always pinned bottom-left above collapsed sheet) -->
+    <g id="btn_cockpit_sos" transform="translate(16, 686)">
+      <circle cx="28" cy="28" r="28" fill="#DC2626" stroke="#EF4444" stroke-width="2" ${glowSos} ${shadowAttr} />
+      <path d="M28 17 L39 37 H17 Z" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linejoin="round" />
+      <line x1="28" y1="24" x2="28" y2="30" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" />
+      <circle cx="28" cy="34" r="1.2" fill="#FFFFFF" />
+      <text x="28" y="46" text-anchor="middle" fill="#FFFFFF" font-size="8" font-weight="900" font-family="Plus Jakarta Sans, sans-serif">SOS</text>
+    </g>
 
-        <!-- Convoy Header Row -> Links to Screen 5: Group Settings -->
-        <g id="btn_convoy_header">
-          <text x="20" y="38" fill="${textPrimary}" font-size="13" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">Bangalore Highway Convoy</text>
-          <rect x="180" y="24" width="60" height="18" rx="9" fill="${cyanLight}" stroke="${cyan}" stroke-width="0.8" />
-          <text x="210" y="36" text-anchor="middle" fill="${cyan}" font-size="9" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">3 Riders</text>
-          <text x="392" y="38" text-anchor="end" fill="${textMuted}" font-size="11" font-weight="700" font-family="JetBrains Mono, monospace">ETA 14:15 &#x2022; 82 km</text>
+    <!-- Collapsed Bottom Sheet: 2x2 Metric Strip Header -->
+    <g id="Collapsed_Bottom_Sheet" transform="translate(0, 752)">
+      <path d="M0 20 C0 8.954 8.954 0 20 0 H392 C403.046 0 412 8.954 412 20 V118 H0 Z" fill="${sheetBg}" stroke="${sheetStroke}" stroke-width="1.2" ${shadowAttr} />
+      <!-- Drag handle -->
+      <rect x="188" y="8" width="36" height="4" rx="2" fill="${isDark ? '#334155' : '#CBD5E1'}" />
+
+      <!-- 4 Key Numbers (2x2 Grid) -->
+      <g id="Metrics_2x2_Grid" transform="translate(24, 22)">
+        <!-- 1. Remaining -->
+        <g id="metric_remaining" transform="translate(0, 0)">
+          <text x="0" y="24" fill="${textPrimary}" font-size="20" font-weight="900" font-family="Plus Jakarta Sans, sans-serif">142 km</text>
+          <text x="0" y="38" fill="${textMuted}" font-size="10" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">left</text>
         </g>
+        <line x1="88" y1="8" x2="88" y2="44" stroke="${sheetStroke}" stroke-width="1" />
 
-        <!-- Live Fuel & Guardian Status Strip -> Links to Screen 4: Fuel Radar -->
-        <g id="btn_fuel_strip" transform="translate(16, 50)">
-          <rect width="380" height="42" rx="14" fill="${isDark ? '#070A0F' : '#F8FAFC'}" stroke="${sheetStroke}" stroke-width="1" />
-          <circle cx="16" cy="21" r="5" fill="${isDark ? '#F59E0B' : '#D97706'}" />
-          <text x="28" y="25" fill="${isDark ? '#CBD5E1' : '#334155'}" font-size="11" font-weight="600" font-family="Plus Jakarta Sans, sans-serif">Usable Range: <tspan fill="${textPrimary}" font-weight="800" font-family="JetBrains Mono, monospace">185 km</tspan></text>
-          <path d="M260 21 L270 21 M263 17 L267 25" stroke="${cyan}" stroke-width="1.8" stroke-linecap="round" />
-          <text x="364" y="25" text-anchor="end" fill="${cyan}" font-size="11" font-weight="800" font-family="Plus Jakarta Sans, sans-serif">Guardian Active</text>
+        <!-- 2. ETA -->
+        <g id="metric_eta" transform="translate(100, 0)">
+          <text x="0" y="24" fill="${textPrimary}" font-size="20" font-weight="900" font-family="Plus Jakarta Sans, sans-serif">4:35 PM</text>
+          <text x="0" y="38" fill="${textMuted}" font-size="10" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">ETA</text>
+        </g>
+        <line x1="190" y1="8" x2="190" y2="44" stroke="${sheetStroke}" stroke-width="1" />
+
+        <!-- 3. Riding Count -->
+        <g id="metric_riding" transform="translate(202, 0)">
+          <text x="0" y="24" fill="${textPrimary}" font-size="20" font-weight="900" font-family="Plus Jakarta Sans, sans-serif">5/8</text>
+          <text x="0" y="38" fill="${textMuted}" font-size="10" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">riding</text>
+        </g>
+        <line x1="264" y1="8" x2="264" y2="44" stroke="${sheetStroke}" stroke-width="1" />
+
+        <!-- 4. Spread -->
+        <g id="metric_spread" transform="translate(276, 0)">
+          <text x="0" y="24" fill="${textPrimary}" font-size="20" font-weight="900" font-family="Plus Jakarta Sans, sans-serif">2.1 km</text>
+          <text x="0" y="38" fill="${textMuted}" font-size="10" font-weight="700" font-family="Plus Jakarta Sans, sans-serif">spread</text>
         </g>
       </g>
     </g>`;
+
 }
 
 // 1. SCREEN 1: COCKPIT IDLE

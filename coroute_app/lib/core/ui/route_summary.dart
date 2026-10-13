@@ -67,7 +67,7 @@ class _Stat extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 20, color: AppTheme.textSecondary),
+          Icon(icon, size: 22, color: AppTheme.accentText),
           const SizedBox(width: Space.s8),
           Flexible(
             child: Column(
@@ -80,7 +80,7 @@ class _Stat extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: AppText.metric.copyWith(fontSize: 18),
                 ),
-                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
               ],
             ),
           ),

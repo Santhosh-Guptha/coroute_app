@@ -119,64 +119,122 @@ class _MeetHereSheetState extends State<MeetHereSheet> {
         children: [
           Row(
             children: [
-              Icon(lead ? StopKind.meeting.icon : Icons.add_location_alt_rounded, color: AppTheme.neonCyan, size: 28),
-              const SizedBox(width: Space.s12),
+              Container(
+                width: 48,
+                height: 48,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(Radii.md)),
+                child: Icon(lead ? StopKind.meeting.icon : Icons.add_location_alt_rounded, color: AppTheme.accentText, size: 26),
+              ),
+              const SizedBox(width: 14),
               Expanded(
-                child: Semantics(
-                  header: true,
-                  liveRegion: true,
-                  child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Semantics(
+                      header: true,
+                      liveRegion: true,
+                      child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.headline.copyWith(fontSize: 20)),
+                    ),
+                    if (facts.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(facts.join('. '), maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label),
+                    ],
+                  ],
                 ),
               ),
             ],
           ),
-          if (facts.isNotEmpty) ...[
-            const SizedBox(height: Space.s4),
-            Text(facts.join('. '), maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label),
-          ],
-          const SizedBox(height: Space.s8),
-          Text(
-            lead ? 'Everyone in the group gets an alert with the distance to it.' : 'The lead decides whether to add the stop.',
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: AppText.caption,
-          ),
-          const SizedBox(height: Space.s16),
-          if (lead) ...[
-            FilledButton.icon(
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-              onPressed: () => Navigator.of(context).pop(MeetHereResult(MeetHereAction.meet, _name)),
-              icon: const Icon(Icons.groups_rounded),
-              label: const Text('Meet here', maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(color: AppTheme.bg, borderRadius: BorderRadius.circular(Radii.md)),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline_rounded, size: 18, color: AppTheme.accentText),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    lead ? 'Everyone in the group gets an alert with the distance to it.' : 'The lead decides whether to add the stop.',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.label,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: Space.s12),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          ),
+          const SizedBox(height: 18),
+          if (lead) ...[
+            DsButton(
+              label: 'Meet here',
+              icon: Icons.groups_rounded,
+              onPressed: () => Navigator.of(context).pop(MeetHereResult(MeetHereAction.meet, _name)),
+            ),
+            const SizedBox(height: 10),
+            DsButton(
+              label: 'Add a stop here',
+              icon: Icons.add_location_alt_rounded,
+              tone: DsButtonTone.outline,
               onPressed: () => Navigator.of(context).pop(MeetHereResult(MeetHereAction.addStop, _name)),
-              icon: const Icon(Icons.add_location_alt_rounded),
-              label: const Text('Add a stop here', maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
           ] else
-            FilledButton.icon(
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+            DsButton(
+              label: MeetHereSheet.suggestLabel,
+              icon: Icons.add_location_alt_rounded,
               onPressed: () => Navigator.of(context).pop(MeetHereResult(MeetHereAction.addStop, _name)),
-              icon: const Icon(Icons.add_location_alt_rounded),
-              label: const Text(MeetHereSheet.suggestLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
           if (widget.canReport) ...[
-            const SizedBox(height: Space.s12),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-                foregroundColor: StatusColors.critical,
-                side: BorderSide(color: StatusColors.critical),
-              ),
+            const SizedBox(height: 10),
+            _ReportButton(
+              label: L10n.t('report.title'),
               onPressed: () => Navigator.of(context).pop(MeetHereResult(MeetHereAction.reportDown, _name)),
-              icon: const Icon(Icons.personal_injury_rounded),
-              label: Text(L10n.t('report.title'), maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// "Report a rider down here": a 56 dp outline button in SOS red (the kit's
+/// outline tone is neutral, so this one is local to the sheet).
+class _ReportButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onPressed;
+  const _ReportButton({required this.label, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final Color c = AppTheme.sos;
+    return SizedBox(
+      height: 56,
+      child: Material(
+        color: AppTheme.card,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: c, width: 2)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.personal_injury_rounded, size: 22, color: c),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: c, fontSize: 16, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

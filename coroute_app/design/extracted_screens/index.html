@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CoRoute Rider App - Extracted Screens Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-main: #090E12;
+    --sidebar-bg: #121920;
+    --card-bg: #17222B;
+    --border: #22323D;
+    --teal: #5CCAD3;
+    --teal-dark: #0B6E78;
+    --text: #F2F6F8;
+    --muted: #8E9EAA;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg-main);
+    color: var(--text);
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+  /* Sidebar */
+  aside {
+    width: 340px;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  .brand-header {
+    padding: 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .brand-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: var(--teal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #090E12;
+    font-weight: 800;
+    font-size: 18px;
+  }
+  .brand-title { font-size: 18px; font-weight: 800; }
+  .brand-sub { font-size: 12px; color: var(--muted); }
+  
+  .nav-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .nav-item {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 10px 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    color: var(--text);
+  }
+  .nav-item:hover {
+    background: rgba(92, 202, 211, 0.08);
+    border-color: rgba(92, 202, 211, 0.2);
+  }
+  .nav-item.active {
+    background: rgba(92, 202, 211, 0.16);
+    border-color: var(--teal);
+  }
+  .nav-category {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--teal);
+  }
+  .nav-title {
+    font-size: 13px;
+    font-weight: 700;
+  }
+  
+  /* Main Stage */
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .topbar {
+    height: 72px;
+    border-bottom: 1px solid var(--border);
+    background: var(--sidebar-bg);
+    padding: 0 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .top-left h2 {
+    font-size: 18px;
+    font-weight: 800;
+  }
+  .top-left p {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .controls-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .theme-toggle {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    padding: 4px;
+    border-radius: 10px;
+    display: flex;
+    gap: 4px;
+  }
+  .toggle-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: none;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    background: transparent;
+    color: var(--muted);
+    transition: all 0.15s;
+  }
+  .toggle-btn.active {
+    background: var(--teal);
+    color: #090E12;
+  }
+  .view-toggle {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    padding: 4px;
+    border-radius: 10px;
+    display: flex;
+    gap: 4px;
+  }
+  .btn-action {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--teal);
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-action:hover {
+    background: rgba(92, 202, 211, 0.1);
+  }
+  
+  /* Stage View */
+  .viewport-stage {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    background: #06090C;
+  }
+  .phone-shell {
+    width: 390px;
+    height: 844px;
+    border-radius: 46px;
+    border: 10px solid #28323B;
+    overflow: hidden;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8), 0 0 0 2px rgba(255, 255, 255, 0.05);
+    background: #000;
+    position: relative;
+    transition: width 0.2s, height 0.2s;
+  }
+  .phone-shell.admin-mode {
+    width: 1200px;
+    height: 840px;
+    border-radius: 20px;
+    border: 6px solid #28323B;
+  }
+  iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+  }
+  
+  /* Grid Canvas View */
+  .grid-canvas {
+    display: none;
+    flex: 1;
+    overflow: auto;
+    padding: 40px;
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 36px;
+    background: #06090C;
+  }
+  .grid-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+  .grid-header {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .badge {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--teal);
+    letter-spacing: 0.5px;
+  }
+  .grid-card-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+  .popout-link {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--teal);
+    text-decoration: none;
+  }
+  .phone-shell.frame-admin {
+    width: 100%;
+    height: 520px;
+    border-radius: 14px;
+    border: 4px solid #28323B;
+  }
+</style>
+<script>
+  let currentSlug = '01_Start_a_ride';
+  let currentTheme = 'dark';
+  let isGrid = false;
+  
+  function selectScreen(slug, title, isAdmin) {
+    currentSlug = slug;
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    document.getElementById('btn-' + slug).classList.add('active');
+    
+    document.getElementById('header-title').innerText = title;
+    document.getElementById('header-path').innerText = currentTheme + '/' + slug + '.html';
+    
+    const stageFrame = document.getElementById('stage-frame');
+    stageFrame.src = currentTheme + '/' + slug + '.html';
+    
+    const shell = document.getElementById('phone-shell');
+    if (isAdmin) {
+      shell.classList.add('admin-mode');
+    } else {
+      shell.classList.remove('admin-mode');
+    }
+    
+    document.getElementById('btn-open-tab').href = currentTheme + '/' + slug + '.html';
+  }
+  
+  function setTheme(mode) {
+    currentTheme = mode;
+    document.querySelectorAll('.theme-toggle .toggle-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('theme-' + mode).classList.add('active');
+    
+    document.getElementById('stage-frame').src = currentTheme + '/' + currentSlug + '.html';
+    document.getElementById('header-path').innerText = currentTheme + '/' + currentSlug + '.html';
+    document.getElementById('btn-open-tab').href = currentTheme + '/' + currentSlug + '.html';
+    
+    // Update grid frames
+    document.querySelectorAll('[id^="grid-frame-"]').forEach(iframe => {
+      const slug = iframe.id.replace('grid-frame-', '');
+      iframe.src = currentTheme + '/' + slug + '.html';
+    });
+    document.querySelectorAll('[id^="popout-"]').forEach(link => {
+      const slug = link.id.replace('popout-', '');
+      link.href = currentTheme + '/' + slug + '.html';
+    });
+  }
+  
+  function toggleView(mode) {
+    isGrid = mode === 'grid';
+    document.getElementById('view-single').classList.toggle('active', !isGrid);
+    document.getElementById('view-grid').classList.toggle('active', isGrid);
+    
+    document.getElementById('viewport-stage').style.display = isGrid ? 'none' : 'flex';
+    document.getElementById('grid-canvas').style.display = isGrid ? 'grid' : 'none';
+  }
+  
+  window.onload = function() {
+    selectScreen('01_Start_a_ride', 'Start a Ride (Home)', false);
+  };
+</script>
+</head>
+<body>
+
+<aside>
+  <div class="brand-header">
+    <div class="brand-logo">C</div>
+    <div>
+      <div class="brand-title">CoRoute</div>
+      <div class="brand-sub">Extracted App Screens Hub</div>
+    </div>
+  </div>
+  
+  <div class="nav-list">
+    
+      <button class="nav-item" onclick="selectScreen('01_Start_a_ride', 'Start a Ride (Home)', false)" id="btn-01_Start_a_ride">
+        <div class="nav-item-top">
+          <span class="nav-category">Pre-Ride</span>
+        </div>
+        <div class="nav-title">Start a Ride (Home)</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('02_Navigation_while_riding', 'Navigation While Riding', false)" id="btn-02_Navigation_while_riding">
+        <div class="nav-item-top">
+          <span class="nav-category">Cockpit</span>
+        </div>
+        <div class="nav-title">Navigation While Riding</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('03_Orbit_quick_access', 'Orbit Quick Access', false)" id="btn-03_Orbit_quick_access">
+        <div class="nav-item-top">
+          <span class="nav-category">Cockpit Popup</span>
+        </div>
+        <div class="nav-title">Orbit Quick Access</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('04_Intercom', 'Intercom & PTT Dock', false)" id="btn-04_Intercom">
+        <div class="nav-item-top">
+          <span class="nav-category">Cockpit Popup</span>
+        </div>
+        <div class="nav-title">Intercom & PTT Dock</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('05_Group_riders', 'Group Riders Ladder', false)" id="btn-05_Group_riders">
+        <div class="nav-item-top">
+          <span class="nav-category">Cockpit Popup</span>
+        </div>
+        <div class="nav-title">Group Riders Ladder</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('06_Fuel', 'Fuel & Range Radar', false)" id="btn-06_Fuel">
+        <div class="nav-item-top">
+          <span class="nav-category">Cockpit Popup</span>
+        </div>
+        <div class="nav-title">Fuel & Range Radar</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('07_Route', 'Route & Stops Timeline', false)" id="btn-07_Route">
+        <div class="nav-item-top">
+          <span class="nav-category">Cockpit Popup</span>
+        </div>
+        <div class="nav-title">Route & Stops Timeline</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('08_Guardian', 'Guardian Safety Shield', false)" id="btn-08_Guardian">
+        <div class="nav-item-top">
+          <span class="nav-category">Cockpit Popup</span>
+        </div>
+        <div class="nav-title">Guardian Safety Shield</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('09_Emergency_SOS', 'Emergency SOS (10s)', false)" id="btn-09_Emergency_SOS">
+        <div class="nav-item-top">
+          <span class="nav-category">Cockpit Popup</span>
+        </div>
+        <div class="nav-title">Emergency SOS (10s)</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('10_Stop_or_pause_ride', 'Stop or Pause Ride', false)" id="btn-10_Stop_or_pause_ride">
+        <div class="nav-item-top">
+          <span class="nav-category">Cockpit Popup</span>
+        </div>
+        <div class="nav-title">Stop or Pause Ride</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('11_More_and_settings', 'More & Settings', false)" id="btn-11_More_and_settings">
+        <div class="nav-item-top">
+          <span class="nav-category">Cockpit Popup</span>
+        </div>
+        <div class="nav-title">More & Settings</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('12_Ride_summary', 'Ride Complete Summary', false)" id="btn-12_Ride_summary">
+        <div class="nav-item-top">
+          <span class="nav-category">Post-Ride</span>
+        </div>
+        <div class="nav-title">Ride Complete Summary</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('13_Trips', 'Trips & History', false)" id="btn-13_Trips">
+        <div class="nav-item-top">
+          <span class="nav-category">App Hub</span>
+        </div>
+        <div class="nav-title">Trips & History</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('14_Alerts', 'Alerts Inbox', false)" id="btn-14_Alerts">
+        <div class="nav-item-top">
+          <span class="nav-category">App Hub</span>
+        </div>
+        <div class="nav-title">Alerts Inbox</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('15_Profile', 'Rider Profile & Bike', false)" id="btn-15_Profile">
+        <div class="nav-item-top">
+          <span class="nav-category">App Hub</span>
+        </div>
+        <div class="nav-title">Rider Profile & Bike</div>
+      </button>
+    
+      <button class="nav-item" onclick="selectScreen('16_Admin_operations_dashboard', 'Admin Ops Console', true)" id="btn-16_Admin_operations_dashboard">
+        <div class="nav-item-top">
+          <span class="nav-category">Operations</span>
+        </div>
+        <div class="nav-title">Admin Ops Console</div>
+      </button>
+    
+  </div>
+</aside>
+
+<main>
+  <div class="topbar">
+    <div class="top-left">
+      <h2 id="header-title">Start a Ride (Home)</h2>
+      <p id="header-path">dark/01_Start_a_ride.html</p>
+    </div>
+    
+    <div class="controls-bar">
+      <div class="view-toggle">
+        <button id="view-single" class="toggle-btn active" onclick="toggleView('single')">Device View</button>
+        <button id="view-grid" class="toggle-btn" onclick="toggleView('grid')">All Screens Grid</button>
+      </div>
+      
+      <div class="theme-toggle">
+        <button id="theme-dark" class="toggle-btn active" onclick="setTheme('dark')">Dark</button>
+        <button id="theme-light" class="toggle-btn" onclick="setTheme('light')">Light</button>
+      </div>
+      
+      <a id="btn-open-tab" class="btn-action" href="dark/01_Start_a_ride.html" target="_blank">
+        Open Fullscreen &#8599;
+      </a>
+    </div>
+  </div>
+  
+  <div class="viewport-stage" id="viewport-stage">
+    <div class="phone-shell" id="phone-shell">
+      <iframe id="stage-frame" src="dark/01_Start_a_ride.html" title="Active Screen"></iframe>
+    </div>
+  </div>
+  
+  <div class="grid-canvas" id="grid-canvas">
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Pre-Ride</span>
+            <div class="grid-card-title">Start a Ride (Home)</div>
+          </div>
+          <a class="popout-link" id="popout-01_Start_a_ride" href="dark/01_Start_a_ride.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-01_Start_a_ride" src="dark/01_Start_a_ride.html" title="Start a Ride (Home)"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Cockpit</span>
+            <div class="grid-card-title">Navigation While Riding</div>
+          </div>
+          <a class="popout-link" id="popout-02_Navigation_while_riding" href="dark/02_Navigation_while_riding.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-02_Navigation_while_riding" src="dark/02_Navigation_while_riding.html" title="Navigation While Riding"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Cockpit Popup</span>
+            <div class="grid-card-title">Orbit Quick Access</div>
+          </div>
+          <a class="popout-link" id="popout-03_Orbit_quick_access" href="dark/03_Orbit_quick_access.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-03_Orbit_quick_access" src="dark/03_Orbit_quick_access.html" title="Orbit Quick Access"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Cockpit Popup</span>
+            <div class="grid-card-title">Intercom & PTT Dock</div>
+          </div>
+          <a class="popout-link" id="popout-04_Intercom" href="dark/04_Intercom.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-04_Intercom" src="dark/04_Intercom.html" title="Intercom & PTT Dock"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Cockpit Popup</span>
+            <div class="grid-card-title">Group Riders Ladder</div>
+          </div>
+          <a class="popout-link" id="popout-05_Group_riders" href="dark/05_Group_riders.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-05_Group_riders" src="dark/05_Group_riders.html" title="Group Riders Ladder"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Cockpit Popup</span>
+            <div class="grid-card-title">Fuel & Range Radar</div>
+          </div>
+          <a class="popout-link" id="popout-06_Fuel" href="dark/06_Fuel.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-06_Fuel" src="dark/06_Fuel.html" title="Fuel & Range Radar"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Cockpit Popup</span>
+            <div class="grid-card-title">Route & Stops Timeline</div>
+          </div>
+          <a class="popout-link" id="popout-07_Route" href="dark/07_Route.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-07_Route" src="dark/07_Route.html" title="Route & Stops Timeline"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Cockpit Popup</span>
+            <div class="grid-card-title">Guardian Safety Shield</div>
+          </div>
+          <a class="popout-link" id="popout-08_Guardian" href="dark/08_Guardian.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-08_Guardian" src="dark/08_Guardian.html" title="Guardian Safety Shield"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Cockpit Popup</span>
+            <div class="grid-card-title">Emergency SOS (10s)</div>
+          </div>
+          <a class="popout-link" id="popout-09_Emergency_SOS" href="dark/09_Emergency_SOS.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-09_Emergency_SOS" src="dark/09_Emergency_SOS.html" title="Emergency SOS (10s)"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Cockpit Popup</span>
+            <div class="grid-card-title">Stop or Pause Ride</div>
+          </div>
+          <a class="popout-link" id="popout-10_Stop_or_pause_ride" href="dark/10_Stop_or_pause_ride.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-10_Stop_or_pause_ride" src="dark/10_Stop_or_pause_ride.html" title="Stop or Pause Ride"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Cockpit Popup</span>
+            <div class="grid-card-title">More & Settings</div>
+          </div>
+          <a class="popout-link" id="popout-11_More_and_settings" href="dark/11_More_and_settings.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-11_More_and_settings" src="dark/11_More_and_settings.html" title="More & Settings"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Post-Ride</span>
+            <div class="grid-card-title">Ride Complete Summary</div>
+          </div>
+          <a class="popout-link" id="popout-12_Ride_summary" href="dark/12_Ride_summary.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-12_Ride_summary" src="dark/12_Ride_summary.html" title="Ride Complete Summary"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">App Hub</span>
+            <div class="grid-card-title">Trips & History</div>
+          </div>
+          <a class="popout-link" id="popout-13_Trips" href="dark/13_Trips.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-13_Trips" src="dark/13_Trips.html" title="Trips & History"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">App Hub</span>
+            <div class="grid-card-title">Alerts Inbox</div>
+          </div>
+          <a class="popout-link" id="popout-14_Alerts" href="dark/14_Alerts.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-14_Alerts" src="dark/14_Alerts.html" title="Alerts Inbox"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">App Hub</span>
+            <div class="grid-card-title">Rider Profile & Bike</div>
+          </div>
+          <a class="popout-link" id="popout-15_Profile" href="dark/15_Profile.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-phone">
+          <iframe id="grid-frame-15_Profile" src="dark/15_Profile.html" title="Rider Profile & Bike"></iframe>
+        </div>
+      </div>
+    
+      <div class="grid-card">
+        <div class="grid-header">
+          <div>
+            <span class="badge">Operations</span>
+            <div class="grid-card-title">Admin Ops Console</div>
+          </div>
+          <a class="popout-link" id="popout-16_Admin_operations_dashboard" href="dark/16_Admin_operations_dashboard.html" target="_blank">Open Fullscreen &#8599;</a>
+        </div>
+        <div class="phone-shell frame-admin">
+          <iframe id="grid-frame-16_Admin_operations_dashboard" src="dark/16_Admin_operations_dashboard.html" title="Admin Ops Console"></iframe>
+        </div>
+      </div>
+    
+  </div>
+</main>
+
+</body>
+</html>

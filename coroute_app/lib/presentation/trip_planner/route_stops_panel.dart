@@ -110,13 +110,20 @@ class RouteStopsPanel extends StatelessWidget {
       service.reorderStops(ids);
     }
 
+    final hasDestination = convoy.destinationLat != 0 || convoy.destinationLng != 0;
+    final destinationDistance = hasDestination ? fromMe(convoy.destinationLat, convoy.destinationLng) : '';
+    final destinationArrivals = arrivalsLine(convoy.destinationArrivals);
+
     final children = <Widget>[
       if (route != null) ...[
-        RouteSummary(
-          distanceKm: route.distanceM / 1000,
-          duration: Duration(seconds: route.durationS),
-          stops: planned.length,
-          riders: convoy.riders.length,
+        Row(
+          children: [
+            Expanded(child: DsStatCell(label: 'Distance', value: formatDistance(route.distanceM))),
+            const SizedBox(width: 10),
+            Expanded(child: DsStatCell(label: 'Time', value: formatDuration(Duration(seconds: route.durationS)))),
+            const SizedBox(width: 10),
+            Expanded(child: DsStatCell(label: planned.length == 1 ? 'Stop' : 'Stops', value: '${planned.length}')),
+          ],
         ),
         if (route.approximate)
           Padding(
@@ -125,17 +132,17 @@ class RouteStopsPanel extends StatelessWidget {
           ),
         const SizedBox(height: Space.s16),
       ],
-      _EndRow(
-        icon: Icons.trip_origin_rounded,
-        color: StatusColors.success,
+      _TimelineRow(
+        ring: AppTheme.accentText,
         title: convoy.startLocationName.isNotEmpty ? convoy.startLocationName : 'Start',
         subtitle: 'Start',
       ),
-      const SizedBox(height: Space.s8),
       if (planned.isEmpty)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: Space.s8),
-          child: Text('No stops planned.', style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+        _TimelineRow(
+          ring: AppTheme.border2,
+          title: 'No stops planned.',
+          titleColor: AppTheme.text2,
+          subtitle: lead ? 'Add one below.' : 'Suggest one below.',
         )
       else
         ReorderableListView.builder(
@@ -165,77 +172,122 @@ class RouteStopsPanel extends StatelessWidget {
           },
         ),
       for (final s in skipped)
-        Padding(
-          padding: const EdgeInsets.only(bottom: Space.s8),
-          child: StopCard(kind: StopKind.fromCategory(s.category), name: s.name, subtitle: 'Skipped'),
+        _TimelineRow(
+          ring: AppTheme.border2,
+          title: s.name.isEmpty ? StopKind.fromCategory(s.category).label : s.name,
+          titleColor: AppTheme.muted,
+          subtitle: 'Skipped',
+          chip: DsChip('Skipped', color: AppTheme.muted, background: AppTheme.soft),
         ),
-      _EndRow(
-        icon: Icons.sports_score_rounded,
-        color: StatusColors.critical,
+      _TimelineRow(
+        ring: AppTheme.accentText,
+        fill: AppTheme.brand,
+        last: true,
         title: convoy.destinationName.isNotEmpty ? convoy.destinationName : 'No destination set',
         subtitle: [
-          (convoy.destinationLat != 0 || convoy.destinationLng != 0)
-              ? ['Destination', if (fromMe(convoy.destinationLat, convoy.destinationLng).isNotEmpty) fromMe(convoy.destinationLat, convoy.destinationLng)].join(', ')
-              : 'Destination',
-          if (arrivalsLine(convoy.destinationArrivals).isNotEmpty) arrivalsLine(convoy.destinationArrivals),
+          hasDestination ? ['Destination', if (destinationDistance.isNotEmpty) destinationDistance].join(' · ') : 'Destination',
+          if (destinationArrivals.isNotEmpty) destinationArrivals,
         ].join('\n'),
         trailing: lead
-            ? IconButton(tooltip: 'Change destination', icon: Icon(Icons.edit_location_alt_rounded, color: AppTheme.textSecondary), onPressed: changeDestination)
+            ? IconButton(tooltip: 'Change destination', icon: Icon(Icons.edit_location_alt_outlined, color: AppTheme.accentText), onPressed: changeDestination)
             : null,
       ),
       const SizedBox(height: Space.s12),
-      OutlinedButton.icon(
-        onPressed: planned.length + suggestions.length >= 20 ? null : addOrSuggest,
-        icon: Icon(lead ? Icons.add_location_alt_rounded : Icons.add_comment_rounded),
-        label: Text(lead ? 'Add a stop' : 'Suggest a stop'),
-        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+      Row(
+        children: [
+          Expanded(
+            child: DsButton(
+              tone: DsButtonTone.outline,
+              icon: lead ? Icons.add_rounded : Icons.add_comment_outlined,
+              fontSize: 15,
+              label: lead ? 'Add a stop' : 'Suggest a stop',
+              onPressed: planned.length + suggestions.length >= 20 ? null : addOrSuggest,
+            ),
+          ),
+          if (!shrinkWrap) ...[
+            const SizedBox(width: 10),
+            Expanded(
+              child: DsButton(
+                icon: Icons.navigation_rounded,
+                fontSize: 15,
+                label: 'Back to riding',
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+            ),
+          ],
+        ],
       ),
       if (suggestions.isNotEmpty) ...[
         const SizedBox(height: Space.s24),
         Semantics(
           header: true,
-          child: Text(lead ? 'Suggested by the group' : 'Suggestions waiting for the lead', style: AppText.label),
+          child: DsSectionHeader(lead ? 'Suggested by the group' : 'Suggestions waiting for the lead'),
         ),
-        const SizedBox(height: Space.s8),
+        const SizedBox(height: 10),
         for (final s in suggestions)
           Padding(
-            padding: const EdgeInsets.only(bottom: Space.s12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                StopCard(
-                  kind: StopKind.fromCategory(s.category),
-                  name: s.name,
-                  subtitle: [
-                    if (s.suggestedByName.isNotEmpty) 'From ${s.suggestedByName}',
-                    if (fromMe(s.lat, s.lng).isNotEmpty) fromMe(s.lat, s.lng),
-                  ].join(', '),
-                ),
-                if (lead) ...[
-                  const SizedBox(height: Space.s8),
+            padding: const EdgeInsets.only(bottom: 10),
+            child: DsCard(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                   Row(
                     children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                          onPressed: () => service.declineStop(s.stopId),
-                          icon: const Icon(Icons.close_rounded),
-                          label: const Text('Decline', maxLines: 1, overflow: TextOverflow.ellipsis),
-                        ),
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(color: AppTheme.soft, borderRadius: BorderRadius.circular(14)),
+                        child: Icon(StopKind.fromCategory(s.category).icon, size: 24, color: AppTheme.accentText),
                       ),
-                      const SizedBox(width: Space.s8),
+                      const SizedBox(width: 14),
                       Expanded(
-                        child: FilledButton.icon(
-                          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                          onPressed: () => service.acceptStop(s.stopId),
-                          icon: const Icon(Icons.check_rounded),
-                          label: const Text('Add to route', maxLines: 1, overflow: TextOverflow.ellipsis),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(s.name.isEmpty ? StopKind.fromCategory(s.category).label : s.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+                            const SizedBox(height: 3),
+                            Text(
+                              [
+                                if (s.suggestedByName.isNotEmpty) 'From ${s.suggestedByName}',
+                                if (fromMe(s.lat, s.lng).isNotEmpty) fromMe(s.lat, s.lng),
+                              ].join(' · '),
+                              style: AppText.label,
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
+                  if (lead) ...[
+                    const SizedBox(height: Space.s12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DsButton(
+                            tone: DsButtonTone.outline,
+                            height: 48,
+                            fontSize: 15,
+                            icon: Icons.close_rounded,
+                            label: 'Decline',
+                            onPressed: () => service.declineStop(s.stopId),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: DsButton(
+                            height: 48,
+                            fontSize: 15,
+                            icon: Icons.check_rounded,
+                            label: 'Add to route',
+                            onPressed: () => service.acceptStop(s.stopId),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
       ],
@@ -250,36 +302,104 @@ class RouteStopsPanel extends StatelessWidget {
   }
 }
 
-/// Start or destination row.
-class _EndRow extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String subtitle;
-  final Widget? trailing;
-
-  const _EndRow({required this.icon, required this.color, required this.title, required this.subtitle, this.trailing});
+/// 18 px timeline dot: a 4 px ring on the card, or [fill]ed solid.
+class _RouteDot extends StatelessWidget {
+  final Color ring;
+  final Color? fill;
+  const _RouteDot({required this.ring, this.fill});
 
   @override
   Widget build(BuildContext context) {
-    final tr = trailing;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 56),
+    return Container(
+      width: 18,
+      height: 18,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: fill ?? AppTheme.card,
+        border: Border.all(color: ring, width: 4),
+      ),
+    );
+  }
+}
+
+/// One entry of the vertical route timeline: ring dot and a 3 px rail on
+/// the left, name 15/800 and detail 13/600, optional chip, trailing and
+/// extra lines under the detail (arrivals, "waiting for signal").
+class _TimelineRow extends StatelessWidget {
+  final Color ring;
+  final Color? fill;
+  final String title;
+  final Color? titleColor;
+  final String subtitle;
+  final Widget? chip;
+  final Widget? trailing;
+  final List<Widget> extra;
+  final bool last;
+
+  const _TimelineRow({
+    super.key,
+    required this.ring,
+    this.fill,
+    required this.title,
+    this.titleColor,
+    required this.subtitle,
+    this.chip,
+    this.trailing,
+    this.extra = const [],
+    this.last = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = chip;
+    final t = trailing;
+    return IntrinsicHeight(
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(width: 40, child: Icon(icon, color: color, size: 24)),
-          const SizedBox(width: Space.s12),
-          Expanded(
+          SizedBox(
+            width: 22,
             child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-                if (subtitle.isNotEmpty) Text(subtitle, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: _RouteDot(ring: ring, fill: fill),
+                ),
+                if (!last) Expanded(child: Center(child: Container(width: 3, color: AppTheme.border2))),
               ],
             ),
           ),
-          ?tr,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(0, 8, 0, last ? 8 : 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: titleColor ?? AppTheme.text, fontSize: 15, fontWeight: FontWeight.w800, height: 1.25),
+                        ),
+                      ),
+                      if (c != null) ...[const SizedBox(width: 8), c],
+                    ],
+                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(subtitle, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label),
+                  ],
+                  ...extra,
+                ],
+              ),
+            ),
+          ),
+          if (t != null) Center(child: t),
         ],
       ),
     );
@@ -320,72 +440,69 @@ class _StopTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = stop;
     final q = queued;
+    final kind = StopKind.fromCategory(s.category);
     final details = [
       s.isVisited ? 'Visited' : 'Stop ${index + 1}',
       if (distance.isNotEmpty) distance,
       if (s.plannedDwellMin > 0) 'stay ${s.plannedDwellMin} min',
       if (s.suggestedByName.isNotEmpty) 'added by ${s.suggestedByName}',
-    ].join(', ');
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Space.s8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          StopCard(
-            kind: StopKind.fromCategory(s.category),
-            name: s.name,
-            subtitle: details,
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // One tick control: tap to mark visited, tap again to undo.
-                IconButton(
-                  tooltip: s.isVisited ? 'Mark as not visited' : 'Mark as visited',
-                  icon: Icon(
-                    s.isVisited ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                    color: s.isVisited ? StatusColors.success : AppTheme.textSecondary,
-                  ),
-                  onPressed: () => onVisited(!s.isVisited),
-                ),
-                if (lead)
-                  PopupMenuButton<String>(
-                    tooltip: 'Stop options',
-                    icon: Icon(Icons.more_vert_rounded, color: AppTheme.textSecondary),
-                    color: AppTheme.elevatedCard,
-                    onSelected: (v) {
-                      switch (v) {
-                        case 'up':
-                          onMove(index - 1);
-                          break;
-                        case 'down':
-                          onMove(index + 1);
-                          break;
-                        case 'skip':
-                          onSkip();
-                          break;
-                        default:
-                          onRemove();
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      if (index > 0) const PopupMenuItem(value: 'up', child: Text('Move up')),
-                      if (index < count - 1) const PopupMenuItem(value: 'down', child: Text('Move down')),
-                      const PopupMenuItem(value: 'skip', child: Text('Skip this stop')),
-                      const PopupMenuItem(value: 'remove', child: Text('Remove from the route')),
-                    ],
-                  ),
-              ],
-            ),
+    ].join(' · ');
+    return _TimelineRow(
+      ring: s.isVisited ? AppTheme.accentText : AppTheme.warnText,
+      fill: s.isVisited ? AppTheme.brand : null,
+      title: s.name.isEmpty ? kind.label : s.name,
+      subtitle: details,
+      chip: DsChip(stopKindChoiceLabel(kind), warning: !s.isVisited),
+      extra: [
+        if (arrivals.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: Space.s4),
+            child: Text(arrivals, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
           ),
-          if (arrivals.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Space.s12, Space.s4, Space.s12, 0),
-              child: Text(arrivals, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+        if (q != null)
+          Padding(
+            padding: const EdgeInsets.only(top: Space.s4),
+            child: QueuedLine(what: 'Visited mark', failed: q.state == OutboxState.failed, sending: online),
+          ),
+      ],
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // One tick control: tap to mark visited, tap again to undo.
+          IconButton(
+            tooltip: s.isVisited ? 'Mark as not visited' : 'Mark as visited',
+            icon: Icon(
+              s.isVisited ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+              color: s.isVisited ? AppTheme.accentText : AppTheme.muted,
             ),
-          if (q != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Space.s12, Space.s4, Space.s12, 0),
-              child: QueuedLine(what: 'Visited mark', failed: q.state == OutboxState.failed, sending: online),
+            onPressed: () => onVisited(!s.isVisited),
+          ),
+          if (lead)
+            PopupMenuButton<String>(
+              tooltip: 'Stop options',
+              icon: Icon(Icons.more_vert_rounded, color: AppTheme.muted),
+              color: AppTheme.card,
+              onSelected: (v) {
+                switch (v) {
+                  case 'up':
+                    onMove(index - 1);
+                    break;
+                  case 'down':
+                    onMove(index + 1);
+                    break;
+                  case 'skip':
+                    onSkip();
+                    break;
+                  default:
+                    onRemove();
+                }
+              },
+              itemBuilder: (_) => [
+                if (index > 0) const PopupMenuItem(value: 'up', child: Text('Move up')),
+                if (index < count - 1) const PopupMenuItem(value: 'down', child: Text('Move down')),
+                const PopupMenuItem(value: 'skip', child: Text('Skip this stop')),
+                const PopupMenuItem(value: 'remove', child: Text('Remove from the route')),
+              ],
             ),
         ],
       ),

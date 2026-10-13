@@ -687,24 +687,14 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('tank range: a chip writes the value, Other takes a typed number, 0 is off', (tester) async {
-      final s = await settingsFor(tester);
-      final list = find.byType(Scrollable).first;
-      await tester.scrollUntilVisible(find.text('Tank range (km)'), 200, scrollable: list);
-      await tester.tap(find.text('250'));
-      await tester.pump();
-      expect(s.fuelRangeKm, 250);
-      expect(find.text('250 km'), findsOneWidget);
-      await tester.tap(find.text('Other'));
-      await tester.pump();
-      await tester.enterText(find.byKey(const ValueKey('fuelRange')), '320');
-      await tester.tap(find.text('Save'));
-      await tester.pump();
-      expect(s.fuelRangeKm, 320);
-      await tester.scrollUntilVisible(find.text('Off'), 200, scrollable: list);
-      await tester.tap(find.text('Off'));
-      await tester.pump();
-      expect(s.fuelRangeKm, 0);
+    testWidgets('ride safety opens the same simple fuel setup', (tester) async {
+      await settingsFor(tester);
+      await tester.scrollUntilVisible(find.text('Fuel'), 200, scrollable: find.byType(Scrollable).first);
+      await tester.tap(find.text('Fuel')); await tester.pumpAndSettle();
+      expect(find.text('How far does a full tank take you?'), findsOneWidget);
+      expect(find.text('Full tank distance (km)'), findsOneWidget);
+      expect(find.text('Tank range (km)'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
     });
 
     testWidgets('the developer impact row appears after 7 title taps and only during a ride', (tester) async {

@@ -297,9 +297,19 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.sports_motorsports_rounded, size: 22, color: AppTheme.neonCyan),
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(12)),
+                          child: Icon(Icons.sports_motorsports_rounded, size: 20, color: AppTheme.accentText),
+                        ),
                         const SizedBox(width: Space.s12),
-                        Expanded(child: Text(PreRideChecklistSheet.documentsLine, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body)),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 7),
+                            child: Text(PreRideChecklistSheet.documentsLine, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -310,9 +320,11 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: _ticked.contains(i),
-                    activeColor: AppTheme.emeraldSafe,
+                    activeColor: AppTheme.brand,
+                    checkboxShape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(6))),
+                    side: BorderSide(color: AppTheme.border2, width: 2),
                     controlAffinity: ListTileControlAffinity.leading,
-                    title: Text(PreRideChecklist.manualItems[i], style: AppText.body),
+                    title: Text(PreRideChecklist.manualItems[i], style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
                     onChanged: (v) => setState(() {
                       if (v == true) {
                         _ticked.add(i);
@@ -325,19 +337,18 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   value: _skip24h,
+                  activeColor: AppTheme.brand,
+                  checkboxShape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(6))),
+                  side: BorderSide(color: AppTheme.border2, width: 2),
                   controlAffinity: ListTileControlAffinity.leading,
-                  title: Text('Do not show for 24 hours', style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+                  title: Text('Do not show for 24 hours', style: AppText.body.copyWith(color: AppTheme.text2)),
                   onChanged: (v) => setState(() => _skip24h = v == true),
                 ),
               ],
             ),
           ),
           const SizedBox(height: Space.s12),
-          FilledButton(
-            onPressed: _start,
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-            child: const Text('Start the ride', style: TextStyle(fontWeight: FontWeight.w700)),
-          ),
+          DsButton(label: 'Start the ride', icon: Icons.play_arrow_rounded, onPressed: _start),
         ],
       ),
     );
@@ -350,8 +361,8 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
     return [
       const Divider(),
       Padding(
-        padding: const EdgeInsets.only(top: Space.s8),
-        child: Semantics(header: true, child: Text('Ride safety', style: AppText.label)),
+        padding: const EdgeInsets.only(top: Space.s12, bottom: Space.s4),
+        child: Semantics(header: true, child: Text('Ride safety', style: AppText.overline)),
       ),
       SafetySwitch(
         icon: Icons.car_crash_rounded,
@@ -371,22 +382,57 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
     ];
   }
 
+  /// One automatic check as a canvas list row: a 36 px status tile (teal when
+  /// fine, amber when it needs attention), title, one line, and a "Fix" pill.
   Widget _autoRow(int i) {
     final c = _checks[i];
     final attention = !c.ok && !c.infoOnly;
-    final color = c.ok ? AppTheme.emeraldSafe : (attention ? AppTheme.hyperAmber : AppTheme.textMuted);
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(c.ok ? Icons.check_circle_rounded : (attention ? Icons.error_outline_rounded : Icons.info_outline_rounded), color: color),
-      title: Text(c.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-      subtitle: Text(c.ok ? c.okText : c.problemText, style: AppText.caption.copyWith(color: attention ? AppTheme.hyperAmber : AppTheme.textMuted)),
-      trailing: (!c.ok && c.fix != null)
-          ? TextButton(
-              onPressed: () => _fix(i),
-              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-              child: Text('Fix', style: TextStyle(color: AppTheme.neonCyan, fontWeight: FontWeight.bold)),
-            )
-          : null,
+    final color = c.ok ? AppTheme.accentText : (attention ? AppTheme.warnText : AppTheme.muted);
+    final tile = c.ok ? AppTheme.tint : (attention ? AppTheme.warnTint : AppTheme.soft);
+    return Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: AppTheme.border))),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(color: tile, borderRadius: BorderRadius.circular(12)),
+            child: Icon(c.ok ? Icons.check_circle_rounded : (attention ? Icons.error_outline_rounded : Icons.info_outline_rounded), size: 20, color: color),
+          ),
+          const SizedBox(width: Space.s12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(c.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 1),
+                Text(c.ok ? c.okText : c.problemText, style: AppText.caption.copyWith(color: attention ? AppTheme.warnText : AppTheme.muted)),
+              ],
+            ),
+          ),
+          if (!c.ok && c.fix != null) ...[
+            const SizedBox(width: Space.s8),
+            SizedBox(
+              height: 40,
+              child: Material(
+                color: AppTheme.brand,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => _fix(i),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Center(child: Text('Fix', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800))),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui.dart';
 import '../../data/services/convoy_service.dart';
 
 class RideFeatureSummary extends StatefulWidget {
@@ -71,26 +73,41 @@ class _RideFeatureSummaryState extends State<RideFeatureSummary> {
       'Power':
           '${fresh.where((r) => r.batteryLevel <= 15).length} riders reporting low battery',
     };
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Live ride analytics',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            for (final row in rows.entries)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text('${row.key}: ${row.value}'),
+    final entries = rows.entries.toList();
+    return DsCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const DsSectionHeader('Live ride analytics'),
+          const SizedBox(height: 4),
+          for (var i = 0; i < entries.length; i++)
+            Container(
+              constraints: const BoxConstraints(minHeight: 44),
+              decoration: BoxDecoration(
+                border: i < entries.length - 1 ? Border(bottom: BorderSide(color: AppTheme.border)) : null,
               ),
-            const Text(
-              'Sharing counts exclude stale estimates. Disabled features do not disable emergency actions.',
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(child: Text(entries[i].key, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Text(
+                      entries[i].value,
+                      textAlign: TextAlign.end,
+                      style: AppText.label.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          const SizedBox(height: 10),
+          Text(
+            'Sharing counts exclude stale estimates. Disabled features do not disable emergency actions.',
+            style: AppText.caption,
+          ),
+        ],
       ),
     );
   }

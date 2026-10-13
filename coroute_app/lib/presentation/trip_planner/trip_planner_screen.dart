@@ -246,28 +246,89 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(title: const Text('Plan a ride')),
+      backgroundColor: AppTheme.map,
       body: LayoutBuilder(builder: (context, c) {
         final map = LoadingState(loading: _routing, child: _mapView());
-        final form = _form();
         final sideBySide = c.maxWidth > c.maxHeight && c.maxWidth >= 560;
         if (sideBySide) {
           final formWidth = (c.maxWidth * 0.45).clamp(280.0, 420.0).toDouble();
-          return Row(children: [SizedBox(width: formWidth, child: form), Expanded(child: map)]);
+          return Row(
+            children: [
+              SizedBox(width: formWidth, child: _sheet(sideBySide: true)),
+              Expanded(child: Stack(children: [Positioned.fill(child: map), _floatingTop()])),
+            ],
+          );
         }
-        return Column(children: [SizedBox(height: c.maxHeight * 0.55, child: map), Expanded(child: form)]);
+        // Half the screen, at least 300 dp and always leaving 120 dp of map;
+        // with the keyboard up (little height) the sheet takes most of it.
+        final sheetHeight = c.maxHeight < 420 ? c.maxHeight * 0.75 : (c.maxHeight * 0.5).clamp(300.0, c.maxHeight - 120).toDouble();
+        return Stack(
+          children: [
+            // The map runs under the sheet's rounded corners.
+            Positioned(left: 0, right: 0, top: 0, bottom: sheetHeight - Radii.sheet, child: map),
+            _floatingTop(),
+            Positioned(left: 0, right: 0, bottom: 0, height: sheetHeight, child: _sheet()),
+          ],
+        );
       }),
-      bottomNavigationBar: SafeArea(
+    );
+  }
+
+  /// Floating row over the map: round back button, "Route · 82 km" pill,
+  /// round fit-route button.
+  Widget _floatingTop() {
+    final r = _route;
+    final pill = r != null
+        ? 'Route · ${formatDistance(r.distanceM)}'
+        : _destination != null
+            ? 'Plan a ride · finding route'
+            : 'Plan a ride';
+    return Positioned(
+      left: 16,
+      right: 16,
+      top: 0,
+      child: SafeArea(
+        bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(Space.s16, Space.s8, Space.s16, Space.s12),
-          child: FilledButton.icon(
-            onPressed: _launching ? null : _review,
-            icon: _launching
-                ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.textSecondary))
-                : const Icon(Icons.fact_check_rounded),
-            label: Text(_launching ? 'Starting the ride' : 'Review', style: const TextStyle(fontWeight: FontWeight.w700)),
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: dsFloatingShadow()),
+                child: DsRoundButton(
+                  icon: Icons.chevron_left_rounded,
+                  label: 'Back',
+                  onTap: () => Navigator.of(context).maybePop(),
+                ),
+              ),
+              Expanded(
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.card,
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: dsFloatingShadow(),
+                    ),
+                    child: Text(
+                      pill,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: AppTheme.text, fontSize: 14, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ),
+              DecoratedBox(
+                decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: dsFloatingShadow()),
+                child: DsRoundButton(
+                  icon: Icons.fit_screen_rounded,
+                  label: 'Fit the route on the map',
+                  iconColor: AppTheme.accentText,
+                  onTap: _fit,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -287,14 +348,14 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       ),
       children: [
         appTileLayer(),
-        if (line.length >= 2) PolylineLayer(polylines: [Polyline(points: line, strokeWidth: 5, color: AppTheme.neonCyan)]),
+        if (line.length >= 2) PolylineLayer(polylines: [Polyline(points: line, strokeWidth: 6, color: AppTheme.brand)]),
         MarkerLayer(markers: [
           if (_start != null)
             Marker(
               point: LatLng(_start!.lat, _start!.lng),
               width: 32,
               height: 32,
-              child: Semantics(label: 'Start: ${_start!.name}', child: Icon(Icons.trip_origin_rounded, color: AppTheme.emeraldSafe, size: 24)),
+              child: Semantics(label: 'Start: ${_start!.name}', child: _RouteDot(ring: AppTheme.brand, size: 22)),
             ),
           for (var i = 0; i < _stops.length; i++)
             Marker(
@@ -308,20 +369,79 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
               point: LatLng(_destination!.lat, _destination!.lng),
               width: 36,
               height: 36,
-              child: Semantics(label: 'Destination: ${_destination!.name}', child: Icon(Icons.sports_score_rounded, color: AppTheme.laserRed, size: 30)),
+              child: Semantics(label: 'Destination: ${_destination!.name}', child: _RouteDot(ring: AppTheme.card, fill: AppTheme.brand, size: 24)),
             ),
         ]),
       ],
     );
   }
 
+  /// The bottom sheet card (radius 28, handle): stats, the stop timeline,
+  /// then "Add stop" and "Review".
+  Widget _sheet({bool sideBySide = false}) {
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: sideBySide ? BorderRadius.zero : Radii.sheetTop,
+        boxShadow: dsFloatingShadow(),
+      ),
+      child: SafeArea(
+        top: sideBySide,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (!sideBySide)
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 10),
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(color: AppTheme.border2, borderRadius: BorderRadius.circular(3)),
+                ),
+              ),
+            Expanded(child: _form()),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: DsButton(
+                      tone: DsButtonTone.outline,
+                      icon: Icons.add_rounded,
+                      fontSize: 15,
+                      label: 'Add stop',
+                      onPressed: _stops.length >= _maxStops || _launching ? null : _addStop,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DsButton(
+                      icon: _launching ? Icons.hourglass_top_rounded : Icons.fact_check_rounded,
+                      fontSize: 15,
+                      label: _launching ? 'Starting the ride' : 'Review',
+                      onPressed: _launching ? null : _review,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _form() {
-    final legs = _route?.legs ?? const <RouteLeg>[];
+    final r = _route;
+    final legs = r?.legs ?? const <RouteLeg>[];
     final recent = _destination == null
         ? _recent.where((p) => _start == null || p.name != _start!.name).take(3).toList()
         : const <PickedPlace>[];
+    final startName = _start?.name;
+    final destinationName = _destination?.name;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s16),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
       children: [
         TextField(
           controller: _name,
@@ -336,56 +456,36 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
             labelText: 'Trip name',
             hintText: 'For example: Sunday ride to Srisailam',
             errorText: _nameError,
-            prefixIcon: const Icon(Icons.edit_rounded),
+            prefixIcon: Icon(Icons.edit_rounded, color: AppTheme.accentText),
           ),
         ),
-        const SizedBox(height: Space.s8),
-        _PlaceRow(
-          icon: Icons.trip_origin_rounded,
-          color: AppTheme.emeraldSafe,
-          label: 'Start',
-          value: _start?.name,
-          empty: 'Finding your location',
-          onTap: _pickStart,
-        ),
-        _PlaceRow(
-          icon: Icons.sports_score_rounded,
-          color: AppTheme.laserRed,
-          label: 'Destination',
-          value: _destination?.name,
-          empty: 'Choose on the map',
-          onTap: _pickDestination,
-        ),
-        if (recent.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(left: Space.s4, bottom: Space.s8),
-            child: Wrap(
-              spacing: Space.s8,
-              runSpacing: Space.s8,
-              children: [
-                for (final p in recent)
-                  ActionChip(
-                    avatar: Icon(Icons.history_rounded, size: 18, color: AppTheme.textSecondary),
-                    label: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 220),
-                      child: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ),
-                    labelStyle: AppText.label.copyWith(color: AppTheme.textPrimary),
-                    tooltip: 'Ride to ${p.name}',
-                    backgroundColor: AppTheme.slateCard,
-                    side: BorderSide(color: AppTheme.subtleBorder),
-                    shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
-                    materialTapTargetSize: MaterialTapTargetSize.padded,
-                    onPressed: () => _setDestination(p),
-                  ),
-              ],
+        if (r != null) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(child: DsStatCell(label: 'Distance', value: formatDistance(r.distanceM))),
+              const SizedBox(width: 10),
+              Expanded(child: DsStatCell(label: 'Time', value: formatDuration(Duration(seconds: r.durationS)))),
+              const SizedBox(width: 10),
+              Expanded(child: DsStatCell(label: 'Stops', value: '${_stops.length}')),
+            ],
+          ),
+          if (r.approximate)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('Straight-line estimate: the road route is not available right now.', style: AppText.caption),
             ),
-          ),
-        const SizedBox(height: Space.s8),
-        Text('Stops', style: AppText.title),
-        const SizedBox(height: Space.s4),
-        Text('Optional. Long-press the map to add one there.', style: AppText.caption),
-        const SizedBox(height: Space.s8),
+        ],
+        const SizedBox(height: 16),
+        _TimelineRow(
+          ring: AppTheme.accentText,
+          title: startName != null && startName.isNotEmpty ? startName : 'Finding your location',
+          titleColor: startName != null && startName.isNotEmpty ? null : AppTheme.accentText,
+          subtitle: 'Start',
+          onTap: _pickStart,
+          trailing: Icon(Icons.edit_location_alt_outlined, size: 22, color: AppTheme.muted),
+          semanticsLabel: 'Start: ${startName ?? 'not set'}. Pick on the map',
+        ),
         ReorderableListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -401,87 +501,194 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
           itemBuilder: (_, i) {
             final s = _stops[i];
             final leg = i < legs.length ? legs[i] : null;
+            final kind = StopKind.fromCategory(s.category);
             final detail = [
-              if (leg != null) '${formatDistance(leg.distanceM)}, ${formatDuration(Duration(seconds: leg.durationS))} from previous',
+              if (leg != null) '${formatDistance(leg.distanceM)} · ${formatDuration(Duration(seconds: leg.durationS))} from previous',
               if (s.plannedDwellMin > 0) 'stay ${s.plannedDwellMin} min',
-            ].join(', ');
-            return Padding(
+            ].join(' · ');
+            return _TimelineRow(
               key: ObjectKey(s),
-              padding: const EdgeInsets.only(bottom: Space.s8),
-              child: StopCard(
-                kind: StopKind.fromCategory(s.category),
-                name: s.name,
-                subtitle: detail,
-                onTap: () => _editStop(i),
-                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  IconButton(
-                    tooltip: 'Remove stop',
-                    icon: Icon(Icons.close_rounded, color: AppTheme.textMuted),
-                    onPressed: () => _removeStop(i),
-                  ),
-                  ReorderableDragStartListener(
-                    index: i,
-                    child: Semantics(
-                      label: 'Drag to reorder ${s.name}',
-                      child: SizedBox(
-                        width: 48,
-                        height: 48,
-                        child: Icon(Icons.drag_handle_rounded, color: AppTheme.textSecondary),
-                      ),
+              ring: AppTheme.warnText,
+              title: s.name.isEmpty ? kind.label : s.name,
+              subtitle: detail.isEmpty ? 'Stop ${i + 1}' : detail,
+              chip: DsChip(stopKindChoiceLabel(kind), warning: true),
+              onTap: () => _editStop(i),
+              semanticsLabel: 'Stop ${i + 1}, ${stopKindChoiceLabel(kind)}: ${s.name}. Edit',
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(
+                  tooltip: 'Remove stop',
+                  icon: Icon(Icons.close_rounded, color: AppTheme.muted),
+                  onPressed: () => _removeStop(i),
+                ),
+                ReorderableDragStartListener(
+                  index: i,
+                  child: Semantics(
+                    label: 'Drag to reorder ${s.name}',
+                    child: SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Icon(Icons.drag_handle_rounded, color: AppTheme.muted),
                     ),
                   ),
-                ]),
-              ),
+                ),
+              ]),
             );
           },
         ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: _stops.length >= _maxStops ? null : _addStop,
-            icon: const Icon(Icons.add_location_alt_rounded),
-            label: const Text('Add a stop'),
-            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-          ),
+        _TimelineRow(
+          ring: AppTheme.accentText,
+          fill: AppTheme.brand,
+          last: true,
+          title: destinationName != null && destinationName.isNotEmpty ? destinationName : 'Choose on the map',
+          titleColor: destinationName != null && destinationName.isNotEmpty ? null : AppTheme.accentText,
+          subtitle: r != null ? 'Destination · ${formatDistance(r.distanceM)}' : 'Destination',
+          onTap: _pickDestination,
+          trailing: Icon(Icons.edit_location_alt_outlined, size: 22, color: AppTheme.muted),
+          semanticsLabel: 'Destination: ${destinationName ?? 'not set'}. Pick on the map',
         ),
+        if (recent.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 8),
+            child: Wrap(
+              spacing: Space.s8,
+              runSpacing: Space.s8,
+              children: [
+                for (final p in recent)
+                  ActionChip(
+                    avatar: Icon(Icons.history_rounded, size: 18, color: AppTheme.accentText),
+                    label: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 220),
+                      child: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    labelStyle: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w700),
+                    tooltip: 'Ride to ${p.name}',
+                    backgroundColor: AppTheme.card,
+                    side: BorderSide(color: AppTheme.border, width: 2),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    materialTapTargetSize: MaterialTapTargetSize.padded,
+                    onPressed: () => _setDestination(p),
+                  ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 6),
+        Text('Stops are optional. Long-press the map to add one there.', style: AppText.caption),
       ],
     );
   }
 }
 
-/// Start or destination row: icon, small label, place name, tap to pick on the map.
-class _PlaceRow extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String label;
-  final String? value;
-  final String empty;
-  final VoidCallback onTap;
-
-  const _PlaceRow({required this.icon, required this.color, required this.label, required this.value, required this.empty, required this.onTap});
+/// 18 px timeline dot: a 4 px ring on the card, or [fill]ed solid.
+class _RouteDot extends StatelessWidget {
+  final Color ring;
+  final Color? fill;
+  final double size;
+  const _RouteDot({required this.ring, this.fill, this.size = 18});
 
   @override
   Widget build(BuildContext context) {
-    final v = value;
-    final has = v != null && v.isNotEmpty;
-    final text = v != null && v.isNotEmpty ? v : empty;
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: Space.s4),
-      leading: Icon(icon, color: color),
-      title: Text(label, style: AppText.caption),
-      subtitle: Text(
-        text,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: AppText.body.copyWith(color: has ? AppTheme.textPrimary : AppTheme.neonCyan),
+    return Center(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: fill ?? AppTheme.card,
+          border: Border.all(color: ring, width: 4),
+        ),
       ),
-      trailing: Icon(Icons.edit_location_alt_rounded, color: AppTheme.textSecondary),
-      onTap: onTap,
     );
   }
 }
 
-/// A planned stop on the planner map: its type icon in an amber circle.
+/// One entry of the vertical route timeline: ring dot and a 3 px rail on
+/// the left, name 15/800 and detail 13/600, optional chip and trailing.
+class _TimelineRow extends StatelessWidget {
+  final Color ring;
+  final Color? fill;
+  final String title;
+  final Color? titleColor;
+  final String subtitle;
+  final Widget? chip;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool last;
+  final String? semanticsLabel;
+
+  const _TimelineRow({
+    super.key,
+    required this.ring,
+    this.fill,
+    required this.title,
+    this.titleColor,
+    required this.subtitle,
+    this.chip,
+    this.trailing,
+    this.onTap,
+    this.last = false,
+    this.semanticsLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = chip;
+    final t = trailing;
+    final body = IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 22,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: _RouteDot(ring: ring, fill: fill),
+                ),
+                if (!last) Expanded(child: Center(child: Container(width: 3, color: AppTheme.border2))),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(0, 10, 0, last ? 10 : 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: titleColor ?? AppTheme.text, fontSize: 15, fontWeight: FontWeight.w800, height: 1.25),
+                        ),
+                      ),
+                      if (c != null) ...[const SizedBox(width: 8), c],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
+                ],
+              ),
+            ),
+          ),
+          if (t != null) Center(child: t),
+        ],
+      ),
+    );
+    final tappable = onTap == null
+        ? body
+        : InkWell(onTap: onTap, borderRadius: BorderRadius.circular(12), child: body);
+    if (semanticsLabel == null) return tappable;
+    return Semantics(label: semanticsLabel, button: onTap != null, child: tappable);
+  }
+}
+
+/// A planned stop on the planner map: its type icon in an amber ring.
 class _StopMarker extends StatelessWidget {
   final int index;
   final PickedPlace place;
@@ -496,8 +703,8 @@ class _StopMarker extends StatelessWidget {
       excludeSemantics: true,
       child: Container(
         alignment: Alignment.center,
-        decoration: BoxDecoration(color: AppTheme.hyperAmber, shape: BoxShape.circle, border: Border.all(color: Colors.black, width: 1.5)),
-        child: Icon(kind.icon, size: 18, color: Colors.black),
+        decoration: BoxDecoration(color: AppTheme.card, shape: BoxShape.circle, border: Border.all(color: AppTheme.warnText, width: 3)),
+        child: Icon(kind.icon, size: 16, color: AppTheme.warnText),
       ),
     );
   }
@@ -576,21 +783,20 @@ class _AddStopSheetState extends State<_AddStopSheet> {
               suffixIcon: _naming
                   ? Padding(
                       padding: const EdgeInsets.all(14),
-                      child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.textMuted)),
+                      child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.muted)),
                     )
                   : null,
             ),
           ),
-          const SizedBox(height: Space.s16),
-          Text('What kind of stop?', style: AppText.label),
-          const SizedBox(height: Space.s8),
+          const SizedBox(height: 18),
+          const DsSectionHeader('What kind of stop?'),
+          const SizedBox(height: 10),
           StopKindChoices(selected: _kind, onSelected: (k) => setState(() => _kind = k)),
-          const SizedBox(height: Space.s16),
-          FilledButton.icon(
+          const SizedBox(height: 18),
+          DsButton(
+            icon: Icons.add_location_alt_rounded,
+            label: 'Add stop',
             onPressed: _kind == null ? null : _add,
-            icon: const Icon(Icons.add_location_alt_rounded),
-            label: const Text('Add stop', style: TextStyle(fontWeight: FontWeight.w700)),
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
           ),
         ],
       ),

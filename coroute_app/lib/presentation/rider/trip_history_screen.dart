@@ -89,6 +89,7 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
     final trips = tripStorage.trips;
 
     final Widget content;
+    String? subtitle;
     if (trips.isEmpty) {
       content = LayoutBuilder(
         builder: (context, c) => ListView(
@@ -109,15 +110,16 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
       );
     } else {
       final totals = _totalsOf(trips);
+      subtitle = '${formatDistance(totals.km * 1000)} · ${totals.rides} ${totals.rides == 1 ? 'ride' : 'rides'}';
       content = ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
         itemCount: trips.length + 1,
         itemBuilder: (ctx, index) {
           if (index == 0) return _TotalsHeader(rides: totals.rides, km: totals.km, ridingMs: totals.ridingMs);
           final trip = trips[index - 1];
           return Padding(
-            padding: const EdgeInsets.only(bottom: Space.s8),
+            padding: const EdgeInsets.only(bottom: 10),
             child: _TripRow(
               key: ValueKey(trip.tripId),
               trip: trip,
@@ -130,20 +132,54 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
     }
 
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(
-        title: const Text('Trips'),
-        automaticallyImplyLeading: !widget.embedded,
-      ),
-      body: LoadingState(
-        loading: _isSyncing,
-        hasData: trips.isNotEmpty,
-        child: RefreshIndicator(
-          color: AppTheme.neonCyan,
-          onRefresh: _triggerSync,
-          child: content,
+      backgroundColor: AppTheme.bg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+              child: DsScreenHeader(
+                title: 'Trips',
+                subtitle: subtitle ?? 'Every ride you finish is saved here',
+                onBack: widget.embedded ? null : () => Navigator.maybePop(context),
+                trailing: _NewRideButton(onTap: () => RiderHomeScreen.selectTab(context, HomeTab.ride)),
+              ),
+            ),
+            Expanded(
+              child: LoadingState(
+                loading: _isSyncing,
+                hasData: trips.isNotEmpty,
+                child: RefreshIndicator(
+                  color: AppTheme.accentText,
+                  onRefresh: _triggerSync,
+                  child: content,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
+    );
+  }
+}
+
+/// Round solid-teal "+" in the header (canvas: plan a new trip). Here it
+/// opens the Ride tab, where a ride is started.
+class _NewRideButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _NewRideButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return DsRoundButton(
+      icon: Icons.add_rounded,
+      label: 'Start a ride',
+      onTap: onTap,
+      size: 48,
+      background: AppTheme.brand,
+      borderColor: AppTheme.brand,
+      iconColor: Colors.white,
     );
   }
 }
@@ -160,10 +196,9 @@ class _TotalsHeader extends StatelessWidget {
     final dist = formatDistance(km * 1000);
     final cut = dist.lastIndexOf(' ');
     return Padding(
-      padding: const EdgeInsets.only(bottom: Space.s16),
-      child: Container(
-        padding: const EdgeInsets.all(Space.s16),
-        decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.subtleBorder)),
+      padding: const EdgeInsets.only(bottom: 16),
+      child: DsCard(
+        padding: const EdgeInsets.all(16),
         child: Row(children: [
           Expanded(child: RideMetric(value: '$rides', label: rides == 1 ? 'Ride' : 'Rides')),
           Expanded(
@@ -178,8 +213,8 @@ class _TotalsHeader extends StatelessWidget {
   }
 }
 
-/// One trip in the list: name, date, "142 km · 3 h 10 min riding", a menu
-/// with Delete, and a chevron. The same card for every trip.
+/// One trip in the list: a small route glyph, name, date, "142 km · 3 h 10 min
+/// riding", and a menu with Delete. The same card for every trip.
 class _TripRow extends StatelessWidget {
   final TripHistoryModel trip;
   final VoidCallback onTap;
@@ -190,79 +225,140 @@ class _TripRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final date = DateFormat('EEE d MMM yyyy, HH:mm').format(DateTime.fromMillisecondsSinceEpoch(trip.startTimeEpochMs));
+    final riders = trip.riderCount > 1 ? '${trip.riderCount} riders' : 'solo';
     final riding = trip.movingMs > 0
         ? '${formatDuration(Duration(milliseconds: trip.movingMs))} riding'
         : formatDuration(Duration(minutes: trip.durationMinutes));
     final facts = '${formatDistance(trip.totalDistanceKm * 1000)} · $riding';
-    return Material(
-      color: AppTheme.slateCard,
-      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 72),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(Space.s12, Space.s8, 0, Space.s8),
-            child: Row(children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(color: AppTheme.neonCyan.withOpacity(0.14), shape: BoxShape.circle),
-                child: Icon(Icons.two_wheeler_rounded, color: AppTheme.neonCyan, size: 22),
-              ),
-              const SizedBox(width: Space.s12),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(trip.tripName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-                    Text(date, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
-                    const SizedBox(height: 2),
-                    Text(facts, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
-                    if (trip.isEstimate)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Row(children: [
-                          Icon(Icons.hourglass_top_rounded, size: 14, color: StatusColors.warning),
-                          const SizedBox(width: Space.s4),
-                          Flexible(
-                            child: Text('Exact report being prepared',
-                                maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: StatusColors.warning)),
-                          ),
-                        ]),
-                      ),
-                  ],
+    return DsCard(
+      padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+      onTap: onTap,
+      child: Row(children: [
+        _RouteGlyph(trip: trip),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(trip.tripName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 15)),
+              const SizedBox(height: 2),
+              Text('$date · $riders', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
+              const SizedBox(height: 2),
+              Text(facts, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
+              if (trip.isEstimate)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Row(children: [
+                    Icon(Icons.hourglass_top_rounded, size: 14, color: AppTheme.warnText),
+                    const SizedBox(width: Space.s4),
+                    Flexible(
+                      child: Text('Exact report being prepared',
+                          maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.warnText, fontWeight: FontWeight.w700)),
+                    ),
+                  ]),
                 ),
-              ),
-              PopupMenuButton<String>(
-                tooltip: 'More options',
-                icon: Icon(Icons.more_vert_rounded, color: AppTheme.textSecondary),
-                onSelected: (v) {
-                  if (v == 'delete') onDelete();
-                },
-                itemBuilder: (_) => [
-                  PopupMenuItem<String>(
-                    value: 'delete',
-                    child: Row(children: [
-                      Icon(Icons.delete_outline_rounded, color: StatusColors.critical),
-                      const SizedBox(width: Space.s12),
-                      const Flexible(child: Text('Delete trip', maxLines: 1, overflow: TextOverflow.ellipsis)),
-                    ]),
-                  ),
-                ],
-              ),
-              Padding(
-                padding: const EdgeInsets.only(right: Space.s8),
-                child: Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
-              ),
-            ]),
+            ],
           ),
         ),
+        PopupMenuButton<String>(
+          tooltip: 'More options',
+          icon: Icon(Icons.more_vert_rounded, color: AppTheme.muted),
+          onSelected: (v) {
+            if (v == 'delete') onDelete();
+          },
+          itemBuilder: (_) => [
+            PopupMenuItem<String>(
+              value: 'delete',
+              child: Row(children: [
+                Icon(Icons.delete_outline_rounded, color: AppTheme.sos),
+                const SizedBox(width: Space.s12),
+                const Flexible(child: Text('Delete trip', maxLines: 1, overflow: TextOverflow.ellipsis)),
+              ]),
+            ),
+          ],
+        ),
+      ]),
+    );
+  }
+}
+
+/// The trip's route as a small teal line (canvas: the sparkline in each past
+/// trip row). Drawn from the saved trail; a plain curve when the trail is
+/// still on the server.
+class _RouteGlyph extends StatelessWidget {
+  final TripHistoryModel trip;
+  const _RouteGlyph({required this.trip});
+
+  @override
+  Widget build(BuildContext context) {
+    final pts = trip.breadcrumbTrail.where((p) => p.lat != 0 || p.lng != 0).toList();
+    return ExcludeSemantics(
+      child: SizedBox(
+        width: 56,
+        height: 40,
+        child: CustomPaint(painter: _RouteGlyphPainter(points: pts, color: AppTheme.brand, seed: trip.tripId.hashCode)),
       ),
     );
   }
+}
+
+class _RouteGlyphPainter extends CustomPainter {
+  final List<TripBreadcrumbPoint> points;
+  final Color color;
+  final int seed;
+  _RouteGlyphPainter({required this.points, required this.color, required this.seed});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path();
+    if (points.length >= 2) {
+      double minLat = points.first.lat, maxLat = points.first.lat, minLng = points.first.lng, maxLng = points.first.lng;
+      for (final p in points) {
+        if (p.lat < minLat) minLat = p.lat;
+        if (p.lat > maxLat) maxLat = p.lat;
+        if (p.lng < minLng) minLng = p.lng;
+        if (p.lng > maxLng) maxLng = p.lng;
+      }
+      final spanLat = (maxLat - minLat).abs() < 1e-9 ? 1e-9 : maxLat - minLat;
+      final spanLng = (maxLng - minLng).abs() < 1e-9 ? 1e-9 : maxLng - minLng;
+      const inset = 3.0;
+      final w = size.width - inset * 2, h = size.height - inset * 2;
+      // At most ~24 samples so the glyph stays smooth and cheap.
+      final step = (points.length / 24).ceil().clamp(1, points.length);
+      var first = true;
+      for (var i = 0; i < points.length; i += step) {
+        final p = points[i];
+        final x = inset + (p.lng - minLng) / spanLng * w;
+        final y = inset + h - (p.lat - minLat) / spanLat * h;
+        if (first) {
+          path.moveTo(x, y);
+          first = false;
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+      final last = points.last;
+      path.lineTo(inset + (last.lng - minLng) / spanLng * w, inset + h - (last.lat - minLat) / spanLat * h);
+    } else {
+      // No trail on this phone: a gentle rising curve, varied a little per trip.
+      final k = (seed % 5) * 0.08;
+      final w = size.width, h = size.height;
+      path.moveTo(4, h - 6);
+      path.cubicTo(w * (0.3 + k), h * 0.75, w * 0.4, h * (0.3 + k), w * 0.58, h * 0.3);
+      path.cubicTo(w * 0.75, h * (0.15 + k), w * 0.85, h * 0.25, w - 4, 4 + h * k);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_RouteGlyphPainter old) => old.points != points || old.color != color || old.seed != seed;
 }
 
 class TripReplayDetailScreen extends StatefulWidget {
@@ -372,17 +468,22 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
     } else if (_loadError != null) {
       child = Column(mainAxisSize: MainAxisSize.min, children: [
         Text(_loadError!, textAlign: TextAlign.center, style: AppText.body),
-        const SizedBox(height: Space.s8),
-        OutlinedButton(onPressed: _loadRoute, child: const Text('Try again')),
+        const SizedBox(height: Space.s12),
+        DsButton(label: 'Try again', tone: DsButtonTone.outline, height: 48, fontSize: 15, onPressed: _loadRoute),
       ]);
     } else {
-      child = FilledButton.icon(onPressed: _loadRoute, icon: const Icon(Icons.download_rounded), label: const Text('Load route'));
+      child = DsButton(label: 'Load route', icon: Icons.download_rounded, height: 48, fontSize: 15, onPressed: _loadRoute);
     }
     return Center(
       child: Container(
         margin: const EdgeInsets.all(Space.s24),
-        padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s12),
-        decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.subtleBorder)),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.card,
+          borderRadius: Radii.lgAll,
+          border: Border.all(color: AppTheme.border, width: 2),
+          boxShadow: dsFloatingShadow(),
+        ),
         child: child,
       ),
     );
@@ -407,14 +508,26 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
     final center = points.isNotEmpty ? points.first : const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng);
 
     final details = Container(
-      padding: const EdgeInsets.all(Space.s16),
-      decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.sheetTop),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: Radii.sheetTop,
+        border: Border(top: BorderSide(color: AppTheme.border, width: 2)),
+      ),
       child: SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Center(
+              child: Container(
+                width: 44,
+                height: 5,
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(color: AppTheme.border2, borderRadius: BorderRadius.circular(3)),
+              ),
+            ),
             Text(trip.tripName, style: AppText.title, maxLines: 1, overflow: TextOverflow.ellipsis),
             if (trip.startLocationName.isNotEmpty || trip.destinationName.isNotEmpty)
               Padding(
@@ -423,7 +536,7 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
                   '${trip.startLocationName.isEmpty ? 'Start' : trip.startLocationName} to ${trip.destinationName.isEmpty ? 'destination' : trip.destinationName}',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: AppText.caption.copyWith(color: AppTheme.textSecondary),
+                  style: AppText.label,
                 ),
               ),
             const SizedBox(height: Space.s16),
@@ -439,14 +552,10 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
                 child: Text('Top speed ${trip.topSpeedKmh.round()} km/h', style: AppText.label),
               ),
             const SizedBox(height: Space.s16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: points.isEmpty ? null : () => _share(context),
-                icon: const Icon(Icons.share_rounded),
-                label: const Text('Share the route (GPX)', maxLines: 1, overflow: TextOverflow.ellipsis),
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-              ),
+            DsButton(
+              label: 'Share the route (GPX)',
+              icon: Icons.share_rounded,
+              onPressed: points.isEmpty ? null : () => _share(context),
             ),
           ],
         ),
@@ -454,8 +563,11 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
     );
 
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(title: Text(trip.tripName, overflow: TextOverflow.ellipsis)),
+      backgroundColor: AppTheme.bg,
+      appBar: AppBar(
+        backgroundColor: AppTheme.bg,
+        title: Text(trip.tripName, overflow: TextOverflow.ellipsis),
+      ),
       body: LayoutBuilder(builder: (context, c) {
         final map = FlutterMap(
           // A new map (and camera fit) once a trail loaded on demand arrives.
@@ -469,7 +581,7 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
           children: [
             appTileLayer(),
             if (points.length >= 2)
-              PolylineLayer(polylines: [Polyline(points: points, strokeWidth: 5.0, color: AppTheme.neonCyan)]),
+              PolylineLayer(polylines: [Polyline(points: points, strokeWidth: 5.0, color: AppTheme.brand)]),
             if (points.isNotEmpty)
               MarkerLayer(
                 markers: [
@@ -485,7 +597,7 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
                     width: 32,
                     height: 32,
                     alignment: Alignment.topCenter,
-                    child: Semantics(label: 'Finish', child: Icon(Icons.flag_rounded, color: StatusColors.critical, size: 28)),
+                    child: Semantics(label: 'Finish', child: Icon(Icons.flag_rounded, color: AppTheme.sos, size: 28)),
                   ),
                 ],
               ),

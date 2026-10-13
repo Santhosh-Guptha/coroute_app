@@ -35,7 +35,7 @@ class RideMetric extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final big = AppText.metric.copyWith(fontSize: emphasis ? 32 : 24, color: color);
-    final small = AppText.label.copyWith(fontSize: emphasis ? 15 : 13);
+    final small = AppText.label.copyWith(fontSize: emphasis ? 15 : 13, fontWeight: FontWeight.w700);
     final u = unit;
     final centered = alignment == CrossAxisAlignment.center;
     final semantic = u == null || u.isEmpty ? '$label: $value' : '$label: $value $u';
@@ -67,7 +67,7 @@ class RideMetric extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: centered ? TextAlign.center : TextAlign.start,
-            style: AppText.caption,
+            style: AppText.caption.copyWith(fontWeight: FontWeight.w700),
           ),
         ],
       ),

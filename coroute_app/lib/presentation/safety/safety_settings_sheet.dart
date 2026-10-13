@@ -1,3 +1,4 @@
+import '../ride/fuel_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -118,15 +119,6 @@ class SafetySettingsSheet extends StatefulWidget {
 class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
   bool _smsDenied = false;
   int _titleTaps = 0;
-  bool _customFuel = false;
-  final TextEditingController _fuel = TextEditingController();
-
-  @override
-  void dispose() {
-    _fuel.dispose();
-    super.dispose();
-  }
-
   Future<void> _setSms(SettingsService s, bool on) async {
     if (!on) {
       await s.setSmsFallback(false);
@@ -154,15 +146,15 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
     setState(() => _titleTaps++);
   }
 
-  void _saveCustomFuel(SettingsService s) {
-    final v = int.tryParse(_fuel.text.trim()) ?? 0;
-    s.setFuelRangeKm(v.clamp(0, SafetyConstants.fuelMaxRangeKm));
-    setState(() => _customFuel = false);
-  }
-
   Widget _section(String text) => Padding(
-        padding: const EdgeInsets.only(top: Space.s16, bottom: Space.s4),
-        child: Semantics(header: true, child: Text(text, style: AppText.label)),
+        padding: const EdgeInsets.only(top: 20, bottom: 10),
+        child: Semantics(header: true, child: DsSectionHeader(text)),
+      );
+
+  /// A card of rows (the More canvas: card, 2 px border, 18 px radius).
+  Widget _group(List<Widget> rows) => DsCard(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
       );
 
   @override
@@ -182,8 +174,6 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
       return a != null && a.tripStatus != 'ENDED';
     });
     final showDev = _titleTaps >= SafetySettingsSheet.devTaps && convoy;
-    final fuel = s.fuelRangeKm;
-    final fuelIsChoice = SafetySettingsSheet.fuelChoices.contains(fuel);
     return SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -194,206 +184,235 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
             onTap: _titleTap,
             child: AppSheetHeader(title: L10n.t('settings.title')),
           ),
-          SafetySwitch(
-            icon: Icons.car_crash_rounded,
-            title: SafetyTexts.crashTitle,
-            subtitle: SafetyTexts.crashExplain,
-            value: s.crashDetection,
-            onChanged: (v) => s.setCrashDetection(v),
-          ),
-          SafetySwitch(
-            icon: Icons.sms_rounded,
-            title: SafetyTexts.smsTitle,
-            subtitle: SafetyTexts.smsExplain,
-            value: s.smsFallback,
-            onChanged: (v) => _setSms(s, v),
-            warning: _smsDenied ? SafetyTexts.smsDenied : null,
-          ),
-          SafetySwitch(
-            icon: Icons.free_breakfast_rounded,
-            title: SafetyTexts.fatigueTitle,
-            subtitle: SafetyTexts.fatigueExplain,
-            value: s.fatigueReminder,
-            onChanged: (v) => s.setFatigueReminder(v),
-          ),
-          SafetySwitch(
-            icon: Icons.person_search_rounded,
-            title: SafetyTexts.checkInTitle,
-            subtitle: SafetyTexts.checkInExplain,
-            value: s.soloCheckIn,
-            onChanged: (v) => s.setSoloCheckIn(v),
-          ),
-          SafetySwitch(
-            icon: Icons.checklist_rounded,
-            title: SafetyTexts.docsTitle,
-            subtitle: SafetyTexts.docsExplain,
-            value: s.documentsReminder,
-            onChanged: (v) => s.setDocumentsReminder(v),
-          ),
+          _group([
+            SafetySwitch(
+              icon: Icons.car_crash_outlined,
+              title: SafetyTexts.crashTitle,
+              subtitle: SafetyTexts.crashExplain,
+              value: s.crashDetection,
+              onChanged: (v) => s.setCrashDetection(v),
+            ),
+            SafetySwitch(
+              icon: Icons.sms_outlined,
+              title: SafetyTexts.smsTitle,
+              subtitle: SafetyTexts.smsExplain,
+              value: s.smsFallback,
+              onChanged: (v) => _setSms(s, v),
+              warning: _smsDenied ? SafetyTexts.smsDenied : null,
+            ),
+            SafetySwitch(
+              icon: Icons.free_breakfast_outlined,
+              title: SafetyTexts.fatigueTitle,
+              subtitle: SafetyTexts.fatigueExplain,
+              value: s.fatigueReminder,
+              onChanged: (v) => s.setFatigueReminder(v),
+            ),
+            SafetySwitch(
+              icon: Icons.person_search_outlined,
+              title: SafetyTexts.checkInTitle,
+              subtitle: SafetyTexts.checkInExplain,
+              value: s.soloCheckIn,
+              onChanged: (v) => s.setSoloCheckIn(v),
+            ),
+            SafetySwitch(
+              icon: Icons.checklist_rounded,
+              title: SafetyTexts.docsTitle,
+              subtitle: SafetyTexts.docsExplain,
+              value: s.documentsReminder,
+              onChanged: (v) => s.setDocumentsReminder(v),
+              divider: false,
+            ),
+          ]),
           _section(L10n.t('settings.ride')),
-          FuelRangeField(
-            value: fuel,
-            custom: _customFuel || (!fuelIsChoice && fuel > 0),
-            controller: _fuel,
-            onChoice: (v) {
-              setState(() => _customFuel = false);
-              s.setFuelRangeKm(v);
-            },
-            onCustom: () {
-              _fuel.text = fuelIsChoice ? '' : '$fuel';
-              setState(() => _customFuel = true);
-            },
-            onSave: () => _saveCustomFuel(s),
-          ),
+          _group([
+            DsListRow(
+              icon: Icons.local_gas_station_outlined,
+              label: 'Fuel',
+              divider: false,
+              trailing: Flexible(
+                child: Text(
+                  s.fuelProfile.valid ? '${s.fuelProfile.rangeKm.floor()} km' : 'Set range',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              onTap: () => showFuelSheet(context, configure: true),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                s.fuelProfile.valid ? '${s.fuelProfile.rangeKm.floor()} km on a full tank. Tap to change.' : 'Set your range and update fuel left.',
+                style: AppText.caption,
+              ),
+            ),
+          ]),
           _section(SafetyTexts.nearbySection),
-          if (auth != null) ...[
+          _group([
+            if (auth != null) ...[
+              SafetySwitch(
+                icon: Icons.volunteer_activism_outlined,
+                title: SafetyTexts.helpTitle,
+                subtitle: SafetyTexts.helpExplain,
+                value: auth.assistHelp,
+                onChanged: (v) => _saveNet(auth, help: v),
+              ),
+              SafetySwitch(
+                icon: Icons.emergency_share_outlined,
+                title: SafetyTexts.askTitle,
+                subtitle: SafetyTexts.askExplain,
+                value: auth.assistAsk,
+                onChanged: (v) => _saveNet(auth, ask: v),
+              ),
+              SafetySwitch(
+                icon: Icons.medical_information_outlined,
+                title: SafetyTexts.medicalTitle,
+                subtitle: SafetyTexts.medicalExplain,
+                value: auth.responderMedical,
+                onChanged: (v) => _saveNet(auth, medical: v),
+              ),
+            ],
             SafetySwitch(
-              icon: Icons.volunteer_activism_rounded,
-              title: SafetyTexts.helpTitle,
-              subtitle: SafetyTexts.helpExplain,
-              value: auth.assistHelp,
-              onChanged: (v) => _saveNet(auth, help: v),
+              icon: Icons.warning_amber_rounded,
+              title: SafetyTexts.hazardTitle,
+              subtitle: SafetyTexts.hazardExplain,
+              value: s.hazardAlerts,
+              onChanged: (v) => s.setHazardAlerts(v),
+              divider: false,
             ),
-            SafetySwitch(
-              icon: Icons.emergency_share_rounded,
-              title: SafetyTexts.askTitle,
-              subtitle: SafetyTexts.askExplain,
-              value: auth.assistAsk,
-              onChanged: (v) => _saveNet(auth, ask: v),
-            ),
-            SafetySwitch(
-              icon: Icons.medical_information_rounded,
-              title: SafetyTexts.medicalTitle,
-              subtitle: SafetyTexts.medicalExplain,
-              value: auth.responderMedical,
-              onChanged: (v) => _saveNet(auth, medical: v),
-            ),
-          ],
-          SafetySwitch(
-            icon: Icons.warning_amber_rounded,
-            title: SafetyTexts.hazardTitle,
-            subtitle: SafetyTexts.hazardExplain,
-            value: s.hazardAlerts,
-            onChanged: (v) => s.setHazardAlerts(v),
-          ),
+          ]),
           _section(SafetyTexts.voiceSection),
-          SafetySwitch(
-            icon: Icons.record_voice_over_rounded,
-            title: 'Announce all alerts',
-            subtitle: 'Read out all notifications and alerts via voice',
-            value: s.voiceAnnounceAllAlerts,
-            onChanged: (v) => s.setVoiceAnnounceAllAlerts(v),
-          ),
-          SafetySwitch(
-            icon: Icons.record_voice_over_rounded,
-            title: SafetyTexts.voiceCriticalTitle,
-            subtitle: SafetyTexts.voiceCriticalExplain,
-            value: s.voiceCritical,
-            onChanged: (v) => s.setVoiceCritical(v),
-          ),
-          SafetySwitch(
-            icon: Icons.campaign_rounded,
-            title: SafetyTexts.voiceWarningsTitle,
-            subtitle: SafetyTexts.voiceWarningsExplain,
-            value: s.voiceWarnings,
-            onChanged: (v) => s.setVoiceWarnings(v),
-          ),
-          SafetySwitch(
-            icon: Icons.nights_stay_rounded,
-            title: SafetyTexts.darkVoiceTitle,
-            subtitle: SafetyTexts.darkVoiceExplain,
-            value: s.speakMoreAfterDark,
-            onChanged: (v) => s.setSpeakMoreAfterDark(v),
-          ),
-          _section(SafetyTexts.notificationSection),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.timer_outlined, color: AppTheme.textSecondary, size: 22),
-                    const SizedBox(width: Space.s12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Map alert banner duration', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-                          Text(
-                            s.mapAlertDismissSeconds == 0
-                                ? 'Manual dismissal only on map'
-                                : 'Dismisses from map after ${s.mapAlertDismissSeconds} seconds (saved in notifications)',
-                            style: AppText.caption,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: Space.s8),
-                Wrap(
-                  spacing: Space.s8,
-                  runSpacing: Space.s4,
-                  children: [
-                    for (final sec in NetworkConstants.mapAlertDismissChoices)
-                      ChoiceChip(
-                        label: Text(sec == 0 ? 'Manual' : '${sec}s'),
-                        selected: s.mapAlertDismissSeconds == sec,
-                        onSelected: (_) => s.setMapAlertDismissSeconds(sec),
-                      ),
-                  ],
-                ),
-              ],
+          _group([
+            SafetySwitch(
+              icon: Icons.record_voice_over_outlined,
+              title: 'Announce all alerts',
+              subtitle: 'Read out all notifications and alerts via voice',
+              value: s.voiceAnnounceAllAlerts,
+              onChanged: (v) => s.setVoiceAnnounceAllAlerts(v),
             ),
-          ),
-          SafetySwitch(
-            icon: Icons.lock_open_rounded,
-            title: SafetyTexts.lockTitle,
-            subtitle: SafetyTexts.lockExplain,
-            value: s.rideOnLockScreen,
-            onChanged: (v) => s.setRideOnLockScreen(v),
-          ),
-          SafetySwitch(
-            icon: Icons.view_agenda_rounded,
-            title: SafetyTexts.richTitle,
-            subtitle: SafetyTexts.richExplain,
-            value: s.richNotification,
-            onChanged: (v) => s.setRichNotification(v),
-          ),
-          SafetySwitch(
-            icon: Icons.medical_services_rounded,
-            title: SafetyTexts.medicalLockTitle,
-            subtitle: SafetyTexts.medicalLockExplain,
-            value: s.medicalIdOnLockScreen,
-            onChanged: (v) => s.setMedicalIdOnLockScreen(v),
-          ),
+            SafetySwitch(
+              icon: Icons.record_voice_over_outlined,
+              title: SafetyTexts.voiceCriticalTitle,
+              subtitle: SafetyTexts.voiceCriticalExplain,
+              value: s.voiceCritical,
+              onChanged: (v) => s.setVoiceCritical(v),
+            ),
+            SafetySwitch(
+              icon: Icons.campaign_outlined,
+              title: SafetyTexts.voiceWarningsTitle,
+              subtitle: SafetyTexts.voiceWarningsExplain,
+              value: s.voiceWarnings,
+              onChanged: (v) => s.setVoiceWarnings(v),
+            ),
+            SafetySwitch(
+              icon: Icons.nights_stay_outlined,
+              title: SafetyTexts.darkVoiceTitle,
+              subtitle: SafetyTexts.darkVoiceExplain,
+              value: s.speakMoreAfterDark,
+              onChanged: (v) => s.setSpeakMoreAfterDark(v),
+              divider: false,
+            ),
+          ]),
+          _section(SafetyTexts.notificationSection),
+          _group([
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.timer_outlined, color: AppTheme.accentText, size: 22),
+                      const SizedBox(width: Space.s12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Map alert banner duration', style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                            Text(
+                              s.mapAlertDismissSeconds == 0
+                                  ? 'Manual dismissal only on map'
+                                  : 'Dismisses from map after ${s.mapAlertDismissSeconds} seconds (saved in notifications)',
+                              style: AppText.caption,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: Space.s8),
+                  Wrap(
+                    spacing: Space.s8,
+                    runSpacing: Space.s4,
+                    children: [
+                      for (final sec in NetworkConstants.mapAlertDismissChoices)
+                        ChoiceChip(
+                          label: Text(sec == 0 ? 'Manual' : '${sec}s'),
+                          selected: s.mapAlertDismissSeconds == sec,
+                          onSelected: (_) => s.setMapAlertDismissSeconds(sec),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: AppTheme.border),
+            SafetySwitch(
+              icon: Icons.lock_open_outlined,
+              title: SafetyTexts.lockTitle,
+              subtitle: SafetyTexts.lockExplain,
+              value: s.rideOnLockScreen,
+              onChanged: (v) => s.setRideOnLockScreen(v),
+            ),
+            SafetySwitch(
+              icon: Icons.view_agenda_outlined,
+              title: SafetyTexts.richTitle,
+              subtitle: SafetyTexts.richExplain,
+              value: s.richNotification,
+              onChanged: (v) => s.setRichNotification(v),
+            ),
+            SafetySwitch(
+              icon: Icons.medical_services_outlined,
+              title: SafetyTexts.medicalLockTitle,
+              subtitle: SafetyTexts.medicalLockExplain,
+              value: s.medicalIdOnLockScreen,
+              onChanged: (v) => s.setMedicalIdOnLockScreen(v),
+              divider: false,
+            ),
+          ]),
           _section(L10n.t('settings.mapsSection')),
-          SafetySwitch(
-            icon: Icons.map_rounded,
-            title: SafetyTexts.mapsTitle,
-            subtitle: SafetyTexts.mapsExplain,
-            value: s.saveRouteMaps,
-            onChanged: (v) => s.setSaveRouteMaps(v),
-          ),
+          _group([
+            SafetySwitch(
+              icon: Icons.map_outlined,
+              title: SafetyTexts.mapsTitle,
+              subtitle: SafetyTexts.mapsExplain,
+              value: s.saveRouteMaps,
+              onChanged: (v) => s.setSaveRouteMaps(v),
+              divider: false,
+            ),
+          ]),
           _section(SafetyTexts.languageTitle),
           LanguagePicker(value: s.language, onChanged: (l) => s.setLanguage(l)),
           if (showDev) ...[
-            const Divider(),
-            ListTile(
-              key: const ValueKey('devImpact'),
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.watch_rounded, color: AppTheme.textSecondary),
-              title: Text(SafetyTexts.devTitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-              subtitle: Text(L10n.t('settings.dev.hint'), maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.caption),
-              onTap: () {
-                context.read<SafetyService?>()?.externalImpact(
-                      source: ExternalImpactSource.developer,
-                      g: SafetyConstants.wearableImpactG,
-                      atMs: DateTime.now().millisecondsSinceEpoch,
-                    );
-                Navigator.of(context).maybePop();
-              },
+            const SizedBox(height: 12),
+            DsCard(
+              dashed: true,
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                key: const ValueKey('devImpact'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                leading: Icon(Icons.watch_outlined, color: AppTheme.accentText),
+                title: Text(SafetyTexts.devTitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                subtitle: Text(L10n.t('settings.dev.hint'), maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                onTap: () {
+                  context.read<SafetyService?>()?.externalImpact(
+                        source: ExternalImpactSource.developer,
+                        g: SafetyConstants.wearableImpactG,
+                        atMs: DateTime.now().millisecondsSinceEpoch,
+                      );
+                  Navigator.of(context).maybePop();
+                },
+              ),
             ),
           ],
         ],
@@ -430,10 +449,10 @@ class FuelRangeField extends StatelessWidget {
       children: [
         Row(
           children: [
-            Icon(Icons.local_gas_station_rounded, color: AppTheme.textSecondary),
+            Icon(Icons.local_gas_station_outlined, color: AppTheme.accentText),
             const SizedBox(width: Space.s16),
             Expanded(
-              child: Text(SafetyTexts.fuelTitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+              child: Text(SafetyTexts.fuelTitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
             ),
             Text(
               value > 0 ? '$value km' : L10n.t('settings.fuel.off'),
@@ -473,19 +492,16 @@ class FuelRangeField extends StatelessWidget {
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
                     style: AppText.body,
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       labelText: 'km',
                       isDense: true,
-                      filled: true,
-                      fillColor: AppTheme.elevatedCard,
-                      border: const OutlineInputBorder(borderRadius: Radii.mdAll),
                     ),
                     onSubmitted: (_) => onSave(),
                   ),
                 ),
                 const SizedBox(width: Space.s8),
                 FilledButton(
-                  style: FilledButton.styleFrom(minimumSize: const Size(64, 48)),
+                  style: FilledButton.styleFrom(minimumSize: const Size(64, 52)),
                   onPressed: onSave,
                   child: const Text('Save'),
                 ),
@@ -516,10 +532,7 @@ class LanguagePicker extends StatelessWidget {
         InputDecorator(
           decoration: InputDecoration(
             labelText: SafetyTexts.languageTitle,
-            prefixIcon: Icon(Icons.translate_rounded, color: AppTheme.textSecondary),
-            filled: true,
-            fillColor: AppTheme.elevatedCard,
-            border: const OutlineInputBorder(borderRadius: Radii.mdAll),
+            prefixIcon: Icon(Icons.translate_rounded, color: AppTheme.accentText),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<AppLanguage>(
@@ -527,7 +540,8 @@ class LanguagePicker extends StatelessWidget {
               value: value,
               isDense: true,
               isExpanded: true,
-              dropdownColor: AppTheme.slateCard,
+              dropdownColor: AppTheme.card,
+              borderRadius: Radii.mdAll,
               style: AppText.body,
               items: [
                 for (final l in AppLanguage.values) DropdownMenuItem(value: l, child: Text(l.label, maxLines: 1, overflow: TextOverflow.ellipsis)),
@@ -546,6 +560,7 @@ class LanguagePicker extends StatelessWidget {
 }
 
 /// A switch row with an explanation (and an optional amber warning line).
+/// Inside a card list: a hairline under the row unless [divider] is false.
 class SafetySwitch extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -553,6 +568,7 @@ class SafetySwitch extends StatelessWidget {
   final bool value;
   final ValueChanged<bool> onChanged;
   final String? warning;
+  final bool divider;
 
   const SafetySwitch({
     super.key,
@@ -562,25 +578,29 @@ class SafetySwitch extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.warning,
+    this.divider = true,
   });
 
   @override
   Widget build(BuildContext context) {
     final w = warning;
-    return SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      value: value,
-      onChanged: onChanged,
-      activeColor: AppTheme.neonCyan,
-      secondary: Icon(icon, color: AppTheme.textSecondary),
-      title: Text(title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(subtitle, maxLines: 10, overflow: TextOverflow.ellipsis, style: AppText.caption),
-          if (w != null) Text(w, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: StatusColors.warning)),
-        ],
+    return Container(
+      decoration: BoxDecoration(border: divider ? Border(bottom: BorderSide(color: AppTheme.border)) : null),
+      child: SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        value: value,
+        onChanged: onChanged,
+        activeColor: AppTheme.brand,
+        secondary: Icon(icon, color: AppTheme.accentText, size: 22),
+        title: Text(title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(subtitle, maxLines: 10, overflow: TextOverflow.ellipsis, style: AppText.caption),
+            if (w != null) Text(w, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.warnText)),
+          ],
+        ),
       ),
     );
   }

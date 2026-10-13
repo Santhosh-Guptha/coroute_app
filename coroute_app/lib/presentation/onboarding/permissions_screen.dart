@@ -67,43 +67,45 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
   Widget build(BuildContext context) {
     final requiredOk = _items.where((p) => p.required).every((p) => p.granted);
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(title: const Text('Permissions'), automaticallyImplyLeading: !widget.gate),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: LoadingState(
-            loading: _loading,
-            hasData: _items.isNotEmpty || !_loading,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s16, Space.s32),
-              children: [
-                Text(
-                  widget.gate
-                      ? 'Before the ride starts, CoRoute needs a few permissions. Each one is used only during an active ride.'
-                      : 'Each permission is used only during an active ride.',
-                  style: AppText.body.copyWith(color: AppTheme.textSecondary),
-                ),
-                const SizedBox(height: Space.s16),
-                for (final p in _items) _PermissionRow(item: p, onAllow: () => _request(p)),
-                const SizedBox(height: Space.s12),
-                if (widget.gate)
-                  FilledButton(
-                    onPressed: requiredOk
-                        ? () async {
-                            await PermissionsService.markIntroShown();
-                            if (context.mounted) Navigator.pop(context, true);
-                          }
-                        : null,
-                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                    child: Text(
-                      requiredOk ? 'Continue' : 'Allow the required permissions to continue',
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+      backgroundColor: AppTheme.bg,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: LoadingState(
+              loading: _loading,
+              hasData: _items.isNotEmpty || !_loading,
+              child: ListView(
+                padding: dsScreenPadding,
+                children: [
+                  DsScreenHeader(
+                    title: 'Permissions',
+                    subtitle: 'Used only during an active ride',
+                    onBack: widget.gate ? null : () => Navigator.maybePop(context),
                   ),
-              ],
+                  const SizedBox(height: 18),
+                  Text(
+                    widget.gate
+                        ? 'Before the ride starts, CoRoute needs a few permissions. Each one is used only during an active ride.'
+                        : 'Each permission is used only during an active ride.',
+                    style: AppText.body.copyWith(color: AppTheme.text2),
+                  ),
+                  const SizedBox(height: Space.s16),
+                  for (final p in _items) _PermissionRow(item: p, onAllow: () => _request(p)),
+                  const SizedBox(height: Space.s12),
+                  if (widget.gate)
+                    DsButton(
+                      label: requiredOk ? 'Continue' : 'Allow the required permissions to continue',
+                      fontSize: requiredOk ? 16 : 14,
+                      onPressed: requiredOk
+                          ? () async {
+                              await PermissionsService.markIntroShown();
+                              if (context.mounted) Navigator.pop(context, true);
+                            }
+                          : null,
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -121,44 +123,50 @@ class _PermissionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = item;
     final statusText = p.granted ? 'Allowed' : (p.required ? 'Required' : 'Optional');
-    final Color statusColor = p.granted ? StatusColors.success : (p.required ? StatusColors.warning : AppTheme.textMuted);
+    final attention = !p.granted && p.required;
+    final Color statusColor = p.granted ? AppTheme.accentText : (attention ? AppTheme.warnText : AppTheme.muted);
     return Padding(
-      padding: const EdgeInsets.only(bottom: Space.s12),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: AppTheme.slateCard,
-          borderRadius: Radii.mdAll,
-          border: Border.all(color: AppTheme.subtleBorder),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(Space.s16),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(p.granted ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded, color: statusColor),
-              const SizedBox(width: Space.s12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(p.title, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 2),
-                    Text(statusText, style: AppText.label.copyWith(color: statusColor)),
-                    const SizedBox(height: Space.s4),
-                    Text(p.reason, style: AppText.label.copyWith(fontWeight: FontWeight.w400)),
-                    if (!p.granted) ...[
-                      const SizedBox(height: Space.s8),
-                      OutlinedButton(
-                        onPressed: onAllow,
-                        style: OutlinedButton.styleFrom(minimumSize: const Size(96, 48)),
-                        child: const Text('Allow'),
-                      ),
-                    ],
-                  ],
-                ),
+      padding: const EdgeInsets.only(bottom: 10),
+      child: DsCard(
+        warning: attention,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: p.granted ? AppTheme.tint : (attention ? AppTheme.warnTint : AppTheme.soft),
+                borderRadius: BorderRadius.circular(14),
               ),
-            ],
-          ),
+              child: Icon(p.granted ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded, size: 22, color: statusColor),
+            ),
+            const SizedBox(width: Space.s12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: Text(p.title, style: AppText.title.copyWith(fontSize: 15))),
+                      const SizedBox(width: 8),
+                      DsChip(statusText, warning: attention, color: p.granted ? null : (attention ? null : AppTheme.muted), background: p.granted ? null : (attention ? null : AppTheme.soft)),
+                    ],
+                  ),
+                  const SizedBox(height: Space.s4),
+                  Text(p.reason, style: AppText.label),
+                  if (!p.granted) ...[
+                    const SizedBox(height: Space.s12),
+                    SizedBox(
+                      width: 140,
+                      child: DsButton(label: 'Allow', height: 48, fontSize: 15, onPressed: onAllow),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -87,50 +87,72 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
               shrinkWrap: true,
               padding: EdgeInsets.zero,
               children: [
-                Text(
-                  'If you have an accident, CoRoute can also ask one to three riders from other groups who are already riding towards you, '
-                  'when they may reach you faster than your own group. They see only where you are and how far. '
-                  'Your name and vehicle are shared only after one of them accepts. Your phone number is never shared.',
-                  style: AppText.body,
+                DsCard(
+                  tinted: true,
+                  borderColor: AppTheme.tint,
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.volunteer_activism_outlined, size: 24, color: AppTheme.accentText),
+                      const SizedBox(width: Space.s12),
+                      Expanded(
+                        child: Text(
+                          'If you have an accident, CoRoute can also ask one to three riders from other groups who are already riding towards you, '
+                          'when they may reach you faster than your own group. They see only where you are and how far. '
+                          'Your name and vehicle are shared only after one of them accepts. Your phone number is never shared.',
+                          style: AppText.body,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: Space.s8),
                 Text(
                   'You can change this any time in Profile, Ride safety.',
-                  style: AppText.caption.copyWith(color: AppTheme.textSecondary),
+                  style: AppText.caption,
                 ),
-                const SizedBox(height: Space.s8),
-                SafetySwitch(
-                  icon: Icons.emergency_share_rounded,
-                  title: SafetyTexts.askTitle,
-                  subtitle: SafetyTexts.askExplain,
-                  value: _ask,
-                  onChanged: (v) => setState(() => _ask = v),
-                ),
-                SafetySwitch(
-                  icon: Icons.volunteer_activism_rounded,
-                  title: SafetyTexts.helpTitle,
-                  subtitle: SafetyTexts.helpExplain,
-                  value: _help,
-                  onChanged: (v) => setState(() => _help = v),
-                ),
-                SafetySwitch(
-                  icon: Icons.medical_information_rounded,
-                  title: SafetyTexts.medicalTitle,
-                  subtitle: SafetyTexts.medicalExplain,
-                  value: _medical,
-                  onChanged: (v) => setState(() => _medical = v),
+                const SizedBox(height: Space.s12),
+                DsCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Column(
+                    children: [
+                      SafetySwitch(
+                        icon: Icons.emergency_share_rounded,
+                        title: SafetyTexts.askTitle,
+                        subtitle: SafetyTexts.askExplain,
+                        value: _ask,
+                        onChanged: (v) => setState(() => _ask = v),
+                      ),
+                      Divider(color: AppTheme.border),
+                      SafetySwitch(
+                        icon: Icons.volunteer_activism_rounded,
+                        title: SafetyTexts.helpTitle,
+                        subtitle: SafetyTexts.helpExplain,
+                        value: _help,
+                        onChanged: (v) => setState(() => _help = v),
+                      ),
+                      Divider(color: AppTheme.border),
+                      SafetySwitch(
+                        icon: Icons.medical_information_rounded,
+                        title: SafetyTexts.medicalTitle,
+                        subtitle: SafetyTexts.medicalExplain,
+                        value: _medical,
+                        onChanged: (v) => setState(() => _medical = v),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: Space.s12),
-          FilledButton(
+          const SizedBox(height: Space.s16),
+          DsButton(
+            label: _busy ? 'Saving...' : 'Continue',
+            icon: _busy ? null : Icons.check_rounded,
             onPressed: _busy ? null : _continue,
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-            child: _busy
-                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
-                : const Text('Continue', style: TextStyle(fontWeight: FontWeight.w700)),
           ),
+          const SizedBox(height: Space.s4),
           TextButton(
             onPressed: _busy ? null : () => Navigator.of(context).pop(false),
             style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),

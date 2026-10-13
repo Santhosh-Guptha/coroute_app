@@ -1,23 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/ui/app_bottom_sheet.dart';
-import '../../core/ui/rider_avatar.dart';
-import '../../core/ui/ui_tokens.dart';
+import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/intercom_service.dart';
 
-/// The voice intercom as one row for the ride screen:
+/// The voice intercom, styled after the "Intercom" canvas sheet:
 ///
+/// * The talk button (hold to talk, or the hands-free switch): a solid teal
+///   block that turns amber while you talk.
 /// * "Talk to" picker: everyone, or one rider for a private 1:1 channel.
-/// * The talk button (hold to talk, or the hands-free switch), 56 dp.
 /// * Mute.
 ///
-/// One optional line above the row says who is speaking, that someone else
-/// holds the channel, or that the radio is reconnecting. The talk mode and
-/// "hear the group" live in [IntercomOptions] (opened from the ride sheet).
-/// SOS is not here: it is the hold-to-send SOS button on the ride map.
+/// One optional line says who is speaking (with their initials), that
+/// someone else holds the channel, or that the radio is reconnecting. The
+/// talk mode and "hear the group" live in [IntercomOptions] (opened from the
+/// ride sheet). SOS is not here: it is the hold-to-send SOS button on the
+/// ride map.
+///
+/// [compact] (inside the ride sheet) is one 56 dp row. Otherwise the dock is
+/// the full sheet card: 28 dp top corners, the 44 x 5 handle, the "Intercom"
+/// header with the radio state, and the big 96 dp push-to-talk block.
 class IntercomDock extends StatelessWidget {
   final ConvoyModel convoy;
   final RiderModel me;
@@ -40,52 +44,99 @@ class IntercomDock extends StatelessWidget {
     Widget? notice;
     if (ic.isReceiving) {
       final private = ic.activeSpeakerIsPrivate;
+      final who = ic.activeSpeakerName ?? 'A rider';
       notice = _Notice(
         icon: private ? Icons.lock_rounded : Icons.graphic_eq_rounded,
-        text: private ? '${ic.activeSpeakerName ?? 'A rider'}, private to you' : '${ic.activeSpeakerName ?? 'A rider'} is speaking',
-        color: private ? StatusColors.info : AppTheme.neonCyan,
+        initials: ic.activeSpeakerName,
+        text: private ? '$who, private to you' : '$who is speaking',
+        color: private ? StatusColors.info : AppTheme.accentText,
       );
     } else if (ic.busyWith != null) {
-      notice = _Notice(icon: Icons.hourglass_top_rounded, text: '${ic.busyWith} is talking, wait for a gap', color: StatusColors.warning);
+      notice = _Notice(
+        icon: Icons.hourglass_top_rounded,
+        initials: ic.busyWith,
+        text: '${ic.busyWith} is talking, wait for a gap',
+        color: AppTheme.warnText,
+      );
     } else if (!ic.isOnline) {
-      notice = _Notice(icon: Icons.cloud_off_rounded, text: 'Reconnecting to convoy radio', color: AppTheme.textSecondary);
+      notice = _Notice(icon: Icons.cloud_off_rounded, text: 'Reconnecting to convoy radio', color: AppTheme.muted);
     }
 
-    final content = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ?notice,
-        Row(
-          children: [
-            Expanded(child: _TalkTargetChip(others: others, ic: ic)),
-            const SizedBox(width: Space.s8),
-            Expanded(child: ic.mode == IntercomMode.ptt ? _PttButton(ic: ic) : _VoxButton(ic: ic)),
-            const SizedBox(width: Space.s4),
-            IconButton(
-              tooltip: ic.isMicMuted ? 'Unmute microphone' : 'Mute microphone',
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              icon: Icon(ic.isMicMuted ? Icons.mic_off_rounded : Icons.mic_rounded, color: ic.isMicMuted ? StatusColors.critical : AppTheme.textPrimary),
-              onPressed: () => ic.setMicMuted(!ic.isMicMuted),
-            ),
-          ],
-        ),
-      ],
-    );
+    final talk = ic.mode == IntercomMode.ptt ? _PttButton(ic: ic, big: !compact) : _VoxButton(ic: ic, big: !compact);
+    final mute = _MuteButton(ic: ic);
 
-    if (compact) return content;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(Space.s12, Space.s8, Space.s12, Space.s8),
-      decoration: BoxDecoration(
-        color: AppTheme.slateCard,
-        border: Border(top: BorderSide(color: AppTheme.subtleBorder)),
+    if (compact) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ?notice,
+          Row(
+            children: [
+              Expanded(child: _TalkTargetChip(others: others, ic: ic)),
+              const SizedBox(width: 10),
+              Expanded(child: talk),
+              const SizedBox(width: 6),
+              mute,
+            ],
+          ),
+        ],
+      );
+    }
+
+    final subtitle = ic.isOnline
+        ? (ic.isPrivateTalk ? 'Private channel · ${ic.talkTargetName ?? 'rider'}' : 'Convoy radio · connected')
+        : 'Convoy radio · no signal';
+
+    return Material(
+      color: AppTheme.card,
+      shape: RoundedRectangleBorder(borderRadius: Radii.sheetTop, side: BorderSide(color: AppTheme.border, width: 2)),
+      clipBehavior: Clip.antiAlias,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const _SheetHandle(),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Semantics(header: true, child: Text('Intercom', style: AppText.headline)),
+                        const SizedBox(height: 2),
+                        Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
+                      ],
+                    ),
+                  ),
+                  mute,
+                ],
+              ),
+              const SizedBox(height: 18),
+              talk,
+              const SizedBox(height: 12),
+              _TalkTargetChip(others: others, ic: ic),
+              if (notice != null) ...[
+                const SizedBox(height: 14),
+                notice,
+              ],
+            ],
+          ),
+        ),
       ),
-      child: SafeArea(top: false, child: content),
     );
   }
 }
 
 /// Talk mode and "hear the group", shown in a sheet from the ride sheet.
+/// Styled like the canvas settings group: a `bg` filled block with switch
+/// rows, and a two-way segment for the talk mode.
 class IntercomOptions extends StatelessWidget {
   const IntercomOptions({super.key});
 
@@ -95,50 +146,103 @@ class IntercomOptions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ic = context.watch<IntercomService>();
-    Widget mode(String title, String subtitle, IntercomMode m, IconData icon) {
-      final selected = ic.mode == m;
-      return ListTile(
-        minVerticalPadding: Space.s12,
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(icon, color: selected ? AppTheme.neonCyan : AppTheme.textSecondary),
-        title: Text(title, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-        subtitle: Text(subtitle, style: AppText.caption),
-        trailing: Icon(selected ? Icons.radio_button_checked_rounded : Icons.radio_button_unchecked_rounded,
-            color: selected ? AppTheme.neonCyan : AppTheme.textSecondary),
-        selected: selected,
-        onTap: () {
-          if (m == IntercomMode.vox) {
-            ic.startVox();
-          } else {
-            ic.setMode(IntercomMode.ptt);
-          }
-        },
-      );
-    }
+    final vox = ic.mode == IntercomMode.vox;
 
     return SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          mode('Hold to talk', 'Press and hold the talk button while you speak.', IntercomMode.ptt, Icons.touch_app_rounded),
-          mode('Hands-free', 'Sends only while you speak. Uses more battery.', IntercomMode.vox, Icons.record_voice_over_rounded),
-          const Divider(),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('Hear the group', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-            subtitle: Text(ic.isDeafened ? 'Group audio is off.' : 'You hear riders who talk.', style: AppText.caption),
-            value: !ic.isDeafened,
-            onChanged: (v) => ic.setDeafened(!v),
+          const DsSectionHeader('Talk mode'),
+          const SizedBox(height: 10),
+          DsSegment<IntercomMode>(
+            values: const [IntercomMode.ptt, IntercomMode.vox],
+            selected: ic.mode,
+            label: (m) => m == IntercomMode.ptt ? 'Hold to talk' : 'Hands-free',
+            onChanged: (m) {
+              if (m == IntercomMode.vox) {
+                ic.startVox();
+              } else {
+                ic.setMode(IntercomMode.ptt);
+              }
+            },
           ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('Microphone', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-            subtitle: Text(ic.isMicMuted ? 'Muted. The group cannot hear you.' : 'On while you talk.', style: AppText.caption),
-            value: !ic.isMicMuted,
-            onChanged: (v) => ic.setMicMuted(!v),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(vox ? Icons.record_voice_over_rounded : Icons.touch_app_rounded, size: 18, color: AppTheme.accentText),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  vox ? 'Sends only while you speak. Uses more battery.' : 'Press and hold the talk button while you speak.',
+                  style: AppText.caption,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          const DsSectionHeader('Audio'),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            decoration: BoxDecoration(color: AppTheme.bg, borderRadius: BorderRadius.circular(Radii.lg)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DsSwitchRow(
+                  label: 'Hear the group',
+                  subtitle: ic.isDeafened ? 'Group audio is off.' : 'You hear riders who talk.',
+                  value: !ic.isDeafened,
+                  onChanged: (v) => ic.setDeafened(!v),
+                ),
+                DsSwitchRow(
+                  label: 'Microphone',
+                  subtitle: ic.isMicMuted ? 'Muted. The group cannot hear you.' : 'On while you talk.',
+                  value: !ic.isMicMuted,
+                  onChanged: (v) => ic.setMicMuted(!v),
+                  divider: false,
+                ),
+              ],
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SheetHandle extends StatelessWidget {
+  const _SheetHandle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 44,
+        height: 5,
+        decoration: BoxDecoration(color: AppTheme.border2, borderRadius: BorderRadius.circular(3)),
+      ),
+    );
+  }
+}
+
+/// The 48 dp round mute button with its tooltip.
+class _MuteButton extends StatelessWidget {
+  final IntercomService ic;
+  const _MuteButton({required this.ic});
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ic.isMicMuted;
+    return Material(
+      color: muted ? AppTheme.warnTint : AppTheme.soft,
+      shape: CircleBorder(side: BorderSide(color: muted ? AppTheme.warnBorder : AppTheme.border, width: 2)),
+      clipBehavior: Clip.antiAlias,
+      child: IconButton(
+        tooltip: muted ? 'Unmute microphone' : 'Mute microphone',
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        icon: Icon(muted ? Icons.mic_off_rounded : Icons.mic_rounded, size: 22, color: muted ? AppTheme.warnText : AppTheme.accentText),
+        onPressed: () => ic.setMicMuted(!ic.isMicMuted),
       ),
     );
   }
@@ -148,21 +252,42 @@ class _Notice extends StatelessWidget {
   final IconData icon;
   final String text;
   final Color color;
-  const _Notice({required this.icon, required this.text, required this.color});
+  final String? initials;
+  const _Notice({required this.icon, required this.text, required this.color, this.initials});
 
   @override
   Widget build(BuildContext context) {
+    final who = initials;
     return Semantics(
       liveRegion: true,
       container: true,
       child: Padding(
-        padding: const EdgeInsets.only(bottom: Space.s8),
+        padding: const EdgeInsets.only(bottom: 8),
         child: Row(
           children: [
+            if (who != null && who.trim().isNotEmpty) ...[
+              Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: color, border: Border.all(color: AppTheme.card, width: 2)),
+                child: Text(
+                  initialsOf(who),
+                  textScaler: TextScaler.noScaling,
+                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
             Icon(icon, color: color, size: 18),
-            const SizedBox(width: Space.s8),
+            const SizedBox(width: 8),
             Expanded(
-              child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: color)),
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.label.copyWith(color: color, fontWeight: FontWeight.w700),
+              ),
             ),
           ],
         ),
@@ -180,34 +305,43 @@ class _TalkTargetChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final private = ic.isPrivateTalk;
     final label = private ? 'Private: ${ic.talkTargetName ?? 'rider'}' : 'Talk to: Everyone';
-    final Color color = private ? StatusColors.info : AppTheme.textPrimary;
+    final Color color = private ? StatusColors.info : AppTheme.text;
     return Semantics(
       button: true,
       label: '$label. Double tap to choose who hears you.',
       excludeSemantics: true,
       onTap: () => _pickTarget(context),
       child: Material(
-      color: AppTheme.elevatedCard,
-      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: private ? StatusColors.info : AppTheme.subtleBorder)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => _pickTarget(context),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 56),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: Space.s8),
-            child: Row(
-              children: [
-                Icon(private ? Icons.lock_rounded : Icons.groups_rounded, size: 20, color: color),
-                const SizedBox(width: Space.s4),
-                Expanded(
-                  child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: color)),
-                ),
-              ],
+        color: private ? AppTheme.tint : AppTheme.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Radii.md),
+          side: BorderSide(color: private ? StatusColors.info : AppTheme.border, width: 2),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _pickTarget(context),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 56),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  Icon(private ? Icons.lock_rounded : Icons.groups_rounded, size: 22, color: private ? StatusColors.info : AppTheme.accentText),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.label.copyWith(color: color, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  Icon(Icons.expand_more_rounded, size: 20, color: AppTheme.muted),
+                ],
+              ),
             ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -222,10 +356,10 @@ class _TalkTargetChip extends StatelessWidget {
         children: [
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.groups_rounded, color: AppTheme.neonCyan),
-            title: Text('Everyone in the convoy', style: AppText.body),
+            leading: Icon(Icons.groups_rounded, color: AppTheme.accentText),
+            title: Text('Everyone in the convoy', style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
             subtitle: Text('Group channel', style: AppText.caption),
-            trailing: !ic.isPrivateTalk ? Icon(Icons.check_rounded, color: AppTheme.neonCyan) : null,
+            trailing: !ic.isPrivateTalk ? Icon(Icons.check_rounded, color: AppTheme.accentText) : null,
             onTap: () {
               ic.setTalkTarget();
               Navigator.pop(ctx);
@@ -233,14 +367,14 @@ class _TalkTargetChip extends StatelessWidget {
           ),
           if (others.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: Space.s16),
-              child: Text('No other riders online yet.', style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text('No other riders online yet.', style: AppText.body.copyWith(color: AppTheme.text2)),
             ),
           for (final r in others)
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: RiderAvatar(name: r.name, size: 40),
-              title: Text(r.name, style: AppText.body),
+              leading: DsAvatar(initialsOf(r.name), size: 40),
+              title: Text(r.name, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
               subtitle: Text('Private channel, only ${r.name.split(' ').first} hears you', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
               trailing: ic.talkTargetUserId == r.userId ? Icon(Icons.check_rounded, color: StatusColors.info) : null,
               onTap: () {
@@ -256,13 +390,19 @@ class _TalkTargetChip extends StatelessWidget {
 
 class _PttButton extends StatelessWidget {
   final IntercomService ic;
-  const _PttButton({required this.ic});
+
+  /// The 96 dp sheet block (icon, label and hint) instead of the 56 dp row button.
+  final bool big;
+  const _PttButton({required this.ic, this.big = false});
 
   @override
   Widget build(BuildContext context) {
     final tx = ic.isTransmitting;
     final private = ic.isPrivateTalk;
-    final Color activeColor = private ? StatusColors.info : StatusColors.success;
+    final Color activeColor = private ? StatusColors.info : AppTheme.warnText;
+    final label = tx ? (private ? 'PRIVATE, TALKING' : 'TALKING') : 'HOLD TO TALK';
+    final hint = tx ? 'Release to stop' : (private ? 'Only ${ic.talkTargetName ?? 'this rider'} hears you' : 'Hold while you speak');
+    final IconData icon = tx ? Icons.mic_rounded : (private ? Icons.lock_rounded : Icons.mic_none_rounded);
     // Screen readers cannot hold a finger down: for them a double tap starts talking and
     // another double tap stops.
     return Semantics(
@@ -297,30 +437,55 @@ class _PttButton extends StatelessWidget {
         child: AnimatedContainer(
           duration: Motion.button,
           curve: Motion.curve,
-          height: 56,
+          height: big ? 96 : 56,
           decoration: BoxDecoration(
-            color: tx ? activeColor : AppTheme.neonCyan,
-            borderRadius: Radii.mdAll,
+            color: tx ? activeColor : AppTheme.brand,
+            borderRadius: BorderRadius.circular(big ? 20 : 16),
           ),
           child: Center(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: Space.s8),
+              padding: EdgeInsets.symmetric(horizontal: big ? 16 : 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(tx ? Icons.mic_rounded : (private ? Icons.lock_rounded : Icons.mic_none_rounded), size: 20, color: Colors.black),
-                  const SizedBox(width: Space.s4),
+                  Icon(icon, size: big ? 34 : 22, color: Colors.white),
+                  SizedBox(width: big ? 14 : 6),
                   Flexible(
-                    // Scales down instead of cutting the words on a narrow phone.
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        tx ? (private ? 'PRIVATE, TALKING' : 'TALKING') : 'HOLD TO TALK',
-                        maxLines: 1,
-                        softWrap: false,
-                        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w800, fontSize: 14),
-                      ),
-                    ),
+                    child: big
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  label,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20, letterSpacing: 0.5),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                hint,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: Colors.white.withOpacity(0.85), fontWeight: FontWeight.w600, fontSize: 13),
+                              ),
+                            ],
+                          )
+                        // Scales down instead of cutting the words on a narrow phone.
+                        : FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              softWrap: false,
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: 0.5),
+                            ),
+                          ),
                   ),
                 ],
               ),
@@ -334,14 +499,19 @@ class _PttButton extends StatelessWidget {
 
 class _VoxButton extends StatelessWidget {
   final IntercomService ic;
-  const _VoxButton({required this.ic});
+  final bool big;
+  const _VoxButton({required this.ic, this.big = false});
 
   @override
   Widget build(BuildContext context) {
     final armed = ic.isVoxArmed && !ic.isMicMuted;
     final tx = ic.isTransmitting;
-    final Color color = tx ? StatusColors.success : (armed ? AppTheme.neonCyan : AppTheme.textSecondary);
+    final Color color = tx ? AppTheme.warnText : (armed ? AppTheme.brand : AppTheme.muted);
     final text = tx ? 'Hands-free, sending' : (armed ? 'Hands-free on' : 'Hands-free off');
+    final hint = tx ? 'Sending while you speak' : (armed ? 'Tap to stop' : 'Tap to start');
+    final IconData icon = tx ? Icons.graphic_eq_rounded : (armed ? Icons.hearing_rounded : Icons.mic_off_rounded);
+    final solid = tx || armed;
+    final Color fg = solid ? Colors.white : AppTheme.text;
     return Semantics(
       button: true,
       toggled: armed,
@@ -350,22 +520,36 @@ class _VoxButton extends StatelessWidget {
       excludeSemantics: true,
       onTap: () => armed ? ic.stopVox() : ic.startVox(),
       child: Material(
-        color: color.withOpacity(0.16),
-        shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: color, width: 1.5)),
+        color: solid ? color : AppTheme.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(big ? 20 : 16),
+          side: BorderSide(color: solid ? color : AppTheme.border, width: 2),
+        ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: () => armed ? ic.stopVox() : ic.startVox(),
           child: SizedBox(
-            height: 56,
+            height: big ? 96 : 56,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: Space.s8),
+              padding: EdgeInsets.symmetric(horizontal: big ? 16 : 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(tx ? Icons.graphic_eq_rounded : (armed ? Icons.hearing_rounded : Icons.mic_off_rounded), size: 20, color: color),
-                  const SizedBox(width: Space.s4),
+                  Icon(icon, size: big ? 34 : 22, color: solid ? Colors.white : AppTheme.accentText),
+                  SizedBox(width: big ? 14 : 6),
                   Flexible(
-                    child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.textPrimary)),
+                    child: big
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontSize: 20, fontWeight: FontWeight.w800)),
+                              const SizedBox(height: 2),
+                              Text(hint, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg.withOpacity(0.85), fontSize: 13, fontWeight: FontWeight.w600)),
+                            ],
+                          )
+                        : Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w800)),
                   ),
                 ],
               ),

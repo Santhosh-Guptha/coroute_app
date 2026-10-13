@@ -27,10 +27,10 @@ class StopCard extends StatelessWidget {
     final tr = trailing;
     final title = name.isEmpty ? kind.label : name;
     return Material(
-      color: AppTheme.slateCard,
+      color: AppTheme.card,
       shape: RoundedRectangleBorder(
-        borderRadius: Radii.mdAll,
-        side: BorderSide(color: AppTheme.subtleBorder),
+        borderRadius: Radii.lgAll,
+        side: BorderSide(color: AppTheme.border, width: 2),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -38,7 +38,7 @@ class StopCard extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 56),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: Space.s8),
+            padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s12),
             child: Row(
               children: [
                 Semantics(
@@ -48,9 +48,9 @@ class StopCard extends StatelessWidget {
                     height: 40,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: AppTheme.neonCyan.withOpacity(0.14),
+                      color: AppTheme.tint,
                     ),
-                    child: Icon(kind.icon, size: 22, color: AppTheme.neonCyan),
+                    child: Icon(kind.icon, size: 22, color: AppTheme.accentText),
                   ),
                 ),
                 const SizedBox(width: Space.s12),
@@ -59,7 +59,7 @@ class StopCard extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                      Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
                       if (sub != null && sub.isNotEmpty)
                         Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
                     ],

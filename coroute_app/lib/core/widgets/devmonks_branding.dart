@@ -15,15 +15,14 @@ class DevMonksBadge extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
         decoration: BoxDecoration(
-          color: AppTheme.elevatedCard,
+          color: AppTheme.tint,
           borderRadius: Radii.smAll,
-          border: Border.all(color: AppTheme.subtleBorder),
         ),
         child: Text(
           AppConstants.brandName,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: AppText.caption.copyWith(color: AppTheme.textSecondary, fontWeight: FontWeight.w600),
+          style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800, letterSpacing: 0.5),
         ),
       );
     }
@@ -34,7 +33,7 @@ class DevMonksBadge extends StatelessWidget {
           TextSpan(text: 'Powered by ', style: AppText.caption),
           TextSpan(
             text: AppConstants.brandName,
-            style: AppText.caption.copyWith(color: AppTheme.textSecondary, fontWeight: FontWeight.w600),
+            style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800),
           ),
         ],
       ),
@@ -77,9 +76,10 @@ class CoRouteHeaderLogo extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: AppTheme.textPrimary,
+                  color: AppTheme.text,
                   fontSize: 26 * scale,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
                 ),
               ),
             ),

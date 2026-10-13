@@ -7,6 +7,7 @@ import 'package:coroute_app/data/models/stop_point_model.dart';
 import 'package:coroute_app/data/services/safety_service.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/domain/safety/fuel_range.dart';
+import 'package:coroute_app/domain/safety/fuel_profile.dart';
 import 'package:coroute_app/domain/tracking/track_point.dart';
 
 import 'safety_service_test.dart' show FakePort, FakeAccel, FakeSms, t0;
@@ -16,6 +17,23 @@ TrackPoint at(int s, double km, {double kmh = 50}) => TrackPoint(ts: t0 + s * 10
 
 void main() {
   group('FuelRangeTracker', () {
+    test('profile warning uses confirmed partial fuel, excludes margin once and resets after filling', () {
+      final tracker = FuelRangeTracker();
+      const profile = FuelProfile(fullRangeKm: 300, bufferKm: 20);
+      expect(tracker.shouldWarnForProfile(profile), false);
+      expect(tracker.refuel(profile, t0, currentKm: 60), true);
+      expect(tracker.usableKm(profile), 40);
+      expect(tracker.shouldWarnForProfile(profile), true);
+      expect(tracker.shouldWarnForProfile(profile), false);
+      tracker.refuel(profile, t0 + 1, full: true);
+      expect(tracker.usableKm(profile), 280);
+      expect(tracker.shouldWarnForProfile(profile), false);
+      tracker.refuel(profile, t0 + 2, currentKm: 50);
+      tracker.uncertain = true;
+      expect(tracker.shouldWarnForProfile(profile), false);
+      expect(tracker.shouldWarnForProfile(const FuelProfile(fullRangeKm: 400)), false);
+    });
+
     test('sums the distance between consecutive fixes', () {
       final t = FuelRangeTracker();
       for (var i = 0; i <= 10; i++) {
@@ -112,6 +130,17 @@ void main() {
       port.changed();
       await tester.pump();
     }
+
+    testWidgets('new fuel setup triggers reminder even when legacy range is off', (tester) async {
+      await start(tester, rangeKm: 0);
+      await settings.setFuelProfile(const FuelProfile(fullRangeKm: 300, bufferKm: 20));
+      expect(safety.refuel(currentKm: 50), true);
+      port.fixes.add(at(0, 0)); await tester.pump();
+      expect(safety.fuelReminderActive, true);
+      expect(safety.estimatedUsableKm, 30);
+      safety.dispose(); await port.fixes.close(); port.dispose(); settings.dispose();
+      await tester.pump();
+    });
 
     Future<void> ride(WidgetTester tester, {required double fromKm, required double toKm, int fromS = 0}) async {
       var s = fromS;

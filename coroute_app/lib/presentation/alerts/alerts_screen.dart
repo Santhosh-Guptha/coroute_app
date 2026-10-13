@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
@@ -112,41 +113,103 @@ class _AlertsScreenState extends State<AlertsScreen> {
   Widget build(BuildContext context) {
     final groupId = context.select<ConvoyService, String?>((s) => s.activeGroupId);
     final gid = groupId;
+    // Header line: how many alerts need attention (critical and important), like the
+    // canvas "3 unread · today" / "All caught up".
+    final facts = context.select<ConvoyService, AlertFacts>(alertFactsOf);
+    final timeline = context.watch<TimelineService>();
+    final attention = gid == null ? 0 : alertsBadgeCount(facts, timeline);
+    final subtitle = gid == null
+        ? 'Alerts appear during a ride'
+        : attention == 0
+            ? 'All caught up'
+            : '$attention ${attention == 1 ? 'alert needs' : 'alerts need'} attention';
+
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(automaticallyImplyLeading: false, title: const Text('Alerts')),
-      body: gid == null
-          ? const EmptyState(
-              icon: Icons.notifications_none_rounded,
-              title: 'No alerts right now',
-              message: 'Alerts appear during a ride.',
-            )
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(Space.s16, Space.s8, Space.s16, Space.s8),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: SegmentedButton<_Segment>(
-                      showSelectedIcon: false,
-                      style: const ButtonStyle(minimumSize: WidgetStatePropertyAll(Size(0, 48))),
-                      segments: const [
-                        ButtonSegment(value: _Segment.alerts, label: Text('Alerts'), icon: Icon(Icons.notifications_rounded)),
-                        ButtonSegment(value: _Segment.timeline, label: Text('Timeline'), icon: Icon(Icons.timeline_rounded)),
-                      ],
-                      selected: {_segment},
-                      onSelectionChanged: (s) => setState(() => _segment = s.first),
+      backgroundColor: AppTheme.bg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+              child: DsScreenHeader(title: 'Alerts', subtitle: subtitle),
+            ),
+            if (gid != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Row(
+                  children: [
+                    _FilterPill(
+                      label: 'Alerts',
+                      icon: Icons.notifications_rounded,
+                      selected: _segment == _Segment.alerts,
+                      onTap: () => setState(() => _segment = _Segment.alerts),
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    _FilterPill(
+                      label: 'Timeline',
+                      icon: Icons.timeline_rounded,
+                      selected: _segment == _Segment.timeline,
+                      onTap: () => setState(() => _segment = _Segment.timeline),
+                    ),
+                  ],
                 ),
-                Expanded(
-                  child: switch (_segment) {
-                    _Segment.alerts => _AlertsList(onOpenTimeline: () => setState(() => _segment = _Segment.timeline)),
-                    _Segment.timeline => LiveTimelineView(key: ValueKey(gid), groupId: gid),
-                  },
-                ),
+              ),
+            Expanded(
+              child: gid == null
+                  ? const EmptyState(
+                      icon: Icons.notifications_none_rounded,
+                      title: 'No alerts right now',
+                      message: 'Alerts appear during a ride.',
+                    )
+                  : switch (_segment) {
+                      _Segment.alerts => _AlertsList(onOpenTimeline: () => setState(() => _segment = _Segment.timeline)),
+                      _Segment.timeline => LiveTimelineView(key: ValueKey(gid), groupId: gid),
+                    },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Canvas filter pill: 38 px, fully round, 2 px border; selected = solid teal.
+class _FilterPill extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final bool selected;
+  final VoidCallback onTap;
+  const _FilterPill({required this.label, this.icon, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = selected ? Colors.white : AppTheme.text;
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: selected ? AppTheme.brand : AppTheme.card,
+        shape: StadiumBorder(side: BorderSide(color: selected ? AppTheme.brand : AppTheme.border, width: 2)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 44),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 18, color: fg),
+                  const SizedBox(width: 6),
+                ],
+                Text(label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800)),
               ],
             ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -310,8 +373,8 @@ class _AlertsList extends StatelessWidget {
 
     final children = <Widget>[];
     void section(String title) => children.add(Padding(
-          padding: const EdgeInsets.fromLTRB(0, Space.s16, 0, Space.s8),
-          child: Semantics(header: true, child: Text(title, style: AppText.label)),
+          padding: EdgeInsets.fromLTRB(0, children.isEmpty ? 4 : 18, 0, 10),
+          child: Semantics(header: true, child: DsSectionHeader(title)),
         ));
 
     final shown = alerts.where((a) => !incidentKeys.contains(a.key)).toList();
@@ -328,40 +391,27 @@ class _AlertsList extends StatelessWidget {
       final canCall = other && phone.isNotEmpty && a.tier == AlertTier.critical;
       final onMap = other && rider != null;
       return Padding(
-        padding: const EdgeInsets.only(bottom: Space.s8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            RideAlert(
-              tier: a.tier,
-              title: a.spec.title,
-              message: a.spec.body,
-              actionLabel: onMap ? 'Show on map' : null,
-              onAction: onMap ? () => _showOnMap(context, rider.userId) : null,
-            ),
-            if (canCall)
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: TextButton.icon(
-                  onPressed: () => _call(context, phone),
-                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                  icon: const Icon(Icons.call_rounded),
-                  label: Text('Call ${_firstName(rider?.name ?? '')}', maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-              ),
-          ],
+        padding: const EdgeInsets.only(bottom: 10),
+        child: _AlertCard(
+          tier: a.tier,
+          title: a.spec.title,
+          body: a.spec.body,
+          atMs: a.at,
+          riderName: rider?.name,
+          actionLabel: onMap ? 'Show on map' : null,
+          onAction: (other && rider != null) ? () => _showOnMap(context, rider.userId) : null,
+          callLabel: canCall ? 'Call ${_firstName(rider?.name ?? '')}' : null,
+          onCall: canCall ? () => _call(context, phone) : null,
         ),
       );
     }
 
+    Widget padded(Widget w) => Padding(padding: const EdgeInsets.only(bottom: 10), child: w);
     if (local.isNotEmpty || critical.isNotEmpty) {
       section('Critical');
-      for (final w in local) {
-        children.add(Padding(padding: const EdgeInsets.only(bottom: Space.s8), child: w));
-      }
+      children.addAll(local.map(padded));
       children.addAll(critical.map(tile));
     }
-    Widget padded(Widget w) => Padding(padding: const EdgeInsets.only(bottom: Space.s8), child: w);
     if (important.isNotEmpty || localImportant.isNotEmpty) {
       section('Important');
       children.addAll(localImportant.map(padded));
@@ -377,8 +427,132 @@ class _AlertsList extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 640),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(Space.s16, 0, Space.s16, Space.s24),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
           children: children,
+        ),
+      ),
+    );
+  }
+}
+
+/// One alert from the timeline, as on the canvas: a 44 px tinted badge with
+/// the rider's initials (or the tier icon), title and time on one line, the
+/// body under it, and the action in teal. The border follows the tier.
+class _AlertCard extends StatelessWidget {
+  final AlertTier tier;
+  final String title;
+  final String? body;
+  final int atMs;
+  final String? riderName;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  final String? callLabel;
+  final VoidCallback? onCall;
+
+  const _AlertCard({
+    required this.tier,
+    required this.title,
+    this.body,
+    required this.atMs,
+    this.riderName,
+    this.actionLabel,
+    this.onAction,
+    this.callLabel,
+    this.onCall,
+  });
+
+  static String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.substring(0, 1);
+    return parts.first.substring(0, 1) + parts.last.substring(0, 1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final critical = tier == AlertTier.critical;
+    final important = tier == AlertTier.important;
+    final Color badgeFg = critical ? AppTheme.sos : (important ? AppTheme.warnText : AppTheme.accentText);
+    final Color badgeBg = critical ? AppTheme.sos.withValues(alpha: 0.12) : (important ? AppTheme.warnTint : AppTheme.tint);
+    final Color border = critical ? AppTheme.sos : (important ? AppTheme.warnBorder : AppTheme.border);
+    final name = riderName?.trim() ?? '';
+    final time = atMs > 0 ? DateFormat('HH:mm').format(DateTime.fromMillisecondsSinceEpoch(atMs)) : '';
+    final b = body;
+    final action = actionLabel;
+    final call = callLabel;
+
+    return Semantics(
+      container: true,
+      liveRegion: critical,
+      child: DsCard(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        borderColor: border,
+        onTap: onAction,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(14)),
+              child: name.isNotEmpty
+                  ? Text(
+                      _initials(name).toUpperCase(),
+                      textScaler: TextScaler.noScaling,
+                      style: TextStyle(color: badgeFg, fontSize: 13, fontWeight: FontWeight.w800),
+                    )
+                  : Icon(tier.icon, size: 22, color: badgeFg),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 15)),
+                      ),
+                      if (time.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Text(time, style: AppText.caption.copyWith(fontSize: 11, fontWeight: FontWeight.w700)),
+                      ],
+                    ],
+                  ),
+                  if (b != null && b.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(b, maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(height: 1.4)),
+                  ],
+                  if (action != null || call != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Wrap(
+                        spacing: 16,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          if (action != null)
+                            Text(action, style: TextStyle(color: AppTheme.accentText, fontSize: 13, fontWeight: FontWeight.w800)),
+                          if (call != null && onCall != null)
+                            TextButton.icon(
+                              onPressed: onCall,
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(48, 44),
+                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                foregroundColor: AppTheme.accentText,
+                              ),
+                              icon: const Icon(Icons.call_rounded, size: 18),
+                              label: Text(call, maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

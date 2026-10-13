@@ -451,6 +451,7 @@ class SafetyService extends ChangeNotifier {
   }
 
   /// Metres ridden since the last fill (item 2), for the ride sheet line.
+  bool get fuelTrackingActive => _rideActive;
   double get riddenSinceFillM => _fuel.riddenM;
   double? get estimatedUsableKm => _fuel.usableKm(_settings.fuelProfile);
   bool get fuelEstimateUncertain => _fuel.uncertain;
@@ -462,6 +463,12 @@ class SafetyService extends ChangeNotifier {
     _saveFuel(force: true);
     notifyListeners();
     return true;
+  }
+
+  /// Allows the fuel sheet to report a disk failure before it closes.
+  Future<bool> waitForFuelSave() async {
+    await _fuelWrites;
+    return !fuelSaveFailed;
   }
 
   /// The fuel reminder is showing.
@@ -996,14 +1003,16 @@ class SafetyService extends ChangeNotifier {
   void _onFuelFix(TrackPoint p) {
     _fuel.onFix(p);
     final range = _settings.fuelRangeKm;
-    if (range > 0 && _fuel.shouldWarn(range)) {
+    final profile = _settings.fuelProfile;
+    final useProfile = _settings.hasFuelProfile;
+    if (useProfile ? _fuel.shouldWarnForProfile(profile) : range > 0 && _fuel.shouldWarn(range)) {
       final km = (_fuel.riddenM / 1000).round();
       _showPrompt(
         SafetyPrompt(
           key: SafetyConstants.promptFuel,
           kind: SafetyPromptKind.fuel,
           title: L10n.t('fuel.title'),
-          message: L10n.t('fuel.body', {'km': '$km km', 'range': range}),
+          message: useProfile ? 'About ${estimatedUsableKm!.floor()} km before refuelling. Plan a fuel stop.' : L10n.t('fuel.body', {'km': '$km km', 'range': range}),
           primaryLabel: L10n.t('prompt.ok'),
           secondaryLabel: L10n.t('fuel.filled'),
         ),

@@ -68,7 +68,7 @@ class _SOSButtonState extends State<SOSButton> with SingleTickerProviderStateMix
   Widget build(BuildContext context) {
     final size = widget.size;
     final ring = size + 12;
-    final red = StatusColors.critical;
+    final red = AppTheme.sos;
     return Semantics(
       container: true,
       button: true,
@@ -103,7 +103,7 @@ class _SOSButtonState extends State<SOSButton> with SingleTickerProviderStateMix
               ),
               Material(
                 color: red,
-                shape: CircleBorder(side: BorderSide(color: AppTheme.slateCard, width: 2)),
+                shape: CircleBorder(side: BorderSide(color: AppTheme.card, width: 3)),
                 elevation: 3,
                 shadowColor: AppTheme.shadow,
                 child: SizedBox(

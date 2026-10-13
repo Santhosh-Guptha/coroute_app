@@ -58,48 +58,53 @@ class ConnectionBanner extends StatelessWidget {
     if (state == RealtimeState.connected) {
       // Connected but the SOS is not confirmed yet: it is being sent.
       return _strip(
-        icon: Icon(Icons.sos_rounded, size: 16, color: AppTheme.laserRed),
-        children: [_line('Sending your SOS to the convoy...', AppTheme.laserRed)],
-        color: AppTheme.laserRed,
+        icon: Icon(Icons.sos_rounded, size: 18, color: AppTheme.sos),
+        children: [_line('Sending your SOS to the convoy...', AppTheme.sos)],
+        critical: true,
       );
     }
     final connecting = state == RealtimeState.connecting;
     final text = lines(connecting: connecting, pendingPoints: pendingPoints, sosWaiting: sosWaiting, serverUnreachable: rt.serverUnreachable);
     return _strip(
       icon: SizedBox(
-        width: 16,
-        height: 16,
+        width: 18,
+        height: 18,
         child: connecting
-            ? Icon(Icons.sync_rounded, size: 16, color: AppTheme.hyperAmber)
-            : Icon(Icons.cloud_off_rounded, size: 16, color: AppTheme.hyperAmber),
+            ? Icon(Icons.sync_rounded, size: 18, color: AppTheme.warnText)
+            : Icon(Icons.cloud_off_rounded, size: 18, color: AppTheme.warnText),
       ),
-      color: sosWaiting ? AppTheme.laserRed : AppTheme.hyperAmber,
+      critical: sosWaiting,
       children: [
-        _line(text.first, AppTheme.hyperAmber),
-        for (final t in text.skip(1)) _line(t, t.startsWith('SOS') ? AppTheme.laserRed : AppTheme.hyperAmber),
+        _line(text.first, AppTheme.warnText),
+        for (final t in text.skip(1)) _line(t, t.startsWith('SOS') ? AppTheme.sos : AppTheme.warnText),
       ],
     );
   }
 
   Widget _line(String text, Color color) => Text(
         text,
-        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
+        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700),
         overflow: TextOverflow.ellipsis,
         maxLines: 2,
       );
 
-  Widget _strip({required Widget icon, required List<Widget> children, required Color color}) {
+  /// Canvas status strip: amber text on the warnTint with a warnBorder hairline;
+  /// SOS red on a pale red when [critical].
+  Widget _strip({required Widget icon, required List<Widget> children, required bool critical}) {
     return Semantics(
       liveRegion: true,
       container: true,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        color: color.withOpacity(0.15),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        decoration: BoxDecoration(
+          color: critical ? AppTheme.sos.withValues(alpha: 0.12) : AppTheme.warnTint,
+          border: Border(bottom: BorderSide(color: critical ? AppTheme.sos : AppTheme.warnBorder, width: 2)),
+        ),
         child: Row(
           children: [
-            Padding(padding: const EdgeInsets.only(top: 2), child: icon),
-            const SizedBox(width: 8),
+            Padding(padding: const EdgeInsets.only(top: 1), child: icon),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

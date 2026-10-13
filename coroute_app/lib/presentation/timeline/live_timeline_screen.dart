@@ -22,23 +22,40 @@ class LiveTimelineScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final name = context.select<ConvoyService, String>((s) => s.allConvoys[groupId]?.name ?? '');
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(
-        title: Text(name.isNotEmpty ? '$name: timeline' : 'Group timeline', maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: [
-          IconButton(
-            tooltip: 'Replay the ride',
-            icon: Icon(Icons.slow_motion_video_rounded, color: AppTheme.neonCyan),
-            onPressed: () => LiveTimelineView.openReplay(context, groupId),
-          ),
-          IconButton(
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: () => LiveTimelineView.refresh(context, groupId),
-          ),
-        ],
+      backgroundColor: AppTheme.bg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: DsScreenHeader(
+                title: name.isNotEmpty ? '$name: timeline' : 'Group timeline',
+                subtitle: 'Who did what, where and when',
+                onBack: () => Navigator.maybePop(context),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DsRoundButton(
+                      icon: Icons.slow_motion_video_rounded,
+                      label: 'Replay the ride',
+                      iconColor: AppTheme.accentText,
+                      onTap: () => LiveTimelineView.openReplay(context, groupId),
+                    ),
+                    const SizedBox(width: 8),
+                    DsRoundButton(
+                      icon: Icons.refresh_rounded,
+                      label: 'Refresh',
+                      onTap: () => LiveTimelineView.refresh(context, groupId),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Expanded(child: LiveTimelineView(groupId: groupId, showReplay: false)),
+          ],
+        ),
       ),
-      body: LiveTimelineView(groupId: groupId, showReplay: false),
     );
   }
 }
@@ -207,13 +224,13 @@ class _LiveTimelineViewState extends State<LiveTimelineView> {
       children: [
         if (widget.showReplay)
           Padding(
-            padding: const EdgeInsets.fromLTRB(Space.s12, Space.s4, Space.s12, 0),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
             child: Align(
               alignment: AlignmentDirectional.centerEnd,
               child: TextButton.icon(
                 onPressed: () => LiveTimelineView.openReplay(context, groupId),
-                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                icon: const Icon(Icons.slow_motion_video_rounded),
+                style: TextButton.styleFrom(minimumSize: const Size(48, 44), foregroundColor: AppTheme.accentText),
+                icon: const Icon(Icons.slow_motion_video_rounded, size: 20),
                 label: const Text('Replay the ride', maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
             ),
@@ -223,7 +240,7 @@ class _LiveTimelineViewState extends State<LiveTimelineView> {
             loading: timeline.isLoading,
             hasData: events.isNotEmpty,
             child: RefreshIndicator(
-              color: AppTheme.neonCyan,
+              color: AppTheme.accentText,
               onRefresh: () => LiveTimelineView.refresh(context, groupId),
               child: list,
             ),

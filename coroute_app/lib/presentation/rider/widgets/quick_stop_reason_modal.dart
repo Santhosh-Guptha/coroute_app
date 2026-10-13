@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/ui/ui_tokens.dart';
+import '../../../core/ui/ui.dart';
 import '../../../data/services/convoy_service.dart';
 
-/// Instant glove-friendly popup modal with 4 oversized buttons to report stop reasons.
+/// Instant glove-friendly "Stopping?" sheet with 4 oversized reason rows.
 ///
 /// Designed for quick 1-tap operation on motorcycle handlebars:
-/// - 4 oversized buttons: 'Fueling', 'Rest/Break', 'Mechanical/Tyre', 'Phone/Nav'.
-/// - Glove-sized touch targets (>64dp tall).
+/// - 4 oversized rows: 'Fueling', 'Rest/Break', 'Mechanical/Tyre', 'Phone/Nav'.
+/// - Glove-sized touch targets (72 dp tall).
 /// - Instant broadcast to convoy via [ConvoyService.updateStatusReason] without opening the sheet.
-/// - Glowing active border for currently active reason.
+/// - Teal accent border and tint on the currently active reason.
 /// - ZERO emojis, ASCII hyphens only.
 class QuickStopReasonModal extends StatelessWidget {
   final ConvoyService convoyService;
@@ -32,18 +32,17 @@ class QuickStopReasonModal extends StatelessWidget {
     String currentReason = '',
     void Function(String reason, String label)? onBroadcast,
   }) {
-    return showDialog<void>(
+    return showModalBottomSheet<void>(
       context: context,
-      barrierColor: Colors.black.withOpacity(0.75),
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s24),
-        child: QuickStopReasonModal(
-          convoyService: convoyService,
-          userId: userId,
-          currentReason: currentReason,
-          onBroadcast: onBroadcast,
-        ),
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: const Color(0xFF15232E).withOpacity(0.5),
+      builder: (ctx) => QuickStopReasonModal(
+        convoyService: convoyService,
+        userId: userId,
+        currentReason: currentReason,
+        onBroadcast: onBroadcast,
       ),
     );
   }
@@ -67,154 +66,160 @@ class QuickStopReasonModal extends StatelessWidget {
         key: const Key('stop_reason_fueling'),
         code: 'FUELING',
         label: 'Fueling',
-        icon: Icons.local_gas_station_rounded,
-        accent: AppTheme.hyperAmber,
+        hint: 'Convoy sees you at the pump',
+        icon: Icons.local_gas_station_outlined,
+        warn: false,
       ),
       (
         key: const Key('stop_reason_rest_break'),
         code: 'REST_BREAK',
         label: 'Rest/Break',
-        icon: Icons.free_breakfast_rounded,
-        accent: AppTheme.infoBlue,
+        hint: 'Convoy pauses with you',
+        icon: Icons.free_breakfast_outlined,
+        warn: false,
       ),
       (
         key: const Key('stop_reason_mechanical_tyre'),
         code: 'MECHANICAL',
         label: 'Mechanical/Tyre',
-        icon: Icons.build_rounded,
-        accent: AppTheme.laserRed,
+        hint: 'Riders nearby can come back to help',
+        icon: Icons.build_outlined,
+        warn: true,
       ),
       (
         key: const Key('stop_reason_phone_nav'),
         code: 'PHONE_NAV',
         label: 'Phone/Nav',
-        icon: Icons.phone_android_rounded,
-        accent: AppTheme.neonCyan,
+        hint: 'Others keep riding - you stay on the map',
+        icon: Icons.phone_android_outlined,
+        warn: false,
       ),
     ];
 
+    final bottom = MediaQuery.paddingOf(context).bottom;
+
     return Container(
-      constraints: const BoxConstraints(maxWidth: 420),
       decoration: BoxDecoration(
-        color: AppTheme.obsidianVoid,
-        borderRadius: Radii.lgAll,
-        border: Border.all(color: AppTheme.glassBorder, width: 2.0),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.shadow,
-            blurRadius: 16.0,
-            offset: const Offset(0, 6),
-          ),
+        color: AppTheme.card,
+        borderRadius: Radii.sheetTop,
+        boxShadow: const [
+          BoxShadow(color: Color(0x40000000), blurRadius: 40, offset: Offset(0, -12)),
         ],
       ),
-      padding: const EdgeInsets.all(Space.s16),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 32 + bottom),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Center(
+              child: Container(
+                width: 44,
+                height: 5,
+                decoration: BoxDecoration(color: AppTheme.border2, borderRadius: BorderRadius.circular(3)),
+              ),
+            ),
+            const SizedBox(height: 18),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: AppTheme.warnTint, borderRadius: BorderRadius.circular(16)),
+                  child: Icon(Icons.pause_rounded, color: AppTheme.warnText, size: 30),
+                ),
+                const SizedBox(width: 14),
                 Expanded(
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.pause_circle_filled_rounded, color: AppTheme.hyperAmber, size: 28),
-                      const SizedBox(width: Space.s8),
-                      Expanded(
-                        child: Text(
-                          'Quick Stop Reason',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                      Text('Stopping?', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.headline),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Tell the convoy so nobody waits or worries',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.label,
                       ),
                     ],
                   ),
                 ),
-                IconButton(
+                const SizedBox(width: 8),
+                DsRoundButton(
                   key: const Key('stop_reason_close'),
-                  tooltip: 'Close modal',
-                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                  icon: Icon(Icons.close_rounded, color: AppTheme.textSecondary, size: 26),
-                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icons.close_rounded,
+                  label: 'Close modal',
+                  onTap: () => Navigator.of(context).pop(),
                 ),
               ],
             ),
-          const SizedBox(height: Space.s4),
-          Text(
-            '1-Tap broadcasts status to convoy without opening sheet',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: Space.s16),
-          // 2x2 grid of oversized cards for glove operation
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: Space.s12,
-            crossAxisSpacing: Space.s12,
-            childAspectRatio: 1.35,
-            children: [
-              for (final r in reasons)
-                _ReasonButton(
-                  key: r.key,
-                  label: r.label,
-                  icon: r.icon,
-                  accentColor: r.accent,
-                  isSelected: currentReason == r.code,
-                  onTap: () => _select(context, r.code, r.label),
-                ),
+            const SizedBox(height: 18),
+            for (var i = 0; i < reasons.length; i++) ...[
+              if (i > 0) const SizedBox(height: 10),
+              _ReasonRow(
+                key: reasons[i].key,
+                label: reasons[i].label,
+                hint: reasons[i].hint,
+                icon: reasons[i].icon,
+                warn: reasons[i].warn,
+                isSelected: currentReason == reasons[i].code,
+                onTap: () => _select(context, reasons[i].code, reasons[i].label),
+              ),
             ],
-          ),
-          if (currentReason.isNotEmpty) ...[
-            const SizedBox(height: Space.s12),
-            FilledButton.icon(
-              key: const Key('stop_reason_clear'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.slateCard,
-                foregroundColor: AppTheme.textPrimary,
-                minimumSize: const Size.fromHeight(52),
-                shape: const RoundedRectangleBorder(
-                  borderRadius: Radii.mdAll,
-                  side: BorderSide(color: Colors.white24, width: 1.5),
-                ),
+            const SizedBox(height: 18),
+            if (currentReason.isNotEmpty)
+              Row(
+                children: [
+                  Expanded(
+                    child: DsButton(
+                      label: 'Keep riding',
+                      tone: DsButtonTone.outline,
+                      height: 58,
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DsButton(
+                      key: const Key('stop_reason_clear'),
+                      label: 'Resume ride',
+                      icon: Icons.play_arrow_rounded,
+                      height: 58,
+                      onPressed: () => _clear(context),
+                    ),
+                  ),
+                ],
+              )
+            else
+              DsButton(
+                label: 'Keep riding',
+                tone: DsButtonTone.outline,
+                height: 58,
+                onPressed: () => Navigator.of(context).pop(),
               ),
-              icon: Icon(Icons.play_arrow_rounded, color: AppTheme.emeraldSafe, size: 24),
-              label: const Text(
-                'Resume Ride (Clear Stop)',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-              ),
-              onPressed: () => _clear(context),
-            ),
           ],
-        ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 }
 
-class _ReasonButton extends StatelessWidget {
+/// One 72 dp reason row: icon, title, hint. Teal border and tint when selected.
+class _ReasonRow extends StatelessWidget {
   final String label;
+  final String hint;
   final IconData icon;
-  final Color accentColor;
+  final bool warn;
   final bool isSelected;
   final VoidCallback onTap;
 
-  const _ReasonButton({
+  const _ReasonRow({
     super.key,
     required this.label,
+    required this.hint,
     required this.icon,
-    required this.accentColor,
+    required this.warn,
     required this.isSelected,
     required this.onTap,
   });
@@ -225,52 +230,33 @@ class _ReasonButton extends StatelessWidget {
       button: true,
       label: label,
       selected: isSelected,
-      child: Material(
-        color: isSelected ? accentColor.withOpacity(0.18) : AppTheme.slateCard,
-        borderRadius: Radii.mdAll,
-        child: InkWell(
-          borderRadius: Radii.mdAll,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 72),
+        child: DsCard(
+          accent: isSelected,
+          tinted: isSelected,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.all(Space.s12),
-            decoration: BoxDecoration(
-              borderRadius: Radii.mdAll,
-              border: Border.all(
-                color: isSelected ? accentColor : AppTheme.subtleBorder,
-                width: isSelected ? 2.5 : 1.5,
+          child: Row(
+            children: [
+              Icon(icon, size: 26, color: warn ? AppTheme.warnText : AppTheme.accentText),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title),
+                    const SizedBox(height: 2),
+                    Text(hint, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
+                  ],
+                ),
               ),
-              boxShadow: isSelected
-                  ? [
-                      BoxShadow(
-                        color: accentColor.withOpacity(0.35),
-                        blurRadius: 10,
-                        spreadRadius: 1,
-                      )
-                    ]
-                  : null,
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  icon,
-                  size: 32,
-                  color: isSelected ? accentColor : AppTheme.textPrimary,
-                ),
-                const SizedBox(height: Space.s8),
-                Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: isSelected ? accentColor : AppTheme.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+              if (isSelected) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.check_circle_rounded, size: 22, color: AppTheme.accentText),
               ],
-            ),
+            ],
           ),
         ),
       ),

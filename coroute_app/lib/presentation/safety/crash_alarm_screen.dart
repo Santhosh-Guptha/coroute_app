@@ -5,6 +5,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/safety_service.dart';
 import '../widgets/emergency_sos_sheet.dart';
+import 'sos_hold_screen.dart';
 
 /// Full-screen crash alarm (POSSIBLE_ACCIDENT), shown by [CrashAlarmHost]
 /// while [SafetyService.alarm] is open. Counting down: red screen, "Possible
@@ -27,7 +28,7 @@ class CrashAlarmScreen extends StatelessWidget {
     final safety = context.watch<SafetyService>();
     final alarm = safety.alarm;
     if (alarm == null) {
-      return Scaffold(backgroundColor: AppTheme.obsidianVoid, body: const SizedBox.shrink());
+      return Scaffold(backgroundColor: AppTheme.bg, body: const SizedBox.shrink());
     }
     if (alarm.sent) {
       return PopScope(
@@ -36,15 +37,24 @@ class CrashAlarmScreen extends StatelessWidget {
           if (didPop) safety.closeAlarm();
         },
         child: Scaffold(
-          backgroundColor: AppTheme.obsidianVoid,
-          appBar: AppBar(title: Text(L10n.t('crash.sent'), maxLines: 1, overflow: TextOverflow.ellipsis)),
+          backgroundColor: AppTheme.bg,
           body: SafeArea(
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 560),
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(Space.s16),
-                  child: EmergencySosSheet(lat: alarm.lat, lng: alarm.lng, onResolved: safety.closeAlarm),
+                  padding: dsScreenPadding,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      DsScreenHeader(
+                        title: L10n.t('crash.sent'),
+                        onBack: () => Navigator.of(context).maybePop(),
+                      ),
+                      const SizedBox(height: 18),
+                      EmergencySosSheet(lat: alarm.lat, lng: alarm.lng, onResolved: safety.closeAlarm),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -59,6 +69,8 @@ class CrashAlarmScreen extends StatelessWidget {
         secondsLeft: alarm.secondsLeft,
         onImOk: safety.alarmImOk,
         onSendNow: safety.alarmSendNow,
+        lat: alarm.lat,
+        lng: alarm.lng,
       ),
     );
   }
@@ -66,7 +78,9 @@ class CrashAlarmScreen extends StatelessWidget {
 
 /// The red countdown screen itself (pure, for tests). Verified at 320 dp and
 /// text x1.3 in portrait and landscape: every text wraps or shrinks, the two
-/// buttons keep their height, nothing overflows.
+/// buttons keep their height, nothing overflows. Same red treatment as
+/// [SosHoldScreen]: overline + position, the 140 px ring with the seconds,
+/// headline, who gets alerted, white "I'm OK" and outlined "Need Help".
 class CrashAlarmView extends StatelessWidget {
   /// The words in the rider's language (read at build time).
   static String get title => L10n.t('crash.title');
@@ -77,7 +91,18 @@ class CrashAlarmView extends StatelessWidget {
   final VoidCallback onImOk;
   final VoidCallback onSendNow;
 
-  const CrashAlarmView({super.key, required this.secondsLeft, required this.onImOk, required this.onSendNow});
+  /// Where the impact was, for the top row (0 when unknown).
+  final double? lat;
+  final double? lng;
+
+  const CrashAlarmView({
+    super.key,
+    required this.secondsLeft,
+    required this.onImOk,
+    required this.onSendNow,
+    this.lat,
+    this.lng,
+  });
 
   static const double buttonHeight = 72;
 
@@ -86,53 +111,62 @@ class CrashAlarmView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final onRed = StatusColors.onCritical;
-    final header = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
-            decoration: BoxDecoration(border: Border.all(color: onRed), borderRadius: Radii.smAll),
-            child: Text(L10n.t('crash.automatic'), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: onRed)),
-          ),
-        ),
-        const SizedBox(height: Space.s12),
-        Semantics(
-          container: true,
-          header: true,
-          liveRegion: true,
-          child: Text(
-            title,
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
-            style: AppText.metric.copyWith(color: onRed, fontSize: 30, height: 1.15),
-          ),
-        ),
-        const SizedBox(height: Space.s8),
-        Text(
-          countdownText(secondsLeft),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          style: AppText.title.copyWith(color: onRed, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: Space.s4),
-        Text(
-          L10n.t('crash.hint'),
-          maxLines: 4,
-          overflow: TextOverflow.ellipsis,
-          style: AppText.body.copyWith(color: onRed),
-        ),
-      ],
+    final top = SosTopRow(overline: L10n.t('crash.automatic'), lat: lat, lng: lng);
+    final heading = Semantics(
+      container: true,
+      header: true,
+      liveRegion: true,
+      child: Text(
+        title,
+        textAlign: TextAlign.center,
+        maxLines: 4,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.3, height: 1.15),
+      ),
+    );
+    final countdown = Text(
+      countdownText(secondsLeft),
+      textAlign: TextAlign.center,
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, height: 1.35),
+    );
+    final hint = Text(
+      L10n.t('crash.hint'),
+      textAlign: TextAlign.center,
+      maxLines: 4,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(color: sosPale, fontSize: 15, fontWeight: FontWeight.w600, height: 1.35),
     );
     final count = ExcludeSemantics(
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Text(
-          '$secondsLeft',
-          style: AppText.metric.copyWith(color: onRed, fontSize: 64, height: 1.0),
+      child: SosRing(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              height: 64,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '$secondsLeft',
+                  textScaler: TextScaler.noScaling,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 64,
+                    fontWeight: FontWeight.w800,
+                    height: 1.0,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 2),
+            const Text(
+              'SECONDS',
+              textScaler: TextScaler.noScaling,
+              style: TextStyle(color: sosPale, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 1.5),
+            ),
+          ],
         ),
       ),
     );
@@ -140,15 +174,8 @@ class CrashAlarmView extends StatelessWidget {
       height: buttonHeight,
       child: FilledButton.icon(
         onPressed: onImOk,
-        style: FilledButton.styleFrom(
-          backgroundColor: StatusColors.success,
-          foregroundColor: onRed,
-          minimumSize: const Size.fromHeight(buttonHeight),
-          padding: const EdgeInsets.symmetric(horizontal: Space.s12),
-          side: BorderSide(color: onRed, width: 2),
-          textStyle: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-        ),
-        icon: const Icon(Icons.check_circle_rounded, size: 30),
+        style: sosPrimaryButtonStyle(height: buttonHeight),
+        icon: const Icon(Icons.check_rounded, size: 26),
         label: Text(okLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
@@ -156,47 +183,56 @@ class CrashAlarmView extends StatelessWidget {
       height: buttonHeight,
       child: FilledButton.icon(
         onPressed: onSendNow,
-        style: FilledButton.styleFrom(
-          backgroundColor: StatusColors.critical,
-          foregroundColor: onRed,
-          minimumSize: const Size.fromHeight(buttonHeight),
-          padding: const EdgeInsets.symmetric(horizontal: Space.s12),
-          side: BorderSide(color: onRed, width: 3),
-          textStyle: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-        ),
-        icon: const Icon(Icons.sos_rounded, size: 30),
+        style: sosOutlineButtonStyle(height: buttonHeight),
+        icon: const Icon(Icons.sos_rounded, size: 24),
         label: Text(helpLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
+    final buttons = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [ok, const SizedBox(height: 12), send, const SizedBox(height: 12), const SosCaption()],
+    );
+    const list = SosAlertList();
 
     return Scaffold(
-      backgroundColor: StatusColors.critical,
+      backgroundColor: AppTheme.sos,
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, box) {
             final wide = box.maxWidth > box.maxHeight && box.maxWidth >= 480;
             if (wide) {
-              // Landscape: text on the left, the two big buttons on the right.
+              // Landscape: text on the left, the ring and the two big buttons on the right.
               return Padding(
-                padding: const EdgeInsets.all(Space.s16),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Expanded(
                       child: SingleChildScrollView(
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [header, const SizedBox(height: Space.s8), count],
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            top,
+                            const SizedBox(height: 14),
+                            heading,
+                            const SizedBox(height: 8),
+                            countdown,
+                            const SizedBox(height: 4),
+                            hint,
+                            const SizedBox(height: 16),
+                            list,
+                          ],
                         ),
                       ),
                     ),
-                    const SizedBox(width: Space.s16),
+                    const SizedBox(width: 16),
                     Expanded(
                       child: SingleChildScrollView(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [ok, const SizedBox(height: Space.s16), send],
+                          children: [Center(child: count), const SizedBox(height: 16), buttons],
                         ),
                       ),
                     ),
@@ -205,23 +241,31 @@ class CrashAlarmView extends StatelessWidget {
               );
             }
             return SingleChildScrollView(
-              padding: const EdgeInsets.all(Space.s16),
+              padding: dsScreenPadding,
               child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: box.maxHeight > Space.s32 ? box.maxHeight - Space.s32 : 0),
+                constraints: BoxConstraints(minHeight: box.maxHeight > 44 ? box.maxHeight - 44 : 0),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    header,
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: Space.s16),
-                      child: Center(child: count),
-                    ),
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [ok, const SizedBox(height: Space.s16), send],
+                      children: [
+                        top,
+                        const SizedBox(height: 24),
+                        Center(child: count),
+                        const SizedBox(height: 14),
+                        heading,
+                        const SizedBox(height: 10),
+                        countdown,
+                        const SizedBox(height: 4),
+                        hint,
+                        const SizedBox(height: 20),
+                        list,
+                      ],
                     ),
+                    Padding(padding: const EdgeInsets.only(top: 20), child: buttons),
                   ],
                 ),
               ),

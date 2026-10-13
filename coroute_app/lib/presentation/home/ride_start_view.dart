@@ -2,19 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
-import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/intercom_service.dart';
+import '../../data/services/safety_service.dart';
+import '../../data/services/settings_service.dart';
 import '../account/edit_profile_screen.dart';
 import '../onboarding/permissions_screen.dart';
+import '../rider/rider_home_screen.dart';
 import '../trip_planner/trip_planner_screen.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
 
-/// The Ride tab when no ride is active: "No active ride" with
-/// [Start Ride] [Join Ride], and at most one alert above it.
+/// The Home tab when no ride is active: greeting, the "No active ride" hero
+/// card with [Start Ride], the "Plan a route" / "Join Ride" tiles, the bike
+/// status list, and at most one alert above it all.
 class RideStartView extends StatelessWidget {
   /// Shows "Ride saved. View the summary" (after a ride ended while the app was open).
   final bool showRideSaved;
@@ -46,6 +50,13 @@ class RideStartView extends StatelessWidget {
     await Navigator.push(context, MaterialPageRoute(builder: (_) => const TripPlannerScreen()));
   }
 
+  /// "Good morning" / "Good afternoon" / "Good evening" for [hour] (0-23).
+  static String greetingFor(int hour) {
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
@@ -70,37 +81,249 @@ class RideStartView extends StatelessWidget {
       );
     }
     final a = alert;
+    final name = auth.currentUserName ?? '';
 
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: Text(AppConstants.appName, maxLines: 1, overflow: TextOverflow.ellipsis),
-      ),
+      backgroundColor: AppTheme.bg,
       body: SafeArea(
-        top: false,
-        child: Column(
-          children: [
-            if (a != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(Space.s16, Space.s8, Space.s16, 0),
-                child: Center(
-                  child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 560), child: a),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: ListView(
+              padding: dsScreenPadding,
+              children: [
+                _Greeting(name: name),
+                const SizedBox(height: 22),
+                if (a != null) ...[
+                  a,
+                  const SizedBox(height: 18),
+                ],
+                const _NoRideHero(),
+                const SizedBox(height: 22),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: _ActionTile(
+                          icon: Icons.map_outlined,
+                          title: 'Plan a route',
+                          caption: 'Stops, pace and a code to share',
+                          onTap: () => startRide(context),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _ActionTile(
+                          icon: Icons.key_rounded,
+                          title: 'Join Ride',
+                          caption: 'Join with code',
+                          onTap: () => showJoinRideSheet(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 22),
+                const DsSectionHeader('Bike status'),
+                const SizedBox(height: 10),
+                const _BikeStatusCard(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "Good afternoon" over "Ready to ride?", with the round initials button
+/// that opens the Profile tab.
+class _Greeting extends StatelessWidget {
+  final String name;
+  const _Greeting({required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = initialsOf(name.isEmpty ? 'Rider' : name);
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(RideStartView.greetingFor(DateTime.now().hour), style: AppText.label),
+              const SizedBox(height: 2),
+              Semantics(
+                header: true,
+                child: Text(
+                  'Ready to ride?',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.headline.copyWith(fontSize: 26),
                 ),
               ),
-            Expanded(
-              child: EmptyState(
-                icon: Icons.two_wheeler_rounded,
-                title: 'No active ride',
-                message: 'Start a ride and share the code, or join with a code from your group.',
-                primaryLabel: 'Start Ride',
-                onPrimary: () => startRide(context),
-                secondaryLabel: 'Join Ride',
-                onSecondary: () => showJoinRideSheet(context),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        Semantics(
+          label: 'Profile and settings',
+          button: true,
+          child: Material(
+            color: AppTheme.card,
+            shape: CircleBorder(side: BorderSide(color: AppTheme.border, width: 2)),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => RiderHomeScreen.selectTab(context, HomeTab.profile),
+              child: SizedBox(
+                width: 48,
+                height: 48,
+                child: Center(
+                  child: Text(
+                    initials,
+                    maxLines: 1,
+                    textScaler: TextScaler.noScaling,
+                    style: TextStyle(color: AppTheme.accentText, fontSize: 15, fontWeight: FontWeight.w800),
+                  ),
+                ),
               ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Solid teal hero: there is no next ride planned, so it says so and
+/// offers [Start Ride].
+class _NoRideHero extends StatelessWidget {
+  const _NoRideHero();
+
+  @override
+  Widget build(BuildContext context) {
+    return DsHeroCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'NEXT RIDE',
+            style: TextStyle(color: DsHeroCard.overline, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1),
+          ),
+          const SizedBox(height: 4),
+          Semantics(
+            header: true,
+            child: const Text(
+              'No active ride',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.2),
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Start a ride and share the code, or join with a code from your group.',
+            style: TextStyle(color: DsHeroCard.secondary, fontSize: 14, fontWeight: FontWeight.w600, height: 1.35),
+          ),
+          const SizedBox(height: 16),
+          DsButton(
+            label: 'Start Ride',
+            icon: Icons.play_arrow_rounded,
+            tone: DsButtonTone.onHero,
+            fontSize: 17,
+            onPressed: () => RideStartView.startRide(context),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One of the two quick-action tiles: teal icon on top, title at the bottom.
+class _ActionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String caption;
+  final VoidCallback onTap;
+
+  const _ActionTile({required this.icon, required this.title, required this.caption, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return DsCard(
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 92),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 26, color: AppTheme.accentText),
+            const SizedBox(height: 10),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.title.copyWith(fontSize: 15),
+                ),
+                const SizedBox(height: 2),
+                Text(caption, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+              ],
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// "BIKE STATUS": usable range, crash detection and the intercom, from the
+/// services this phone has (each is optional, so the tab renders without them).
+class _BikeStatusCard extends StatelessWidget {
+  const _BikeStatusCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService?>();
+    final safety = context.watch<SafetyService?>();
+    final intercom = context.watch<IntercomService?>();
+
+    String range;
+    final estimate = safety?.estimatedUsableKm;
+    final profile = settings?.fuelProfile;
+    if (estimate != null) {
+      range = '${estimate.floor()} km';
+    } else if (profile != null && profile.valid) {
+      range = '${profile.rangeKm.floor()} km full';
+    } else {
+      range = 'Not set';
+    }
+
+    final String crash = settings == null ? 'Not set' : (settings.crashDetection ? 'On' : 'Off');
+
+    String talk;
+    if (intercom == null) {
+      talk = 'Off';
+    } else if (intercom.isMicMuted) {
+      talk = 'Muted';
+    } else {
+      talk = intercom.mode == IntercomMode.vox ? 'Voice activated' : 'Push to talk';
+    }
+
+    return DsCard(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DsListRow(icon: Icons.local_gas_station_rounded, label: 'Usable range', value: range),
+          DsListRow(icon: Icons.shield_outlined, label: 'Crash detection', value: crash),
+          DsListRow(icon: Icons.headset_mic_outlined, label: 'Helmet intercom', value: talk, divider: false),
+        ],
       ),
     );
   }
@@ -223,7 +446,7 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
         children: [
           Text(
             'Enter the code shared by the person who started the ride.',
-            style: AppText.body.copyWith(color: AppTheme.textSecondary),
+            style: AppText.body.copyWith(color: AppTheme.text2),
           ),
           const SizedBox(height: Space.s16),
           if (needsProfile) ...[
@@ -250,7 +473,21 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
             decoration: InputDecoration(
               labelText: 'Ride code',
               hintText: 'e.g. WST900',
-              prefixIcon: Icon(Icons.key_rounded, color: AppTheme.textSecondary),
+              prefixIcon: Icon(Icons.key_rounded, color: AppTheme.accentText),
+              filled: true,
+              fillColor: AppTheme.card,
+              enabledBorder: OutlineInputBorder(
+                borderRadius: Radii.mdAll,
+                borderSide: BorderSide(color: AppTheme.border, width: 2),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: Radii.mdAll,
+                borderSide: BorderSide(color: AppTheme.accentText, width: 2),
+              ),
+              disabledBorder: OutlineInputBorder(
+                borderRadius: Radii.mdAll,
+                borderSide: BorderSide(color: AppTheme.border, width: 2),
+              ),
               border: const OutlineInputBorder(borderRadius: Radii.mdAll),
             ),
           ),
@@ -259,9 +496,9 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.error_outline_rounded, color: StatusColors.critical, size: 20),
+                Icon(Icons.error_outline_rounded, color: AppTheme.sos, size: 20),
                 const SizedBox(width: Space.s8),
-                Expanded(child: Text(err, style: AppText.label.copyWith(color: StatusColors.critical))),
+                Expanded(child: Text(err, style: AppText.label.copyWith(color: AppTheme.sos))),
               ],
             ),
           ],
@@ -270,7 +507,7 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
             onPressed: (_busy || needsProfile) ? null : _join,
             style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
             child: _busy
-                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
+                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
                 : const Text('Join'),
           ),
         ],

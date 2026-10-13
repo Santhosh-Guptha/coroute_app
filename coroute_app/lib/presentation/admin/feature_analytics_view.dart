@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/realtime_service.dart';
+import 'admin_ui.dart';
 
 /// Uses the existing authenticated admin socket; no new connection or GPS stream.
 class FeatureAnalyticsView extends StatefulWidget {
@@ -116,66 +118,125 @@ class _FeatureAnalyticsViewState extends State<FeatureAnalyticsView> {
         ? null
         : DateTime.now().millisecondsSinceEpoch - stamp;
     final fresh = online && age != null && age >= 0 && age < 45000;
+    final features = (_data?['features'] as List? ?? []).whereType<Map>().toList();
+    final error = _error;
     return ListView(
-      padding: const EdgeInsets.all(Space.s16),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
       children: [
-        Text(
-          fresh ? 'Live feature analytics' : 'Analytics stale or offline',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const Text(
-          'Operational counts for this gateway process; reset on server restart. Live ride counts come from the existing fleet feed. No private fuel amounts, contacts or Guardian links are shown.',
-        ),
-        if (stamp != null)
-          Text(
-            'Updated ${DateTime.fromMillisecondsSinceEpoch(stamp).toLocal()}',
-          ),
-        if (_error != null) Text(_error!),
-        TextButton(onPressed: _load, child: const Text('Refresh analytics')),
-        for (final row in (_data?['features'] as List? ?? []).whereType<Map>())
-          Card(
-            child: ListTile(
-              title: Text(row['feature'].toString()),
-              subtitle: Text(
-                row['measured'] == true
-                    ? '${row['requests']} operations · ${row['succeeded']} successful · ${row['failed']} failed · ${row['averageMs']} ms average'
-                    : 'No observations since this server started',
+        DsCard(
+          tinted: fresh,
+          borderColor: fresh ? AppTheme.tint : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(fresh ? Icons.sensors_rounded : Icons.sensors_off_rounded, size: 22, color: fresh ? AppTheme.accentText : AppTheme.warnText),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      fresh ? 'Live feature analytics' : 'Analytics stale or offline',
+                      style: AppText.title.copyWith(color: fresh ? AppTheme.accentText : AppTheme.text),
+                    ),
+                  ),
+                ],
               ),
-            ),
+              const SizedBox(height: 8),
+              Text(
+                'Operational counts for this gateway process; reset on server restart. Live ride counts come from the existing fleet feed. No private fuel amounts, contacts or Guardian links are shown.',
+                style: AppText.label,
+              ),
+              if (stamp != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Updated ${DateTime.fromMillisecondsSinceEpoch(stamp).toLocal()}',
+                  style: AppText.caption.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ],
+              if (error != null) ...[
+                const SizedBox(height: 8),
+                StatusLine(icon: Icons.cloud_off_rounded, text: error, color: AppTheme.warnText),
+              ],
+              const SizedBox(height: 12),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: SizedBox(
+                  width: 220,
+                  child: DsButton(
+                    label: 'Refresh analytics',
+                    icon: Icons.refresh_rounded,
+                    tone: DsButtonTone.outline,
+                    height: 44,
+                    fontSize: 14,
+                    onPressed: _load,
+                  ),
+                ),
+              ),
+            ],
           ),
-        const SizedBox(height: Space.s16),
-        Text(
+        ),
+        if (features.isNotEmpty) ...[
+          const AdminSectionLabel('Features'),
+          AdminTable(
+            columns: const ['Feature', 'Activity'],
+            rows: [
+              for (var i = 0; i < features.length; i++)
+                AdminRow(
+                  leading: AdminRowIcon(
+                    features[i]['measured'] == true ? Icons.bolt_rounded : Icons.hourglass_empty_rounded,
+                    color: features[i]['measured'] == true ? AppTheme.accentText : AppTheme.muted,
+                  ),
+                  title: features[i]['feature'].toString(),
+                  detail: features[i]['measured'] == true
+                      ? '${features[i]['requests']} operations · ${features[i]['succeeded']} successful · ${features[i]['failed']} failed · ${features[i]['averageMs']} ms average'
+                      : 'No observations since this server started',
+                  divider: i < features.length - 1,
+                ),
+            ],
+          ),
+        ],
+        AdminSectionLabel(
           _fleetReceived
               ? 'Live rides (${_rides.length})'
               : 'Waiting for live ride data',
-          style: Theme.of(context).textTheme.titleMedium,
         ),
         for (final ride in _rides)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(Space.s12),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: DsCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(ride['name']?.toString() ?? 'Ride'),
+                  Row(
+                    children: [
+                      const AdminRowIcon(Icons.two_wheeler_rounded),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(ride['name']?.toString() ?? 'Ride', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title)),
+                    ],
+                  ),
                   for (final entry
                       in ((ride['featureAnalytics'] as Map?)?['features']
                                   as Map? ??
                               {})
                           .entries)
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _label(entry.key.toString()),
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        if (entry.value is Map)
-                          for (final metric in (entry.value as Map).entries)
-                            Text(
-                              '${_label(metric.key.toString())}: ${metric.value is bool ? (metric.value == true ? 'Yes' : 'No') : metric.value}',
-                            ),
-                      ],
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          DsSectionHeader(_label(entry.key.toString())),
+                          const SizedBox(height: 4),
+                          if (entry.value is Map)
+                            for (final metric in (entry.value as Map).entries)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 2),
+                                child: Text(
+                                  '${_label(metric.key.toString())}: ${metric.value is bool ? (metric.value == true ? 'Yes' : 'No') : metric.value}',
+                                  style: AppText.label.copyWith(color: AppTheme.text),
+                                ),
+                              ),
+                        ],
+                      ),
                     ),
                 ],
               ),

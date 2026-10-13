@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../ui/ui_tokens.dart';
 
-/// A flat card surface: opaque card colour, medium radius, hairline border,
+/// A flat card surface: opaque card colour, 18 px radius, 2 px border,
 /// no shadow and no translucency. The name is kept for the existing callers.
 class GlassCard extends StatelessWidget {
   final Widget child;
@@ -16,7 +16,7 @@ class GlassCard extends StatelessWidget {
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(Space.s16),
-    this.borderRadius = Radii.md,
+    this.borderRadius = Radii.lg,
     this.borderColor,
     this.backgroundColor,
     this.onTap,
@@ -27,10 +27,10 @@ class GlassCard extends StatelessWidget {
     final radius = BorderRadius.circular(borderRadius);
     final tap = onTap;
     return Material(
-      color: backgroundColor ?? AppTheme.slateCard,
+      color: backgroundColor ?? AppTheme.card,
       shape: RoundedRectangleBorder(
         borderRadius: radius,
-        side: BorderSide(color: borderColor ?? AppTheme.subtleBorder, width: 1),
+        side: BorderSide(color: borderColor ?? AppTheme.border, width: 2),
       ),
       clipBehavior: Clip.antiAlias,
       child: tap == null

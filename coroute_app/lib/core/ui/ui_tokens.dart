@@ -18,15 +18,19 @@ class Radii {
   Radii._();
 
   static const double sm = 8;
-  static const double md = 12;
-  static const double lg = 16;
+  static const double md = 14;
+  static const double lg = 18;
+
+  /// Hero cards and large panels.
+  static const double xl = 22;
 
   /// Top corners of bottom sheets.
-  static const double sheet = 20;
+  static const double sheet = 28;
 
   static const BorderRadius smAll = BorderRadius.all(Radius.circular(sm));
   static const BorderRadius mdAll = BorderRadius.all(Radius.circular(md));
   static const BorderRadius lgAll = BorderRadius.all(Radius.circular(lg));
+  static const BorderRadius xlAll = BorderRadius.all(Radius.circular(xl));
   static const BorderRadius sheetTop = BorderRadius.vertical(top: Radius.circular(sheet));
 }
 
@@ -48,43 +52,60 @@ class AppText {
 
   /// Big ride numbers ("186 km"), tabular figures so digits do not jump.
   static TextStyle get metric => TextStyle(
-        color: AppTheme.textPrimary,
+        color: AppTheme.text,
         fontSize: 32,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w800,
         height: 1.1,
         fontFeatures: const [FontFeature.tabularFigures()],
       );
 
-  /// Screen, card and sheet titles.
+  /// Screen titles ("Ready to ride?", "Group").
+  static TextStyle get headline => TextStyle(
+        color: AppTheme.text,
+        fontSize: 22,
+        fontWeight: FontWeight.w800,
+        height: 1.2,
+        letterSpacing: -0.3,
+      );
+
+  /// Card and sheet titles.
   static TextStyle get title => TextStyle(
-        color: AppTheme.textPrimary,
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
+        color: AppTheme.text,
+        fontSize: 16,
+        fontWeight: FontWeight.w800,
         height: 1.25,
       );
 
   /// Normal reading text.
   static TextStyle get body => TextStyle(
-        color: AppTheme.textPrimary,
+        color: AppTheme.text,
         fontSize: 15,
-        fontWeight: FontWeight.w400,
+        fontWeight: FontWeight.w600,
         height: 1.35,
       );
 
   /// Short labels under metrics, chip text, list secondary lines.
   static TextStyle get label => TextStyle(
-        color: AppTheme.textSecondary,
+        color: AppTheme.muted,
         fontSize: 13,
         fontWeight: FontWeight.w600,
         height: 1.25,
-        letterSpacing: 0.2,
+      );
+
+  /// Small uppercase section header ("BIKE STATUS", "RIDING ORDER").
+  static TextStyle get overline => TextStyle(
+        color: AppTheme.muted,
+        fontSize: 12,
+        fontWeight: FontWeight.w800,
+        height: 1.2,
+        letterSpacing: 1.5,
       );
 
   /// Smallest text in the app (12 sp): timestamps, hints.
   static TextStyle get caption => TextStyle(
-        color: AppTheme.textMuted,
+        color: AppTheme.muted,
         fontSize: 12,
-        fontWeight: FontWeight.w400,
+        fontWeight: FontWeight.w600,
         height: 1.3,
       );
 }

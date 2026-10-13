@@ -24,8 +24,8 @@ class MapControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = onPressed != null;
-    final bg = active ? AppTheme.neonCyan : AppTheme.slateCard;
-    final Color fg = active ? Colors.black : (enabled ? AppTheme.textPrimary : AppTheme.textMuted);
+    final bg = active ? AppTheme.brand : AppTheme.card;
+    final Color fg = active ? Colors.white : (enabled ? AppTheme.accentText : AppTheme.muted);
     return Semantics(
       container: true,
       button: true,
@@ -41,7 +41,7 @@ class MapControl extends StatelessWidget {
           color: bg,
           elevation: 2,
           shadowColor: AppTheme.shadow,
-          shape: CircleBorder(side: BorderSide(color: AppTheme.subtleBorder)),
+          shape: CircleBorder(side: BorderSide(color: active ? AppTheme.brand : AppTheme.border, width: 2)),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onPressed,

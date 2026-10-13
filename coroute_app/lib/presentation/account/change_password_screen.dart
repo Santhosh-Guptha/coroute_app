@@ -61,58 +61,73 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
   InputDecoration _dec(String label) => InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: AppTheme.textMuted),
-        filled: true,
-        fillColor: AppTheme.elevatedCard,
-        border: const OutlineInputBorder(borderRadius: Radii.mdAll),
+        prefixIcon: Icon(Icons.lock_outline_rounded, color: AppTheme.accentText, size: 22),
         suffixIcon: IconButton(
           tooltip: _obscure ? 'Show passwords' : 'Hide passwords',
-          icon: Icon(_obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: AppTheme.textMuted),
+          icon: Icon(_obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded, color: AppTheme.muted),
           onPressed: () => setState(() => _obscure = !_obscure),
         ),
       );
 
   @override
   Widget build(BuildContext context) {
+    final err = _error;
     return PopScope(
       canPop: !widget.forced,
       child: Scaffold(
-        backgroundColor: AppTheme.obsidianVoid,
-        appBar: AppBar(title: Text(widget.forced ? 'Set a new password' : 'Change password'), automaticallyImplyLeading: !widget.forced),
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: ListView(
-              padding: const EdgeInsets.all(Space.s16),
-              children: [
-                if (widget.forced)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: Space.s16),
-                    child: Text(
-                      'You signed in with a temporary password. Choose a new one to continue.',
-                      style: AppText.body.copyWith(color: AppTheme.textSecondary),
-                    ),
+        backgroundColor: AppTheme.bg,
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: ListView(
+                padding: dsScreenPadding,
+                children: [
+                  DsScreenHeader(
+                    title: widget.forced ? 'Set a new password' : 'Change password',
+                    subtitle: widget.forced ? 'Choose one you will remember' : 'At least 8 characters',
+                    onBack: widget.forced ? null : () => Navigator.maybePop(context),
                   ),
-                if (!widget.forced) ...[
-                  TextField(controller: _current, obscureText: _obscure, style: TextStyle(color: AppTheme.textPrimary), decoration: _dec('Current password')),
+                  const SizedBox(height: 18),
+                  if (widget.forced)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: Space.s16),
+                      child: DsCard(
+                        tinted: true,
+                        borderColor: AppTheme.tint,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.info_outline_rounded, size: 22, color: AppTheme.accentText),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'You signed in with a temporary password. Choose a new one to continue.',
+                                style: AppText.body,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (!widget.forced) ...[
+                    TextField(controller: _current, obscureText: _obscure, style: AppText.body, decoration: _dec('Current password')),
+                    const SizedBox(height: 12),
+                  ],
+                  TextField(controller: _next, obscureText: _obscure, style: AppText.body, decoration: _dec('New password (8+ characters)')),
                   const SizedBox(height: 12),
+                  TextField(controller: _confirm, obscureText: _obscure, style: AppText.body, decoration: _dec('Repeat new password')),
+                  if (err != null) ...[
+                    const SizedBox(height: 12),
+                    RideAlert(tier: AlertTier.important, title: err),
+                  ],
+                  const SizedBox(height: Space.s24),
+                  DsButton(
+                    label: _busy ? 'Saving...' : 'Save password',
+                    onPressed: _busy ? null : _submit,
+                  ),
                 ],
-                TextField(controller: _next, obscureText: _obscure, style: TextStyle(color: AppTheme.textPrimary), decoration: _dec('New password (8+ characters)')),
-                const SizedBox(height: 12),
-                TextField(controller: _confirm, obscureText: _obscure, style: TextStyle(color: AppTheme.textPrimary), decoration: _dec('Repeat new password')),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(_error!, style: AppText.label.copyWith(color: StatusColors.critical)),
-                ],
-                const SizedBox(height: Space.s24),
-                FilledButton(
-                  onPressed: _busy ? null : _submit,
-                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                  child: _busy
-                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
-                      : const Text('Save password'),
-                ),
-              ],
+              ),
             ),
           ),
         ),

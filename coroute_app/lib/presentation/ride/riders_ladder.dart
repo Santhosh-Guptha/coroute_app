@@ -79,28 +79,45 @@ String presenceClock(BuildContext context, int ms) => MaterialLocalizations.of(c
 IconData presenceIcon(RiderModel r) =>
     r.presenceState == RiderPresence.appClosed ? Icons.phonelink_erase_rounded : Icons.signal_cellular_connected_no_internet_0_bar_rounded;
 
+/// Small icon + text status pill in the canvas chip style (tinted fill,
+/// 7 dp corners, 700 weight). Never colour alone: the text says it.
+class _StatusPill extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final Color color;
+  final Color background;
+  final Color? border;
+  const _StatusPill({required this.icon, required this.text, required this.color, required this.background, this.border});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(7),
+        border: border == null ? null : Border.all(color: border!, width: 1.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 4),
+          Flexible(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: color, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+  }
+}
+
 /// "Possible incident" as a small red chip with an icon (never colour alone).
 class PossibleIncidentChip extends StatelessWidget {
   const PossibleIncidentChip({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final Color c = StatusColors.critical;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
-      decoration: ShapeDecoration(
-        color: c.withOpacity(0.14),
-        shape: StadiumBorder(side: BorderSide(color: c.withOpacity(0.6))),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.report_rounded, size: 16, color: c),
-          const SizedBox(width: Space.s4),
-          Flexible(child: Text('Possible incident', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: c))),
-        ],
-      ),
-    );
+    final Color c = AppTheme.sos;
+    return _StatusPill(icon: Icons.report_rounded, text: 'Possible incident', color: c, background: c.withOpacity(0.12));
   }
 }
 
@@ -114,22 +131,7 @@ class LowBatteryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color c = StatusColors.warning;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
-      decoration: ShapeDecoration(
-        color: c.withOpacity(0.14),
-        shape: StadiumBorder(side: BorderSide(color: c.withOpacity(0.6))),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.battery_alert_rounded, size: 16, color: c),
-          const SizedBox(width: Space.s4),
-          Flexible(child: Text(text(level), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: c))),
-        ],
-      ),
-    );
+    return _StatusPill(icon: Icons.battery_alert_rounded, text: text(level), color: AppTheme.warnText, background: AppTheme.warnTint);
   }
 }
 
@@ -142,19 +144,7 @@ class SweeperMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color c = AppTheme.textSecondary;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
-      decoration: ShapeDecoration(shape: StadiumBorder(side: BorderSide(color: AppTheme.subtleBorder))),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.flag_rounded, size: 16, color: c),
-          const SizedBox(width: Space.s4),
-          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: c)),
-        ],
-      ),
-    );
+    return _StatusPill(icon: Icons.flag_rounded, text: label, color: AppTheme.text2, background: Colors.transparent, border: AppTheme.border);
   }
 }
 
@@ -166,13 +156,12 @@ class PresenceText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color c = StatusColors.warning;
     return Row(
       children: [
-        Icon(presenceIcon(rider), size: 16, color: c),
-        const SizedBox(width: Space.s4),
+        Icon(presenceIcon(rider), size: 16, color: AppTheme.warnText),
+        const SizedBox(width: 4),
         Expanded(
-          child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.textPrimary)),
+          child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w700)),
         ),
       ],
     );
@@ -186,9 +175,10 @@ String riderReasonText(RiderModel r) {
   return r.statusMessage.isEmpty ? label : (r.statusReason == 'CUSTOM' ? r.statusMessage : '$label: ${r.statusMessage}');
 }
 
-/// The group from front to back: who is ahead of me and who is behind, the
-/// gap between riders, and a "Too far behind" flag when a gap is larger than
-/// the group's separation limit. Tapping a rider opens the rider card.
+/// The group from front to back, one card per rider (canvas "Riding
+/// order"): who is ahead of me and who is behind, the gap between riders,
+/// and a "Too far behind" flag when a gap is larger than the group's
+/// separation limit. Tapping a rider opens the rider card.
 class RidersLadder extends StatelessWidget {
   final List<LadderRung> rungs;
   final Map<String, Color> colors;
@@ -218,6 +208,7 @@ class RidersLadder extends StatelessWidget {
     final children = <Widget>[];
     for (final rung in rungs) {
       final gap = rung.gapAheadM;
+      if (children.isNotEmpty) children.add(const SizedBox(height: 10));
       if (gap != null) children.add(_GapRow(gapM: gap, tooFar: rung.tooFarBehind));
       children.add(_RiderRow(
         rung: rung,
@@ -233,6 +224,8 @@ class RidersLadder extends StatelessWidget {
   }
 }
 
+/// The distance between two cards: a short tick on the avatar axis and the
+/// gap in words, amber when it is too large.
 class _GapRow extends StatelessWidget {
   final double gapM;
   final bool tooFar;
@@ -240,28 +233,30 @@ class _GapRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color c = tooFar ? StatusColors.warning : AppTheme.textMuted;
+    final Color c = tooFar ? AppTheme.warnText : AppTheme.muted;
     final text = tooFar ? '${formatDistanceRounded(gapM)} gap, too far behind' : '${formatDistanceRounded(gapM)} gap';
     return Semantics(
       container: true,
       label: text,
       excludeSemantics: true,
-      child: Row(
-        children: [
-          SizedBox(
-            width: 44,
-            height: 24,
-            child: Center(child: Container(width: 2, color: tooFar ? StatusColors.warning : AppTheme.subtleBorder)),
-          ),
-          const SizedBox(width: Space.s12),
-          if (tooFar) ...[
-            Icon(Icons.warning_amber_rounded, size: 16, color: c),
-            const SizedBox(width: Space.s4),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 48 + 18,
+              height: 18,
+              child: Center(child: Container(width: 3, decoration: BoxDecoration(color: tooFar ? AppTheme.warnText : AppTheme.border2, borderRadius: BorderRadius.circular(2)))),
+            ),
+            if (tooFar) ...[
+              Icon(Icons.warning_amber_rounded, size: 16, color: c),
+              const SizedBox(width: 4),
+            ],
+            Expanded(
+              child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: c, fontWeight: FontWeight.w700)),
+            ),
           ],
-          Expanded(
-            child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: c, fontWeight: tooFar ? FontWeight.w600 : null)),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -296,12 +291,16 @@ class _RiderRow extends StatelessWidget {
     final dist = rung.displayFromMeM;
     final lowBattery = r.lowBattery;
     final sweeper = r.isSweeper;
+    final isLead = r.role == RiderRoles.lead;
+    final tooFar = rung.tooFarBehind;
     final extra = [
       if (reason.isNotEmpty) reason,
       if (rung.isMe && !lowBattery) 'Battery ${r.batteryLevel}%${r.isCharging ? ', charging' : ''}',
-      if (r.role == RiderRoles.lead) 'Lead',
     ].join(', ');
     final distText = dist == null || rung.isMe ? '' : describeDistance(dist, ahead: rung.ahead);
+    final speed = status == RiderStatus.riding && r.speedKmh.isFinite && r.speedKmh > 0 ? '${r.speedKmh.round()} km/h' : null;
+    final fuelKm = r.fuelUsableKm;
+    final fuel = fuelKm != null && fuelKm.isFinite ? 'Fuel ${fuelKm.floor()} km' : null;
     final semantic = [
       rung.isMe ? 'You' : r.name,
       detail == null ? status.label : '${status.label}, $detail',
@@ -310,9 +309,15 @@ class _RiderRow extends StatelessWidget {
       if (lowBattery) LowBatteryChip.text(r.batteryLevel),
       if (sweeper) SweeperMarker.label,
       if (distText.isNotEmpty) distText,
-      if (rung.tooFarBehind) 'too far behind',
+      if (tooFar) 'too far behind',
+      if (speed != null) speed,
+      if (fuel != null) fuel,
       if (extra.isNotEmpty) extra,
+      if (isLead) 'Lead',
     ].join(', ');
+
+    final Color secondary = rung.isMe ? AppTheme.text2 : (tooFar ? AppTheme.warnText : AppTheme.muted);
+    final avatarRing = tooFar ? AppTheme.warnText : (color ?? AppTheme.accentText);
 
     return Semantics(
       container: true,
@@ -320,58 +325,80 @@ class _RiderRow extends StatelessWidget {
       label: semantic,
       excludeSemantics: true,
       onTap: onTap,
-      child: InkWell(
+      child: DsCard(
         onTap: onTap,
-        borderRadius: Radii.mdAll,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 64),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: Space.s8),
-            child: Row(
-              children: [
-                RiderAvatar(name: r.name, color: color, status: status, size: 44),
-                const SizedBox(width: Space.s12),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+        tinted: rung.isMe,
+        accent: rung.isMe,
+        warning: !rung.isMe && tooFar,
+        padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+        child: Row(
+          children: [
+            DsAvatar(initialsOf(r.name), size: 48, filled: rung.isMe, ringColor: avatarRing),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      Text(
-                        rung.isMe ? '${r.name} (You)' : r.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppText.body.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: Space.s4),
-                      Wrap(
-                        spacing: Space.s8,
-                        runSpacing: Space.s4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          RiderStatusChip(status: status, detail: detail),
-                          if (incident) const PossibleIncidentChip(),
-                          if (lowBattery) LowBatteryChip(level: r.batteryLevel),
-                          if (sweeper) const SweeperMarker(),
-                          if (dist != null && !rung.isMe) DistanceIndicator(meters: dist, ahead: rung.ahead, warn: rung.tooFarBehind),
-                        ],
-                      ),
-                      if (presence != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: Space.s4),
-                          child: PresenceText(rider: r, text: presence),
+                      Flexible(
+                        child: Text(
+                          rung.isMe ? '${r.name} (You)' : r.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.title,
                         ),
-                      if (extra.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: Space.s4),
-                          child: Text(extra, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
-                        ),
+                      ),
+                      if (isLead) ...[const SizedBox(width: 8), const DsChip('Lead')]
+                      else if (tooFar) ...[const SizedBox(width: 8), const DsChip('Falling back', warning: true)]
+                      else if (rung.isMe) ...[const SizedBox(width: 8), const DsChip('Pack', inverse: true)],
                     ],
                   ),
-                ),
-                Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
-              ],
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      RiderStatusChip(status: status, detail: detail),
+                      if (incident) const PossibleIncidentChip(),
+                      if (lowBattery) LowBatteryChip(level: r.batteryLevel),
+                      if (sweeper) const SweeperMarker(),
+                      if (dist != null && !rung.isMe)
+                        DistanceIndicator(meters: dist, ahead: rung.ahead, warn: tooFar, style: AppText.label.copyWith(color: secondary)),
+                    ],
+                  ),
+                  if (presence != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: PresenceText(rider: r, text: presence),
+                    ),
+                  if (extra.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(extra, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: secondary)),
+                    ),
+                ],
+              ),
             ),
-          ),
+            if (speed != null || fuel != null) ...[
+              const SizedBox(width: 10),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (speed != null)
+                    Text(speed, maxLines: 1, style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700, fontFeatures: const [FontFeature.tabularFigures()])),
+                  if (speed != null && fuel != null) const SizedBox(height: 4),
+                  if (fuel != null)
+                    Text(fuel, maxLines: 1, style: AppText.caption.copyWith(color: tooFar ? AppTheme.warnText : secondary, fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ],
+            const SizedBox(width: 4),
+            Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
+          ],
         ),
       ),
     );

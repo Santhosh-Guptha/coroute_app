@@ -37,9 +37,9 @@ enum AlertTier {
 
 /// A compact alert banner: icon, title, optional one line, optional action.
 ///
-/// Critical alerts are solid red with white text and are announced by
-/// screen readers as they appear. Important ones have an amber tint and
-/// border; normal ones are a plain card with a blue icon.
+/// Critical alerts are solid SOS red with white text and are announced by
+/// screen readers as they appear. Important ones sit on the amber warnTint
+/// with a warnBorder; normal ones are a plain card with a teal icon.
 class RideAlert extends StatelessWidget {
   final AlertTier tier;
   final String title;
@@ -63,14 +63,15 @@ class RideAlert extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final critical = tier == AlertTier.critical;
-    final accent = tier.color;
-    final Color bg = critical
-        ? accent
-        : (tier == AlertTier.important ? Color.alphaBlend(accent.withOpacity(0.14), AppTheme.slateCard) : AppTheme.slateCard);
-    final Color fg = critical ? StatusColors.onCritical : AppTheme.textPrimary;
-    final Color sub = critical ? StatusColors.onCritical : AppTheme.textSecondary;
-    final Color iconColor = critical ? StatusColors.onCritical : accent;
-    final Color border = critical ? accent : (tier == AlertTier.important ? accent.withOpacity(0.6) : AppTheme.subtleBorder);
+    final important = tier == AlertTier.important;
+    // Canvas status colours: solid SOS red, amber warnTint/warnBorder, plain card.
+    final Color bg = critical ? AppTheme.sos : (important ? AppTheme.warnTint : AppTheme.card);
+    final Color fg = critical ? StatusColors.onCritical : AppTheme.text;
+    final Color sub = critical ? StatusColors.onCritical : AppTheme.text2;
+    final Color iconColor = critical ? StatusColors.onCritical : (important ? AppTheme.warnText : AppTheme.accentText);
+    final Color border = critical ? AppTheme.sos : (important ? AppTheme.warnBorder : AppTheme.border);
+    final Color actionFg = critical ? StatusColors.onCritical : (important ? AppTheme.warnText : AppTheme.accentText);
+    final Color actionBg = critical ? Colors.black.withOpacity(0.18) : (important ? AppTheme.card : AppTheme.tint);
     final m = message;
     final action = actionLabel;
     final dismiss = onDismiss;
@@ -80,16 +81,15 @@ class RideAlert extends StatelessWidget {
       liveRegion: critical,
       child: Material(
         color: bg,
-        elevation: critical ? 2 : 1,
-        shadowColor: AppTheme.shadow,
+        elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: Radii.mdAll,
-          side: BorderSide(color: border),
+          borderRadius: Radii.lgAll,
+          side: BorderSide(color: border, width: 2),
         ),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 56),
           child: Padding(
-            padding: EdgeInsetsDirectional.fromSTEB(Space.s12, Space.s8, dismiss == null ? Space.s12 : 0.0, Space.s8),
+            padding: EdgeInsetsDirectional.fromSTEB(Space.s16, Space.s12, dismiss == null ? Space.s16 : Space.s4, Space.s12),
             child: Row(
               children: [
                 Icon(tier.icon, color: iconColor, size: 24),
@@ -103,7 +103,7 @@ class RideAlert extends StatelessWidget {
                         title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: AppText.body.copyWith(color: fg, fontWeight: FontWeight.w700),
+                        style: AppText.body.copyWith(color: fg, fontWeight: FontWeight.w800),
                       ),
                       if (m != null && m.isNotEmpty)
                         Padding(
@@ -112,7 +112,7 @@ class RideAlert extends StatelessWidget {
                             m,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: AppText.label.copyWith(color: sub, fontWeight: FontWeight.w400),
+                            style: AppText.label.copyWith(color: sub),
                           ),
                         ),
                       if (action != null && onAction != null)
@@ -121,11 +121,12 @@ class RideAlert extends StatelessWidget {
                           child: TextButton(
                             onPressed: onAction,
                             style: TextButton.styleFrom(
-                              foregroundColor: critical ? StatusColors.onCritical : AppTheme.neonCyan,
-                              backgroundColor: critical ? Colors.black.withOpacity(0.18) : AppTheme.neonCyan.withOpacity(0.12),
+                              foregroundColor: actionFg,
+                              backgroundColor: actionBg,
                               minimumSize: const Size(48, 44),
                               padding: const EdgeInsets.symmetric(horizontal: Space.s12),
-                              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
+                              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
                             ),
                             child: Text(action, maxLines: 1, overflow: TextOverflow.ellipsis),
                           ),

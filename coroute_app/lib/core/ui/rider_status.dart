@@ -144,8 +144,11 @@ class RiderStatusChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s4),
       decoration: ShapeDecoration(
-        color: c.withOpacity(0.14),
-        shape: StadiumBorder(side: BorderSide(color: c.withOpacity(0.45))),
+        color: c.withOpacity(0.12),
+        shape: RoundedRectangleBorder(
+          borderRadius: Radii.smAll,
+          side: BorderSide(color: c.withOpacity(0.45)),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -157,7 +160,7 @@ class RiderStatusChip extends StatelessWidget {
               text,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: AppText.label.copyWith(color: c),
+              style: AppText.label.copyWith(color: c, fontWeight: FontWeight.w700),
             ),
           ),
         ],

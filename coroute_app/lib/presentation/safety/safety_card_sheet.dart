@@ -73,7 +73,6 @@ class SafetyCardSheet extends StatelessWidget {
     final contact = contactText(contactName, contactPhone);
     final phone = contactPhone.trim();
     final first = name.trim().isEmpty ? '' : name.trim().split(' ').first;
-    final Color red = StatusColors.critical;
 
     Widget row(IconData icon, String label, String value, {bool big = false}) {
       return Padding(
@@ -83,7 +82,7 @@ class SafetyCardSheet extends StatelessWidget {
           children: [
             Padding(
               padding: const EdgeInsets.only(top: 2),
-              child: Icon(icon, size: 24, color: AppTheme.textSecondary),
+              child: Icon(icon, size: 24, color: AppTheme.accentText),
             ),
             const SizedBox(width: Space.s12),
             Expanded(
@@ -98,8 +97,8 @@ class SafetyCardSheet extends StatelessWidget {
                     maxLines: big ? 1 : 6,
                     overflow: TextOverflow.ellipsis,
                     style: big
-                        ? AppText.metric.copyWith(color: value.isEmpty ? AppTheme.textMuted : AppTheme.textPrimary)
-                        : AppText.title.copyWith(color: value.isEmpty ? AppTheme.textMuted : AppTheme.textPrimary, height: 1.3),
+                        ? AppText.metric.copyWith(color: value.isEmpty ? AppTheme.muted : AppTheme.text)
+                        : AppText.title.copyWith(color: value.isEmpty ? AppTheme.muted : AppTheme.text, height: 1.3),
                   ),
                 ],
               ),
@@ -118,8 +117,8 @@ class SafetyCardSheet extends StatelessWidget {
             Container(
               width: 48,
               height: 48,
-              decoration: BoxDecoration(color: red.withOpacity(0.14), shape: BoxShape.circle),
-              child: Icon(Icons.medical_information_rounded, color: red, size: 28),
+              decoration: BoxDecoration(color: AppTheme.sos.withValues(alpha: 0.12), shape: BoxShape.circle),
+              child: Icon(Icons.medical_information_outlined, color: AppTheme.sos, size: 26),
             ),
             const SizedBox(width: Space.s12),
             Expanded(
@@ -129,38 +128,43 @@ class SafetyCardSheet extends StatelessWidget {
                 children: [
                   Semantics(
                     header: true,
-                    child: Text(L10n.t('card.title'), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontWeight: FontWeight.w700)),
+                    child: Text(L10n.t('card.title'), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 18)),
                   ),
-                  if (name.trim().isNotEmpty) Text(name.trim(), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body),
+                  if (name.trim().isNotEmpty) Text(name.trim(), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
                 ],
               ),
             ),
           ],
         ),
         const SizedBox(height: Space.s24),
-        row(Icons.bloodtype_rounded, L10n.t('card.blood'), blood, big: true),
-        row(Icons.warning_amber_rounded, L10n.t('card.allergies'), allergies),
-        row(Icons.notes_rounded, L10n.t('card.notes'), notes),
-        row(Icons.contact_emergency_rounded, L10n.t('card.contact'), contact),
+        DsCard(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              row(Icons.bloodtype_outlined, L10n.t('card.blood'), blood, big: true),
+              row(Icons.warning_amber_rounded, L10n.t('card.allergies'), allergies),
+              row(Icons.notes_outlined, L10n.t('card.notes'), notes),
+              row(Icons.contact_emergency_outlined, L10n.t('card.contact'), contact),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
         if (!mine && phone.isNotEmpty) ...[
-          FilledButton.icon(
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+          DsButton(
+            label: L10n.t('card.call', {'name': contactName.trim().isEmpty ? (first.isEmpty ? '' : first) : contactName.trim()}).trim(),
+            icon: Icons.call_outlined,
             onPressed: () => dialNumber(context, phone),
-            icon: const Icon(Icons.call_rounded),
-            label: Text(
-              L10n.t('card.call', {'name': contactName.trim().isEmpty ? (first.isEmpty ? '' : first) : contactName.trim()}).trim(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
           ),
           const SizedBox(height: Space.s12),
         ],
         Text(L10n.t('card.footer'), maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.caption),
         const SizedBox(height: Space.s8),
-        OutlinedButton(
-          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        DsButton(
+          label: L10n.t('card.close'),
+          tone: DsButtonTone.outline,
           onPressed: () => Navigator.of(context).maybePop(),
-          child: Text(L10n.t('card.close'), maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ],
     );

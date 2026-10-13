@@ -143,8 +143,8 @@ class _ReplayScreenState extends State<ReplayScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(title: Text(widget.title, overflow: TextOverflow.ellipsis)),
+      backgroundColor: AppTheme.bg,
+      appBar: AppBar(backgroundColor: AppTheme.bg, foregroundColor: AppTheme.text, title: Text(widget.title, overflow: TextOverflow.ellipsis)),
       // Never blocks: the map (planned stops, destination) shows at once and
       // the routes appear when they arrive.
       body: LayoutBuilder(builder: (context, c) {
@@ -178,8 +178,8 @@ class _ReplayScreenState extends State<ReplayScreen> {
     final day = DateFormat('EEE d MMM');
     final hasRange = _to > _from;
     return Container(
-      color: AppTheme.darkCanvas,
-      padding: const EdgeInsets.fromLTRB(Space.s12, Space.s8, Space.s12, Space.s12),
+      color: AppTheme.bg,
+      padding: const EdgeInsets.fromLTRB(20, Space.s8, 20, Space.s12),
       child: SafeArea(
         top: false,
         child: Column(
@@ -194,7 +194,7 @@ class _ReplayScreenState extends State<ReplayScreen> {
             else if (_loading)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: Space.s12),
-                child: Text('Loading the routes...', textAlign: TextAlign.center, style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+                child: Text('Loading the routes...', textAlign: TextAlign.center, style: AppText.body.copyWith(color: AppTheme.text2)),
               )
             else if (_tracks.isEmpty)
               Padding(
@@ -204,7 +204,7 @@ class _ReplayScreenState extends State<ReplayScreen> {
                         ? 'No recorded route for this trip yet. Routes appear a minute after riders move.'
                         : 'No recorded routes for this trip. The map shows the planned stops and destination.',
                     textAlign: TextAlign.center,
-                    style: AppText.body.copyWith(color: AppTheme.textMuted)),
+                    style: AppText.body.copyWith(color: AppTheme.muted)),
               )
             else ...[
               Row(
@@ -213,7 +213,7 @@ class _ReplayScreenState extends State<ReplayScreen> {
                     onPressed: hasRange ? _togglePlay : null,
                     iconSize: 40,
                     constraints: const BoxConstraints(minWidth: 56, minHeight: 56),
-                    icon: Icon(_timer != null ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded, color: AppTheme.neonCyan),
+                    icon: Icon(_timer != null ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded, color: AppTheme.accentText),
                     tooltip: _timer != null ? 'Pause' : 'Play',
                   ),
                   const SizedBox(width: Space.s4),
@@ -241,7 +241,7 @@ class _ReplayScreenState extends State<ReplayScreen> {
                   value: _t.toDouble().clamp(_from.toDouble(), _to.toDouble()).toDouble(),
                   min: _from.toDouble(),
                   max: _to.toDouble(),
-                  activeColor: AppTheme.neonCyan,
+                  activeColor: AppTheme.brand,
                   semanticFormatterCallback: (v) => fmt.format(DateTime.fromMillisecondsSinceEpoch(v.round())),
                   onChanged: (v) => setState(() => _t = v.round()),
                 ),
@@ -253,10 +253,10 @@ class _ReplayScreenState extends State<ReplayScreen> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        CircleAvatar(radius: 5, backgroundColor: _colors[t.userId] ?? AppTheme.neonCyan),
+                        CircleAvatar(radius: 5, backgroundColor: _colors[t.userId] ?? AppTheme.accentText),
                         const SizedBox(width: Space.s4),
                         Flexible(
-                          child: Text(_riderNow(t), style: AppText.caption.copyWith(color: AppTheme.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          child: Text(_riderNow(t), style: AppText.caption.copyWith(color: AppTheme.text2), maxLines: 1, overflow: TextOverflow.ellipsis),
                         ),
                       ],
                     ),

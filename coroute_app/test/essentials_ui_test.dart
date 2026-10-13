@@ -20,15 +20,40 @@ void main() {
       home: Scaffold(body: Builder(builder: (context) => TextButton(onPressed: () => showFuelSheet(context, configure: true), child: const Text('Open')))),
     )));
     await tester.tap(find.text('Open')); await tester.pumpAndSettle();
-    expect(find.text('Fuel profile'), findsOneWidget);
+    expect(find.text('Fuel'), findsOneWidget);
     expect(find.byKey(const ValueKey('shareFuelEstimate')), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.scrollUntilVisible(find.byKey(const ValueKey('shareFuelEstimate')), 150, scrollable: find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first);
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('shareFuelEstimate'))); await tester.pumpAndSettle();
     expect(settings.shareFuelEstimate, true);
-    await tester.scrollUntilVisible(find.byKey(const ValueKey('fuelLitresMode')), 150);
+    await tester.scrollUntilVisible(find.byKey(const ValueKey('fuelLitresMode')), -150, scrollable: find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first);
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('fuelLitresMode')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink()); settings.dispose();
+  });
+
+  testWidgets('simple setup saves one range without claiming a full tank', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final settings = SettingsService(); await settings.load();
+    await tester.pumpWidget(ChangeNotifierProvider.value(value: settings, child: MaterialApp(
+      home: Scaffold(body: Builder(builder: (context) => TextButton(onPressed: () => showFuelSheet(context), child: const Text('Open')))))));
+    await tester.tap(find.text('Open')); await tester.pumpAndSettle();
+    final input = find.widgetWithText(TextField, 'Full tank distance (km)');
+    await tester.enterText(input, 'not a number');
+    await tester.ensureVisible(find.text('Save and continue'));
+    await tester.tap(find.text('Save and continue')); await tester.pumpAndSettle();
+    expect(settings.hasFuelProfile, false);
+    await tester.enterText(input, '300');
+    await tester.ensureVisible(find.text('Save and continue'));
+    await tester.tap(find.text('Save and continue')); await tester.pumpAndSettle();
+    expect(settings.fuelProfile.rangeKm, 300);
+    expect(settings.fuelProfile.marginKm, 20);
+    expect(find.text('Fuel setup saved'), findsOneWidget);
+    expect(find.text('I filled the tank completely'), findsNothing, reason: 'no active ride');
+    expect(settings.shareFuelEstimate, false);
+    await tester.pumpWidget(const SizedBox()); settings.dispose();
   });
 
   testWidgets('failed stop submission stays retryable; successful request disables it', (tester) async {

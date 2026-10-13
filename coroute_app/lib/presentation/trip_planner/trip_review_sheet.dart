@@ -195,12 +195,11 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
             padding: EdgeInsets.zero,
             children: [
               if (r != null)
-                RouteSummary(
-                  distanceKm: r.distanceM / 1000,
-                  duration: Duration(seconds: r.durationS),
+                _Stats(
+                  distance: formatDistance(r.distanceM),
+                  time: formatDuration(Duration(seconds: r.durationS)),
                   stops: widget.stops,
-                  riders: 1,
-                  departure: DateTime.now(),
+                  departs: RouteSummary.departureText(context, DateTime.now()),
                 )
               else
                 _Note(
@@ -209,7 +208,10 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                       ? 'Route preview is not available right now. It is worked out when the ride starts.'
                       : 'No destination yet. You can set it during the ride.',
                 ),
-              if (r != null && !r.approximate) EssentialsPreview(route: r),
+              if (r != null && !r.approximate) ...[
+                const SizedBox(height: Space.s12),
+                EssentialsPreview(route: r),
+              ],
               if (r != null && r.approximate)
                 Padding(
                   padding: const EdgeInsets.only(top: Space.s8),
@@ -220,13 +222,13 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                 _Note(icon: Icons.umbrella_rounded, text: weatherLine),
                 if (!_checking && _weather != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: Space.s4, left: 28),
+                    padding: const EdgeInsets.only(top: Space.s4, left: 32),
                     child: Text(L10n.t('weather.by'), style: AppText.caption),
                   ),
               ],
               if (dark != null) ...[
                 const SizedBox(height: Space.s12),
-                _Note(icon: Icons.nights_stay_rounded, text: dark),
+                _Note(icon: Icons.nights_stay_outlined, text: dark, warning: true),
               ],
               if (r != null && pf != null && canSaveMap)
                 Padding(
@@ -241,21 +243,21 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                 ),
               const SizedBox(height: Space.s16),
               const _Note(
-                icon: Icons.group_add_rounded,
+                icon: Icons.group_add_outlined,
                 text: 'After you start, share the ride code so your group can join.',
               ),
-              const SizedBox(height: Space.s16),
+              const SizedBox(height: 18),
               Row(
                 children: [
-                  Icon(Icons.speed_rounded, size: 20, color: AppTheme.textSecondary),
-                  const SizedBox(width: Space.s8),
+                  Icon(Icons.speed_rounded, size: 22, color: AppTheme.accentText),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Text('Group speed limit', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                    child: Text('Group speed limit', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title),
                   ),
-                  Text(_limit > 0 ? '$_limit km/h' : 'Off', style: AppText.label.copyWith(color: AppTheme.textPrimary)),
+                  Text(_limit > 0 ? '$_limit km/h' : 'Off', style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
                 ],
               ),
-              const SizedBox(height: Space.s8),
+              const SizedBox(height: 10),
               Wrap(
                 spacing: Space.s8,
                 runSpacing: Space.s8,
@@ -265,17 +267,17 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                       label: Text(v == 0 ? 'Off' : '$v'),
                       selected: _limit == v,
                       onSelected: (_) => setState(() => _limit = v),
-                      selectedColor: AppTheme.neonCyan,
-                      backgroundColor: AppTheme.slateCard,
-                      labelStyle: AppText.label.copyWith(color: _limit == v ? Colors.black : AppTheme.textPrimary),
-                      side: BorderSide(color: _limit == v ? AppTheme.neonCyan : AppTheme.subtleBorder),
+                      selectedColor: AppTheme.brand,
+                      backgroundColor: AppTheme.card,
+                      labelStyle: TextStyle(color: _limit == v ? Colors.white : AppTheme.text, fontSize: 13, fontWeight: FontWeight.w800),
+                      side: BorderSide(color: _limit == v ? AppTheme.brand : AppTheme.border, width: 2),
                       showCheckmark: false,
                       materialTapTargetSize: MaterialTapTargetSize.padded,
-                      shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                 ],
               ),
-              const SizedBox(height: Space.s4),
+              const SizedBox(height: Space.s8),
               Text(
                 'Riding over it for 10 seconds is logged and the group is told once. You can change it during the ride.',
                 style: AppText.caption,
@@ -284,30 +286,80 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
           ),
         ),
         const SizedBox(height: Space.s16),
+        // A FilledButton (tests measure it): 56 dp, teal, radius 16.
         FilledButton.icon(
           onPressed: () => Navigator.pop(context, _limit),
           icon: const Icon(Icons.play_arrow_rounded),
-          label: const Text('Start Ride', style: TextStyle(fontWeight: FontWeight.w700)),
-          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+          label: const Text('Start Ride', style: TextStyle(fontWeight: FontWeight.w800)),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(56),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
         ),
       ],
     );
   }
 }
 
+/// Four stat cells (Distance / Time / Stops / Departs) on a soft fill: one
+/// row when there is room, otherwise two rows of two.
+class _Stats extends StatelessWidget {
+  final String distance;
+  final String time;
+  final int stops;
+  final String departs;
+
+  const _Stats({required this.distance, required this.time, required this.stops, required this.departs});
+
+  @override
+  Widget build(BuildContext context) {
+    final cells = <Widget>[
+      DsStatCell(label: 'Distance', value: distance),
+      DsStatCell(label: 'Time', value: time),
+      DsStatCell(label: stops == 1 ? 'Stop' : 'Stops', value: '$stops'),
+      DsStatCell(label: 'Departs', value: departs),
+    ];
+    return LayoutBuilder(builder: (context, c) {
+      final oneRow = c.maxWidth >= 420;
+      // IntrinsicHeight bounds the row so the cells can stretch to one height.
+      Widget row(List<Widget> items) => IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 10),
+                  Expanded(child: items[i]),
+                ],
+              ],
+            ),
+          );
+      if (oneRow) return row(cells);
+      return Column(
+        children: [
+          row(cells.sublist(0, 2)),
+          const SizedBox(height: 10),
+          row(cells.sublist(2)),
+        ],
+      );
+    });
+  }
+}
+
+/// One line with a teal (or amber) outline icon in front of it.
 class _Note extends StatelessWidget {
   final IconData icon;
   final String text;
+  final bool warning;
 
-  const _Note({required this.icon, required this.text});
+  const _Note({required this.icon, required this.text, this.warning = false});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 20, color: AppTheme.textSecondary),
-        const SizedBox(width: Space.s8),
+        Icon(icon, size: 22, color: warning ? AppTheme.warnText : AppTheme.accentText),
+        const SizedBox(width: 10),
         Expanded(child: Text(text, maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.body)),
       ],
     );

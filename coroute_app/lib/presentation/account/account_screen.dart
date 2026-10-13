@@ -12,9 +12,11 @@ import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/meta_service.dart';
 import '../../data/services/settings_service.dart';
+import '../../data/services/trip_storage_service.dart';
 import '../admin/master_admin_dashboard.dart';
 import '../auth/access_gate_screen.dart';
 import '../onboarding/permissions_screen.dart';
+import '../rider/rider_home_screen.dart';
 import '../safety/safety_settings_sheet.dart';
 import '../widgets/data_saver_tile.dart';
 import 'appearance_sheet.dart';
@@ -39,131 +41,361 @@ class AccountScreen extends StatelessWidget {
   void _push(BuildContext context, Widget screen) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
 
+  static String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first.substring(0, 1);
+    return parts.first.substring(0, 1) + parts.last.substring(0, 1);
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final meta = context.watch<MetaService>().meta;
     final theme = context.watch<ThemeController>();
     final settings = context.watch<SettingsService?>();
+    final trips = context.watch<TripStorageService?>();
     final base = AppConfig.apiBaseUrl;
     final privacyUrl = meta?.privacyUrl.isNotEmpty == true ? meta!.privacyUrl : '$base/privacy';
     final termsUrl = meta?.termsUrl.isNotEmpty == true ? meta!.termsUrl : '$base/terms';
     final support = meta?.supportEmail ?? '';
     final name = (auth.currentUserName ?? '').trim();
-    final vehicle = auth.isPillion
-        ? 'Pillion'
-        : [
-            if ((auth.vehicleType ?? '').trim().isNotEmpty) auth.vehicleType!.trim(),
-            if ((auth.vehicleNo ?? '').trim().isNotEmpty) auth.vehicleNo!.trim(),
-          ].join(', ');
-    final contactSet = (auth.emergencyContact ?? '').trim().length >= 7 && (auth.emergencyContactName ?? '').trim().length >= 2;
+    final email = (auth.currentUserEmail ?? '').trim();
+    final vehicleType = (auth.vehicleType ?? '').trim();
+    final plate = (auth.vehicleNo ?? '').trim();
+    final contactName = (auth.emergencyContactName ?? '').trim();
+    final contactPhone = (auth.emergencyContact ?? '').trim();
+    final contactSet = contactPhone.length >= 7 && contactName.length >= 2;
+    final analytics = trips == null ? null : HomeAnalytics.of(trips.trips);
 
-    Widget row(IconData icon, String title, {String? subtitle, VoidCallback? onTap, Color? color, bool chevron = true}) {
-      final sub = subtitle;
-      return ListTile(
-        minVerticalPadding: Space.s12,
-        leading: Icon(icon, color: color ?? AppTheme.textSecondary),
-        title: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(color: color ?? AppTheme.textPrimary)),
-        subtitle: sub == null ? null : Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
-        trailing: chevron && onTap != null ? Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted) : null,
-        onTap: onTap,
-      );
-    }
+    final bikeTitle = auth.isPillion ? 'Pillion' : (vehicleType.isNotEmpty ? vehicleType : 'Your bike');
+    final bikeFacts = <String>[
+      if (!auth.isPillion && plate.isNotEmpty) plate,
+      if (auth.isPillion) 'No bike registration needed',
+      if (settings != null && settings.fuelRangeKm > 0) '${settings.fuelRangeKm} km range',
+    ];
 
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(title: const Text('Profile'), automaticallyImplyLeading: !embedded),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: ListView(
-            padding: const EdgeInsets.only(bottom: Space.s32),
-            children: [
-              // Who you are: one tap opens the one profile editor.
-              Semantics(
-                button: true,
-                label: 'Edit profile',
-                child: InkWell(
+      backgroundColor: AppTheme.bg,
+      body: SafeArea(
+        bottom: false,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: ListView(
+              padding: dsScreenPadding,
+              children: [
+                DsScreenHeader(
+                  title: 'Profile',
+                  onBack: embedded ? null : () => Navigator.maybePop(context),
+                  trailing: DsRoundButton(
+                    icon: Icons.edit_rounded,
+                    label: 'Edit profile',
+                    onTap: () => _push(context, const EditProfileScreen()),
+                  ),
+                ),
+                const SizedBox(height: 18),
+
+                // Who you are: one tap opens the one profile editor.
+                DsCard(
+                  radius: Radii.xl,
+                  padding: const EdgeInsets.all(18),
                   onTap: () => _push(context, const EditProfileScreen()),
-                  child: Padding(
-                    padding: const EdgeInsets.all(Space.s16),
+                  semanticsLabel: 'Edit profile',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          DsAvatar(_initials(name.isEmpty ? '?' : name), size: 64, filled: true),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(name.isEmpty ? 'Your name' : name,
+                                    maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.headline.copyWith(fontSize: 20)),
+                                if (email.isNotEmpty) ...[
+                                  const SizedBox(height: 3),
+                                  Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
+                                ],
+                                const SizedBox(height: 6),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: [
+                                    if (auth.isPillion) const DsChip('Pillion') else const DsChip('Rider'),
+                                    if (auth.isMasterAdmin) const DsChip('Admin'),
+                                    if (settings != null && settings.crashDetection) const DsChip('Guardian on'),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Icon(
+                            contactSet ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
+                            size: 16,
+                            color: contactSet ? AppTheme.accentText : AppTheme.warnText,
+                          ),
+                          const SizedBox(width: Space.s4),
+                          Flexible(
+                            child: Text(
+                              contactSet ? 'Emergency contact: set' : 'Emergency contact: not set',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.caption.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: contactSet ? AppTheme.text2 : AppTheme.warnText,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (analytics != null) ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(child: DsStatCell(label: 'Rides', value: '${analytics.rides}')),
+                            const SizedBox(width: 8),
+                            Expanded(child: DsStatCell(label: 'Distance', value: formatDistance(analytics.totalDistanceKm * 1000))),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: DsStatCell(
+                                label: 'Riding time',
+                                value: formatDuration(Duration(minutes: analytics.totalMinutes)),
+                                valueColor: AppTheme.accentText,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+                const DsSectionHeader('My bike'),
+                const SizedBox(height: 10),
+                DsCard(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(14)),
+                        child: Icon(
+                          auth.isPillion ? Icons.airline_seat_recline_normal_rounded : Icons.two_wheeler_rounded,
+                          size: 26,
+                          color: AppTheme.accentText,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(bikeTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 15)),
+                            if (bikeFacts.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(bikeFacts.join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _SquareButton(icon: Icons.edit_rounded, label: 'Edit bike', onTap: () => _push(context, const EditProfileScreen())),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+                const DsSectionHeader('Emergency contact'),
+                const SizedBox(height: 10),
+                DsCard(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
+                  onTap: () => _push(context, const EditProfileScreen()),
+                  semanticsLabel: contactSet ? 'Emergency contact $contactName, edit' : 'Add an emergency contact',
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 54),
                     child: Row(
                       children: [
-                        RiderAvatar(name: name.isEmpty ? '?' : name, size: 56),
-                        const SizedBox(width: Space.s16),
+                        if (contactSet)
+                          Container(
+                            width: 36,
+                            height: 36,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(color: AppTheme.tint, shape: BoxShape.circle),
+                            child: Text(
+                              _initials(contactName).toUpperCase(),
+                              textScaler: TextScaler.noScaling,
+                              style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w800),
+                            ),
+                          )
+                        else
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(color: AppTheme.warnTint, shape: BoxShape.circle),
+                            child: Icon(Icons.person_add_alt_1_rounded, size: 18, color: AppTheme.warnText),
+                          ),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(name.isEmpty ? 'Your name' : name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title),
-                              if (vehicle.isNotEmpty)
-                                Text(vehicle, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  Icon(
-                                    contactSet ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
-                                    size: 16,
-                                    color: contactSet ? StatusColors.success : StatusColors.warning,
-                                  ),
-                                  const SizedBox(width: Space.s4),
-                                  Flexible(
-                                    child: Text(
-                                      contactSet ? 'Emergency contact: set' : 'Emergency contact: not set',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: AppText.caption.copyWith(color: AppTheme.textSecondary),
-                                    ),
-                                  ),
-                                ],
+                              Text(
+                                contactSet ? contactName : 'Add an emergency contact',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                contactSet ? contactPhone : 'Your SOS screen calls or texts this person.',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppText.caption,
                               ),
                             ],
                           ),
                         ),
-                        Icon(Icons.edit_rounded, color: AppTheme.textMuted),
+                        const SizedBox(width: 8),
+                        if (contactSet)
+                          Text('PRIMARY', style: TextStyle(color: AppTheme.accentText, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1))
+                        else
+                          Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
                       ],
                     ),
                   ),
                 ),
-              ),
-              const Divider(height: 1),
-              const _SectionLabel('Settings'),
-              row(theme.isLight ? Icons.light_mode_rounded : Icons.dark_mode_rounded, 'Theme',
-                  subtitle: AppearanceSheet.summary(theme), onTap: () => AppearanceSheet.show(context)),
-              const DataSaverTile(),
-              if (settings != null) row(Icons.local_gas_station_rounded, 'Fuel profile', subtitle: 'Range, mileage, reserve and buffer', onTap: () => showFuelSheet(context, configure: true)),
-              if (settings != null)
-                row(Icons.health_and_safety_rounded, 'Ride safety',
-                    subtitle: SafetySettingsSheet.summary(settings), onTap: () => SafetySettingsSheet.show(context)),
-              row(Icons.verified_user_rounded, 'Permissions',
-                  subtitle: 'Location, microphone, notifications, battery and texts', onTap: () => _push(context, const PermissionsScreen())),
-              row(Icons.password_rounded, 'Change password', onTap: () => _push(context, const ChangePasswordScreen())),
-              if (auth.isMasterAdmin) row(Icons.admin_panel_settings_rounded, 'Admin', subtitle: 'Live rides, history and users',
-                  onTap: () => _push(context, const MasterAdminDashboard())),
-              const _SectionLabel('Help'),
-              row(Icons.bug_report_rounded, 'Report a problem', subtitle: 'We reply by e-mail.',
-                  onTap: () => _push(context, const ReportProblemScreen())),
-              row(Icons.privacy_tip_rounded, 'Privacy policy', onTap: () => _open(context, privacyUrl)),
-              row(Icons.gavel_rounded, 'Terms of use', onTap: () => _open(context, termsUrl)),
-              const _SectionLabel('Account'),
-              row(Icons.logout_rounded, 'Sign out', chevron: false, onTap: () async {
-                await auth.logout();
-                if (context.mounted) {
-                  Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const AccessGateScreen()), (_) => false);
-                }
-              }),
-              row(Icons.delete_forever_rounded, 'Delete my account', subtitle: 'Removes your account, profile and ride history.',
-                  color: StatusColors.critical, chevron: false, onTap: () => _confirmDelete(context)),
-              const SizedBox(height: Space.s24),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: Space.s16),
-                child: Text(
+
+                const SizedBox(height: 20),
+                const DsSectionHeader('Riding'),
+                const SizedBox(height: 10),
+                DsCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Column(
+                    children: [
+                      if (settings != null)
+                        _SettingsRow(
+                          icon: Icons.local_gas_station_rounded,
+                          title: 'Fuel',
+                          subtitle: 'Set your range and update fuel left',
+                          onTap: () => showFuelSheet(context, configure: true),
+                        ),
+                      if (settings != null)
+                        _SettingsRow(
+                          icon: Icons.health_and_safety_rounded,
+                          title: 'Ride safety',
+                          subtitle: SafetySettingsSheet.summary(settings),
+                          onTap: () => SafetySettingsSheet.show(context),
+                        ),
+                      _SettingsRow(
+                        icon: Icons.verified_user_rounded,
+                        title: 'Permissions',
+                        subtitle: 'Location, microphone, notifications, battery and texts',
+                        onTap: () => _push(context, const PermissionsScreen()),
+                      ),
+                      const DataSaverTile(divider: false),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+                const DsSectionHeader('App'),
+                const SizedBox(height: 10),
+                DsCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Column(
+                    children: [
+                      _SettingsRow(
+                        icon: theme.isLight ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                        title: 'Theme',
+                        value: AppearanceSheet.summary(theme),
+                        onTap: () => AppearanceSheet.show(context),
+                      ),
+                      _SettingsRow(
+                        icon: Icons.password_rounded,
+                        title: 'Change password',
+                        onTap: () => _push(context, const ChangePasswordScreen()),
+                        divider: auth.isMasterAdmin,
+                      ),
+                      if (auth.isMasterAdmin)
+                        _SettingsRow(
+                          icon: Icons.admin_panel_settings_rounded,
+                          title: 'Admin',
+                          subtitle: 'Live rides, history and users',
+                          onTap: () => _push(context, const MasterAdminDashboard()),
+                          divider: false,
+                        ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+                const DsSectionHeader('Help'),
+                const SizedBox(height: 10),
+                DsCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Column(
+                    children: [
+                      _SettingsRow(
+                        icon: Icons.bug_report_rounded,
+                        title: 'Report a problem',
+                        subtitle: 'We reply by e-mail.',
+                        onTap: () => _push(context, const ReportProblemScreen()),
+                      ),
+                      _SettingsRow(icon: Icons.privacy_tip_rounded, title: 'Privacy policy', onTap: () => _open(context, privacyUrl)),
+                      _SettingsRow(icon: Icons.gavel_rounded, title: 'Terms of use', onTap: () => _open(context, termsUrl), divider: false),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+                const DsSectionHeader('Account'),
+                const SizedBox(height: 10),
+                DsCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Column(
+                    children: [
+                      _SettingsRow(
+                        icon: Icons.logout_rounded,
+                        title: 'Sign out',
+                        chevron: false,
+                        onTap: () async {
+                          await auth.logout();
+                          if (context.mounted) {
+                            Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const AccessGateScreen()), (_) => false);
+                          }
+                        },
+                      ),
+                      _SettingsRow(
+                        icon: Icons.delete_forever_rounded,
+                        title: 'Delete my account',
+                        subtitle: 'Removes your account, profile and ride history.',
+                        color: AppTheme.sos,
+                        chevron: false,
+                        divider: false,
+                        onTap: () => _confirmDelete(context),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: Space.s24),
+                Text(
                   'CoRoute ${MetaService.currentVersion} (build ${MetaService.currentBuild})${support.isNotEmpty ? ', $support' : ''}',
                   style: AppText.caption,
                   textAlign: TextAlign.center,
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -199,6 +431,91 @@ class AccountScreen extends StatelessWidget {
   }
 }
 
+/// A settings row inside a [DsCard] list (canvas "More" rows): teal icon,
+/// 15/700 label with an optional 12/600 line under it, a muted value or a
+/// chevron on the right, and a hairline under it.
+class _SettingsRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final String? value;
+  final VoidCallback? onTap;
+  final Color? color;
+  final bool chevron;
+  final bool divider;
+
+  const _SettingsRow({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.value,
+    this.onTap,
+    this.color,
+    this.chevron = true,
+    this.divider = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sub = subtitle;
+    final v = value;
+    final row = Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(border: divider ? Border(bottom: BorderSide(color: AppTheme.border)) : null),
+      child: Row(
+        children: [
+          Icon(icon, size: 22, color: color ?? AppTheme.accentText),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700, color: color ?? AppTheme.text)),
+                if (sub != null && sub.isNotEmpty) Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+              ],
+            ),
+          ),
+          if (v != null && v.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(v, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.end, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+            ),
+          ],
+          if (chevron && onTap != null) Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
+        ],
+      ),
+    );
+    return onTap == null ? row : InkWell(onTap: onTap, child: row);
+  }
+}
+
+/// 40 px square button on a soft fill (canvas "Edit bike").
+class _SquareButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _SquareButton({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: AppTheme.soft,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(width: 44, height: 44, child: Icon(icon, size: 18, color: AppTheme.text)),
+        ),
+      ),
+    );
+  }
+}
+
 class _TypeDeleteSheet extends StatefulWidget {
   const _TypeDeleteSheet();
 
@@ -229,35 +546,18 @@ class _TypeDeleteSheetState extends State<_TypeDeleteSheet> {
             textCapitalization: TextCapitalization.characters,
             onChanged: (_) => setState(() {}),
             style: AppText.body,
-            decoration: const InputDecoration(
-              labelText: 'Type DELETE',
-              border: OutlineInputBorder(borderRadius: Radii.mdAll),
-            ),
+            decoration: const InputDecoration(labelText: 'Type DELETE'),
           ),
           const SizedBox(height: Space.s16),
-          FilledButton(
+          DsButton(
+            label: 'Delete permanently',
+            tone: DsButtonTone.sos,
             onPressed: ok ? () => Navigator.pop(context, true) : null,
-            style: FilledButton.styleFrom(
-              backgroundColor: StatusColors.critical,
-              foregroundColor: StatusColors.onCritical,
-              minimumSize: const Size.fromHeight(56),
-            ),
-            child: const Text('Delete permanently'),
           ),
         ],
       ),
     );
   }
-}
-
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  const _SectionLabel(this.text);
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(Space.s16, Space.s24, Space.s16, Space.s4),
-        child: Semantics(header: true, child: Text(text, style: AppText.label)),
-      );
 }
 
 /// In-app problem report. Posts to the same endpoint as the website form and
@@ -317,44 +617,44 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(title: const Text('Report a problem')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: ListView(
-            padding: const EdgeInsets.all(Space.s16),
-            children: [
-              Text(
-                'What happened, what you expected, and which screen you were on. Your e-mail, app version and phone platform are attached so we can reply.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-              ),
-              const SizedBox(height: Space.s12),
-              TextField(
-                controller: _message,
-                minLines: 6,
-                maxLines: 12,
-                maxLength: 2000,
-                style: TextStyle(color: AppTheme.textPrimary),
-                decoration: InputDecoration(
-                  hintText: 'Describe the problem',
-                  hintStyle: TextStyle(color: AppTheme.textMuted),
-                  filled: true,
-                  fillColor: AppTheme.elevatedCard,
-                  border: const OutlineInputBorder(borderRadius: Radii.mdAll),
-                  counterStyle: TextStyle(color: AppTheme.textMuted),
+      backgroundColor: AppTheme.bg,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: ListView(
+              padding: dsScreenPadding,
+              children: [
+                DsScreenHeader(title: 'Report a problem', onBack: () => Navigator.maybePop(context)),
+                const SizedBox(height: 18),
+                Text(
+                  'What happened, what you expected, and which screen you were on. Your e-mail, app version and phone platform are attached so we can reply.',
+                  style: AppText.label,
                 ),
-              ),
-              if (_error != null) Text(_error!, style: TextStyle(color: AppTheme.laserRed, fontSize: 13)),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _busy ? null : _send,
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                child: _busy
-                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
-                    : const Text('Send report'),
-              ),
-            ],
+                const SizedBox(height: Space.s12),
+                TextField(
+                  controller: _message,
+                  minLines: 6,
+                  maxLines: 12,
+                  maxLength: 2000,
+                  style: AppText.body,
+                  decoration: InputDecoration(
+                    hintText: 'Describe the problem',
+                    counterStyle: AppText.caption,
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: Space.s8),
+                  RideAlert(tier: AlertTier.important, title: _error!),
+                ],
+                const SizedBox(height: 16),
+                DsButton(
+                  label: _busy ? 'Sending...' : 'Send report',
+                  icon: _busy ? null : Icons.send_rounded,
+                  onPressed: _busy ? null : _send,
+                ),
+              ],
+            ),
           ),
         ),
       ),

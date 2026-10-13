@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/safety_wire.dart';
@@ -482,28 +483,46 @@ class AdminEmergenciesPanelState extends State<AdminEmergenciesPanel> {
       children: [
         AdminSectionLabel(
           list.isEmpty ? 'Emergencies' : 'Emergencies (${list.length})',
-          trailing: _loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : null,
+          trailing: _loading
+              ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accentText))
+              : null,
         ),
         if (list.isEmpty)
-          StatusLine(icon: Icons.check_circle_rounded, text: 'No open SOS or crash alerts', color: StatusColors.success)
+          DsCard(
+            tinted: true,
+            borderColor: AppTheme.tint,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle_rounded, size: 22, color: AppTheme.accentText),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'No open SOS or crash alerts',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.body.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+          )
         else ...[
           if (unsilenced)
             Padding(
-              padding: const EdgeInsets.only(bottom: Space.s8),
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
-                  backgroundColor: StatusColors.critical,
-                  foregroundColor: StatusColors.onCritical,
-                ),
+              padding: const EdgeInsets.only(bottom: 10),
+              child: DsButton(
+                label: 'Silence alarm',
+                icon: Icons.volume_off_rounded,
+                tone: DsButtonTone.sos,
+                height: 52,
+                fontSize: 15,
                 onPressed: () => _silence(list),
-                icon: const Icon(Icons.volume_off_rounded),
-                label: const Text('Silence alarm', maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
             ),
           for (final e in list)
             Padding(
-              padding: const EdgeInsets.only(bottom: Space.s8),
+              padding: const EdgeInsets.only(bottom: 10),
               child: _EmergencyCard(
                 key: ValueKey(e.alertId),
                 emergency: e,
@@ -589,7 +608,7 @@ class _EmergencyCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = emergency;
-    final Color bg = StatusColors.critical;
+    final Color bg = AppTheme.sos;
     final Color fg = StatusColors.onCritical;
     final since = e.occurredAt > 0 ? e.occurredAt : e.startedAt;
     final open = since > 0 ? 'open ${formatDuration(Duration(milliseconds: math.max(0, nowMs - since)))}' : '';
@@ -614,14 +633,16 @@ class _EmergencyCard extends StatelessWidget {
       if (e.falseAlarms30d > 0) 'False alarms in 30 days: ${e.falseAlarms30d}',
     ].where((l) => l.isNotEmpty).toList();
 
+    final kind = e.isCrash ? 'Crash' : 'SOS';
     return Semantics(
       container: true,
       liveRegion: !silenced,
       child: Material(
         color: bg,
-        shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+        shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
+        clipBehavior: Clip.antiAlias,
         child: Padding(
-          padding: const EdgeInsets.all(Space.s12),
+          padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -629,64 +650,109 @@ class _EmergencyCard extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(e.isCrash ? Icons.car_crash_rounded : Icons.sos_rounded, color: fg, size: 24),
-                  const SizedBox(width: Space.s8),
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.18), borderRadius: BorderRadius.circular(12)),
+                    child: Icon(e.isCrash ? Icons.car_crash_rounded : Icons.sos_rounded, color: fg, size: 24),
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
-                    child: Text(e.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(color: fg, fontWeight: FontWeight.w700)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${kind.toUpperCase()}${silenced ? '' : ' · OPEN'}',
+                          style: TextStyle(color: fg.withOpacity(0.85), fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 1.5),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(e.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg)),
+                      ],
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: Space.s4),
-              for (final l in lines) Text(l, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w400)),
-              const SizedBox(height: Space.s8),
+              const SizedBox(height: 10),
+              for (final l in lines)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Text(l, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg.withOpacity(0.92))),
+                ),
+              const SizedBox(height: 12),
               Wrap(
-                spacing: Space.s8,
-                runSpacing: Space.s8,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   if (e.hasPosition)
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(foregroundColor: fg, side: BorderSide(color: fg), minimumSize: const Size(48, 48)),
-                      onPressed: () async {
+                    _OnRedButton(
+                      icon: Icons.map_rounded,
+                      label: 'Open map',
+                      onTap: () async {
                         final ok = await navigateTo(e.lat, e.lng, label: e.who);
                         if (!ok && context.mounted) adminSnack(context, 'No map app found on this phone.');
                       },
-                      icon: const Icon(Icons.map_rounded),
-                      label: const Text('Open map'),
                     ),
                   if (onOpenRide != null)
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(backgroundColor: fg, foregroundColor: bg, minimumSize: const Size(48, 48)),
-                      onPressed: onOpenRide,
-                      icon: const Icon(Icons.two_wheeler_rounded),
-                      label: const Text('Open ride'),
-                    ),
+                    _OnRedButton(icon: Icons.two_wheeler_rounded, label: 'Open ride', filled: true, onTap: onOpenRide!),
                   if (e.alertId.isNotEmpty && e.groupId.isNotEmpty)
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(foregroundColor: fg, side: BorderSide(color: fg), minimumSize: const Size(48, 48)),
-                      onPressed: () => callEmergencyContact(context, e),
-                      icon: const Icon(Icons.contact_phone_rounded),
-                      label: const Text('Call emergency contact'),
-                    ),
+                    _OnRedButton(icon: Icons.contact_phone_rounded, label: 'Call emergency contact', onTap: () => callEmergencyContact(context, e)),
                   if (e.falseAlarms30d > 0 && e.userId.isNotEmpty)
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(foregroundColor: fg, side: BorderSide(color: fg), minimumSize: const Size(48, 48)),
-                      onPressed: () => _resetFalseAlarms(context, e),
-                      icon: const Icon(Icons.restart_alt_rounded),
-                      label: const Text('Reset false alarms'),
-                    ),
+                    _OnRedButton(icon: Icons.restart_alt_rounded, label: 'Reset false alarms', onTap: () => _resetFalseAlarms(context, e)),
                 ],
               ),
               if (silenced)
                 Padding(
-                  padding: const EdgeInsets.only(top: Space.s4),
+                  padding: const EdgeInsets.only(top: 10),
                   child: Row(
                     children: [
                       Icon(Icons.volume_off_rounded, size: 16, color: fg),
-                      const SizedBox(width: Space.s4),
-                      Flexible(child: Text('Alarm silenced', style: AppText.caption.copyWith(color: fg))),
+                      const SizedBox(width: 5),
+                      Flexible(child: Text('Alarm silenced', style: AppText.caption.copyWith(color: fg, fontWeight: FontWeight.w700))),
                     ],
                   ),
                 ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A 44 px button on the red emergency card: white with red text when
+/// [filled] (the main action), otherwise white text with a white outline.
+class _OnRedButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool filled;
+
+  const _OnRedButton({required this.icon, required this.label, required this.onTap, this.filled = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = filled ? AppTheme.sos : Colors.white;
+    return Material(
+      color: filled ? Colors.white : Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.white.withOpacity(filled ? 1 : 0.7), width: 2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: fg),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800)),
+              ),
             ],
           ),
         ),

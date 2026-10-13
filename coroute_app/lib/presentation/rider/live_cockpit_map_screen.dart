@@ -77,6 +77,7 @@ import '../../data/services/intercom_service.dart';
 import '../widgets/rider_status_sheet.dart';
 import 'rider_home_screen.dart';
 import 'widgets/cockpit_hud_toast.dart';
+import 'widgets/cockpit_shortcuts_dock.dart';
 import 'widgets/coroute_orbit_control.dart';
 import 'widgets/glove_quick_settings_modal.dart';
 import 'widgets/minimal_cockpit_overlay.dart';
@@ -1091,6 +1092,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     var newestOther = 0;
     for (final r in convoy.riders.values) {
       if (r.userId != uid && r.lastSeenEpochMs > newestOther) newestOther = r.lastSeenEpochMs;
+      final speedExpiresAt = r.lastSeenEpochMs + RideThresholds.staleAfter.inMilliseconds;
+      if (r.lastSeenEpochMs > 0 && speedExpiresAt > now) _armHideTimer(speedExpiresAt, now);
     }
     final connection = ConnectionBanner.status(
       state: rtState,
@@ -1150,9 +1153,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
     final speedLimit = convoy.speedLimitKmh;
     final showSpeed = speedLimit > 0 && me.speedKmh >= speedLimit - 10;
+    // "Guardian on" in the ride-summary card: this phone's crash detection setting.
+    final guardianOn = context.select<SettingsService?, bool>((s) => s?.crashDetection ?? true);
 
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
+      backgroundColor: AppTheme.map,
       body: LayoutBuilder(builder: (context, box) {
         final h = box.maxHeight;
         final w = box.maxWidth;
@@ -1177,7 +1182,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 child: RideSheet(
                   key: _sheetKey,
                   onTopChanged: (v) => _sheetTop.value = v,
-                  header: _sheetHeader(convoy, me, snap, stoppedFor, now),
+                  header: _sheetHeader(convoy, me, snap, stoppedFor, now, guardianOn: guardianOn),
                   body: _sheetBody(convoy, service, me, uid, snap, stoppedFor, colors, statuses, lead, now,
                       offlinePlaces: offlinePlaces,
                       possibleIncident: possible,
@@ -1207,6 +1212,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     onStopNavigation: guidance?.target == null ? null : guidance?.stop,
                     onBack: widget.embedded ? null : () => Navigator.of(context).maybePop(),
                     isTunnelCoasting: me.isTunnelCoasting,
+                    subtitle: convoy.name,
+                    speedKmh: RideFacts.hasPosition(me) ? me.speedKmh : null,
+                    speedLimitKmh: speedLimit,
                   ),
                   // In-cockpit alert slot
                   AnimatedSwitcher(
@@ -1240,12 +1248,16 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         child: TextButton(
                           style: TextButton.styleFrom(
                             minimumSize: const Size(48, 40),
-                            backgroundColor: AppTheme.slateCard,
-                            foregroundColor: AppTheme.textPrimary,
+                            backgroundColor: AppTheme.card,
+                            foregroundColor: AppTheme.accentText,
                             padding: const EdgeInsets.symmetric(horizontal: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(color: AppTheme.border, width: 2),
+                            ),
                           ),
                           onPressed: () => RiderHomeScreen.selectTab(context, HomeTab.alerts),
-                          child: Text('+$extra more', maxLines: 1, style: AppText.caption),
+                          child: Text('+$extra more', maxLines: 1, style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
                         ),
                       ),
                     )
@@ -1257,13 +1269,17 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         child: TextButton.icon(
                           style: TextButton.styleFrom(
                             minimumSize: const Size(48, 40),
-                            backgroundColor: AppTheme.slateCard,
-                            foregroundColor: AppTheme.textPrimary,
+                            backgroundColor: AppTheme.card,
+                            foregroundColor: AppTheme.accentText,
                             padding: const EdgeInsets.symmetric(horizontal: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(color: AppTheme.border, width: 2),
+                            ),
                           ),
                           onPressed: () => RiderHomeScreen.selectTab(context, HomeTab.alerts),
                           icon: const Icon(Icons.notifications_none_rounded, size: 16),
-                          label: Text('$_activeAlertCount in notifications', style: AppText.caption),
+                          label: Text('$_activeAlertCount in notifications', style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
                         ),
                       ),
                     ),
@@ -1379,12 +1395,16 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   if (intercom.isMicMuted) {
                     intercom.setMicMuted(false);
                     intercom.setMode(IntercomMode.vox);
-                    _showHudToast('Intercom: VOX Active', Icons.record_voice_over_rounded, AppTheme.neonCyan);
+                    _showHudToast('Intercom: VOX Active', Icons.record_voice_over_rounded, AppTheme.accentText);
                   } else {
                     intercom.setMicMuted(true);
-                    _showHudToast('Intercom: Mic Muted', Icons.mic_off_rounded, AppTheme.laserRed);
+                    _showHudToast('Intercom: Mic Muted', Icons.mic_off_rounded, AppTheme.sos);
                   }
                 }
+              },
+              // Never a one-tap send: the hold screen asks for the 1.5 s hold first.
+              onSosTap: () {
+                if (!SosHoldScreen.isOpen) _openSosHold(service, auth);
               },
               onGroupTap: () => showGroupSettings(context, convoyId: widget.convoyId),
               onFuelTap: () => showFuelSheet(context),
@@ -1405,7 +1425,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   onSettingToggled: (name, isEnabled) => _showHudToast(
                     '$name: ${isEnabled ? "ON" : "OFF"}',
                     Icons.tune_rounded,
-                    isEnabled ? AppTheme.neonCyan : AppTheme.textSecondary,
+                    isEnabled ? AppTheme.accentText : AppTheme.muted,
                   ),
                 );
               },
@@ -1418,7 +1438,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
   Widget _ended(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
+      backgroundColor: AppTheme.map,
       body: SafeArea(
         child: EmptyState(
           icon: Icons.flag_rounded,
@@ -1455,13 +1475,30 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     );
   }
 
-  Widget _sheetHeader(ConvoyModel convoy, RiderModel me, RideSnapshot snap, Duration? stoppedFor, int now) {
+  Widget _sheetHeader(ConvoyModel convoy, RiderModel me, RideSnapshot snap, Duration? stoppedFor, int now, {bool guardianOn = true}) {
     void toggle() => _sheetKey.currentState?.toggle();
     final next = snap.nextStop;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // The quick-action dock (canvas: card with a row of 64 dp tiles).
+        Padding(
+          padding: const EdgeInsets.fromLTRB(Space.s12, 0, Space.s12, Space.s12),
+          child: CockpitShortcutsDock(
+            convoy: convoy,
+            me: me,
+            essentialsService: _essentials,
+            settingsService: context.read<SettingsService?>(),
+            intercomService: context.read<IntercomService?>(),
+            keepScreenOn: _keepScreenOn,
+            autoFollow: _autoFollow,
+            onToggleKeepScreenOn: _toggleKeepScreenOn,
+            onToggleAutoFollow: () => setState(() => _autoFollow = !_autoFollow),
+            onEssentialsRadarTap: _openEssentials,
+            onHudToast: _showHudToast,
+          ),
+        ),
         if (stoppedFor != null)
           StoppedDetails(
             stoppedFor: stoppedFor,
@@ -1475,12 +1512,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             onTap: toggle,
           )
         else
-          RidingMetrics(
+          _RideSummaryHeader(
+            name: convoy.name,
+            paused: convoy.tripStatus == 'PAUSED',
             remainingM: snap.remainingM,
             eta: _eta(snap.eta),
             riding: RideFacts.ridingCount(convoy.riders.values, nowMs: now),
             total: convoy.riders.length,
             spreadM: snap.spreadM,
+            guardianOn: guardianOn,
             onTap: toggle,
           ),
         if (_essentials != null && convoy.activeAlerts.isEmpty)
@@ -1536,7 +1576,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           total: convoy.riders.length,
           spreadM: snap.spreadM,
         ),
-      SheetSectionTitle('Riders (${convoy.riders.length})'),
+      ConvoySpreadHero(
+        spreadM: convoy.riders.length < 2 ? null : snap.spreadM,
+        onTalkToAll: () => IntercomOptions.show(context),
+      ),
+      SheetOverline('Riding order · ${convoy.riders.length}'),
       RidersLadder(
         rungs: snap.ladder,
         colors: colors,
@@ -1617,7 +1661,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             }
           } else if (profile != null && profile.valid) {
             fuelTitle = 'Fuel profile: ${profile.rangeKm.floor()} km full range';
-            fuelSubtitle = 'Confirm filled tank to start live range tracking';
+            fuelSubtitle = 'Open Fuel to set how much is left';
           } else {
             fuelTitle = 'Fuel estimate / refuel';
             fuelSubtitle = 'Set up fuel capacity & mileage for range warnings';
@@ -1638,7 +1682,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         title: 'Share Ride Guardian link',
         subtitle: 'Live web tracking link with PIN protection for family or friends',
         onTap: () => showGuardianSheet(context, groupId: convoy.groupId),
-        trailing: Icon(Icons.share_rounded, size: 20, color: AppTheme.neonCyan),
+        trailing: Icon(Icons.share_rounded, size: 20, color: AppTheme.accentText),
       ),
       if (pf != null && canSaveMap)
         SaveRouteMapRow(
@@ -1657,16 +1701,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           subtitle: _etaShareSubtitle(snap),
           onTap: () => _shareEta(convoy, snap.remainingM, snap.eta),
         ),
-      SheetRow(
-        icon: Icons.person_add_alt_rounded,
-        title: 'Invite riders',
-        subtitle: 'Code ${convoy.joinCode}',
-        onTap: () => _shareInvite(convoy),
-        trailing: IconButton(
-          tooltip: 'Copy code',
-          icon: Icon(Icons.copy_rounded, color: AppTheme.textSecondary),
-          onPressed: () => _copyCode(convoy),
-        ),
+      InviteCodeCard(
+        code: convoy.joinCode,
+        onShare: () => _shareInvite(convoy),
+        onCopy: () => _copyCode(convoy),
       ),
       if (lead)
         SheetRow(
@@ -1764,17 +1802,17 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           PolylineLayer(polylines: [
             Polyline(
               points: routePoints,
-              strokeWidth: 5,
+              strokeWidth: 6,
               color: (!_guide.hasPersonalRoute && (convoy.route?.approximate ?? false))
-                  ? AppTheme.neonCyan.withOpacity(0.45)
-                  : AppTheme.neonCyan.withOpacity(0.75),
+                  ? AppTheme.brand.withOpacity(0.5)
+                  : AppTheme.brand.withOpacity(0.9),
             ),
           ]),
         if (_essentials != null && convoy.activeAlerts.isEmpty)
           MarkerLayer(markers: [for (final p in _essentials!.upcoming.take(3)) Marker(
             point: LatLng(p.lat, p.lng), width: 40, height: 40,
             child: IconButton(tooltip: '${p.name}, mapped ${essentialCategories[p.category]}',
-              onPressed: _openEssentials, icon: const Icon(Icons.local_offer_rounded), color: AppTheme.neonCyan),
+              onPressed: _openEssentials, icon: const Icon(Icons.local_offer_rounded), color: AppTheme.accentText),
           )]),
         // The way to an emergency I navigate to (red), above the group route.
         if (navLine.length >= 2)
@@ -1809,9 +1847,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             if (RideFacts.hasPosition(r))
               Marker(
                 point: LatLng(r.lat, r.lng),
-                width: 132,
-                height: 96,
-                child: _RiderMarker(
+                width: 144,
+                height: 140,
+                child: RiderMapMarker(
                   rider: r,
                   isMe: isMeRider(r, uid),
                   color: colors[r.userId],
@@ -1917,22 +1955,22 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         child: Container(
           margin: const EdgeInsets.all(Space.s4),
           decoration: BoxDecoration(
-            color: AppTheme.slateCard,
+            color: AppTheme.card,
             shape: BoxShape.circle,
-            border: Border.all(color: ring, width: 2),
+            border: Border.all(color: ring, width: 3),
+            boxShadow: dsFloatingShadow(),
           ),
-          child: Icon(s.isVisited ? Icons.check_rounded : kind.icon, size: 18, color: s.isVisited ? ring : AppTheme.textPrimary),
+          child: Icon(s.isVisited ? Icons.check_rounded : kind.icon, size: 18, color: s.isVisited ? ring : AppTheme.text),
         ),
       ),
     );
   }
 }
 
-/// A rider on the map: initials and a status dot, no animation. The name
-
-/// shows only for the selected rider and for riders whose position is old
-/// ("Kiran, 6 min ago"). Tapping it opens the rider card.
-class _RiderMarker extends StatelessWidget {
+/// A rider on the map (canvas: a 44 dp avatar with a 3 px ring, "you" as a
+/// solid teal 56 dp avatar, and a small solid label pill with the name and
+/// speed). Uses the existing convoy updates; tapping opens the rider card.
+class RiderMapMarker extends StatelessWidget {
   final RiderModel rider;
   final bool isMe;
   final Color? color;
@@ -1941,7 +1979,8 @@ class _RiderMarker extends StatelessWidget {
   final int nowMs;
   final VoidCallback onTap;
 
-  const _RiderMarker({
+  const RiderMapMarker({
+    super.key,
     required this.rider,
     required this.isMe,
     required this.color,
@@ -1955,70 +1994,117 @@ class _RiderMarker extends StatelessWidget {
   Widget build(BuildContext context) {
     final first = rider.name.split(' ').first;
     final isTunnel = rider.isTunnelCoasting;
-    final effectiveColor = isTunnel ? AppTheme.neonCyan : color;
-    final isMoving = rider.speedKmh >= 5;
-    final speedBadge = isMoving
-        ? '${rider.speedKmh.round()} km/h'
-        : (rider.statusReason.isNotEmpty ? RiderStatusSheet.getStatusLabel(rider.statusReason) : '0 km/h');
+    final speedBadge = riderMapSpeedLabel(rider, status: status, nowMs: nowMs);
+    final isMoving = speedBadge.endsWith('km/h') && rider.speedKmh >= 5;
+    final isLead = rider.role == 'LEAD';
+    final who = isMe ? 'You' : (isLead ? 'LEAD · $first' : first);
+    final label = isTunnel ? '$who · Tunnel' : who;
 
-    String label;
-    if (isTunnel) {
-      label = isMe ? 'Tunnel Coasting' : '$first (Tunnel)';
-    } else if (status.isStale && !isMe && rider.lastSeenEpochMs > 0) {
-      label = '$first · ${formatAgo(Duration(milliseconds: nowMs - rider.lastSeenEpochMs))}';
-    } else {
-      label = isMe ? 'You · $speedBadge' : '$first · $speedBadge';
-    }
+    // Ring: the rider's colour while moving (teal for the lead), amber while not.
+    final ring = !isMoving && !isMe
+        ? AppTheme.warnText
+        : (isTunnel ? AppTheme.accentText : (isLead ? AppTheme.accentText : (color ?? AppTheme.accentText)));
+    // Pill: dark for me, teal for the lead, amber when not moving, the rider's colour otherwise.
+    final pill = isMe
+        ? AppTheme.text
+        : (!isMoving ? AppTheme.warnText : (isLead ? AppTheme.brand : (color ?? AppTheme.brand)));
+    final pillText = isMe && !AppTheme.isLight ? AppTheme.bg : Colors.white;
+    final avatarSize = isMe ? 56.0 : 44.0;
 
     final reason = rider.statusReason.isEmpty ? '' : RiderStatusSheet.getStatusLabel(rider.statusReason);
     return Semantics(
       container: true,
       button: true,
-      label: '${riderSemanticsLabel(rider, isMe: isMe, statusLabel: reason)}, ${rider.speedKmh.round()} km/h, ${status.label}',
+      label: '${isMe ? 'You' : rider.name}, $speedBadge, ${status.label}${reason.isEmpty ? '' : ', $reason'}',
       excludeSemantics: true,
       onTap: onTap,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          RiderAvatar(name: rider.name, color: effectiveColor, status: status, size: isMe ? 44 : 40, onTap: onTap),
-          Positioned(
-            top: isMe ? 50 : 46,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppTheme.slateCard.withOpacity(0.92),
-                  borderRadius: Radii.smAll,
-                  border: Border.all(
-                    color: isMoving ? (effectiveColor ?? AppTheme.neonCyan) : AppTheme.subtleBorder,
-                    width: isMoving ? 1.2 : 1,
-                  ),
-                  boxShadow: [
-                    if (isMoving)
-                      BoxShadow(
-                        color: (effectiveColor ?? AppTheme.neonCyan).withOpacity(0.25),
-                        blurRadius: 4,
-                      ),
-                  ],
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: onTap,
+        // The avatar sits on the rider's position (the marker box's centre); the pill hangs under it.
+        child: Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  decoration: isMe
+                      ? BoxDecoration(
+                          shape: BoxShape.circle,
+                          boxShadow: [BoxShadow(color: AppTheme.brand.withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 6))],
+                        )
+                      : (selected
+                          ? BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [BoxShadow(color: ring.withOpacity(0.35), spreadRadius: 4)],
+                            )
+                          : null),
+                  child: DsAvatar(initialsOf(rider.name), size: avatarSize, filled: isMe, ringColor: ring),
                 ),
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.caption.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: isMoving ? (isMe ? AppTheme.neonCyan : AppTheme.textPrimary) : AppTheme.textSecondary,
+                Positioned(
+                  right: -1,
+                  bottom: -1,
+                  child: Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: status.color,
+                      border: Border.all(color: AppTheme.card, width: 2),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Positioned(
+              top: 70 + avatarSize / 2 + 4,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: pill, borderRadius: BorderRadius.circular(8)),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textScaler: TextScaler.noScaling,
+                        style: TextStyle(color: pillText, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.5, height: 1.2),
+                      ),
+                      Text(
+                        speedBadge,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textScaler: TextScaler.noScaling,
+                        style: TextStyle(color: pillText.withOpacity(0.85), fontSize: 10, fontWeight: FontWeight.w700, height: 1.2),
+                      ),
+                    ],
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
+}
+
+/// Never present a disconnected, estimated or invalid reading as live speed.
+String riderMapSpeedLabel(RiderModel rider, {required RiderStatus status, required int nowMs}) {
+  final age = nowMs - rider.lastSeenEpochMs;
+  if (rider.lastSeenEpochMs <= 0 || age < 0 || age >= RideThresholds.staleAfter.inMilliseconds || status.isStale) {
+    return 'Speed unavailable';
+  }
+  if (rider.isTunnelCoasting || status == RiderStatus.lowGps || !rider.speedKmh.isFinite || rider.speedKmh < 0) {
+    return 'Speed unavailable';
+  }
+  return '${rider.speedKmh.round()} km/h';
 }
 
 /// The ride's SOS button: hold for 1.5 s to send (a tap does nothing).
@@ -2049,4 +2135,113 @@ String riderSemanticsLabel(RiderModel r, {required bool isMe, String statusLabel
   final who = isMe ? 'You' : r.name;
   final speed = '${r.speedKmh.round()} km per hour';
   return statusLabel.isEmpty ? '$who, $speed' : '$who, $speed, stopped: $statusLabel';
+}
+
+/// The collapsed ride sheet while riding (canvas "ride-summary card"): the
+/// convoy name, a "N riders" tint chip and one line with the ETA, distance
+/// left, who is riding and whether Ride Guardian is on. Tap to open the
+/// sheet. Static: no animation.
+class _RideSummaryHeader extends StatelessWidget {
+  final String name;
+  final bool paused;
+  final double? remainingM;
+  final String eta;
+  final int riding;
+  final int total;
+  final double spreadM;
+  final bool guardianOn;
+  final VoidCallback onTap;
+
+  const _RideSummaryHeader({
+    required this.name,
+    required this.paused,
+    required this.remainingM,
+    required this.eta,
+    required this.riding,
+    required this.total,
+    required this.spreadM,
+    required this.guardianOn,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final left = remainingM;
+    final muted = AppText.label.copyWith(fontWeight: FontWeight.w700);
+    final strong = muted.copyWith(color: AppTheme.text);
+    final spread = total < 2 ? null : formatDistanceRounded(spreadM);
+    return Semantics(
+      container: true,
+      hint: 'Double tap to show riders and route',
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(Space.s16, 0, Space.s16, Space.s12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Semantics(
+                      header: true,
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.title.copyWith(fontSize: 17),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(10)),
+                    child: Text(
+                      '$total ${total == 1 ? 'rider' : 'riders'}',
+                      style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          if (paused)
+                            TextSpan(text: 'Paused', style: muted.copyWith(color: AppTheme.warnText))
+                          else
+                            TextSpan(text: 'ETA $eta', style: strong),
+                          if (left != null) TextSpan(text: ' · ${formatDistanceRounded(left)} left', style: muted),
+                          TextSpan(text: ' · $riding/$total riding', style: muted),
+                          if (spread != null) TextSpan(text: ' · $spread spread', style: muted),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Icon(
+                    guardianOn ? Icons.verified_user_outlined : Icons.shield_outlined,
+                    size: 16,
+                    color: guardianOn ? AppTheme.accentText : AppTheme.muted,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    guardianOn ? 'Guardian on' : 'Guardian off',
+                    style: muted.copyWith(color: guardianOn ? AppTheme.accentText : AppTheme.muted),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

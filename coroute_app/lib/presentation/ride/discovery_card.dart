@@ -68,23 +68,22 @@ class DiscoveryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final e = encounter;
     final meet = DiscoveryTexts.meeting(e);
-    final Color info = StatusColors.info;
     final lines = <String>[DiscoveryTexts.size(e), DiscoveryTexts.how(e), ?meet];
-    ButtonStyle flat() => TextButton.styleFrom(
+    ButtonStyle flat({bool accent = false}) => TextButton.styleFrom(
           minimumSize: const Size(48, 48),
-          foregroundColor: AppTheme.textPrimary,
-          padding: const EdgeInsets.symmetric(horizontal: Space.s8),
+          foregroundColor: accent ? AppTheme.accentText : AppTheme.text,
+          padding: const EdgeInsets.symmetric(horizontal: Space.s12),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
         );
     return Semantics(
       container: true,
       label: [DiscoveryTexts.title(e), ...lines].join('. '),
       child: Material(
-        color: AppTheme.slateCard,
-        elevation: 1,
-        shadowColor: AppTheme.shadow,
-        shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
+        color: AppTheme.card,
+        shape: RoundedRectangleBorder(borderRadius: Radii.lgAll, side: BorderSide(color: AppTheme.border, width: 2)),
+        clipBehavior: Clip.antiAlias,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(Space.s12, Space.s8, Space.s8, Space.s4),
+          padding: const EdgeInsets.fromLTRB(14, 12, Space.s8, Space.s4),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -93,15 +92,20 @@ class DiscoveryCard extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Padding(padding: const EdgeInsets.only(top: 2), child: Icon(Icons.groups_rounded, color: info, size: 22)),
-                    const SizedBox(width: Space.s8),
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(12)),
+                      child: Icon(Icons.groups_rounded, color: AppTheme.accentText, size: 22),
+                    ),
+                    const SizedBox(width: Space.s12),
                     Expanded(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(DiscoveryTexts.title(e), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
-                          Text(lines.join('. '), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
+                          Text(DiscoveryTexts.title(e), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                          Text(lines.join(' · '), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
                         ],
                       ),
                     ),
@@ -112,9 +116,9 @@ class DiscoveryCard extends StatelessWidget {
                 alignment: WrapAlignment.end,
                 spacing: Space.s4,
                 children: [
-                  TextButton(style: flat(), onPressed: onView, child: const Text('View Group', maxLines: 1)),
+                  TextButton(style: flat(accent: true), onPressed: onView, child: const Text('View Group', maxLines: 1)),
                   TextButton(
-                    style: flat(),
+                    style: flat(accent: true),
                     onPressed: e.iWaved ? null : onWave,
                     child: Text(e.iWaved ? 'Waved' : 'Wave', maxLines: 1),
                   ),
@@ -139,15 +143,15 @@ class WavedLine extends StatelessWidget {
     return Semantics(
       liveRegion: true,
       child: Material(
-        color: AppTheme.slateCard,
-        shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
+        color: AppTheme.card,
+        shape: RoundedRectangleBorder(borderRadius: Radii.lgAll, side: BorderSide(color: AppTheme.border, width: 2)),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 48),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: Space.s8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: Space.s8),
             child: Row(
               children: [
-                Icon(Icons.waving_hand_rounded, size: 20, color: StatusColors.info),
+                Icon(Icons.waving_hand_rounded, size: 20, color: AppTheme.accentText),
                 const SizedBox(width: Space.s8),
                 Expanded(child: Text(DiscoveryTexts.waved(encounter), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body)),
               ],
@@ -172,8 +176,8 @@ Future<void> showDiscoverySheet(BuildContext context, Encounter e, {required Voi
             padding: const EdgeInsets.only(bottom: Space.s8),
             child: Row(
               children: [
-                Icon(icon, size: 20, color: AppTheme.textSecondary),
-                const SizedBox(width: Space.s8),
+                Icon(icon, size: 22, color: AppTheme.accentText),
+                const SizedBox(width: 10),
                 Expanded(child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body)),
               ],
             ),
@@ -188,16 +192,15 @@ Future<void> showDiscoverySheet(BuildContext context, Encounter e, {required Voi
             if (meet != null) line(Icons.schedule_rounded, meet),
             Text('A public riding group that also chose to be seen. Only its name and rider count are shared, never positions.', style: AppText.caption),
             const SizedBox(height: Space.s16),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            DsButton(
+              icon: Icons.waving_hand_rounded,
+              label: e.iWaved ? 'Waved' : 'Wave',
               onPressed: e.iWaved
                   ? null
                   : () {
                       onWave();
                       Navigator.of(ctx).maybePop();
                     },
-              icon: const Icon(Icons.waving_hand_rounded),
-              label: Text(e.iWaved ? 'Waved' : 'Wave', maxLines: 1),
             ),
           ],
         ),

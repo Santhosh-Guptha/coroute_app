@@ -7,6 +7,7 @@ import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import 'admin_ui.dart';
 import 'admin_user_details_screen.dart';
+import 'master_admin_dashboard.dart';
 
 /// Which users the list shows.
 enum AdminUserFilter { all, active, onHold, blocked, riding }
@@ -143,17 +144,18 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
       onSelected: (f) => setState(() => _filter = f),
     );
 
-    return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(
-        title: const Text('Users'),
-        actions: [IconButton(icon: const Icon(Icons.refresh_rounded), tooltip: 'Refresh', onPressed: _load)],
-      ),
+    final riding = _users.where(_isRiding).length;
+    return AdminShell(
+      title: 'Users',
+      subtitle: _loaded ? '${_users.length} ${_users.length == 1 ? 'account' : 'accounts'}${riding > 0 ? ' · $riding riding now' : ''}' : 'Registered accounts',
+      onBack: () => Navigator.maybePop(context),
+      actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
+      nav: adminNavItems(context, AdminSection.users),
       body: LayoutBuilder(builder: (context, c) {
         final wide = c.maxWidth >= adminWideBreakpoint;
         final list = _buildList(visible, me, wide, filter);
         if (!wide) {
-          return Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 760), child: list));
+          return Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: adminMaxContentWidth), child: list));
         }
         Map<String, dynamic>? selected;
         for (final u in _users) {
@@ -163,8 +165,8 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(width: (c.maxWidth * 0.42).clamp(340.0, 460.0).toDouble(), child: list),
-            VerticalDivider(width: 1, color: AppTheme.subtleBorder),
+            SizedBox(width: (c.maxWidth * 0.42).clamp(340.0, 480.0).toDouble(), child: list),
+            VerticalDivider(width: 1, color: AppTheme.border),
             Expanded(
               child: sel == null
                   ? const EmptyState(
@@ -206,30 +208,32 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
         ),
       );
     } else {
-      content = ListView.builder(
+      content = ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(Space.s16, Space.s8, Space.s16, Space.s32),
-        itemCount: visible.length,
-        itemBuilder: (ctx, i) {
-          final u = visible[i];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: Space.s8),
-            child: _UserRow(
-              key: ValueKey(u['userId']),
-              user: u,
-              isMe: me != null && u['userId'] == me,
-              selected: wide && u['userId']?.toString() == _selectedId,
-              onTap: () => _open(u, wide),
-            ),
-          );
-        },
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+        children: [
+          AdminTable(
+            columns: const ['Rider', 'Status'],
+            rows: [
+              for (var i = 0; i < visible.length; i++)
+                _UserRow(
+                  key: ValueKey(visible[i]['userId']),
+                  user: visible[i],
+                  isMe: me != null && visible[i]['userId'] == me,
+                  selected: wide && visible[i]['userId']?.toString() == _selectedId,
+                  last: i == visible.length - 1,
+                  onTap: () => _open(visible[i], wide),
+                ),
+            ],
+          ),
+        ],
       );
     }
 
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s16, Space.s8),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
           child: AdminSearchRow(
             hint: 'Name, email, phone or vehicle',
             onChanged: (v) => setState(() => _query = v),
@@ -240,7 +244,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
           child: LoadingState(
             loading: _loading,
             hasData: _loaded || _error != null,
-            child: RefreshIndicator(color: AppTheme.neonCyan, onRefresh: _load, child: content),
+            child: adminRefresh(onRefresh: _load, child: content),
           ),
         ),
       ],
@@ -254,9 +258,10 @@ class _UserRow extends StatelessWidget {
   final Map<String, dynamic> user;
   final bool isMe;
   final bool selected;
+  final bool last;
   final VoidCallback onTap;
 
-  const _UserRow({super.key, required this.user, required this.isMe, required this.selected, required this.onTap});
+  const _UserRow({super.key, required this.user, required this.isMe, required this.selected, required this.onTap, this.last = false});
 
   @override
   Widget build(BuildContext context) {
@@ -271,24 +276,25 @@ class _UserRow extends StatelessWidget {
     final contact = [u['email']?.toString() ?? '', phone].where((s) => s.isNotEmpty).join(', ');
 
     final lines = <Widget>[
-      if (status != AccountStatus.active) StatusTextChip.account(status),
       if (riding)
         StatusLine(
           icon: Icons.two_wheeler_rounded,
           text: groupName.isEmpty ? 'In a live ride' : 'Riding in $groupName',
-          color: StatusColors.success,
+          color: AppTheme.accentText,
         ),
     ];
 
     return AdminRow(
-      leading: RiderAvatar(name: name.isEmpty ? '?' : name, color: isAdmin ? AppTheme.infoBlue : null),
+      leading: RiderAvatar(name: name.isEmpty ? '?' : name, color: isAdmin ? AppTheme.warnText : null),
       title: '${name.isEmpty ? 'Unnamed rider' : name}${isMe ? ' (you)' : ''}',
       subtitle: contact,
       detail: isAdmin ? 'Admin' : null,
       status: lines.isEmpty
           ? null
-          : Wrap(spacing: Space.s8, runSpacing: Space.s4, crossAxisAlignment: WrapCrossAlignment.center, children: lines),
+          : Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: lines),
+      trailing: Padding(padding: const EdgeInsets.only(left: 8), child: StatusTextChip.account(status)),
       selected: selected,
+      divider: !last,
       onTap: onTap,
     );
   }

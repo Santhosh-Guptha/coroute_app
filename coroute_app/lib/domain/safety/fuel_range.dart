@@ -92,6 +92,17 @@ class FuelRangeTracker {
     return true;
   }
 
+  /// Warn from the confirmed amount, including a partly filled tank. Unknown or
+  /// uncertain amounts never masquerade as a current estimate.
+  bool shouldWarnForProfile(FuelProfile p) {
+    final left = usableKm(p);
+    if (_warned || uncertain || left == null) return false;
+    final threshold = (p.rangeKm - p.marginKm) * (1 - warnAtFraction);
+    if (left > threshold) return false;
+    _warned = true;
+    return true;
+  }
+
   void reset() {
     baselineKm = null;
     profileStamp = null;

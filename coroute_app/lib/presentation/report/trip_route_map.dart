@@ -206,7 +206,7 @@ class TripRouteMapState extends State<TripRouteMap> {
   }
 
   bool _shown(String userId) => widget.visible == null || widget.visible!.contains(userId);
-  Color _color(String userId) => widget.colors[userId] ?? AppTheme.neonCyan;
+  Color _color(String userId) => widget.colors[userId] ?? AppTheme.accentText;
 
   @override
   Widget build(BuildContext context) {
@@ -235,18 +235,18 @@ class TripRouteMapState extends State<TripRouteMap> {
         PolylineLayer(polylines: [
           // The plan: a dashed neutral line under the ridden routes.
           if (planned != null && planned.length >= 2) ...[
-            Polyline(points: planned, strokeWidth: 6, color: AppTheme.obsidianVoid.withOpacity(0.35)),
+            Polyline(points: planned, strokeWidth: 6, color: AppTheme.text.withValues(alpha: 0.25)),
             Polyline(
               points: planned,
               strokeWidth: 3.5,
-              color: AppTheme.textSecondary,
+              color: AppTheme.text2,
               pattern: StrokePattern.dashed(segments: const [14, 10]),
             ),
           ],
           // Dark casing under every route so a colour stays visible on any map background.
           for (final p in shown)
             for (final piece in p.pieces)
-              Polyline(points: piece, strokeWidth: (p.track.userId == focus ? 7 : 6), color: AppTheme.obsidianVoid.withOpacity(replay ? 0.25 : 0.55)),
+              Polyline(points: piece, strokeWidth: (p.track.userId == focus ? 7 : 6), color: AppTheme.card.withValues(alpha: replay ? 0.5 : 0.9)),
           for (final p in shown)
             for (final piece in p.pieces)
               Polyline(
@@ -277,7 +277,7 @@ class TripRouteMapState extends State<TripRouteMap> {
               width: 36,
               height: 36,
               alignment: Alignment.topCenter,
-              child: Semantics(label: 'Selected place', child: Icon(Icons.location_on_rounded, color: AppTheme.hyperAmber, size: 34)),
+              child: Semantics(label: 'Selected place', child: Icon(Icons.location_on_rounded, color: AppTheme.warnText, size: 34)),
             ),
           if (replay) ..._riderNow(shown, widget.timeMs!, widget.focusUserId),
           for (final (p, at) in hRiders) _riderMarker(p, at, true),
@@ -294,7 +294,7 @@ class TripRouteMapState extends State<TripRouteMap> {
       for (final s in plan.stops)
         () {
           final kind = StopKind.fromCategory(s.category);
-          final Color fill = s.isSkipped ? AppTheme.textMuted : (s.isVisited ? StatusColors.success : StatusColors.warning);
+          final Color fill = s.isSkipped ? AppTheme.muted : (s.isVisited ? AppTheme.brand : AppTheme.warnText);
           final status = s.isSkipped ? 'skipped' : (s.isVisited ? 'visited' : 'not visited');
           final name = s.name.isEmpty ? kind.label : s.name;
           return Marker(
@@ -316,7 +316,7 @@ class TripRouteMapState extends State<TripRouteMap> {
                       Positioned.fill(
                         child: Container(
                           alignment: Alignment.center,
-                          decoration: BoxDecoration(color: fill, shape: BoxShape.circle, border: Border.all(color: AppTheme.slateCard, width: 2)),
+                          decoration: BoxDecoration(color: fill, shape: BoxShape.circle, border: Border.all(color: AppTheme.card, width: 2)),
                           child: Icon(kind.icon, size: 18, color: TripRouteMap.onColor(fill)),
                         ),
                       ),
@@ -327,8 +327,8 @@ class TripRouteMapState extends State<TripRouteMap> {
                           child: Container(
                             width: 16,
                             height: 16,
-                            decoration: BoxDecoration(color: AppTheme.slateCard, shape: BoxShape.circle, border: Border.all(color: StatusColors.success, width: 1.5)),
-                            child: Icon(Icons.check_rounded, size: 12, color: StatusColors.success),
+                            decoration: BoxDecoration(color: AppTheme.card, shape: BoxShape.circle, border: Border.all(color: AppTheme.brand, width: 1.5)),
+                            child: Icon(Icons.check_rounded, size: 12, color: AppTheme.brand),
                           ),
                         ),
                     ]),
@@ -348,8 +348,8 @@ class TripRouteMapState extends State<TripRouteMap> {
             excludeSemantics: true,
             child: Container(
               alignment: Alignment.center,
-              decoration: BoxDecoration(color: AppTheme.slateCard, shape: BoxShape.circle, border: Border.all(color: StatusColors.critical, width: 2.5)),
-              child: Icon(Icons.sports_score_rounded, color: StatusColors.critical, size: 22),
+              decoration: BoxDecoration(color: AppTheme.card, shape: BoxShape.circle, border: Border.all(color: AppTheme.sos, width: 2.5)),
+              child: Icon(Icons.sports_score_rounded, color: AppTheme.sos, size: 22),
             ),
           ),
         ),
@@ -379,11 +379,11 @@ class TripRouteMapState extends State<TripRouteMap> {
                 height: 30,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: AppTheme.slateCard,
+                  color: AppTheme.card,
                   borderRadius: Radii.smAll,
-                  border: Border.all(color: StatusColors.warning, width: 2),
+                  border: Border.all(color: AppTheme.warnText, width: 2),
                 ),
-                child: Icon(Icons.wrong_location_rounded, size: 18, color: StatusColors.warning),
+                child: Icon(Icons.wrong_location_rounded, size: 18, color: AppTheme.warnText),
               ),
             ),
           ),
@@ -420,7 +420,7 @@ class TripRouteMapState extends State<TripRouteMap> {
                 decoration: BoxDecoration(
                   color: c,
                   borderRadius: Radii.smAll,
-                  border: Border.all(color: long ? AppTheme.textPrimary : AppTheme.slateCard, width: long ? 2 : 1.5),
+                  border: Border.all(color: long ? AppTheme.text : AppTheme.card, width: long ? 2 : 1.5),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Icon(long ? Icons.hotel_rounded : Icons.pause_rounded, size: 14, color: TripRouteMap.onColor(c)),
@@ -470,7 +470,7 @@ class TripRouteMapState extends State<TripRouteMap> {
                 width: 24,
                 height: 24,
                 alignment: Alignment.center,
-                decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: AppTheme.slateCard, width: 2.5)),
+                decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: AppTheme.card, width: 2.5)),
                 child: Icon(Icons.play_arrow_rounded, size: 14, color: TripRouteMap.onColor(c)),
               ),
             ),
@@ -495,7 +495,7 @@ class TripRouteMapState extends State<TripRouteMap> {
                 width: 30,
                 height: 30,
                 alignment: Alignment.center,
-                decoration: BoxDecoration(color: AppTheme.slateCard, shape: BoxShape.circle, border: Border.all(color: c, width: 2)),
+                decoration: BoxDecoration(color: AppTheme.card, shape: BoxShape.circle, border: Border.all(color: c, width: 2)),
                 child: Icon(Icons.flag_rounded, size: 18, color: c),
               ),
             ),
@@ -559,13 +559,13 @@ class _HighlightRing extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: color.withOpacity(0.18),
-                border: Border.all(color: AppTheme.textPrimary, width: 3),
+                border: Border.all(color: AppTheme.text, width: 3),
               ),
               child: Center(
                 child: Container(
                   width: 12,
                   height: 12,
-                  decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: AppTheme.slateCard, width: 2)),
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: AppTheme.card, width: 2)),
                 ),
               ),
             ),
@@ -587,19 +587,19 @@ class TripMapLegend extends StatelessWidget {
     Widget item(Widget icon, String text) => Row(mainAxisSize: MainAxisSize.min, children: [
           SizedBox(width: 24, child: Center(child: icon)),
           const SizedBox(width: Space.s4),
-          Flexible(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary))),
+          Flexible(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.text2))),
         ]);
-    final c = AppTheme.textSecondary;
+    final c = AppTheme.text2;
     return Wrap(spacing: Space.s16, runSpacing: Space.s8, children: [
-      item(Container(width: 16, height: 16, decoration: BoxDecoration(color: c, shape: BoxShape.circle), child: Icon(Icons.play_arrow_rounded, size: 12, color: AppTheme.slateCard)), 'Started'),
+      item(Container(width: 16, height: 16, decoration: BoxDecoration(color: c, shape: BoxShape.circle), child: Icon(Icons.play_arrow_rounded, size: 12, color: AppTheme.card)), 'Started'),
       item(Icon(Icons.flag_rounded, size: 16, color: c), 'Finished'),
-      item(Container(padding: const EdgeInsets.symmetric(horizontal: 3), decoration: BoxDecoration(color: c, borderRadius: Radii.smAll), child: Icon(Icons.pause_rounded, size: 12, color: AppTheme.slateCard)), 'Waited'),
-      item(Container(padding: const EdgeInsets.symmetric(horizontal: 3), decoration: BoxDecoration(color: c, borderRadius: Radii.smAll), child: Icon(Icons.hotel_rounded, size: 12, color: AppTheme.slateCard)), 'Long rest'),
-      item(Container(width: 16, height: 16, decoration: BoxDecoration(color: StatusColors.warning, shape: BoxShape.circle)), 'Planned stop'),
-      item(Icon(Icons.sports_score_rounded, size: 16, color: StatusColors.critical), 'Destination'),
+      item(Container(padding: const EdgeInsets.symmetric(horizontal: 3), decoration: BoxDecoration(color: c, borderRadius: Radii.smAll), child: Icon(Icons.pause_rounded, size: 12, color: AppTheme.card)), 'Waited'),
+      item(Container(padding: const EdgeInsets.symmetric(horizontal: 3), decoration: BoxDecoration(color: c, borderRadius: Radii.smAll), child: Icon(Icons.hotel_rounded, size: 12, color: AppTheme.card)), 'Long rest'),
+      item(Container(width: 16, height: 16, decoration: BoxDecoration(color: AppTheme.warnText, shape: BoxShape.circle)), 'Planned stop'),
+      item(Icon(Icons.sports_score_rounded, size: 16, color: AppTheme.sos), 'Destination'),
       if (showPlan) ...[
         item(Text('- - -', style: AppText.caption.copyWith(color: c, fontWeight: FontWeight.w700)), 'Planned route'),
-        item(Icon(Icons.wrong_location_rounded, size: 16, color: StatusColors.warning), 'Off route'),
+        item(Icon(Icons.wrong_location_rounded, size: 16, color: AppTheme.warnText), 'Off route'),
       ],
       item(Text('.....', style: AppText.caption.copyWith(color: c, fontWeight: FontWeight.w700)), 'No signal'),
     ]);

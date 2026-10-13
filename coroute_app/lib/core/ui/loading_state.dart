@@ -35,7 +35,7 @@ class LoadingState extends StatelessWidget {
               liveRegion: true,
               child: LinearProgressIndicator(
                 minHeight: 2,
-                color: AppTheme.neonCyan,
+                color: AppTheme.brand,
                 backgroundColor: Colors.transparent,
               ),
             ),
@@ -57,7 +57,7 @@ class LoadingSpinner extends StatelessWidget {
         child: SizedBox(
           width: 24,
           height: 24,
-          child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.neonCyan),
+          child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.brand),
         ),
       ),
     );

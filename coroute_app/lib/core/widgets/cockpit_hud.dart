@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../ui/design_kit.dart';
 import '../ui/ride_metric.dart';
 import '../ui/ui_tokens.dart';
 
@@ -38,19 +39,20 @@ class CockpitHud extends StatelessWidget {
     final limit = speedLimitKmh;
     final over = limit > 0 && speedKmh > limit;
     final near = limit > 0 && !over && speedKmh > limit - 10;
-    final Color? color = over ? AppTheme.speedWarning : (near ? StatusColors.warning : null);
+    final Color? color = over ? AppTheme.sos : (near ? AppTheme.warnText : null);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: Space.s8),
+      padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s12),
       decoration: BoxDecoration(
-        color: AppTheme.slateCard,
-        borderRadius: Radii.mdAll,
-        border: Border.all(color: over ? AppTheme.speedWarning : AppTheme.subtleBorder),
+        color: AppTheme.card,
+        borderRadius: Radii.lgAll,
+        border: Border.all(color: over ? AppTheme.sos : (near ? AppTheme.warnBorder : AppTheme.border), width: 2),
+        boxShadow: dsFloatingShadow(),
       ),
       child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (over) ...[
-              Icon(Icons.speed_rounded, size: 20, color: AppTheme.speedWarning),
+              Icon(Icons.speed_rounded, size: 22, color: AppTheme.sos),
               const SizedBox(width: Space.s8),
             ],
             Flexible(

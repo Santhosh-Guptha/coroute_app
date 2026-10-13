@@ -1,20 +1,19 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
 import '../../../domain/ride/ride_facts.dart';
 
-
-
 // ---------------------------------------------------------------------------
 // MinimalCockpitTopBar
 // ---------------------------------------------------------------------------
 
-/// Slim pill bar at the very top: destination + distance on the left, GPS/
-/// connection state on the right. Height never exceeds 48 dp. When an alert
-/// message is present it slides in on a second row that blends into the pill.
+/// The floating instruction pill at the top of the map (canvas: card, radius
+/// 20, soft shadow): a 60 dp teal square with the navigation icon, the
+/// destination or next stop as a 22/800 title with a muted subtitle, and on
+/// the right the live speed (32/800 teal, "KM/H", "LIMIT 80" badge). The
+/// connection, GPS, tunnel and route status lines sit under the title.
 ///
-/// Strict CoRoute standards: no emoji, pure vector icons, 48 dp minimum tap.
+/// Strict CoRoute standards: no emoji, pure vector icons, 44 dp minimum tap.
 class MinimalCockpitTopBar extends StatelessWidget {
   final String title;
 
@@ -38,6 +37,15 @@ class MinimalCockpitTopBar extends StatelessWidget {
 
   final bool isTunnelCoasting;
 
+  /// Second line under the title (the convoy or road name). Optional.
+  final String? subtitle;
+
+  /// My live speed for the right column. Null hides the speed column.
+  final double? speedKmh;
+
+  /// The group's speed limit; 0 or null hides the "LIMIT" badge.
+  final int? speedLimitKmh;
+
   const MinimalCockpitTopBar({
     super.key,
     required this.title,
@@ -48,123 +56,168 @@ class MinimalCockpitTopBar extends StatelessWidget {
     this.onStopNavigation,
     this.onBack,
     this.isTunnelCoasting = false,
+    this.subtitle,
+    this.speedKmh,
+    this.speedLimitKmh,
   });
 
   @override
   Widget build(BuildContext context) {
     final hasWarn = connection != null || gps != GpsState.accurate;
     final hasRoute = routeStatus != null;
-    final hasExtra = hasWarn || hasRoute || isTunnelCoasting;
     final back = onBack;
+    final speed = speedKmh;
+    final limit = speedLimitKmh ?? 0;
+    final overLimit = speed != null && limit > 0 && speed > limit;
+    final sub = subtitle;
 
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 48),
-          decoration: BoxDecoration(
-            color: AppTheme.obsidianVoid.withOpacity(0.78),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: hasWarn
-                  ? StatusColors.warning.withOpacity(0.55)
-                  : AppTheme.neonCyan.withOpacity(0.35),
-              width: 1.2,
+    return Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: dsFloatingShadow(),
+      ),
+      child: Row(
+        children: [
+          if (back != null)
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppTheme.card,
+                border: Border.all(color: AppTheme.border, width: 2),
+              ),
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: Icon(Icons.chevron_left_rounded, color: AppTheme.text, size: 24),
+                tooltip: 'Back',
+                onPressed: back,
+              ),
+            )
+          else
+            Container(
+              width: 60,
+              height: 60,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: emergencyRoute ? AppTheme.sos : AppTheme.brand,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(
+                emergencyRoute ? Icons.emergency_rounded : Icons.navigation_rounded,
+                color: Colors.white,
+                size: 32,
+              ),
             ),
-          ),
-          padding: EdgeInsetsDirectional.fromSTEB(
-            back != null ? 4 : 16,
-            hasExtra ? 8 : 0,
-            onStopNavigation != null ? 4 : 16,
-            hasExtra ? 8 : 0,
-          ),
-          child: IntrinsicHeight(
-            child: Row(
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (back != null)
-                  SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: IconButton(
-                      padding: EdgeInsets.zero,
-                      icon: Icon(Icons.arrow_back_rounded, color: AppTheme.textPrimary, size: 20),
-                      tooltip: 'Back',
-                      onPressed: back,
-                    ),
-                  ),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Primary: destination / convoy name
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppText.body.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
-                          fontSize: 15,
-                        ),
-                      ),
-                      // Secondary: tunnel / connection / GPS / route status
-                      if (isTunnelCoasting) ...[
-                        const SizedBox(height: 2),
-                        _StatusRow(
-                          icon: Icons.tune_rounded,
-                          label: 'Tunnel Coasting (Dead-Reckoning)',
-                          color: AppTheme.neonCyan,
-                        ),
-                      ] else if (hasWarn) ...[
-                        const SizedBox(height: 2),
-                        _StatusRow(
-                          icon: connection != null
-                              ? Icons.cloud_off_rounded
-                              : Icons.gps_not_fixed_rounded,
-                          label: [
-                            ?connection,
-                            if (gps != GpsState.accurate)
-                              'GPS ${gps.label.toLowerCase()}',
-                          ].join(', '),
-                          color: StatusColors.warning,
-                        ),
-
-                      ],
-                      if (hasRoute && !isTunnelCoasting) ...[
-                        const SizedBox(height: 2),
-                        _StatusRow(
-                          icon: emergencyRoute
-                              ? Icons.emergency_rounded
-                              : Icons.alt_route_rounded,
-                          label: routeStatus!,
-                          color: emergencyRoute ? StatusColors.critical : StatusColors.info,
-                        ),
-                      ],
-                    ],
-                  ),
+                // Primary: destination / next stop / convoy name
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.headline,
                 ),
-                // Right: GPS quality dot
-                _GpsDot(gps: gps),
-                if (onStopNavigation != null) ...[
-                  const SizedBox(width: 4),
-                  SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: IconButton(
-                      padding: EdgeInsets.zero,
-                      icon: Icon(Icons.close_rounded, color: AppTheme.textPrimary, size: 20),
-                      tooltip: 'Stop navigation',
-                      onPressed: onStopNavigation,
-                    ),
+                if (sub != null && sub.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
+                ],
+                // Secondary: tunnel / connection / GPS / route status
+                if (isTunnelCoasting) ...[
+                  const SizedBox(height: 3),
+                  _StatusRow(
+                    icon: Icons.tune_rounded,
+                    label: 'Tunnel Coasting (Dead-Reckoning)',
+                    color: AppTheme.accentText,
+                  ),
+                ] else if (hasWarn) ...[
+                  const SizedBox(height: 3),
+                  _StatusRow(
+                    icon: connection != null ? Icons.cloud_off_rounded : Icons.gps_not_fixed_rounded,
+                    label: [
+                      ?connection,
+                      if (gps != GpsState.accurate) 'GPS ${gps.label.toLowerCase()}',
+                    ].join(', '),
+                    color: AppTheme.warnText,
+                  ),
+                ],
+                if (hasRoute && !isTunnelCoasting) ...[
+                  const SizedBox(height: 3),
+                  _StatusRow(
+                    icon: emergencyRoute ? Icons.emergency_rounded : Icons.alt_route_rounded,
+                    label: routeStatus!,
+                    color: emergencyRoute ? AppTheme.sos : AppTheme.accentText,
                   ),
                 ],
               ],
             ),
           ),
-        ),
+          const SizedBox(width: 10),
+          // Right: live speed column, or the GPS dot when no speed is given.
+          if (speed != null)
+            Semantics(
+              label: '${speed.round()} km/h${limit > 0 ? ', limit $limit km/h' : ''}',
+              excludeSemantics: true,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${speed.round()}',
+                    style: AppText.metric.copyWith(
+                      color: overLimit ? AppTheme.warnText : AppTheme.accentText,
+                      height: 1,
+                    ),
+                  ),
+                  Text(
+                    'KM/H',
+                    style: TextStyle(
+                      color: AppTheme.muted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  if (limit > 0) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warnTint,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'LIMIT $limit',
+                        style: TextStyle(color: AppTheme.warnText, fontSize: 11, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            )
+          else
+            _GpsDot(gps: gps),
+          if (onStopNavigation != null) ...[
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 44,
+              height: 44,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: Icon(Icons.close_rounded, color: AppTheme.text, size: 22),
+                tooltip: 'Stop navigation',
+                onPressed: onStopNavigation,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -181,14 +234,14 @@ class _StatusRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 13, color: color),
-        const SizedBox(width: 4),
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 5),
         Expanded(
           child: Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: AppText.caption.copyWith(color: AppTheme.textSecondary, fontSize: 11),
+            style: AppText.caption.copyWith(color: color, fontWeight: FontWeight.w700),
           ),
         ),
       ],
@@ -196,7 +249,7 @@ class _StatusRow extends StatelessWidget {
   }
 }
 
-/// Cyan dot (accurate), amber dot (degraded), grey dot (lost).
+/// Teal dot (accurate), amber dot (degraded), grey dot (lost).
 class _GpsDot extends StatelessWidget {
   final GpsState gps;
 
@@ -207,26 +260,26 @@ class _GpsDot extends StatelessWidget {
     final Color color;
     switch (gps) {
       case GpsState.accurate:
-        color = AppTheme.neonCyan;
+        color = AppTheme.accentText;
         break;
       case GpsState.updating:
       case GpsState.lowAccuracy:
-        color = AppTheme.hyperAmber;
+        color = AppTheme.warnText;
         break;
       case GpsState.unavailable:
-        color = AppTheme.offlineGrey;
+        color = AppTheme.muted;
         break;
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Container(
-        width: 8,
-        height: 8,
+        width: 10,
+        height: 10,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: color,
-          boxShadow: [BoxShadow(color: color.withOpacity(0.6), blurRadius: 6, spreadRadius: 1)],
+          border: Border.all(color: AppTheme.card, width: 2),
         ),
       ),
     );
@@ -237,9 +290,8 @@ class _GpsDot extends StatelessWidget {
 // MinimalRideStatsBar
 // ---------------------------------------------------------------------------
 
-/// The collapsed sheet handle area: just the 4 key ride numbers rendered as a
-/// compact 2 x 2 grid on a frosted glass strip. Tapping anywhere opens the
-/// full sheet. The handle notch is centred above the metrics.
+/// The collapsed sheet handle area: the 4 key ride numbers as stat cells on
+/// a floating card. Tapping anywhere opens the full sheet.
 class MinimalRideStatsBar extends StatelessWidget {
   final String? remainingText;
   final String etaText;
@@ -262,127 +314,36 @@ class MinimalRideStatsBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppTheme.obsidianVoid.withOpacity(0.88),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-              border: Border.all(color: AppTheme.glassBorder, width: 1),
-
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.card,
+          borderRadius: BorderRadius.circular(Radii.xl),
+          boxShadow: dsFloatingShadow(),
+        ),
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 44,
+              height: 5,
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(color: AppTheme.border2, borderRadius: BorderRadius.circular(3)),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            Row(
               children: [
-                // Drag handle
-                Padding(
-                  padding: const EdgeInsets.only(top: 10, bottom: 6),
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppTheme.subtleBorder,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                // 2 x 2 metric grid
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _StatCell(
-                          value: remainingText ?? '-',
-                          label: 'left',
-                        ),
-                      ),
-                      _Divider(),
-                      Expanded(
-                        child: _StatCell(
-                          value: etaText,
-                          label: 'ETA',
-                          alignEnd: true,
-                        ),
-                      ),
-                      const SizedBox(width: 20),
-                      Expanded(
-                        child: _StatCell(
-                          value: '$ridingCount/$totalCount',
-                          label: 'riding',
-                        ),
-                      ),
-                      _Divider(),
-                      Expanded(
-                        child: _StatCell(
-                          value: spreadText ?? '-',
-                          label: 'spread',
-                          alignEnd: true,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                Expanded(child: DsStatCell(label: 'Left', value: remainingText ?? '-')),
+                const SizedBox(width: 8),
+                Expanded(child: DsStatCell(label: 'ETA', value: etaText)),
+                const SizedBox(width: 8),
+                Expanded(child: DsStatCell(label: 'Riding', value: '$ridingCount/$totalCount')),
+                const SizedBox(width: 8),
+                Expanded(child: DsStatCell(label: 'Spread', value: spreadText ?? '-')),
               ],
             ),
-          ),
+          ],
         ),
       ),
-    );
-  }
-}
-
-class _Divider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 32,
-      margin: const EdgeInsets.symmetric(horizontal: 12),
-      color: AppTheme.subtleBorder,
-    );
-  }
-}
-
-class _StatCell extends StatelessWidget {
-  final String value;
-  final String label;
-  final bool alignEnd;
-
-  const _StatCell({required this.value, required this.label, this.alignEnd = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final alignment = alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: alignment,
-      children: [
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: alignEnd ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
-          child: Text(
-            value,
-            maxLines: 1,
-            style: AppText.body.copyWith(
-              fontWeight: FontWeight.w800,
-              color: AppTheme.textPrimary,
-              fontSize: 17,
-              height: 1.1,
-            ),
-          ),
-        ),
-        Text(
-          label,
-          style: AppText.caption.copyWith(
-            color: AppTheme.textSecondary,
-            fontSize: 11,
-          ),
-          textAlign: alignEnd ? TextAlign.end : TextAlign.start,
-        ),
-      ],
     );
   }
 }
@@ -413,70 +374,59 @@ class MinimalStoppedBar extends StatelessWidget {
     final dur = mins < 1 ? 'just stopped' : 'stopped ${mins}m';
     return GestureDetector(
       onTap: onTap,
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppTheme.obsidianVoid.withOpacity(0.88),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-              border: Border.all(color: AppTheme.hyperAmber.withOpacity(0.4), width: 1),
-
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.card,
+          borderRadius: BorderRadius.circular(Radii.xl),
+          border: Border.all(color: AppTheme.warnBorder, width: 2),
+          boxShadow: dsFloatingShadow(),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 10, 12, 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 44,
+              height: 5,
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(color: AppTheme.warnBorder, borderRadius: BorderRadius.circular(3)),
             ),
-            padding: const EdgeInsets.fromLTRB(20, 12, 12, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            Row(
               children: [
-                // Drag handle
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.hyperAmber.withOpacity(0.5),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+                Container(
+                  width: 44,
+                  height: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: AppTheme.warnTint, borderRadius: BorderRadius.circular(12)),
+                  child: Icon(Icons.pause_rounded, color: AppTheme.warnText, size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(dur, style: AppText.title.copyWith(color: AppTheme.warnText)),
+                      Text(
+                        nearbyCount > 0 ? '$nearbyCount riders nearby' : 'Group riding ahead',
+                        style: AppText.label,
+                      ),
+                    ],
                   ),
                 ),
-                Row(
-                  children: [
-                    Icon(Icons.pause_circle_rounded, color: AppTheme.hyperAmber, size: 22),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            dur,
-                            style: AppText.body.copyWith(
-                              color: AppTheme.hyperAmber,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 15,
-                            ),
-                          ),
-                          Text(
-                            nearbyCount > 0 ? '$nearbyCount riders nearby' : 'Group riding ahead',
-                            style: AppText.caption.copyWith(color: AppTheme.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: onTellWhy,
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.hyperAmber,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        minimumSize: const Size(64, 44),
-                      ),
-                      child: const Text('Tell why', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                    ),
-                  ],
+                TextButton(
+                  onPressed: onTellWhy,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.warnText,
+                    backgroundColor: AppTheme.warnTint,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    minimumSize: const Size(64, 44),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('Tell why', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
                 ),
               ],
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -487,8 +437,8 @@ class MinimalStoppedBar extends StatelessWidget {
 // MinimalSpeedAlert
 // ---------------------------------------------------------------------------
 
-/// Compact speed-over-limit badge shown below the top bar. Very small
-/// footprint: just the number in a red pill.
+/// Compact speed-near-limit chip shown below the top pill. Amber while
+/// close to the group limit, red once over it.
 class MinimalSpeedAlert extends StatelessWidget {
   final double speedKmh;
   final int limitKmh;
@@ -497,28 +447,32 @@ class MinimalSpeedAlert extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final over = speedKmh > limitKmh;
+    final fg = over ? AppTheme.sos : AppTheme.warnText;
+    final bg = over ? AppTheme.sos.withOpacity(0.12) : AppTheme.warnTint;
+    final border = over ? AppTheme.sos.withOpacity(0.5) : AppTheme.warnBorder;
     return Semantics(
       label: '${speedKmh.round()} km/h, group limit $limitKmh km/h',
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: StatusColors.critical.withOpacity(0.18),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: StatusColors.critical.withOpacity(0.7), width: 1.5),
-          boxShadow: [BoxShadow(color: StatusColors.critical.withOpacity(0.25), blurRadius: 8)],
+          color: bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: border, width: 2),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.speed_rounded, color: StatusColors.critical, size: 16),
-            const SizedBox(width: 5),
+            Icon(Icons.speed_rounded, color: fg, size: 16),
+            const SizedBox(width: 6),
             Text(
               '${speedKmh.round()} km/h',
-              style: AppText.body.copyWith(
-                color: StatusColors.critical,
-                fontWeight: FontWeight.w800,
-                fontSize: 14,
-              ),
+              style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 13),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'LIMIT $limitKmh',
+              style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 0.5),
             ),
           ],
         ),
@@ -531,8 +485,8 @@ class MinimalSpeedAlert extends StatelessWidget {
 // MapSideControls
 // ---------------------------------------------------------------------------
 
-/// Vertical strip of 3 minimal circular icon buttons on the right edge of the
-/// map: brightness, re-centre, and sheet-open chevron. They fade out when the
+/// Vertical strip of 3 round card buttons on the right edge of the map:
+/// screen-on, re-centre, and sheet-open chevron. They fade out when the
 /// sheet is fully expanded.
 class MapSideControls extends StatelessWidget {
   final bool keepScreenOn;
@@ -566,6 +520,7 @@ class MapSideControls extends StatelessWidget {
               icon: keepScreenOn ? Icons.light_mode_rounded : Icons.brightness_low_rounded,
               tooltip: keepScreenOn ? 'Screen stays on' : 'Keep screen on',
               active: keepScreenOn,
+              activeTint: AppTheme.warnText,
               onTap: onToggleKeepScreenOn,
             ),
             const SizedBox(height: 10),
@@ -573,7 +528,6 @@ class MapSideControls extends StatelessWidget {
               icon: Icons.my_location_rounded,
               tooltip: 'Centre on me',
               active: autoFollow,
-              activeTint: AppTheme.neonCyan,
               onTap: onCentre,
             ),
             const SizedBox(height: 10),
@@ -589,6 +543,8 @@ class MapSideControls extends StatelessWidget {
   }
 }
 
+/// 44 dp round card button with a 2 px border; the active state uses the
+/// accent ring and tint (canvas "round button").
 class _SideControl extends StatelessWidget {
   final IconData icon;
   final String tooltip;
@@ -606,7 +562,7 @@ class _SideControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = activeTint ?? AppTheme.hyperAmber;
+    final accent = activeTint ?? AppTheme.accentText;
     return Semantics(
       button: true,
       label: tooltip,
@@ -620,18 +576,17 @@ class _SideControl extends StatelessWidget {
             height: 44,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: active ? accent.withOpacity(0.18) : AppTheme.slateCard.withOpacity(0.92),
-              border: Border.all(
-                color: active ? accent : AppTheme.subtleBorder,
-                width: active ? 1.8 : 1,
-              ),
+              color: active ? accent.withOpacity(0.14) : AppTheme.card,
+              border: Border.all(color: active ? accent : AppTheme.border, width: 2),
               boxShadow: [
-                BoxShadow(color: AppTheme.shadow.withOpacity(0.5), blurRadius: 8, offset: const Offset(0, 2)),
-                if (active)
-                  BoxShadow(color: accent.withOpacity(0.3), blurRadius: 10, spreadRadius: 1),
+                BoxShadow(
+                  color: AppTheme.shadow.withOpacity(AppTheme.isLight ? 0.16 : 0.5),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
               ],
             ),
-            child: Icon(icon, size: 22, color: active ? accent : AppTheme.textPrimary),
+            child: Icon(icon, size: 22, color: active ? accent : AppTheme.text),
           ),
         ),
       ),

@@ -141,8 +141,8 @@ class IncidentBanner extends StatelessWidget {
     final where = incidentDistanceText(i, myLat: myLat, myLng: myLng);
     final what = ago == null ? i.what : '${i.what}, $ago';
     final helping = incidentHelpingText(i);
-    final Color bg = StatusColors.critical;
-    final Color fg = StatusColors.onCritical;
+    final Color bg = AppTheme.sos;
+    const Color fg = Colors.white;
     VoidCallback? nav = onNavigate;
     if (nav == null && i.hasPosition) nav = () => navigateTo(i.lat, i.lng, label: i.who);
 
@@ -152,14 +152,14 @@ class IncidentBanner extends StatelessWidget {
       label: [i.title, what, ?where, ?helping].join('. '),
       child: Material(
         color: bg,
-        elevation: 2,
+        elevation: 4,
         shadowColor: AppTheme.shadow,
-        shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+        shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onOpen,
           child: Padding(
-            padding: const EdgeInsets.all(Space.s12),
+            padding: const EdgeInsets.all(14),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -168,14 +168,14 @@ class IncidentBanner extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(incidentIcon(i.kind), color: fg, size: 28),
+                      Icon(incidentIcon(i.kind), color: fg, size: 26),
                       const SizedBox(width: Space.s12),
                       Expanded(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(i.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg, fontWeight: FontWeight.w700)),
+                            Text(i.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg)),
                             const SizedBox(height: 2),
                             Text(what, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg)),
                             if (where != null)
@@ -195,13 +195,8 @@ class IncidentBanner extends StatelessWidget {
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: nav,
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: fg,
-                            side: BorderSide(color: fg, width: 1.5),
-                            minimumSize: const Size.fromHeight(48),
-                            padding: const EdgeInsets.symmetric(horizontal: Space.s8),
-                          ),
-                          icon: const Icon(Icons.navigation_rounded),
+                          style: _onRedOutlined(),
+                          icon: const Icon(Icons.navigation_outlined),
                           label: Text(L10n.t('incident.navigate'), maxLines: 1, overflow: TextOverflow.ellipsis),
                         ),
                       ),
@@ -210,12 +205,7 @@ class IncidentBanner extends StatelessWidget {
                     Expanded(
                       child: FilledButton.icon(
                         onPressed: onOpen,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: fg,
-                          foregroundColor: bg,
-                          minimumSize: const Size.fromHeight(48),
-                          padding: const EdgeInsets.symmetric(horizontal: Space.s8),
-                        ),
+                        style: _onRedFilled(height: 48),
                         icon: const Icon(Icons.open_in_full_rounded),
                         label: Text(L10n.t('incident.open'), maxLines: 1, overflow: TextOverflow.ellipsis),
                       ),
@@ -242,8 +232,8 @@ class IncidentBanner extends StatelessWidget {
     final own = i.ownNearest;
     final ownEta = own == null ? null : etaWords(own.etaS);
     final nearest = (own == null || own.name.trim().isEmpty) ? null : 'Nearest member: ${own.name.trim()}${ownEta == null ? '' : ', $ownEta'}';
-    final Color bg = StatusColors.critical;
-    final Color fg = StatusColors.onCritical;
+    final Color bg = AppTheme.sos;
+    const Color fg = Colors.white;
     final id = i.alertId;
     VoidCallback? nav = onNavigate;
     if (nav == null && i.hasPosition) {
@@ -257,12 +247,7 @@ class IncidentBanner extends StatelessWidget {
     final call = phone.trim().isEmpty ? null : () => dialNumber(context, phone);
     final semantics = [L10n.t('incident.emergency'), i.summary, ?where, ?updated, ?nearby, ?helping, ?nearest].join('. ');
 
-    ButtonStyle outlined() => OutlinedButton.styleFrom(
-          foregroundColor: fg,
-          side: BorderSide(color: fg, width: 1.5),
-          minimumSize: const Size.fromHeight(48),
-          padding: const EdgeInsets.symmetric(horizontal: Space.s8),
-        );
+    ButtonStyle outlined() => _onRedOutlined();
 
     return Semantics(
       container: true,
@@ -270,14 +255,14 @@ class IncidentBanner extends StatelessWidget {
       label: semantics,
       child: Material(
         color: bg,
-        elevation: 2,
+        elevation: 4,
         shadowColor: AppTheme.shadow,
-        shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+        shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onOpen,
           child: Padding(
-            padding: const EdgeInsets.all(Space.s12),
+            padding: const EdgeInsets.all(14),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -286,19 +271,19 @@ class IncidentBanner extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(incidentIcon(i.kind), color: fg, size: 28),
+                      Icon(incidentIcon(i.kind), color: fg, size: 26),
                       const SizedBox(width: Space.s12),
                       Expanded(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(L10n.t('incident.emergency'), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg, fontWeight: FontWeight.w800)),
-                            Text(i.summary, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(color: fg, fontWeight: FontWeight.w600)),
+                            Text(L10n.t('incident.emergency'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: sosPaleRose, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 1.5, height: 1.3)),
+                            Text(i.summary, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(color: fg)),
                             if (where != null)
                               Text(where, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w700)),
                             if (updated != null && !compact)
-                              Text(updated, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: fg)),
+                              Text(updated, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: sosPaleRose)),
                             if (helping != null)
                               Text(helping, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg)),
                             if (nearest != null && !compact)
@@ -317,13 +302,8 @@ class IncidentBanner extends StatelessWidget {
                 if (nav != null)
                   FilledButton.icon(
                     onPressed: nav,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: fg,
-                      foregroundColor: bg,
-                      minimumSize: const Size.fromHeight(56),
-                      padding: const EdgeInsets.symmetric(horizontal: Space.s8),
-                    ),
-                    icon: const Icon(Icons.navigation_rounded),
+                    style: _onRedFilled(height: 56),
+                    icon: const Icon(Icons.navigation_outlined),
                     label: Text(L10n.t('incident.navigateTo', {'name': i.firstName}), maxLines: 1, overflow: TextOverflow.ellipsis),
                   ),
                 const SizedBox(height: Space.s8),
@@ -334,7 +314,7 @@ class IncidentBanner extends StatelessWidget {
                         child: OutlinedButton.icon(
                           onPressed: call,
                           style: outlined(),
-                          icon: const Icon(Icons.call_rounded),
+                          icon: const Icon(Icons.call_outlined),
                           label: Text(L10n.t('incident.call', {'name': i.firstName}), maxLines: 1, overflow: TextOverflow.ellipsis),
                         ),
                       ),
@@ -359,8 +339,32 @@ class IncidentBanner extends StatelessWidget {
   }
 }
 
-/// A short positive (green) line: "Nearby rider responding, ETA 3 min".
-/// Used on the red banner and in the sheets (the kit has no positive banner).
+/// Pale rose for secondary text on the red banner.
+const Color sosPaleRose = Color(0xFFFFD0D7);
+
+/// White button with red text on the red banner.
+ButtonStyle _onRedFilled({double height = 48}) => FilledButton.styleFrom(
+      backgroundColor: Colors.white,
+      foregroundColor: AppTheme.sos,
+      minimumSize: Size.fromHeight(height),
+      padding: const EdgeInsets.symmetric(horizontal: Space.s8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 15, fontWeight: FontWeight.w800),
+    );
+
+/// Outlined white button on the red banner.
+ButtonStyle _onRedOutlined({double height = 48}) => OutlinedButton.styleFrom(
+      foregroundColor: Colors.white,
+      backgroundColor: Colors.transparent,
+      side: BorderSide(color: Colors.white.withValues(alpha: 0.6), width: 2),
+      minimumSize: Size.fromHeight(height),
+      padding: const EdgeInsets.symmetric(horizontal: Space.s8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      textStyle: const TextStyle(fontFamily: AppTheme.fontFamily, fontSize: 15, fontWeight: FontWeight.w800),
+    );
+
+/// A short positive line: "Nearby rider responding, ETA 3 min". Solid teal
+/// with white text so it reads on the red banner and in the sheets.
 class PositiveLine extends StatelessWidget {
   final String text;
   final String? detail;
@@ -368,28 +372,28 @@ class PositiveLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color bg = StatusColors.success;
-    final Color fg = StatusColors.onCritical;
+    final Color bg = AppTheme.brand;
+    const Color fg = Colors.white;
     final d = detail;
     return Semantics(
       container: true,
       label: d == null ? text : '$text. $d',
       excludeSemantics: true,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: Space.s8, vertical: Space.s8),
-        decoration: BoxDecoration(color: bg, borderRadius: Radii.smAll),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(color: bg, borderRadius: Radii.mdAll),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.health_and_safety_rounded, size: 20, color: fg),
+            const Icon(Icons.health_and_safety_outlined, size: 20, color: fg),
             const SizedBox(width: Space.s8),
             Expanded(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w700)),
-                  if (d != null) Text(d, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: fg)),
+                  Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w800)),
+                  if (d != null) Text(d, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: DsHeroCard.secondary)),
                 ],
               ),
             ),

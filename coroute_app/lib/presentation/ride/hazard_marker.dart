@@ -54,7 +54,7 @@ class HazardBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color amber = StatusColors.warning;
+    final Color amber = AppTheme.warnText;
     final message = hazardMessage(hazard, view);
     final level = hazardLevelWords(hazard.level);
     final dismiss = onDismiss;
@@ -63,24 +63,24 @@ class HazardBanner extends StatelessWidget {
       liveRegion: true,
       label: '${L10n.t('hazard.title')}. $message $level.',
       child: Material(
-        color: Color.alphaBlend(amber.withOpacity(0.16), AppTheme.slateCard),
-        elevation: 2,
+        color: AppTheme.warnTint,
+        elevation: 4,
         shadowColor: AppTheme.shadow,
-        shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: amber, width: 1.5)),
+        shape: RoundedRectangleBorder(borderRadius: Radii.lgAll, side: BorderSide(color: AppTheme.warnBorder, width: 2)),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 56),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(Space.s12, Space.s8, Space.s4, Space.s8),
+              padding: const EdgeInsets.fromLTRB(14, 10, Space.s4, 10),
               child: ExcludeSemantics(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Icon(Icons.warning_amber_rounded, color: amber, size: 28),
+                      child: Icon(Icons.warning_amber_rounded, color: amber, size: 26),
                     ),
                     const SizedBox(width: Space.s12),
                     Expanded(
@@ -88,9 +88,9 @@ class HazardBanner extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(L10n.t('hazard.title').toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontWeight: FontWeight.w800)),
-                          Text(message, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body),
-                          Text(level, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
+                          Text(L10n.t('hazard.title').toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.overline.copyWith(color: amber)),
+                          Text(message, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                          Text(level, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: amber, fontWeight: FontWeight.w700)),
                         ],
                       ),
                     ),
@@ -98,7 +98,7 @@ class HazardBanner extends StatelessWidget {
                       IconButton(
                         tooltip: 'Dismiss',
                         onPressed: dismiss,
-                        icon: Icon(Icons.close_rounded, color: AppTheme.textSecondary),
+                        icon: Icon(Icons.close_rounded, color: AppTheme.text2),
                       )
                     else
                       const SizedBox(width: Space.s8),
@@ -160,7 +160,7 @@ class HazardMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color amber = StatusColors.warning;
+    final Color amber = AppTheme.warnText;
     return Semantics(
       container: true,
       label: '$label. ${hazardLevelWords(level)}',
@@ -170,13 +170,13 @@ class HazardMarker extends StatelessWidget {
         height: height,
         pin: 28,
         icon: Container(
-          decoration: BoxDecoration(color: amber, shape: BoxShape.circle, border: Border.all(color: AppTheme.slateCard, width: 2)),
-          child: Icon(Icons.warning_rounded, size: 16, color: AppTheme.obsidianVoid),
+          decoration: BoxDecoration(color: amber, shape: BoxShape.circle, border: Border.all(color: AppTheme.card, width: 2)),
+          child: const Icon(Icons.warning_rounded, size: 16, color: Colors.white),
         ),
         label: Container(
           padding: const EdgeInsets.symmetric(horizontal: Space.s4, vertical: 2),
-          decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.smAll, border: Border.all(color: amber)),
-          child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textPrimary)),
+          decoration: BoxDecoration(color: AppTheme.card, borderRadius: Radii.smAll, border: Border.all(color: AppTheme.warnBorder, width: 2)),
+          child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.text, fontWeight: FontWeight.w700)),
         ),
       ),
     );
@@ -196,7 +196,7 @@ class EmergencyPointMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color red = StatusColors.critical;
+    final Color red = AppTheme.sos;
     final d = detail;
     return Semantics(
       container: true,
@@ -207,8 +207,8 @@ class EmergencyPointMarker extends StatelessWidget {
         height: height,
         pin: 32,
         icon: Container(
-          decoration: BoxDecoration(color: red, shape: BoxShape.circle, border: Border.all(color: StatusColors.onCritical, width: 2)),
-          child: Icon(Icons.emergency_rounded, size: 18, color: StatusColors.onCritical),
+          decoration: BoxDecoration(color: red, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+          child: const Icon(Icons.emergency_rounded, size: 18, color: Colors.white),
         ),
         label: Container(
           padding: const EdgeInsets.symmetric(horizontal: Space.s4, vertical: 2),
@@ -217,7 +217,7 @@ class EmergencyPointMarker extends StatelessWidget {
             d == null ? label : '$label, $d',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: AppText.caption.copyWith(color: StatusColors.onCritical, fontWeight: FontWeight.w700),
+            style: AppText.caption.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
           ),
         ),
       ),
@@ -237,7 +237,7 @@ class ResponderMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color green = StatusColors.success;
+    final Color green = AppTheme.brand;
     final n = name.trim().isEmpty ? 'Responder' : name.trim();
     return Semantics(
       container: true,
@@ -248,13 +248,13 @@ class ResponderMarker extends StatelessWidget {
         height: height,
         pin: 28,
         icon: Container(
-          decoration: BoxDecoration(color: green, shape: BoxShape.circle, border: Border.all(color: StatusColors.onCritical, width: 2)),
-          child: Icon(Icons.health_and_safety_rounded, size: 16, color: StatusColors.onCritical),
+          decoration: BoxDecoration(color: green, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+          child: const Icon(Icons.health_and_safety_rounded, size: 16, color: Colors.white),
         ),
         label: Container(
           padding: const EdgeInsets.symmetric(horizontal: Space.s4, vertical: 2),
-          decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.smAll, border: Border.all(color: green)),
-          child: Text(n, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textPrimary)),
+          decoration: BoxDecoration(color: AppTheme.card, borderRadius: Radii.smAll, border: Border.all(color: green, width: 2)),
+          child: Text(n, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700)),
         ),
       ),
     );

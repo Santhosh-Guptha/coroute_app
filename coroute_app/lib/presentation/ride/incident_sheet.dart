@@ -139,9 +139,8 @@ class IncidentSheetBody extends StatelessWidget {
             if (linkId != null) ...[const SizedBox(height: Space.s12), LiveLinkControls(alertId: linkId)],
             const SizedBox(height: Space.s16),
             _BigButton(
-              icon: Icons.check_circle_rounded,
+              icon: Icons.check_circle_outline_rounded,
               label: L10n.t('sos.ok'),
-              color: StatusColors.success,
               onPressed: () {
                 service.cancelMySos(reason: ResolveReason.resolved);
                 Navigator.of(context).maybePop();
@@ -166,9 +165,8 @@ class IncidentSheetBody extends StatelessWidget {
             ),
             const SizedBox(height: Space.s16),
             _BigButton(
-              icon: Icons.check_circle_rounded,
+              icon: Icons.check_circle_outline_rounded,
               label: L10n.t('incident.imOk'),
-              color: StatusColors.success,
               onPressed: () {
                 final ok = service.sendCheckIn(CheckInResult.ok);
                 if (ok) {
@@ -210,7 +208,7 @@ class IncidentSheetBody extends StatelessWidget {
         ],
         if (inc.hasPosition)
           _BigButton(
-            icon: Icons.navigation_rounded,
+            icon: Icons.navigation_outlined,
             label: emergency ? L10n.t('incident.navigateTo', {'name': _first(inc.who)}) : L10n.t('incident.navigate'),
             onPressed: emergency
                 ? () => navigateToEmergency(
@@ -223,7 +221,7 @@ class IncidentSheetBody extends StatelessWidget {
           ),
         if (phone.isNotEmpty) ...[
           const SizedBox(height: Space.s8),
-          _BigButton(icon: Icons.call_rounded, label: L10n.t('incident.call', {'name': _first(inc.who)}), outlined: true, onPressed: () => _dial(context, phone)),
+          _BigButton(icon: Icons.call_outlined, label: L10n.t('incident.call', {'name': _first(inc.who)}), outlined: true, onPressed: () => _dial(context, phone)),
         ],
         // The lead sees who is already helping first; everyone else first says if they go.
         if (isLead && responders != null) ...[const SizedBox(height: Space.s24), responders],
@@ -234,7 +232,7 @@ class IncidentSheetBody extends StatelessWidget {
           MedicalCard(info: medical),
           const SizedBox(height: Space.s8),
           OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
             onPressed: () => SafetyCardSheet.show(
               context,
               name: inc.who,
@@ -242,14 +240,14 @@ class IncidentSheetBody extends StatelessWidget {
               contactName: rider?.emergencyContactName ?? '',
               contactPhone: contact,
             ),
-            icon: const Icon(Icons.medical_information_rounded),
+            icon: const Icon(Icons.medical_information_outlined),
             label: Text(L10n.t('incident.card'), maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         ],
         if (inc.isAlert && contact.isNotEmpty) ...[
           const SizedBox(height: Space.s16),
           _BigButton(
-            icon: Icons.emergency_rounded,
+            icon: Icons.emergency_outlined,
             label: L10n.t('incident.callContact'),
             outlined: true,
             onPressed: () => _dial(context, contact),
@@ -260,16 +258,16 @@ class IncidentSheetBody extends StatelessWidget {
         if (emergency && inc.hasPosition) ...[
           const SizedBox(height: Space.s8),
           TextButton.icon(
-            style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.textPrimary),
+            style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.text),
             onPressed: openMaps,
-            icon: const Icon(Icons.map_rounded),
+            icon: const Icon(Icons.map_outlined),
             label: const Text('Open in Google Maps', maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         ],
         if (inc.isAlert && id != null) ...[
           const SizedBox(height: Space.s8),
           TextButton.icon(
-            style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.textPrimary),
+            style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.text),
             onPressed: () async {
               final ok = await confirmAction(
                 context,
@@ -297,20 +295,26 @@ class IncidentSheetBody extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(Icons.check_circle_rounded, size: 40, color: StatusColors.success),
-          const SizedBox(height: Space.s8),
-          Text(L10n.t('incident.closed'), textAlign: TextAlign.center, style: AppText.title),
+          Container(
+            width: 56,
+            height: 56,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: AppTheme.tint, shape: BoxShape.circle),
+            child: Icon(Icons.check_circle_outline_rounded, size: 32, color: AppTheme.accentText),
+          ),
+          const SizedBox(height: Space.s12),
+          Text(L10n.t('incident.closed'), textAlign: TextAlign.center, style: AppText.title.copyWith(fontSize: 18)),
           const SizedBox(height: Space.s4),
           Text(
             rider == null ? 'The rider is no longer in the ride.' : '${rider.name} is not in an open alert any more.',
             textAlign: TextAlign.center,
-            style: AppText.body.copyWith(color: AppTheme.textSecondary),
+            style: AppText.body.copyWith(color: AppTheme.text2),
           ),
-          const SizedBox(height: Space.s16),
-          OutlinedButton(
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          const SizedBox(height: 20),
+          DsButton(
+            label: 'Close',
+            tone: DsButtonTone.outline,
             onPressed: () => Navigator.of(context).maybePop(),
-            child: const Text('Close'),
           ),
         ],
       ),
@@ -331,7 +335,8 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final w = where;
     final u = updated;
-    final Color accent = incident.isMe && !incident.isAlert ? StatusColors.warning : StatusColors.critical;
+    final Color accent = incident.isMe && !incident.isAlert ? AppTheme.warnText : AppTheme.sos;
+    final Color accentBg = incident.isMe && !incident.isAlert ? AppTheme.warnTint : AppTheme.sos.withValues(alpha: 0.12);
     return Semantics(
       container: true,
       liveRegion: true,
@@ -341,8 +346,8 @@ class _Header extends StatelessWidget {
           Container(
             width: 48,
             height: 48,
-            decoration: BoxDecoration(color: accent.withOpacity(0.14), shape: BoxShape.circle),
-            child: Icon(incidentIcon(incident.kind), color: accent, size: 28),
+            decoration: BoxDecoration(color: accentBg, shape: BoxShape.circle),
+            child: Icon(incidentIcon(incident.kind), color: accent, size: 26),
           ),
           const SizedBox(width: Space.s12),
           Expanded(
@@ -352,11 +357,11 @@ class _Header extends StatelessWidget {
               children: [
                 Semantics(
                   header: true,
-                  child: Text(title ?? incident.title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontWeight: FontWeight.w700)),
+                  child: Text(title ?? incident.title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 18)),
                 ),
                 const SizedBox(height: 2),
-                Text(what, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: accent)),
-                if (w != null) Text(w, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                Text(what, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: accent, fontWeight: FontWeight.w700)),
+                if (w != null) Text(w, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
                 if (u != null) Text(u, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
                 if (incident.placeName.isNotEmpty)
                   Text('Near ${incident.placeName}', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption),
@@ -382,25 +387,14 @@ class _BigButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = color;
-    final text = Text(label, maxLines: 1, overflow: TextOverflow.ellipsis);
-    if (outlined) {
-      return OutlinedButton.icon(
-        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-        onPressed: onPressed,
-        icon: Icon(icon),
-        label: text,
-      );
-    }
-    return FilledButton.icon(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(56),
-        backgroundColor: c,
-        foregroundColor: c == null ? null : StatusColors.onCritical,
-      ),
-      onPressed: onPressed,
-      icon: Icon(icon),
-      label: text,
-    );
+    final tone = outlined
+        ? DsButtonTone.outline
+        : c == AppTheme.sos
+            ? DsButtonTone.sos
+            : c == AppTheme.warnText
+                ? DsButtonTone.warn
+                : DsButtonTone.brand;
+    return DsButton(label: label, icon: icon, tone: tone, onPressed: onPressed);
   }
 }
 
@@ -438,11 +432,7 @@ class _RespondButtons extends StatelessWidget {
         selected: selected,
         child: selected
             ? FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(56),
-                  backgroundColor: StatusColors.success,
-                  foregroundColor: StatusColors.onCritical,
-                ),
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
                 onPressed: tap,
                 icon: const Icon(Icons.check_rounded),
                 label: text,
@@ -464,7 +454,7 @@ class _RespondButtons extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Semantics(header: true, child: Text('Tell the group', style: AppText.label)),
+        Semantics(header: true, child: Text('Tell the group', style: AppText.overline)),
         const SizedBox(height: Space.s8),
         LayoutBuilder(builder: (context, c) {
           // Side by side only when both labels fit at the rider's text size.
@@ -527,7 +517,7 @@ class QueuedLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color c = failed ? StatusColors.critical : StatusColors.warning;
+    final Color c = failed ? AppTheme.sos : AppTheme.warnText;
     return Semantics(
       liveRegion: true,
       child: Row(
@@ -561,18 +551,18 @@ class _Responders extends StatelessWidget {
       children: [
         Semantics(
           header: true,
-          child: Text(list.isEmpty ? 'Who is helping' : 'Who is helping (${list.length})', style: AppText.label),
+          child: Text(list.isEmpty ? 'Who is helping' : 'Who is helping (${list.length})', style: AppText.overline),
         ),
         const SizedBox(height: Space.s8),
         if (list.isEmpty)
-          Text(forMe ? 'No one has answered yet. Your group can see where you are.' : 'No one has answered yet.', style: AppText.body.copyWith(color: AppTheme.textSecondary))
+          Text(forMe ? 'No one has answered yet. Your group can see where you are.' : 'No one has answered yet.', style: AppText.body.copyWith(color: AppTheme.text2))
         else
           for (final r in list)
             Padding(
               padding: const EdgeInsets.only(bottom: Space.s4),
               child: Row(
                 children: [
-                  Icon(r.kind == SosResponseKind.withThem ? Icons.handshake_rounded : Icons.directions_run_rounded, size: 20, color: StatusColors.success),
+                  Icon(r.kind == SosResponseKind.withThem ? Icons.handshake_outlined : Icons.directions_run_rounded, size: 20, color: AppTheme.accentText),
                   const SizedBox(width: Space.s8),
                   Expanded(
                     child: Text(
@@ -610,22 +600,17 @@ class MedicalCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final lines = linesOf(info);
     if (lines.isEmpty) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.all(Space.s12),
-      decoration: BoxDecoration(
-        color: AppTheme.elevatedCard,
-        borderRadius: Radii.mdAll,
-        border: Border.all(color: AppTheme.subtleBorder),
-      ),
+    return DsCard(
+      padding: const EdgeInsets.all(14),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.medical_information_rounded, size: 20, color: StatusColors.critical),
+              Icon(Icons.medical_information_outlined, size: 22, color: AppTheme.sos),
               const SizedBox(width: Space.s8),
-              Expanded(child: Semantics(header: true, child: Text('Medical info', style: AppText.label))),
+              Expanded(child: Semantics(header: true, child: Text('Medical info', style: AppText.overline))),
             ],
           ),
           const SizedBox(height: Space.s8),
@@ -687,7 +672,7 @@ class InfoLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? AppTheme.textSecondary;
+    final c = color ?? AppTheme.accentText;
     return Padding(
       padding: const EdgeInsets.only(bottom: Space.s4),
       child: Row(
@@ -794,7 +779,7 @@ class HospitalLine extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(Icons.local_hospital_rounded, size: 20, color: StatusColors.critical),
+          Icon(Icons.local_hospital_outlined, size: 22, color: AppTheme.sos),
           const SizedBox(width: Space.s8),
           Expanded(child: Text(text(place), maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body)),
           TextButton.icon(
@@ -805,7 +790,7 @@ class HospitalLine extends StatelessWidget {
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No map app found on this phone.')));
               }
             },
-            icon: const Icon(Icons.navigation_rounded, size: 18),
+            icon: const Icon(Icons.navigation_outlined, size: 18),
             label: Text(L10n.t('incident.navigate'), maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         ],
@@ -874,9 +859,9 @@ class _LiveLinkControlsState extends State<LiveLinkControls> {
     final link = service.liveLinkFor(widget.alertId);
     if (link == null) {
       return OutlinedButton.icon(
-        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
         onPressed: _busy ? null : () => _create(service),
-        icon: const Icon(Icons.share_location_rounded),
+        icon: const Icon(Icons.share_location_outlined),
         label: Text(L10n.t('sos.share'), maxLines: 1, overflow: TextOverflow.ellipsis),
       );
     }
@@ -886,7 +871,7 @@ class _LiveLinkControlsState extends State<LiveLinkControls> {
       children: [
         Row(
           children: [
-            Icon(Icons.share_location_rounded, size: 20, color: StatusColors.success),
+            Icon(Icons.share_location_outlined, size: 22, color: AppTheme.accentText),
             const SizedBox(width: Space.s8),
             Expanded(
               child: Text(LiveLinkControls.untilText(context, link.expiresAt), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body),
@@ -914,7 +899,7 @@ class _LiveLinkControlsState extends State<LiveLinkControls> {
               label: Text(L10n.t('sos.share'), maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
             TextButton.icon(
-              style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: StatusColors.critical),
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: AppTheme.sos),
               onPressed: _busy ? null : () => _revoke(service),
               icon: const Icon(Icons.link_off_rounded, size: 18),
               label: Text(L10n.t('sos.share.revoke'), maxLines: 1, overflow: TextOverflow.ellipsis),

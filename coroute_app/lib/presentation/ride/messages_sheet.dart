@@ -104,15 +104,15 @@ class _QuickReplyBarState extends State<QuickReplyBar> {
   @override
   Widget build(BuildContext context) {
     final feedback = _feedback;
-    final color = (_feedbackOk && !_feedbackQueued) ? StatusColors.success : StatusColors.warning;
+    final color = (_feedbackOk && !_feedbackQueued) ? AppTheme.accentText : AppTheme.warnText;
     final IconData icon = !_feedbackOk ? Icons.cloud_off_rounded : (_feedbackQueued ? Icons.schedule_rounded : Icons.check_circle_rounded);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Wrap(
-          spacing: Space.s8,
-          runSpacing: Space.s8,
+          spacing: 10,
+          runSpacing: 10,
           children: [
             for (final q in widget.messages) _QuickChip(message: q, onTap: () => _tap(q)),
           ],
@@ -124,13 +124,13 @@ class _QuickReplyBarState extends State<QuickReplyBar> {
             child: feedback == null
                 ? const SizedBox.shrink()
                 : Padding(
-                    padding: const EdgeInsets.only(top: Space.s8),
+                    padding: const EdgeInsets.only(top: 8),
                     child: Row(
                       children: [
                         Icon(icon, size: 16, color: color),
-                        const SizedBox(width: Space.s4),
+                        const SizedBox(width: 4),
                         Flexible(
-                          child: Text(feedback, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: color)),
+                          child: Text(feedback, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: color, fontWeight: FontWeight.w700)),
                         ),
                       ],
                     ),
@@ -151,26 +151,26 @@ class _QuickChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppTheme.elevatedCard,
-      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
+      color: AppTheme.card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md), side: BorderSide(color: AppTheme.border, width: 2)),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: QuickReplyBar.chipHeight, minWidth: 48),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: Space.s16),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(message.icon, size: 22, color: AppTheme.neonCyan),
-                const SizedBox(width: Space.s8),
+                Icon(message.icon, size: 22, color: AppTheme.accentText),
+                const SizedBox(width: 8),
                 Flexible(
                   child: Text(
                     message.text,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                    style: AppText.body.copyWith(fontWeight: FontWeight.w800),
                   ),
                 ),
               ],
@@ -249,56 +249,73 @@ class _MessagesViewState extends State<MessagesView> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const DsSectionHeader('Quick replies'),
+        const SizedBox(height: 10),
         QuickReplyBar(onSend: (q) => _sendQuick(service, q), queued: () => !service.isOnline),
-        const SizedBox(height: Space.s4),
-        const Divider(height: 1),
+        const SizedBox(height: 4),
+        Divider(height: 2, thickness: 2, color: AppTheme.border),
         if (messages.isEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: Space.s24),
-            child: Text('No messages yet.', textAlign: TextAlign.center, style: AppText.body.copyWith(color: AppTheme.textSecondary)),
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.forum_outlined, size: 28, color: AppTheme.muted),
+                const SizedBox(height: 6),
+                Text('No messages yet.', textAlign: TextAlign.center, style: AppText.body.copyWith(color: AppTheme.text2)),
+              ],
+            ),
           )
         else
-        Flexible(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: maxList),
-            child: ListView.builder(
-                    reverse: true,
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.symmetric(vertical: Space.s8),
-                    itemCount: messages.length,
-                    itemBuilder: (context, i) {
-                      final (msg, item) = messages[messages.length - 1 - i];
-                      final mine = msg == null || msg.senderId == widget.me.userId;
-                      final text = msg?.text ?? item?.payload['text']?.toString() ?? '';
-                      return Align(
-                        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(vertical: Space.s4),
-                          padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: Space.s8),
-                          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.75),
-                          decoration: BoxDecoration(
-                            color: mine ? AppTheme.neonCyan.withOpacity(0.16) : AppTheme.elevatedCard,
-                            borderRadius: Radii.mdAll,
-                            border: Border.all(color: mine ? AppTheme.neonCyan.withOpacity(0.5) : AppTheme.subtleBorder),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (!mine)
-                                Text(msg.senderName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
-                              Text(text, style: AppText.body),
-                              if (item != null) QueuedLine(failed: item.state == OutboxState.failed, sending: service.isOnline),
-                            ],
-                          ),
+          Flexible(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxList),
+              child: ListView.builder(
+                reverse: true,
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                itemCount: messages.length,
+                itemBuilder: (context, i) {
+                  final (msg, item) = messages[messages.length - 1 - i];
+                  final mine = msg == null || msg.senderId == widget.me.userId;
+                  final text = msg?.text ?? item?.payload['text']?.toString() ?? '';
+                  return Align(
+                    alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.75),
+                      decoration: BoxDecoration(
+                        color: mine ? AppTheme.tint : AppTheme.soft,
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(Radii.lg),
+                          topRight: const Radius.circular(Radii.lg),
+                          bottomLeft: Radius.circular(mine ? Radii.lg : 6),
+                          bottomRight: Radius.circular(mine ? 6 : Radii.lg),
                         ),
-                      );
-                    },
-                  ),
+                        border: Border.all(color: mine ? AppTheme.accentText : AppTheme.border, width: 2),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (!mine)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: Text(msg.senderName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+                            ),
+                          Text(text, style: AppText.body),
+                          if (item != null) QueuedLine(failed: item.state == OutboxState.failed, sending: service.isOnline),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
-        ),
-        const Divider(height: 1),
-        const SizedBox(height: Space.s8),
+        Divider(height: 2, thickness: 2, color: AppTheme.border),
+        const SizedBox(height: 10),
         Row(
           children: [
             Expanded(
@@ -310,20 +327,28 @@ class _MessagesViewState extends State<MessagesView> {
                 style: AppText.body,
                 decoration: InputDecoration(
                   hintText: 'Message the group',
-                  hintStyle: AppText.caption,
+                  hintStyle: AppText.label,
                   counterText: '',
                   filled: true,
-                  fillColor: AppTheme.elevatedCard,
-                  border: const OutlineInputBorder(borderRadius: Radii.mdAll, borderSide: BorderSide.none),
+                  fillColor: AppTheme.soft,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md), borderSide: BorderSide(color: AppTheme.border, width: 2)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md), borderSide: BorderSide(color: AppTheme.border, width: 2)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md), borderSide: BorderSide(color: AppTheme.accentText, width: 2)),
                 ),
               ),
             ),
-            const SizedBox(width: Space.s8),
-            IconButton(
-              tooltip: 'Send message',
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              icon: Icon(Icons.send_rounded, color: AppTheme.neonCyan),
-              onPressed: () => _send(service),
+            const SizedBox(width: 10),
+            Material(
+              color: AppTheme.brand,
+              shape: const CircleBorder(),
+              clipBehavior: Clip.antiAlias,
+              child: IconButton(
+                tooltip: 'Send message',
+                constraints: const BoxConstraints(minWidth: 52, minHeight: 52),
+                icon: const Icon(Icons.send_rounded, color: Colors.white, size: 22),
+                onPressed: () => _send(service),
+              ),
             ),
           ],
         ),

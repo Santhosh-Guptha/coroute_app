@@ -53,7 +53,7 @@ class _ReportDownSheetState extends State<ReportDownSheet> {
       for (final r in convoy?.riders.values ?? const <RiderModel>[])
         if (r.userId != myId) r,
     ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    final Color red = StatusColors.critical;
+    final Color red = AppTheme.sos;
     final place = widget.placeName.trim();
 
     return SingleChildScrollView(
@@ -67,8 +67,8 @@ class _ReportDownSheetState extends State<ReportDownSheet> {
               Container(
                 width: 48,
                 height: 48,
-                decoration: BoxDecoration(color: red.withOpacity(0.14), shape: BoxShape.circle),
-                child: Icon(Icons.personal_injury_rounded, color: red, size: 28),
+                decoration: BoxDecoration(color: red.withValues(alpha: 0.12), shape: BoxShape.circle),
+                child: Icon(Icons.personal_injury_outlined, color: red, size: 26),
               ),
               const SizedBox(width: Space.s12),
               Expanded(
@@ -78,7 +78,7 @@ class _ReportDownSheetState extends State<ReportDownSheet> {
                   children: [
                     Semantics(
                       header: true,
-                      child: Text(L10n.t('report.title'), maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontWeight: FontWeight.w700)),
+                      child: Text(L10n.t('report.title'), maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 18)),
                     ),
                     if (place.isNotEmpty)
                       Text(place, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label)
@@ -98,7 +98,7 @@ class _ReportDownSheetState extends State<ReportDownSheet> {
           Text(L10n.t('report.body'), maxLines: 5, overflow: TextOverflow.ellipsis, style: AppText.body),
           if (riders.isNotEmpty) ...[
             const SizedBox(height: Space.s16),
-            Semantics(header: true, child: Text(L10n.t('report.who'), style: AppText.label)),
+            Semantics(header: true, child: Text(L10n.t('report.who'), style: AppText.overline)),
             const SizedBox(height: Space.s8),
             Wrap(
               spacing: Space.s8,
@@ -121,12 +121,10 @@ class _ReportDownSheetState extends State<ReportDownSheet> {
             ),
           ],
           const SizedBox(height: Space.s24),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(56),
-              backgroundColor: red,
-              foregroundColor: StatusColors.onCritical,
-            ),
+          DsButton(
+            label: L10n.t('report.send'),
+            icon: Icons.sos_rounded,
+            tone: DsButtonTone.sos,
             onPressed: () {
               final ok = service.reportRiderDown(
                 lat: widget.lat,
@@ -135,12 +133,10 @@ class _ReportDownSheetState extends State<ReportDownSheet> {
               );
               Navigator.of(context).pop(ok);
             },
-            icon: const Icon(Icons.sos_rounded),
-            label: Text(L10n.t('report.send'), maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
           const SizedBox(height: Space.s8),
           TextButton(
-            style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.textPrimary),
+            style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.text),
             onPressed: () => Navigator.of(context).pop(),
             child: Text(L10n.t('sos.cancel'), maxLines: 1, overflow: TextOverflow.ellipsis),
           ),

@@ -53,17 +53,17 @@ class StopKindChoices extends StatelessWidget {
       children: [
         for (final k in StopKind.pickable)
           ChoiceChip(
-            avatar: Icon(k.icon, size: 18, color: selected == k ? Colors.black : AppTheme.textSecondary),
+            avatar: Icon(k.icon, size: 18, color: selected == k ? Colors.white : AppTheme.accentText),
             label: Text(stopKindChoiceLabel(k)),
             selected: selected == k,
             onSelected: (_) => onSelected(k),
-            selectedColor: AppTheme.neonCyan,
-            backgroundColor: AppTheme.slateCard,
-            labelStyle: AppText.label.copyWith(color: selected == k ? Colors.black : AppTheme.textPrimary),
-            side: BorderSide(color: selected == k ? AppTheme.neonCyan : AppTheme.subtleBorder),
+            selectedColor: AppTheme.brand,
+            backgroundColor: AppTheme.card,
+            labelStyle: TextStyle(color: selected == k ? Colors.white : AppTheme.text, fontSize: 13, fontWeight: FontWeight.w800),
+            side: BorderSide(color: selected == k ? AppTheme.brand : AppTheme.border, width: 2),
             showCheckmark: false,
             materialTapTargetSize: MaterialTapTargetSize.padded,
-            shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
       ],
     );
@@ -274,8 +274,22 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+      backgroundColor: AppTheme.map,
+      appBar: AppBar(
+        backgroundColor: AppTheme.bg,
+        title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: Center(
+            child: DsRoundButton(
+              icon: Icons.chevron_left_rounded,
+              label: 'Back',
+              onTap: () => Navigator.of(context).maybePop(),
+            ),
+          ),
+        ),
+        leadingWidth: 60,
+      ),
       body: LayoutBuilder(builder: (context, c) {
         return Column(
           children: [
@@ -317,7 +331,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
               padding: const EdgeInsets.only(bottom: 44),
               child: Semantics(
                 label: 'Pin. Move the map to place it.',
-                child: Icon(Icons.location_on_rounded, size: 44, color: AppTheme.hyperAmber),
+                child: Icon(Icons.location_on_rounded, size: 44, color: AppTheme.warnText),
               ),
             ),
           ),
@@ -370,43 +384,46 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   }
 
   Widget _searchField() {
-    return Material(
-      color: AppTheme.slateCard,
-      shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.subtleBorder)),
-      clipBehavior: Clip.antiAlias,
-      child: TextField(
-        controller: _search,
-        focusNode: _searchFocus,
-        onChanged: (q) {
-          _onSearchChanged(q);
-          setState(() {});
-        },
-        style: AppText.body,
-        textInputAction: TextInputAction.search,
-        decoration: InputDecoration(
-          hintText: 'Search a place, town or address',
-          hintStyle: AppText.body.copyWith(color: AppTheme.textMuted),
-          prefixIcon: Icon(Icons.search_rounded, color: AppTheme.textMuted),
-          suffixIcon: _searching
-              ? Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.neonCyan)),
-                )
-              : (_search.text.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: 'Clear search',
-                      icon: Icon(Icons.close_rounded, color: AppTheme.textMuted),
-                      onPressed: () => setState(() {
-                        _search.clear();
-                        _results = [];
-                      }),
-                    )),
-          filled: false,
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 14),
+    return Container(
+      decoration: BoxDecoration(borderRadius: Radii.mdAll, boxShadow: dsFloatingShadow()),
+      child: Material(
+        color: AppTheme.card,
+        shape: RoundedRectangleBorder(borderRadius: Radii.mdAll, side: BorderSide(color: AppTheme.border, width: 2)),
+        clipBehavior: Clip.antiAlias,
+        child: TextField(
+          controller: _search,
+          focusNode: _searchFocus,
+          onChanged: (q) {
+            _onSearchChanged(q);
+            setState(() {});
+          },
+          style: AppText.body,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: 'Search a place, town or address',
+            hintStyle: AppText.body.copyWith(color: AppTheme.muted),
+            prefixIcon: Icon(Icons.search_rounded, color: AppTheme.accentText),
+            suffixIcon: _searching
+                ? Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accentText)),
+                  )
+                : (_search.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        icon: Icon(Icons.close_rounded, color: AppTheme.muted),
+                        onPressed: () => setState(() {
+                          _search.clear();
+                          _results = [];
+                        }),
+                      )),
+            filled: false,
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(vertical: 14),
+          ),
         ),
       ),
     );
@@ -416,7 +433,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     return Container(
       margin: const EdgeInsets.only(top: Space.s8),
       constraints: const BoxConstraints(maxHeight: 280),
-      decoration: BoxDecoration(color: AppTheme.slateCard, borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.subtleBorder)),
+      decoration: BoxDecoration(color: AppTheme.card, borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.border, width: 2), boxShadow: dsFloatingShadow()),
       clipBehavior: Clip.antiAlias,
       child: Material(
         type: MaterialType.transparency,
@@ -431,9 +448,9 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     final selected = StopKind.pickable.contains(kind) ? kind : null;
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.slateCard,
+        color: AppTheme.card,
         borderRadius: Radii.sheetTop,
-        border: Border(top: BorderSide(color: AppTheme.subtleBorder)),
+        boxShadow: dsFloatingShadow(),
       ),
       child: SafeArea(
         top: false,
@@ -441,9 +458,17 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 10),
+                width: 44,
+                height: 5,
+                decoration: BoxDecoration(color: AppTheme.border2, borderRadius: BorderRadius.circular(3)),
+              ),
+            ),
             Flexible(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, 0),
+                padding: const EdgeInsets.fromLTRB(20, Space.s12, 20, 0),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -457,7 +482,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                         suffixIcon: _naming
                             ? Padding(
                                 padding: const EdgeInsets.all(14),
-                                child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.textMuted)),
+                                child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.muted)),
                               )
                             : null,
                       ),
@@ -470,25 +495,27 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                       style: AppText.caption,
                     ),
                     if (widget.forStop) ...[
-                      const SizedBox(height: Space.s12),
+                      const SizedBox(height: Space.s16),
+                      const DsSectionHeader('What kind of stop?'),
+                      const SizedBox(height: 10),
                       StopKindChoices(
                         selected: selected,
                         onSelected: (k) => setState(() => _category = stopWireCode(k)),
                       ),
-                      const SizedBox(height: Space.s4),
+                      const SizedBox(height: Space.s8),
                       Row(
                         children: [
-                          Expanded(child: Text('Planned stay', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label)),
+                          Expanded(child: Text('Planned stay', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
                           IconButton(
                             tooltip: 'Shorter stay',
                             onPressed: _dwell <= 0 ? null : () => setState(() => _dwell = (_dwell - 5).clamp(0, 600).toInt()),
-                            icon: Icon(Icons.remove_circle_outline_rounded, color: AppTheme.textSecondary),
+                            icon: Icon(Icons.remove_circle_outline_rounded, color: _dwell <= 0 ? AppTheme.muted : AppTheme.accentText),
                           ),
-                          Text(_dwell == 0 ? 'Not set' : '$_dwell min', style: AppText.body),
+                          Text(_dwell == 0 ? 'Not set' : '$_dwell min', style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
                           IconButton(
                             tooltip: 'Longer stay',
                             onPressed: () => setState(() => _dwell = (_dwell + 5).clamp(0, 600).toInt()),
-                            icon: Icon(Icons.add_circle_outline_rounded, color: AppTheme.textSecondary),
+                            icon: Icon(Icons.add_circle_outline_rounded, color: AppTheme.accentText),
                           ),
                         ],
                       ),
@@ -498,11 +525,11 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s16, Space.s16),
-              child: FilledButton(
+              padding: const EdgeInsets.fromLTRB(20, Space.s12, 20, Space.s16),
+              child: DsButton(
+                icon: Icons.check_rounded,
+                label: widget.confirmLabel,
                 onPressed: _confirm,
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                child: Text(widget.confirmLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
               ),
             ),
           ],
@@ -525,8 +552,8 @@ class _ResultRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final sub = subtitle;
     return ListTile(
-      leading: Icon(icon, color: AppTheme.neonCyan),
-      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body),
+      leading: Icon(icon, color: AppTheme.accentText),
+      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
       subtitle: sub == null || sub.isEmpty ? null : Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
       onTap: onTap,
     );

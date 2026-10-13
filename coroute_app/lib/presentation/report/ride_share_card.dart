@@ -111,13 +111,13 @@ class RideShareCard extends StatelessWidget {
       maxScaleFactor: 1.3,
       child: Container(
         padding: const EdgeInsets.all(Space.s12),
-        color: _p.obsidianVoid,
+        color: _p.bg,
         child: Container(
           padding: const EdgeInsets.all(Space.s16),
           decoration: BoxDecoration(
-            color: _p.slateCard,
-            borderRadius: Radii.lgAll,
-            border: Border.all(color: _p.subtleBorder),
+            color: _p.card,
+            borderRadius: Radii.xlAll,
+            border: Border.all(color: _p.border, width: 2),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -127,7 +127,7 @@ class RideShareCard extends StatelessWidget {
                 children: [
                   Text(
                     'CoRoute',
-                    style: AppText.label.copyWith(color: _p.neonCyan, fontWeight: FontWeight.w700, letterSpacing: 0.4),
+                    style: AppText.overline.copyWith(color: _p.accentText),
                   ),
                   const SizedBox(width: Space.s8),
                   Expanded(
@@ -136,7 +136,7 @@ class RideShareCard extends StatelessWidget {
                       textAlign: TextAlign.end,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: AppText.caption.copyWith(color: _p.textSecondary),
+                      style: AppText.caption.copyWith(color: _p.muted, fontWeight: FontWeight.w700),
                     ),
                   ),
                 ],
@@ -146,26 +146,26 @@ class RideShareCard extends StatelessWidget {
                 data.tripName.isEmpty ? 'Group ride' : data.tripName,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: AppText.title.copyWith(color: _p.textPrimary),
+                style: AppText.headline.copyWith(color: _p.text, fontSize: 20),
               ),
               if (route.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: Space.s4),
-                  child: Text(route, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(color: _p.textSecondary)),
+                  child: Text(route, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: _p.muted)),
                 ),
               if (data.sketch.isNotEmpty) ...[
                 const SizedBox(height: Space.s12),
                 AspectRatio(
                   aspectRatio: 2,
                   child: DecoratedBox(
-                    decoration: BoxDecoration(color: _p.elevatedCard, borderRadius: Radii.mdAll),
+                    decoration: BoxDecoration(color: _p.brand, borderRadius: Radii.lgAll),
                     child: CustomPaint(
                       painter: RouteSketchPainter(
                         points: data.sketch,
-                        lineColor: _p.neonCyan,
-                        startColor: _p.emeraldSafe,
-                        endColor: _p.textPrimary,
-                        ringColor: _p.slateCard,
+                        lineColor: Colors.white,
+                        startColor: Colors.white,
+                        endColor: _p.brand,
+                        ringColor: Colors.white,
                       ),
                     ),
                   ),
@@ -209,8 +209,8 @@ class _CardStat extends StatelessWidget {
   Widget build(BuildContext context) {
     final u = unit;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: Space.s8),
-      decoration: BoxDecoration(color: _p.elevatedCard, borderRadius: Radii.smAll),
+      padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: 10),
+      decoration: BoxDecoration(color: _p.soft, borderRadius: Radii.mdAll),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -221,18 +221,18 @@ class _CardStat extends StatelessWidget {
             child: Text.rich(
               TextSpan(children: [
                 TextSpan(text: value),
-                if (u != null) TextSpan(text: ' $u', style: AppText.label.copyWith(color: _p.textSecondary)),
+                if (u != null) TextSpan(text: ' $u', style: AppText.label.copyWith(color: _p.muted, fontWeight: FontWeight.w700)),
               ]),
               maxLines: 1,
               style: AppText.title.copyWith(
-                color: _p.textPrimary,
-                fontWeight: FontWeight.w700,
+                color: _p.text,
+                fontWeight: FontWeight.w800,
                 fontSize: 22,
                 fontFeatures: const [ui.FontFeature.tabularFigures()],
               ),
             ),
           ),
-          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: _p.textSecondary)),
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: _p.muted, fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -445,19 +445,19 @@ class _RideSharePreviewState extends State<RideSharePreview> {
           builder: (bc) => FilledButton.icon(
             onPressed: _busy ? null : () => _shareImage(bc),
             icon: _busy
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.image_rounded),
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.image_outlined),
             label: const Text('Share image', maxLines: 1, overflow: TextOverflow.ellipsis),
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
           ),
         ),
-        const SizedBox(height: Space.s8),
+        const SizedBox(height: 10),
         Builder(
           builder: (bc) => OutlinedButton.icon(
             onPressed: _busy ? null : () => _shareText(_origin(bc)),
-            icon: const Icon(Icons.notes_rounded),
+            icon: const Icon(Icons.notes_outlined),
             label: const Text('Share as text', maxLines: 1, overflow: TextOverflow.ellipsis),
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
           ),
         ),
       ],

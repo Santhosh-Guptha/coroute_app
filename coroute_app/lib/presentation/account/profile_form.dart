@@ -227,21 +227,21 @@ class _ProfileFormState extends State<ProfileForm> {
     }
   }
 
+  /// Fields follow the theme (card fill, 2 px border, radius 14); the icon is teal.
   InputDecoration _dec(String label, IconData icon, {String? hint}) => InputDecoration(
         labelText: label,
         hintText: hint,
-        prefixIcon: Icon(icon, color: AppTheme.textSecondary),
-        filled: true,
-        fillColor: AppTheme.elevatedCard,
-        border: const OutlineInputBorder(borderRadius: Radii.mdAll),
+        prefixIcon: Icon(icon, color: AppTheme.accentText, size: 22),
       );
 
+  /// Canvas-style section header (12/800 muted). The text keeps its case:
+  /// tests and screen readers look for it as written.
   Widget _section(String text, {String? subtitle}) => Padding(
-        padding: const EdgeInsets.only(top: Space.s24, bottom: Space.s8),
+        padding: const EdgeInsets.only(top: 22, bottom: 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Semantics(header: true, child: Text(text, style: AppText.label)),
+            Semantics(header: true, child: Text(text, style: AppText.overline.copyWith(fontSize: 13, letterSpacing: 0.3))),
             if (subtitle != null) ...[
               const SizedBox(height: Space.s4),
               Text(subtitle, style: AppText.caption),
@@ -249,6 +249,9 @@ class _ProfileFormState extends State<ProfileForm> {
           ],
         ),
       );
+
+  /// Switch rows look like the canvas settings rows (15/700 label, caption under it).
+  TextStyle get _switchTitle => AppText.body.copyWith(fontWeight: FontWeight.w700);
 
   /// Tank range (3.16, item 2) and the safety language (item 23); saved at once
   /// in the phone's settings, not with the profile. Hidden when no SettingsService.
@@ -287,7 +290,7 @@ class _ProfileFormState extends State<ProfileForm> {
     final header = widget.header;
     final err = _error;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s16, Space.s32),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
       children: [
         ?header,
         if (err != null) ...[
@@ -315,7 +318,7 @@ class _ProfileFormState extends State<ProfileForm> {
           contentPadding: EdgeInsets.zero,
           value: _pillion,
           onChanged: _busy ? null : (v) => setState(() => _pillion = v),
-          title: Text('I ride as a pillion', style: AppText.body),
+          title: Text('I ride as a pillion', style: _switchTitle),
           subtitle: Text('No bike registration needed.', style: AppText.caption),
         ),
         if (!_pillion) ...[
@@ -327,7 +330,7 @@ class _ProfileFormState extends State<ProfileForm> {
                 value: _vehicle,
                 isDense: true,
                 isExpanded: true,
-                dropdownColor: AppTheme.slateCard,
+                dropdownColor: AppTheme.card,
                 style: AppText.body,
                 items: [
                   for (final v in _types) DropdownMenuItem(value: v, child: Text(v, maxLines: 1, overflow: TextOverflow.ellipsis)),
@@ -376,7 +379,7 @@ class _ProfileFormState extends State<ProfileForm> {
               value: _bloodGroup,
               isDense: true,
               isExpanded: true,
-              dropdownColor: AppTheme.slateCard,
+              dropdownColor: AppTheme.card,
               style: AppText.body,
               items: [
                 for (final g in _bloodChoices)
@@ -412,7 +415,7 @@ class _ProfileFormState extends State<ProfileForm> {
         const SizedBox(height: Space.s8),
         OutlinedButton.icon(
           key: const ValueKey('safetyCard'),
-          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52), foregroundColor: AppTheme.accentText),
           onPressed: () => SafetyCardSheet.show(
             context,
             name: _name.text.trim(),
@@ -429,7 +432,7 @@ class _ProfileFormState extends State<ProfileForm> {
           contentPadding: EdgeInsets.zero,
           value: _responderMedical,
           onChanged: _busy ? null : (v) => setState(() => _responderMedical = v),
-          title: Text('Share with a rider from another group who comes to help me', style: AppText.body),
+          title: Text('Share with a rider from another group who comes to help me', style: _switchTitle),
           subtitle: Text('Only after they accept to help, only while your alert is open. Off by default.', style: AppText.caption),
         ),
         ..._rideAndLanguage(),
@@ -440,19 +443,17 @@ class _ProfileFormState extends State<ProfileForm> {
           contentPadding: EdgeInsets.zero,
           value: !_smsOptOut,
           onChanged: _busy ? null : (v) => setState(() => _smsOptOut = !v),
-          title: Text('Receive emergency texts from my ride group', style: AppText.body),
+          title: Text('Receive emergency texts from my ride group', style: _switchTitle),
           subtitle: Text(
             'A rider with no internet can text you where they are. When off, your number is not used for these texts.',
             style: AppText.caption,
           ),
         ),
         const SizedBox(height: Space.s24),
-        FilledButton(
+        DsButton(
+          label: _busy ? 'Saving...' : widget.saveLabel,
+          icon: _busy ? null : Icons.check_rounded,
           onPressed: _busy ? null : _save,
-          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-          child: _busy
-              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
-              : Text(widget.saveLabel),
         ),
       ],
     );

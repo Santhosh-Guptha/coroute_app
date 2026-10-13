@@ -8,6 +8,7 @@ library;
 export '../constants/ride_thresholds.dart';
 export 'app_bottom_sheet.dart';
 export 'confirm.dart';
+export 'design_kit.dart';
 export 'distance_indicator.dart';
 export 'empty_state.dart';
 export 'loading_state.dart';

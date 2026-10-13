@@ -53,20 +53,43 @@ class GroupSettingsView extends StatelessWidget {
 
     Widget section({required String title, required String value, required String help, required Widget control}) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: Space.s16),
+        padding: const EdgeInsets.only(bottom: 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
-                Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w600))),
-                const SizedBox(width: Space.s8),
-                Text(value, style: AppText.body.copyWith(fontWeight: FontWeight.w700, fontFeatures: const [FontFeature.tabularFigures()])),
+                Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
+                const SizedBox(width: 8),
+                Text(value, style: AppText.body.copyWith(fontWeight: FontWeight.w800, color: AppTheme.accentText, fontFeatures: const [FontFeature.tabularFigures()])),
               ],
             ),
             control,
             Text(help, style: AppText.caption),
+          ],
+        ),
+      );
+    }
+
+    /// The canvas settings group: a `bg` filled block with 18 dp corners.
+    Widget group(List<Widget> children) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        decoration: BoxDecoration(color: AppTheme.bg, borderRadius: BorderRadius.circular(Radii.lg)),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+      );
+    }
+
+    Widget note(String text, {Color? color, IconData icon = Icons.info_outline_rounded}) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 16, color: color ?? AppTheme.muted),
+            const SizedBox(width: 6),
+            Expanded(child: Text(text, style: AppText.caption.copyWith(color: color))),
           ],
         ),
       );
@@ -78,58 +101,54 @@ class GroupSettingsView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // 1. Ride Guardian Live Link Banner
-          Container(
-            margin: const EdgeInsets.only(bottom: Space.s16),
-            padding: const EdgeInsets.all(Space.s16),
-            decoration: BoxDecoration(
-              color: AppTheme.slateCard,
-              borderRadius: Radii.mdAll,
-              border: Border.all(color: AppTheme.neonCyan, width: 1.5),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(Space.s8),
-                      decoration: BoxDecoration(
-                        color: AppTheme.neonCyan.withOpacity(0.15),
-                        borderRadius: Radii.smAll,
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: DsHeroCard(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(color: Colors.white.withOpacity(0.16), borderRadius: BorderRadius.circular(12)),
+                        child: const Icon(Icons.shield_rounded, color: Colors.white, size: 24),
                       ),
-                      child: Icon(Icons.shield_rounded, color: AppTheme.neonCyan, size: 24),
-                    ),
-                    const SizedBox(width: Space.s12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Ride Guardian', style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
-                          Text(
-                            convoy.featurePolicy.guardianEnabled
-                                ? 'Share your personal ride with someone you trust.'
-                                : 'Guardian links are disabled for this group.',
-                            style: AppText.caption,
-                          ),
-                        ],
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Ride Guardian', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 2),
+                            Text(
+                              convoy.featurePolicy.guardianEnabled
+                                  ? 'Share your personal ride with someone you trust.'
+                                  : 'Guardian links are disabled for this group.',
+                              style: const TextStyle(color: DsHeroCard.secondary, fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: Space.s12),
-                FilledButton.icon(
-                  key: const Key('group_settings_guardian_share_btn'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: convoy.featurePolicy.guardianEnabled ? AppTheme.neonCyan : Colors.white12,
-                    foregroundColor: convoy.featurePolicy.guardianEnabled ? Colors.black : AppTheme.textMuted,
-                    minimumSize: const Size.fromHeight(48),
-                    shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+                    ],
                   ),
-                  icon: const Icon(Icons.share_rounded, size: 18),
-                  label: const Text('Share with a Ride Guardian', style: TextStyle(fontWeight: FontWeight.w700)),
-                  onPressed: convoy.featurePolicy.guardianEnabled ? () => showGuardianSheet(context, groupId: convoyId) : null,
-                ),
-              ],
+                  const SizedBox(height: 14),
+                  DsButton(
+                    key: const Key('group_settings_guardian_share_btn'),
+                    label: 'Share with a Ride Guardian',
+                    icon: Icons.share_rounded,
+                    tone: DsButtonTone.onHero,
+                    height: 48,
+                    fontSize: 15,
+                    onPressed: convoy.featurePolicy.guardianEnabled ? () => showGuardianSheet(context, groupId: convoyId) : null,
+                  ),
+                ],
+              ),
             ),
           ),
 
@@ -139,26 +158,26 @@ class GroupSettingsView extends StatelessWidget {
           // 2. Ride Feature Controls
           SheetSectionTitle('Ride feature controls'),
           if (!service.supports(ProtocolFeatures.featurePolicy))
-            Text('Connect to an updated gateway to change ride features.', style: AppText.caption.copyWith(color: StatusColors.warning)),
-          if (!service.isOnline)
-            Text('Reconnect to change group settings.', style: AppText.caption.copyWith(color: StatusColors.warning)),
-          if (service.lastError != null)
-            Text(service.lastError!, style: AppText.caption.copyWith(color: StatusColors.critical)),
-          for (final entry in const {
-            'essentialsEnabled': 'Route essentials',
-            'autoDiscovery': 'Automatic essentials refresh',
-            'groupFuelEnabled': 'Allow opt-in group fuel estimates',
-            'guardianEnabled': 'Allow Ride Guardian links',
-            'guardianRequirePin': 'Require PIN on Guardian links',
-            'notificationInsights': 'Expanded notification insights',
-          }.entries)
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(entry.value, style: AppText.body),
-              value: convoy.featurePolicy.toJson()[entry.key] == true,
-              onChanged: featureControls ? (v) => service.updateGroupConfig(featurePolicy: {entry.key: v}) : null,
-            ),
-          const Divider(),
+            note('Connect to an updated gateway to change ride features.', color: AppTheme.warnText, icon: Icons.warning_amber_rounded),
+          if (!service.isOnline) note('Reconnect to change group settings.', color: AppTheme.warnText, icon: Icons.cloud_off_rounded),
+          if (service.lastError != null) note(service.lastError!, color: AppTheme.sos, icon: Icons.error_outline_rounded),
+          group([
+            for (final entry in const {
+              'essentialsEnabled': 'Route essentials',
+              'autoDiscovery': 'Automatic essentials refresh',
+              'groupFuelEnabled': 'Allow opt-in group fuel estimates',
+              'guardianEnabled': 'Allow Ride Guardian links',
+              'guardianRequirePin': 'Require PIN on Guardian links',
+              'notificationInsights': 'Expanded notification insights',
+            }.entries)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(entry.value, style: AppText.body.copyWith(fontSize: 16, fontWeight: FontWeight.w700)),
+                value: convoy.featurePolicy.toJson()[entry.key] == true,
+                onChanged: featureControls ? (v) => service.updateGroupConfig(featurePolicy: {entry.key: v}) : null,
+              ),
+          ]),
+          const SizedBox(height: 14),
           for (final entry in const {
             'guardianMaxHours': ('Guardian maximum hours', [1, 6, 24, 72, 168, 336]),
             'guardianStopMinutes': ('Guardian stopped warning minutes', [5, 15, 30, 60, 120]),
@@ -166,14 +185,15 @@ class GroupSettingsView extends StatelessWidget {
             'guardianDeviationMinutes': ('Guardian deviation warning minutes', [1, 5, 10, 15, 30]),
           }.entries)
             Padding(
-              padding: const EdgeInsets.only(bottom: Space.s12),
+              padding: const EdgeInsets.only(bottom: 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(entry.value.$1, style: AppText.caption.copyWith(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: Space.s4),
+                  Text(entry.value.$1, style: AppText.label.copyWith(fontWeight: FontWeight.w700, color: AppTheme.text)),
+                  const SizedBox(height: 6),
                   Wrap(
-                    spacing: Space.s8,
+                    spacing: 8,
+                    runSpacing: 4,
                     children: [
                       for (final v in entry.value.$2)
                         ChoiceChip(
@@ -186,13 +206,9 @@ class GroupSettingsView extends StatelessWidget {
                 ],
               ),
             ),
-          Text('Changes apply after server confirmation. Rider consent and emergency safeguards remain in control of each rider.', style: AppText.caption),
-          if (!lead) ...[
-            const SizedBox(height: Space.s8),
-            Text('Only the lead can change these.', style: AppText.label),
-          ],
-          const SizedBox(height: Space.s16),
-          const Divider(),
+          note('Changes apply after server confirmation. Rider consent and emergency safeguards remain in control of each rider.'),
+          if (!lead) note('Only the lead can change these.', icon: Icons.lock_outline_rounded),
+          const SizedBox(height: 8),
 
           // 3. Convoy Safety Limits
           SheetSectionTitle('Convoy safety limits'),
@@ -268,49 +284,52 @@ class GroupSettingsView extends StatelessWidget {
               ),
             ),
           if (service.supports(ProtocolFeatures.ride316))
-            Padding(
-              padding: const EdgeInsets.only(bottom: Space.s16),
+            DsCard(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               child: Row(
                 children: [
-                  Icon(Icons.flag_rounded, size: 20, color: AppTheme.textSecondary),
-                  const SizedBox(width: Space.s8),
+                  Icon(Icons.flag_rounded, size: 22, color: AppTheme.accentText),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       GroupSettingsView.sweeperLine(convoy),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: AppText.body,
+                      style: AppText.body.copyWith(fontWeight: FontWeight.w700),
                     ),
                   ),
                 ],
               ),
             ),
-          const SizedBox(height: Space.s8),
-          const Divider(),
+          const SizedBox(height: 8),
 
           // 4. Alerts & Voice Guidance
           SheetSectionTitle('Audio & guidance alerts'),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('Spoken alerts', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-            subtitle: Text('Separation and emergency warnings are read out.', style: AppText.caption),
-            value: convoy.voiceGuidanceEnabled,
-            onChanged: lead ? (v) => service.updateGroupConfig(voiceGuidanceEnabled: v) : null,
-          ),
           Builder(
             builder: (context) {
               final riderSettings = context.watch<SettingsService?>();
-              if (riderSettings == null) return const SizedBox.shrink();
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('Announce all alerts', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-                    subtitle: Text('Read out all notifications and alerts via voice.', style: AppText.caption),
-                    value: riderSettings.voiceAnnounceAllAlerts,
-                    onChanged: (v) => riderSettings.setVoiceAnnounceAllAlerts(v),
-                  ),
+                  group([
+                    DsSwitchRow(
+                      label: 'Spoken alerts',
+                      subtitle: 'Separation and emergency warnings are read out.',
+                      value: convoy.voiceGuidanceEnabled,
+                      onChanged: lead ? (v) => service.updateGroupConfig(voiceGuidanceEnabled: v) : null,
+                      divider: riderSettings != null,
+                    ),
+                    if (riderSettings != null)
+                      DsSwitchRow(
+                        label: 'Announce all alerts',
+                        subtitle: 'Read out all notifications and alerts via voice.',
+                        value: riderSettings.voiceAnnounceAllAlerts,
+                        onChanged: (v) => riderSettings.setVoiceAnnounceAllAlerts(v),
+                        divider: false,
+                      ),
+                  ]),
+                  const SizedBox(height: 14),
+                  if (riderSettings != null)
                   section(
                     title: 'Map alert banner duration',
                     value: riderSettings.mapAlertDismissSeconds == 0 ? 'Manual' : '${riderSettings.mapAlertDismissSeconds}s',
@@ -338,7 +357,7 @@ class GroupSettingsView extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: Space.s8),
+          const SizedBox(height: 8),
 
           // 5. Network & Discovery Settings
           if (service.supports(ProtocolFeatures.safetyNet) || service.supports(ProtocolFeatures.discovery))
@@ -358,20 +377,36 @@ class GroupSettingsView extends StatelessWidget {
             ),
 
           // 6. Location Status
-          const Divider(),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-              service.isRealGpsActive ? Icons.location_on_rounded : Icons.location_off_rounded,
-              color: service.isRealGpsActive ? StatusColors.success : StatusColors.warning,
-              size: 28,
-            ),
-            title: Text(service.isRealGpsActive ? 'Sharing my location' : 'Location not shared', style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
-            subtitle: Text(
-              service.isRealGpsActive
-                  ? 'On while you are in this ride. It stops when the ride ends or you leave.'
-                  : 'Waiting for GPS. Check that location is on and allowed for CoRoute.',
-              style: AppText.caption.copyWith(color: AppTheme.textSecondary),
+          const SizedBox(height: 18),
+          DsCard(
+            tinted: service.isRealGpsActive,
+            warning: !service.isRealGpsActive,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(
+                  service.isRealGpsActive ? Icons.location_on_rounded : Icons.location_off_rounded,
+                  color: service.isRealGpsActive ? AppTheme.accentText : AppTheme.warnText,
+                  size: 26,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(service.isRealGpsActive ? 'Sharing my location' : 'Location not shared', style: AppText.title),
+                      const SizedBox(height: 2),
+                      Text(
+                        service.isRealGpsActive
+                            ? 'On while you are in this ride. It stops when the ride ends or you leave.'
+                            : 'Waiting for GPS. Check that location is on and allowed for CoRoute.',
+                        style: AppText.caption.copyWith(color: AppTheme.text2),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ],

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
@@ -63,7 +64,7 @@ class RiderCard extends StatelessWidget {
     final r = convoy?.riders[userId];
     if (convoy == null || r == null) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: Space.s24),
+        padding: const EdgeInsets.symmetric(vertical: 24),
         child: Text('This rider is no longer in the ride.', style: AppText.body),
       );
     }
@@ -122,22 +123,25 @@ class RiderCard extends StatelessWidget {
     final (destVal, destUnit) = split(toDest);
 
     Widget action(IconData icon, String label, VoidCallback onTap, {bool primary = false}) {
-      const min = Size.fromHeight(48);
       return Padding(
-        padding: const EdgeInsets.only(top: Space.s8),
-        child: primary
-            ? FilledButton.icon(
-                style: FilledButton.styleFrom(minimumSize: min),
-                onPressed: onTap,
-                icon: Icon(icon),
-                label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis))
-            : OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(minimumSize: min),
-                onPressed: onTap,
-                icon: Icon(icon),
-                label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis)),
+        padding: const EdgeInsets.only(top: 10),
+        child: DsButton(
+          label: label,
+          icon: icon,
+          tone: primary ? DsButtonTone.brand : DsButtonTone.outline,
+          height: primary ? 56 : 52,
+          fontSize: 15,
+          onPressed: onTap,
+        ),
       );
     }
+
+    // Avatar ring: red on an open SOS, amber when the position may be old, else the rider's map colour.
+    final Color ring = status == RiderStatus.emergency
+        ? AppTheme.sos
+        : status.isStale
+            ? AppTheme.warnText
+            : (colors[r.userId] ?? AppTheme.accentText);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -145,27 +149,34 @@ class RiderCard extends StatelessWidget {
       children: [
         Row(
           children: [
-            RiderAvatar(name: r.name, color: colors[r.userId], status: status, size: 56),
-            const SizedBox(width: Space.s12),
+            DsAvatar(initialsOf(r.name), size: 56, filled: isMe, ringColor: ring),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Semantics(
-                    header: true,
-                    child: Text(isMe ? '${r.name} (You)' : r.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Semantics(
+                          header: true,
+                          child: Text(isMe ? '${r.name} (You)' : r.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.headline.copyWith(fontSize: 20)),
+                        ),
+                      ),
+                      if (riderIsLead) ...[const SizedBox(width: 8), const DsChip('Lead')],
+                    ],
                   ),
                   Text(
-                    [r.vehicleType, if (r.vehicleNo.isNotEmpty) r.vehicleNo, if (r.role == RiderRoles.lead) 'Lead'].join(', '),
+                    [r.vehicleType, if (r.vehicleNo.isNotEmpty) r.vehicleNo].join(', '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppText.caption,
+                    style: AppText.label,
                   ),
-                  const SizedBox(height: Space.s4),
+                  const SizedBox(height: 6),
                   Wrap(
-                    spacing: Space.s8,
-                    runSpacing: Space.s4,
+                    spacing: 8,
+                    runSpacing: 4,
                     children: [
                       RiderStatusChip(status: status, detail: detail),
                       if (inc != null && inc.kind == IncidentKind.possibleIncident) const PossibleIncidentChip(),
@@ -179,8 +190,12 @@ class RiderCard extends StatelessWidget {
           ],
         ),
         if (presence != null) ...[
-          const SizedBox(height: Space.s8),
-          PresenceText(rider: r, text: presence),
+          const SizedBox(height: 10),
+          DsCard(
+            warning: true,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: PresenceText(rider: r, text: presence),
+          ),
         ],
         if (inc != null && !isMe)
           action(Icons.emergency_rounded, 'Open alert', () {
@@ -189,34 +204,59 @@ class RiderCard extends StatelessWidget {
             showIncidentSheet(nav.context, convoyId: convoyId, subjectUserId: r.userId, alertId: inc.alertId);
           }, primary: true),
         if (reason.isNotEmpty) ...[
-          const SizedBox(height: Space.s8),
-          Text('Reason: $reason', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(Icons.chat_bubble_outline_rounded, size: 18, color: AppTheme.accentText),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Reason: $reason', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body)),
+            ],
+          ),
         ],
-        const SizedBox(height: Space.s16),
+        const SizedBox(height: 16),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: RideMetric(
-                value: fromVal,
-                unit: fromUnit,
+              child: DsStatCell(
                 label: isMe ? 'From you' : (ahead == null ? 'From you' : (ahead ? 'Ahead of you' : 'Behind you')),
+                value: fromUnit == null ? fromVal : '$fromVal $fromUnit',
               ),
             ),
-            Expanded(child: RideMetric(value: r.speedKmh.isFinite ? r.speedKmh.round().toString() : '0', unit: 'km/h', label: 'Speed')),
-            Expanded(child: RideMetric(value: destVal, unit: destUnit, label: 'To destination')),
+            const SizedBox(width: 10),
+            Expanded(
+              child: DsStatCell(
+                label: 'Speed',
+                value: '${r.speedKmh.isFinite ? r.speedKmh.round().toString() : '0'} km/h',
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: DsStatCell(
+                label: 'To destination',
+                value: destUnit == null ? destVal : '$destVal $destUnit',
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: Space.s8),
-        Text(
-          [
-            r.lastSeenEpochMs > 0 ? 'Last update ${formatAgo(Duration(milliseconds: now - r.lastSeenEpochMs))}' : 'No update yet',
-            'battery ${r.batteryLevel}%${r.isCharging ? ', charging' : ''}',
-          ].join(', '),
-          style: AppText.caption,
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Icon(r.isCharging ? Icons.battery_charging_full_rounded : Icons.battery_std_rounded, size: 16, color: AppTheme.muted),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                [
+                  r.lastSeenEpochMs > 0 ? 'Last update ${formatAgo(Duration(milliseconds: now - r.lastSeenEpochMs))}' : 'No update yet',
+                  'battery ${r.batteryLevel}%${r.isCharging ? ', charging' : ''}',
+                ].join(', '),
+                style: AppText.caption,
+              ),
+            ),
+          ],
         ),
         if (!isMe && r.emergencyContact.isNotEmpty) ...[
-          const SizedBox(height: Space.s4),
+          const SizedBox(height: 4),
           Text(
             'Emergency contact: ${r.emergencyContactName.isNotEmpty ? '${r.emergencyContactName}, ' : ''}${r.emergencyContact}',
             maxLines: 2,
@@ -225,7 +265,7 @@ class RiderCard extends StatelessWidget {
           ),
         ],
         if (openSos.isNotEmpty) ...[
-          const SizedBox(height: Space.s12),
+          const SizedBox(height: 12),
           RideAlert(
             tier: AlertTier.critical,
             title: isMe ? 'Your SOS is on' : 'SOS: ${r.name} needs help',
@@ -243,7 +283,7 @@ class RiderCard extends StatelessWidget {
               if (ok) service.resolveSosAlert(openSos.last.alertId);
             }),
         ],
-        const SizedBox(height: Space.s8),
+        const SizedBox(height: 8),
         if (RideFacts.hasPosition(r))
           action(Icons.near_me_rounded, 'Show on map', () {
             Navigator.pop(context);

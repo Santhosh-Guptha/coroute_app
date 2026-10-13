@@ -4,6 +4,7 @@ import '../../data/services/geo_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/l10n/l10n.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/ui/confirm.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/trip_history_model.dart';
@@ -42,7 +43,7 @@ Future<void> leaveFromNotification(BuildContext context, ConvoyService convoys, 
   if (!embedded) Navigator.of(context).maybePop();
 }
 
-/// The app shell: Ride | Trips | Alerts | Profile in a bottom navigation bar.
+/// The app shell: Home | Trips | Alerts | Profile in a bottom navigation bar.
 ///
 /// Ride is selected at start and whenever a ride becomes active (create, join,
 /// restore). When the ride ends the shell stays on Ride, which then offers the
@@ -264,15 +265,40 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
           for (final t in HomeTab.values) _built.contains(t) ? _body(t, groupId) : const SizedBox.shrink(),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab.index,
-        onDestinationSelected: (i) => _select(HomeTab.values[i]),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.two_wheeler_rounded), label: 'Ride'),
-          NavigationDestination(icon: Icon(Icons.route_rounded), label: 'Trips'),
-          NavigationDestination(icon: _AlertsNavIcon(), label: 'Alerts'),
-          NavigationDestination(icon: Icon(Icons.person_rounded), label: 'Profile'),
-        ],
+      // Canvas bottom nav: bg fill, hairline top border, rounded icons, 12/800 labels
+      // (colours and weights come from the NavigationBarTheme in AppTheme).
+      bottomNavigationBar: DecoratedBox(
+        decoration: BoxDecoration(
+          color: AppTheme.bg,
+          border: Border(top: BorderSide(color: AppTheme.border, width: 1)),
+        ),
+        child: NavigationBar(
+          selectedIndex: _tab.index,
+          onDestinationSelected: (i) => _select(HomeTab.values[i]),
+          backgroundColor: AppTheme.bg,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.home_outlined),
+              selectedIcon: Icon(Icons.home_rounded),
+              label: 'Home',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.route_outlined),
+              selectedIcon: Icon(Icons.route_rounded),
+              label: 'Trips',
+            ),
+            NavigationDestination(
+              icon: _AlertsNavIcon(),
+              selectedIcon: _AlertsNavIcon(selected: true),
+              label: 'Alerts',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline_rounded),
+              selectedIcon: Icon(Icons.person_rounded),
+              label: 'Profile',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -281,7 +307,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
 /// The Alerts icon with the number of critical and important alerts.
 /// Rebuilds on timeline changes and on ride facts, never on positions.
 class _AlertsNavIcon extends StatelessWidget {
-  const _AlertsNavIcon();
+  final bool selected;
+  const _AlertsNavIcon({this.selected = false});
 
   @override
   Widget build(BuildContext context) {
@@ -297,7 +324,7 @@ class _AlertsNavIcon extends StatelessWidget {
       child: Badge.count(
         count: n,
         isLabelVisible: n > 0,
-        child: const Icon(Icons.notifications_rounded),
+        child: Icon(selected ? Icons.notifications_rounded : Icons.notifications_none_rounded),
       ),
     );
   }

@@ -74,7 +74,7 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
             Row(
               children: [
                 RiderAvatar(name: r.name, color: color, status: status, size: 48),
-                const SizedBox(width: Space.s12),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -87,19 +87,19 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
                 ),
               ],
             ),
-            const SizedBox(height: Space.s12),
+            const SizedBox(height: 12),
             Align(alignment: AlignmentDirectional.centerStart, child: RiderStatusChip(status: status, detail: detail)),
-            const SizedBox(height: Space.s16),
+            const SizedBox(height: 16),
             Row(
               children: [
-                Expanded(child: RideMetric(value: r.speedKmh.toStringAsFixed(0), unit: 'km/h', label: 'Speed')),
-                Expanded(
-                  child: RideMetric(value: '${r.heading.round()}°', unit: TelemetryUtils.getCardinalDirection(r.heading), label: 'Heading'),
-                ),
-                Expanded(child: RideMetric(value: '${r.batteryLevel}', unit: '%', label: r.isCharging ? 'Battery, charging' : 'Battery')),
+                Expanded(child: DsStatCell(label: 'Speed', value: '${r.speedKmh.toStringAsFixed(0)} km/h')),
+                const SizedBox(width: 8),
+                Expanded(child: DsStatCell(label: 'Heading', value: '${r.heading.round()}° ${TelemetryUtils.getCardinalDirection(r.heading)}')),
+                const SizedBox(width: 8),
+                Expanded(child: DsStatCell(label: r.isCharging ? 'Battery, charging' : 'Battery', value: '${r.batteryLevel}%')),
               ],
             ),
-            const SizedBox(height: Space.s16),
+            const SizedBox(height: 16),
             Text(
               r.lastSeenEpochMs > 0 ? 'Last update ${formatAgo(Duration(milliseconds: now - r.lastSeenEpochMs))}' : 'No update yet',
               style: AppText.label,
@@ -107,15 +107,14 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
             if (reason.isNotEmpty) Text('Said: $reason', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
             if (vehicle.isNotEmpty) Text(vehicle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
             if (hasFix) ...[
-              const SizedBox(height: Space.s16),
-              FilledButton.icon(
+              const SizedBox(height: 16),
+              DsButton(
+                label: 'Show on map',
+                icon: Icons.my_location_rounded,
                 onPressed: () {
                   Navigator.pop(ctx);
                   _focus(r.lat, r.lng);
                 },
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                icon: const Icon(Icons.my_location_rounded),
-                label: const Text('Show on map'),
               ),
             ],
           ],
@@ -154,7 +153,7 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
     final alerts = <Widget>[
       for (final a in sos)
         Padding(
-          padding: const EdgeInsets.only(bottom: Space.s8),
+          padding: const EdgeInsets.only(bottom: 10),
           child: RideAlert(
             tier: AlertTier.critical,
             title: 'SOS: ${a.userName.isEmpty ? 'a rider' : a.userName} needs help',
@@ -165,11 +164,9 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
         ),
     ];
 
-    final map = ClipRRect(
-      borderRadius: Radii.mdAll,
-      child: DecoratedBox(
-        position: DecorationPosition.foreground,
-        decoration: BoxDecoration(borderRadius: Radii.mdAll, border: Border.all(color: AppTheme.subtleBorder)),
+    final map = DsCard(
+      padding: EdgeInsets.zero,
+      child: SizedBox.expand(
         child: FlutterMap(
           mapController: _map,
           options: MapOptions(initialCenter: center, initialZoom: located.isEmpty ? 5 : 14.5),
@@ -197,126 +194,147 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
       ),
     );
 
-    final dist = formatDistance(metrics.spreadKm * 1000);
-    final cut = dist.lastIndexOf(' ');
+    final spreadColor = metrics.spreadKm >= 6
+        ? AppTheme.sos
+        : metrics.spreadKm >= 3
+            ? AppTheme.warnText
+            : AppTheme.accentText;
     final facts = [
       if (current.joinCode.isNotEmpty) 'Code ${current.joinCode}',
       if (current.createdByUserName.isNotEmpty) 'lead ${current.createdByUserName}',
       if (current.destinationName.trim().isNotEmpty) 'to ${current.destinationName}',
     ].join(', ');
-    final numbers = AdminCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+    final numbers = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AdminKpiGrid(
+          tiles: [
+            AdminKpiTile(label: 'Riders', value: '${riders.length}', delta: '${metrics.movingRiderCount} moving'),
+            AdminKpiTile(label: 'Spread', value: formatDistance(metrics.spreadKm * 1000), valueColor: spreadColor, delta: metrics.status, deltaColor: spreadColor),
+            AdminKpiTile(label: 'Avg speed', value: '${metrics.averageSpeedKmh.toStringAsFixed(0)} km/h', delta: 'Top ${metrics.maxSpeedKmh.toStringAsFixed(0)} km/h'),
+          ],
+        ),
+        const SizedBox(height: 12),
+        DsCard(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(child: RideMetric(value: '${riders.length}', label: 'Riders')),
-              Expanded(
-                child: cut > 0
-                    ? RideMetric(value: dist.substring(0, cut), unit: dist.substring(cut + 1), label: 'Spread')
-                    : RideMetric(value: dist, label: 'Spread'),
-              ),
-              Expanded(child: RideMetric(value: metrics.averageSpeedKmh.toStringAsFixed(0), unit: 'km/h', label: 'Avg speed')),
+              StatusLine(icon: Icons.groups_rounded, text: 'Formation: ${metrics.status}', color: AppTheme.text),
+              if (facts.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(facts, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+              ],
             ],
           ),
-          const SizedBox(height: Space.s12),
-          StatusLine(icon: Icons.groups_rounded, text: 'Formation: ${metrics.status}'),
-          if (facts.isNotEmpty) ...[
-            const SizedBox(height: Space.s4),
-            Text(facts, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
-          ],
-        ],
-      ),
+        ),
+      ],
     );
 
     final roster = <Widget>[
       AdminSectionLabel('Riders (${riders.length})'),
-      if (riders.isEmpty) Text('Nobody has joined yet.', style: AppText.body.copyWith(color: AppTheme.textSecondary)),
-      for (final r in riders)
-        Padding(
-          padding: const EdgeInsets.only(bottom: Space.s8),
-          child: AdminRow(
-            key: ValueKey(r.userId),
-            leading: RiderAvatar(name: r.name, color: colors[r.userId], status: status[r.userId]),
-            title: r.name.isEmpty ? 'Rider' : r.name,
-            subtitle: [adminRoleLabel(r.role), r.vehicleType].where((s) => s.isNotEmpty).join(', '),
-            detail: '${r.speedKmh.toStringAsFixed(0)} km/h, heading ${r.heading.round()}° ${TelemetryUtils.getCardinalDirection(r.heading)}',
-            status: RiderStatusChip(
-              status: status[r.userId] ?? RiderStatus.offline,
-              detail: riderStatusDetail(r, status[r.userId] ?? RiderStatus.offline, nowMs: now),
-            ),
-            onTap: () => _showRider(r, status[r.userId] ?? RiderStatus.offline, colors[r.userId]),
-          ),
-        ),
-    ];
-
-    return Scaffold(
-      backgroundColor: AppTheme.obsidianVoid,
-      appBar: AppBar(
-        title: Text(current.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: [
-          IconButton(
-            tooltip: 'Live timeline',
-            icon: const Icon(Icons.timeline_rounded),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: current.groupId)),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Replay and routes',
-            icon: const Icon(Icons.slow_motion_video_rounded),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => ReplayScreen(groupId: current.groupId, title: '${current.name}: Replay')),
-            ),
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'More options',
-            icon: const Icon(Icons.more_vert_rounded),
-            onSelected: (v) {
-              if (v == 'end') _confirmDissolveConvoy(context, convoyService, current);
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem<String>(
-                value: 'end',
-                height: 48,
-                child: Row(children: [
-                  Icon(Icons.stop_circle_rounded, color: StatusColors.critical),
-                  const SizedBox(width: Space.s12),
-                  const Flexible(child: Text('End ride for everyone', maxLines: 1, overflow: TextOverflow.ellipsis)),
-                ]),
+      AdminTable(
+        columns: const ['Rider', 'Status'],
+        empty: Text('Nobody has joined yet.', style: AppText.body.copyWith(color: AppTheme.text2)),
+        rows: [
+          for (var i = 0; i < riders.length; i++)
+            AdminRow(
+              key: ValueKey(riders[i].userId),
+              leading: RiderAvatar(name: riders[i].name, color: colors[riders[i].userId], status: status[riders[i].userId]),
+              title: riders[i].name.isEmpty ? 'Rider' : riders[i].name,
+              subtitle: [adminRoleLabel(riders[i].role), riders[i].vehicleType].where((s) => s.isNotEmpty).join(', '),
+              detail: '${riders[i].speedKmh.toStringAsFixed(0)} km/h, heading ${riders[i].heading.round()}° ${TelemetryUtils.getCardinalDirection(riders[i].heading)}',
+              status: RiderStatusChip(
+                status: status[riders[i].userId] ?? RiderStatus.offline,
+                detail: riderStatusDetail(riders[i], status[riders[i].userId] ?? RiderStatus.offline, nowMs: now),
               ),
-            ],
-          ),
+              divider: i < riders.length - 1,
+              onTap: () => _showRider(riders[i], status[riders[i].userId] ?? RiderStatus.offline, colors[riders[i].userId]),
+            ),
         ],
       ),
+    ];
+
+    final more = PopupMenuButton<String>(
+      tooltip: 'More options',
+      color: AppTheme.card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppTheme.border, width: 2)),
+      onSelected: (v) {
+        if (v == 'end') _confirmDissolveConvoy(context, convoyService, current);
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem<String>(
+          value: 'end',
+          height: 48,
+          child: Row(children: [
+            Icon(Icons.stop_circle_rounded, color: AppTheme.sos),
+            const SizedBox(width: 12),
+            Flexible(child: Text('End ride for everyone', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
+          ]),
+        ),
+      ],
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(shape: BoxShape.circle, color: AppTheme.card, border: Border.all(color: AppTheme.border, width: 2)),
+        child: Icon(Icons.more_horiz_rounded, color: AppTheme.text, size: 22),
+      ),
+    );
+
+    return AdminShell(
+      title: current.name.isEmpty ? 'Ride' : current.name,
+      subtitle: facts.isEmpty ? 'Live ride' : facts,
+      onBack: () => Navigator.maybePop(context),
+      actions: [
+        AdminIconAction(
+          icon: Icons.timeline_rounded,
+          label: 'Live timeline',
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: current.groupId)),
+          ),
+        ),
+        AdminIconAction(
+          icon: Icons.slow_motion_video_rounded,
+          label: 'Replay and routes',
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => ReplayScreen(groupId: current.groupId, title: '${current.name}: Replay')),
+          ),
+        ),
+        more,
+      ],
       body: LayoutBuilder(builder: (context, c) {
         if (c.maxWidth >= adminWideBreakpoint) {
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(child: Padding(padding: const EdgeInsets.all(Space.s16), child: map)),
-              SizedBox(
-                width: (c.maxWidth * 0.4).clamp(340.0, 460.0).toDouble(),
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(0, Space.s16, Space.s16, Space.s32),
-                  children: [...alerts, numbers, ...roster],
-                ),
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: Padding(padding: const EdgeInsets.fromLTRB(24, 8, 0, 32), child: map)),
+                  SizedBox(
+                    width: (c.maxWidth * 0.4).clamp(360.0, 480.0).toDouble(),
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 24, 32),
+                      children: [...alerts, numbers, ...roster],
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           );
         }
         final mapHeight = (c.maxHeight * 0.45).clamp(200.0, 320.0).toDouble();
         return Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
+            constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(Space.s16, Space.s16, Space.s16, Space.s32),
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
               children: [
                 ...alerts,
                 SizedBox(height: mapHeight, child: map),
-                const SizedBox(height: Space.s16),
+                const SizedBox(height: 16),
                 numbers,
                 ...roster,
               ],

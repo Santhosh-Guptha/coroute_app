@@ -117,7 +117,7 @@ class _TimelineListState extends State<TimelineList> {
       case 'DESTINATION_ALL_REACHED':
         return StatusColors.success;
       default:
-        return AppTheme.textSecondary;
+        return AppTheme.accentText;
     }
   }
 
@@ -152,13 +152,13 @@ class _TimelineListState extends State<TimelineList> {
                         _toggleMember(entry.key, on);
                         setSheet(() {});
                       },
-                      selectedColor: (widget.colors[entry.key] ?? AppTheme.neonCyan).withOpacity(0.18),
-                      labelStyle: AppText.label.copyWith(color: AppTheme.textPrimary),
-                      backgroundColor: AppTheme.slateCard,
-                      side: BorderSide(color: AppTheme.subtleBorder),
-                      shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
+                      selectedColor: (widget.colors[entry.key] ?? AppTheme.accentText).withOpacity(0.18),
+                      labelStyle: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800),
+                      backgroundColor: AppTheme.card,
+                      side: BorderSide(color: _members.contains(entry.key) ? (widget.colors[entry.key] ?? AppTheme.accentText) : AppTheme.border, width: 2),
+                      shape: const StadiumBorder(),
                       showCheckmark: true,
-                      checkmarkColor: AppTheme.textPrimary,
+                      checkmarkColor: AppTheme.text,
                     ),
                 ],
               ),
@@ -166,22 +166,20 @@ class _TimelineListState extends State<TimelineList> {
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton(
+                    child: DsButton(
+                      label: 'Everyone',
+                      tone: DsButtonTone.outline,
                       onPressed: _members.isEmpty
                           ? null
                           : () {
                               if (mounted) setState(_members.clear);
                               setSheet(() {});
                             },
-                      child: const Text('Everyone', maxLines: 1, overflow: TextOverflow.ellipsis),
                     ),
                   ),
                   const SizedBox(width: Space.s12),
                   Expanded(
-                    child: FilledButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      child: const Text('Done', maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ),
+                    child: DsButton(label: 'Done', onPressed: () => Navigator.of(ctx).pop()),
                   ),
                 ],
               ),
@@ -218,7 +216,7 @@ class _TimelineListState extends State<TimelineList> {
         key: ValueKey(e.eventId),
         event: e,
         nowMs: now,
-        color: e.userId != null ? (widget.colors[e.userId] ?? AppTheme.neonCyan) : AppTheme.textMuted,
+        color: e.userId != null ? (widget.colors[e.userId] ?? AppTheme.accentText) : AppTheme.muted,
         icon: _icons[e.type] ?? Icons.circle_outlined,
         tone: _tone(e),
         selected: widget.selectedEventId != null && widget.selectedEventId == e.eventId,
@@ -229,11 +227,12 @@ class _TimelineListState extends State<TimelineList> {
     final riderCount = _members.length;
     return Column(
       children: [
+        // Canvas filter pills: 38 px, fully round, 2 px border; the selected one is solid teal.
         SizedBox(
-          height: 52,
+          height: 54,
           child: ListView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: Space.s4),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: Space.s4),
             children: [
               for (final f in TimelineFilter.values)
                 Padding(
@@ -242,24 +241,26 @@ class _TimelineListState extends State<TimelineList> {
                     label: Text(f.label),
                     selected: _filter == f,
                     onSelected: (_) => setState(() => _filter = f),
-                    selectedColor: AppTheme.neonCyan.withOpacity(0.2),
-                    labelStyle: AppText.label.copyWith(color: _filter == f ? AppTheme.neonCyan : AppTheme.textSecondary),
-                    backgroundColor: AppTheme.slateCard,
-                    side: BorderSide(color: _filter == f ? AppTheme.neonCyan : AppTheme.subtleBorder),
-                    shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
+                    selectedColor: AppTheme.brand,
+                    labelStyle: TextStyle(color: _filter == f ? Colors.white : AppTheme.text, fontSize: 13, fontWeight: FontWeight.w800),
+                    backgroundColor: AppTheme.card,
+                    side: BorderSide(color: _filter == f ? AppTheme.brand : AppTheme.border, width: 2),
+                    shape: const StadiumBorder(),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     showCheckmark: false,
                   ),
                 ),
               if (widget.memberNames.length > 1)
                 ActionChip(
-                  avatar: Icon(Icons.people_alt_rounded, size: 18, color: riderCount > 0 ? AppTheme.neonCyan : AppTheme.textSecondary),
+                  avatar: Icon(Icons.people_alt_rounded, size: 18, color: riderCount > 0 ? Colors.white : AppTheme.accentText),
                   label: Text(riderCount > 0 ? 'Riders ($riderCount)' : 'Riders'),
                   tooltip: 'Choose which riders to show',
                   onPressed: _pickRiders,
-                  labelStyle: AppText.label.copyWith(color: riderCount > 0 ? AppTheme.neonCyan : AppTheme.textSecondary),
-                  backgroundColor: riderCount > 0 ? AppTheme.neonCyan.withOpacity(0.2) : AppTheme.slateCard,
-                  side: BorderSide(color: riderCount > 0 ? AppTheme.neonCyan : AppTheme.subtleBorder),
-                  shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
+                  labelStyle: TextStyle(color: riderCount > 0 ? Colors.white : AppTheme.text, fontSize: 13, fontWeight: FontWeight.w800),
+                  backgroundColor: riderCount > 0 ? AppTheme.brand : AppTheme.card,
+                  side: BorderSide(color: riderCount > 0 ? AppTheme.brand : AppTheme.border, width: 2),
+                  shape: const StadiumBorder(),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 ),
             ],
           ),
@@ -272,7 +273,7 @@ class _TimelineListState extends State<TimelineList> {
                     title: 'Nothing here yet',
                     message: _filter == TimelineFilter.all && _members.isEmpty ? null : 'Try another filter.',
                   ))
-              : ListView(padding: const EdgeInsets.fromLTRB(Space.s12, Space.s4, Space.s12, Space.s24), children: rows),
+              : ListView(padding: const EdgeInsets.fromLTRB(20, Space.s4, 20, 28), children: rows),
         ),
       ],
     );
@@ -285,10 +286,10 @@ class _HourHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(Space.s4, Space.s16, Space.s4, Space.s4),
+        padding: const EdgeInsets.fromLTRB(0, 18, 0, 8),
         child: Semantics(
           header: true,
-          child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.textMuted)),
+          child: Text(text.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.overline),
         ),
       );
 }
@@ -318,28 +319,30 @@ class _EventRow extends StatelessWidget {
     final e = event;
     final time = DateFormat('HH:mm').format(DateTime.fromMillisecondsSinceEpoch(e.startedAt));
     final detail = TimelineText.detail(e, nowMs: nowMs);
-    final Color? bg = selected ? AppTheme.neonCyan.withOpacity(0.12) : null;
-    return Material(
-      color: bg ?? Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: Radii.mdAll,
-        side: selected ? BorderSide(color: AppTheme.neonCyan) : BorderSide.none,
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
+    // A card per entry (canvas list rows): tinted with a teal border when selected.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: selected ? AppTheme.tint : AppTheme.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: Radii.lgAll,
+          side: BorderSide(color: selected ? AppTheme.accentText : AppTheme.border, width: 2),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 52),
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: Space.s8, horizontal: Space.s4),
+            padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SizedBox(
                   width: 48,
                   child: Padding(
-                    padding: const EdgeInsets.only(top: Space.s8),
-                    child: Text(time, maxLines: 1, style: AppText.caption.copyWith(color: AppTheme.textSecondary, fontFeatures: const [FontFeature.tabularFigures()])),
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(time, maxLines: 1, style: AppText.caption.copyWith(fontWeight: FontWeight.w700, fontFeatures: const [FontFeature.tabularFigures()])),
                   ),
                 ),
                 e.isGroupEntry
@@ -348,11 +351,11 @@ class _EventRow extends StatelessWidget {
                         height: 32,
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          color: AppTheme.elevatedCard,
+                          color: AppTheme.soft,
                           shape: BoxShape.circle,
-                          border: Border.all(color: AppTheme.subtleBorder, width: 1.4),
+                          border: Border.all(color: AppTheme.border, width: 2),
                         ),
-                        child: Icon(icon, size: 16, color: AppTheme.textSecondary),
+                        child: Icon(icon, size: 16, color: AppTheme.accentText),
                       )
                     : RiderAvatar(name: e.userName, color: color, size: 32),
                 const SizedBox(width: Space.s12),
@@ -372,34 +375,32 @@ class _EventRow extends StatelessWidget {
                               TimelineText.title(e, nowMs: nowMs),
                               maxLines: 3,
                               overflow: TextOverflow.ellipsis,
-                              style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                              style: AppText.body.copyWith(fontWeight: FontWeight.w700),
                             ),
                           ),
                           if (e.open)
-                            Container(
-                              margin: const EdgeInsets.only(left: Space.s4),
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(color: tone.withOpacity(0.18), borderRadius: Radii.smAll),
-                              child: Text('NOW', style: AppText.caption.copyWith(color: tone, fontWeight: FontWeight.w700)),
+                            Padding(
+                              padding: const EdgeInsets.only(left: Space.s4),
+                              child: DsChip('NOW', color: tone, background: tone.withOpacity(0.14)),
                             ),
                         ],
                       ),
                       if (detail.isNotEmpty) ...[
                         const SizedBox(height: 2),
-                        Text(detail, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.textSecondary)),
+                        Text(detail, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.caption),
                       ],
                       if (onTap != null)
                         Padding(
-                          padding: const EdgeInsets.only(top: 2),
+                          padding: const EdgeInsets.only(top: 4),
                           child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(Icons.map_rounded, size: 14, color: AppTheme.neonCyan),
+                            Icon(Icons.map_rounded, size: 14, color: AppTheme.accentText),
                             const SizedBox(width: Space.s4),
                             Flexible(
                               child: Text(
                                 selected ? 'Shown on the map' : 'Show on map',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: AppText.caption.copyWith(color: AppTheme.neonCyan, fontWeight: FontWeight.w600),
+                                style: TextStyle(color: AppTheme.accentText, fontSize: 13, fontWeight: FontWeight.w800),
                               ),
                             ),
                           ]),
@@ -410,6 +411,7 @@ class _EventRow extends StatelessWidget {
               ],
             ),
           ),
+        ),
         ),
       ),
     );

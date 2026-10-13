@@ -51,11 +51,33 @@ class AppTheme {
   static Color get shadow => _p.shadow;
   static Color get heroTop => _p.heroTop;
 
+  // Design-canvas tokens (preferred in new/restyled screens)
+  static Color get bg => _p.bg;
+  static Color get card => _p.card;
+  static Color get soft => _p.soft;
+  static Color get map => _p.map;
+  static Color get road => _p.road;
+  static Color get border => _p.border;
+  static Color get border2 => _p.border2;
+  static Color get tint => _p.tint;
+  static Color get brand => _p.brand;
+  static Color get accentText => _p.accentText;
+  static Color get warnText => _p.warnText;
+  static Color get warnTint => _p.warnTint;
+  static Color get warnBorder => _p.warnBorder;
+  static Color get sos => _p.sos;
+  static Color get text => _p.text;
+  static Color get text2 => _p.text2;
+  static Color get muted => _p.muted;
+
+  /// App typeface (bundled, see pubspec `fonts`).
+  static const String fontFamily = 'Manrope';
+
   static SystemUiOverlayStyle get overlayStyle => SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: _p.isLight ? Brightness.dark : Brightness.light,
         statusBarBrightness: _p.isLight ? Brightness.light : Brightness.dark, // iOS
-        systemNavigationBarColor: _p.obsidianVoid,
+        systemNavigationBarColor: _p.bg,
         systemNavigationBarIconBrightness: _p.isLight ? Brightness.dark : Brightness.light,
       );
 
@@ -65,27 +87,30 @@ class AppTheme {
   static ThemeData themeFor(AppPalette p) {
     final base = p.isLight
         ? ColorScheme.light(
-            primary: p.neonCyan,
-            secondary: p.hyperAmber,
-            surface: p.slateCard,
-            error: p.laserRed,
-            onPrimary: Colors.black,
-            onSecondary: Colors.black,
-            onSurface: p.textPrimary,
+            primary: p.brand,
+            secondary: p.warnText,
+            surface: p.card,
+            error: p.sos,
+            onPrimary: Colors.white,
+            onSecondary: Colors.white,
+            onSurface: p.text,
+            outline: p.border2,
           )
         : ColorScheme.dark(
-            primary: p.neonCyan,
-            secondary: p.hyperAmber,
-            surface: p.slateCard,
-            error: p.laserRed,
-            onPrimary: Colors.black,
+            primary: p.brand,
+            secondary: p.warnText,
+            surface: p.card,
+            error: p.sos,
+            onPrimary: Colors.white,
             onSecondary: Colors.black,
-            onSurface: p.textPrimary,
+            onSurface: p.text,
+            outline: p.border2,
           );
     return ThemeData(
       brightness: p.brightness,
-      scaffoldBackgroundColor: p.obsidianVoid,
-      primaryColor: p.neonCyan,
+      fontFamily: fontFamily,
+      scaffoldBackgroundColor: p.bg,
+      primaryColor: p.brand,
       canvasColor: p.darkCanvas,
       cardColor: p.slateCard,
       dividerColor: p.subtleBorder,
@@ -98,17 +123,18 @@ class AppTheme {
         centerTitle: false,
         systemOverlayStyle: p.isLight ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light,
         titleTextStyle: TextStyle(
-          color: p.textPrimary,
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 0.5,
+          color: p.text,
+          fontFamily: fontFamily,
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.3,
         ),
       ),
       iconTheme: IconThemeData(color: p.textSecondary),
       listTileTheme: ListTileThemeData(textColor: p.textPrimary, iconColor: p.textSecondary),
       dialogTheme: DialogThemeData(
         backgroundColor: p.slateCard,
-        shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
+        shape: const RoundedRectangleBorder(borderRadius: Radii.xlAll),
       ),
       // The drag handle is not switched on for every sheet here: older sheets
       // draw their own. showAppSheet (lib/core/ui) turns it on.
@@ -117,35 +143,60 @@ class AppTheme {
         modalBackgroundColor: p.slateCard,
         surfaceTintColor: Colors.transparent,
         shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),
-        dragHandleColor: p.textMuted,
-        dragHandleSize: const Size(36, 4),
+        dragHandleColor: p.border2,
+        dragHandleSize: const Size(44, 5),
       ),
       cardTheme: CardThemeData(
-        color: p.slateCard,
+        color: p.card,
         surfaceTintColor: Colors.transparent,
-        shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: Radii.lgAll, side: BorderSide(color: p.border, width: 2)),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size(64, 48),
-          shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+          backgroundColor: p.brand,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(64, 56),
+          shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
+          textStyle: const TextStyle(fontFamily: fontFamily, fontSize: 16, fontWeight: FontWeight.w800),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size(64, 48),
-          shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+          foregroundColor: p.text,
+          backgroundColor: p.card,
+          minimumSize: const Size(64, 56),
+          side: BorderSide(color: p.border, width: 2),
+          shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
+          textStyle: const TextStyle(fontFamily: fontFamily, fontSize: 15, fontWeight: FontWeight.w800),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
+          foregroundColor: p.accentText,
           shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
+          textStyle: const TextStyle(fontFamily: fontFamily, fontSize: 14, fontWeight: FontWeight.w800),
         ),
       ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStatePropertyAll(p.card),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? p.brand : p.border2,
+        ),
+        trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: p.soft,
+        selectedColor: p.tint,
+        side: BorderSide(color: p.border),
+        labelStyle: TextStyle(color: p.text, fontFamily: fontFamily, fontWeight: FontWeight.w700, fontSize: 13),
+        shape: const RoundedRectangleBorder(borderRadius: Radii.smAll),
+      ),
+      dividerTheme: DividerThemeData(color: p.border, thickness: 1, space: 1),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: p.slateCard,
+        backgroundColor: p.bg,
         surfaceTintColor: Colors.transparent,
-        indicatorColor: p.neonCyan.withOpacity(0.18),
+        indicatorColor: Colors.transparent,
         indicatorShape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         height: 64,
@@ -153,58 +204,57 @@ class AppTheme {
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
             size: 24,
-            color: states.contains(WidgetState.selected) ? p.neonCyan : p.textSecondary,
+            color: states.contains(WidgetState.selected) ? p.accentText : p.muted,
           ),
         ),
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
+            fontFamily: fontFamily,
             fontSize: 12,
-            fontWeight: states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
-            color: states.contains(WidgetState.selected) ? p.textPrimary : p.textSecondary,
+            fontWeight: states.contains(WidgetState.selected) ? FontWeight.w800 : FontWeight.w700,
+            color: states.contains(WidgetState.selected) ? p.accentText : p.muted,
           ),
         ),
       ),
-      popupMenuTheme: PopupMenuThemeData(color: p.elevatedCard),
+      popupMenuTheme: PopupMenuThemeData(color: p.card),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: p.isLight ? const Color(0xFF1E293B) : p.elevatedCard,
+        backgroundColor: p.isLight ? const Color(0xFF15232E) : p.soft,
         contentTextStyle: const TextStyle(color: Color(0xFFF8FAFC)),
         behavior: SnackBarBehavior.floating,
         shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: p.neonCyan,
-          foregroundColor: Colors.black,
-          elevation: p.isLight ? 1 : 4,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          backgroundColor: p.brand,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
           textStyle: const TextStyle(
+            fontFamily: fontFamily,
             fontSize: 16,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
+            fontWeight: FontWeight.w800,
           ),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: p.slateCard,
+        fillColor: p.card,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: p.subtleBorder),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: p.border, width: 2),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: p.isLight ? const Color(0x400F172A) : p.subtleBorder),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: p.border, width: 2),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: p.neonCyan, width: 1.5),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: p.brand, width: 2),
         ),
-        hintStyle: TextStyle(color: p.textMuted),
-        labelStyle: TextStyle(color: p.textSecondary),
+        hintStyle: TextStyle(color: p.muted, fontWeight: FontWeight.w600),
+        labelStyle: TextStyle(color: p.text2, fontWeight: FontWeight.w700),
       ),
     );
   }

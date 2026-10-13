@@ -30,7 +30,7 @@ class RiderAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? AppTheme.neonCyan;
+    final c = color ?? AppTheme.accentText;
     final s = status;
     final dot = (size * 0.32).clamp(10.0, 18.0).toDouble();
     final avatar = SizedBox(
@@ -43,7 +43,7 @@ class RiderAvatar extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Color.alphaBlend(c.withOpacity(0.18), AppTheme.slateCard),
+                color: Color.alphaBlend(c.withOpacity(0.12), AppTheme.card),
                 border: Border.all(color: c, width: 2),
               ),
               child: Center(
@@ -59,7 +59,7 @@ class RiderAvatar extends StatelessWidget {
                       style: TextStyle(
                         color: c,
                         fontSize: math.max(11.0, size * 0.36),
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ),
@@ -77,9 +77,9 @@ class RiderAvatar extends StatelessWidget {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: s.color,
-                  border: Border.all(color: AppTheme.slateCard, width: 2),
+                  border: Border.all(color: AppTheme.card, width: 2),
                 ),
-                child: dot >= 14 ? Icon(s.icon, size: dot - 6, color: AppTheme.slateCard) : null,
+                child: dot >= 14 ? Icon(s.icon, size: dot - 6, color: AppTheme.card) : null,
               ),
             ),
         ],
