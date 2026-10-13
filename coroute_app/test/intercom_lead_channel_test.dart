@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -12,13 +11,18 @@ import 'package:coroute_app/data/services/convoy_service.dart';
 import 'package:coroute_app/data/services/intercom_service.dart';
 import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/presentation/ride/riders_ladder.dart';
 import 'package:coroute_app/presentation/widgets/intercom_dock.dart';
+import 'package:coroute_app/data/services/settings_service.dart';
 
 class _TestRt extends RealtimeService {
   final List<Map<String, dynamic>> sent = [];
+  final List<Map<String, dynamic>> sentVoice = [];
   bool connected = true;
+  String? testGroupId = 'c1';
   final StreamController<Map<String, dynamic>> _ctrl = StreamController<Map<String, dynamic>>.broadcast();
   final StreamController<VoicePacket> _voiceCtrl = StreamController<VoicePacket>.broadcast();
 
@@ -29,6 +33,8 @@ class _TestRt extends RealtimeService {
   @override
   bool get isConnected => connected;
   @override
+  String? get groupId => testGroupId;
+  @override
   RealtimeState get state => connected ? RealtimeState.connected : RealtimeState.disconnected;
   @override
   bool supports(String feature) => true;
@@ -38,12 +44,20 @@ class _TestRt extends RealtimeService {
     sent.add(message);
     return true;
   }
+  @override
+  void sendVoice(int kind, Map<String, dynamic> header, [Uint8List? payload]) {
+    sentVoice.add({'kind': kind, 'header': header, 'payload': payload});
+  }
 
   void emit(Map<String, dynamic> m) => _ctrl.add(m);
   void emitVoice(VoicePacket p) => _voiceCtrl.add(p);
 }
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('RiderModel mic state & voice telemetry', () {
     test('serializes and deserializes micMuted and isSpeaking', () {
       final rider = RiderModel(
@@ -293,6 +307,110 @@ void main() {
       expect(find.text('Talking'), findsOneWidget);
       expect(find.byType(MicMutedChip), findsOneWidget);
       expect(find.text('Muted'), findsOneWidget);
+    });
+  });
+
+  group('Live Audio VU Meter & Hardware PTT Mapping', () {
+    test('audioLevel ValueNotifier updates and resets', () async {
+      final rt = _TestRt();
+      final ic = IntercomService(rt);
+      expect(ic.audioLevel.value, equals(0.0));
+
+      ic.updateAudioLevelForTesting(0.75);
+      expect(ic.audioLevel.value, equals(0.75));
+
+      await ic.reset();
+      expect(ic.audioLevel.value, equals(0.0));
+      ic.dispose();
+    });
+
+    test('Hardware keyboard PTT event handling', () async {
+      final rt = _TestRt();
+      final settings = SettingsService();
+      final ic = IntercomService(rt, settings: settings);
+
+      // 1. When hardwarePtt is false, events are not handled
+      const volumeDownEvent = KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.audioVolumeDown,
+        logicalKey: LogicalKeyboardKey.audioVolumeDown,
+        timeStamp: Duration.zero,
+      );
+      expect(ic.handleKeyEvent(volumeDownEvent), isFalse);
+
+      // 2. Enable hardwarePtt
+      await settings.setHardwarePtt(true);
+      expect(settings.hardwarePtt, isTrue);
+
+      // 3. When in convoy, VolumeDown KeyDown starts transmission
+      final handledDown = ic.handleKeyEvent(volumeDownEvent);
+      expect(handledDown, isTrue);
+
+      // Key repeat is consumed
+      const repeatEvent = KeyRepeatEvent(
+        physicalKey: PhysicalKeyboardKey.audioVolumeDown,
+        logicalKey: LogicalKeyboardKey.audioVolumeDown,
+        timeStamp: Duration.zero,
+      );
+      expect(ic.handleKeyEvent(repeatEvent), isTrue);
+
+      // KeyUp ends transmission
+      const volumeUpEvent = KeyUpEvent(
+        physicalKey: PhysicalKeyboardKey.audioVolumeDown,
+        logicalKey: LogicalKeyboardKey.audioVolumeDown,
+        timeStamp: Duration.zero,
+      );
+      expect(ic.handleKeyEvent(volumeUpEvent), isTrue);
+
+      // 4. Non-PTT key (e.g. keyA) is not intercepted
+      const keyAEvent = KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.keyA,
+        logicalKey: LogicalKeyboardKey.keyA,
+        timeStamp: Duration.zero,
+      );
+      expect(ic.handleKeyEvent(keyAEvent), isFalse);
+
+      // 5. When disconnected from convoy, events pass through
+      rt.testGroupId = null;
+      expect(ic.handleKeyEvent(volumeDownEvent), isFalse);
+      rt.testGroupId = 'c1';
+
+      // 6. In VOX mode, KeyDown toggles VOX state
+      ic.setMode(IntercomMode.vox);
+      final handledVox = ic.handleKeyEvent(volumeDownEvent);
+      expect(handledVox, isTrue);
+
+      ic.dispose();
+    });
+
+    testWidgets('IntercomOptions renders Handlebar / Headset PTT switch', (tester) async {
+      final rt = _TestRt();
+      final settings = SettingsService();
+      final ic = IntercomService(rt, settings: settings);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.darkTheme,
+          home: MultiProvider(
+            providers: [
+              ChangeNotifierProvider<IntercomService>.value(value: ic),
+              ChangeNotifierProvider<SettingsService>.value(value: settings),
+            ],
+            child: const Scaffold(
+              body: IntercomOptions(),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Handlebar / Headset PTT'), findsOneWidget);
+      expect(find.text('Disabled. Use on-screen talk button.'), findsOneWidget);
+
+      await tester.tap(find.byType(Switch).last);
+      await tester.pumpAndSettle();
+      expect(settings.hardwarePtt, isTrue);
+      expect(find.text('Volume down or headset media button acts as push-to-talk.'), findsOneWidget);
+
+      ic.dispose();
     });
   });
 }

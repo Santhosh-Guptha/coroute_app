@@ -96,6 +96,7 @@ class SettingsService extends ChangeNotifier {
   bool _saveRouteMaps = true;
   bool _voiceAnnounceAllAlerts = true;
   int _mapAlertDismissSeconds = 5;
+  bool _hardwarePtt = false;
 
   bool get lowData => _lowData;
   bool get crashDetection => _crashDetection;
@@ -150,6 +151,9 @@ class SettingsService extends ChangeNotifier {
   /// Auto-dismiss map overlay alert after seconds (default 5; 0 for manual).
   int get mapAlertDismissSeconds => _mapAlertDismissSeconds;
 
+  /// Hardware button (volume down / media button on Bluetooth headset or handlebar remote) acts as PTT.
+  bool get hardwarePtt => _hardwarePtt;
+
   Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
 
   /// Reads the saved settings. Safe to call more than once.
@@ -186,6 +190,7 @@ class SettingsService extends ChangeNotifier {
       _saveRouteMaps = prefs.getBool(NetworkConstants.keySaveRouteMaps) ?? true;
       _voiceAnnounceAllAlerts = prefs.getBool(NetworkConstants.keyVoiceAnnounceAllAlerts) ?? true;
       _mapAlertDismissSeconds = prefs.getInt(NetworkConstants.keyMapAlertDismissSeconds) ?? 5;
+      _hardwarePtt = prefs.getBool('hardware_ptt_v1') ?? false;
     } catch (e) {
       debugPrint('settings load note: $e');
     }
@@ -377,5 +382,12 @@ class SettingsService extends ChangeNotifier {
     _oemGuideSeen = true;
     notifyListeners();
     await _save(SafetyConstants.keyOemGuideSeen, true);
+  }
+
+  Future<void> setHardwarePtt(bool value) async {
+    if (value == _hardwarePtt) return;
+    _hardwarePtt = value;
+    notifyListeners();
+    await _save('hardware_ptt_v1', value);
   }
 }

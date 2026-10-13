@@ -5,6 +5,7 @@ import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/intercom_service.dart';
+import '../../data/services/settings_service.dart';
 
 /// The voice intercom, styled after the "Intercom" canvas sheet:
 ///
@@ -170,6 +171,7 @@ class IntercomOptions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ic = context.watch<IntercomService>();
+    final settings = context.watch<SettingsService>();
     final vox = ic.mode == IntercomMode.vox;
 
     return SingleChildScrollView(
@@ -205,7 +207,7 @@ class IntercomOptions extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 18),
-          const DsSectionHeader('Audio'),
+          const DsSectionHeader('Audio & Controls'),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -224,6 +226,14 @@ class IntercomOptions extends StatelessWidget {
                   subtitle: ic.isMicMuted ? 'Muted. The group cannot hear you.' : 'On while you talk.',
                   value: !ic.isMicMuted,
                   onChanged: (v) => ic.setMicMuted(!v),
+                ),
+                DsSwitchRow(
+                  label: 'Handlebar / Headset PTT',
+                  subtitle: settings.hardwarePtt
+                      ? 'Volume down or headset media button acts as push-to-talk.'
+                      : 'Disabled. Use on-screen talk button.',
+                  value: settings.hardwarePtt,
+                  onChanged: (v) => settings.setHardwarePtt(v),
                   divider: false,
                 ),
               ],
@@ -519,6 +529,10 @@ class _PttButton extends StatelessWidget {
                             ),
                           ),
                   ),
+                  if (tx) ...[
+                    SizedBox(width: big ? 12 : 6),
+                    _AudioVuMeter(audioLevel: ic.audioLevel, height: big ? 24 : 16),
+                  ],
                 ],
               ),
             ),
@@ -589,12 +603,64 @@ class _VoxButton extends StatelessWidget {
                           )
                         : Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: fg, fontWeight: FontWeight.w800)),
                   ),
+                  if (tx) ...[
+                    SizedBox(width: big ? 12 : 6),
+                    _AudioVuMeter(audioLevel: ic.audioLevel, height: big ? 24 : 16),
+                  ],
                 ],
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Live 5-bar VU meter for the microphone audio level [0.0 .. 1.0].
+/// Renders purely through a [ValueListenableBuilder] so audio level updates
+/// don't cause parent widgets to rebuild.
+class _AudioVuMeter extends StatelessWidget {
+  final ValueNotifier<double> audioLevel;
+  final double height;
+
+  const _AudioVuMeter({
+    required this.audioLevel,
+    this.height = 18,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<double>(
+      valueListenable: audioLevel,
+      builder: (context, level, _) {
+        return SizedBox(
+          height: height,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: List.generate(5, (i) {
+              final threshold = (i + 1) * 0.16;
+              final active = level >= threshold;
+              const barWeights = [0.5, 0.8, 1.0, 0.8, 0.5];
+              final maxH = barWeights[i] * height;
+              final barH = active
+                  ? maxH
+                  : (maxH * 0.35 + (maxH * 0.65 * (level / threshold).clamp(0.0, 1.0))).clamp(3.0, maxH);
+
+              return Container(
+                margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                width: 3.5,
+                height: barH,
+                decoration: BoxDecoration(
+                  color: active ? Colors.white : Colors.white.withOpacity(0.35),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              );
+            }),
+          ),
+        );
+      },
     );
   }
 }

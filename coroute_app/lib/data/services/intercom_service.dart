@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 import 'package:record/record.dart';
 import '../../core/config/app_config.dart';
@@ -31,12 +32,16 @@ class IntercomService extends ChangeNotifier {
   IntercomService(this._rt, {this.settings}) {
     _voiceSub = _rt.voice.listen(_onVoicePacket);
     _eventSub = _rt.events.listen(_onEvent);
+    _setupHardwareKeyboard();
   }
 
   final RealtimeService _rt;
 
   /// Data saver setting (optional so the service also works without it, as in tests).
   final SettingsService? settings;
+
+  /// Microphone audio level [0.0 .. 1.0] for live VU metering.
+  final ValueNotifier<double> audioLevel = ValueNotifier<double>(0.0);
 
   /// Rate the next transmission uses.
   int get txSampleRate => AppConfig.sampleRateFor(settings?.lowData ?? false);
@@ -216,6 +221,7 @@ class IntercomService extends ChangeNotifier {
     _micSub?.cancel();
     _micSub = null;
     _micOpen = false;
+    audioLevel.value = 0.0;
     _pending.clear();
     try {
       if (await _recorder.isRecording()) await _recorder.stop();
@@ -238,6 +244,7 @@ class IntercomService extends ChangeNotifier {
 
   void _endStream() {
     _transmitting = false;
+    audioLevel.value = 0.0;
     _pending.clear();
     _rt.sendVoice(VoiceKind.end, {'to': _talkTargetUserId});
     notifyListeners();
@@ -249,10 +256,13 @@ class IntercomService extends ChangeNotifier {
   int get _txFrameBytes => AppConfig.frameBytesFor(_micRate) * 2; // 40 ms
 
   void _onMicData(Uint8List chunk) {
-    if (!_micOpen || _micMuted) return;
+    if (!_micOpen || _micMuted) {
+      if (audioLevel.value != 0.0) audioLevel.value = 0.0;
+      return;
+    }
 
+    final rms = _rms(chunk);
     if (_mode == IntercomMode.vox) {
-      final rms = _rms(chunk);
       if (rms >= _voxOpenRms) {
         if (!_transmitting && _rt.isConnected) _startStream();
         _voxSilenceTimer?.cancel();
@@ -260,10 +270,19 @@ class IntercomService extends ChangeNotifier {
           if (_transmitting) _endStream();
         });
       }
-      if (!_transmitting) return;
+      if (!_transmitting) {
+        if (audioLevel.value != 0.0) audioLevel.value = 0.0;
+        return;
+      }
     } else if (!_transmitting) {
+      if (audioLevel.value != 0.0) audioLevel.value = 0.0;
       return;
     }
+
+    // Update live audio VU meter while transmitting
+    // Speech RMS into helmet mic typically ranges 0.01 - 0.20
+    final normalized = (rms * 5.0).clamp(0.0, 1.0);
+    audioLevel.value = normalized;
 
     // Guard: streams longer than the gateway allows are cut off server-side.
     if (_txStartedAt != null && DateTime.now().difference(_txStartedAt!).inMilliseconds > 55000) {
@@ -466,6 +485,7 @@ class IntercomService extends ChangeNotifier {
     _voxSilenceTimer?.cancel();
     if (_transmitting) _endStream();
     await _closeMic();
+    audioLevel.value = 0.0;
     _talkTargetUserId = null;
     _talkTargetName = null;
     _channel = IntercomChannel.all;
@@ -474,16 +494,78 @@ class IntercomService extends ChangeNotifier {
     _resetPlayback(clearSpeaker: true);
   }
 
+  void _setupHardwareKeyboard() {
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+  }
+
+  @visibleForTesting
+  bool handleKeyEvent(KeyEvent event) => _handleKeyEvent(event);
+
+  @visibleForTesting
+  void updateAudioLevelForTesting(double level) {
+    audioLevel.value = level.clamp(0.0, 1.0);
+  }
+
+  static bool isPttKey(LogicalKeyboardKey key) {
+    return key == LogicalKeyboardKey.audioVolumeDown ||
+        key == LogicalKeyboardKey.headsetHook ||
+        key == LogicalKeyboardKey.mediaPlayPause ||
+        key == LogicalKeyboardKey.mediaPlay ||
+        key == LogicalKeyboardKey.mediaPause;
+  }
+
+  bool _handleKeyEvent(KeyEvent event) {
+    if (settings?.hardwarePtt != true) return false;
+    if (!_rt.isConnected || _rt.groupId == null) return false;
+
+    if (!isPttKey(event.logicalKey)) return false;
+
+    if (_mode == IntercomMode.vox) {
+      if (event is KeyDownEvent) {
+        if (isVoxArmed) {
+          stopVox();
+        } else {
+          startVox();
+        }
+      }
+      return true;
+    }
+
+    if (event is KeyDownEvent) {
+      if (!_transmitting && !_micMuted) {
+        beginTransmission();
+      }
+      return true;
+    } else if (event is KeyUpEvent) {
+      if (_transmitting) {
+        endTransmission();
+      }
+      return true;
+    } else if (event is KeyRepeatEvent) {
+      return true;
+    }
+
+    return false;
+  }
+
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
+    audioLevel.dispose();
     _voiceSub?.cancel();
     _eventSub?.cancel();
     _micSub?.cancel();
     _voxSilenceTimer?.cancel();
     _rxIdleTimer?.cancel();
     _busyTimer?.cancel();
-    _recorderInstance?.dispose();
-    if (_playerReady) FlutterPcmSound.release();
+    try {
+      _recorderInstance?.dispose().catchError((_) {});
+    } catch (_) {}
+    if (_playerReady) {
+      try {
+        FlutterPcmSound.release().catchError((_) {});
+      } catch (_) {}
+    }
     super.dispose();
   }
 }
