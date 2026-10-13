@@ -361,6 +361,10 @@ class _DeepLinkListenerState extends State<_DeepLinkListener> {
   }
 
   void _handle(Uri uri) {
+    if (uri.scheme == 'coroute' && uri.host == 'cockpit') {
+      // Return link from Organic Maps; activity is brought to foreground.
+      return;
+    }
     final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();
     String? code;
     if (uri.scheme == 'coroute' && uri.host == 'join' && segs.isNotEmpty) code = segs.first;

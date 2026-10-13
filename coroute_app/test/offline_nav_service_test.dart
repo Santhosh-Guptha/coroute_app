@@ -1,7 +1,9 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:coroute_app/data/services/offline_nav_service.dart';
 import 'package:coroute_app/domain/route/lost_rider_recovery_coordinator.dart';
 import 'package:coroute_app/presentation/ride/navigate_to.dart';
+import 'package:coroute_app/presentation/rider/widgets/glove_quick_settings_modal.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -219,6 +221,32 @@ void main() {
       expect(tried[0], contains('dll=17.450000,78.450000'));
       expect(tried[0], contains('sll=17.446000,78.446000'));
       expect(tried[0], contains('Rejoin%20Convoy%20Route'));
+    });
+  });
+
+  group('GloveQuickSettingsModal offline navigation trigger', () {
+    testWidgets('renders Offline voice nav button and calls callback when tapped', (tester) async {
+      var triggered = false;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: GloveQuickSettingsModal(
+            keepScreenOn: true,
+            autoFollow: true,
+            onToggleKeepScreenOn: () {},
+            onToggleAutoFollow: () {},
+            onLaunchOfflineNav: () => triggered = true,
+          ),
+        ),
+      ));
+
+      expect(find.byKey(const Key('quick_action_offline_nav')), findsOneWidget);
+      expect(find.text('Offline voice nav'), findsOneWidget);
+
+      await tester.ensureVisible(find.byKey(const Key('quick_action_offline_nav')));
+      await tester.tap(find.byKey(const Key('quick_action_offline_nav')));
+      await tester.pump();
+
+      expect(triggered, isTrue);
     });
   });
 }
