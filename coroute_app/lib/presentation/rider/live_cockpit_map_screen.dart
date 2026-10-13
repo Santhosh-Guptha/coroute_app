@@ -222,7 +222,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   int _activeAlertCount = 0;
 
   // Route following: fed with my own fixes by the convoy listener (never by a timer).
-  late final RouteGuide _localGuide = RouteGuide(fetchRoute: _fetchRoute);
+  late final RouteGuide _localGuide = RouteGuide(
+    fetchRoute: _fetchRoute,
+    reverseGeocode: (lat, lng) => _geoService().reverse(lat, lng),
+  );
   RideEssentialsCoordinator? _rideEssentials;
   RouteGuide get _guide => _rideEssentials?.guide ?? _localGuide;
   ConvoyService? _convoys;
@@ -1214,6 +1217,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     onBack: widget.embedded ? null : () => Navigator.of(context).maybePop(),
                     isTunnelCoasting: me.isTunnelCoasting,
                     subtitle: convoy.name,
+                    roadName: _guide.currentRoadName,
                     speedKmh: RideFacts.hasPosition(me) ? me.speedKmh : null,
                     speedLimitKmh: speedLimit,
                   ),

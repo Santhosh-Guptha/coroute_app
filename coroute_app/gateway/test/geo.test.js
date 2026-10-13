@@ -21,7 +21,7 @@ function fakeFetch(log) {
       return { ok: true, json: async () => ([{ display_name: 'Kurnool, Andhra Pradesh, India', lat: '15.83', lon: '78.04', address: { city: 'Kurnool' } }]) };
     }
     if (url.startsWith('http://route.test/route/v1/driving/')) {
-      return { ok: true, json: async () => ({ routes: [{ distance: 210400.4, duration: 12600.2, geometry: { coordinates: [[78.4, 17.4], [78.3, 16.9], [78.04, 15.83]] }, legs: [{ distance: 100000, duration: 6000 }, { distance: 110400, duration: 6600 }] }] }) };
+      return { ok: true, json: async () => ({ routes: [{ distance: 210400.4, duration: 12600.2, geometry: { coordinates: [[78.4, 17.4], [78.3, 16.9], [78.04, 15.83]] }, legs: [{ distance: 100000, duration: 6000, steps: [{ name: 'Outer Ring Road', ref: 'NH44', distance: 50000, duration: 3000 }, { name: 'Bangalore Highway', ref: 'NH44', distance: 50000, duration: 3000 }] }, { distance: 110400, duration: 6600, steps: [{ name: 'Kurnool Road', ref: 'NH44', distance: 110400, duration: 6600 }] }] }] }) };
     }
     return { ok: false, status: 404, json: async () => ({}) };
   };
@@ -48,6 +48,9 @@ test('geo proxy: cached, spaced out, identifies itself', async () => {
   const r = await geo.route([{ lat: 17.4, lng: 78.4 }, { lat: 16.9, lng: 78.3 }, { lat: 15.83, lng: 78.04 }]);
   assert.equal(r.distanceM, 210400);
   assert.equal(r.legs.length, 2);
+  assert.equal(r.steps.length, 3);
+  assert.equal(r.steps[0].name, 'Outer Ring Road');
+  assert.equal(r.steps[0].ref, 'NH44');
   assert.equal(decodePolyline(r.polyline).length, 3);
   assert.equal(await geo.route([{ lat: 99, lng: 0 }, { lat: 1, lng: 1 }]), null);
   assert.equal(await geo.route([{ lat: 1, lng: 1 }]), null);

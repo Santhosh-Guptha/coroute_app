@@ -171,12 +171,16 @@ class CoRouteApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<RideEssentialsCoordinator>(
           lazy: false,
-          create: (ctx) => RideEssentialsCoordinator(
-            ConvoyEssentialsPort(ctx.read<ConvoyService>()),
-            ctx.read<SettingsService>(),
-            RouteEssentialsService(ctx.read<ApiClient>()),
-            fetchRoute: GeoService(ctx.read<ApiClient>()).route,
-          ),
+          create: (ctx) {
+            final geo = GeoService(ctx.read<ApiClient>());
+            return RideEssentialsCoordinator(
+              ConvoyEssentialsPort(ctx.read<ConvoyService>()),
+              ctx.read<SettingsService>(),
+              RouteEssentialsService(ctx.read<ApiClient>()),
+              fetchRoute: geo.route,
+              reverseGeocode: geo.reverse,
+            );
+          },
         ),
         // The big ride notification on the home and lock screen (replaces the plain one in place).
         Provider<RideNotificationService>(

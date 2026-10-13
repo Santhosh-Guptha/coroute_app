@@ -10,10 +10,14 @@ import 'route_plan.dart';
 import 'route_progress.dart';
 import '../timeline/timeline_text.dart';
 import '../tracking/dead_reckoning_engine.dart';
+import '../tracking/geo_math.dart';
 
 /// Asks the route service for a route through these points; null when it
 /// is not available (offline, error, timeout). Never throws.
 typedef RouteFetcher = Future<RouteModel?> Function(List<(double, double)> waypoints);
+
+/// Reverse geocodes a coordinate (lat, lng) to a place or road name.
+typedef ReverseGeocoder = Future<String?> Function(double lat, double lng);
 
 /// Follows my position along the route during a ride and, when I leave the
 /// planned route, quietly fetches a personal route from where I am to the
@@ -31,9 +35,10 @@ typedef RouteFetcher = Future<RouteModel?> Function(List<(double, double)> waypo
 /// changes; progress along the line is read by the ride screen when it
 /// rebuilds for the same fix.
 class RouteGuide extends ChangeNotifier {
-  RouteGuide({required this.fetchRoute});
+  RouteGuide({required this.fetchRoute, this.reverseGeocode});
 
   final RouteFetcher fetchRoute;
+  final ReverseGeocoder? reverseGeocode;
   final ReroutePolicy policy = ReroutePolicy();
   final OffRouteDetector _detector = OffRouteDetector();
   final OffRouteDetector _rejoin = OffRouteDetector(initial: OffRouteState.offRoute);
@@ -56,6 +61,33 @@ class RouteGuide extends ChangeNotifier {
   int _statusUntilMs = 0;
   (double, double)? _lastFix;
   int _routeVersion = 0;
+
+  String? _lastRoadName;
+  String? _cachedReverseRoadName;
+  int _lastReverseLookupMs = 0;
+  (double, double)? _lastReverseLookupFix;
+  final Map<String, String> _roadNameGeoCache = {};
+
+  /// Current road or highway name (e.g. "NH 44", "Outer Ring Rd") along the active route or cached corridor.
+  String? get currentRoadName {
+    final route = activeRoute;
+    if (route != null && route.steps.isNotEmpty) {
+      final progress = active?.matched;
+      if (progress != null) {
+        final rName = route.roadNameAt(progress.alongM);
+        if (rName != null && rName.isNotEmpty) return rName;
+      } else if (!_everOnPlan && route.steps.isNotEmpty) {
+        final firstLabel = route.steps.first.roadLabel;
+        if (firstLabel.isNotEmpty) return firstLabel;
+      }
+    }
+    final fix = _lastFix;
+    if (fix != null) {
+      final cached = _roadNameGeoCache[_cellKey(fix.$1, fix.$2)];
+      if (cached != null && cached.isNotEmpty) return cached;
+    }
+    return _cachedReverseRoadName;
+  }
 
   /// Text for the quiet status line, or null.
   String? get statusLine => _status;
@@ -152,8 +184,7 @@ class RouteGuide extends ChangeNotifier {
     bool isTunnelCoasting = false,
   }) {
     if (_disposed) return;
-    final plan = _plan;
-    if (plan == null || (lat == 0 && lng == 0)) return;
+    if (lat == 0 && lng == 0) return;
     final fix = (lat, lng);
     if (fix == _lastFix) return;
     _lastFix = fix;
@@ -162,6 +193,40 @@ class RouteGuide extends ChangeNotifier {
       _status = null;
       _statusUntilMs = 0;
       changed = true;
+    }
+
+    final road = currentRoadName;
+    if (road != _lastRoadName) {
+      _lastRoadName = road;
+      changed = true;
+    }
+
+    if (road == null && reverseGeocode != null && online && !lowData && (nowMs - _lastReverseLookupMs >= 15000)) {
+      final lastReq = _lastReverseLookupFix;
+      final movedM = lastReq == null ? 999.0 : GeoMath.haversine(lastReq.$1, lastReq.$2, lat, lng);
+      if (movedM >= 250) {
+        _lastReverseLookupMs = nowMs;
+        _lastReverseLookupFix = fix;
+        final cell = _cellKey(lat, lng);
+        reverseGeocode!(lat, lng).then((name) {
+          if (_disposed || name == null || name.isEmpty) return;
+          final clean = extractRoadName(name);
+          if (clean.isNotEmpty) {
+            _roadNameGeoCache[cell] = clean;
+            _cachedReverseRoadName = clean;
+            if (_cachedReverseRoadName != _lastRoadName) {
+              _lastRoadName = _cachedReverseRoadName;
+              _notify();
+            }
+          }
+        }).catchError((_) {});
+      }
+    }
+
+    final plan = _plan;
+    if (plan == null) {
+      if (changed) _notify();
+      return;
     }
 
     final limit = OffRouteDetector.limitFor(accuracyM);
@@ -317,6 +382,24 @@ class RouteGuide extends ChangeNotifier {
   void _notify() {
     if (!_disposed) notifyListeners();
   }
+
+  static String extractRoadName(String text) {
+    final clean = text.trim();
+    if (clean.isEmpty) return '';
+    final nhMatch = RegExp(r'\b(NH|SH|AH)\s*(\d+)\b', caseSensitive: false).firstMatch(clean);
+    if (nhMatch != null) {
+      final prefix = nhMatch.group(1)!.toUpperCase();
+      final num = nhMatch.group(2)!;
+      return '$prefix $num';
+    }
+    final parts = clean.split(',');
+    if (parts.isNotEmpty) {
+      return parts.first.trim();
+    }
+    return clean;
+  }
+
+  static String _cellKey(double lat, double lng) => '${(lat * 200).round() / 200},${(lng * 200).round() / 200}';
 
   @override
   void dispose() {

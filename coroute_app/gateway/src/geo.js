@@ -162,13 +162,30 @@ class GeoProxy {
     const coords = wp.map((p) => `${p.lng},${p.lat}`).join(';');
     return this._cached(`r:${hash(coords)}`, 7, async () => {
       try {
-        const j = await this._queued(() => this._getJson(`${config.geoRouteUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`));
+        const j = await this._queued(() => this._getJson(`${config.geoRouteUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true`));
         const r = j?.routes?.[0];
         if (!r) return null;
         const line = (r.geometry?.coordinates || []).map(([x, y]) => ({ lat: y, lng: x }));
+        const steps = [];
+        for (const leg of (r.legs || [])) {
+          for (const s of (leg.steps || [])) {
+            const name = (s.name || '').trim();
+            const ref = (s.ref || '').trim();
+            const d = Math.round(s.distance || 0);
+            if (name || ref || d > 0) {
+              steps.push({
+                name,
+                ref,
+                distanceM: d,
+                durationS: Math.round(s.duration || 0),
+              });
+            }
+          }
+        }
         return {
           distanceM: Math.round(r.distance || 0), durationS: Math.round(r.duration || 0), polyline: encodePolyline(line),
           legs: (r.legs || []).map((l) => ({ distanceM: Math.round(l.distance || 0), durationS: Math.round(l.duration || 0) })),
+          steps,
         };
       } catch (e) { this.log.warn('[geo] route failed', e.message); return null; }
     });

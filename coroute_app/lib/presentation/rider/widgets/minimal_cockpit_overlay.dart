@@ -40,6 +40,9 @@ class MinimalCockpitTopBar extends StatelessWidget {
   /// Second line under the title (the convoy or road name). Optional.
   final String? subtitle;
 
+  /// Current road or highway name (e.g. "NH 44", "Outer Ring Rd").
+  final String? roadName;
+
   /// My live speed for the right column. Null hides the speed column.
   final double? speedKmh;
 
@@ -57,6 +60,7 @@ class MinimalCockpitTopBar extends StatelessWidget {
     this.onBack,
     this.isTunnelCoasting = false,
     this.subtitle,
+    this.roadName,
     this.speedKmh,
     this.speedLimitKmh,
   });
@@ -125,7 +129,50 @@ class MinimalCockpitTopBar extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: AppText.headline,
                 ),
-                if (sub != null && sub.isNotEmpty) ...[
+                if (roadName != null && roadName!.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: AppTheme.brand.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: AppTheme.brand.withValues(alpha: 0.4), width: 1),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.edit_road_rounded, size: 12, color: AppTheme.brand),
+                            const SizedBox(width: 4),
+                            Text(
+                              roadName!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.caption.copyWith(
+                                color: AppTheme.brand,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (sub != null && sub.isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            sub,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.label,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ] else if (sub != null && sub.isNotEmpty) ...[
                   const SizedBox(height: 3),
                   Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
                 ],

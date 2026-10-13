@@ -44,7 +44,7 @@ class ConvoyEssentialsPort implements RideEssentialsPort {
 /// A single expiry timer invalidates GPS guidance without making a request.
 class RideEssentialsCoordinator extends ChangeNotifier {
   RideEssentialsCoordinator(this.port, this.settings, this.essentials,
-      {required this._fetchRoute, int Function()? clock})
+      {required this._fetchRoute, this.reverseGeocode, int Function()? clock})
       : _clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch) {
     _guide = _newGuide();
     port.addListener(_onState);
@@ -59,6 +59,7 @@ class RideEssentialsCoordinator extends ChangeNotifier {
   final SettingsService settings;
   final RouteEssentialsService essentials;
   final RouteFetcher _fetchRoute;
+  final ReverseGeocoder? reverseGeocode;
   final int Function() _clock;
   late RouteGuide _guide;
   late final StreamSubscription<TrackPoint> _fixes;
@@ -74,7 +75,7 @@ class RideEssentialsCoordinator extends ChangeNotifier {
       _fix != null && _clock() >= _fix!.ts &&
       _clock() - _fix!.ts < fixLifetime.inMilliseconds;
 
-  RouteGuide _newGuide() => RouteGuide(fetchRoute: _fetchRoute)..addListener(_onGuide);
+  RouteGuide _newGuide() => RouteGuide(fetchRoute: _fetchRoute, reverseGeocode: reverseGeocode)..addListener(_onGuide);
 
   void _changed() {
     if (!_disposed) notifyListeners();
