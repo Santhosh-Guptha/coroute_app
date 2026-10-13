@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/models/safety_wire.dart';
+import '../../data/services/intercom_service.dart';
 import '../../domain/ride/ride_facts.dart';
 import '../widgets/rider_status_sheet.dart';
 
@@ -148,6 +150,37 @@ class SweeperMarker extends StatelessWidget {
   }
 }
 
+/// Talking indicator chip when a rider is transmitting on the intercom.
+class SpeakingChip extends StatelessWidget {
+  const SpeakingChip({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return _StatusPill(
+      icon: Icons.graphic_eq_rounded,
+      text: 'Talking',
+      color: StatusColors.info,
+      background: StatusColors.info.withOpacity(0.12),
+      border: StatusColors.info.withOpacity(0.4),
+    );
+  }
+}
+
+/// Muted microphone chip when a rider has muted their microphone.
+class MicMutedChip extends StatelessWidget {
+  const MicMutedChip({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return _StatusPill(
+      icon: Icons.mic_off_rounded,
+      text: 'Muted',
+      color: AppTheme.muted,
+      background: AppTheme.muted.withOpacity(0.10),
+    );
+  }
+}
+
 /// A presence line with its icon, for the ladder and the rider card.
 class PresenceText extends StatelessWidget {
   final RiderModel rider;
@@ -287,6 +320,10 @@ class _RiderRow extends StatelessWidget {
     final presence = presenceLine(r, isMe: rung.isMe, place: place, clock: (ms) => presenceClock(context, ms));
     // The presence line says why the position is old; the chip then needs no "last seen".
     final detail = presence == null ? riderStatusDetail(r, status, nowMs: nowMs) : null;
+    final ic = Provider.of<IntercomService?>(context);
+    final isSpeaking = r.isSpeaking || (ic?.isRiderSpeaking(r.userId) ?? false);
+    final isMuted = r.micMuted || (ic?.isRiderMuted(r.userId) ?? false);
+
     final reason = riderReasonText(r);
     final dist = rung.displayFromMeM;
     final lowBattery = r.lowBattery;
@@ -306,6 +343,8 @@ class _RiderRow extends StatelessWidget {
       detail == null ? status.label : '${status.label}, $detail',
       ?presence,
       if (incident) 'possible incident',
+      if (isSpeaking) 'talking',
+      if (isMuted && !isSpeaking) 'microphone muted',
       if (lowBattery) LowBatteryChip.text(r.batteryLevel),
       if (sweeper) SweeperMarker.label,
       if (distText.isNotEmpty) distText,
@@ -317,7 +356,9 @@ class _RiderRow extends StatelessWidget {
     ].join(', ');
 
     final Color secondary = rung.isMe ? AppTheme.text2 : (tooFar ? AppTheme.warnText : AppTheme.muted);
-    final avatarRing = tooFar ? AppTheme.warnText : (color ?? AppTheme.accentText);
+    final avatarRing = isSpeaking
+        ? StatusColors.info
+        : (tooFar ? AppTheme.warnText : (color ?? AppTheme.accentText));
 
     return Semantics(
       container: true,
@@ -363,6 +404,8 @@ class _RiderRow extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       RiderStatusChip(status: status, detail: detail),
+                      if (isSpeaking) const SpeakingChip()
+                      else if (isMuted) const MicMutedChip(),
                       if (incident) const PossibleIncidentChip(),
                       if (lowBattery) LowBatteryChip(level: r.batteryLevel),
                       if (sweeper) const SweeperMarker(),

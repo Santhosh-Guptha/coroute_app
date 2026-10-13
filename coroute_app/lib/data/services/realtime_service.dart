@@ -28,6 +28,9 @@ class VoicePacket {
   String get fromName => header['fromName']?.toString() ?? 'Rider';
   String? get to => header['to']?.toString();
   bool get isPrivate => to != null && to!.isNotEmpty;
+  String get channel => header['channel']?.toString() ?? 'ALL';
+  bool get isLeadOnly => channel == 'LEAD_ONLY';
+
   /// The sender's sample rate: 16 kHz, or 8 kHz from a phone in data saver mode. Anything
   /// else is treated as 16 kHz (the player is never set up at an arbitrary rate).
   int get sampleRate {
@@ -404,6 +407,7 @@ class RealtimeService extends ChangeNotifier {
         'WAIT_REQUESTS', 'CONFIG', 'TRIP_STATUS', 'DISSOLVED', 'VOICE_BUSY',
         'TIMELINE', 'TIMELINE_UPDATE', 'TIMELINE_BATCH', 'REPORT_READY',
         'SOS_RESPONSE', 'PRESENCE', 'ROSTER_CHANGED',
+        'MIC_STATUS',
         // 3.15 safety and discovery networks.
         'EMERGENCY_UPDATE', 'ASSIST_REQUEST', 'ASSIST_UPDATE', 'ASSIST_CLOSED', 'HAZARD', 'HAZARD_CLEAR', 'DISCOVERY', 'WAVED',
       };

@@ -74,7 +74,7 @@ class ConvoyError extends Error {
  * emergency contact) and co-riding are never taken from a socket message: role and
  * co-riding are set by server code paths only, the profile comes from the users table.
  */
-const TELEMETRY_FIELDS = ['lat', 'lng', 'speedKmh', 'heading', 'batteryLevel', 'isCharging', 'statusReason', 'statusMessage', 'stoppedSince', 'fuelEstimate'];
+const TELEMETRY_FIELDS = ['lat', 'lng', 'speedKmh', 'heading', 'batteryLevel', 'isCharging', 'statusReason', 'statusMessage', 'stoppedSince', 'fuelEstimate', 'micMuted', 'isSpeaking'];
 /** Extra fields only trusted server code may set (CORIDER handler). */
 const TRUSTED_FIELDS = ['isCoRiding', 'ridingWithUserId'];
 
@@ -1555,6 +1555,8 @@ function sanitizeTelemetry(patch) {
   if (has('statusReason')) out.statusReason = String(patch.statusReason).slice(0, 24);
   if (has('statusMessage')) out.statusMessage = String(patch.statusMessage).slice(0, 140);
   if (has('stoppedSince')) out.stoppedSince = Math.max(0, Math.min(now() + 60000, Math.round(num(patch.stoppedSince))));
+  if (has('micMuted')) out.micMuted = !!patch.micMuted;
+  if (has('isSpeaking')) out.isSpeaking = !!patch.isSpeaking;
   if (Object.hasOwn(patch, 'fuelEstimate')) {
     const f = patch.fuelEstimate;
     out.fuelEstimate = f && Number.isFinite(f.usableKm) && f.usableKm >= 0 && f.usableKm <= 15000
@@ -1632,6 +1634,8 @@ function publicRider(r) {
     vehicleNo: r.vehicleNo || '', isCoRiding: !!r.isCoRiding, ridingWithUserId: r.ridingWithUserId || '', stoppedSince: r.stoppedSince || 0,
     presence: r.presence || '', presenceAt: r.presenceAt || 0,
     fuelEstimate: r.fuelEstimate && now() - r.fuelEstimate.updatedAt < 120000 ? r.fuelEstimate : null,
+    micMuted: !!r.micMuted,
+    isSpeaking: !!r.isSpeaking,
   };
 }
 

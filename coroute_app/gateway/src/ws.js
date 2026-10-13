@@ -44,7 +44,7 @@ const ACTION_TYPES = new Set([
   // 3.15
   'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE',
   // 3.16
-  'ROLE_SET',
+  'ROLE_SET', 'MIC_STATE',
   // 4.0
   'REGROUP_SET', 'REGROUP_CLEAR', 'LAST_GASP_BEACON',
 ]);
@@ -564,6 +564,19 @@ class Hub {
         const gid = this._requireRoom(ws);
         return this._once(ws, cid, 'ROLE_SET', () => this.convoys.setRole(gid, u, msg.userId, msg.role));
       }
+      case 'MIC_STATE': {
+        const gid = this._requireRoom(ws);
+        const room = this.convoys.rooms.get(gid);
+        if (room && room.riders && room.riders.has(u.userId)) {
+          room.riders.get(u.userId).micMuted = !!msg.muted;
+        }
+        return this.broadcast(gid, {
+          type: 'MIC_STATUS',
+          userId: u.userId,
+          micMuted: !!msg.muted,
+          ts: Date.now(),
+        }, { except: ws });
+      }
       case 'REGROUP_SET': {
         const gid = this._requireRoom(ws);
         return this._once(ws, cid, 'REGROUP_SET', () => this.convoys.setRegroup(gid, u, msg));
@@ -734,14 +747,32 @@ class Hub {
         }
         if (cur && cur.ws !== ws) this._endStream(gid, cur, 'preempted');
       }
+      const channel = pkt.header.channel === 'LEAD_ONLY' ? 'LEAD_ONLY' : 'ALL';
+      if (channel === 'LEAD_ONLY') {
+        const room = this.convoys.rooms.get(gid);
+        const speakerRider = room && room.riders ? room.riders.get(ws.user.userId) : null;
+        const speakerRole = speakerRider ? speakerRider.role : ws.user.role;
+        const isLeader = speakerRole === 'LEAD' || speakerRole === 'SWEEPER' || (room && room.meta && room.meta.createdByUserId === ws.user.userId) || ws.user.role === 'ADMIN' || ws.user.role === 'MASTER_ADMIN';
+        if (!isLeader) {
+          return this.sendError(ws, 403, 'Lead channel is restricted to convoy leads and sweepers.');
+        }
+      }
       const stream = {
         streamId: crypto.randomBytes(6).toString('hex'), ws, from: ws.user.userId, fromName: ws.user.name, to,
+        channel,
         startedAt: t, lastAt: t, frames: 0, sampleRate: VOICE_RATES.has(Number(pkt.header.sampleRate)) ? Number(pkt.header.sampleRate) : 16000, codec: String(pkt.header.codec || 'pcm16').slice(0, 16),
       };
       if (to) state.private.set(ws.user.userId, stream); else state.group = stream;
       ws.voiceStream = stream;
       this.convoys.featureAnalytics?.record('voice', true);
-      this._relay(gid, stream, VOICE_START, { ...this._hdr(stream), sampleRate: stream.sampleRate, codec: stream.codec }, null);
+      this._relay(gid, stream, VOICE_START, { ...this._hdr(stream), channel: stream.channel, sampleRate: stream.sampleRate, codec: stream.codec }, null);
+      this.broadcast(gid, {
+        type: 'MIC_STATUS',
+        userId: ws.user.userId,
+        isSpeaking: true,
+        channel: stream.channel,
+        ts: t,
+      });
       return;
     }
 
@@ -758,15 +789,22 @@ class Hub {
     if (pkt.kind === VOICE_END) this._endStream(gid, stream, 'end');
   }
 
-  _hdr(s) { return { streamId: s.streamId, from: s.from, fromName: s.fromName, to: s.to, ts: Date.now() }; }
+  _hdr(s) { return { streamId: s.streamId, from: s.from, fromName: s.fromName, to: s.to, channel: s.channel || 'ALL', ts: Date.now() }; }
 
   _relay(gid, stream, kind, header, payload) {
     const set = this.rooms.get(gid);
     if (!set) return;
     const frame = encodeVoice(kind, header, payload);
+    const room = this.convoys.rooms.get(gid);
     for (const client of set) {
       if (client === stream.ws || client.readyState !== WebSocket.OPEN) continue;
       if (stream.to && client.user.userId !== stream.to) continue; // 1:1 — only the chosen rider hears it
+      if (stream.channel === 'LEAD_ONLY') {
+        const rider = room && room.riders ? room.riders.get(client.user.userId) : null;
+        const role = rider ? rider.role : client.user.role;
+        const isLeadOrSweeper = role === 'LEAD' || role === 'SWEEPER' || (room && room.meta && room.meta.createdByUserId === client.user.userId) || client.user.role === 'ADMIN' || client.user.role === 'MASTER_ADMIN';
+        if (!isLeadOrSweeper) continue;
+      }
       if (client.bufferedAmount > 512 * 1024) continue; // slow link: drop audio rather than build latency
       client.send(frame);
     }
@@ -780,6 +818,12 @@ class Hub {
     }
     if (stream.ws.voiceStream === stream) stream.ws.voiceStream = null;
     this._relay(gid, stream, VOICE_END, { ...this._hdr(stream), reason }, null);
+    this.broadcast(gid, {
+      type: 'MIC_STATUS',
+      userId: stream.from,
+      isSpeaking: false,
+      ts: Date.now(),
+    });
     const durationMs = Date.now() - stream.startedAt;
     if (stream.frames > 0) {
       this.repo.logVoiceSession({ groupId: gid, from: stream.from, to: stream.to, startedAt: stream.startedAt, durationMs, frames: stream.frames, reason });

@@ -12,6 +12,8 @@ import 'settings_service.dart';
 
 enum IntercomMode { ptt, vox }
 
+enum IntercomChannel { all, leadOnly }
+
 /// Live voice intercom over the gateway WebSocket.
 ///
 /// Sender: microphone → PCM16 mono stream (16 kHz, or 8 kHz in data saver mode, half the
@@ -51,6 +53,7 @@ class IntercomService extends ChangeNotifier {
   bool _transmitting = false; // a stream is open to the gateway
   bool _micOpen = false; // recorder is running (VOX keeps it open)
   IntercomMode _mode = IntercomMode.ptt;
+  IntercomChannel _channel = IntercomChannel.all;
   String? _talkTargetUserId; // null == everyone
   String? _talkTargetName;
   int _seq = 0;
@@ -69,11 +72,16 @@ class IntercomService extends ChangeNotifier {
   String? _activeSpeakerId;
   String? _activeSpeakerName;
   bool _activeIsPrivate = false;
+  IntercomChannel _activeChannel = IntercomChannel.all;
   DateTime _lastRxAt = DateTime.fromMillisecondsSinceEpoch(0);
   Timer? _rxIdleTimer;
   final Queue<Uint8List> _jitter = Queue<Uint8List>();
   int _queuedBytes = 0;
   bool _draining = false;
+
+  // ---- per-rider states ----
+  final Map<String, bool> _speakingRiders = {};
+  final Map<String, bool> _mutedRiders = {};
 
   // ---- public getters ----
   bool get isMicMuted => _micMuted;
@@ -81,6 +89,9 @@ class IntercomService extends ChangeNotifier {
   bool get isTransmitting => _transmitting;
   bool get isVoxArmed => _mode == IntercomMode.vox && _micOpen;
   IntercomMode get mode => _mode;
+  IntercomChannel get channel => _channel;
+  IntercomChannel get activeChannel => _activeChannel;
+  bool get isReceivingLeadOnly => isReceiving && _activeChannel == IntercomChannel.leadOnly;
   String? get talkTargetUserId => _talkTargetUserId;
   String? get talkTargetName => _talkTargetName;
   bool get isPrivateTalk => _talkTargetUserId != null;
@@ -91,11 +102,21 @@ class IntercomService extends ChangeNotifier {
   String? get busyWith => _busyWith;
   bool get isOnline => _rt.isConnected;
 
+  bool isRiderSpeaking(String uid) => _speakingRiders[uid] == true;
+  bool isRiderMuted(String uid) => _mutedRiders[uid] == true;
+
   // ---------------------------------------------------------------- config
   void setMode(IntercomMode m) {
     if (_mode == m) return;
     if (_mode == IntercomMode.vox) stopVox();
     _mode = m;
+    notifyListeners();
+  }
+
+  void setChannel(IntercomChannel ch) {
+    if (_channel == ch) return;
+    if (_transmitting) endTransmission();
+    _channel = ch;
     notifyListeners();
   }
 
@@ -113,6 +134,7 @@ class IntercomService extends ChangeNotifier {
       if (_transmitting) endTransmission();
       if (_mode == IntercomMode.vox) stopVox();
     }
+    _rt.send({'type': 'MIC_STATE', 'muted': v});
     notifyListeners();
   }
 
@@ -209,6 +231,7 @@ class IntercomService extends ChangeNotifier {
       'to': _talkTargetUserId,
       'sampleRate': _micRate,
       'codec': 'pcm16',
+      'channel': _channel == IntercomChannel.leadOnly ? 'LEAD_ONLY' : 'ALL',
     });
     notifyListeners();
   }
@@ -345,6 +368,8 @@ class IntercomService extends ChangeNotifier {
         _activeSpeakerId = p.from;
         _activeSpeakerName = p.fromName;
         _activeIsPrivate = p.isPrivate;
+        _activeChannel = p.isLeadOnly ? IntercomChannel.leadOnly : IntercomChannel.all;
+        if (p.from.isNotEmpty) _speakingRiders[p.from] = true;
         _jitter.clear();
         _queuedBytes = 0;
         _lastRxAt = DateTime.now();
@@ -359,6 +384,8 @@ class IntercomService extends ChangeNotifier {
           _activeSpeakerId = p.from;
           _activeSpeakerName = p.fromName;
           _activeIsPrivate = p.isPrivate;
+          _activeChannel = p.isLeadOnly ? IntercomChannel.leadOnly : IntercomChannel.all;
+          if (p.from.isNotEmpty) _speakingRiders[p.from] = true;
           _ensurePlayer(p.sampleRate).ignore();
           notifyListeners();
         }
@@ -381,6 +408,7 @@ class IntercomService extends ChangeNotifier {
         break;
       case VoiceKind.end:
         if (p.streamId == _activeStreamId) {
+          if (p.from.isNotEmpty) _speakingRiders[p.from] = false;
           _rxIdleTimer?.cancel();
           // Let the buffered tail play out, then clear the "speaking" badge.
           _rxIdleTimer = Timer(const Duration(milliseconds: 400), () => _resetPlayback(clearSpeaker: true));
@@ -395,10 +423,12 @@ class IntercomService extends ChangeNotifier {
     _jitter.clear();
     _queuedBytes = 0;
     if (clearSpeaker) {
+      if (_activeSpeakerId != null) _speakingRiders[_activeSpeakerId!] = false;
       _activeStreamId = null;
       _activeSpeakerId = null;
       _activeSpeakerName = null;
       _activeIsPrivate = false;
+      _activeChannel = IntercomChannel.all;
       notifyListeners();
     }
   }
@@ -413,6 +443,17 @@ class IntercomService extends ChangeNotifier {
         notifyListeners();
       });
       notifyListeners();
+    } else if (e['type'] == 'MIC_STATUS') {
+      final uid = e['userId']?.toString();
+      if (uid != null && uid.isNotEmpty) {
+        if (e.containsKey('isSpeaking')) {
+          _speakingRiders[uid] = e['isSpeaking'] == true;
+        }
+        if (e.containsKey('micMuted')) {
+          _mutedRiders[uid] = e['micMuted'] == true;
+        }
+        notifyListeners();
+      }
     } else if (e['type'] == 'RIDER_LEFT' && e['userId'] == _talkTargetUserId) {
       setTalkTarget(); // our private partner left → back to everyone
     } else if (e['type'] == 'DISSOLVED' || e['type'] == 'LEFT') {
@@ -427,6 +468,9 @@ class IntercomService extends ChangeNotifier {
     await _closeMic();
     _talkTargetUserId = null;
     _talkTargetName = null;
+    _channel = IntercomChannel.all;
+    _speakingRiders.clear();
+    _mutedRiders.clear();
     _resetPlayback(clearSpeaker: true);
   }
 

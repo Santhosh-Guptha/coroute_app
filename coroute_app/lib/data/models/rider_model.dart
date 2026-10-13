@@ -69,6 +69,12 @@ class RiderModel {
   /// Tracking confidence for tunnel coasting and GPS degradation (REQ-03).
   final TrackingConfidence trackingConfidence;
 
+  /// Microphone hardware/software mute state.
+  final bool micMuted;
+
+  /// Whether the rider is currently broadcasting voice audio on intercom.
+  final bool isSpeaking;
+
   RiderPresence get presenceState => RiderPresence.fromWire(presence);
 
   /// The lead made this rider the sweeper (3.16).
@@ -107,6 +113,8 @@ class RiderModel {
     this.presence = '',
     this.presenceAt = 0,
     this.trackingConfidence = TrackingConfidence.gpsFix,
+    this.micMuted = false,
+    this.isSpeaking = false,
   });
 
   RiderModel copyWith({
@@ -134,6 +142,8 @@ class RiderModel {
     String? presence,
     int? presenceAt,
     TrackingConfidence? trackingConfidence,
+    bool? micMuted,
+    bool? isSpeaking,
   }) {
     return RiderModel(
       fuelUsableKm: fuelUsableKm,
@@ -162,6 +172,8 @@ class RiderModel {
       presence: presence ?? this.presence,
       presenceAt: presenceAt ?? this.presenceAt,
       trackingConfidence: trackingConfidence ?? this.trackingConfidence,
+      micMuted: micMuted ?? this.micMuted,
+      isSpeaking: isSpeaking ?? this.isSpeaking,
     );
   }
 
@@ -192,6 +204,8 @@ class RiderModel {
       if (presence.isNotEmpty) 'presence': presence,
       if (presenceAt > 0) 'presenceAt': presenceAt,
       'trackingConfidence': trackingConfidence.toWire(),
+      'micMuted': micMuted,
+      'isSpeaking': isSpeaking,
     };
   }
 
@@ -223,6 +237,8 @@ class RiderModel {
       presence: json['presence']?.toString() ?? '',
       presenceAt: (json['presenceAt'] as num?)?.toInt() ?? 0,
       trackingConfidence: TrackingConfidence.fromWire(json['trackingConfidence'] as String?),
+      micMuted: json['micMuted'] == true,
+      isSpeaking: json['isSpeaking'] == true,
     );
   }
 }

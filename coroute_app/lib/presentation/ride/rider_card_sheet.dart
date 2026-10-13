@@ -136,12 +136,17 @@ class RiderCard extends StatelessWidget {
       );
     }
 
-    // Avatar ring: red on an open SOS, amber when the position may be old, else the rider's map colour.
+    final isSpeaking = r.isSpeaking || (ic?.isRiderSpeaking(r.userId) ?? false);
+    final isMuted = r.micMuted || (ic?.isRiderMuted(r.userId) ?? false);
+
+    // Avatar ring: red on an open SOS, speaking blue/info, amber when the position may be old, else the rider's map colour.
     final Color ring = status == RiderStatus.emergency
         ? AppTheme.sos
-        : status.isStale
-            ? AppTheme.warnText
-            : (colors[r.userId] ?? AppTheme.accentText);
+        : isSpeaking
+            ? StatusColors.info
+            : status.isStale
+                ? AppTheme.warnText
+                : (colors[r.userId] ?? AppTheme.accentText);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -179,6 +184,8 @@ class RiderCard extends StatelessWidget {
                     runSpacing: 4,
                     children: [
                       RiderStatusChip(status: status, detail: detail),
+                      if (isSpeaking) const SpeakingChip()
+                      else if (isMuted) const MicMutedChip(),
                       if (inc != null && inc.kind == IncidentKind.possibleIncident) const PossibleIncidentChip(),
                       if (r.lowBattery) LowBatteryChip(level: r.batteryLevel),
                       if (r.isSweeper) const SweeperMarker(),

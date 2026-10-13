@@ -285,6 +285,57 @@ test('ISOLATION: data and audio never cross between two convoys; 1:1 voice reach
   for (const w of [w1, w2, w3, x1, x2]) w.close();
 });
 
+test('VOICE CHANNELS & MIC STATUS: Lead-Only channel restricts audio to leaders, broadcasts mic status and mic state', async () => {
+  const lead = await register('Lead Rider', 'lead-voice@coroute.test');
+  const sweeper = await register('Sweeper Rider', 'sweeper-voice@coroute.test');
+  const pack = await register('Pack Rider', 'pack-voice@coroute.test');
+  const c = (await api('POST', '/convoys', { name: 'Lead Voice Test' }, lead.token)).json;
+  await api('POST', '/convoys/join', { code: c.joinCode }, sweeper.token);
+  await api('POST', '/convoys/join', { code: c.joinCode }, pack.token);
+
+  const [wLead, wSweeper, wPack] = await Promise.all([lead, sweeper, pack].map((u) => connect(u.token)));
+  wLead.sendJson({ type: 'JOIN', groupId: c.groupId });
+  wSweeper.sendJson({ type: 'JOIN', groupId: c.groupId });
+  wPack.sendJson({ type: 'JOIN', groupId: c.groupId });
+
+  await Promise.all([wLead, wSweeper, wPack].map((w) => w.next((m) => m.type === 'SNAPSHOT')));
+
+  // Promote sweeper
+  wLead.sendJson({ type: 'ROLE_SET', clientId: 'role-voice-1', userId: sweeper.user.userId, role: 'SWEEPER' });
+  await wLead.next((m) => m.type === 'ACK');
+
+  // 1. Mic mute toggle via MIC_STATE
+  wSweeper.sendJson({ type: 'MIC_STATE', muted: true });
+  const muteMsg = await wLead.next((m) => m.type === 'MIC_STATUS' && m.userId === sweeper.user.userId);
+  assert.equal(muteMsg.micMuted, true);
+
+  // 2. Lead-Only audio: Lead transmits on LEAD_ONLY
+  const pcm = Buffer.alloc(640, 9);
+  wLead.send(encodeVoice(VOICE_START, { channel: 'LEAD_ONLY', sampleRate: 16000 }));
+  const leadSpeaking = await wSweeper.next((m) => m.type === 'MIC_STATUS' && m.userId === lead.user.userId);
+  assert.equal(leadSpeaking.isSpeaking, true);
+  assert.equal(leadSpeaking.channel, 'LEAD_ONLY');
+
+  wLead.send(encodeVoice(VOICE_FRAME, { seq: 1 }, pcm));
+  wLead.send(encodeVoice(VOICE_END, {}));
+
+  // Sweeper gets audio frame
+  const sweeperFrame = await wSweeper.next((m) => m.binary && m.binary.kind === VOICE_FRAME);
+  assert.equal(sweeperFrame.binary.payload.length, 640);
+
+  await sleep(100);
+  // Pack member receives ZERO audio frames on Lead-Only channel
+  const packAudio = wPack.inbox.filter((m) => m.binary && m.binary.kind === VOICE_FRAME);
+  assert.equal(packAudio.length, 0, 'Pack member should not receive Lead-Only audio');
+
+  // 3. Pack member forbidden from transmitting on LEAD_ONLY
+  wPack.send(encodeVoice(VOICE_START, { channel: 'LEAD_ONLY' }));
+  const err = await wPack.next((m) => m.type === 'ERROR');
+  assert.equal(err.code, 403);
+
+  for (const w of [wLead, wSweeper, wPack]) w.close();
+});
+
 test('admin: fleet view, broadcast reaches everyone, dissolve removes room', async () => {
   const admin = (await api('POST', '/auth/login', { identifier: 'admin@coroute.test', password: 'Password#123' })).json;
   const lead = await register('Lead Two', 'lead2@coroute.test');

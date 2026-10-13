@@ -40,16 +40,20 @@ class IntercomDock extends StatelessWidget {
     final ic = context.watch<IntercomService>();
     final others = convoy.riders.values.where((r) => r.userId != me.userId).toList()
       ..sort((a, b) => a.name.compareTo(b.name));
+    final isLeader = me.role == 'LEAD' || me.role == 'SWEEPER' || me.userId == convoy.createdByUserId;
 
     Widget? notice;
     if (ic.isReceiving) {
       final private = ic.activeSpeakerIsPrivate;
+      final leadOnly = ic.isReceivingLeadOnly;
       final who = ic.activeSpeakerName ?? 'A rider';
       notice = _Notice(
-        icon: private ? Icons.lock_rounded : Icons.graphic_eq_rounded,
+        icon: private ? Icons.lock_rounded : (leadOnly ? Icons.shield_rounded : Icons.graphic_eq_rounded),
         initials: ic.activeSpeakerName,
-        text: private ? '$who, private to you' : '$who is speaking',
-        color: private ? StatusColors.info : AppTheme.accentText,
+        text: private
+            ? '$who, private to you'
+            : (leadOnly ? '$who (Lead & Sweeper channel)' : '$who is speaking'),
+        color: private ? StatusColors.info : (leadOnly ? AppTheme.warnText : AppTheme.accentText),
       );
     } else if (ic.busyWith != null) {
       notice = _Notice(
@@ -67,12 +71,25 @@ class IntercomDock extends StatelessWidget {
     final talk = ic.mode == IntercomMode.ptt ? _PttButton(ic: ic, big: big) : _VoxButton(ic: ic, big: big);
     final mute = _MuteButton(ic: ic);
 
+    final channelSelector = isLeader
+        ? DsSegment<IntercomChannel>(
+            values: const [IntercomChannel.all, IntercomChannel.leadOnly],
+            selected: ic.channel,
+            label: (c) => c == IntercomChannel.all ? 'All Convoy' : 'Lead & Sweeper',
+            onChanged: (c) => ic.setChannel(c),
+          )
+        : null;
+
     if (compact) {
       return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           ?notice,
+          if (channelSelector != null) ...[
+            channelSelector,
+            const SizedBox(height: 8),
+          ],
           Row(
             children: [
               Expanded(child: _TalkTargetChip(others: others, ic: ic)),
@@ -86,8 +103,9 @@ class IntercomDock extends StatelessWidget {
       );
     }
 
+    final channelDesc = ic.channel == IntercomChannel.leadOnly ? 'Lead & Sweeper' : 'All Convoy';
     final subtitle = ic.isOnline
-        ? (ic.isPrivateTalk ? 'Private channel · ${ic.talkTargetName ?? 'rider'}' : 'Convoy radio · connected')
+        ? (ic.isPrivateTalk ? 'Private channel · ${ic.talkTargetName ?? 'rider'}' : 'Convoy radio · $channelDesc')
         : 'Convoy radio · no signal';
 
     return Material(
@@ -120,6 +138,10 @@ class IntercomDock extends StatelessWidget {
                   mute,
                 ],
               ),
+              if (channelSelector != null) ...[
+                SizedBox(height: isShort ? 8 : 12),
+                channelSelector,
+              ],
               SizedBox(height: isShort ? 10 : 18),
               talk,
               SizedBox(height: isShort ? 8 : 12),
@@ -401,15 +423,23 @@ class _PttButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final tx = ic.isTransmitting;
     final private = ic.isPrivateTalk;
+    final leadChannel = ic.channel == IntercomChannel.leadOnly;
     final Color activeColor = private ? StatusColors.info : AppTheme.warnText;
-    final label = tx ? (private ? 'PRIVATE, TALKING' : 'TALKING') : 'HOLD TO TALK';
-    final hint = tx ? 'Release to stop' : (private ? 'Only ${ic.talkTargetName ?? 'this rider'} hears you' : 'Hold while you speak');
-    final IconData icon = tx ? Icons.mic_rounded : (private ? Icons.lock_rounded : Icons.mic_none_rounded);
+    final label = tx
+        ? (private ? 'PRIVATE, TALKING' : (leadChannel ? 'LEAD TALKING' : 'TALKING'))
+        : (leadChannel ? 'LEAD & SWEEPER TALK' : 'HOLD TO TALK');
+    final hint = tx
+        ? 'Release to stop'
+        : (private
+            ? 'Only ${ic.talkTargetName ?? 'this rider'} hears you'
+            : (leadChannel ? 'Only leaders hear you' : 'Hold while you speak'));
+    final IconData icon = tx ? Icons.mic_rounded : (private ? Icons.lock_rounded : (leadChannel ? Icons.shield_rounded : Icons.mic_none_rounded));
+    final Color idleColor = leadChannel ? const Color(0xFFD97706) : AppTheme.brand;
     // Screen readers cannot hold a finger down: for them a double tap starts talking and
     // another double tap stops.
     return Semantics(
       button: true,
-      label: pttSemanticsLabel(private ? ic.talkTargetName : null),
+      label: pttSemanticsLabel(private ? ic.talkTargetName : (leadChannel ? 'leaders' : null)),
       hint: tx ? 'Double tap to stop talking' : 'Double tap to start talking',
       excludeSemantics: true,
       onTap: () {
@@ -441,7 +471,7 @@ class _PttButton extends StatelessWidget {
           curve: Motion.curve,
           height: big ? 96 : 56,
           decoration: BoxDecoration(
-            color: tx ? activeColor : AppTheme.brand,
+            color: tx ? activeColor : idleColor,
             borderRadius: BorderRadius.circular(big ? 20 : 16),
           ),
           child: Center(
@@ -508,10 +538,16 @@ class _VoxButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final armed = ic.isVoxArmed && !ic.isMicMuted;
     final tx = ic.isTransmitting;
-    final Color color = tx ? AppTheme.warnText : (armed ? AppTheme.brand : AppTheme.muted);
-    final text = tx ? 'Hands-free, sending' : (armed ? 'Hands-free on' : 'Hands-free off');
-    final hint = tx ? 'Sending while you speak' : (armed ? 'Tap to stop' : 'Tap to start');
-    final IconData icon = tx ? Icons.graphic_eq_rounded : (armed ? Icons.hearing_rounded : Icons.mic_off_rounded);
+    final leadChannel = ic.channel == IntercomChannel.leadOnly;
+    final Color armedColor = leadChannel ? const Color(0xFFD97706) : AppTheme.brand;
+    final Color color = tx ? AppTheme.warnText : (armed ? armedColor : AppTheme.muted);
+    final text = tx
+        ? (leadChannel ? 'Lead channel, sending' : 'Hands-free, sending')
+        : (armed ? (leadChannel ? 'Hands-free (Lead)' : 'Hands-free on') : 'Hands-free off');
+    final hint = tx
+        ? (leadChannel ? 'Sending to leaders' : 'Sending while you speak')
+        : (armed ? 'Tap to stop' : 'Tap to start');
+    final IconData icon = tx ? Icons.graphic_eq_rounded : (armed ? (leadChannel ? Icons.shield_rounded : Icons.hearing_rounded) : Icons.mic_off_rounded);
     final solid = tx || armed;
     final Color fg = solid ? Colors.white : AppTheme.text;
     return Semantics(

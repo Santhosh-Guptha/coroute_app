@@ -585,6 +585,13 @@ class ConvoyService extends ChangeNotifier {
   @visibleForTesting
   void debugNotificationButton(String id) => _onNotificationButton(id);
 
+  @visibleForTesting
+  void setActiveConvoyForTesting(ConvoyModel convoy) {
+    _allConvoys[convoy.groupId] = convoy;
+    _activeGroupId = convoy.groupId;
+    notifyListeners();
+  }
+
   /// SOS pressed on a notification: asks the UI to show the hold-to-send SOS screen.
   /// Never raises an SOS by itself.
   void openSosFromNotification() {
@@ -716,6 +723,18 @@ class ConvoyService extends ChangeNotifier {
       case 'ROSTER_CHANGED':
         _scheduleRosterRefresh();
         return;
+      case 'MIC_STATUS':
+        if (convoy == null) return;
+        final uid = e['userId']?.toString();
+        final r = uid == null ? null : convoy.riders[uid];
+        if (r == null) return;
+        final updatedRider = r.copyWith(
+          micMuted: e.containsKey('micMuted') ? (e['micMuted'] == true) : r.micMuted,
+          isSpeaking: e.containsKey('isSpeaking') ? (e['isSpeaking'] == true) : r.isSpeaking,
+        );
+        final riders = Map<String, RiderModel>.from(convoy.riders)..[uid!] = updatedRider;
+        _allConvoys[gid] = convoy.copyWith(riders: riders);
+        break;
       case 'MESSAGE':
         if (convoy == null || e['message'] is! Map) return;
         final msg = GroupMessageModel.fromJson(Map<String, dynamic>.from(e['message'] as Map));
