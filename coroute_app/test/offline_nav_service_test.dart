@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:coroute_app/data/models/route_model.dart';
+import 'package:coroute_app/domain/tracking/geo_math.dart';
+import 'package:coroute_app/presentation/trip_planner/widgets/organic_maps_card.dart';
 import 'package:coroute_app/data/services/offline_nav_service.dart';
 import 'package:coroute_app/domain/route/lost_rider_recovery_coordinator.dart';
 import 'package:coroute_app/presentation/ride/navigate_to.dart';
@@ -11,11 +14,15 @@ void main() {
   setUp(() {
     navigateLauncherOverride = null;
     OfflineNavService.exportOverride = null;
+    OfflineNavService.installedOverride = null;
+    OfflineNavService.downloadRegionOverride = null;
   });
 
   tearDown(() {
     navigateLauncherOverride = null;
     OfflineNavService.exportOverride = null;
+    OfflineNavService.installedOverride = null;
+    OfflineNavService.downloadRegionOverride = null;
   });
 
   group('Organic Maps URI resolution (navigate_to.dart)', () {
@@ -249,4 +256,185 @@ void main() {
       expect(triggered, isTrue);
     });
   });
+
+  group('OfflineNavService On-Demand Region Download & Route Deep Links', () {
+    test('openOrganicMapsRegionDownload generates om://map with destination and backurl', () async {
+      Uri? launchedUri;
+      OfflineNavService.downloadRegionOverride = (uri) async {
+        launchedUri = uri;
+        return true;
+      };
+
+      final ok = await OfflineNavService.openOrganicMapsRegionDownload(
+        lat: 12.971600,
+        lng: 77.594600,
+        label: 'Bangalore Fort',
+      );
+
+      expect(ok, isTrue);
+      expect(launchedUri, isNotNull);
+      expect(launchedUri!.scheme, 'om');
+      expect(launchedUri!.host, 'map');
+      expect(launchedUri!.queryParameters['v'], '1');
+      expect(launchedUri!.queryParameters['ll'], '12.971600,77.594600');
+      expect(launchedUri!.queryParameters['n'], 'Bangalore Fort');
+      expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
+    });
+
+    test('openOrganicMapsRegionDownload rejects invalid coordinates', () async {
+      var called = false;
+      OfflineNavService.downloadRegionOverride = (_) async {
+        called = true;
+        return true;
+      };
+
+      expect(await OfflineNavService.openOrganicMapsRegionDownload(lat: 0, lng: 0), isFalse);
+      expect(await OfflineNavService.openOrganicMapsRegionDownload(lat: double.nan, lng: 77.0), isFalse);
+      expect(called, isFalse);
+    });
+
+    test('openOrganicMapsRoute generates om://route with sll, dll, and backurl', () async {
+      Uri? launchedUri;
+      OfflineNavService.downloadRegionOverride = (uri) async {
+        launchedUri = uri;
+        return true;
+      };
+
+      final ok = await OfflineNavService.openOrganicMapsRoute(
+        startLat: 17.385000,
+        startLng: 78.486700,
+        destLat: 12.971600,
+        destLng: 77.594600,
+        startName: 'Hyderabad',
+        destName: 'Bangalore',
+      );
+
+      expect(ok, isTrue);
+      expect(launchedUri, isNotNull);
+      expect(launchedUri!.scheme, 'om');
+      expect(launchedUri!.host, 'route');
+      expect(launchedUri!.queryParameters['sll'], '17.385000,78.486700');
+      expect(launchedUri!.queryParameters['saddr'], 'Hyderabad');
+      expect(launchedUri!.queryParameters['dll'], '12.971600,77.594600');
+      expect(launchedUri!.queryParameters['daddr'], 'Bangalore');
+      expect(launchedUri!.queryParameters['type'], 'vehicle');
+      expect(launchedUri!.queryParameters['backurl'], 'coroute://cockpit');
+    });
+  });
+
+  group('OrganicMapsCard Widget Tests in Trip Creation', () {
+    final testPoints = [(17.385, 78.4867), (17.400, 78.5000), (17.420, 78.5200)];
+
+    testWidgets('renders empty shrink widget when route is null or approximate', (tester) async {
+      OfflineNavService.installedOverride = () async => true;
+
+      await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+          body: OrganicMapsCard(route: null),
+        ),
+      ));
+
+      expect(find.byType(OrganicMapsCard), findsOneWidget);
+      expect(find.text('Organic Maps Offline'), findsNothing);
+
+      final approxRoute = RouteModel(
+        distanceM: 5000,
+        durationS: 600,
+        polyline: GeoMath.encodePolyline(testPoints),
+        approximate: true,
+      );
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: OrganicMapsCard(route: approxRoute),
+        ),
+      ));
+
+      expect(find.text('Organic Maps Offline'), findsNothing);
+    });
+
+    testWidgets('renders Install state when Organic Maps is not installed', (tester) async {
+      OfflineNavService.installedOverride = () async => false;
+
+      final route = RouteModel(
+        distanceM: 5000,
+        durationS: 600,
+        polyline: GeoMath.encodePolyline(testPoints),
+      );
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: OrganicMapsCard(
+            route: route,
+            tripName: 'Highway Ride',
+          ),
+        ),
+      ));
+      await tester.pump();
+
+      expect(find.text('Organic Maps Companion'), findsOneWidget);
+      expect(find.text('OFFLINE'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Install'), findsOneWidget);
+    });
+
+    testWidgets('renders READY state with Download Map and Sync Route when installed', (tester) async {
+      OfflineNavService.installedOverride = () async => true;
+      Uri? downloadTarget;
+      OfflineNavService.downloadRegionOverride = (uri) async {
+        downloadTarget = uri;
+        return true;
+      };
+
+      var exportCalled = false;
+      OfflineNavService.exportOverride = ({
+        required String tripName,
+        required List<(double lat, double lng)> points,
+        List<(String name, double lat, double lng)> checkpoints = const [],
+      }) async {
+        exportCalled = true;
+        return true;
+      };
+
+      final route = RouteModel(
+        distanceM: 5000,
+        durationS: 600,
+        polyline: GeoMath.encodePolyline(testPoints),
+      );
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: OrganicMapsCard(
+            route: route,
+            tripName: 'Srisailam Ghat Run',
+            destinationPoint: (17.420, 78.5200),
+            destinationName: 'Srisailam Dam',
+            checkpoints: const [('Ghat Viewpoint', 17.400, 78.500)],
+          ),
+        ),
+      ));
+      await tester.pump();
+
+      expect(find.text('Organic Maps Offline'), findsOneWidget);
+      expect(find.text('READY'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Download Map'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Sync Route GPX'), findsOneWidget);
+
+      // Tap Download Map -> triggers on-demand regional map deep link in Organic Maps
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Download Map'));
+      await tester.pump();
+
+      expect(downloadTarget, isNotNull);
+      expect(downloadTarget!.scheme, 'om');
+      expect(downloadTarget!.host, 'map');
+      expect(downloadTarget!.queryParameters['ll'], '17.420000,78.520000');
+      expect(downloadTarget!.queryParameters['backurl'], 'coroute://cockpit');
+
+      // Tap Sync Route GPX -> triggers GPX track export
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Sync Route GPX'));
+      await tester.pump();
+
+      expect(exportCalled, isTrue);
+    });
+  });
 }
+

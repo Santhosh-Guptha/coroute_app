@@ -19,8 +19,17 @@ class OfflineNavService {
     List<(String name, double lat, double lng)> checkpoints,
   })? exportOverride;
 
+  @visibleForTesting
+  static Future<bool> Function()? installedOverride;
+
+  @visibleForTesting
+  static Future<bool> Function(Uri uri)? downloadRegionOverride;
+
   /// Checks if Organic Maps is installed and registered on the device.
-  static Future<bool> isInstalled() => isOrganicMapsInstalled();
+  static Future<bool> isInstalled() {
+    if (installedOverride != null) return installedOverride!();
+    return isOrganicMapsInstalled();
+  }
 
   /// Prompts the rider to install Organic Maps from Google Play Store or F-Droid.
   static Future<bool> openStoreInstall() async {
@@ -31,6 +40,64 @@ class OfflineNavService {
       }
       final fdroidUri = Uri.parse(organicMapsFDroidUrl);
       return await launchUrl(fdroidUri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Opens Organic Maps targeted at coordinates [lat],[lng] with a backlink
+  /// to CoRoute cockpit (`coroute://cockpit`). If the regional map is not yet
+  /// downloaded, Organic Maps immediately triggers its on-demand download prompt.
+  static Future<bool> openOrganicMapsRegionDownload({
+    required double lat,
+    required double lng,
+    String? label,
+  }) async {
+    if (!lat.isFinite || !lng.isFinite || (lat == 0 && lng == 0)) return false;
+    final name = (label ?? '').replaceAll(RegExp(r'[()\n\r]'), ' ').trim();
+    final encName = Uri.encodeComponent(name);
+    final la = lat.toStringAsFixed(6);
+    final ln = lng.toStringAsFixed(6);
+    final uri = Uri.parse('om://map?v=1&ll=$la,$ln&n=$encName&backurl=coroute://cockpit');
+    if (downloadRegionOverride != null) return downloadRegionOverride!(uri);
+    try {
+      if (await canLaunchUrl(uri)) {
+        return await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Opens Organic Maps vehicle navigation route from start to destination coordinates
+  /// with a backlink to CoRoute (`coroute://cockpit`).
+  static Future<bool> openOrganicMapsRoute({
+    required double startLat,
+    required double startLng,
+    required double destLat,
+    required double destLng,
+    String? startName,
+    String? destName,
+  }) async {
+    if (!startLat.isFinite || !startLng.isFinite || !destLat.isFinite || !destLng.isFinite) {
+      return false;
+    }
+    final sLa = startLat.toStringAsFixed(6);
+    final sLn = startLng.toStringAsFixed(6);
+    final dLa = destLat.toStringAsFixed(6);
+    final dLn = destLng.toStringAsFixed(6);
+    final sAddr = Uri.encodeComponent((startName ?? 'Start').trim());
+    final dAddr = Uri.encodeComponent((destName ?? 'Destination').trim());
+    final uri = Uri.parse(
+      'om://route?sll=$sLa,$sLn&saddr=$sAddr&dll=$dLa,$dLn&daddr=$dAddr&type=vehicle&backurl=coroute://cockpit',
+    );
+    if (downloadRegionOverride != null) return downloadRegionOverride!(uri);
+    try {
+      if (await canLaunchUrl(uri)) {
+        return await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+      return false;
     } catch (_) {
       return false;
     }

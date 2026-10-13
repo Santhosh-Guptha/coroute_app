@@ -12,6 +12,7 @@ import '../../data/services/tile_cache_service.dart';
 import '../../data/services/weather_service.dart';
 import '../../domain/safety/sun_helper.dart';
 import '../ride/ride_sheet.dart' show SaveRouteMapRow, SheetRow;
+import 'widgets/organic_maps_card.dart';
 import 'widgets/route_map_pack_card.dart';
 
 /// The last step before a ride starts: what the trip looks like (distance,
@@ -243,9 +244,11 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
               if (r != null && r.points.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: Space.s8),
-                  child: _OfflineNavigationRow(
+                  child: OrganicMapsCard(
+                    route: r,
                     tripName: widget.name,
-                    points: r.points,
+                    startPoint: r.points.isNotEmpty ? r.points.first : null,
+                    destinationPoint: r.points.length > 1 ? r.points.last : null,
                     checkpoints: widget.namedStops.map((s) => (s.$1, s.$2, s.$3)).toList(),
                   ),
                 ),
@@ -370,87 +373,6 @@ class _Note extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(child: Text(text, maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.body)),
       ],
-    );
-  }
-}
-
-class _OfflineNavigationRow extends StatefulWidget {
-  final String tripName;
-  final List<(double, double)> points;
-  final List<(String, double, double)> checkpoints;
-
-  const _OfflineNavigationRow({
-    required this.tripName,
-    required this.points,
-    required this.checkpoints,
-  });
-
-  @override
-  State<_OfflineNavigationRow> createState() => _OfflineNavigationRowState();
-}
-
-class _OfflineNavigationRowState extends State<_OfflineNavigationRow> {
-  bool _exporting = false;
-
-  Future<void> _handleTap() async {
-    if (_exporting) return;
-    setState(() => _exporting = true);
-    try {
-      final installed = await OfflineNavService.isInstalled();
-      if (!mounted) return;
-      if (!installed) {
-        final install = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: AppTheme.card,
-            title: Text('Offline Voice Navigation', style: AppText.title),
-            content: Text(
-              'Organic Maps is required for 100% offline turn-by-turn navigation in cellular dead zones. Install it now from the app store?',
-              style: AppText.body,
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text('Cancel', style: TextStyle(color: AppTheme.muted)),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Install'),
-              ),
-            ],
-          ),
-        );
-        if (install == true) {
-          await OfflineNavService.openStoreInstall();
-        }
-        return;
-      }
-
-      final ok = await OfflineNavService.exportRouteToOrganicMaps(
-        tripName: widget.tripName,
-        points: widget.points,
-        checkpoints: widget.checkpoints,
-      );
-      if (mounted && ok) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Route exported. Open in Organic Maps to download regional map.')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _exporting = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SheetRow(
-      icon: Icons.navigation_outlined,
-      title: 'Offline navigation pack',
-      subtitle: 'Prepare offline vector map & voice routing in Organic Maps',
-      trailing: _exporting
-          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-          : null,
-      onTap: _handleTap,
     );
   }
 }
