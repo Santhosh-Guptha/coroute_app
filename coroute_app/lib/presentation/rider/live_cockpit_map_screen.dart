@@ -250,7 +250,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     _essentials ??= RouteEssentialsService(api)..addListener(_essentialsChanged);
     final s = _convoys;
     final active = _guide.active;
-    await _essentials!.update(active?.last?.onLine == false ? null : _guide.activeRoute,
+    final c = s?.allConvoys[widget.convoyId];
+    final routeToUse = _guide.activeRoute ?? c?.route;
+    await _essentials!.update(routeToUse,
       fromM: active?.matched?.alongM ?? 0, online: s?.isOnline ?? false,
       lowData: s?.settings?.lowData ?? false, selectedCategory: category ?? _essentials!.category, force: force);
   }
@@ -351,6 +353,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       s.addListener(_onConvoyUpdate);
       _onConvoyUpdate();
       _onFocusRequest();
+      _syncEssentials(category: 'FUEL', force: true);
     });
   }
 
@@ -391,7 +394,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     final convoy = s.allConvoys[widget.convoyId];
     final uid = _auth?.currentUserId ?? s.myUserId ?? '';
     if (convoy == null || uid.isEmpty) return;
-    if (_rideEssentials != null) return;
+    if (_rideEssentials != null) {
+      if (_essentials?.snapshot == null && convoy.route != null) {
+        _syncEssentials(category: 'FUEL');
+      }
+      return;
+    }
     _guide.setConvoy(convoy, uid);
     if (!s.isRealGpsActive) return;
     final life = WidgetsBinding.instance.lifecycleState;
@@ -1692,7 +1700,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           final estimate = safety?.estimatedUsableKm;
           final profile = settings?.fuelProfile;
           final nearestFuel = _essentials?.upcoming.where((e) => e.category == 'FUEL').firstOrNull;
-          final fuelAheadM = nearestFuel?.aheadM(_essentials?.progressM ?? 0);
+          final rawAheadM = nearestFuel?.aheadM(_essentials?.progressM ?? 0);
+          final fuelAheadM = nearestFuel != null
+              ? ((rawAheadM != null && rawAheadM > 0)
+                  ? rawAheadM
+                  : (me.lat != 0 && me.lng != 0 ? GeoMath.haversine(me.lat, me.lng, nearestFuel.lat, nearestFuel.lng) : null))
+              : null;
 
           return SafetyFuelCard(
             estimatedUsableKm: estimate,

@@ -108,6 +108,7 @@ void main() {
 
     expect(find.text('Low Fuel Warning'), findsOneWidget);
     expect(find.text('Estimated ~42 km usable range left'), findsOneWidget);
+    expect(addedStation, isNull);
   });
 
   testWidgets('MinimalCockpitSettingsCards renders all 4 structured cards', (tester) async {

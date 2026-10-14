@@ -55,7 +55,14 @@ class CockpitActionStack extends StatelessWidget {
     final progressM = essentials?.progressM ?? 0;
     final upcomingFuel = essentials?.upcoming.where((e) => e.category == 'FUEL').toList() ?? [];
     final nearestStation = upcomingFuel.isNotEmpty ? upcomingFuel.first : null;
-    final fuelAheadM = nearestStation?.aheadM(progressM);
+    final rawAheadM = nearestStation?.aheadM(progressM);
+    final fuelAheadM = nearestStation != null
+        ? ((rawAheadM != null && rawAheadM > 0)
+            ? rawAheadM
+            : (me.lat != 0 && me.lng != 0
+                ? GeoMath.haversine(me.lat, me.lng, nearestStation.lat, nearestStation.lng)
+                : null))
+        : null;
     final fuelAheadKm = (fuelAheadM != null && fuelAheadM > 0) ? fuelAheadM / 1000 : null;
 
     final isLowFuel = usableKm != null && (usableKm <= 60 || (fuelAheadKm != null && fuelAheadKm > usableKm));
@@ -75,11 +82,51 @@ class CockpitActionStack extends StatelessWidget {
             _showFuelQuickSheet(
               context,
               usableKm: usableKm,
-              stations: upcomingFuel.take(3).toList(),
+              stations: upcomingFuel.take(4).toList(),
               progressM: progressM,
+              riderLat: me.lat,
+              riderLng: me.lng,
               onAddStationStop: onAddStationStop,
               onOpenFuelSheet: onOpenFuelSheet,
             );
+          },
+        ),
+      );
+    } else if (nearestStation != null && fuelAheadM != null) {
+      final rangeText = usableKm != null ? ' · ${usableKm.round()} km left' : '';
+      items.add(
+        _ActionPill(
+          icon: Icons.local_gas_station_rounded,
+          iconColor: Colors.white,
+          accentColor: const Color(0xFFD97706),
+          title: 'NEXT FUEL · in ${formatDistanceRounded(fuelAheadM)}$rangeText',
+          subtitle: '${nearestStation.name} · Tap to route',
+          onTap: () {
+            HapticFeedback.lightImpact();
+            _showFuelQuickSheet(
+              context,
+              usableKm: usableKm,
+              stations: upcomingFuel.take(4).toList(),
+              progressM: progressM,
+              riderLat: me.lat,
+              riderLng: me.lng,
+              onAddStationStop: onAddStationStop,
+              onOpenFuelSheet: onOpenFuelSheet,
+            );
+          },
+        ),
+      );
+    } else if (usableKm != null && usableKm <= 100) {
+      items.add(
+        _ActionPill(
+          icon: Icons.local_gas_station_rounded,
+          iconColor: Colors.white,
+          accentColor: AppTheme.warnText,
+          title: 'FUEL · ${usableKm.round()} km range',
+          subtitle: 'Tap to view petrol stations',
+          onTap: () {
+            HapticFeedback.lightImpact();
+            onOpenFuelSheet?.call();
           },
         ),
       );
@@ -208,9 +255,11 @@ class CockpitActionStack extends StatelessWidget {
 
   void _showFuelQuickSheet(
     BuildContext context, {
-    required double usableKm,
+    double? usableKm,
     required List<RouteEssential> stations,
     required double progressM,
+    double? riderLat,
+    double? riderLng,
     Function(RouteEssential station)? onAddStationStop,
     VoidCallback? onOpenFuelSheet,
   }) {
@@ -219,6 +268,7 @@ class CockpitActionStack extends StatelessWidget {
       backgroundColor: AppTheme.card,
       shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),
       builder: (ctx) {
+        final isLow = usableKm != null && usableKm <= 60;
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(Space.s24, Space.s16, Space.s24, Space.s24),
@@ -242,19 +292,30 @@ class CockpitActionStack extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(Space.s8),
                       decoration: BoxDecoration(
-                        color: AppTheme.sos.withOpacity(0.15),
+                        color: (isLow ? AppTheme.sos : AppTheme.brand).withOpacity(0.15),
                         shape: BoxShape.circle,
                       ),
-                      child: Icon(Icons.local_gas_station_rounded, color: AppTheme.sos, size: 28),
+                      child: Icon(
+                        Icons.local_gas_station_rounded,
+                        color: isLow ? AppTheme.sos : AppTheme.brand,
+                        size: 28,
+                      ),
                     ),
                     const SizedBox(width: Space.s12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Low Fuel Warning', style: AppText.title),
-                          Text('Estimated ~${usableKm.round()} km usable range left',
-                              style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.bold)),
+                          Text(isLow ? 'Low Fuel Warning' : 'Corridor Fuel Stations', style: AppText.title),
+                          Text(
+                            usableKm != null
+                                ? 'Estimated ~${usableKm.round()} km usable range left'
+                                : 'Upcoming petrol bunks along active route',
+                            style: AppText.caption.copyWith(
+                              color: isLow ? AppTheme.sos : AppTheme.accentText,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -277,6 +338,8 @@ class CockpitActionStack extends StatelessWidget {
                     _StationRow(
                       station: st,
                       progressM: progressM,
+                      riderLat: riderLat,
+                      riderLng: riderLng,
                       onAdd: () {
                         Navigator.pop(ctx);
                         onAddStationStop?.call(st);
@@ -399,17 +462,26 @@ class _ActionPill extends StatelessWidget {
 class _StationRow extends StatelessWidget {
   final RouteEssential station;
   final double progressM;
+  final double? riderLat;
+  final double? riderLng;
   final VoidCallback onAdd;
 
   const _StationRow({
     required this.station,
     required this.progressM,
+    this.riderLat,
+    this.riderLng,
     required this.onAdd,
   });
 
   @override
   Widget build(BuildContext context) {
-    final aheadM = station.aheadM(progressM);
+    final rawAheadM = station.aheadM(progressM);
+    final aheadM = (rawAheadM > 0)
+        ? rawAheadM
+        : (riderLat != null && riderLng != null && riderLat != 0 && riderLng != 0
+            ? GeoMath.haversine(riderLat!, riderLng!, station.lat, station.lng)
+            : rawAheadM);
     final distStr = formatDistanceRounded(aheadM);
 
     return Container(

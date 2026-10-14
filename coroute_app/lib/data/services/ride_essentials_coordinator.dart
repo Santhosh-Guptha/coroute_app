@@ -104,7 +104,7 @@ class RideEssentialsCoordinator extends ChangeNotifier {
       _feed();
       _feeding = false;
     }
-    refresh().ignore();
+    refresh(force: session != null).ignore();
   }
 
   void _onFix(TrackPoint fix) {
@@ -143,10 +143,14 @@ class RideEssentialsCoordinator extends ChangeNotifier {
 
   Future<void> refresh({String? category, bool force = false, bool allowNetwork = true}) {
     essentials.groupId = groupId;
-    final policy = port.activeConvoy?.featurePolicy;
-    final valid = policy?.essentialsEnabled != false && hasCurrentPosition && _guide.active?.last?.onLine == true;
-    return essentials.update(valid ? _guide.activeRoute : null,
-        fromM: valid ? _guide.active!.matched!.alongM : 0,
+    final convoy = port.activeConvoy;
+    final policy = convoy?.featurePolicy;
+    final routeToUse = _guide.activeRoute ?? convoy?.route;
+    final hasRoute = routeToUse != null && !routeToUse.approximate && routeToUse.points.length >= 2;
+    final valid = policy?.essentialsEnabled != false && hasRoute;
+    final progressM = _guide.active?.matched?.alongM ?? 0.0;
+    return essentials.update(valid ? routeToUse : null,
+        fromM: progressM,
         online: port.isOnline,
         lowData: !allowNetwork || policy?.autoDiscovery == false || settings.lowData || port.conservingBattery,
         selectedCategory: category ?? essentials.category,

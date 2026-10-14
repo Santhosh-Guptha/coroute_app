@@ -78,8 +78,11 @@ class RouteEssentialsService extends ChangeNotifier {
     offline = !online;
     category = selectedCategory;
     if (route == null || route.approximate || route.points.length < 2) {
-      _generation++; _key = null; snapshot = null; loading = false;
-      error = 'A calculated road route is needed.'; notifyListeners(); return;
+      if (_key != null) {
+        _generation++; _key = null; loading = false;
+        error = 'A calculated road route is needed.'; notifyListeners();
+      }
+      return;
     }
     // Store the exact geometry in the key: no hash collision can resurrect another route.
     final key = '${route.polyline}|$category|${progressM ~/ 5000}';
@@ -111,7 +114,7 @@ class RouteEssentialsService extends ChangeNotifier {
       final raw = await api.post('/geo/essentials', {if (groupId != null) 'groupId': groupId, 'polyline': route.polyline, 'category': category, 'fromM': progressM}, const Duration(seconds: 55));
       if (_disposed || generation != _generation) return;
       final result = EssentialsSnapshot.fromJson(raw);
-      if (result == null || result.category != category || result.fromM > progressM || result.toM < progressM || result.fetchedAt > _clock() + 60000) throw const FormatException('Invalid essentials response');
+      if (result == null || result.category != category || result.fromM > progressM + 5000 || result.toM < progressM - 5000 || result.fetchedAt > _clock() + 60000) throw const FormatException('Invalid essentials response');
       snapshot = result; _failures = 0;
       // Stale server fallback is usable offline, but must not cause immediate refresh loops.
       _retryAt = _clock() + const Duration(minutes: 2).inMilliseconds;

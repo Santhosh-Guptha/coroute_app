@@ -53,8 +53,9 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const geo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
   // Dedicated queue: background POI checks never block emergency hospital routing.
   const essentialsGeo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
+  const overpassUrl = process.env.ESSENTIALS_OVERPASS_URL || "https://overpass-api.de/api/interpreter";
   const essentials = new EssentialsService({ repo,
-    places: process.env.ESSENTIALS_OVERPASS_URL ? new OverpassPlacesProvider({ url: process.env.ESSENTIALS_OVERPASS_URL, ...(geoFetch ? { fetchImpl: geoFetch } : {}) }) : null,
+    places: new OverpassPlacesProvider({ url: overpassUrl, ...(geoFetch ? { fetchImpl: geoFetch } : {}) }),
     routing: (wp) => essentialsGeo.route(wp),
   });
   convoys.router = (wp) => geo.route(wp);
