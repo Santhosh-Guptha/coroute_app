@@ -23,6 +23,7 @@ import '../widgets/data_saver_tile.dart';
 import 'appearance_sheet.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
+import '../trip_planner/offline_map_manager_screen.dart';
 
 /// The Profile tab: who you are, then every setting in one place.
 /// Each item (theme, data saver, permissions, sign out, version) appears
@@ -321,6 +322,13 @@ class AccountScreen extends StatelessWidget {
                         title: 'Night mode',
                         value: AppearanceSheet.summary(theme),
                         onTap: () => AppearanceSheet.show(context),
+                        divider: true,
+                      ),
+                      _SettingsRow(
+                        icon: Icons.offline_pin_rounded,
+                        title: 'Offline map packs',
+                        subtitle: 'Manage downloaded corridors and tile storage',
+                        onTap: () => _push(context, const OfflineMapManagerScreen()),
                         divider: false,
                       ),
                     ],

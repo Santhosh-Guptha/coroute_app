@@ -147,7 +147,7 @@ class _Prefetcher extends TilePrefetcher {
   @override
   String? get error => err;
   @override
-  Future<void> start(List<(double, double)> line, {required String label}) async {
+  Future<void> start(List<(double, double)> line, {required String label, bool highDetail = false}) async {
     starts++;
   }
 }
@@ -430,8 +430,9 @@ void main() {
       expect(find.text('Rain likely after Warangal around 3 PM.'), findsOneWidget);
       expect(find.text(L10n.t('weather.by')), findsOneWidget);
       expect(find.text(TripReviewSheet.checkingWeather), findsNothing);
-      expect(find.text(SaveRouteMapRow.idleTitle), findsOneWidget);
-      await tester.tap(find.text(SaveRouteMapRow.idleTitle));
+      expect(find.text('Download Route Map Pack'), findsOneWidget);
+      await tester.ensureVisible(find.text('Download'));
+      await tester.tap(find.text('Download'));
       expect(pf.starts, 1);
     });
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show base64Decode;
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -9,6 +10,8 @@ import 'package:http/http.dart' as http;
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../domain/tracking/geo_math.dart';
+import '../local/saved_map_pack_store.dart';
+import '../models/saved_map_pack.dart';
 
 /// Map tiles saved on the phone (3.16). Every map reads through it, so a tile
 /// seen once (or saved along the planned route before the ride) shows again
@@ -67,7 +70,15 @@ class TileCache {
   String _path(String name) => '${dir.path}${Platform.pathSeparator}$name';
 
   int get approxBytes => _bytes;
+  double get approxMb => _bytes / (1024 * 1024);
   int get count => _index.length;
+
+  /// Deletes a set of specific tiles from disk and the memory index.
+  Future<void> deleteTiles(Iterable<(int, int, int)> tiles) async {
+    for (final t in tiles) {
+      await _delete(nameOf(t.$1, t.$2, t.$3));
+    }
+  }
 
   /// The saved tile, when it exists and is not older than [maxAgeDays]. Cheap (memory index).
   File? lookup(int z, int x, int y, {int maxAgeDays = SafetyConstants.tileMaxAgeDays}) {
@@ -161,7 +172,7 @@ class _TileEntry {
 /// app's User-Agent, as the OSM tile policy asks), saved after the download.
 /// A failed download behaves like [NetworkTileProvider] (error tile path).
 class CachedTileProvider extends TileProvider {
-  CachedTileProvider({TileCache? cache, http.Client? client})
+  CachedTileProvider({TileCache? cache, http.Client? client, this.offlineOnly = false})
       : _cache = cache ?? TileCache.instance,
         _client = client ?? http.Client(),
         _ownsClient = client == null,
@@ -170,6 +181,7 @@ class CachedTileProvider extends TileProvider {
   final TileCache? _cache;
   final http.Client _client;
   final bool _ownsClient;
+  final bool offlineOnly;
 
   @override
   ImageProvider getImage(TileCoordinates coordinates, TileLayer options) => CachedTileImage(
@@ -180,6 +192,7 @@ class CachedTileProvider extends TileProvider {
         cache: _cache,
         client: _client,
         headers: headers,
+        offlineOnly: offlineOnly,
       );
 
   @override
@@ -200,6 +213,7 @@ class CachedTileImage extends ImageProvider<CachedTileImage> {
     required this.cache,
     required this.client,
     required this.headers,
+    this.offlineOnly = false,
   });
 
   final String url;
@@ -209,6 +223,11 @@ class CachedTileImage extends ImageProvider<CachedTileImage> {
   final TileCache? cache;
   final http.Client client;
   final Map<String, String> headers;
+  final bool offlineOnly;
+
+  static final Uint8List _transparentPng = base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+  );
 
   @override
   Future<CachedTileImage> obtainKey(ImageConfiguration configuration) => SynchronousFuture<CachedTileImage>(this);
@@ -226,6 +245,9 @@ class CachedTileImage extends ImageProvider<CachedTileImage> {
       } catch (_) {
         // unreadable file: fetched again below
       }
+    }
+    if (offlineOnly) {
+      return await decode(await ui.ImmutableBuffer.fromUint8List(_transparentPng));
     }
     final uri = Uri.parse(url);
     final res = await client.get(uri, headers: headers).timeout(SafetyConstants.prefetchTimeout);
@@ -291,10 +313,10 @@ class TilePrefetcher extends ChangeNotifier {
   bool get complete => !_running && _finishedAt > 0 && _error == null && _total > 0 && _done >= _total;
 
   /// Checks whether all tiles along [line] are already saved in the local cache.
-  bool isRouteCached(List<(double, double)> line) {
+  bool isRouteCached(List<(double, double)> line, {bool highDetail = false}) {
     final cache = _cache;
     if (cache == null || line.isEmpty) return false;
-    final tiles = tilesAlong(line);
+    final tiles = tilesAlong(line, highDetail: highDetail);
     if (tiles.isEmpty) return false;
     for (final t in tiles) {
       if (cache.lookup(t.$1, t.$2, t.$3) == null) {
@@ -305,10 +327,10 @@ class TilePrefetcher extends ChangeNotifier {
   }
 
   /// Counts how many tiles along [line] are already saved in the local cache.
-  int countCachedTiles(List<(double, double)> line) {
+  int countCachedTiles(List<(double, double)> line, {bool highDetail = false}) {
     final cache = _cache;
     if (cache == null || line.isEmpty) return 0;
-    final tiles = tilesAlong(line);
+    final tiles = tilesAlong(line, highDetail: highDetail);
     var count = 0;
     for (final t in tiles) {
       if (cache.lookup(t.$1, t.$2, t.$3) != null) {
@@ -328,23 +350,34 @@ class TilePrefetcher extends ChangeNotifier {
   }
 
   /// The tiles to save: for every point sampled each [SafetyConstants.prefetchSampleM]
-  /// along [line], its tile at each zoom plus the 8 neighbours at the highest zoom
-  /// (nothing extra at the overview zoom). Deduped, route order. Over [maxTiles], the
-  /// highest-zoom tiles from the far end go first.
+  /// along [line], its tile at each zoom plus corridor neighbours.
+  /// When [highDetail] is true, includes zooms 16 & 17 for street names, junction labels,
+  /// and landmarks up to [SafetyConstants.prefetchMaxTilesHighDetail].
   static Set<(int, int, int)> tilesAlong(
     List<(double, double)> line, {
-    List<int> zooms = SafetyConstants.prefetchZooms,
-    int maxTiles = SafetyConstants.prefetchMaxTiles,
+    List<int>? zooms,
+    int? maxTiles,
+    bool highDetail = false,
   }) {
-    if (line.isEmpty || zooms.isEmpty) return <(int, int, int)>{};
-    final detail = zooms.reduce(math.max);
+    final effectiveZooms = zooms ?? (highDetail ? SafetyConstants.prefetchZoomsHighDetail : SafetyConstants.prefetchZooms);
+    final effectiveMaxTiles = maxTiles ?? (highDetail ? SafetyConstants.prefetchMaxTilesHighDetail : SafetyConstants.prefetchMaxTiles);
+    if (line.isEmpty || effectiveZooms.isEmpty) return <(int, int, int)>{};
+    final detail = effectiveZooms.reduce(math.max);
     final samples = _sample(line, SafetyConstants.prefetchSampleM);
     final out = <(int, int, int)>{};
-    for (final p in samples) {
-      for (final z in zooms) {
+    for (var i = 0; i < samples.length; i++) {
+      final p = samples[i];
+      final isKeyPoint = i == 0 || i == samples.length - 1 || (i % 5 == 0);
+      for (final z in effectiveZooms) {
         final t = tileOf(p.$1, p.$2, z);
         out.add((z, t.$1, t.$2));
-        if (z == detail) {
+
+        final shouldExpandNeighbors = (!highDetail && z == detail) ||
+            (highDetail && z == 14) ||
+            (highDetail && z == 16 && isKeyPoint) ||
+            (highDetail && z == 17 && (i == 0 || i == samples.length - 1));
+
+        if (shouldExpandNeighbors) {
           final n = 1 << z;
           for (var dx = -1; dx <= 1; dx++) {
             for (var dy = -1; dy <= 1; dy++) {
@@ -357,13 +390,18 @@ class TilePrefetcher extends ChangeNotifier {
         }
       }
     }
-    if (out.length <= maxTiles) return out;
+    if (out.length <= effectiveMaxTiles) return out;
     // Keep the overview everywhere; drop detail tiles from the far end until it fits.
     final list = out.toList();
-    for (var i = list.length - 1; i >= 0 && list.length > maxTiles; i--) {
+    for (var i = list.length - 1; i >= 0 && list.length > effectiveMaxTiles; i--) {
       if (list[i].$1 == detail) list.removeAt(i);
     }
-    while (list.length > maxTiles) {
+    if (highDetail) {
+      for (var i = list.length - 1; i >= 0 && list.length > effectiveMaxTiles; i--) {
+        if (list[i].$1 == 16) list.removeAt(i);
+      }
+    }
+    while (list.length > effectiveMaxTiles) {
       list.removeLast();
     }
     return list.toSet();
@@ -390,7 +428,11 @@ class TilePrefetcher extends ChangeNotifier {
 
   /// Saves the tiles along [line]. Returns when the job ends (done, cancelled or
   /// stopped after [SafetyConstants.prefetchMaxFailures] failures in a row).
-  Future<void> start(List<(double, double)> line, {required String label}) async {
+  Future<void> start(
+    List<(double, double)> line, {
+    required String label,
+    bool highDetail = false,
+  }) async {
     if (_running) return;
     final cache = _cache;
     _label = label;
@@ -399,7 +441,7 @@ class TilePrefetcher extends ChangeNotifier {
     _saved = 0;
     _failed = 0;
     _error = cache == null ? 'storage' : null;
-    final tiles = cache == null ? const <(int, int, int)>[] : tilesAlong(line).toList();
+    final tiles = cache == null ? const <(int, int, int)>[] : tilesAlong(line, highDetail: highDetail).toList();
     _total = tiles.length;
     if (cache == null || tiles.isEmpty) {
       _finishedAt = _clock();
@@ -439,6 +481,21 @@ class TilePrefetcher extends ChangeNotifier {
       }
       if (pending.isNotEmpty) await Future.wait(pending.toList());
       if (consecutive >= SafetyConstants.prefetchMaxFailures) _error = 'network';
+      if (_error == null && !_cancel && _done >= _total) {
+        try {
+          final pack = SavedMapPack(
+            id: 'pack_${DateTime.now().millisecondsSinceEpoch}',
+            name: label,
+            downloadedAt: DateTime.now(),
+            highDetail: highDetail,
+            zooms: highDetail ? SafetyConstants.prefetchZoomsHighDetail : SafetyConstants.prefetchZooms,
+            tileCount: _total,
+            estimatedBytes: _total * 25 * 1024,
+            polyline: line,
+          );
+          SavedMapPackStore.save(pack).ignore();
+        } catch (_) {}
+      }
     } finally {
       _running = false;
       _finishedAt = _clock();

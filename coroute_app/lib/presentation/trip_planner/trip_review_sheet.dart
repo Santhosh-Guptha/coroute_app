@@ -6,7 +6,6 @@ import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/route_model.dart';
-import '../../data/services/offline_nav_service.dart';
 import '../../data/services/settings_service.dart';
 import '../../data/services/tile_cache_service.dart';
 import '../../data/services/weather_service.dart';

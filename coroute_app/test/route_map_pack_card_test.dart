@@ -47,13 +47,13 @@ class FakeTilePrefetcher extends TilePrefetcher {
   String? get error => fakeError;
 
   @override
-  bool isRouteCached(List<(double, double)> line) => fakeCached;
+  bool isRouteCached(List<(double, double)> line, {bool highDetail = false}) => fakeCached;
 
   @override
-  int countCachedTiles(List<(double, double)> line) => fakeCachedCount;
+  int countCachedTiles(List<(double, double)> line, {bool highDetail = false}) => fakeCachedCount;
 
   @override
-  Future<void> start(List<(double, double)> line, {required String label}) async {
+  Future<void> start(List<(double, double)> line, {required String label, bool highDetail = false}) async {
     startCalled = true;
   }
 
