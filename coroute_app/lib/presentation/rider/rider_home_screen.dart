@@ -265,13 +265,13 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
           for (final t in HomeTab.values) _built.contains(t) ? _body(t, groupId) : const SizedBox.shrink(),
         ],
       ),
-      // Canvas bottom nav: bg fill, hairline top border, rounded icons, 12/800 labels
-      // (colours and weights come from the NavigationBarTheme in AppTheme).
-      bottomNavigationBar: DecoratedBox(
-        decoration: BoxDecoration(
-          color: AppTheme.bg,
-          border: Border(top: BorderSide(color: AppTheme.border, width: 1)),
-        ),
+      bottomNavigationBar: (groupId != null && _tab == HomeTab.ride)
+          ? null
+          : DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppTheme.bg,
+                border: Border(top: BorderSide(color: AppTheme.border, width: 1)),
+              ),
         child: NavigationBar(
           selectedIndex: _tab.index,
           onDestinationSelected: (i) => _select(HomeTab.values[i]),

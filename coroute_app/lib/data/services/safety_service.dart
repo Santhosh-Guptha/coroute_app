@@ -453,7 +453,13 @@ class SafetyService extends ChangeNotifier {
   /// Metres ridden since the last fill (item 2), for the ride sheet line.
   bool get fuelTrackingActive => _rideActive;
   double get riddenSinceFillM => _fuel.riddenM;
-  double? get estimatedUsableKm => _fuel.usableKm(_settings.fuelProfile);
+  double? get estimatedUsableKm {
+    final p = _settings.fuelProfile;
+    final explicit = _fuel.usableKm(p);
+    if (explicit != null) return explicit;
+    if (p.valid) return p.usableKm(p.rangeKm, _fuel.riddenM);
+    return null;
+  }
   bool get fuelEstimateUncertain => _fuel.uncertain;
   int get fuelConfirmedAt => _fuel.lastFillAt;
   bool refuel({bool full = false, double? addedL, double? currentL, double? currentKm}) {

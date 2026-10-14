@@ -3,7 +3,6 @@ import '../../data/services/route_essentials_service.dart';
 import 'package:coroute_app/presentation/ride/essentials_sheet.dart';
 import 'package:coroute_app/presentation/ride/fuel_sheet.dart';
 import 'package:coroute_app/presentation/ride/guardian_sheet.dart';
-import 'package:coroute_app/domain/safety/fuel_profile.dart';
 import 'dart:async';
 import '../ride/navigate_to.dart';
 import 'package:flutter/material.dart';
@@ -77,11 +76,14 @@ import '../widgets/intercom_dock.dart';
 import '../../data/services/intercom_service.dart';
 import '../widgets/rider_status_sheet.dart';
 import 'rider_home_screen.dart';
+import 'widgets/cockpit_action_stack.dart';
 import 'widgets/cockpit_hud_toast.dart';
-import 'widgets/cockpit_shortcuts_dock.dart';
 import 'widgets/coroute_orbit_control.dart';
 import 'widgets/glove_quick_settings_modal.dart';
 import 'widgets/minimal_cockpit_overlay.dart';
+import 'widgets/minimal_cockpit_settings_cards.dart';
+import 'widgets/minimal_cockpit_stats_row.dart';
+import 'widgets/minimal_hold_to_talk_bar.dart';
 
 
 
@@ -161,7 +163,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   final Set<String> _dismissed = {};
 
   bool _autoFollow = true;
-  bool _keepScreenOn = false;
+  bool _keepScreenOn = true;
   LatLng? _lastFollowed;
   String? _selectedRiderId;
   bool _sosNoticeScheduled = false;
@@ -331,6 +333,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   void initState() {
     super.initState();
     _loadDismissed();
+    WakelockPlus.enable().catchError((e) => debugPrint('Wakelock init note: $e'));
 
     widget.focus?.addListener(_onFocusRequest);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -705,6 +708,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   /// Keeps my marker in view while auto-follow is on. Moves only when I moved
   /// more than 15 m (no constant redraws, which would cost battery).
   void _follow(RiderModel me) {
+    if (!_autoFollow && me.speedKmh >= 15) {
+      setState(() => _autoFollow = true);
+    }
     if (!_autoFollow || (me.lat == 0 && me.lng == 0)) return;
     final here = LatLng(me.lat, me.lng);
     final last = _lastFollowed;
@@ -1316,61 +1322,122 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 ),
               ),
 
-            // 5. Right-side floating controls (Portrait: brightness, recenter, toggle sheet)
-            if (!side)
+            // 5. Floating Recenter Chip (shows only when map is panned away from rider)
+            if (!side && !_autoFollow)
               ValueListenableBuilder<double>(
                 valueListenable: _sheetTop,
                 builder: (context, top, _) {
-                  final visible = top < h * 0.55;
                   return Positioned(
-                    right: Space.s12,
+                    right: Space.s16,
                     bottom: top + Space.s12,
-                    child: MapSideControls(
-                      keepScreenOn: _keepScreenOn,
-                      autoFollow: _autoFollow,
-                      onToggleKeepScreenOn: _toggleKeepScreenOn,
-                      onCentre: () {
-                        setState(() => _autoFollow = true);
-                        _lastFollowed = null;
-                        if (me.lat != 0 || me.lng != 0) {
-                          _mapController.move(LatLng(me.lat, me.lng), 16.0);
-                        }
-                      },
-                      onOpenSheet: () => _sheetKey.currentState?.toggle(),
-                      visible: visible,
+                    child: Material(
+                      color: AppTheme.card.withAlpha(230),
+                      borderRadius: BorderRadius.circular(24),
+                      elevation: 4,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(24),
+                        onTap: () {
+                          setState(() => _autoFollow = true);
+                          _lastFollowed = null;
+                          if (me.lat != 0 || me.lng != 0) {
+                            _mapController.move(LatLng(me.lat, me.lng), 16.0);
+                          }
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s8),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.my_location_rounded, size: 18, color: AppTheme.brand),
+                              const SizedBox(width: Space.s8),
+                              Text(
+                                'RECENTER',
+                                style: AppText.label.copyWith(
+                                  color: AppTheme.brand,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   );
                 },
               ),
 
-            // 6. Right-side floating controls (Landscape)
-            if (side)
+            // 6. Floating Recenter Chip (Landscape)
+            if (side && !_autoFollow)
               Positioned(
-                right: Space.s12,
-                bottom: Space.s12 + sosSize + Space.s12,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    MapControl(
-                      icon: _keepScreenOn ? Icons.light_mode_rounded : Icons.brightness_low_rounded,
-                      tooltip: _keepScreenOn ? 'Screen stays on. Tap to allow sleep.' : 'Keep screen on while riding',
-                      active: _keepScreenOn,
-                      onPressed: _toggleKeepScreenOn,
+                right: Space.s16,
+                bottom: Space.s16 + sosSize + Space.s12,
+                child: Material(
+                  color: AppTheme.card.withAlpha(230),
+                  borderRadius: BorderRadius.circular(24),
+                  elevation: 4,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(24),
+                    onTap: () {
+                      setState(() => _autoFollow = true);
+                      _lastFollowed = null;
+                      if (me.lat != 0 || me.lng != 0) _mapController.move(LatLng(me.lat, me.lng), 16.0);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.my_location_rounded, size: 18, color: AppTheme.brand),
+                          const SizedBox(width: Space.s8),
+                          Text(
+                            'RECENTER',
+                            style: AppText.label.copyWith(
+                              color: AppTheme.brand,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: Space.s12),
-                    MapControl(
-                      icon: Icons.my_location_rounded,
-                      tooltip: 'Centre on me',
-                      active: _autoFollow,
-                      onPressed: () {
-                        setState(() => _autoFollow = true);
-                        _lastFollowed = null;
-                        if (me.lat != 0 || me.lng != 0) _mapController.move(LatLng(me.lat, me.lng), 16.0);
-                      },
-                    ),
-                  ],
+                  ),
                 ),
               ),
+
+            // 6b. Right-side Dynamic Event Stack (Low Fuel Alert, Stop Suggestions, Meet Point)
+            ValueListenableBuilder<double>(
+              valueListenable: _sheetTop,
+              builder: (context, top, _) {
+                final safeTop = MediaQuery.paddingOf(context).top + 80;
+                return Positioned(
+                  right: Space.s16,
+                  top: safeTop,
+                  child: Builder(
+                    builder: (ctx) {
+                      final safety = ctx.watch<SafetyService?>();
+                      return CockpitActionStack(
+                        convoy: convoy,
+                        me: me,
+                        essentialsService: _essentials,
+                        estimatedUsableKm: safety?.estimatedUsableKm,
+                        isLead: lead,
+                        onAddStationStop: (station) async {
+                          final picked = PickedPlace(name: station.name.isEmpty ? 'Petrol Pump' : station.name, lat: station.lat, lng: station.lng, category: 'FUEL');
+                          final ok = lead ? service.addStop(picked) : service.suggestStop(picked);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Fuel stop added to route plan.' : 'Could not add stop. Check connection.')));
+                          }
+                        },
+                        onFocusLocation: (lat, lng) => _focus(lat, lng),
+                        onOpenFuelSheet: () => showFuelSheet(context),
+                        onOpenStopsSheet: () => _openStops(convoy),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
 
             // 7. Hold-to-SOS Button (always visible, bottom-left)
             ValueListenableBuilder<double>(
@@ -1487,58 +1554,46 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   Widget _sheetHeader(ConvoyModel convoy, RiderModel me, RideSnapshot snap, Duration? stoppedFor, int now, {bool guardianOn = true}) {
     void toggle() => _sheetKey.currentState?.toggle();
     final next = snap.nextStop;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // The quick-action dock (canvas: card with a row of 64 dp tiles).
-        Padding(
-          padding: const EdgeInsets.fromLTRB(Space.s12, 0, Space.s12, Space.s12),
-          child: CockpitShortcutsDock(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.s16, Space.s4, Space.s16, Space.s12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (stoppedFor != null)
+            StoppedDetails(
+              stoppedFor: stoppedFor,
+              place: RideFacts.hasPosition(me) ? '${me.lat.toStringAsFixed(5)}, ${me.lng.toStringAsFixed(5)}' : '',
+              nearby: RideFacts.nearbyCount(convoy, me.userId),
+              nearbyRadiusM: RideFacts.nearbyRadiusM,
+              nextM: next != null ? snap.nextStopM : snap.remainingM,
+              nextLabel: next != null ? 'Next stop' : 'Destination',
+              reason: riderReasonText(me),
+              onTellWhy: () => RiderStatusSheet.show(context, userId: me.userId),
+              onTap: toggle,
+            )
+          else
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: toggle,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: Space.s8),
+                child: MinimalCockpitStatsRow(
+                  convoy: convoy,
+                  me: me,
+                  snap: snap,
+                  eta: _eta(snap.eta),
+                  guardianOn: guardianOn,
+                  now: now,
+                ),
+              ),
+            ),
+          MinimalHoldToTalkBar(
             convoy: convoy,
             me: me,
-            essentialsService: _essentials,
-            settingsService: context.read<SettingsService?>(),
-            intercomService: context.read<IntercomService?>(),
-            keepScreenOn: _keepScreenOn,
-            autoFollow: _autoFollow,
-            onToggleKeepScreenOn: _toggleKeepScreenOn,
-            onToggleAutoFollow: () => setState(() => _autoFollow = !_autoFollow),
-            onEssentialsRadarTap: _openEssentials,
-            onHudToast: _showHudToast,
           ),
-        ),
-        if (stoppedFor != null)
-          StoppedDetails(
-            stoppedFor: stoppedFor,
-            place: RideFacts.hasPosition(me) ? '${me.lat.toStringAsFixed(5)}, ${me.lng.toStringAsFixed(5)}' : '',
-            nearby: RideFacts.nearbyCount(convoy, me.userId),
-            nearbyRadiusM: RideFacts.nearbyRadiusM,
-            nextM: next != null ? snap.nextStopM : snap.remainingM,
-            nextLabel: next != null ? 'Next stop' : 'Destination',
-            reason: riderReasonText(me),
-            onTellWhy: () => RiderStatusSheet.show(context, userId: me.userId),
-            onTap: toggle,
-          )
-        else
-          _RideSummaryHeader(
-            name: convoy.name,
-            paused: convoy.tripStatus == 'PAUSED',
-            remainingM: snap.remainingM,
-            eta: _eta(snap.eta),
-            riding: RideFacts.ridingCount(convoy.riders.values, nowMs: now),
-            total: convoy.riders.length,
-            spreadM: snap.spreadM,
-            guardianOn: guardianOn,
-            onTap: toggle,
-          ),
-        if (_essentials != null && convoy.activeAlerts.isEmpty)
-          EssentialsRow(service: _essentials!, onTap: _openEssentials),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(Space.s16, 0, Space.s16, Space.s12),
-          child: IntercomDock(convoy: convoy, me: me, compact: true),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -1612,34 +1667,24 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         ]),
       ],
       const SizedBox(height: Space.s16),
-      SheetRow(
-        icon: Icons.route_rounded,
-        title: 'Route and stops',
-        subtitle: convoy.suggestedStops.isEmpty ? null : '${convoy.suggestedStops.length} suggested',
-        onTap: () => _openStops(convoy),
+      NavigationToolsCard(
+        convoy: convoy,
+        onOpenStops: () => _openStops(convoy),
+        onOpenMessages: () => showMessagesSheet(context, convoyId: convoy.groupId, me: me),
+        onTurnByTurn: (hasDest || snap.nextStop != null) ? () => _launchOfflineNav(convoy, me, snap) : null,
+        saveMapWidget: (pf != null && canSaveMap)
+            ? SaveRouteMapRow(
+                running: pf.running,
+                done: pf.done,
+                total: pf.total,
+                error: pf.error,
+                onSave: () => pf.start(routeLine, label: convoy.name),
+              )
+            : null,
+        chatQueued: chatQueued,
+        isOnline: service.isOnline,
       ),
-      SheetRow(
-        icon: Icons.chat_bubble_outline_rounded,
-        title: 'Messages (${convoy.messages.length})',
-        subtitle: chatQueued > 0
-            ? (service.isOnline ? '$chatQueued sending' : '$chatQueued waiting for signal')
-            : (convoy.messages.isEmpty ? null : convoy.messages.last.text),
-        onTap: () => showMessagesSheet(context, convoyId: convoy.groupId, me: me),
-      ),
-      // 3.11 offered the stop reason at any time (set it before pulling in, clear it after
-      // moving on); the stopped details only offer it while stopped.
-      SheetRow(
-        icon: Icons.pause_circle_outline_rounded,
-        title: me.statusReason.isEmpty ? 'Tell the group why you stop' : 'Your stop reason',
-        subtitle: statusQueued == null
-            ? riderReasonText(me)
-            : QueuedLine.textFor(
-                failed: statusQueued.state == OutboxState.failed,
-                sending: service.isOnline,
-                what: riderReasonText(me).isEmpty ? null : riderReasonText(me),
-              ),
-        onTap: () => RiderStatusSheet.show(context, userId: me.userId),
-      ),
+      const SizedBox(height: Space.s12),
       Builder(
         builder: (ctx) {
           final safety = ctx.watch<SafetyService?>();
@@ -1648,114 +1693,45 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           final profile = settings?.fuelProfile;
           final nearestFuel = _essentials?.upcoming.where((e) => e.category == 'FUEL').firstOrNull;
           final fuelAheadM = nearestFuel?.aheadM(_essentials?.progressM ?? 0);
-          final fuelAheadKm = (fuelAheadM != null && fuelAheadM > 0) ? fuelAheadM / 1000 : null;
-          final advice = fuelAdvice(
-            usableKm: estimate,
-            nextKm: fuelAheadKm,
-            reliable: !(safety?.fuelEstimateUncertain ?? false),
-          );
 
-          String fuelTitle;
-          String fuelSubtitle;
-          if (estimate != null) {
-            fuelTitle = 'Fuel range: ${estimate.floor()} km remaining';
-            if (advice == FuelAdvice.rangeRisk) {
-              fuelSubtitle = 'CRITICAL: Next fuel station is beyond current usable range!';
-            } else if (fuelAheadM != null) {
-              fuelSubtitle = 'Next station in ${formatDistanceRounded(fuelAheadM)} • Tap to manage';
-            } else if (safety?.fuelEstimateUncertain == true) {
-              fuelSubtitle = 'Tracking gaps detected • Tap to update estimate';
-            } else {
-              fuelSubtitle = 'Ridden ${(safety!.riddenSinceFillM / 1000).toStringAsFixed(1)} km since fill • Tap to manage';
-            }
-          } else if (profile != null && profile.valid) {
-            fuelTitle = 'Fuel profile: ${profile.rangeKm.floor()} km full range';
-            fuelSubtitle = 'Open Fuel to set how much is left';
-          } else {
-            fuelTitle = 'Fuel estimate / refuel';
-            fuelSubtitle = 'Set up fuel capacity & mileage for range warnings';
-          }
-
-          return SheetRow(
-            key: const Key('sheet_row_fuel_status'),
-            icon: Icons.local_gas_station_rounded,
-            title: fuelTitle,
-            subtitle: fuelSubtitle,
-            onTap: () => showFuelSheet(ctx),
+          return SafetyFuelCard(
+            estimatedUsableKm: estimate,
+            profile: profile,
+            nearestFuelAheadM: fuelAheadM,
+            nearestFuelName: nearestFuel?.name,
+            fuelUncertain: safety?.fuelEstimateUncertain ?? false,
+            riddenSinceFillM: safety?.riddenSinceFillM ?? 0,
+            onOpenFuel: () => showFuelSheet(ctx),
+            onOpenGuardian: () => showGuardianSheet(context, groupId: convoy.groupId),
+            onTellWhy: () => RiderStatusSheet.show(context, userId: me.userId),
+            stopReasonText: riderReasonText(me),
+            queuedStopReason: statusQueued == null
+                ? null
+                : QueuedLine.textFor(
+                    failed: statusQueued.state == OutboxState.failed,
+                    sending: service.isOnline,
+                    what: riderReasonText(me).isEmpty ? null : riderReasonText(me),
+                  ),
           );
         },
       ),
-      SheetRow(
-        key: const Key('sheet_row_guardian'),
-        icon: Icons.shield_rounded,
-        title: 'Share Ride Guardian link',
-        subtitle: 'Live web tracking link with PIN protection for family or friends',
-        onTap: () => showGuardianSheet(context, groupId: convoy.groupId),
-        trailing: Icon(Icons.share_rounded, size: 20, color: AppTheme.accentText),
+      const SizedBox(height: Space.s12),
+      ConvoyCommsCard(
+        convoy: convoy,
+        onShareInvite: () => _shareInvite(convoy),
+        onCopyCode: () => _copyCode(convoy),
+        onOpenIntercom: () => IntercomOptions.show(context),
+        onOpenGroupSettings: () => showGroupSettings(context, convoyId: convoy.groupId),
+        onShareEta: hasDest ? () => _shareEta(convoy, snap.remainingM, snap.eta) : null,
+        etaSubtitle: _etaShareSubtitle(snap),
       ),
-      if (pf != null && canSaveMap)
-        SaveRouteMapRow(
-          running: pf.running,
-          done: pf.done,
-          total: pf.total,
-          error: pf.error,
-          onSave: () => pf.start(routeLine, label: convoy.name),
-        ),
-      if (hasDest || snap.nextStop != null)
-        SheetRow(
-          key: const Key('sheet_row_offline_nav'),
-          icon: Icons.navigation_rounded,
-          title: 'Turn-by-turn navigation',
-          subtitle: snap.nextStop != null
-              ? 'Route to ${snap.nextStop!.name.isEmpty ? "Next stop" : snap.nextStop!.name}'
-              : 'Route to ${convoy.destinationName.isEmpty ? "Destination" : convoy.destinationName}',
-          onTap: () => _launchOfflineNav(convoy, me, snap),
-        ),
-      SheetRow(icon: Icons.tune_rounded, title: 'Group settings', onTap: () => showGroupSettings(context, convoyId: convoy.groupId)),
-      SheetRow(icon: Icons.headset_mic_rounded, title: 'Intercom options', onTap: () => IntercomOptions.show(context)),
-      if (hasDest)
-        SheetRow(
-          icon: Icons.share_rounded,
-          title: 'Share my ETA',
-          subtitle: _etaShareSubtitle(snap),
-          onTap: () => _shareEta(convoy, snap.remainingM, snap.eta),
-        ),
-      InviteCodeCard(
-        code: convoy.joinCode,
-        onShare: () => _shareInvite(convoy),
-        onCopy: () => _copyCode(convoy),
-      ),
-      if (lead)
-        SheetRow(
-          icon: paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-          title: paused ? 'Resume the ride' : 'Pause the ride',
-          subtitle: paused ? 'The ride is paused' : null,
-          onTap: () => service.updateTripState(paused ? 'STARTED' : 'PAUSED'),
-          trailing: const SizedBox.shrink(),
-        ),
-      const SizedBox(height: Space.s24),
-      if (lead) ...[
-        FilledButton.icon(
-          style: FilledButton.styleFrom(
-            backgroundColor: StatusColors.critical,
-            foregroundColor: StatusColors.onCritical,
-            minimumSize: const Size.fromHeight(56),
-          ),
-          onPressed: () => _endRide(service),
-          icon: const Icon(Icons.flag_rounded),
-          label: const Text('End ride'),
-        ),
-        const SizedBox(height: Space.s12),
-      ],
-      OutlinedButton.icon(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: StatusColors.critical,
-          side: BorderSide(color: StatusColors.critical),
-          minimumSize: const Size.fromHeight(56),
-        ),
-        onPressed: () => _leaveRide(service, uid),
-        icon: const Icon(Icons.logout_rounded),
-        label: const Text('Leave ride'),
+      const SizedBox(height: Space.s16),
+      RideControlsCard(
+        isLead: lead,
+        isPaused: paused,
+        onTogglePause: () => service.updateTripState(paused ? 'STARTED' : 'PAUSED'),
+        onEndRide: () => _endRide(service),
+        onLeaveRide: () => _leaveRide(service, uid),
       ),
     ];
   }
@@ -2187,111 +2163,3 @@ String riderSemanticsLabel(RiderModel r, {required bool isMe, String statusLabel
   return statusLabel.isEmpty ? '$who, $speed' : '$who, $speed, stopped: $statusLabel';
 }
 
-/// The collapsed ride sheet while riding (canvas "ride-summary card"): the
-/// convoy name, a "N riders" tint chip and one line with the ETA, distance
-/// left, who is riding and whether Ride Guardian is on. Tap to open the
-/// sheet. Static: no animation.
-class _RideSummaryHeader extends StatelessWidget {
-  final String name;
-  final bool paused;
-  final double? remainingM;
-  final String eta;
-  final int riding;
-  final int total;
-  final double spreadM;
-  final bool guardianOn;
-  final VoidCallback onTap;
-
-  const _RideSummaryHeader({
-    required this.name,
-    required this.paused,
-    required this.remainingM,
-    required this.eta,
-    required this.riding,
-    required this.total,
-    required this.spreadM,
-    required this.guardianOn,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final left = remainingM;
-    final muted = AppText.label.copyWith(fontWeight: FontWeight.w700);
-    final strong = muted.copyWith(color: AppTheme.text);
-    final spread = total < 2 ? null : formatDistanceRounded(spreadM);
-    return Semantics(
-      container: true,
-      hint: 'Double tap to show riders and route',
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(Space.s16, 0, Space.s16, Space.s12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Semantics(
-                      header: true,
-                      child: Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppText.title.copyWith(fontSize: 17),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(10)),
-                    child: Text(
-                      '$total ${total == 1 ? 'rider' : 'riders'}',
-                      style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          if (paused)
-                            TextSpan(text: 'Paused', style: muted.copyWith(color: AppTheme.warnText))
-                          else
-                            TextSpan(text: 'ETA $eta', style: strong),
-                          if (left != null) TextSpan(text: ' · ${formatDistanceRounded(left)} left', style: muted),
-                          TextSpan(text: ' · $riding/$total riding', style: muted),
-                          if (spread != null) TextSpan(text: ' · $spread spread', style: muted),
-                        ],
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Icon(
-                    guardianOn ? Icons.verified_user_outlined : Icons.shield_outlined,
-                    size: 16,
-                    color: guardianOn ? AppTheme.accentText : AppTheme.muted,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    guardianOn ? 'Guardian on' : 'Guardian off',
-                    style: muted.copyWith(color: guardianOn ? AppTheme.accentText : AppTheme.muted),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
