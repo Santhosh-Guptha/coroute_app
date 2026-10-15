@@ -49,6 +49,35 @@ class CockpitActionStack extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = <Widget>[];
 
+    // 0. Active SOS Distress Alert (Highest Priority - Gateway or Offline P2P Mesh)
+    for (final alert in convoy.activeAlerts) {
+      if (alert.userId == me.userId || alert.resolved) continue;
+      final who = alert.userName.split(' ').first;
+      final distM = (me.lat != 0 && me.lng != 0 && alert.lat != 0 && alert.lng != 0)
+          ? GeoMath.haversine(me.lat, me.lng, alert.lat, alert.lng)
+          : null;
+      final distText = distM != null ? ' · ${formatDistanceRounded(distM)} away' : '';
+      final isMeshAlert = alert.alertId.startsWith('mesh_');
+      final sourceTag = isMeshAlert ? ' (via Mesh)' : '';
+
+      items.add(
+        _ActionPill(
+          icon: Icons.emergency_rounded,
+          iconColor: Colors.white,
+          accentColor: AppTheme.sos,
+          title: 'SOS: $who$sourceTag',
+          subtitle: '${alert.alertType}$distText · Tap to locate',
+          onTap: () {
+            HapticFeedback.heavyImpact();
+            if (onFocusLocation != null && alert.lat != 0 && alert.lng != 0) {
+              onFocusLocation!(alert.lat, alert.lng);
+            }
+          },
+        ),
+      );
+      break; // Display top critical alert first
+    }
+
     // 1. Fuel Alert / Nearest Station Check
     final usableKm = estimatedUsableKm;
     final essentials = essentialsService;

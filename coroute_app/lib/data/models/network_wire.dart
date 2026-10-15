@@ -51,7 +51,8 @@ enum EmergencySource {
   notification,
   memberReport,
   nearbyReport,
-  wearable;
+  wearable,
+  meshBeacon;
 
   String get wire => switch (this) {
         EmergencySource.manual => 'MANUAL',
@@ -61,6 +62,7 @@ enum EmergencySource {
         EmergencySource.memberReport => 'MEMBER_REPORT',
         EmergencySource.nearbyReport => 'NEARBY_REPORT',
         EmergencySource.wearable => 'WEARABLE',
+        EmergencySource.meshBeacon => 'MESH_BEACON',
       };
 
   static EmergencySource? fromWire(String? s) {

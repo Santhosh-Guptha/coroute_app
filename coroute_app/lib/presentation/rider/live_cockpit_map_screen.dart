@@ -1200,7 +1200,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 child: RideSheet(
                   key: _sheetKey,
                   onTopChanged: (v) => _sheetTop.value = v,
-                  header: _sheetHeader(convoy, me, snap, stoppedFor, now, guardianOn: guardianOn),
+                  header: _sheetHeader(convoy, me, snap, stoppedFor, now,
+                      guardianOn: guardianOn, meshPeersCount: service.p2pMeshPeerCount),
                   body: _sheetBody(convoy, service, me, uid, snap, stoppedFor, colors, statuses, lead, now,
                       offlinePlaces: offlinePlaces,
                       possibleIncident: possible,
@@ -1559,7 +1560,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     );
   }
 
-  Widget _sheetHeader(ConvoyModel convoy, RiderModel me, RideSnapshot snap, Duration? stoppedFor, int now, {bool guardianOn = true}) {
+  Widget _sheetHeader(ConvoyModel convoy, RiderModel me, RideSnapshot snap, Duration? stoppedFor, int now, {bool guardianOn = true, int meshPeersCount = 0}) {
     void toggle() => _sheetKey.currentState?.toggle();
     final next = snap.nextStop;
     return Padding(
@@ -1593,6 +1594,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   eta: _eta(snap.eta),
                   guardianOn: guardianOn,
                   now: now,
+                  meshPeersCount: meshPeersCount,
                 ),
               ),
             ),
@@ -2033,11 +2035,12 @@ class RiderMapMarker extends StatelessWidget {
   Widget build(BuildContext context) {
     final first = rider.name.split(' ').first;
     final isTunnel = rider.isTunnelCoasting;
+    final isMesh = rider.isMeshPeer;
     final speedBadge = riderMapSpeedLabel(rider, status: status, nowMs: nowMs);
     final isMoving = speedBadge.endsWith('km/h') && rider.speedKmh >= 5;
     final isLead = rider.role == 'LEAD';
     final who = isMe ? 'You' : (isLead ? 'LEAD · $first' : first);
-    final label = isTunnel ? '$who · Tunnel' : who;
+    final label = isTunnel ? '$who · Tunnel' : (isMesh ? '$who · Mesh' : who);
 
     // Ring: the rider's colour while moving (teal for the lead), amber while not.
     final ring = !isMoving && !isMe

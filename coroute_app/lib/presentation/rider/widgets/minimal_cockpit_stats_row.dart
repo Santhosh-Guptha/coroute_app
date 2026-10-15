@@ -18,6 +18,7 @@ class MinimalCockpitStatsRow extends StatelessWidget {
   final String eta;
   final bool guardianOn;
   final int now;
+  final int? meshPeersCount;
 
   const MinimalCockpitStatsRow({
     super.key,
@@ -27,6 +28,7 @@ class MinimalCockpitStatsRow extends StatelessWidget {
     required this.eta,
     required this.guardianOn,
     required this.now,
+    this.meshPeersCount,
   });
 
   @override
@@ -116,6 +118,23 @@ class MinimalCockpitStatsRow extends StatelessWidget {
                 fontSize: 12,
               ),
             ),
+            if (meshPeersCount != null && meshPeersCount! > 0) ...[
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.hub_outlined,
+                size: 13,
+                color: Color(0xFF00E5FF),
+              ),
+              const SizedBox(width: 3),
+              Text(
+                '$meshPeersCount mesh',
+                style: AppText.caption.copyWith(
+                  color: const Color(0xFF00E5FF),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
+            ],
           ],
         ),
       ],

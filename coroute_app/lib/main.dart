@@ -17,6 +17,7 @@ import 'data/services/alert_service.dart';
 import 'data/services/api_client.dart';
 import 'data/services/auth_service.dart';
 import 'data/services/background_service.dart';
+import 'data/services/p2p_mesh_service.dart';
 import 'data/services/convoy_service.dart';
 import 'data/services/geo_service.dart';
 import 'data/services/intercom_service.dart';
@@ -109,6 +110,7 @@ class CoRouteApp extends StatelessWidget {
           final queue = SqfliteTrackQueue();
           return TrackRecorder(queue, TrackUploader(ctx.read<ApiClient>(), queue));
         }),
+        ChangeNotifierProvider<P2pMeshService>(create: (_) => P2pMeshService()),
         ChangeNotifierProvider(
           create: (ctx) => ConvoyService(
             ctx.read<ApiClient>(),
@@ -117,6 +119,7 @@ class CoRouteApp extends StatelessWidget {
             recorder: ctx.read<TrackRecorder>(),
             timeline: ctx.read<TimelineService>(),
             settings: ctx.read<SettingsService>(),
+            mesh: ctx.read<P2pMeshService>(),
           )..addListener(() => _notePosition(ctx)),
         ),
         ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>(), settings: ctx.read<SettingsService>())),

@@ -1,4 +1,6 @@
 import '../../domain/tracking/ride_power_policy.dart';
+import '../../domain/mesh/mesh_telemetry_packet.dart';
+import 'p2p_mesh_service.dart';
 import '../models/ride_feature_policy.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
@@ -54,6 +56,7 @@ class ConvoyService extends ChangeNotifier {
     this.recorder,
     this.timeline,
     this.settings,
+    this.mesh,
     OutboxStore? outboxStore,
     RosterStore? rosterStore,
     int Function()? clock,
@@ -62,6 +65,7 @@ class ConvoyService extends ChangeNotifier {
         _rosterStore = rosterStore ?? RosterStore(),
         _clock = clock ?? _wallClock {
     _eventSub = _rt.events.listen(_onEvent);
+    _meshSub = mesh?.onTelemetryReceived.listen(_onMeshTelemetry);
     BackgroundService.addButtonListener(_onNotificationButton);
     _rt.addListener(_onConnectionChanged);
     _initBatteryTracking();
@@ -83,6 +87,13 @@ class ConvoyService extends ChangeNotifier {
       debugPrint('lifecycle listener note: $e'); // no Flutter binding (plain unit tests)
     }
   }
+
+  /// P2P offline wireless mesh service for dead zones.
+  final P2pMeshService? mesh;
+  StreamSubscription<MeshTelemetryPacket>? _meshSub;
+
+  bool get isP2pMeshActive => mesh?.isRunning ?? false;
+  int get p2pMeshPeerCount => mesh?.peerCount ?? 0;
 
   /// Data saver setting (optional: tests and older call sites work without it).
   final SettingsService? settings;
@@ -494,8 +505,72 @@ class ConvoyService extends ChangeNotifier {
     BackgroundService.start(convoyName: convoy.name, riderCount: convoy.riders.length).ignore();
     refreshEmergencyRoster(force: true).ignore();
     _flushOutbox();
+    final myRider = convoy.riders[_myUserId];
+    mesh?.start(
+      joinCode: convoy.joinCode,
+      myUserId: _myUserId ?? '',
+      myUserName: myRider?.name ?? 'Rider',
+    ).ignore();
     notifyListeners();
   }
+
+  void _onMeshTelemetry(MeshTelemetryPacket packet) {
+    final gid = _activeGroupId;
+    if (gid == null) return;
+    final convoy = _allConvoys[gid];
+    if (convoy == null || packet.userId == _myUserId) return;
+
+    final rider = convoy.riders[packet.userId];
+    if (rider == null) return;
+
+    final updatedRider = rider.copyWith(
+      lat: packet.lat,
+      lng: packet.lng,
+      speedKmh: packet.speedKmh,
+      heading: packet.heading,
+      batteryLevel: packet.batteryLevel,
+      isCharging: packet.isCharging,
+      role: packet.role,
+      presence: 'MESH',
+      presenceAt: packet.timestampMs,
+      lastSeenEpochMs: packet.timestampMs,
+      isMeshPeer: true,
+      meshHops: packet.hopCount,
+      lastMeshEpochMs: packet.timestampMs,
+    );
+
+    final riders = Map<String, RiderModel>.from(convoy.riders)..[packet.userId] = updatedRider;
+
+    if (packet.isSos) {
+      final hasAlert = convoy.activeAlerts.any((a) => a.userId == packet.userId && !a.resolved);
+      if (!hasAlert) {
+        final alert = SosAlertModel(
+          alertId: 'mesh_${packet.userId}_${packet.seq}',
+          userId: packet.userId,
+          userName: packet.userName.isNotEmpty ? packet.userName : rider.name,
+          lat: packet.lat,
+          lng: packet.lng,
+          alertType: packet.sosType,
+          timestamp: packet.timestampMs,
+          occurredAt: packet.timestampMs,
+          source: EmergencySource.meshBeacon,
+        );
+        final alerts = List<SosAlertModel>.from(convoy.activeAlerts)..add(alert);
+        _allConvoys[gid] = convoy.copyWith(riders: riders, activeAlerts: alerts);
+        _networkRevision++;
+        notifyListeners();
+        _refreshNotification();
+        return;
+      }
+    }
+
+    _allConvoys[gid] = convoy.copyWith(riders: riders);
+    notifyListeners();
+    _refreshNotification();
+  }
+
+  /// Ingests a peer-to-peer mesh telemetry packet from a nearby teammate.
+  void applyMeshTelemetry(MeshTelemetryPacket packet) => _onMeshTelemetry(packet);
 
   void _refreshNotification() => _pushStatus();
 
@@ -589,7 +664,18 @@ class ConvoyService extends ChangeNotifier {
   void setActiveConvoyForTesting(ConvoyModel convoy) {
     _allConvoys[convoy.groupId] = convoy;
     _activeGroupId = convoy.groupId;
+    final myRider = convoy.riders[_myUserId];
+    mesh?.start(
+      joinCode: convoy.joinCode,
+      myUserId: _myUserId ?? '',
+      myUserName: myRider?.name ?? 'Rider',
+    ).ignore();
     notifyListeners();
+  }
+
+  @visibleForTesting
+  void setMyUserIdForTesting(String uid) {
+    _myUserId = uid;
   }
 
   /// SOS pressed on a notification: asks the UI to show the hold-to-send SOS screen.
@@ -1221,6 +1307,18 @@ class ConvoyService extends ChangeNotifier {
     final convoy = gid != null ? _allConvoys[gid] : null;
     if (convoy == null) return;
     _allConvoys[gid!] = convoy.copyWith(riders: Map<String, RiderModel>.from(convoy.riders)..[rider.userId] = rider);
+    final hasActiveSos = convoy.activeAlerts.any((a) => a.userId == rider.userId && !a.resolved);
+    mesh?.updateMyTelemetry(
+      lat: rider.lat,
+      lng: rider.lng,
+      speedKmh: rider.speedKmh,
+      heading: rider.heading,
+      batteryLevel: _currentBatteryLevel,
+      isCharging: _isCharging,
+      role: rider.role,
+      isSos: hasActiveSos,
+      fuelUsableKm: rider.fuelUsableKm,
+    );
     notifyListeners();
   }
 
@@ -1241,6 +1339,18 @@ class ConvoyService extends ChangeNotifier {
       // Same once-a-minute beat: renew the SMS roster before it expires (no extra timer).
       if (_rt.isConnected && _rosterWanted && _rosterStale) refreshEmergencyRoster(force: true).ignore();
     }
+    final hasActiveSos = activeConvoy?.activeAlerts.any((a) => a.userId == r.userId && !a.resolved) ?? false;
+    mesh?.updateMyTelemetry(
+      lat: r.lat,
+      lng: r.lng,
+      speedKmh: r.speedKmh,
+      heading: r.heading,
+      batteryLevel: _currentBatteryLevel,
+      isCharging: _isCharging,
+      role: r.role,
+      isSos: hasActiveSos,
+      fuelUsableKm: r.fuelUsableKm,
+    );
     _rt.send({
       'type': 'TELEMETRY',
       'fuelEstimate': activeConvoy?.featurePolicy.groupFuelEnabled == false ? null : fuelEstimate?.call(),
@@ -1261,6 +1371,7 @@ class ConvoyService extends ChangeNotifier {
     _gpsSub = null;
     _idleHeartbeat?.cancel();
     _isRealGpsActive = false;
+    mesh?.stop().ignore();
     notifyListeners();
   }
 
@@ -2252,6 +2363,8 @@ class ConvoyService extends ChangeNotifier {
   void dispose() {
     _lifecycle?.dispose();
     _eventSub?.cancel();
+    _meshSub?.cancel();
+    mesh?.stop().ignore();
     _rt.removeListener(_onConnectionChanged);
     _batteryStateSub?.cancel();
     _batteryRefresh?.cancel();

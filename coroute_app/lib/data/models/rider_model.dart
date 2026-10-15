@@ -86,6 +86,15 @@ class RiderModel {
   /// Whether this rider is coasting inside a tunnel or dead zone.
   bool get isTunnelCoasting => trackingConfidence == TrackingConfidence.tunnelCoasting;
 
+  /// Whether the rider's latest telemetry was received directly or relayed via P2P offline mesh.
+  final bool isMeshPeer;
+
+  /// Number of hops taken in the mesh network (0 = direct single-hop, 1 = 1 relay, etc.).
+  final int meshHops;
+
+  /// Timestamp in epoch ms when last seen over P2P mesh (0 when none).
+  final int lastMeshEpochMs;
+
   RiderModel({
     this.fuelUsableKm,
     this.fuelUpdatedAt = 0,
@@ -115,6 +124,9 @@ class RiderModel {
     this.trackingConfidence = TrackingConfidence.gpsFix,
     this.micMuted = false,
     this.isSpeaking = false,
+    this.isMeshPeer = false,
+    this.meshHops = 0,
+    this.lastMeshEpochMs = 0,
   });
 
   RiderModel copyWith({
@@ -144,6 +156,9 @@ class RiderModel {
     TrackingConfidence? trackingConfidence,
     bool? micMuted,
     bool? isSpeaking,
+    bool? isMeshPeer,
+    int? meshHops,
+    int? lastMeshEpochMs,
   }) {
     return RiderModel(
       fuelUsableKm: fuelUsableKm,
@@ -174,6 +189,9 @@ class RiderModel {
       trackingConfidence: trackingConfidence ?? this.trackingConfidence,
       micMuted: micMuted ?? this.micMuted,
       isSpeaking: isSpeaking ?? this.isSpeaking,
+      isMeshPeer: isMeshPeer ?? this.isMeshPeer,
+      meshHops: meshHops ?? this.meshHops,
+      lastMeshEpochMs: lastMeshEpochMs ?? this.lastMeshEpochMs,
     );
   }
 
@@ -206,6 +224,9 @@ class RiderModel {
       'trackingConfidence': trackingConfidence.toWire(),
       'micMuted': micMuted,
       'isSpeaking': isSpeaking,
+      if (isMeshPeer) 'isMeshPeer': true,
+      if (meshHops > 0) 'meshHops': meshHops,
+      if (lastMeshEpochMs > 0) 'lastMeshEpochMs': lastMeshEpochMs,
     };
   }
 
@@ -239,6 +260,9 @@ class RiderModel {
       trackingConfidence: TrackingConfidence.fromWire(json['trackingConfidence'] as String?),
       micMuted: json['micMuted'] == true,
       isSpeaking: json['isSpeaking'] == true,
+      isMeshPeer: json['isMeshPeer'] == true,
+      meshHops: (json['meshHops'] as num?)?.toInt() ?? 0,
+      lastMeshEpochMs: (json['lastMeshEpochMs'] as num?)?.toInt() ?? 0,
     );
   }
 }
