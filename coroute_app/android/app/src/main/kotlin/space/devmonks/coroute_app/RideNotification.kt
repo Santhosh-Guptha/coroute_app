@@ -76,10 +76,6 @@ class RideNotification(private val activity: Activity, private val channel: Meth
          */
         val processToken: String = UUID.randomUUID().toString()
 
-        private val ROW_IDS = intArrayOf(R.id.ride_notif_row0, R.id.ride_notif_row1, R.id.ride_notif_row2, R.id.ride_notif_row3)
-        private val ROW_NAME_IDS = intArrayOf(R.id.ride_notif_row0_name, R.id.ride_notif_row1_name, R.id.ride_notif_row2_name, R.id.ride_notif_row3_name)
-        private val ROW_DETAIL_IDS = intArrayOf(R.id.ride_notif_row0_detail, R.id.ride_notif_row1_detail, R.id.ride_notif_row2_detail, R.id.ride_notif_row3_detail)
-        private val ROW_FLAG_IDS = intArrayOf(R.id.ride_notif_row0_flag, R.id.ride_notif_row1_flag, R.id.ride_notif_row2_flag, R.id.ride_notif_row3_flag)
     }
 
     private val app: Context = activity.applicationContext
@@ -368,27 +364,105 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         setOptionalText(expanded, R.id.ride_notif_status, status)
         if (statusPositive && status.isNotEmpty()) expanded.setTextColor(R.id.ride_notif_status, color(R.color.ride_notif_positive))
 
-        val rows = (args["rows"] as? List<*>) ?: emptyList<Any?>()
-        var shownRows = 0
-        for (i in ROW_IDS.indices) {
-            val row = rows.getOrNull(i) as? Map<*, *>
-            if (row == null) {
-                expanded.setViewVisibility(ROW_IDS[i], View.GONE)
-                continue
-            }
-            shownRows++
-            expanded.setViewVisibility(ROW_IDS[i], View.VISIBLE)
-            expanded.setTextViewText(ROW_NAME_IDS[i], str(row, "name"))
-            expanded.setTextViewText(ROW_DETAIL_IDS[i], str(row, "detail"))
-            setOptionalText(expanded, ROW_FLAG_IDS[i], str(row, "flag"))
+        // Bind the Convoy Horizontal Bead Chain (Ahead -> YOU -> Behind 1 -> Behind 2)
+        val aheadRaw = (args["ahead"] as? List<*>)?.filterIsInstance<Map<*, *>>()
+        val behindRaw = (args["behind"] as? List<*>)?.filterIsInstance<Map<*, *>>()
+        val rows = (args["rows"] as? List<*>)?.filterIsInstance<Map<*, *>>()
+
+        val aheadList = if (!aheadRaw.isNullOrEmpty()) {
+            aheadRaw
+        } else {
+            rows?.filter { it["ahead"] == true } ?: emptyList()
         }
-        expanded.setViewVisibility(R.id.ride_notif_rows, if (shownRows > 0) View.VISIBLE else View.GONE)
+
+        val behindList = if (!behindRaw.isNullOrEmpty()) {
+            behindRaw
+        } else {
+            rows?.filter { it["ahead"] != true } ?: emptyList()
+        }
+
+        // Ahead Node & Connector
+        val aheadRider = aheadList.firstOrNull()
+        if (aheadRider != null) {
+            expanded.setViewVisibility(R.id.node_ahead, View.VISIBLE)
+            expanded.setViewVisibility(R.id.conn_ahead, View.VISIBLE)
+            val name = str(aheadRider, "name").ifEmpty { "Ahead" }
+            expanded.setTextViewText(R.id.node_ahead_name, name)
+            val dist = str(aheadRider, "distDetail").ifEmpty { str(aheadRider, "detail") }
+            expanded.setTextViewText(R.id.conn_ahead_dist, dist)
+            val flag = str(aheadRider, "flag")
+            expanded.setTextViewText(R.id.node_ahead_tag, if (flag.isNotEmpty()) flag else "▲ Ahead")
+            val isWarn = flag.contains("Stopped", ignoreCase = true) || flag.contains("signal", ignoreCase = true)
+            expanded.setImageViewResource(R.id.node_ahead_icon, if (isWarn) R.drawable.ic_ride_node_warning else R.drawable.ic_ride_node_peer)
+        } else {
+            expanded.setViewVisibility(R.id.node_ahead, View.GONE)
+            expanded.setViewVisibility(R.id.conn_ahead, View.GONE)
+        }
+
+        // Central YOU Node
+        expanded.setViewVisibility(R.id.node_you, View.VISIBLE)
+        expanded.setTextViewText(R.id.node_you_name, "YOU")
+        val packPos = aheadList.size + 1
+        expanded.setTextViewText(R.id.node_you_tag, "Pack #$packPos")
+
+        // Behind Rider 1
+        val behind1 = behindList.getOrNull(0)
+        if (behind1 != null) {
+            expanded.setViewVisibility(R.id.conn_behind1, View.VISIBLE)
+            expanded.setViewVisibility(R.id.node_behind1, View.VISIBLE)
+            val name = str(behind1, "name").ifEmpty { "Behind" }
+            expanded.setTextViewText(R.id.node_behind1_name, name)
+            val dist = str(behind1, "distDetail").ifEmpty { str(behind1, "detail") }
+            expanded.setTextViewText(R.id.conn_behind1_dist, dist)
+            val flag = str(behind1, "flag")
+            val isWarn = flag.contains("Stopped", ignoreCase = true) || flag.contains("signal", ignoreCase = true)
+            expanded.setTextViewText(R.id.node_behind1_tag, if (flag.isNotEmpty()) flag else "▼ Behind")
+            expanded.setTextColor(R.id.node_behind1_tag, if (isWarn) 0xFFFF9100.toInt() else 0xFF00B0FF.toInt())
+            expanded.setImageViewResource(R.id.node_behind1_icon, if (isWarn) R.drawable.ic_ride_node_warning else R.drawable.ic_ride_node_behind)
+        } else {
+            expanded.setViewVisibility(R.id.conn_behind1, View.GONE)
+            expanded.setViewVisibility(R.id.node_behind1, View.GONE)
+        }
+
+        // Behind Rider 2 / Sweeper
+        val behind2 = behindList.getOrNull(1)
+        if (behind2 != null) {
+            expanded.setViewVisibility(R.id.conn_behind2, View.VISIBLE)
+            expanded.setViewVisibility(R.id.node_behind2, View.VISIBLE)
+            val name = str(behind2, "name").ifEmpty { "Sweeper" }
+            expanded.setTextViewText(R.id.node_behind2_name, name)
+            val dist = str(behind2, "distDetail").ifEmpty { str(behind2, "detail") }
+            expanded.setTextViewText(R.id.conn_behind2_dist, dist)
+            val flag = str(behind2, "flag")
+            val isWarn = flag.contains("Stopped", ignoreCase = true) || flag.contains("signal", ignoreCase = true)
+            expanded.setTextViewText(R.id.node_behind2_tag, if (flag.isNotEmpty()) flag else "▼ Sweeper")
+            expanded.setTextColor(R.id.node_behind2_tag, if (isWarn) 0xFFFF9100.toInt() else 0xFF00B0FF.toInt())
+            expanded.setImageViewResource(R.id.node_behind2_icon, if (isWarn) R.drawable.ic_ride_node_warning else R.drawable.ic_ride_node_behind)
+        } else {
+            expanded.setViewVisibility(R.id.conn_behind2, View.GONE)
+            expanded.setViewVisibility(R.id.node_behind2, View.GONE)
+        }
+
+        // Telemetry Subtitle
+        val telemetry = str(args, "telemetry")
+        if (telemetry.isNotEmpty()) {
+            expanded.setViewVisibility(R.id.ride_notif_telemetry, View.VISIBLE)
+            expanded.setTextViewText(R.id.ride_notif_telemetry, telemetry)
+        } else {
+            val total = aheadList.size + behindList.size + 1
+            if (total > 1) {
+                expanded.setViewVisibility(R.id.ride_notif_telemetry, View.VISIBLE)
+                expanded.setTextViewText(R.id.ride_notif_telemetry, "Pack #$packPos • $total riders")
+            } else {
+                expanded.setViewVisibility(R.id.ride_notif_telemetry, View.GONE)
+            }
+        }
 
         val smartView = str(args, "view")
         val smart = mode == "RIDE" && smartView.isNotEmpty()
         expanded.setViewVisibility(R.id.ride_notif_smart, if (smart) View.VISIBLE else View.GONE)
         if (smart) {
-            expanded.setViewVisibility(R.id.ride_notif_rows, View.GONE)
+            expanded.setViewVisibility(R.id.ride_notif_bead_wire, View.GONE)
             expanded.setTextViewText(R.id.ride_notif_route_line, str(args, "routeLine"))
             expanded.setTextViewText(R.id.ride_notif_route_detail, str(args, "routeDetail"))
             expanded.setContentDescription(R.id.ride_notif_route_line, str(args, "routeLine") + ". " + str(args, "routeDetail"))
@@ -399,15 +473,17 @@ class RideNotification(private val activity: Activity, private val channel: Meth
             val details = if (smartView == "FUEL") activityIntent("FUEL", str(args, "fuelRef"), 7109) else activityIntent(MAP, "", RC_MAP)
             expanded.setOnClickPendingIntent(R.id.ride_notif_route_line, details)
             expanded.setOnClickPendingIntent(R.id.ride_notif_route_detail, details)
+        } else {
+            expanded.setViewVisibility(R.id.ride_notif_bead_wire, View.VISIBLE)
         }
 
-        // Buttons (48 dp high, one tap each). SOS only opens the hold-to-send screen.
-        val sosLabel = str(args, "sosLabel").ifEmpty { "SOS" }
-        val waitLabel = str(args, "waitLabel").ifEmpty { "Wait for me" }
-        val mapLabel = str(args, "mapLabel").ifEmpty { "Open map" }
-        setButton(expanded, R.id.ride_notif_btn_sos, showSos, sosLabel, "$sosLabel, opens the hold to send screen", sosIntent())
+        // Glove-Friendly Pill Buttons [ ⏸ WAIT ]  [ 📍 MAP ]  [ ⚠️ SOS ]
+        val sosLabel = str(args, "sosLabel").let { if (it.isEmpty() || it == "SOS") "⚠️  SOS" else it }
+        val waitLabel = str(args, "waitLabel").let { if (it.isEmpty() || it == "Wait for me") "⏸  WAIT" else it }
+        val mapLabel = str(args, "mapLabel").let { if (it.isEmpty() || it == "Open map") "📍  MAP" else it }
         setButton(expanded, R.id.ride_notif_btn_wait, showWait, waitLabel, waitLabel, broadcastIntent(WAIT, "", RC_WAIT))
         setButton(expanded, R.id.ride_notif_btn_map, true, mapLabel, mapLabel, activityIntent(MAP, "", RC_MAP))
+        setButton(expanded, R.id.ride_notif_btn_sos, showSos, sosLabel, "$sosLabel, opens the hold to send screen", sosIntent())
         val contextIntent = when (context) {
             NAV_EMERGENCY -> activityIntent(NAV_EMERGENCY, contextRef, RC_NAV)
             ASSIST_ACCEPT -> if (contextRef.isEmpty()) null else broadcastIntent(ASSIST_ACCEPT, contextRef, RC_ASSIST)

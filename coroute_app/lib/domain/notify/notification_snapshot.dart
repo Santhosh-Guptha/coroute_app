@@ -119,7 +119,15 @@ class RiderLine {
     return ahead ? '$d ahead' : '$d behind';
   }
 
-  Map<String, Object?> toArgs() => {'name': name, 'detail': detail, 'flag': flag ?? '', 'ahead': ahead};
+  Map<String, Object?> toArgs() => {
+        'name': name,
+        'detail': detail,
+        'distDetail': StatusText.roundedDistance(distanceM),
+        'distanceM': distanceM,
+        'flag': flag ?? '',
+        'ahead': ahead,
+        'sideKnown': sideKnown,
+      };
 
   String get _key => '$name|$detail|${flag ?? ''}|$ahead';
 }
@@ -162,6 +170,9 @@ class NotificationSnapshot {
   /// SOS with their medical ID, opt-in). Null = the usual minimal version.
   final String? customPublicText;
 
+  /// Real-time pack telemetry e.g. "Pack #3 • 71 km/h".
+  final String? telemetry;
+
   const NotificationSnapshot({
     required this.mode,
     required this.tone,
@@ -172,6 +183,7 @@ class NotificationSnapshot {
     this.statusPositive = false,
     this.ahead = const [],
     this.behind = const [],
+    this.telemetry,
     this.contextAction = NotifContextAction.none,
     this.contextLabel,
     this.contextRef,
@@ -201,6 +213,9 @@ class NotificationSnapshot {
         'status': statusLine ?? '',
         'statusPositive': statusPositive,
         'rows': [for (final r in ahead) r.toArgs(), for (final r in behind) r.toArgs()],
+        'ahead': [for (final r in ahead) r.toArgs()],
+        'behind': [for (final r in behind) r.toArgs()],
+        'telemetry': telemetry ?? (ahead.isNotEmpty || behind.isNotEmpty ? 'Pack #${ahead.length + 1}' : ''),
         'context': contextAction.wire,
         'contextLabel': contextLabel ?? '',
         'contextRef': contextRef ?? '',
@@ -222,6 +237,7 @@ class NotificationSnapshot {
         header ?? '',
         statusLine ?? '',
         statusPositive,
+        telemetry ?? '',
         for (final r in ahead) r._key,
         '/',
         for (final r in behind) r._key,
@@ -270,6 +286,9 @@ class NotificationSnapshotBuilder {
     final header = _header(convoy);
     final rideStatus = _rideStatus(convoy, myUserId, me, events, nowMs);
     final ladderLine = _ladderSummary(ladder.ahead, ladder.behind);
+    final packPosition = ladder.ahead.length + 1;
+    final speed = me != null && me.speedKmh > 0 ? '${me.speedKmh.round()} km/h' : '0 km/h';
+    final telemetry = 'Pack #$packPosition • $speed';
 
     // 1. Own group emergency (mine or another member's).
     final sos = openEmergency(convoy);
@@ -297,6 +316,7 @@ class NotificationSnapshotBuilder {
         statusLine: rideStatus,
         ahead: ladder.ahead,
         behind: ladder.behind,
+        telemetry: telemetry,
         lockScreenPublic: lockScreenPublic,
         showWait: ladder.othersCount > 0,
       );
@@ -312,6 +332,7 @@ class NotificationSnapshotBuilder {
       statusLine: rideStatus,
       ahead: ladder.ahead,
       behind: ladder.behind,
+      telemetry: telemetry,
       lockScreenPublic: lockScreenPublic,
       showWait: ladder.othersCount > 0,
     );

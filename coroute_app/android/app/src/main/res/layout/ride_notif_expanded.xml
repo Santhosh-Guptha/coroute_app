@@ -1,24 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Big ride notification, expanded (DecoratedCustomViewStyle, at most 256 dp).
-     Title, convoy line, up to 2 riders ahead and 2 behind, group status line, and a row of
-     large buttons (48 dp high): SOS, Wait for me, Open map, context action.
-     RemoteViews: only LinearLayout, TextView and Button here. -->
+<!-- CoRoute Convoy Ride Notification, expanded (DecoratedCustomViewStyle).
+     Features the Horizontal Convoy Bead Chain (Ahead -> YOU -> Behind),
+     real-time pack telemetry, and glove-friendly pill buttons. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/ride_notif_expanded_surface"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:padding="8dp">
 
+    <!-- Convoy Title (e.g. Western Ghats Riders) -->
     <TextView
         android:id="@+id/ride_notif_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:ellipsize="end"
-        android:maxLines="2"
+        android:maxLines="1"
         android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
-        android:textSize="17sp"
+        android:textSize="18sp"
         android:textStyle="bold" />
 
+    <!-- Convoy Subtitle (e.g. 6 riders • ● Live convoy) -->
     <TextView
         android:id="@+id/ride_notif_header"
         android:layout_width="match_parent"
@@ -26,198 +28,264 @@
         android:ellipsize="end"
         android:maxLines="1"
         android:textAppearance="@android:style/TextAppearance.Material.Notification"
-        android:textSize="13sp" />
+        android:textSize="13sp"
+        android:layout_marginBottom="6dp" />
 
+    <!-- Optional Smart Route / Fuel Strip -->
     <LinearLayout android:id="@+id/ride_notif_smart"
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="vertical" android:visibility="gone">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
             <TextView android:id="@+id/ride_notif_view_group" android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="48dp" android:gravity="center" android:text="Group"
+                android:layout_height="40dp" android:gravity="center" android:text="Group"
                 android:textAppearance="@android:style/TextAppearance.Material.Notification" />
             <TextView android:id="@+id/ride_notif_view_fuel" android:layout_width="0dp" android:layout_weight="1"
-                android:layout_height="48dp" android:gravity="center" android:text="Fuel"
+                android:layout_height="40dp" android:gravity="center" android:text="Fuel"
                 android:textAppearance="@android:style/TextAppearance.Material.Notification" />
         </LinearLayout>
         <TextView android:id="@+id/ride_notif_route_line" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:maxLines="2" android:ellipsize="end" android:textStyle="bold"
+            android:maxLines="1" android:ellipsize="end" android:textStyle="bold"
             android:textAppearance="@android:style/TextAppearance.Material.Notification" />
         <TextView android:id="@+id/ride_notif_route_detail" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:maxLines="2" android:ellipsize="end"
+            android:maxLines="1" android:ellipsize="end"
             android:textAppearance="@android:style/TextAppearance.Material.Notification" />
     </LinearLayout>
 
+    <!-- HORIZONTAL CONVOY BEAD STRING (Ahead -> YOU -> Behind 1 -> Behind 2) -->
     <LinearLayout
-        android:id="@+id/ride_notif_rows"
+        android:id="@+id/ride_notif_bead_wire"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingTop="4dp">
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="4dp">
 
+        <!-- Node 1: Ahead Rider (e.g. Rahul) -->
         <LinearLayout
-            android:id="@+id/ride_notif_row0"
-            android:layout_width="match_parent"
+            android:id="@+id/node_ahead"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:minHeight="22dp"
-            android:orientation="horizontal"
-            android:visibility="gone">
-
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:minWidth="44dp">
             <TextView
-                android:id="@+id/ride_notif_row0_name"
-                android:layout_width="0dp"
+                android:id="@+id/node_ahead_name"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:textSize="11sp"
+                android:textColor="#E2E8F0"
+                android:maxLines="1"
                 android:ellipsize="end"
-                android:maxLines="1"
-                android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
-                android:textSize="15sp" />
-
+                android:text="Ahead" />
+            <ImageView
+                android:id="@+id/node_ahead_icon"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="2dp"
+                android:src="@drawable/ic_ride_node_peer" />
             <TextView
-                android:id="@+id/ride_notif_row0_detail"
+                android:id="@+id/node_ahead_tag"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:textAppearance="@android:style/TextAppearance.Material.Notification"
-                android:textSize="15sp" />
-
-            <TextView
-                android:id="@+id/ride_notif_row0_flag"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:paddingStart="8dp"
-                android:textColor="@color/ride_notif_warning"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:visibility="gone" />
+                android:textSize="9sp"
+                android:textColor="#A0AEC0"
+                android:text="▲ Ahead" />
         </LinearLayout>
-        <LinearLayout
-            android:id="@+id/ride_notif_row1"
-            android:layout_width="match_parent"
+
+        <!-- Connector 1: Ahead to YOU -->
+        <FrameLayout
+            android:id="@+id/conn_ahead"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:minHeight="22dp"
-            android:orientation="horizontal"
-            android:visibility="gone">
-
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical">
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="2dp"
+                android:layout_gravity="center_vertical"
+                android:background="#4A5568" />
             <TextView
-                android:id="@+id/ride_notif_row1_name"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
-                android:textSize="15sp" />
-
-            <TextView
-                android:id="@+id/ride_notif_row1_detail"
+                android:id="@+id/conn_ahead_dist"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:textAppearance="@android:style/TextAppearance.Material.Notification"
-                android:textSize="15sp" />
+                android:layout_gravity="center"
+                android:background="@drawable/ride_wire_dist_pill"
+                android:textColor="#CBD5E0"
+                android:textSize="9sp"
+                android:text="320 m" />
+        </FrameLayout>
 
+        <!-- Node 2: YOU (Central Anchor) -->
+        <LinearLayout
+            android:id="@+id/node_you"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:minWidth="48dp">
             <TextView
-                android:id="@+id/ride_notif_row1_flag"
+                android:id="@+id/node_you_name"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:paddingStart="8dp"
-                android:textColor="@color/ride_notif_warning"
-                android:textSize="13sp"
+                android:textSize="11sp"
                 android:textStyle="bold"
-                android:visibility="gone" />
+                android:textColor="#00E676"
+                android:text="YOU" />
+            <ImageView
+                android:id="@+id/node_you_icon"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="2dp"
+                android:src="@drawable/ic_ride_node_you" />
+            <TextView
+                android:id="@+id/node_you_tag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="9sp"
+                android:textColor="#00E676"
+                android:text="YOU" />
         </LinearLayout>
-        <LinearLayout
-            android:id="@+id/ride_notif_row2"
-            android:layout_width="match_parent"
+
+        <!-- Connector 2: YOU to Behind 1 -->
+        <FrameLayout
+            android:id="@+id/conn_behind1"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:minHeight="22dp"
-            android:orientation="horizontal"
-            android:visibility="gone">
-
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical">
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="2dp"
+                android:layout_gravity="center_vertical"
+                android:background="#4A5568" />
             <TextView
-                android:id="@+id/ride_notif_row2_name"
-                android:layout_width="0dp"
+                android:id="@+id/conn_behind1_dist"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:layout_gravity="center"
+                android:background="@drawable/ride_wire_dist_pill"
+                android:textColor="#CBD5E0"
+                android:textSize="9sp"
+                android:text="450 m" />
+        </FrameLayout>
+
+        <!-- Node 3: Behind Rider 1 (e.g. Kiran) -->
+        <LinearLayout
+            android:id="@+id/node_behind1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:minWidth="44dp">
+            <TextView
+                android:id="@+id/node_behind1_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="#E2E8F0"
+                android:maxLines="1"
                 android:ellipsize="end"
-                android:maxLines="1"
-                android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
-                android:textSize="15sp" />
-
+                android:text="Behind" />
+            <ImageView
+                android:id="@+id/node_behind1_icon"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="2dp"
+                android:src="@drawable/ic_ride_node_behind" />
             <TextView
-                android:id="@+id/ride_notif_row2_detail"
+                android:id="@+id/node_behind1_tag"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:textAppearance="@android:style/TextAppearance.Material.Notification"
-                android:textSize="15sp" />
-
-            <TextView
-                android:id="@+id/ride_notif_row2_flag"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:paddingStart="8dp"
-                android:textColor="@color/ride_notif_warning"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:visibility="gone" />
+                android:textSize="9sp"
+                android:textColor="#00B0FF"
+                android:text="▼ Behind" />
         </LinearLayout>
-        <LinearLayout
-            android:id="@+id/ride_notif_row3"
-            android:layout_width="match_parent"
+
+        <!-- Connector 3: Behind 1 to Behind 2 -->
+        <FrameLayout
+            android:id="@+id/conn_behind2"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:minHeight="22dp"
-            android:orientation="horizontal"
-            android:visibility="gone">
-
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical">
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="2dp"
+                android:layout_gravity="center_vertical"
+                android:background="#4A5568" />
             <TextView
-                android:id="@+id/ride_notif_row3_name"
-                android:layout_width="0dp"
+                android:id="@+id/conn_behind2_dist"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:layout_gravity="center"
+                android:background="@drawable/ride_wire_dist_pill"
+                android:textColor="#CBD5E0"
+                android:textSize="9sp"
+                android:text="2.8 km" />
+        </FrameLayout>
+
+        <!-- Node 4: Behind Rider 2 / Sweeper (e.g. Aditya) -->
+        <LinearLayout
+            android:id="@+id/node_behind2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:minWidth="44dp">
+            <TextView
+                android:id="@+id/node_behind2_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:textColor="#E2E8F0"
+                android:maxLines="1"
                 android:ellipsize="end"
-                android:maxLines="1"
-                android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
-                android:textSize="15sp" />
-
+                android:text="Sweeper" />
+            <ImageView
+                android:id="@+id/node_behind2_icon"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="2dp"
+                android:src="@drawable/ic_ride_node_warning" />
             <TextView
-                android:id="@+id/ride_notif_row3_detail"
+                android:id="@+id/node_behind2_tag"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:textAppearance="@android:style/TextAppearance.Material.Notification"
-                android:textSize="15sp" />
-
-            <TextView
-                android:id="@+id/ride_notif_row3_flag"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:paddingStart="8dp"
-                android:textColor="@color/ride_notif_warning"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:visibility="gone" />
+                android:textSize="9sp"
+                android:textColor="#FF9100"
+                android:text="⚠️ Stopped" />
         </LinearLayout>
     </LinearLayout>
 
+    <!-- Convoy Telemetry Subtitle (e.g. Pack #3 • 71 km/h) -->
+    <TextView
+        android:id="@+id/ride_notif_telemetry"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="12sp"
+        android:textColor="#A0AEC0"
+        android:text="Pack #3 • 71 km/h"
+        android:paddingTop="2dp"
+        android:paddingBottom="4dp" />
+
+    <!-- Optional Emergency or Group Status line -->
     <TextView
         android:id="@+id/ride_notif_status"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:ellipsize="end"
         android:maxLines="2"
-        android:paddingTop="4dp"
+        android:paddingTop="2dp"
         android:textAppearance="@android:style/TextAppearance.Material.Notification"
-        android:textSize="14sp" />
+        android:textSize="13sp"
+        android:visibility="gone" />
 
+    <!-- 3 GLOVE-FRIENDLY PILL ACTION BUTTONS: [ || WAIT ]  [ 📍 MAP ]  [ ⚠️ SOS ] -->
     <LinearLayout
         android:id="@+id/ride_notif_buttons"
         android:layout_width="match_parent"
@@ -226,78 +294,74 @@
         android:orientation="horizontal">
 
         <Button
-            android:id="@+id/ride_notif_btn_sos"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:background="@drawable/ride_notif_btn_sos"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="2"
-            android:minWidth="0dp"
-            android:minHeight="48dp"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:textAllCaps="false"
-            android:textColor="@color/ride_notif_sos_text"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
-        <Button
             android:id="@+id/ride_notif_btn_wait"
             android:layout_width="0dp"
-            android:layout_height="48dp"
+            android:layout_height="44dp"
             android:layout_weight="1"
             android:layout_marginEnd="6dp"
-            android:background="@drawable/ride_notif_btn"
+            android:background="@drawable/ride_notif_pill_btn"
             android:ellipsize="end"
             android:gravity="center"
-            android:maxLines="2"
-            android:minWidth="0dp"
-            android:minHeight="48dp"
+            android:maxLines="1"
             android:paddingStart="4dp"
             android:paddingEnd="4dp"
             android:textAllCaps="false"
             android:textColor="@color/ride_notif_btn_text"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:text="⏸  WAIT" />
 
         <Button
             android:id="@+id/ride_notif_btn_map"
             android:layout_width="0dp"
-            android:layout_height="48dp"
+            android:layout_height="44dp"
             android:layout_weight="1"
             android:layout_marginEnd="6dp"
-            android:background="@drawable/ride_notif_btn"
+            android:background="@drawable/ride_notif_pill_btn"
             android:ellipsize="end"
             android:gravity="center"
-            android:maxLines="2"
-            android:minWidth="0dp"
-            android:minHeight="48dp"
+            android:maxLines="1"
             android:paddingStart="4dp"
             android:paddingEnd="4dp"
             android:textAllCaps="false"
             android:textColor="@color/ride_notif_btn_text"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:text="📍  MAP" />
+
+        <Button
+            android:id="@+id/ride_notif_btn_sos"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:background="@drawable/ride_notif_pill_sos"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="1"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:textAllCaps="false"
+            android:textColor="#FF5252"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:text="⚠️  SOS" />
 
         <Button
             android:id="@+id/ride_notif_btn_context"
             android:layout_width="0dp"
-            android:layout_height="48dp"
+            android:layout_height="44dp"
             android:layout_weight="1"
-            android:background="@drawable/ride_notif_btn"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/ride_notif_pill_btn"
             android:ellipsize="end"
             android:gravity="center"
-            android:maxLines="2"
-            android:minWidth="0dp"
-            android:minHeight="48dp"
+            android:maxLines="1"
             android:paddingStart="4dp"
             android:paddingEnd="4dp"
             android:textAllCaps="false"
             android:textColor="@color/ride_notif_btn_text"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
     </LinearLayout>
 </LinearLayout>
