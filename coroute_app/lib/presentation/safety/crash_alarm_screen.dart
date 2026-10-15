@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
@@ -36,24 +37,108 @@ class CrashAlarmScreen extends StatelessWidget {
         onPopInvokedWithResult: (didPop, _) {
           if (didPop) safety.closeAlarm();
         },
-        child: Scaffold(
-          backgroundColor: AppTheme.bg,
-          body: SafeArea(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
-                child: SingleChildScrollView(
-                  padding: dsScreenPadding,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      DsScreenHeader(
-                        title: L10n.t('crash.sent'),
-                        onBack: () => Navigator.of(context).maybePop(),
-                      ),
-                      const SizedBox(height: 18),
-                      EmergencySosSheet(lat: alarm.lat, lng: alarm.lng, onResolved: safety.closeAlarm),
-                    ],
+        child: Focus(
+          autofocus: true,
+          onKeyEvent: (node, event) {
+            if (alarm.isSirenActive && event is KeyDownEvent) {
+              final key = event.logicalKey;
+              if (key == LogicalKeyboardKey.audioVolumeDown ||
+                  key == LogicalKeyboardKey.audioVolumeUp ||
+                  key == LogicalKeyboardKey.audioVolumeMute ||
+                  key == LogicalKeyboardKey.escape) {
+                safety.silenceSiren();
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Scaffold(
+            backgroundColor: AppTheme.bg,
+            body: SafeArea(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: SingleChildScrollView(
+                    padding: dsScreenPadding,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        DsScreenHeader(
+                          title: L10n.t('crash.sent'),
+                          onBack: () => Navigator.of(context).maybePop(),
+                        ),
+                        const SizedBox(height: 18),
+                        if (alarm.isSirenActive) ...[
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 16),
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2A0606),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.redAccent, width: 2),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.redAccent.withOpacity(0.35),
+                                  blurRadius: 16,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.emergency_rounded, color: Colors.redAccent, size: 26),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        '🚨 BYSTANDER AUDIO BEACON ACTIVE',
+                                        style: TextStyle(
+                                          color: Colors.redAccent.shade100,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.6,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  "Loud audio beacon sounding to guide bystanders to your location. Tap below, press volume keys, or say 'CoRoute Silence' to mute. SOS remains broadcasting to your convoy.",
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.9),
+                                    fontSize: 13,
+                                    height: 1.4,
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                ElevatedButton.icon(
+                                  onPressed: safety.silenceSiren,
+                                  icon: const Icon(Icons.volume_off_rounded, color: Colors.white),
+                                  label: const Text(
+                                    "🔕 I'M CONSCIOUS · SILENCE SIREN",
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFD32F2F),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        EmergencySosSheet(lat: alarm.lat, lng: alarm.lng, onResolved: safety.closeAlarm),
+                      ],
+                    ),
                   ),
                 ),
               ),

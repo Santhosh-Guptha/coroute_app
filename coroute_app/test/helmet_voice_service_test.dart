@@ -50,6 +50,13 @@ void main() {
       expect(HelmetVoiceMatcher.match("unmute mic")?.hotword, equals(HelmetVoiceHotword.intercom));
     });
 
+    test('Recognizes "CoRoute Silence" and conscious siren mute requests', () {
+      expect(HelmetVoiceMatcher.match("coroute silence")?.hotword, equals(HelmetVoiceHotword.silenceSiren));
+      expect(HelmetVoiceMatcher.match("silence siren")?.hotword, equals(HelmetVoiceHotword.silenceSiren));
+      expect(HelmetVoiceMatcher.match("quiet")?.hotword, equals(HelmetVoiceHotword.silenceSiren));
+      expect(HelmetVoiceMatcher.match("im conscious")?.hotword, equals(HelmetVoiceHotword.silenceSiren));
+    });
+
     test('Rejects unrelated chatter', () {
       expect(HelmetVoiceMatcher.match("the weather is quite nice today"), isNull);
       expect(HelmetVoiceMatcher.match("look at that scenery"), isNull);

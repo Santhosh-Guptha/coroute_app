@@ -83,6 +83,8 @@ class CrashAlarmState {
   final double lat;
   final double lng;
   final bool sent;
+  final bool isUnresponsive;
+  final bool isSirenActive;
 
   const CrashAlarmState({
     required this.startedAtMs,
@@ -92,9 +94,16 @@ class CrashAlarmState {
     this.lat = 0,
     this.lng = 0,
     this.sent = false,
+    this.isUnresponsive = false,
+    this.isSirenActive = false,
   });
 
-  CrashAlarmState copyWith({int? secondsLeft, bool? sent}) => CrashAlarmState(
+  CrashAlarmState copyWith({
+    int? secondsLeft,
+    bool? sent,
+    bool? isUnresponsive,
+    bool? isSirenActive,
+  }) => CrashAlarmState(
         startedAtMs: startedAtMs,
         secondsLeft: secondsLeft ?? this.secondsLeft,
         impactG: impactG,
@@ -102,6 +111,8 @@ class CrashAlarmState {
         lat: lat,
         lng: lng,
         sent: sent ?? this.sent,
+        isUnresponsive: isUnresponsive ?? this.isUnresponsive,
+        isSirenActive: isSirenActive ?? this.isSirenActive,
       );
 }
 
@@ -392,6 +403,7 @@ class SafetyService extends ChangeNotifier {
   CrashAlarmState? _alarm;
   CrashEvent? _alarmEvent;
   Timer? _alarmTimer;
+  Timer? _bystanderSirenTimer;
 
   /// Set for an alarm raised through [externalImpact] (sent as source WEARABLE; the
   /// developer action never schedules a follow-up).
@@ -531,6 +543,7 @@ class SafetyService extends ChangeNotifier {
       closeAlarm();
       return;
     }
+    silenceSiren();
     _alarmTimer?.cancel();
     _alarmTimer = null;
     final e = _alarmEvent;
@@ -558,11 +571,24 @@ class SafetyService extends ChangeNotifier {
   /// Closes the alarm screen after the SOS was sent (the SOS itself stays open).
   void closeAlarm() {
     if (_alarm == null) return;
+    silenceSiren();
     _alarmTimer?.cancel();
     _alarmTimer = null;
     _alarm = null;
     _alarmEvent = null;
     notifyListeners();
+  }
+
+  /// Silences the piercing bystander audio beacon when the rider confirms consciousness,
+  /// while keeping the SOS distress broadcast active for the convoy and responders.
+  void silenceSiren() {
+    _bystanderSirenTimer?.cancel();
+    _bystanderSirenTimer = null;
+    _voice?.stop();
+    if (_alarm != null && _alarm!.isSirenActive) {
+      _alarm = _alarm!.copyWith(isSirenActive: false);
+      notifyListeners();
+    }
   }
 
   void answerPrompt(String key, {bool primary = true}) {
@@ -712,6 +738,7 @@ class SafetyService extends ChangeNotifier {
   }
 
   void _resetRide() {
+    silenceSiren();
     _detector.reset();
     _accelUnavailable = false; // try the sensor again on the next ride
     _fatigue.reset();
@@ -865,10 +892,39 @@ class SafetyService extends ChangeNotifier {
         occurredAtMs: e.impactAtMs,
       );
     }
-    _alarm = a.copyWith(sent: true, secondsLeft: 0);
+    final isUnresponsive = source == EmergencySource.crashAuto;
+    _alarm = a.copyWith(
+      sent: true,
+      secondsLeft: 0,
+      isUnresponsive: isUnresponsive,
+      isSirenActive: isUnresponsive,
+    );
     _detector.cooldown(_now());
     _endAlarmNative();
+    if (isUnresponsive) {
+      _startBystanderSiren();
+    }
     notifyListeners();
+  }
+
+  void _startBystanderSiren() {
+    _bystanderSirenTimer?.cancel();
+    _bystanderSiren();
+    _bystanderSirenTimer = Timer.periodic(const Duration(seconds: 10), (_) => _bystanderSiren());
+  }
+
+  void _bystanderSiren() {
+    if (_disposed || _alarm == null || !_alarm!.isSirenActive) {
+      _bystanderSirenTimer?.cancel();
+      _bystanderSirenTimer = null;
+      return;
+    }
+    _haptic();
+    _voice?.speak(
+      'Emergency! Rider needs help! Check phone screen!',
+      priority: VoicePriority.critical,
+      key: 'bystander_siren_${_now() ~/ 10000}',
+    );
   }
 
   void _endAlarmNative() {
@@ -1313,6 +1369,7 @@ class SafetyService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    silenceSiren();
     _saveFuel(force: true);
     _port.removeListener(_onConvoy);
     _settings.removeListener(_onSettings);

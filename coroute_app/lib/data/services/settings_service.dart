@@ -341,6 +341,29 @@ class SettingsService extends ChangeNotifier {
     _medicalIdOnLockScreen = value;
     notifyListeners();
     await _save(NetworkConstants.keyMedicalIdLock, value);
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('flutter.medical_enabled', value);
+  }
+
+  /// Synchronizes First Responder ICE card info (Blood group, allergies, conditions, contacts)
+  /// to SharedPreferences so native Android MedicalTileService and MedicalIdActivity
+  /// can render the ICE Card over the lock screen without requiring device unlock.
+  Future<void> syncMedicalIdToLockScreen({
+    required String name,
+    required String bloodGroup,
+    required String allergies,
+    required String medicalNotes,
+    required String contactName,
+    required String contactPhone,
+  }) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('flutter.medical_user_name', name);
+    await p.setString('flutter.medical_blood_group', bloodGroup);
+    await p.setString('flutter.medical_allergies', allergies);
+    await p.setString('flutter.medical_notes', medicalNotes);
+    await p.setString('flutter.medical_contact_name', contactName);
+    await p.setString('flutter.medical_contact_phone', contactPhone);
+    await p.setBool('flutter.medical_enabled', _medicalIdOnLockScreen);
   }
 
   Future<void> setDocumentsReminder(bool value) async {

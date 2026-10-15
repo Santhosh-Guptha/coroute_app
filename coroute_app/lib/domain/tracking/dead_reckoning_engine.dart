@@ -51,6 +51,25 @@ class CoastingFix {
   });
 }
 
+/// Result of re-converging coasted coordinate towards a recovered GPS fix.
+class ConvergencePoint {
+  final double lat;
+  final double lng;
+  final double speedKmh;
+  final double heading;
+  final double distanceM;
+  final bool isCompleted;
+
+  const ConvergencePoint({
+    required this.lat,
+    required this.lng,
+    required this.speedKmh,
+    required this.heading,
+    required this.distanceM,
+    required this.isCompleted,
+  });
+}
+
 /// Dead-zone tunnel coasting and GPS shadow dead-reckoning engine (REQ-03).
 ///
 /// Keeps smooth, along-route dead-reckoning progression when GPS fix is lost
@@ -133,8 +152,20 @@ class DeadReckoningEngine {
   /// after 300s speed is 47%, keeping realistic cruising pace.
   static const double speedDecayAlpha = 0.0025;
 
+  /// Powered cruising speed decay alpha (engine running, throttle or gearing engaged):
+  /// v(t) = v0 * exp(-alpha * t)
+  /// At alpha = 0.0008, after 120s speed remains ~90%, after 300s speed remains ~78%.
+  static const double poweredDecayAlpha = 0.0008;
+
+  /// Unpowered coasting speed decay alpha (engine idle or neutral roll):
+  /// At alpha = 0.0055, after 60s speed is 71%, after 180s speed is 37%.
+  static const double unpoweredDecayAlpha = 0.0055;
+
   /// Crash detection threshold on accelerometer peak impact during coasting.
   static const double crashDecelPeakG = 3.2;
+
+  /// Severe impact threshold in G for in-tunnel collision detection.
+  static const double severeImpactG = 4.0;
 
   /// Stationary vibration threshold (phone resting or bike halted).
   static const double stationaryStdGThreshold = 0.09;
@@ -155,9 +186,14 @@ class DeadReckoningEngine {
   double _frozenLat = 0.0;
   double _frozenLng = 0.0;
   double _frozenAlongM = 0.0;
+  bool _engineRunning = true;
+  int _lastVibrationMs = 0;
+  int _lowVibrationSeconds = 0;
 
   bool get isCoasting => _isCoasting;
   bool get crashDetectedInTunnel => _crashDetectedInTunnel;
+  bool get isEngineRunning => _engineRunning;
+  int get lastVibrationMs => _lastVibrationMs;
   List<(double, double)> get plannedRoute => _plannedRoute;
 
   void setPlannedRoute(List<(double, double)> route) {
@@ -207,6 +243,8 @@ class DeadReckoningEngine {
     _isCoasting = false;
     _coastingStartMs = 0;
     _crashDetectedInTunnel = false;
+    _engineRunning = true;
+    _lowVibrationSeconds = 0;
   }
 
   /// Initiates tunnel coasting mode when GPS fix is lost.
@@ -224,6 +262,9 @@ class DeadReckoningEngine {
     _lastKnownLng = lng;
     _lastKnownHeading = heading;
     _crashDetectedInTunnel = false;
+    _engineRunning = true;
+    _lastVibrationMs = timestampMs;
+    _lowVibrationSeconds = 0;
 
     // Calculate along-route distance at entry point
     if (_plannedRoute.length >= 2) {
@@ -237,15 +278,42 @@ class DeadReckoningEngine {
     _frozenLng = lng;
   }
 
-  /// Ingests accelerometer buckets while in tunnel coasting to detect deceleration crashes.
+  /// Ingests accelerometer buckets while in tunnel coasting to detect deceleration crashes
+  /// and analyze structural motorcycle engine/road vibration signatures.
   void checkAccelerometer(AccelBucket bucket) {
     if (!_isCoasting || _crashDetectedInTunnel) return;
 
-    if (bucket.peakG >= crashDecelPeakG && bucket.stdG <= stationaryStdGThreshold) {
+    // Severe impact detection (> 4.0G) or standard deceleration threshold with stationary rest
+    if (bucket.peakG >= severeImpactG ||
+        (bucket.peakG >= crashDecelPeakG && bucket.stdG <= stationaryStdGThreshold)) {
       _crashDetectedInTunnel = true;
       _frozenLat = _lastKnownLat;
       _frozenLng = _lastKnownLng;
+      return;
     }
+
+    // Road & engine vibration signature analysis:
+    // Single / multi-cylinder motorcycle engines produce characteristic high-frequency
+    // vibration with stdG >= 0.08 and meanG around 1.0G.
+    final hasEngineVibration = bucket.stdG >= 0.08 && bucket.meanG >= 0.7 && bucket.meanG <= 1.6;
+    if (hasEngineVibration) {
+      _engineRunning = true;
+      _lastVibrationMs = bucket.tMs;
+      _lowVibrationSeconds = 0;
+    } else if (bucket.stdG < 0.05) {
+      _lowVibrationSeconds++;
+      if (_lowVibrationSeconds >= 4) {
+        _engineRunning = false;
+      }
+    }
+  }
+
+  /// Returns whether the vehicle is actively moving inside the tunnel or canyon dead-zone,
+  /// suppressing false "Rider Stopped" or "Rider Lost" alerts.
+  bool isVehicularMoving(int nowMs) {
+    if (!_isCoasting || _crashDetectedInTunnel) return false;
+    final fix = computeFix(nowMs);
+    return !fix.hasTimedOut && fix.speedKmh >= 5.0;
   }
 
   /// Calculates dead-reckoning position projection for the given [nowMs].
@@ -300,12 +368,14 @@ class DeadReckoningEngine {
     }
 
     // Case 3: Conservative exponential decay along route polyline
-    // v(t) = v0 * exp(-alpha * t)
-    final vCurrentKmh = _entrySpeedKmh * math.exp(-speedDecayAlpha * elapsedSec);
+    // Uses powered decay alpha if engine vibration confirms engine is running,
+    // otherwise higher decay for unpowered roll.
+    final decayAlpha = _engineRunning ? poweredDecayAlpha : unpoweredDecayAlpha;
+    final vCurrentKmh = _entrySpeedKmh * math.exp(-decayAlpha * elapsedSec);
     final v0Mps = _entrySpeedKmh / 3.6;
 
     // Integrated distance: integral_0^t (v0 * exp(-alpha * t)) dt = (v0 / alpha) * (1 - exp(-alpha * t))
-    final projectedDistanceM = (v0Mps / speedDecayAlpha) * (1.0 - math.exp(-speedDecayAlpha * elapsedSec));
+    final projectedDistanceM = (v0Mps / decayAlpha) * (1.0 - math.exp(-decayAlpha * elapsedSec));
     final targetAlongM = _entryAlongM + projectedDistanceM;
 
     final projected = pointAlongRoute(targetAlongM, _plannedRoute);
@@ -351,6 +421,55 @@ class DeadReckoningEngine {
       elapsedSeconds: elapsedSec,
       statusDescription: 'Tunnel Coasting (${elapsedSec}s)',
     );
+  }
+
+  /// Smoothly converges coasted coordinate towards newly acquired GPS fix over time,
+  /// preventing map avatars from abruptly snapping across the screen upon tunnel exit.
+  static ConvergencePoint convergeToGps({
+    required double coastedLat,
+    required double coastedLng,
+    required double gpsLat,
+    required double gpsLng,
+    required double blendFactor,
+    required double gpsSpeedKmh,
+    required double gpsHeading,
+  }) {
+    final dist = GeoMath.haversine(coastedLat, coastedLng, gpsLat, gpsLng);
+    if (dist < 3.0 || blendFactor >= 1.0) {
+      return ConvergencePoint(
+        lat: gpsLat,
+        lng: gpsLng,
+        speedKmh: gpsSpeedKmh,
+        heading: gpsHeading,
+        distanceM: dist,
+        isCompleted: true,
+      );
+    }
+    final factor = blendFactor.clamp(0.0, 1.0);
+    final lat = coastedLat + (gpsLat - coastedLat) * factor;
+    final lng = coastedLng + (gpsLng - coastedLng) * factor;
+    return ConvergencePoint(
+      lat: lat,
+      lng: lng,
+      speedKmh: gpsSpeedKmh,
+      heading: gpsHeading,
+      distanceM: dist,
+      isCompleted: false,
+    );
+  }
+
+  /// Proactive GPS blackout & canyon shadow detector.
+  static bool shouldInitiateCoasting({
+    required double fixAgeSec,
+    required double accuracyM,
+    required double lat,
+    required double lng,
+    double speedKmh = 0.0,
+  }) {
+    if (fixAgeSec < 3.5 && accuracyM <= 80.0) return false;
+    if (isNearTunnelPortal(lat, lng)) return true;
+    if (fixAgeSec >= 4.0 && accuracyM > 80.0 && speedKmh >= 10.0) return true;
+    return false;
   }
 
   /// Locates the coordinate and segment bearing at [targetAlongM] meters from route start.

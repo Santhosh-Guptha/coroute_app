@@ -376,7 +376,18 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               title: SafetyTexts.medicalLockTitle,
               subtitle: SafetyTexts.medicalLockExplain,
               value: s.medicalIdOnLockScreen,
-              onChanged: (v) => s.setMedicalIdOnLockScreen(v),
+              onChanged: (v) {
+                s.setMedicalIdOnLockScreen(v);
+                final auth = context.read<AuthService>();
+                s.syncMedicalIdToLockScreen(
+                  name: auth.currentUserName ?? '',
+                  bloodGroup: auth.bloodGroup,
+                  allergies: auth.allergies,
+                  medicalNotes: auth.medicalNotes,
+                  contactName: auth.emergencyContactName ?? '',
+                  contactPhone: auth.emergencyContact ?? '',
+                );
+              },
               divider: false,
             ),
           ]),

@@ -87,6 +87,11 @@ class HelmetVoiceService extends ChangeNotifier {
         await _speak(match.confirmationSpeech, priority: VoicePriority.critical);
         break;
 
+      case HelmetVoiceHotword.silenceSiren:
+        safetyService?.silenceSiren();
+        await _speak(match.confirmationSpeech, priority: VoicePriority.critical);
+        break;
+
       case HelmetVoiceHotword.emergency:
         final uid = convoyService.myUserId ?? 'unknown';
         final me = convoyService.activeConvoy?.riders[uid];

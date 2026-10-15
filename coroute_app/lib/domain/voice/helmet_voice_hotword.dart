@@ -4,6 +4,7 @@ enum HelmetVoiceHotword {
   fuel,
   regroup,
   intercom,
+  silenceSiren,
 }
 
 class HotwordMatch {
@@ -51,6 +52,18 @@ class HelmetVoiceMatcher {
     'need help',
     'help me',
     'send help',
+  ];
+
+  static const List<String> _silencePhrases = [
+    'coroute silence',
+    'silence siren',
+    'silence',
+    'quiet',
+    'stop siren',
+    'turn off siren',
+    'mute siren',
+    'im conscious',
+    'i am conscious',
   ];
 
   static const List<String> _fuelPhrases = [
@@ -123,7 +136,19 @@ class HelmetVoiceMatcher {
       }
     }
 
-    // 3. Fuel Stop Request
+    // 3. Silence Siren / Conscious Override
+    for (final p in _silencePhrases) {
+      if (clean == p || clean.contains(p)) {
+        return HotwordMatch(
+          hotword: HelmetVoiceHotword.silenceSiren,
+          matchedPhrase: p,
+          confidence: clean == p ? 1.0 : 0.85,
+          confirmationSpeech: 'Bystander siren silenced. Emergency SOS broadcast remains active.',
+        );
+      }
+    }
+
+    // 4. Fuel Stop Request
     for (final p in _fuelPhrases) {
       if (clean == p || clean.contains(p)) {
         return HotwordMatch(

@@ -76,6 +76,27 @@
             android:turnScreenOn="true"
             android:taskAffinity="space.devmonks.coroute_app.sos"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- Android Quick Settings Tile for Emergency Medical ID -->
+        <service
+            android:name=".MedicalTileService"
+            android:icon="@drawable/ic_medical_cross"
+            android:label="Medical ID"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <!-- Lock-Screen First Responder ICE Card Activity -->
+        <activity
+            android:name=".MedicalIdActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity="space.devmonks.coroute_app.medical"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
         <!-- Foreground service that keeps GPS, intercom and the convoy connection alive with the screen locked. -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
