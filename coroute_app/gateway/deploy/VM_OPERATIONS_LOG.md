@@ -233,3 +233,19 @@
      - Published binaries to `/opt/coroute/gateway/public/`.
      - Updated `/etc/coroute/gateway.env` to `LATEST_APP_BUILD=90`.
      - Restarted `coroute-gateway.service`, verified status `HEALTHY` on v3.30.0.
+
+### Release 3.37.0+97 / Gateway v3.37.0 (2026-10-15)
+- **Operator User**: `antigravity` / `santhosh`
+- **Activities**:
+  1. Automated test suites executed:
+     - Flutter Test Suites: All passed (100%), including `convoy_bead_wire_test.dart`, `notification_snapshot_test.dart`, `bystander_siren_test.dart`, `imu_dead_reckoning_test.dart`.
+     - Dart Analysis: 0 issues.
+  2. Bumped app version to `3.37.0+97` in `coroute_app/pubspec.yaml` and gateway version to `3.37.0` in `gateway/package.json`.
+  3. Feature Implementations:
+     - **Horizontal Convoy Bead String**: Live linear bead wire in Android custom RemoteViews lock-screen notification and Flutter in-app widget (`Ahead` -> `YOU` -> `Behind 1` -> `Behind 2` / `Sweeper`) with inline distance pills (`300 m`, `450 m`, `2.8 km`).
+     - **Real-Time Pack Telemetry**: Integrated instantaneous pack rank and speed (`Pack #3 • 71 km/h`).
+     - **3 Glove-Friendly Action Pills**: High-contrast, 44dp pill buttons (`[ ⏸ WAIT ]`, `[ 📍 MAP ]`, `[ ⚠️ SOS ]`) for effortless glove operation.
+  4. Compiled production release binary:
+     - `app-release.apk` (29.7 MB, SHA-256: `3730CFCBFEA19FBFF3F7A06DAE6E86E3E17E56387FF1C05919EE1F98B0E4D2CF`).
+  5. Git tagged `v3.37.0` on `main`.
+
