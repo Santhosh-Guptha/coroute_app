@@ -191,43 +191,46 @@ class EssentialsService {
     let complete = found.complete && candidates.length <= this.maxCandidates;
     const places = [];
 
+    let routingFailures = 0;
     for (const p of candidates.slice(0, this.maxCandidates)) {
       if (this.clock() - now > 25000) { complete = false; break; }
       const entryM = Math.max(r.fromM, p.routePositionM - 1000);
       const exitM = Math.min(r.toM, p.routePositionM + 1000);
       const a = pointAt(r, entryM), b = pointAt(r, exitM);
 
-      let accessDistanceM = Math.round(p.offM);
-      let detourDistanceM = Math.round(p.offM * 2);
-      let detourDurationS = Math.round((p.offM * 2) / 8.33);
-
       try {
         const base = await this.routing([a, b]);
         const via = await this.routing([a, p, b]);
-        if (base && via && !via.approximate && !base.approximate && via.legs?.length === 2) {
-          const numbers = [base.distanceM, base.durationS, via.distanceM, via.durationS, via.legs[0].distanceM];
-          if (numbers.every(n => Number.isFinite(n) && n >= 0)) {
-            const roadDetour = Math.max(0, via.distanceM - base.distanceM);
-            if (roadDetour <= 20000) {
-              detourDistanceM = roadDetour;
-              detourDurationS = Math.max(0, via.durationS - base.durationS);
-              accessDistanceM = via.legs[0].distanceM;
-            }
-          }
+        if (!base || !via || via.approximate || base.approximate || via.legs?.length !== 2) {
+          complete = false; routingFailures++; continue;
         }
-      } catch (_) { complete = false; }
-
-      places.push({
-        ...p,
-        entryM,
-        exitM,
-        accessDistanceM,
-        detourDistanceM,
-        detourDurationS,
-        visitId: `${p.placeId}:${Math.round(p.routePositionM)}`,
-        openStatus: "unknown"
-      });
+        const numbers = [base.distanceM, base.durationS, via.distanceM, via.durationS, via.legs[0].distanceM];
+        if (!numbers.every(n => Number.isFinite(n) && n >= 0)) {
+          complete = false; routingFailures++; continue;
+        }
+        // A router choosing a shortcut means these anchors do not represent this route section.
+        if (Math.abs(base.distanceM - (exitM - entryM)) > Math.max(200, (exitM - entryM) * 0.15)) {
+          complete = false; routingFailures++; continue;
+        }
+        const detourDistanceM = Math.max(0, via.distanceM - base.distanceM);
+        if (detourDistanceM > 20000) continue;
+        places.push({
+          ...p,
+          entryM,
+          exitM,
+          accessDistanceM: via.legs[0].distanceM,
+          detourDistanceM,
+          detourDurationS: Math.max(0, via.durationS - base.durationS),
+          visitId: `${p.placeId}:${Math.round(p.routePositionM)}`,
+          openStatus: "unknown"
+        });
+      } catch (_) {
+        complete = false;
+        routingFailures++;
+      }
     }
+
+    if (candidates.length && !places.length && routingFailures) throw new EssentialsError(503, "ESSENTIALS_ROAD_ACCESS_UNAVAILABLE");
 
     return {
       version: 1,

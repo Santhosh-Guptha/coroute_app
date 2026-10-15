@@ -16,6 +16,8 @@
     el('freshness').textContent = ''; el('incident').textContent = ''; el('expiry').textContent = '';
     el('riders').replaceChildren(); el('timeline').replaceChildren();
     el('location').hidden = true; el('location').removeAttribute('href');
+    const mapBox = el('guardian-map-box');
+    if (mapBox) mapBox.hidden = true;
   }
   let pushConfig = null, subscriptionId = null;
   function expired() {
@@ -33,6 +35,79 @@
       return await res.json();
     } finally { clearTimeout(timeout); }
   }
+  const TILE_BASE = 'https://tile.openstreetmap.org/';
+  const ZOOM = 15, TILE = 256;
+  let lastPos = null, drawn = null;
+
+  function tileXY(lat, lng) {
+    const n = 2 ** ZOOM;
+    const la = Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI / 180;
+    return {
+      x: ((lng + 180) / 360) * n,
+      y: ((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n,
+    };
+  }
+
+  function gridDimensions(mapEl) {
+    const odd = (n) => (n % 2 ? n : n + 1);
+    const cols = Math.min(5, odd(Math.ceil((mapEl.clientWidth || 360) / TILE) + 1));
+    const rows = Math.min(5, odd(Math.ceil((mapEl.clientHeight || 320) / TILE) + 1));
+    return { cols: Math.max(3, cols), rows: Math.max(3, rows) };
+  }
+
+  function drawGuardianMap(lat, lng) {
+    try {
+      const mapEl = el('map');
+      const tilesBox = el('map-tiles');
+      if (!mapEl || !tilesBox || !tilesBox.style || !isFinite(lat) || !isFinite(lng)) return;
+      lastPos = { lat, lng };
+
+      const t = tileXY(lat, lng);
+      const cx = Math.floor(t.x), cy = Math.floor(t.y);
+      const fx = t.x - cx, fy = t.y - cy;
+      const g = gridDimensions(mapEl);
+      const hc = Math.floor(g.cols / 2), hr = Math.floor(g.rows / 2);
+
+      tilesBox.style.width = `${g.cols * TILE}px`;
+      tilesBox.style.height = `${g.rows * TILE}px`;
+      tilesBox.style.gridTemplateColumns = `repeat(${g.cols}, ${TILE}px)`;
+      tilesBox.style.gridTemplateRows = `repeat(${g.rows}, ${TILE}px)`;
+      tilesBox.style.transform = `translate(${-(hc + fx) * TILE}px, ${-(hr + fy) * TILE}px)`;
+
+      if (drawn && drawn.x === cx && drawn.y === cy && drawn.cols === g.cols && drawn.rows === g.rows) return;
+      drawn = { x: cx, y: cy, cols: g.cols, rows: g.rows };
+
+      const n = 2 ** ZOOM;
+      const hasFrag = typeof document.createDocumentFragment === 'function';
+      const container = hasFrag ? document.createDocumentFragment() : tilesBox;
+      if (!hasFrag && typeof tilesBox.replaceChildren === 'function') tilesBox.replaceChildren();
+
+      for (let dy = -hr; dy <= hr; dy++) {
+        for (let dx = -hc; dx <= hc; dx++) {
+          const img = document.createElement('img');
+          if (!img) continue;
+          const x = ((cx + dx) % n + n) % n, y = cy + dy;
+          img.alt = '';
+          img.decoding = 'async';
+          img.referrerPolicy = 'no-referrer';
+          if (typeof img.addEventListener === 'function') {
+            img.addEventListener('error', () => { if (img.style) img.style.visibility = 'hidden'; });
+          }
+          if (y >= 0 && y < n) {
+            img.src = `${TILE_BASE}${ZOOM}/${x}/${y}.png`;
+          } else {
+            if (img.style) img.style.visibility = 'hidden';
+          }
+          if (typeof container.appendChild === 'function') container.appendChild(img);
+          else if (typeof container.append === 'function') container.append(img);
+        }
+      }
+      if (hasFrag && typeof tilesBox.replaceChildren === 'function') tilesBox.replaceChildren(container);
+    } catch (_) {
+      // Non-critical fallback
+    }
+  }
+
   function render(data) {
     clear();
     el('ride-title').textContent = data.name ? `${data.name}'s ride` : 'Personal ride';
@@ -67,10 +142,22 @@
     if (alert) el('incident').textContent = alert.type === 'POSSIBLE_ACCIDENT'
       ? 'A possible accident was reported. This is not confirmation of injury.' : 'An active request for help was reported.';
     const position = alert?.position || data.position;
-    if (position) {
+    const mapBox = el('guardian-map-box');
+    if (position && isFinite(position.lat) && isFinite(position.lng)) {
       el('location').href = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(position.lat)}&mlon=${encodeURIComponent(position.lng)}#map=16/${encodeURIComponent(position.lat)}/${encodeURIComponent(position.lng)}`;
       el('location').hidden = false;
       if (position.stale) el('freshness').textContent += ' · Last known location';
+
+      if (mapBox) {
+        mapBox.hidden = false;
+        const badge = el('map-marker-badge');
+        if (badge) badge.textContent = data.name ? `${data.name}` : 'Rider';
+        const extLink = el('external-maps');
+        if (extLink) extLink.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(position.lat)},${encodeURIComponent(position.lng)}`;
+        drawGuardianMap(Number(position.lat), Number(position.lng));
+      }
+    } else {
+      if (mapBox) mapBox.hidden = true;
     }
     document.querySelector('.guardian__card').dataset.tone = data.emergency ? 'critical' : data.status === 'LOCATION_UNAVAILABLE' ? 'unknown' : 'normal';
     el('expiry').textContent = `This viewing session ends ${new Date(data.expiresAt).toLocaleString()}.`;
@@ -131,6 +218,17 @@
       el('push-status').textContent = 'Alerts disabled for this link. A new link is needed to enable them again.';
       el('disable-alerts').hidden = true;
     } catch { el('push-status').textContent = 'Could not disable alerts. Try again or ask the rider to revoke the link.'; }
+  });
+  const recenterBtn = el('map-recenter');
+  if (recenterBtn) {
+    recenterBtn.addEventListener('click', () => {
+      if (lastPos) drawGuardianMap(lastPos.lat, lastPos.lng);
+    });
+  }
+  window.addEventListener('resize', () => {
+    if (lastPos && el('guardian-map-box') && !el('guardian-map-box').hidden) {
+      drawGuardianMap(lastPos.lat, lastPos.lng);
+    }
   });
   window.addEventListener('pagehide', () => { pageActive = false; clearTimeout(timer); clear(); });
   window.addEventListener('pageshow', () => { pageActive = true; if (!stopped) update(); });

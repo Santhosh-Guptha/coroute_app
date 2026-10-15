@@ -18,6 +18,21 @@
 <p id="ride-status">Waiting for trip information.</p>
 <p id="freshness"></p>
 <div id="incident" role="status"></div>
+<div class="guardian__map-box" id="guardian-map-box" hidden>
+  <div class="guardian-map" id="map" role="region" aria-label="Live Rider Location Map">
+    <div class="guardian-map__tiles" id="map-tiles"></div>
+    <div class="guardian-map__marker" id="map-marker" aria-hidden="true">
+      <div class="guardian-map__pulse"></div>
+      <div class="guardian-map__dot"></div>
+      <div class="guardian-map__badge" id="map-marker-badge">Rider</div>
+    </div>
+  </div>
+  <div class="guardian-map__controls">
+    <button type="button" id="map-recenter" class="guardian-map__btn">Center on rider</button>
+    <a id="external-maps" class="guardian-map__btn" target="_blank" rel="noreferrer noopener">Open in Google Maps</a>
+  </div>
+  <p class="guardian-map__credit"><small>&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer noopener">OpenStreetMap</a> contributors</small></p>
+</div>
 <div id="riders"></div>
 <h3>Shared updates</h3><ol id="timeline"></ol>
 <a id="location" hidden target="_blank" rel="noreferrer noopener">View last reported location</a>

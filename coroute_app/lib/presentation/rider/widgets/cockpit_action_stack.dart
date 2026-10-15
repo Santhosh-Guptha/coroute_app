@@ -8,6 +8,7 @@ import '../../../data/models/rider_model.dart';
 import '../../../data/models/route_essential.dart';
 import '../../../data/models/stop_point_model.dart';
 import '../../../data/services/route_essentials_service.dart';
+import '../../../domain/fuel/group_fuel_consensus.dart';
 import '../../../domain/ride/ride_facts.dart';
 import '../../../domain/route/route_plan.dart';
 import '../../../domain/tracking/geo_math.dart';
@@ -162,6 +163,43 @@ class CockpitActionStack extends StatelessWidget {
           ),
         );
       }
+    }
+
+    // 1b. Group Fuel Consensus (Tracks lowest-range motorcycle in the convoy pack)
+    final consensus = GroupFuelConsensus.evaluate(
+      convoy: convoy,
+      upcomingStations: upcomingFuel,
+      progressM: progressM,
+    );
+
+    if (consensus != null && consensus.alertLead && consensus.bottleneckUserId != me.userId) {
+      final who = consensus.bottleneckRiderName.split(' ').first;
+      final st = consensus.recommendedStation;
+      final distStr = consensus.distanceToStationKm != null ? ' in ${consensus.distanceToStationKm!.toStringAsFixed(1)} km' : '';
+      items.add(
+        _ActionPill(
+          icon: Icons.local_gas_station_rounded,
+          iconColor: Colors.white,
+          accentColor: const Color(0xFFD97706),
+          title: 'GROUP FUEL · $who: ${consensus.lowestRangeKm.round()} km left',
+          subtitle: st != null
+              ? '${st.name}$distStr · Tap to add stop'
+              : 'Bottleneck rider needs fuel · Tap to search',
+          onTap: () {
+            HapticFeedback.mediumImpact();
+            _showFuelQuickSheet(
+              context,
+              usableKm: consensus.lowestRangeKm,
+              stations: upcomingFuel.take(4).toList(),
+              progressM: progressM,
+              riderLat: me.lat,
+              riderLng: me.lng,
+              onAddStationStop: onAddStationStop,
+              onOpenFuelSheet: onOpenFuelSheet,
+            );
+          },
+        ),
+      );
     }
 
     // 2. Stop Suggestions from Convoy Members (Food, Coffee, Rest, etc.)

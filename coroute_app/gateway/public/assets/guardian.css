@@ -1,1 +1,15 @@
 .guardian{max-width:640px;margin:auto;padding:clamp(24px,6vw,64px) 24px;min-height:100svh}.guardian__brand{font-weight:800;letter-spacing:.15em;text-decoration:none;color:inherit}.guardian__eyebrow{margin-top:48px;color:#70d6dc;letter-spacing:.14em;font-size:.85rem}.guardian h1{font-size:clamp(2rem,7vw,3.5rem);line-height:1.06;margin:16px 0}.guardian__intro,.guardian__note{line-height:1.65;color:#adb8bb}.guardian__card{margin:32px 0;padding:clamp(20px,5vw,32px);border:1px solid #38565b;border-radius:20px;background:#142125}.guardian__card[data-tone="critical"]{border-color:#f29b9b;background:#301d23}.guardian__card[data-tone="unknown"]{border-color:#667379;background:#20282b}.guardian__card h2{font-size:1.75rem;margin:14px 0}.guardian__card p{line-height:1.6}.guardian #connection{font-weight:600;color:#aee0e2}.guardian #location,.guardian button{display:inline-block;border:1px solid #8faeb4;border-radius:10px;padding:12px 16px;margin:12px 0;background:transparent;color:#e3f7f8;font:inherit;text-decoration:none;cursor:pointer}.guardian [hidden]{display:none!important}.guardian a:focus-visible,.guardian button:focus-visible{outline:3px solid #70d6dc;outline-offset:4px}.guardian #expiry{font-size:.85rem;color:#adb8bb}.guardian__note{font-size:.9rem}
+.guardian__map-box{margin:20px 0;display:flex;flex-direction:column;gap:12px}
+.guardian-map{position:relative;width:100%;height:320px;border-radius:14px;overflow:hidden;background:#0d1618;border:1px solid #38565b}
+.guardian-map__tiles{position:absolute;left:50%;top:50%;display:grid;width:768px;height:768px;transform:translate(-384px,-384px);pointer-events:none}
+.guardian-map__tiles img{width:256px;height:256px;display:block;background:#142125}
+.guardian-map__marker{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:10;display:flex;flex-direction:column;align-items:center}
+.guardian-map__pulse{position:absolute;width:40px;height:40px;border-radius:50%;background:rgba(112,214,220,0.35);animation:guardian-pulse 2s infinite ease-out}
+.guardian-map__dot{width:16px;height:16px;border-radius:50%;background:#70d6dc;border:2.5px solid #ffffff;box-shadow:0 0 10px rgba(0,0,0,0.5)}
+.guardian-map__badge{margin-top:6px;background:rgba(20,33,37,0.92);color:#ffffff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:8px;border:1px solid #38565b;white-space:nowrap}
+.guardian-map__controls{display:flex;gap:10px;flex-wrap:wrap}
+.guardian-map__btn{border:1px solid #8faeb4;border-radius:8px;padding:8px 14px;background:rgba(20,33,37,0.6);color:#e3f7f8;font:inherit;font-size:0.9rem;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+.guardian-map__credit{font-size:0.75rem;color:#adb8bb;margin:0}
+.guardian-map__credit a{color:inherit;text-decoration:underline}
+@keyframes guardian-pulse{0%{transform:scale(0.5);opacity:1}100%{transform:scale(2.2);opacity:0}}
+

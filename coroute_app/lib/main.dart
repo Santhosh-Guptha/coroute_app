@@ -20,6 +20,7 @@ import 'data/services/background_service.dart';
 import 'data/services/p2p_mesh_service.dart';
 import 'data/services/convoy_service.dart';
 import 'data/services/geo_service.dart';
+import 'data/services/helmet_voice_service.dart';
 import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
 import 'data/local/ride_stats_store.dart';
@@ -152,6 +153,15 @@ class CoRouteApp extends StatelessWidget {
               voice: ctx.read<VoiceService>(), weather: ctx.read<WeatherService>(), tiles: ctx.read<TilePrefetcher>());
             return safety;
           },
+        ),
+        ChangeNotifierProvider<HelmetVoiceService>(
+          lazy: false,
+          create: (ctx) => HelmetVoiceService(
+            convoyService: ctx.read<ConvoyService>(),
+            safetyService: ctx.read<SafetyService>(),
+            intercomService: ctx.read<IntercomService>(),
+            voiceService: ctx.read<VoiceService>(),
+          ),
         ),
         Provider<FuelSharingBinding>(
           lazy: false,

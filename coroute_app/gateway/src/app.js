@@ -53,9 +53,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const geo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
   // Dedicated queue: background POI checks never block emergency hospital routing.
   const essentialsGeo = new GeoProxy({ repo, logger, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
-  const overpassUrl = process.env.ESSENTIALS_OVERPASS_URL || "https://overpass-api.de/api/interpreter";
   const essentials = new EssentialsService({ repo,
-    places: new OverpassPlacesProvider({ url: overpassUrl, ...(geoFetch ? { fetchImpl: geoFetch } : {}) }),
+    places: process.env.ESSENTIALS_OVERPASS_URL ? new OverpassPlacesProvider({ url: process.env.ESSENTIALS_OVERPASS_URL, ...(geoFetch ? { fetchImpl: geoFetch } : {}) }) : null,
     routing: (wp) => essentialsGeo.route(wp),
   });
   convoys.router = (wp) => geo.route(wp);
@@ -156,7 +155,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     if (process.env.GUARDIAN_ENABLED !== 'true') return notFoundPage(req, res);
     res.set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer')
       .set('X-Robots-Tag', 'noindex, nofollow')
-      .set('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'")
+      .set('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'")
       .type('html').send(site.render('watch.html', pageVars(req)));
   });
   // Join link shared from the app: opens the app via its custom scheme, with the download as fallback.

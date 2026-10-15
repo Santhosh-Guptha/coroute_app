@@ -8,6 +8,7 @@ import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/services/intercom_service.dart';
 import 'package:coroute_app/data/services/realtime_service.dart';
+import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/presentation/ride/ride_sheet.dart';
 import 'package:coroute_app/presentation/ride/riders_ladder.dart';
@@ -33,9 +34,10 @@ void main() {
   Widget host(Widget child, RealtimeService rt) => MultiProvider(
         providers: [
           ChangeNotifierProvider<RealtimeService>.value(value: rt),
+          ChangeNotifierProvider(create: (_) => SettingsService()),
           ChangeNotifierProvider(create: (_) => IntercomService(rt)),
         ],
-        child: MaterialApp(home: Scaffold(body: Column(children: [child]))),
+        child: MaterialApp(home: Scaffold(body: SingleChildScrollView(child: child))),
       );
 
   /// 320 dp wide at 1.3x text, in both themes.

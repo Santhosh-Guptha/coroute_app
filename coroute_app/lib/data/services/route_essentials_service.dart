@@ -78,11 +78,8 @@ class RouteEssentialsService extends ChangeNotifier {
     offline = !online;
     category = selectedCategory;
     if (route == null || route.approximate || route.points.length < 2) {
-      if (_key != null) {
-        _generation++; _key = null; loading = false;
-        error = 'A calculated road route is needed.'; notifyListeners();
-      }
-      return;
+      _generation++; _key = null; snapshot = null; loading = false;
+      error = 'A calculated road route is needed.'; notifyListeners(); return;
     }
     // Store the exact geometry in the key: no hash collision can resurrect another route.
     final key = '${route.polyline}|$category|${progressM ~/ 5000}';
