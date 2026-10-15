@@ -121,49 +121,52 @@ class CockpitActionStack extends StatelessWidget {
           },
         ),
       );
-    } else if (nearestStation != null && fuelAheadM != null) {
-      final rangeText = usableKm != null ? ' · ${usableKm.round()} km left' : '';
-      items.add(
-        _ActionPill(
-          icon: Icons.local_gas_station_rounded,
-          iconColor: Colors.white,
-          accentColor: const Color(0xFFD97706),
-          title: 'NEXT FUEL · in ${formatDistanceRounded(fuelAheadM)}$rangeText',
-          subtitle: '${nearestStation.name} · Tap to route',
-          onTap: () {
-            HapticFeedback.lightImpact();
-            _showFuelQuickSheet(
-              context,
-              usableKm: usableKm,
-              stations: upcomingFuel.take(4).toList(),
-              progressM: progressM,
-              riderLat: me.lat,
-              riderLng: me.lng,
-              onAddStationStop: onAddStationStop,
-              onOpenFuelSheet: onOpenFuelSheet,
-            );
-          },
-        ),
-      );
     } else if (usableKm != null && usableKm <= 100) {
-      items.add(
-        _ActionPill(
-          icon: Icons.local_gas_station_rounded,
-          iconColor: Colors.white,
-          accentColor: AppTheme.warnText,
-          title: 'FUEL · ${usableKm.round()} km range',
-          subtitle: 'Tap to view petrol stations',
-          onTap: () {
-            HapticFeedback.lightImpact();
-            onOpenFuelSheet?.call();
-          },
-        ),
-      );
+      // Only show proactive fuel recommendation when tank is actually in reserve (<= 100 km)
+      if (nearestStation != null && fuelAheadM != null) {
+        final rangeText = ' · ${usableKm.round()} km left';
+        items.add(
+          _ActionPill(
+            icon: Icons.local_gas_station_rounded,
+            iconColor: Colors.white,
+            accentColor: const Color(0xFFD97706),
+            title: 'NEXT FUEL · in ${formatDistanceRounded(fuelAheadM)}$rangeText',
+            subtitle: '${nearestStation.name} · Tap to route',
+            onTap: () {
+              HapticFeedback.lightImpact();
+              _showFuelQuickSheet(
+                context,
+                usableKm: usableKm,
+                stations: upcomingFuel.take(4).toList(),
+                progressM: progressM,
+                riderLat: me.lat,
+                riderLng: me.lng,
+                onAddStationStop: onAddStationStop,
+                onOpenFuelSheet: onOpenFuelSheet,
+              );
+            },
+          ),
+        );
+      } else {
+        items.add(
+          _ActionPill(
+            icon: Icons.local_gas_station_rounded,
+            iconColor: Colors.white,
+            accentColor: AppTheme.warnText,
+            title: 'FUEL · ${usableKm.round()} km range',
+            subtitle: 'Tap to view petrol stations',
+            onTap: () {
+              HapticFeedback.lightImpact();
+              onOpenFuelSheet?.call();
+            },
+          ),
+        );
+      }
     }
 
     // 2. Stop Suggestions from Convoy Members (Food, Coffee, Rest, etc.)
     final suggestions = convoy.suggestedStops;
-    for (final stop in suggestions.take(2)) {
+    for (final stop in suggestions.take(4)) {
       final IconData stopIcon;
       final Color stopColor;
       switch (stop.category.toUpperCase()) {
@@ -268,16 +271,33 @@ class CockpitActionStack extends StatelessWidget {
       }
     }
 
-    if (items.isEmpty) return const SizedBox.shrink();
+    final fuelButton = _SideFuelButton(
+      isLowFuel: isLowFuel,
+      usableKm: usableKm,
+      onTap: () {
+        HapticFeedback.lightImpact();
+        _showFuelQuickSheet(
+          context,
+          usableKm: usableKm,
+          stations: upcomingFuel.take(4).toList(),
+          progressM: progressM,
+          riderLat: me.lat,
+          riderLng: me.lng,
+          onAddStationStop: onAddStationStop,
+          onOpenFuelSheet: onOpenFuelSheet,
+        );
+      },
+    );
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        for (int i = 0; i < items.length; i++) ...[
-          if (i > 0) const SizedBox(height: Space.s8),
-          items[i],
+        for (final item in items) ...[
+          item,
+          const SizedBox(height: Space.s8),
         ],
+        fuelButton,
       ],
     );
   }
@@ -555,6 +575,65 @@ class _StationRow extends StatelessWidget {
             label: const Text('Add Stop', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SideFuelButton extends StatelessWidget {
+  final bool isLowFuel;
+  final double? usableKm;
+  final VoidCallback onTap;
+
+  const _SideFuelButton({
+    required this.isLowFuel,
+    required this.usableKm,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final rangeText = usableKm != null ? '${usableKm!.round()} km' : 'Fuel';
+    final bgColor = isLowFuel ? AppTheme.sos : AppTheme.card.withAlpha(245);
+    final borderColor = isLowFuel ? AppTheme.sos : AppTheme.border.withOpacity(0.6);
+    final iconColor = isLowFuel
+        ? Colors.white
+        : (usableKm != null && usableKm! <= 100 ? AppTheme.warnText : AppTheme.brand);
+
+    return Material(
+      color: bgColor,
+      elevation: isLowFuel ? 6 : 3,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: borderColor, width: 1.5),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.local_gas_station_rounded,
+                size: 18,
+                color: isLowFuel ? Colors.white : iconColor,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                isLowFuel ? 'LOW ($rangeText)' : rangeText,
+                style: AppText.caption.copyWith(
+                  color: isLowFuel ? Colors.white : AppText.body.color,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
