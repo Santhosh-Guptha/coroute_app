@@ -73,12 +73,12 @@ class CrashAlarmScreen extends StatelessWidget {
                             margin: const EdgeInsets.only(bottom: 16),
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF2A0606),
+                              color: AppTheme.isLight ? const Color(0xFFFFECEC) : const Color(0xFF2A0606),
                               borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: Colors.redAccent, width: 2),
+                              border: Border.all(color: AppTheme.sos, width: 2),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.redAccent.withOpacity(0.35),
+                                  color: AppTheme.sos.withValues(alpha: AppTheme.isLight ? 0.15 : 0.35),
                                   blurRadius: 16,
                                   spreadRadius: 1,
                                 ),
@@ -89,13 +89,13 @@ class CrashAlarmScreen extends StatelessWidget {
                               children: [
                                 Row(
                                   children: [
-                                    const Icon(Icons.emergency_rounded, color: Colors.redAccent, size: 26),
+                                    Icon(Icons.emergency_rounded, color: AppTheme.sos, size: 26),
                                     const SizedBox(width: 10),
                                     Expanded(
                                       child: Text(
                                         '🚨 BYSTANDER AUDIO BEACON ACTIVE',
                                         style: TextStyle(
-                                          color: Colors.redAccent.shade100,
+                                          color: AppTheme.isLight ? AppTheme.sos : Colors.redAccent.shade100,
                                           fontSize: 14,
                                           fontWeight: FontWeight.bold,
                                           letterSpacing: 0.6,
@@ -108,7 +108,7 @@ class CrashAlarmScreen extends StatelessWidget {
                                 Text(
                                   "Loud audio beacon sounding to guide bystanders to your location. Tap below, press volume keys, or say 'CoRoute Silence' to mute. SOS remains broadcasting to your convoy.",
                                   style: TextStyle(
-                                    color: Colors.white.withOpacity(0.9),
+                                    color: AppTheme.isLight ? AppTheme.text : Colors.white.withValues(alpha: 0.9),
                                     fontSize: 13,
                                     height: 1.4,
                                   ),
@@ -126,7 +126,7 @@ class CrashAlarmScreen extends StatelessWidget {
                                     ),
                                   ),
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFFD32F2F),
+                                    backgroundColor: AppTheme.sos,
                                     foregroundColor: Colors.white,
                                     padding: const EdgeInsets.symmetric(vertical: 14),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

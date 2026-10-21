@@ -444,7 +444,7 @@ class _PttButton extends StatelessWidget {
             ? 'Only ${ic.talkTargetName ?? 'this rider'} hears you'
             : (leadChannel ? 'Only leaders hear you' : 'Hold while you speak'));
     final IconData icon = tx ? Icons.mic_rounded : (private ? Icons.lock_rounded : (leadChannel ? Icons.shield_rounded : Icons.mic_none_rounded));
-    final Color idleColor = leadChannel ? const Color(0xFFD97706) : AppTheme.brand;
+    final Color idleColor = leadChannel ? AppTheme.warnText : AppTheme.brand;
     // Screen readers cannot hold a finger down: for them a double tap starts talking and
     // another double tap stops.
     return Semantics(
@@ -553,7 +553,7 @@ class _VoxButton extends StatelessWidget {
     final armed = ic.isVoxArmed && !ic.isMicMuted;
     final tx = ic.isTransmitting;
     final leadChannel = ic.channel == IntercomChannel.leadOnly;
-    final Color armedColor = leadChannel ? const Color(0xFFD97706) : AppTheme.brand;
+    final Color armedColor = leadChannel ? AppTheme.warnText : AppTheme.brand;
     final Color color = tx ? AppTheme.warnText : (armed ? armedColor : AppTheme.muted);
     final text = tx
         ? (leadChannel ? 'Lead channel, sending' : 'Hands-free, sending')

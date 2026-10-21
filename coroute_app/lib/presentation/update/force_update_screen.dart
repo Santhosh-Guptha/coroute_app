@@ -197,10 +197,10 @@ class ForceUpdateScreen extends StatelessWidget {
                               }
                             },
                       child: versionService.checking
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 20,
                               height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accentText),
                             )
                           : const Text(
                               'Check Again',
@@ -217,9 +217,9 @@ class ForceUpdateScreen extends StatelessWidget {
                         versionService.setSimulateMandatoryUpdate(false);
                         Navigator.of(context).pop();
                       },
-                      child: const Text(
+                      child: Text(
                         'Exit Simulated Update (Test Mode)',
-                        style: TextStyle(color: Colors.white54, fontSize: 12),
+                        style: TextStyle(color: AppTheme.muted, fontSize: 12),
                       ),
                     ),
                   ],

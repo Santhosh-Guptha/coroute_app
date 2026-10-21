@@ -207,7 +207,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
         _ActionPill(
           icon: Icons.local_gas_station_rounded,
           iconColor: Colors.white,
-          accentColor: const Color(0xFFD97706),
+          accentColor: AppTheme.warnText,
           title: 'GROUP FUEL · $who: ${consensus.lowestRangeKm.round()} km left',
           subtitle: st != null
               ? '${st.name}$distStr · Tap to add stop'
@@ -237,7 +237,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
       switch (stop.category.toUpperCase()) {
         case 'FOOD':
           stopIcon = Icons.restaurant_rounded;
-          stopColor = const Color(0xFFEA580C); // Warm Orange
+          stopColor = AppTheme.warnText;
           break;
         case 'FUEL':
           stopIcon = Icons.local_gas_station_rounded;
@@ -245,11 +245,11 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
           break;
         case 'SCENIC':
           stopIcon = Icons.photo_camera_rounded;
-          stopColor = const Color(0xFF0284C7); // Blue
+          stopColor = AppTheme.brand;
           break;
         default:
           stopIcon = Icons.local_cafe_rounded;
-          stopColor = AppTheme.warnText; // Amber
+          stopColor = AppTheme.warnText;
           break;
       }
 

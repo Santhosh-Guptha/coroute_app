@@ -64,13 +64,13 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
     // Background color
     final Color bgColor;
     if (tx) {
-      bgColor = private ? const Color(0xFF0284C7) : AppTheme.warnText;
+      bgColor = private ? AppTheme.infoBlue : AppTheme.warnText;
     } else if (rx) {
       bgColor = const Color(0xFF0F766E);
     } else if (muted) {
       bgColor = AppTheme.card;
     } else if (leadChannel) {
-      bgColor = const Color(0xFFD97706);
+      bgColor = AppTheme.warnText;
     } else {
       bgColor = AppTheme.brand;
     }

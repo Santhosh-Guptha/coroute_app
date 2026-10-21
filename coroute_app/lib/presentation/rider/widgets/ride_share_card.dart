@@ -49,7 +49,7 @@ class RideShareCard extends StatelessWidget {
         border: Border.all(color: AppTheme.subtleBorder, width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
+            color: AppTheme.shadow,
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
@@ -248,8 +248,8 @@ class RideShareCard extends StatelessWidget {
                             icon: const Icon(Icons.share, size: 18),
                             label: const Text('Share Summary'),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.neonCyan,
-                              foregroundColor: Colors.black,
+                              backgroundColor: AppTheme.brand,
+                              foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),

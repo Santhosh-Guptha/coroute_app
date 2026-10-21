@@ -180,8 +180,8 @@ class GloveQuickSettingsModal extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: Radii.sheetTop,
-        boxShadow: const [
-          BoxShadow(color: Color(0x40000000), blurRadius: 40, offset: Offset(0, -12)),
+        boxShadow: [
+          BoxShadow(color: AppTheme.shadow, blurRadius: 40, offset: const Offset(0, -12)),
         ],
       ),
       padding: EdgeInsets.fromLTRB(20, 12, 20, 28 + bottom),

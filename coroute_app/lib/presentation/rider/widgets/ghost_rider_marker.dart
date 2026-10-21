@@ -125,7 +125,7 @@ class GhostRiderMarker extends StatelessWidget {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.4),
+                        color: AppTheme.shadow,
                         blurRadius: 8,
                         offset: const Offset(0, 3),
                       ),

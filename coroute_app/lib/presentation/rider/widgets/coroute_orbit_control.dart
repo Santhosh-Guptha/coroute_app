@@ -340,8 +340,8 @@ class _OrbitQuickAccessCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(24),
-        boxShadow: const [
-          BoxShadow(color: Color(0x4D000000), blurRadius: 40, offset: Offset(0, 16)),
+        boxShadow: [
+          BoxShadow(color: AppTheme.shadow, blurRadius: 40, offset: const Offset(0, 16)),
         ],
       ),
       child: Column(

@@ -189,12 +189,12 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
                   Polyline(
                     points: allPoints,
                     strokeWidth: 4.0,
-                    color: Colors.white.withOpacity(0.2),
+                    color: AppTheme.isLight ? AppTheme.border2 : Colors.white.withOpacity(0.25),
                   ),
                   Polyline(
                     points: playedPoints,
                     strokeWidth: 4.5,
-                    color: AppTheme.neonCyan,
+                    color: AppTheme.accentText,
                   ),
                 ],
               ),
@@ -239,12 +239,12 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
                       angle: ((currentPt.bearing ?? 0) * (3.141592653589793 / 180)),
                       child: Container(
                         decoration: BoxDecoration(
-                          color: AppTheme.neonCyan,
+                          color: AppTheme.brand,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.black, width: 2.5),
+                          border: Border.all(color: AppTheme.card, width: 2.5),
                           boxShadow: [
                             BoxShadow(
-                              color: AppTheme.neonCyan.withOpacity(0.6),
+                              color: AppTheme.brand.withOpacity(0.6),
                               blurRadius: 12,
                               spreadRadius: 2,
                             ),
@@ -252,7 +252,7 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
                         ),
                         child: const Icon(
                           Icons.navigation,
-                          color: Colors.black,
+                          color: Colors.white,
                           size: 24,
                         ),
                       ),
@@ -322,11 +322,11 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
                     width: 48,
                     height: 48,
                     decoration: BoxDecoration(
-                      color: AppTheme.neonCyan,
+                      color: AppTheme.brand,
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.share, color: Colors.black),
+                      icon: const Icon(Icons.share, color: Colors.white),
                       tooltip: 'Share Card / Export GPX',
                       onPressed: _openShareSheet,
                     ),
