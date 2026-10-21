@@ -24,6 +24,7 @@ import 'appearance_sheet.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import '../trip_planner/offline_map_manager_screen.dart';
+import '../subscription/plan_selector_screen.dart';
 
 /// The Profile tab: who you are, then every setting in one place.
 /// Each item (theme, data saver, permissions, sign out, version) appears
@@ -278,6 +279,19 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
 
+                const SizedBox(height: 20),
+                const DsSectionHeader('Membership & Plans'),
+                const SizedBox(height: 10),
+                DsCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: _SettingsRow(
+                    icon: Icons.card_membership_rounded,
+                    title: 'Subscription & Tier Selector',
+                    subtitle: 'Switch plans & test features (Community, Pro, Road Captain, Tour Operator)',
+                    divider: false,
+                    onTap: () => _push(context, const PlanSelectorScreen()),
+                  ),
+                ),
                 const SizedBox(height: 20),
                 const DsSectionHeader('Riding'),
                 const SizedBox(height: 10),

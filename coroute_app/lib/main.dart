@@ -23,6 +23,8 @@ import 'data/services/geo_service.dart';
 import 'data/services/helmet_voice_service.dart';
 import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
+import 'data/services/app_version_service.dart';
+import 'data/services/plan_subscription_service.dart';
 import 'data/local/ride_stats_store.dart';
 import 'data/local/sqflite_track_queue.dart';
 import 'data/services/realtime_service.dart';
@@ -105,6 +107,8 @@ class CoRouteApp extends StatelessWidget {
           create: (ctx) => FuelSettingsBinding(ctx.read<AuthService>(), ctx.read<SettingsService>()),
           dispose: (_, binding) => binding.dispose()),
         ChangeNotifierProvider(create: (ctx) => MetaService(ctx.read<ApiClient>())..load()),
+        ChangeNotifierProvider(create: (ctx) => AppVersionService(ctx.read<MetaService>())),
+        ChangeNotifierProvider(create: (_) => PlanSubscriptionService()..load()),
         ChangeNotifierProvider(create: (ctx) => TripStorageService(ctx.read<ApiClient>())),
         ChangeNotifierProvider(create: (ctx) => TimelineService(ctx.read<ApiClient>(), ctx.read<RealtimeService>())),
         ChangeNotifierProvider(create: (ctx) {
