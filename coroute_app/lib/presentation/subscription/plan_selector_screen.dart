@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/ui/ui_tokens.dart';
 import '../../data/services/plan_subscription_service.dart';
 
 /// Screen allowing riders, captains, and testers to inspect and switch between
@@ -42,11 +41,11 @@ class PlanSelectorScreen extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.verified_user_rounded, color: AppTheme.accentText, size: 14),
+                Icon(Icons.verified_user_rounded, color: AppTheme.accentText, size: 14),
                 const SizedBox(width: 5),
                 Text(
                   FeatureGates.tierLabel(currentTier).toUpperCase(),
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.accentText,
                     fontWeight: FontWeight.w900,
                     fontSize: 11,
@@ -157,7 +156,7 @@ class PlanSelectorScreen extends StatelessWidget {
                     backgroundColor: AppTheme.card,
                     content: Row(
                       children: [
-                        const Icon(Icons.check_circle_rounded, color: AppTheme.accentText),
+                        Icon(Icons.check_circle_rounded, color: AppTheme.accentText),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
@@ -183,12 +182,12 @@ class PlanSelectorScreen extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppTheme.border2),
             ),
-            child: const Row(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(Icons.info_outline_rounded, color: AppTheme.muted, size: 18),
                 const SizedBox(width: 10),
-                Expanded(
+                const Expanded(
                   child: Text(
                     'No payment is required in this build. You can switch between plans freely to test convoy scaling, priority ducking, and emergency systems.',
                     style: TextStyle(color: Colors.white60, fontSize: 12, height: 1.4),
@@ -276,7 +275,7 @@ class _PlanCard extends StatelessWidget {
                       ),
                       child: Text(
                         'Up to ${plan.maxConvoySize} Bikes',
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppTheme.accentText,
                           fontWeight: FontWeight.w800,
                           fontSize: 11,
@@ -307,7 +306,7 @@ class _PlanCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                const Divider(height: 24, color: AppTheme.border2),
+                Divider(height: 24, color: AppTheme.border2),
 
                 // Features Checklist
                 for (final f in plan.features) ...[
