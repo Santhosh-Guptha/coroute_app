@@ -119,7 +119,7 @@ class PlanSubscriptionService extends ChangeNotifier {
           name: 'Community Rider',
           tagline: 'Essential Safety & Small Group Rides',
           monthlyPrice: 'Free Forever',
-          annualPrice: '₹0 / $0',
+          annualPrice: '₹0 / \$0',
           maxConvoySize: 4,
           features: [
             PlanFeatureItem(
@@ -148,8 +148,8 @@ class PlanSubscriptionService extends ChangeNotifier {
           tier: SubscriptionTier.proRider,
           name: 'CoRoute Pro',
           tagline: 'Solo Exploration, Family Tracking & Deep Telemetry',
-          monthlyPrice: '₹149 / mo ($3.99)',
-          annualPrice: '₹1,199 / yr ($29.99)',
+          monthlyPrice: '₹149 / mo (\$3.99)',
+          annualPrice: '₹1,199 / yr (\$29.99)',
           maxConvoySize: 4,
           features: [
             PlanFeatureItem(
@@ -188,8 +188,8 @@ class PlanSubscriptionService extends ChangeNotifier {
           tier: SubscriptionTier.roadCaptain,
           name: 'Road Captain Pass',
           tagline: 'Host the Pack — One Pass Unlocks the Entire Convoy',
-          monthlyPrice: '₹599 / mo ($12.99)',
-          annualPrice: '₹4,499 / yr ($99.99)',
+          monthlyPrice: '₹599 / mo (\$12.99)',
+          annualPrice: '₹4,499 / yr (\$99.99)',
           maxConvoySize: 30,
           isPopular: true,
           features: [
@@ -226,8 +226,8 @@ class PlanSubscriptionService extends ChangeNotifier {
           tier: SubscriptionTier.tourOperator,
           name: 'Tour Operator Enterprise',
           tagline: 'Commercial Fleets, Rallies & Multi-Day Expeditions',
-          monthlyPrice: '₹3,999 / tour ($79)',
-          annualPrice: '₹39,000 / yr ($499)',
+          monthlyPrice: '₹3,999 / tour (\$79)',
+          annualPrice: '₹39,000 / yr (\$499)',
           maxConvoySize: 100,
           features: [
             PlanFeatureItem(
