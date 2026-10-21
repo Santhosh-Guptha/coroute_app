@@ -448,14 +448,48 @@ class EmergencySosSheet extends StatelessWidget {
             DsButton(
               label: L10n.t('sos.ok'),
               icon: Icons.verified_user_outlined,
-              onPressed: () => _close(context, convoyService, ResolveReason.resolved),
+              onPressed: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    backgroundColor: AppTheme.card,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    title: const Text('Cancel SOS?'),
+                    content: const Text('Confirm that help has reached you and your distress beacon can be turned off.'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep SOS Active')),
+                      FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm Cancel')),
+                    ],
+                  ),
+                );
+                if (ok == true && context.mounted) {
+                  _close(context, convoyService, ResolveReason.resolved);
+                }
+              },
             ),
             const SizedBox(height: 10),
             DsButton(
               label: L10n.t('sos.false'),
               icon: Icons.do_not_disturb_on_outlined,
               tone: DsButtonTone.outline,
-              onPressed: () => _close(context, convoyService, ResolveReason.falseAlarm),
+              onPressed: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    backgroundColor: AppTheme.card,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    title: const Text('Cancel as False Alarm?'),
+                    content: const Text('Confirm that this SOS was triggered accidentally and you are safe.'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep SOS Active')),
+                      FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm False Alarm')),
+                    ],
+                  ),
+                );
+                if (ok == true && context.mounted) {
+                  _close(context, convoyService, ResolveReason.falseAlarm);
+                }
+              },
             ),
             const SizedBox(height: Space.s4),
             TextButton(

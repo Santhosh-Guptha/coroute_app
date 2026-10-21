@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import '../../core/constants/safety_constants.dart';
 import '../tracking/geo_math.dart';
 import '../tracking/track_point.dart';
@@ -21,6 +22,7 @@ class FuelRangeTracker {
   double? baselineKm;
   String? profileStamp;
   bool uncertain = false;
+  int? _pristineMotionStartTs;
 
   double? usableKm(FuelProfile p) => p.valid && baselineKm != null && profileStamp == p.toJson().toString()
       ? p.usableKm(baselineKm!, _riddenM) : null;
@@ -42,6 +44,7 @@ class FuelRangeTracker {
     baselineKm = next;
     profileStamp = p.toJson().toString();
     uncertain = false;
+    _pristineMotionStartTs = null;
     _lastLat = null;
     _lastLng = null;
     _lastTs = atMs;
@@ -61,14 +64,51 @@ class FuelRangeTracker {
   /// [SafetyConstants.fuelMaxJumpM] or a gap over [SafetyConstants.fuelMaxGap]
   /// is skipped (GPS teleports, a restart): the new fix only becomes the new start.
   void onFix(TrackPoint p) {
-    if (!p.lat.isFinite || !p.lng.isFinite || p.lat.abs() > 90 || p.lng.abs() > 180 || !p.accuracyM.isFinite || p.accuracyM > 100) { uncertain = true; return; }
+    if (!p.lat.isFinite || !p.lng.isFinite || p.lat.abs() > 90 || p.lng.abs() > 180 || !p.accuracyM.isFinite || p.accuracyM > 100) {
+      uncertain = true;
+      _pristineMotionStartTs = null;
+      return;
+    }
     if (p.ts < _lastTs || (p.ts == _lastTs && _lastLat != null)) return;
     final lat = _lastLat, lng = _lastLng;
+    double? d;
+    int? dt;
     if (lat != null && lng != null && _lastTs > 0 && p.ts >= _lastTs) {
-      final dt = p.ts - _lastTs;
-      final d = GeoMath.haversine(lat, lng, p.lat, p.lng);
-      if (dt <= SafetyConstants.fuelMaxGap.inMilliseconds && d <= SafetyConstants.fuelMaxJumpM) { _riddenM += d; } else { uncertain = true; }
+      dt = p.ts - _lastTs;
+      d = GeoMath.haversine(lat, lng, p.lat, p.lng);
+      if (dt <= SafetyConstants.fuelMaxGap.inMilliseconds && d <= SafetyConstants.fuelMaxJumpM) {
+        _riddenM += d;
+      } else {
+        uncertain = true;
+        _pristineMotionStartTs = null;
+      }
     }
+
+    // Auto-recovery: When GPS accuracy returns to pristine (< 15 meters) for at least
+    // 30 consecutive seconds with active motion, reset uncertain = false and re-anchor
+    // the fuel consumption baseline.
+    final bool isPristine = p.accuracyM < 15;
+    final double speedFromDist = (dt != null && dt > 0 && d != null) ? (d / (dt / 1000.0)) * 3.6 : 0.0;
+    final bool isMoving = p.speedKmh >= 5.0 || speedFromDist >= 5.0 || (p.speedKmh > 0);
+
+    if (uncertain) {
+      if (isPristine && isMoving) {
+        _pristineMotionStartTs ??= p.ts;
+        if (p.ts - _pristineMotionStartTs! >= 30000) {
+          uncertain = false;
+          if (baselineKm != null) {
+            baselineKm = math.max(0.0, baselineKm! - (_riddenM / 1000.0));
+            _riddenM = 0;
+          }
+          _pristineMotionStartTs = null;
+        }
+      } else {
+        _pristineMotionStartTs = null;
+      }
+    } else {
+      _pristineMotionStartTs = null;
+    }
+
     _lastLat = p.lat;
     _lastLng = p.lng;
     _lastTs = p.ts;
@@ -80,6 +120,7 @@ class FuelRangeTracker {
     baselineKm = null;
     profileStamp = null;
     _warned = false;
+    _pristineMotionStartTs = null;
     if (atMs > _lastFillAt) _lastFillAt = atMs;
   }
 
@@ -113,6 +154,7 @@ class FuelRangeTracker {
     _lastTs = 0;
     _lastFillAt = 0;
     _warned = false;
+    _pristineMotionStartTs = null;
   }
 
   Map<String, Object?> toJson() => {

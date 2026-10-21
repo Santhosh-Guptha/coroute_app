@@ -85,6 +85,8 @@ import 'widgets/minimal_cockpit_overlay.dart';
 import 'widgets/minimal_cockpit_settings_cards.dart';
 import 'widgets/minimal_cockpit_stats_row.dart';
 import 'widgets/minimal_hold_to_talk_bar.dart';
+import 'widgets/ghost_rider_marker.dart';
+import 'widgets/cockpit_dual_state_banner.dart';
 
 
 
@@ -1244,6 +1246,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     speedKmh: RideFacts.hasPosition(me) ? me.speedKmh : null,
                     speedLimitKmh: speedLimit,
                   ),
+                  if (connection != null && prefetcher != null)
+                    CockpitDualStateBanner(
+                      isOffline: true,
+                      isPackActive: prefetcher.isRouteCached(convoy.routeLine),
+                      peerCount: service.p2pMeshPeerCount,
+                      margin: const EdgeInsets.only(top: Space.s8),
+                    ),
                   // In-cockpit alert slot
                   AnimatedSwitcher(
                     duration: Motion.screen,
@@ -1897,7 +1906,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 point: LatLng(r.lat, r.lng),
                 width: 144,
                 height: 140,
-                child: RiderMapMarker(
+                child: (!isMeRider(r, uid) && GhostRiderMarker.isDropped(r, now))
+                    ? GhostRiderMarker(
+                        rider: r,
+                        nowMs: now,
+                        isMe: false,
+                        onTap: () => _openRider(r),
+                      )
+                    : RiderMapMarker(
                   rider: r,
                   isMe: isMeRider(r, uid),
                   color: colors[r.userId],

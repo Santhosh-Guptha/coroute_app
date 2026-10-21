@@ -30,6 +30,9 @@ class VoicePacket {
   bool get isPrivate => to != null && to!.isNotEmpty;
   String get channel => header['channel']?.toString() ?? 'ALL';
   bool get isLeadOnly => channel == 'LEAD_ONLY';
+  String? get role => header['role']?.toString();
+  bool get isPriority => header['priority'] == true;
+  bool get isLead => role?.toUpperCase() == 'LEAD' || isLeadOnly || isPriority;
 
   /// The sender's sample rate: 16 kHz, or 8 kHz from a phone in data saver mode. Anything
   /// else is treated as 16 kHz (the player is never set up at an arbitrary rate).

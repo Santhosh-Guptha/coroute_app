@@ -1,7 +1,10 @@
+import 'dart:math' as math;
+import '../../core/config/feature_gates.dart';
 import '../../core/constants/ride_thresholds.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/models/route_model.dart';
+import '../../data/models/safety_wire.dart';
 import '../../data/models/stop_point_model.dart';
 import '../timeline/timeline_text.dart';
 import '../tracking/geo_math.dart';
@@ -90,6 +93,9 @@ class RideSnapshot {
   final Duration? eta;
   final List<LadderRung> ladder;
   final double spreadM;
+
+  /// Total pack spread (Lead-to-Sweeper distance). Null when gated.
+  final double? totalPackSpreadM;
   final StopPointModel? nextStop;
   final double? nextStopM;
 
@@ -102,6 +108,7 @@ class RideSnapshot {
     required this.eta,
     required this.ladder,
     required this.spreadM,
+    this.totalPackSpreadM,
     required this.nextStop,
     required this.nextStopM,
     required this.stops,
@@ -115,6 +122,7 @@ class RideSnapshot {
         eta: eta,
         ladder: ladder,
         spreadM: spreadM,
+        totalPackSpreadM: totalPackSpreadM,
         nextStop: nextStop,
         nextStopM: nextStopM,
         stops: stops,
@@ -175,11 +183,43 @@ class RideFacts {
     return Duration(seconds: (remaining * route.durationS / route.distanceM).round());
   }
 
+  /// Finds the lead rider in the convoy.
+  static RiderModel? findLead(ConvoyModel convoy) {
+    for (final r in convoy.riders.values) {
+      if (r.role == RiderRoles.lead) return r;
+    }
+    return convoy.riders[convoy.createdByUserId];
+  }
+
+  /// Projects rider [r] position along [lead]'s moving heading vector.
+  /// Positive means ahead of lead in the direction of heading; negative means behind.
+  static double projectAlongHeading(RiderModel r, RiderModel lead) {
+    if (r.userId == lead.userId && r.lat == lead.lat && r.lng == lead.lng) return 0.0;
+    final radLat = lead.lat * math.pi / 180.0;
+    final dy = (r.lat - lead.lat) * (math.pi / 180.0) * GeoMath.earthRadiusM;
+    final dx = (r.lng - lead.lng) * (math.pi / 180.0) * GeoMath.earthRadiusM * math.cos(radLat);
+    final headingRad = lead.heading * math.pi / 180.0;
+    final ux = math.sin(headingRad);
+    final uy = math.cos(headingRad);
+    return dx * ux + dy * uy;
+  }
+
   /// How far along the ride [r] is (see [LadderRung.progressM]).
-  static double? progressM(RiderModel r, List<(double, double)> line, {double destLat = 0, double destLng = 0}) {
+  /// When route polyline and destination are absent (free-riding), projects
+  /// along [lead]'s moving heading vector to maintain spatial ordering.
+  static double? progressM(
+    RiderModel r,
+    List<(double, double)> line, {
+    double destLat = 0,
+    double destLng = 0,
+    RiderModel? lead,
+  }) {
     if (!hasPosition(r)) return null;
     if (line.length >= 2) return alongM(r.lat, r.lng, line);
     if (destLat != 0 || destLng != 0) return -GeoMath.haversine(r.lat, r.lng, destLat, destLng);
+    if (lead != null && hasPosition(lead)) {
+      return projectAlongHeading(r, lead);
+    }
     return null;
   }
 
@@ -191,11 +231,14 @@ class RideFacts {
     final line = convoy.routeLine;
     final limit = convoy.distanceThresholdMeters;
     final me = convoy.riders[myUserId];
-    final myProgress = me == null ? null : progressM(me, line, destLat: convoy.destinationLat, destLng: convoy.destinationLng);
+    final lead = findLead(convoy);
+    final myProgress = me == null
+        ? null
+        : progressM(me, line, destLat: convoy.destinationLat, destLng: convoy.destinationLng, lead: lead);
     final known = <(RiderModel, double)>[];
     final unknown = <RiderModel>[];
     for (final r in convoy.riders.values) {
-      final p = progressM(r, line, destLat: convoy.destinationLat, destLng: convoy.destinationLng);
+      final p = progressM(r, line, destLat: convoy.destinationLat, destLng: convoy.destinationLng, lead: lead);
       if (p == null) {
         unknown.add(r);
       } else {
@@ -230,6 +273,61 @@ class RideFacts {
       out.add(LadderRung(rider: r, isMe: myUserId.isNotEmpty && r.userId == myUserId, straightFromMeM: straight(r)));
     }
     return out;
+  }
+
+  /// Total pack spread calculation (Lead-to-Sweeper distance).
+  /// Exposes the pack spread between the designated Lead and Sweeper.
+  /// When [Feature.totalConvoySpreadAlert] is gated (locked), returns null.
+  static double? totalPackSpreadM(ConvoyModel convoy) {
+    if (!FeatureGates.isUnlocked(Feature.totalConvoySpreadAlert)) return null;
+    final lead = findLead(convoy);
+    if (lead == null || !hasPosition(lead)) return null;
+
+    RiderModel? sweeper;
+    final sId = convoy.sweeperId;
+    if (sId != null) {
+      sweeper = convoy.riders[sId];
+    }
+    if (sweeper == null) {
+      for (final r in convoy.riders.values) {
+        if (r.role == RiderRoles.sweeper) {
+          sweeper = r;
+          break;
+        }
+      }
+    }
+
+    if (sweeper != null && hasPosition(sweeper)) {
+      final line = convoy.routeLine;
+      if (line.length >= 2) {
+        final aLead = alongM(lead.lat, lead.lng, line);
+        final aSweeper = alongM(sweeper.lat, sweeper.lng, line);
+        if (aLead != null && aSweeper != null) {
+          return (aLead - aSweeper).abs();
+        }
+      }
+      return GeoMath.haversine(lead.lat, lead.lng, sweeper.lat, sweeper.lng);
+    }
+
+    // Fallback when no designated sweeper: distance from lead to rearmost placed rider
+    final otherPlaced = convoy.riders.values.where((r) => hasPosition(r) && r.userId != lead.userId).toList();
+    if (otherPlaced.isEmpty) return 0.0;
+    final line = convoy.routeLine;
+    if (line.length >= 2) {
+      final aLead = alongM(lead.lat, lead.lng, line);
+      double? minAlong;
+      for (final r in otherPlaced) {
+        final a = alongM(r.lat, r.lng, line);
+        if (a != null && (minAlong == null || a < minAlong)) minAlong = a;
+      }
+      if (aLead != null && minAlong != null) return (aLead - minAlong).abs();
+    }
+    double maxDist = 0.0;
+    for (final r in otherPlaced) {
+      final d = GeoMath.haversine(lead.lat, lead.lng, r.lat, r.lng);
+      if (d > maxDist) maxDist = d;
+    }
+    return maxDist;
   }
 
   /// Length of the group in metres: front to back along the route, or the
@@ -357,6 +455,7 @@ class RideFacts {
       eta: etaFor(remaining, convoy.route),
       ladder: ladder(convoy, myUserId),
       spreadM: spreadM(convoy),
+      totalPackSpreadM: totalPackSpreadM(convoy),
       nextStop: next,
       nextStopM: (me != null && next != null) ? distanceToM(me, next.lat, next.lng, line, myAlong: myAlong) : null,
       stops: [

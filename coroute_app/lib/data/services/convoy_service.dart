@@ -1277,6 +1277,8 @@ class ConvoyService extends ChangeNotifier {
     final wasStopped = current?.statusReason.isNotEmpty == true;
     final base = current ??
         RiderModel(userId: userId, name: 'Rider', lat: position.latitude, lng: position.longitude, lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch);
+    final isLimpMode = base.statusReason == 'MECHANICAL' || base.statusReason == 'FLAT_TIRE';
+    final shouldClearStatus = isMoving && wasStopped && (!isLimpMode || speedKmh >= 25.0);
     final updated = base.copyWith(
       lat: position.latitude,
       lng: position.longitude,
@@ -1285,8 +1287,8 @@ class ConvoyService extends ChangeNotifier {
       batteryLevel: _currentBatteryLevel,
       isCharging: _isCharging,
       lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
-      statusReason: (isMoving && wasStopped) ? '' : base.statusReason,
-      statusMessage: (isMoving && wasStopped) ? '' : base.statusMessage,
+      statusReason: shouldClearStatus ? '' : base.statusReason,
+      statusMessage: shouldClearStatus ? '' : base.statusMessage,
       stoppedSince: isMoving ? 0 : (base.stoppedSince != 0 ? base.stoppedSince : DateTime.now().millisecondsSinceEpoch),
     );
 
@@ -1297,7 +1299,7 @@ class ConvoyService extends ChangeNotifier {
         Geolocator.distanceBetween(current.lat, current.lng, position.latitude, position.longitude) > 40;
     final critical = convoy.activeAlerts.isNotEmpty || assistRequests.isNotEmpty || hazards.isNotEmpty;
     final interval = _power.telemetryInterval(moving: isMoving, lowData: settings?.lowData ?? false, critical: critical);
-    if (since >= interval || movedFar || (isMoving && wasStopped)) {
+    if (since >= interval || movedFar || shouldClearStatus) {
       _pushTelemetry(updated);
     }
   }

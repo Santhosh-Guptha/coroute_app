@@ -160,10 +160,13 @@ class SafetyConstants {
   // ---------------------------------------------------------------- map tiles (3.16)
   static const int tileCacheMaxBytes = 200 * 1024 * 1024;
   static const int tileMaxAgeDays = 30;
-  static const List<int> prefetchZooms = [12, 14];
-  static const List<int> prefetchZoomsHighDetail = [12, 14, 16, 17];
+  static const List<int> prefetchZooms = [11, 12, 13, 14, 15, 16];
+  static const List<int> prefetchZoomsHighDetail = [11, 12, 13, 14, 15, 16, 17];
   static const int prefetchMaxTiles = 600;
   static const int prefetchMaxTilesHighDetail = 2500;
+  static const int prefetchMaxTilesCommunity = 300;
+  static const int freeOfflinePacksLimit = 1;
+  static const double prefetchCorridorRadiusM = 2500.0; // 2.5 km lateral corridor
   static const Duration prefetchSpacing = Duration(milliseconds: 150);
   static const int prefetchParallel = 2;
   static const Duration prefetchTimeout = Duration(seconds: 8);

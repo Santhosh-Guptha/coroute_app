@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
+import '../../core/config/feature_gates.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../domain/tracking/geo_math.dart';
@@ -312,6 +313,21 @@ class TilePrefetcher extends ChangeNotifier {
   /// Finished without an error and not cancelled.
   bool get complete => !_running && _finishedAt > 0 && _error == null && _total > 0 && _done >= _total;
 
+  /// Default lateral corridor buffering radius (2.5 km Minkowski corridor).
+  static const double corridorLateralRadiusM = SafetyConstants.prefetchCorridorRadiusM;
+
+  /// Intermediate zoom levels ensuring no blank tiles when riders zoom at speed:
+  /// Covers zoom 11 (wide regional overview) up to 16 (street/trail detail).
+  static const List<int> corridorZooms = SafetyConstants.prefetchZooms;
+
+  /// High-detail corridor zooms including junction level (17).
+  static const List<int> corridorZoomsHighDetail = SafetyConstants.prefetchZoomsHighDetail;
+
+  /// Hook for future Play Store / App Store IAP feature entitlements.
+  /// Currently unlocked for all riders by default via [FeatureGates.isUnlocked].
+  static bool get hasUnlimitedOfflinePacks =>
+      FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks);
+
   /// Checks whether all tiles along [line] are already saved in the local cache.
   bool isRouteCached(List<(double, double)> line, {bool highDetail = false}) {
     final cache = _cache;
@@ -349,56 +365,81 @@ class TilePrefetcher extends ChangeNotifier {
     return (x.clamp(0, n - 1).toInt(), y.clamp(0, n - 1).toInt());
   }
 
-  /// The tiles to save: for every point sampled each [SafetyConstants.prefetchSampleM]
-  /// along [line], its tile at each zoom plus corridor neighbours.
-  /// When [highDetail] is true, includes zooms 16 & 17 for street names, junction labels,
-  /// and landmarks up to [SafetyConstants.prefetchMaxTilesHighDetail].
+  /// The tiles to save: 2.5 km lateral corridor buffering along [line] for offline prefetching.
+  /// Covers intermediate zoom levels (11, 12, 13, 14, 15, 16) so riders zooming at speed
+  /// do not hit blank tiles. When [highDetail] is true, includes zoom 17 for junction labels.
+  /// Governed by [FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks)] for entitlement quotas.
   static Set<(int, int, int)> tilesAlong(
     List<(double, double)> line, {
     List<int>? zooms,
     int? maxTiles,
     bool highDetail = false,
+    double corridorRadiusM = corridorLateralRadiusM,
   }) {
-    final effectiveZooms = zooms ?? (highDetail ? SafetyConstants.prefetchZoomsHighDetail : SafetyConstants.prefetchZooms);
-    final effectiveMaxTiles = maxTiles ?? (highDetail ? SafetyConstants.prefetchMaxTilesHighDetail : SafetyConstants.prefetchMaxTiles);
+    final effectiveZooms = zooms ??
+        (highDetail
+            ? SafetyConstants.prefetchZoomsHighDetail
+            : SafetyConstants.prefetchZooms);
+
+    final isUnlimited = FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks);
+    final defaultMax = isUnlimited
+        ? (highDetail ? SafetyConstants.prefetchMaxTilesHighDetail : SafetyConstants.prefetchMaxTiles)
+        : (highDetail ? SafetyConstants.prefetchMaxTiles : SafetyConstants.prefetchMaxTilesCommunity);
+    final effectiveMaxTiles = maxTiles ?? defaultMax;
     if (line.isEmpty || effectiveZooms.isEmpty) return <(int, int, int)>{};
-    final detail = effectiveZooms.reduce(math.max);
+
     final samples = _sample(line, SafetyConstants.prefetchSampleM);
     final out = <(int, int, int)>{};
+
     for (var i = 0; i < samples.length; i++) {
       final p = samples[i];
       final isKeyPoint = i == 0 || i == samples.length - 1 || (i % 5 == 0);
+      final latRad = p.$1.clamp(-85.05112878, 85.05112878) * math.pi / 180;
+      final cosLat = math.cos(latRad).abs();
+
       for (final z in effectiveZooms) {
         final t = tileOf(p.$1, p.$2, z);
+        final n = 1 << z;
         out.add((z, t.$1, t.$2));
 
-        final shouldExpandNeighbors = (!highDetail && z == detail) ||
-            (highDetail && z == 14) ||
-            (highDetail && z == 16 && isKeyPoint) ||
-            (highDetail && z == 17 && (i == 0 || i == samples.length - 1));
+        // Lateral 2.5 km corridor buffering
+        // Conformal Web Mercator ground resolution at latitude (meters per tile):
+        final metersPerTile = (40075016.686 * cosLat) / n;
+        final radiusTiles = corridorRadiusM / metersPerTile;
+        final r = math.max(1, radiusTiles.ceil());
+        final maxDistM = corridorRadiusM + metersPerTile * 0.5;
+        final maxDistSq = maxDistM * maxDistM;
+        final mptSq = metersPerTile * metersPerTile;
 
-        if (shouldExpandNeighbors) {
-          final n = 1 << z;
-          for (var dx = -1; dx <= 1; dx++) {
-            for (var dy = -1; dy <= 1; dy++) {
-              if (dx == 0 && dy == 0) continue;
-              final x = t.$1 + dx, y = t.$2 + dy;
-              if (x < 0 || y < 0 || x >= n || y >= n) continue;
-              out.add((z, x, y));
+        // Optimization: for extreme high-detail z17, expand on key points or endpoints
+        if (z == 17 && !isKeyPoint) continue;
+
+        for (var dx = -r; dx <= r; dx++) {
+          for (var dy = -r; dy <= r; dy++) {
+            if (dx == 0 && dy == 0) continue;
+            final distSq = (dx * dx + dy * dy) * mptSq;
+            if (distSq <= maxDistSq) {
+              final x = t.$1 + dx;
+              final y = t.$2 + dy;
+              if (x >= 0 && y >= 0 && x < n && y < n) {
+                out.add((z, x, y));
+              }
             }
           }
         }
       }
     }
+
     if (out.length <= effectiveMaxTiles) return out;
-    // Keep the overview everywhere; drop detail tiles from the far end until it fits.
+
+    // Keep overview everywhere; drop detail tiles from the far end until it fits within budget.
     final list = out.toList();
-    for (var i = list.length - 1; i >= 0 && list.length > effectiveMaxTiles; i--) {
-      if (list[i].$1 == detail) list.removeAt(i);
-    }
-    if (highDetail) {
+    final detailZooms = effectiveZooms.where((z) => z >= 14).toList()
+      ..sort((a, b) => b.compareTo(a));
+
+    for (final dz in detailZooms) {
       for (var i = list.length - 1; i >= 0 && list.length > effectiveMaxTiles; i--) {
-        if (list[i].$1 == 16) list.removeAt(i);
+        if (list[i].$1 == dz) list.removeAt(i);
       }
     }
     while (list.length > effectiveMaxTiles) {
@@ -434,6 +475,19 @@ class TilePrefetcher extends ChangeNotifier {
     bool highDetail = false,
   }) async {
     if (_running) return;
+
+    // Check future IAP entitlement hook via FeatureGates
+    if (!FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks)) {
+      final existingPacks = await SavedMapPackStore.loadAll();
+      if (existingPacks.length >= SafetyConstants.freeOfflinePacksLimit &&
+          !existingPacks.any((p) => p.name == label)) {
+        _error = 'entitlement_required';
+        _finishedAt = _clock();
+        notifyListeners();
+        return;
+      }
+    }
+
     final cache = _cache;
     _label = label;
     _cancel = false;
@@ -441,7 +495,9 @@ class TilePrefetcher extends ChangeNotifier {
     _saved = 0;
     _failed = 0;
     _error = cache == null ? 'storage' : null;
-    final tiles = cache == null ? const <(int, int, int)>[] : tilesAlong(line, highDetail: highDetail).toList();
+    final tiles = cache == null
+        ? const <(int, int, int)>[]
+        : tilesAlong(line, highDetail: highDetail).toList();
     _total = tiles.length;
     if (cache == null || tiles.isEmpty) {
       _finishedAt = _clock();

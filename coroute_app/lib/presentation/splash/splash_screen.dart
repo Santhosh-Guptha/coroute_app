@@ -11,6 +11,8 @@ import '../admin/master_admin_dashboard.dart';
 import '../auth/access_gate_screen.dart';
 import '../onboarding/onboarding_screen.dart';
 import '../rider/rider_home_screen.dart';
+import '../../data/services/app_version_service.dart';
+import '../update/force_update_screen.dart';
 
 /// A static logo while the saved session loads. No animation, no polling,
 /// no minimum display time: it moves on as soon as the account is known.
@@ -47,12 +49,30 @@ class _SplashScreenState extends State<SplashScreen> {
     await _authReady(auth);
     if (!mounted) return;
 
+    final versionService = context.read<AppVersionService?>();
+    if (versionService != null && versionService.isMandatoryUpdateRequired) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ForceUpdateScreen()));
+      return;
+    }
+
     if (auth.isAuthenticated && auth.mustChangePassword) {
       final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen(forced: true)));
       if (!mounted) return;
+
+    final versionService = context.read<AppVersionService?>();
+    if (versionService != null && versionService.isMandatoryUpdateRequired) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ForceUpdateScreen()));
+      return;
+    }
       if (changed != true) {
         await auth.logout();
         if (!mounted) return;
+
+    final versionService = context.read<AppVersionService?>();
+    if (versionService != null && versionService.isMandatoryUpdateRequired) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ForceUpdateScreen()));
+      return;
+    }
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AccessGateScreen()));
         return;
       }
@@ -65,6 +85,12 @@ class _SplashScreenState extends State<SplashScreen> {
     } else {
       final onboarded = await OnboardingScreen.isDone();
       if (!mounted) return;
+
+    final versionService = context.read<AppVersionService?>();
+    if (versionService != null && versionService.isMandatoryUpdateRequired) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ForceUpdateScreen()));
+      return;
+    }
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => onboarded ? const AccessGateScreen() : const OnboardingScreen()),

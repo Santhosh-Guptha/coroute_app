@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/config/feature_gates.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
 import '../../../data/models/convoy_model.dart';
@@ -15,12 +16,13 @@ import '../../../domain/tracking/geo_math.dart';
 
 /// Floating right-side action stack in the motorcycle cockpit.
 ///
-/// Stacks real-time alerts line-by-line one on another:
-/// 1. Low Fuel Pop-up Button: Red fuel icon with usable km left & nearest station.
-/// 2. Member Stop Suggestions (Food, Chai/Coffee, Rest, Scenic).
-/// 3. Lead Emergency / Meeting Points.
-/// 4. Convoy Rider Stopped / Needs Assistance alerts.
-class CockpitActionStack extends StatelessWidget {
+/// Ergonomically optimized for handlebar phone mounts:
+/// - Constrained to prioritize and display at most 1 primary action capsule with
+///   horizontal swipe and tap-to-next pagination to prevent covering the map.
+/// - Touch targets are upscaled for leather motorcycle gloves (SideFuelButton >= 56 dp,
+///   StationRow button >= 48 dp).
+/// - Integrates [FeatureGates.isUnlocked] for [Feature.sunlightHudMode] high-contrast outdoor styling.
+class CockpitActionStack extends StatefulWidget {
   final ConvoyModel convoy;
   final RiderModel me;
   final RouteEssentialsService? essentialsService;
@@ -47,15 +49,40 @@ class CockpitActionStack extends StatelessWidget {
   });
 
   @override
+  State<CockpitActionStack> createState() => _CockpitActionStackState();
+}
+
+class _CockpitActionStackState extends State<CockpitActionStack> {
+  int _currentIndex = 0;
+  double _dragOffset = 0;
+
+  void _nextCapsule(int total) {
+    if (total <= 1) return;
+    setState(() {
+      _currentIndex = (_currentIndex + 1) % total;
+    });
+    HapticFeedback.lightImpact();
+  }
+
+  void _prevCapsule(int total) {
+    if (total <= 1) return;
+    setState(() {
+      _currentIndex = (_currentIndex - 1 + total) % total;
+    });
+    HapticFeedback.lightImpact();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
     final items = <Widget>[];
 
     // 0. Active SOS Distress Alert (Highest Priority - Gateway or Offline P2P Mesh)
-    for (final alert in convoy.activeAlerts) {
-      if (alert.userId == me.userId || alert.resolved) continue;
+    for (final alert in widget.convoy.activeAlerts) {
+      if (alert.userId == widget.me.userId || alert.resolved) continue;
       final who = alert.userName.split(' ').first;
-      final distM = (me.lat != 0 && me.lng != 0 && alert.lat != 0 && alert.lng != 0)
-          ? GeoMath.haversine(me.lat, me.lng, alert.lat, alert.lng)
+      final distM = (widget.me.lat != 0 && widget.me.lng != 0 && alert.lat != 0 && alert.lng != 0)
+          ? GeoMath.haversine(widget.me.lat, widget.me.lng, alert.lat, alert.lng)
           : null;
       final distText = distM != null ? ' · ${formatDistanceRounded(distM)} away' : '';
       final isMeshAlert = alert.alertId.startsWith('mesh_');
@@ -70,8 +97,8 @@ class CockpitActionStack extends StatelessWidget {
           subtitle: '${alert.alertType}$distText · Tap to locate',
           onTap: () {
             HapticFeedback.heavyImpact();
-            if (onFocusLocation != null && alert.lat != 0 && alert.lng != 0) {
-              onFocusLocation!(alert.lat, alert.lng);
+            if (widget.onFocusLocation != null && alert.lat != 0 && alert.lng != 0) {
+              widget.onFocusLocation!(alert.lat, alert.lng);
             }
           },
         ),
@@ -80,8 +107,8 @@ class CockpitActionStack extends StatelessWidget {
     }
 
     // 1. Fuel Alert / Nearest Station Check
-    final usableKm = estimatedUsableKm;
-    final essentials = essentialsService;
+    final usableKm = widget.estimatedUsableKm;
+    final essentials = widget.essentialsService;
     final progressM = essentials?.progressM ?? 0;
     final upcomingFuel = essentials?.upcoming.where((e) => e.category == 'FUEL').toList() ?? [];
     final nearestStation = upcomingFuel.isNotEmpty ? upcomingFuel.first : null;
@@ -89,8 +116,8 @@ class CockpitActionStack extends StatelessWidget {
     final fuelAheadM = nearestStation != null
         ? ((rawAheadM != null && rawAheadM > 0)
             ? rawAheadM
-            : (me.lat != 0 && me.lng != 0
-                ? GeoMath.haversine(me.lat, me.lng, nearestStation.lat, nearestStation.lng)
+            : (widget.me.lat != 0 && widget.me.lng != 0
+                ? GeoMath.haversine(widget.me.lat, widget.me.lng, nearestStation.lat, nearestStation.lng)
                 : null))
         : null;
     final fuelAheadKm = (fuelAheadM != null && fuelAheadM > 0) ? fuelAheadM / 1000 : null;
@@ -114,10 +141,10 @@ class CockpitActionStack extends StatelessWidget {
               usableKm: usableKm,
               stations: upcomingFuel.take(4).toList(),
               progressM: progressM,
-              riderLat: me.lat,
-              riderLng: me.lng,
-              onAddStationStop: onAddStationStop,
-              onOpenFuelSheet: onOpenFuelSheet,
+              riderLat: widget.me.lat,
+              riderLng: widget.me.lng,
+              onAddStationStop: widget.onAddStationStop,
+              onOpenFuelSheet: widget.onOpenFuelSheet,
             );
           },
         ),
@@ -140,10 +167,10 @@ class CockpitActionStack extends StatelessWidget {
                 usableKm: usableKm,
                 stations: upcomingFuel.take(4).toList(),
                 progressM: progressM,
-                riderLat: me.lat,
-                riderLng: me.lng,
-                onAddStationStop: onAddStationStop,
-                onOpenFuelSheet: onOpenFuelSheet,
+                riderLat: widget.me.lat,
+                riderLng: widget.me.lng,
+                onAddStationStop: widget.onAddStationStop,
+                onOpenFuelSheet: widget.onOpenFuelSheet,
               );
             },
           ),
@@ -158,7 +185,7 @@ class CockpitActionStack extends StatelessWidget {
             subtitle: 'Tap to view petrol stations',
             onTap: () {
               HapticFeedback.lightImpact();
-              onOpenFuelSheet?.call();
+              widget.onOpenFuelSheet?.call();
             },
           ),
         );
@@ -167,12 +194,12 @@ class CockpitActionStack extends StatelessWidget {
 
     // 1b. Group Fuel Consensus (Tracks lowest-range motorcycle in the convoy pack)
     final consensus = GroupFuelConsensus.evaluate(
-      convoy: convoy,
+      convoy: widget.convoy,
       upcomingStations: upcomingFuel,
       progressM: progressM,
     );
 
-    if (consensus != null && consensus.alertLead && consensus.bottleneckUserId != me.userId) {
+    if (consensus != null && consensus.alertLead && consensus.bottleneckUserId != widget.me.userId) {
       final who = consensus.bottleneckRiderName.split(' ').first;
       final st = consensus.recommendedStation;
       final distStr = consensus.distanceToStationKm != null ? ' in ${consensus.distanceToStationKm!.toStringAsFixed(1)} km' : '';
@@ -192,10 +219,10 @@ class CockpitActionStack extends StatelessWidget {
               usableKm: consensus.lowestRangeKm,
               stations: upcomingFuel.take(4).toList(),
               progressM: progressM,
-              riderLat: me.lat,
-              riderLng: me.lng,
-              onAddStationStop: onAddStationStop,
-              onOpenFuelSheet: onOpenFuelSheet,
+              riderLat: widget.me.lat,
+              riderLng: widget.me.lng,
+              onAddStationStop: widget.onAddStationStop,
+              onOpenFuelSheet: widget.onOpenFuelSheet,
             );
           },
         ),
@@ -203,7 +230,7 @@ class CockpitActionStack extends StatelessWidget {
     }
 
     // 2. Stop Suggestions from Convoy Members (Food, Coffee, Rest, etc.)
-    final suggestions = convoy.suggestedStops;
+    final suggestions = widget.convoy.suggestedStops;
     for (final stop in suggestions.take(4)) {
       final IconData stopIcon;
       final Color stopColor;
@@ -227,8 +254,8 @@ class CockpitActionStack extends StatelessWidget {
       }
 
       final who = stop.suggestedByName.split(' ').first;
-      final distM = (me.lat != 0 && me.lng != 0)
-          ? GeoMath.haversine(me.lat, me.lng, stop.lat, stop.lng)
+      final distM = (widget.me.lat != 0 && widget.me.lng != 0)
+          ? GeoMath.haversine(widget.me.lat, widget.me.lng, stop.lat, stop.lng)
           : null;
       final distText = distM != null ? ' · ${formatDistanceRounded(distM)}' : '';
 
@@ -241,11 +268,11 @@ class CockpitActionStack extends StatelessWidget {
           subtitle: '${stop.category} stop suggested$distText · Tap to view',
           onTap: () {
             HapticFeedback.lightImpact();
-            if (onFocusLocation != null && stop.lat != 0 && stop.lng != 0) {
-              onFocusLocation!(stop.lat, stop.lng);
+            if (widget.onFocusLocation != null && stop.lat != 0 && stop.lng != 0) {
+              widget.onFocusLocation!(stop.lat, stop.lng);
             }
-            if (onOpenStopsSheet != null) {
-              onOpenStopsSheet!();
+            if (widget.onOpenStopsSheet != null) {
+              widget.onOpenStopsSheet!();
             }
           },
         ),
@@ -253,10 +280,10 @@ class CockpitActionStack extends StatelessWidget {
     }
 
     // 3. Lead Meeting Points / Meet Here
-    final meetingStops = convoy.plannedStops.where((s) => s.category == RoutePlan.meetingCategory);
+    final meetingStops = widget.convoy.plannedStops.where((s) => s.category == RoutePlan.meetingCategory);
     for (final meet in meetingStops.take(1)) {
-      final distM = (me.lat != 0 && me.lng != 0)
-          ? GeoMath.haversine(me.lat, me.lng, meet.lat, meet.lng)
+      final distM = (widget.me.lat != 0 && widget.me.lng != 0)
+          ? GeoMath.haversine(widget.me.lat, widget.me.lng, meet.lat, meet.lng)
           : null;
       final distText = distM != null ? ' · ${formatDistanceRounded(distM)}' : '';
 
@@ -269,8 +296,8 @@ class CockpitActionStack extends StatelessWidget {
           subtitle: 'Group meeting point$distText · Tap to view',
           onTap: () {
             HapticFeedback.lightImpact();
-            if (onFocusLocation != null && meet.lat != 0 && meet.lng != 0) {
-              onFocusLocation!(meet.lat, meet.lng);
+            if (widget.onFocusLocation != null && meet.lat != 0 && meet.lng != 0) {
+              widget.onFocusLocation!(meet.lat, meet.lng);
             }
           },
         ),
@@ -279,14 +306,14 @@ class CockpitActionStack extends StatelessWidget {
 
     // 4. Convoy Rider Stopped with Reason (e.g. Puncture, Rest, Breakdown)
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    for (final rider in convoy.riders.values) {
-      if (rider.userId == me.userId || !RideFacts.hasPosition(rider)) continue;
+    for (final rider in widget.convoy.riders.values) {
+      if (rider.userId == widget.me.userId || !RideFacts.hasPosition(rider)) continue;
       final isStopped = (nowMs - rider.lastSeenEpochMs < 300000) && rider.speedKmh < 5.0 && rider.statusReason.isNotEmpty;
       if (isStopped) {
         final who = rider.name.split(' ').first;
         final reason = rider.statusReason;
-        final distM = (me.lat != 0 && me.lng != 0)
-            ? GeoMath.haversine(me.lat, me.lng, rider.lat, rider.lng)
+        final distM = (widget.me.lat != 0 && widget.me.lng != 0)
+            ? GeoMath.haversine(widget.me.lat, widget.me.lng, rider.lat, rider.lng)
             : null;
         final distText = distM != null ? ' · ${formatDistanceRounded(distM)} away' : '';
 
@@ -299,8 +326,8 @@ class CockpitActionStack extends StatelessWidget {
             subtitle: 'Rider stopped$distText · Tap to locate',
             onTap: () {
               HapticFeedback.lightImpact();
-              if (onFocusLocation != null) {
-                onFocusLocation!(rider.lat, rider.lng);
+              if (widget.onFocusLocation != null) {
+                widget.onFocusLocation!(rider.lat, rider.lng);
               }
             },
           ),
@@ -319,20 +346,85 @@ class CockpitActionStack extends StatelessWidget {
           usableKm: usableKm,
           stations: upcomingFuel.take(4).toList(),
           progressM: progressM,
-          riderLat: me.lat,
-          riderLng: me.lng,
-          onAddStationStop: onAddStationStop,
-          onOpenFuelSheet: onOpenFuelSheet,
+          riderLat: widget.me.lat,
+          riderLng: widget.me.lng,
+          onAddStationStop: widget.onAddStationStop,
+          onOpenFuelSheet: widget.onOpenFuelSheet,
         );
       },
     );
+
+    final count = items.length;
+    final activeIdx = count == 0 ? 0 : (_currentIndex % count);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        for (final item in items) ...[
-          item,
+        if (count > 0) ...[
+          if (count > 1) ...[
+            GestureDetector(
+              onTap: () => _nextCapsule(count),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isSunlightHud ? AppTheme.card : AppTheme.card.withAlpha(240),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isSunlightHud ? AppTheme.border.withOpacity(0.9) : AppTheme.border,
+                    width: isSunlightHud ? 2 : 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.shadow.withOpacity(0.12),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${activeIdx + 1}/$count',
+                      style: AppText.caption.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.accentText,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Next',
+                      style: AppText.caption.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.text,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    Icon(Icons.chevron_right_rounded, size: 16, color: AppTheme.accentText),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          GestureDetector(
+            onHorizontalDragUpdate: (details) {
+              _dragOffset += details.primaryDelta ?? 0;
+            },
+            onHorizontalDragEnd: (details) {
+              final vel = details.primaryVelocity ?? 0;
+              if (vel < -80 || _dragOffset < -40) {
+                _nextCapsule(count);
+              } else if (vel > 80 || _dragOffset > 40) {
+                _prevCapsule(count);
+              }
+              _dragOffset = 0;
+            },
+            child: items[activeIdx],
+          ),
           const SizedBox(height: Space.s8),
         ],
         fuelButton,
@@ -350,6 +442,7 @@ class CockpitActionStack extends StatelessWidget {
     Function(RouteEssential station)? onAddStationStop,
     VoidCallback? onOpenFuelSheet,
   }) {
+    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.card,
@@ -441,8 +534,12 @@ class CockpitActionStack extends StatelessWidget {
                       child: OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppTheme.text,
-                          side: BorderSide(color: AppTheme.border, width: 1.5),
-                          padding: const EdgeInsets.symmetric(vertical: Space.s12),
+                          side: BorderSide(
+                            color: isSunlightHud ? AppTheme.border.withOpacity(0.9) : AppTheme.border,
+                            width: isSunlightHud ? 2 : 1.5,
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: Space.s12, horizontal: Space.s16),
+                          minimumSize: const Size(0, 48),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                         onPressed: () {
@@ -483,19 +580,23 @@ class _ActionPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
     return Material(
-      color: AppTheme.card.withAlpha(245),
+      color: isSunlightHud ? AppTheme.card : AppTheme.card.withAlpha(245),
       elevation: 6,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 270),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          constraints: const BoxConstraints(maxWidth: 280, minHeight: 56),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: accentColor.withOpacity(0.8), width: 1.5),
+            border: Border.all(
+              color: isSunlightHud ? accentColor : accentColor.withOpacity(0.8),
+              width: isSunlightHud ? 2.5 : 1.5,
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -530,7 +631,7 @@ class _ActionPill extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppText.caption.copyWith(
-                        color: AppTheme.muted,
+                        color: isSunlightHud ? AppTheme.accentText : AppTheme.muted,
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
@@ -570,13 +671,17 @@ class _StationRow extends StatelessWidget {
             ? GeoMath.haversine(riderLat!, riderLng!, station.lat, station.lng)
             : rawAheadM);
     final distStr = formatDistanceRounded(aheadM);
+    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
 
     return Container(
       padding: const EdgeInsets.all(Space.s12),
       decoration: BoxDecoration(
         color: AppTheme.bg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.border),
+        border: Border.all(
+          color: isSunlightHud ? AppTheme.border.withOpacity(0.9) : AppTheme.border,
+          width: isSunlightHud ? 1.5 : 1,
+        ),
       ),
       child: Row(
         children: [
@@ -604,13 +709,13 @@ class _StationRow extends StatelessWidget {
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.brand,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              minimumSize: const Size(0, 36),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              minimumSize: const Size(0, 48),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: onAdd,
-            icon: const Icon(Icons.add_location_alt_rounded, size: 16),
-            label: const Text('Add Stop', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            icon: const Icon(Icons.add_location_alt_rounded, size: 18),
+            label: const Text('Add Stop', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -632,8 +737,13 @@ class _SideFuelButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rangeText = usableKm != null ? '${usableKm!.round()} km' : 'Fuel';
-    final bgColor = isLowFuel ? AppTheme.sos : AppTheme.card.withAlpha(245);
-    final borderColor = isLowFuel ? AppTheme.sos : AppTheme.border.withOpacity(0.6);
+    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
+    final bgColor = isLowFuel
+        ? AppTheme.sos
+        : (isSunlightHud ? AppTheme.card : AppTheme.card.withAlpha(245));
+    final borderColor = isLowFuel
+        ? AppTheme.sos
+        : (isSunlightHud ? AppTheme.border.withOpacity(0.9) : AppTheme.border.withOpacity(0.6));
     final iconColor = isLowFuel
         ? Colors.white
         : (usableKm != null && usableKm! <= 100 ? AppTheme.warnText : AppTheme.brand);
@@ -641,31 +751,32 @@ class _SideFuelButton extends StatelessWidget {
     return Material(
       color: bgColor,
       elevation: isLowFuel ? 6 : 3,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(28),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(28),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          constraints: const BoxConstraints(minHeight: 56, minWidth: 56),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: borderColor, width: 1.5),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: borderColor, width: isSunlightHud ? 2.5 : 2),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 Icons.local_gas_station_rounded,
-                size: 18,
+                size: 22,
                 color: isLowFuel ? Colors.white : iconColor,
               ),
-              const SizedBox(width: 5),
+              const SizedBox(width: 8),
               Text(
                 isLowFuel ? 'LOW ($rangeText)' : rangeText,
                 style: AppText.caption.copyWith(
                   color: isLowFuel ? Colors.white : AppText.body.color,
                   fontWeight: FontWeight.bold,
-                  fontSize: 11,
+                  fontSize: 13,
                   letterSpacing: 0.3,
                 ),
               ),

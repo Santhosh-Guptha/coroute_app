@@ -10,6 +10,7 @@ class CrashThresholds {
   final Duration armWindow;
   final double impactG;
   final Duration stopWithin;
+  final Duration highSpeedStopWithin;
   final double stopSpeedKmh;
   final Duration stillFor;
   final double stillStdG;
@@ -23,6 +24,7 @@ class CrashThresholds {
     this.armWindow = SafetyConstants.crashArmWindow,
     this.impactG = SafetyConstants.crashImpactG,
     this.stopWithin = SafetyConstants.crashStopWithin,
+    this.highSpeedStopWithin = const Duration(seconds: 18),
     this.stopSpeedKmh = SafetyConstants.crashStopSpeedKmh,
     this.stillFor = SafetyConstants.crashStillFor,
     this.stillStdG = SafetyConstants.crashStillStdG,
@@ -31,6 +33,9 @@ class CrashThresholds {
     this.settle = SafetyConstants.crashSettle,
     this.cooldown = SafetyConstants.crashCooldown,
   });
+
+  Duration stopWithinForSpeed(double speedKmh) =>
+      speedKmh > 60.0 ? highSpeedStopWithin : stopWithin;
 }
 
 /// A likely crash: a hard impact at speed, then a stop, and no riding on.
@@ -73,9 +78,10 @@ class _Candidate {
 ///
 /// 1. Armed: a fix faster than 25 km/h in the last 30 s.
 /// 2. Impact: a bucket with a peak of 4 g or more while armed.
-/// 3. Stop: a fix at 5 km/h or less within 10 s after the impact. With the GPS
-///    distance filter a phone that does not move gets no fixes at all, so when
-///    NO fix arrives in those 10 s the stop is taken to be at impact + 10 s.
+/// 3. Stop: a fix at 5 km/h or less within 10 s after the impact (extended to 18 s
+///    for initial speeds > 60 km/h to account for slides and Doppler smoothing lag).
+///    With the GPS distance filter a phone that does not move gets no fixes at all,
+///    so when NO fix arrives in that window the stop is taken to be at impact + window.
 ///    The impact must also be at speed: when there were fixes in the 10 s before it,
 ///    at least one was faster than 25 km/h (a phone dropped at a fuel stop is not).
 /// 4. No riding on for 20 s after the stop: no fix faster than 15 km/h and none
@@ -122,8 +128,9 @@ class CrashDetector {
     if (c == null || p.ts < c.impactAt + 1000) return null;
     c.fixSeen = true;
     final stopAt = c.stopAt;
+    final stopWithinMs = t.stopWithinForSpeed(c.speedBefore).inMilliseconds;
     if (stopAt == null) {
-      if (p.ts - c.impactAt > t.stopWithin.inMilliseconds) {
+      if (p.ts - c.impactAt > stopWithinMs) {
         _c = null; // never came to a stop in time: a pothole or a dropped phone, the ride goes on
         return null;
       }
@@ -164,14 +171,15 @@ class CrashDetector {
     }
     if (b.tMs < c.impactAt) return null;
     var stopAt = c.stopAt;
+    final stopWithinMs = t.stopWithinForSpeed(c.speedBefore).inMilliseconds;
     if (stopAt == null) {
-      if (b.tMs >= c.impactAt + t.stopWithin.inMilliseconds) {
+      if (b.tMs >= c.impactAt + stopWithinMs) {
         if (c.fixSeen) {
           _c = null; // fixes kept coming but none was slow: still riding
           return null;
         }
         // No fix at all since the impact: the phone has not moved 8 m (GPS distance filter).
-        stopAt = c.impactAt + t.stopWithin.inMilliseconds;
+        stopAt = c.impactAt + stopWithinMs;
         c.stopAt = stopAt;
       } else {
         return null; // tumbling and sliding are not judged

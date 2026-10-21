@@ -158,7 +158,7 @@ void main() {
       expect(find.textContaining('LOW (42 km)'), findsOneWidget);
     });
 
-    testWidgets('Multiple stop suggestions from teammates stack line-by-line one on another', (tester) async {
+    testWidgets('Multiple stop suggestions constrain to 1 primary action capsule with swipe/tap to view next', (tester) async {
       final convoy = ConvoyModel(
         groupId: 'grp_1',
         name: 'Bangalore Riders',
@@ -206,12 +206,26 @@ void main() {
 
       await tester.pump();
 
-      // Verify both stop suggestions stack line-by-line
+      // Verify only 1 primary action capsule is displayed initially (Rahul)
       expect(find.textContaining('Rahul: Royal Dhaba'), findsOneWidget);
       expect(find.textContaining('FOOD stop suggested'), findsOneWidget);
+      expect(find.textContaining('1/2'), findsOneWidget);
+      expect(find.textContaining('Kiran: Highway Chai'), findsNothing);
 
+      // Tap Next to view next action capsule
+      await tester.tap(find.textContaining('Next'));
+      await tester.pumpAndSettle();
+
+      // Verify the second stop suggestion (Kiran) is now displayed
       expect(find.textContaining('Kiran: Highway Chai'), findsOneWidget);
       expect(find.textContaining('COFFEE stop suggested'), findsOneWidget);
+      expect(find.textContaining('2/2'), findsOneWidget);
+      expect(find.textContaining('Rahul: Royal Dhaba'), findsNothing);
+
+      // Verify swipe also cycles back to first capsule
+      await tester.drag(find.textContaining('Kiran: Highway Chai'), const Offset(-300, 0));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Rahul: Royal Dhaba'), findsOneWidget);
 
       // Verify side fuel button is also present at bottom
       expect(find.textContaining('550 km'), findsOneWidget);

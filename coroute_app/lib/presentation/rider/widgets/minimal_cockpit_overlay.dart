@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/config/feature_gates.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
 import '../../../domain/ride/ride_facts.dart';
@@ -78,6 +79,7 @@ class MinimalCockpitTopBar extends StatelessWidget {
     final limit = speedLimitKmh ?? 0;
     final overLimit = speed != null && limit > 0 && speed > limit;
     final sub = subtitle;
+    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
 
     return Container(
       constraints: const BoxConstraints(minHeight: 56),
@@ -85,23 +87,28 @@ class MinimalCockpitTopBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(20),
-        border: overLimit ? Border.all(color: AppTheme.sos, width: 2) : null,
+        border: overLimit
+            ? Border.all(color: AppTheme.sos, width: isSunlightHud ? 3 : 2)
+            : (isSunlightHud ? Border.all(color: AppTheme.border.withOpacity(0.9), width: 2) : null),
         boxShadow: dsFloatingShadow(),
       ),
       child: Row(
         children: [
           if (back != null)
             Container(
-              width: 44,
-              height: 44,
+              width: 56,
+              height: 56,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppTheme.card,
-                border: Border.all(color: AppTheme.border, width: 2),
+                border: Border.all(
+                  color: isSunlightHud ? AppTheme.text : AppTheme.border,
+                  width: isSunlightHud ? 2.5 : 2,
+                ),
               ),
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.chevron_left_rounded, color: AppTheme.text, size: 24),
+                icon: Icon(Icons.chevron_left_rounded, color: AppTheme.text, size: 28),
                 tooltip: 'Back',
                 onPressed: back,
               ),
@@ -267,13 +274,21 @@ class MinimalCockpitTopBar extends StatelessWidget {
           else
             _GpsDot(gps: gps),
           if (onStopNavigation != null) ...[
-            const SizedBox(width: 4),
-            SizedBox(
-              width: 44,
-              height: 44,
+            const SizedBox(width: 6),
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isSunlightHud ? AppTheme.card : AppTheme.card.withOpacity(0.9),
+                border: Border.all(
+                  color: isSunlightHud ? AppTheme.sos : AppTheme.border,
+                  width: isSunlightHud ? 2.5 : 2,
+                ),
+              ),
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.close_rounded, color: AppTheme.text, size: 22),
+                icon: Icon(Icons.close_rounded, color: isSunlightHud ? AppTheme.sos : AppTheme.text, size: 26),
                 tooltip: 'Stop navigation',
                 onPressed: onStopNavigation,
               ),
@@ -374,12 +389,14 @@ class MinimalRideStatsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
           color: AppTheme.card,
           borderRadius: BorderRadius.circular(Radii.xl),
+          border: isSunlightHud ? Border.all(color: AppTheme.border.withOpacity(0.9), width: 1.5) : null,
           boxShadow: dsFloatingShadow(),
         ),
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
@@ -434,13 +451,14 @@ class MinimalStoppedBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final mins = stoppedFor.inMinutes;
     final dur = mins < 1 ? 'just stopped' : 'stopped ${mins}m';
+    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
           color: AppTheme.card,
           borderRadius: BorderRadius.circular(Radii.xl),
-          border: Border.all(color: AppTheme.warnBorder, width: 2),
+          border: Border.all(color: AppTheme.warnBorder, width: isSunlightHud ? 2.5 : 2),
           boxShadow: dsFloatingShadow(),
         ),
         padding: const EdgeInsets.fromLTRB(16, 10, 12, 14),
@@ -585,14 +603,14 @@ class MapSideControls extends StatelessWidget {
               activeTint: AppTheme.warnText,
               onTap: onToggleKeepScreenOn,
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             _SideControl(
               icon: Icons.my_location_rounded,
               tooltip: 'Centre on me',
               active: autoFollow,
               onTap: onCentre,
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             _SideControl(
               icon: Icons.keyboard_arrow_up_rounded,
               tooltip: 'Open ride sheet',
@@ -605,8 +623,9 @@ class MapSideControls extends StatelessWidget {
   }
 }
 
-/// 44 dp round card button with a 2 px border; the active state uses the
-/// accent ring and tint (canvas "round button").
+/// 56 dp round card button with a 2-2.5 px border; the active state uses the
+/// accent ring and tint (canvas "round button"). Ergonomically upscaled to 56x56 dp
+/// for effortless motorcycle leather glove operation on vibrating handlebars.
 class _SideControl extends StatelessWidget {
   final IconData icon;
   final String tooltip;
@@ -625,6 +644,7 @@ class _SideControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = activeTint ?? AppTheme.accentText;
+    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
     return Semantics(
       button: true,
       label: tooltip,
@@ -634,21 +654,26 @@ class _SideControl extends StatelessWidget {
         child: GestureDetector(
           onTap: onTap,
           child: Container(
-            width: 44,
-            height: 44,
+            width: 56,
+            height: 56,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: active ? accent.withOpacity(0.14) : AppTheme.card,
-              border: Border.all(color: active ? accent : AppTheme.border, width: 2),
+              color: active
+                  ? (isSunlightHud ? accent.withOpacity(0.24) : accent.withOpacity(0.14))
+                  : AppTheme.card,
+              border: Border.all(
+                color: active ? accent : (isSunlightHud ? AppTheme.border.withOpacity(0.9) : AppTheme.border),
+                width: isSunlightHud ? 2.5 : 2,
+              ),
               boxShadow: [
                 BoxShadow(
                   color: AppTheme.shadow.withOpacity(AppTheme.isLight ? 0.16 : 0.5),
-                  blurRadius: 12,
+                  blurRadius: isSunlightHud ? 14 : 12,
                   offset: const Offset(0, 4),
                 ),
               ],
             ),
-            child: Icon(icon, size: 22, color: active ? accent : AppTheme.text),
+            child: Icon(icon, size: 26, color: active ? accent : AppTheme.text),
           ),
         ),
       ),

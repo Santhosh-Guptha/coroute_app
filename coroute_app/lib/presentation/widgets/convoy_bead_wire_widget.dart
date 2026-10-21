@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../data/models/convoy_model.dart';
 import '../../domain/notify/notification_snapshot.dart';
 import '../../domain/notify/status_text.dart';
 
@@ -11,6 +12,8 @@ import '../../domain/notify/status_text.dart';
 /// ([ ⏸ WAIT ], [ 📍 MAP ], [ ⚠️ SOS ]).
 class ConvoyBeadWireWidget extends StatelessWidget {
   final String convoyName;
+  final ConvoyModel? convoy;
+  final String? sweeperId;
   final List<RiderLine> ahead;
   final List<RiderLine> behind;
   final String? telemetry;
@@ -23,6 +26,8 @@ class ConvoyBeadWireWidget extends StatelessWidget {
   const ConvoyBeadWireWidget({
     super.key,
     required this.convoyName,
+    this.convoy,
+    this.sweeperId,
     this.ahead = const [],
     this.behind = const [],
     this.telemetry,
@@ -38,6 +43,8 @@ class ConvoyBeadWireWidget extends StatelessWidget {
     Key? key,
     required NotificationSnapshot snapshot,
     required String convoyName,
+    ConvoyModel? convoy,
+    String? sweeperId,
     bool isLive = true,
     bool showButtons = true,
     VoidCallback? onWait,
@@ -47,6 +54,8 @@ class ConvoyBeadWireWidget extends StatelessWidget {
     return ConvoyBeadWireWidget(
       key: key,
       convoyName: convoyName,
+      convoy: convoy,
+      sweeperId: sweeperId,
       ahead: snapshot.ahead,
       behind: snapshot.behind,
       telemetry: snapshot.telemetry,
@@ -69,6 +78,13 @@ class ConvoyBeadWireWidget extends StatelessWidget {
 
     final packPos = ahead.length + 1;
     final totalRiders = ahead.length + behind.length + 1;
+    final effectiveSweeperId = convoy?.sweeperId ?? sweeperId;
+    bool isSweeper(RiderLine? r) =>
+        r != null &&
+        effectiveSweeperId != null &&
+        effectiveSweeperId.isNotEmpty &&
+        r.userId.isNotEmpty &&
+        r.userId == effectiveSweeperId;
 
     return Container(
       decoration: BoxDecoration(
@@ -181,7 +197,7 @@ class ConvoyBeadWireWidget extends StatelessWidget {
                 ),
                 _buildRiderNode(
                   name: behind1.name,
-                  tag: behind1.flag ?? '▼ Behind',
+                  tag: behind1.flag ?? (isSweeper(behind1) ? '▼ Sweeper' : '▼ Behind'),
                   isYou: false,
                   isWarning: _isWarning(behind1.flag),
                   icon: Icons.two_wheeler,
@@ -197,7 +213,7 @@ class ConvoyBeadWireWidget extends StatelessWidget {
                 ),
                 _buildRiderNode(
                   name: behind2.name,
-                  tag: behind2.flag ?? (behind.length > 2 ? '▼ Sweeper' : '▼ Behind'),
+                  tag: behind2.flag ?? (isSweeper(behind2) ? '▼ Sweeper' : '▼ Behind'),
                   isYou: false,
                   isWarning: _isWarning(behind2.flag),
                   icon: _isWarning(behind2.flag) ? Icons.warning_amber_rounded : Icons.two_wheeler,

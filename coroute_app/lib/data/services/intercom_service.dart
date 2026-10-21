@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 import 'package:record/record.dart';
 import '../../core/config/app_config.dart';
+import '../../core/config/feature_gates.dart';
 import 'background_service.dart';
 import 'realtime_service.dart';
 import 'settings_service.dart';
@@ -14,6 +15,41 @@ import 'settings_service.dart';
 enum IntercomMode { ptt, vox }
 
 enum IntercomChannel { all, leadOnly }
+
+/// Metadata describing an active incoming voice speaker.
+class ActiveSpeakerInfo {
+  final String speakerName;
+  final String? speakerId;
+  final bool isLead;
+  final bool isEmergency;
+  final DateTime timestamp;
+
+  ActiveSpeakerInfo({
+    required this.speakerName,
+    this.speakerId,
+    this.isLead = false,
+    this.isEmergency = false,
+    DateTime? timestamp,
+  }) : timestamp = timestamp ?? DateTime.now();
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ActiveSpeakerInfo &&
+          runtimeType == other.runtimeType &&
+          speakerName == other.speakerName &&
+          speakerId == other.speakerId &&
+          isLead == other.isLead &&
+          isEmergency == other.isEmergency &&
+          timestamp == other.timestamp;
+
+  @override
+  int get hashCode => Object.hash(speakerName, speakerId, isLead, isEmergency, timestamp);
+
+  @override
+  String toString() =>
+      'ActiveSpeakerInfo(id: $speakerId, name: $speakerName, isLead: $isLead, isEmergency: $isEmergency, at: $timestamp)';
+}
 
 /// Live voice intercom over the gateway WebSocket.
 ///
@@ -29,7 +65,13 @@ enum IntercomChannel { all, leadOnly }
 ///   so the radio stays idle, and the battery lasts, while you are quiet).
 /// * Mute (don't transmit) and Deafen (don't play) switches.
 class IntercomService extends ChangeNotifier {
-  IntercomService(this._rt, {this.settings}) {
+  IntercomService(
+    this._rt, {
+    this.settings,
+    bool isRoadCaptain = false,
+    String? userRole,
+  })  : _myRole = userRole,
+        _isRoadCaptain = isRoadCaptain || userRole == 'LEAD' {
     _voiceSub = _rt.voice.listen(_onVoicePacket);
     _eventSub = _rt.events.listen(_onEvent);
     _setupHardwareKeyboard();
@@ -42,6 +84,10 @@ class IntercomService extends ChangeNotifier {
 
   /// Microphone audio level [0.0 .. 1.0] for live VU metering.
   final ValueNotifier<double> audioLevel = ValueNotifier<double>(0.0);
+
+  /// Active speaker notification stream for cockpit HUDs and visual fallbacks.
+  final ValueNotifier<ActiveSpeakerInfo?> activeSpeakerNotifier =
+      ValueNotifier<ActiveSpeakerInfo?>(null);
 
   /// Rate the next transmission uses.
   int get txSampleRate => AppConfig.sampleRateFor(settings?.lowData ?? false);
@@ -68,6 +114,8 @@ class IntercomService extends ChangeNotifier {
   DateTime? _txStartedAt;
   String? _busyWith;
   Timer? _busyTimer;
+  bool _isRoadCaptain = false;
+  String? _myRole;
 
   // ---- receive state ----
   bool _playerReady = false;
@@ -77,6 +125,8 @@ class IntercomService extends ChangeNotifier {
   String? _activeSpeakerId;
   String? _activeSpeakerName;
   bool _activeIsPrivate = false;
+  bool _activeIsLead = false;
+  bool _isPriorityDucked = false;
   IntercomChannel _activeChannel = IntercomChannel.all;
   DateTime _lastRxAt = DateTime.fromMillisecondsSinceEpoch(0);
   Timer? _rxIdleTimer;
@@ -87,6 +137,7 @@ class IntercomService extends ChangeNotifier {
   // ---- per-rider states ----
   final Map<String, bool> _speakingRiders = {};
   final Map<String, bool> _mutedRiders = {};
+  final Map<String, String> _riderRoles = {};
 
   // ---- public getters ----
   bool get isMicMuted => _micMuted;
@@ -103,12 +154,40 @@ class IntercomService extends ChangeNotifier {
   String? get activeSpeakerName => _activeSpeakerName;
   String? get activeSpeakerId => _activeSpeakerId;
   bool get activeSpeakerIsPrivate => _activeIsPrivate;
+  bool get activeSpeakerIsLead => _activeIsLead;
+  bool get isPriorityDucked => _isPriorityDucked;
   bool get isReceiving => _activeSpeakerName != null;
   String? get busyWith => _busyWith;
   bool get isOnline => _rt.isConnected;
+  bool get isRoadCaptain =>
+      _isRoadCaptain ||
+      _myRole?.toUpperCase() == 'LEAD' ||
+      _channel == IntercomChannel.leadOnly;
+  String? get myRole => _myRole;
 
   bool isRiderSpeaking(String uid) => _speakingRiders[uid] == true;
   bool isRiderMuted(String uid) => _mutedRiders[uid] == true;
+
+  void setRoadCaptain(bool value) {
+    if (_isRoadCaptain == value) return;
+    _isRoadCaptain = value;
+    notifyListeners();
+  }
+
+  void setIsRoadCaptain(bool value) => setRoadCaptain(value);
+
+  void setUserRole(String? role) {
+    if (_myRole == role) return;
+    _myRole = role;
+    if (role?.toUpperCase() == 'LEAD') {
+      _isRoadCaptain = true;
+    }
+    notifyListeners();
+  }
+
+  void setRiderRole(String userId, String role) {
+    _riderRoles[userId] = role;
+  }
 
   // ---------------------------------------------------------------- config
   void setMode(IntercomMode m) {
@@ -233,12 +312,17 @@ class IntercomService extends ChangeNotifier {
     _seq = 0;
     _transmitting = true;
     _txStartedAt = DateTime.now();
-    _rt.sendVoice(VoiceKind.start, {
+    final header = <String, dynamic>{
       'to': _talkTargetUserId,
       'sampleRate': _micRate,
       'codec': 'pcm16',
       'channel': _channel == IntercomChannel.leadOnly ? 'LEAD_ONLY' : 'ALL',
-    });
+    };
+    if (isRoadCaptain) {
+      header['role'] = 'LEAD';
+      header['priority'] = true;
+    }
+    _rt.sendVoice(VoiceKind.start, header);
     notifyListeners();
   }
 
@@ -246,7 +330,12 @@ class IntercomService extends ChangeNotifier {
     _transmitting = false;
     audioLevel.value = 0.0;
     _pending.clear();
-    _rt.sendVoice(VoiceKind.end, {'to': _talkTargetUserId});
+    final header = <String, dynamic>{'to': _talkTargetUserId};
+    if (isRoadCaptain) {
+      header['role'] = 'LEAD';
+      header['priority'] = true;
+    }
+    _rt.sendVoice(VoiceKind.end, header);
     notifyListeners();
   }
 
@@ -296,7 +385,12 @@ class IntercomService extends ChangeNotifier {
       final all = _pending.takeBytes();
       final frame = Uint8List.sublistView(all, 0, frameBytes);
       if (all.length > frameBytes) _pending.add(Uint8List.sublistView(all, frameBytes));
-      _rt.sendVoice(VoiceKind.frame, {'to': _talkTargetUserId, 'seq': _seq++}, frame);
+      final header = <String, dynamic>{'to': _talkTargetUserId, 'seq': _seq++};
+      if (isRoadCaptain) {
+        header['role'] = 'LEAD';
+        header['priority'] = true;
+      }
+      _rt.sendVoice(VoiceKind.frame, header, frame);
     }
   }
 
@@ -377,34 +471,147 @@ class IntercomService extends ChangeNotifier {
     }
   }
 
+  // -------------------------------------------------------------- ducking & priority
+  /// Attenuation for Road Captain priority ducking (-18 dB).
+  /// Amplitude ratio: 10^(-18/20) ~= 0.12589254.
+  static const double duckingDecibels = -18.0;
+  static final double duckingFactor = math.pow(10.0, duckingDecibels / 20.0).toDouble();
+
+  /// Attenuates 16-bit little-endian PCM audio samples by [factor] (defaults to -18 dB ducking).
+  @visibleForTesting
+  static Uint8List attenuatePcm16(Uint8List pcm, [double? factor]) {
+    final f = factor ?? duckingFactor;
+    final len = pcm.length ~/ 2;
+    if (len == 0) return pcm;
+    final even = len * 2;
+    final inData = ByteData.sublistView(pcm, 0, even);
+    final outBytes = Uint8List.fromList(pcm);
+    final outData = ByteData.sublistView(outBytes, 0, even);
+    for (var i = 0; i < len; i++) {
+      final sample = inData.getInt16(i * 2, Endian.little);
+      final ducked = (sample * f).round().clamp(-32768, 32767);
+      outData.setInt16(i * 2, ducked, Endian.little);
+    }
+    return outBytes;
+  }
+
+  void _duckExistingPlayback() {
+    _isPriorityDucked = true;
+    if (_jitter.isEmpty) return;
+    // Cap existing ducked chatter buffer to ~100 ms so the Lead's broadcast cuts through promptly.
+    final maxDuckedBytes = _rxFrameBytes * 5;
+    while (_queuedBytes > maxDuckedBytes && _jitter.length > 1) {
+      _queuedBytes -= _jitter.removeFirst().length;
+    }
+    final count = _jitter.length;
+    for (var i = 0; i < count; i++) {
+      final chunk = _jitter.removeFirst();
+      _jitter.addLast(attenuatePcm16(chunk, duckingFactor));
+    }
+  }
+
+  bool _isRoadCaptainPacket(VoicePacket p) {
+    final role = p.header['role']?.toString().toUpperCase() ?? _riderRoles[p.from]?.toUpperCase();
+    final priority = p.header['priority'] == true;
+    return role == 'LEAD' || p.isLeadOnly || priority;
+  }
+
+  void _triggerIncomingHapticPulse({required bool isLead}) {
+    try {
+      HapticFeedback.heavyImpact();
+      if (isLead) {
+        Future.delayed(const Duration(milliseconds: 150), () {
+          try {
+            HapticFeedback.heavyImpact();
+          } catch (_) {}
+        });
+      }
+    } catch (_) {}
+  }
+
   void _onVoicePacket(VoicePacket p) {
     if (_deafened) return;
+    final isLead = _isRoadCaptainPacket(p);
+    final duckingEnabled = FeatureGates.isUnlocked(Feature.priorityIntercomDucking);
+
     switch (p.kind) {
       case VoiceKind.start:
-        // One speaker at a time: a newer group stream pre-empts; private calls win.
-        if (_activeStreamId != null && _activeStreamId != p.streamId && !p.isPrivate && !_rxStale()) return;
+        // One speaker at a time: a newer group stream normally does not pre-empt an active stream.
+        // But if the Road Captain transmits, do NOT drop packets due to casual chatter (!p.isPrivate).
+        // Instead, prioritize the Lead's audio stream!
+        final shouldPreempt = p.isPrivate || (isLead && duckingEnabled && !_activeIsLead);
+        if (_activeStreamId != null && _activeStreamId != p.streamId && !shouldPreempt && !_rxStale()) return;
+
+        // If the Road Captain pre-empts casual chatter, duck existing incoming playback volume by -18 dB:
+        if (isLead && duckingEnabled && _activeStreamId != null && _activeStreamId != p.streamId && !_activeIsLead) {
+          _duckExistingPlayback();
+        } else {
+          _jitter.clear();
+          _queuedBytes = 0;
+          _isPriorityDucked = false;
+        }
+
         _activeStreamId = p.streamId;
         _activeSpeakerId = p.from;
         _activeSpeakerName = p.fromName;
         _activeIsPrivate = p.isPrivate;
+        _activeIsLead = isLead;
         _activeChannel = p.isLeadOnly ? IntercomChannel.leadOnly : IntercomChannel.all;
         if (p.from.isNotEmpty) _speakingRiders[p.from] = true;
-        _jitter.clear();
-        _queuedBytes = 0;
         _lastRxAt = DateTime.now();
+
+        _triggerIncomingHapticPulse(isLead: isLead);
+        final isEmergency = p.header['emergency'] == true ||
+            p.header['isEmergency'] == true ||
+            p.header['type'] == 'SOS' ||
+            p.header['sos'] == true;
+        activeSpeakerNotifier.value = ActiveSpeakerInfo(
+          speakerName: p.fromName.isNotEmpty ? p.fromName : 'Rider',
+          speakerId: p.from.isNotEmpty ? p.from : null,
+          isLead: isLead,
+          isEmergency: isEmergency,
+          timestamp: DateTime.now(),
+        );
+
         _ensurePlayer(p.sampleRate).ignore();
         notifyListeners();
         break;
+
       case VoiceKind.frame:
         if (p.streamId != _activeStreamId) {
           // Frames of a stream we never saw START for (e.g. joined mid-sentence).
-          if (_activeStreamId != null && !_rxStale()) return;
+          final shouldPreempt = p.isPrivate || (isLead && duckingEnabled && !_activeIsLead);
+          if (_activeStreamId != null && !shouldPreempt && !_rxStale()) return;
+
+          if (isLead && duckingEnabled && _activeStreamId != null && !_activeIsLead) {
+            _duckExistingPlayback();
+          } else {
+            _jitter.clear();
+            _queuedBytes = 0;
+            _isPriorityDucked = false;
+          }
+
           _activeStreamId = p.streamId;
           _activeSpeakerId = p.from;
           _activeSpeakerName = p.fromName;
           _activeIsPrivate = p.isPrivate;
+          _activeIsLead = isLead;
           _activeChannel = p.isLeadOnly ? IntercomChannel.leadOnly : IntercomChannel.all;
           if (p.from.isNotEmpty) _speakingRiders[p.from] = true;
+
+          _triggerIncomingHapticPulse(isLead: isLead);
+          final isEmergency = p.header['emergency'] == true ||
+              p.header['isEmergency'] == true ||
+              p.header['type'] == 'SOS' ||
+              p.header['sos'] == true;
+          activeSpeakerNotifier.value = ActiveSpeakerInfo(
+            speakerName: p.fromName.isNotEmpty ? p.fromName : 'Rider',
+            speakerId: p.from.isNotEmpty ? p.from : null,
+            isLead: isLead,
+            isEmergency: isEmergency,
+            timestamp: DateTime.now(),
+          );
+
           _ensurePlayer(p.sampleRate).ignore();
           notifyListeners();
         }
@@ -425,9 +632,12 @@ class IntercomService extends ChangeNotifier {
         _rxIdleTimer?.cancel();
         _rxIdleTimer = Timer(const Duration(milliseconds: 1500), () => _resetPlayback(clearSpeaker: true));
         break;
+
       case VoiceKind.end:
         if (p.streamId == _activeStreamId) {
           if (p.from.isNotEmpty) _speakingRiders[p.from] = false;
+          _activeIsLead = false;
+          activeSpeakerNotifier.value = null;
           _rxIdleTimer?.cancel();
           // Let the buffered tail play out, then clear the "speaking" badge.
           _rxIdleTimer = Timer(const Duration(milliseconds: 400), () => _resetPlayback(clearSpeaker: true));
@@ -441,19 +651,26 @@ class IntercomService extends ChangeNotifier {
   void _resetPlayback({required bool clearSpeaker}) {
     _jitter.clear();
     _queuedBytes = 0;
+    _isPriorityDucked = false;
     if (clearSpeaker) {
       if (_activeSpeakerId != null) _speakingRiders[_activeSpeakerId!] = false;
       _activeStreamId = null;
       _activeSpeakerId = null;
       _activeSpeakerName = null;
       _activeIsPrivate = false;
+      _activeIsLead = false;
       _activeChannel = IntercomChannel.all;
+      activeSpeakerNotifier.value = null;
       notifyListeners();
     }
   }
 
   void _onEvent(Map<String, dynamic> e) {
     if (e['type'] == 'VOICE_BUSY') {
+      if (isRoadCaptain && FeatureGates.isUnlocked(Feature.priorityIntercomDucking)) {
+        // Road Captain has priority override; do not abort emergency broadcast.
+        return;
+      }
       _busyWith = e['speaker']?.toString() ?? 'another rider';
       if (_transmitting) _endStream();
       _busyTimer?.cancel();
@@ -473,6 +690,21 @@ class IntercomService extends ChangeNotifier {
         }
         notifyListeners();
       }
+    } else if (e['type'] == 'SNAPSHOT' && e['convoy'] is Map) {
+      final riders = e['convoy']['riders'];
+      if (riders is Map) {
+        for (final entry in riders.entries) {
+          final r = entry.value;
+          if (r is Map && r['role'] != null) {
+            _riderRoles[entry.key.toString()] = r['role'].toString();
+          }
+        }
+      }
+    } else if (e['type'] == 'ROSTER_CHANGED' || e['type'] == 'RIDER_UPDATE') {
+      final rider = e['rider'];
+      if (rider is Map && rider['userId'] != null && rider['role'] != null) {
+        _riderRoles[rider['userId'].toString()] = rider['role'].toString();
+      }
     } else if (e['type'] == 'RIDER_LEFT' && e['userId'] == _talkTargetUserId) {
       setTalkTarget(); // our private partner left → back to everyone
     } else if (e['type'] == 'DISSOLVED' || e['type'] == 'LEFT') {
@@ -486,11 +718,15 @@ class IntercomService extends ChangeNotifier {
     if (_transmitting) _endStream();
     await _closeMic();
     audioLevel.value = 0.0;
+    activeSpeakerNotifier.value = null;
     _talkTargetUserId = null;
     _talkTargetName = null;
     _channel = IntercomChannel.all;
     _speakingRiders.clear();
     _mutedRiders.clear();
+    _riderRoles.clear();
+    _activeIsLead = false;
+    _isPriorityDucked = false;
     _resetPlayback(clearSpeaker: true);
   }
 
@@ -504,6 +740,18 @@ class IntercomService extends ChangeNotifier {
   @visibleForTesting
   void updateAudioLevelForTesting(double level) {
     audioLevel.value = level.clamp(0.0, 1.0);
+  }
+
+  @visibleForTesting
+  int get jitterQueueLength => _jitter.length;
+
+  @visibleForTesting
+  Uint8List? get firstJitterBuffer => _jitter.isEmpty ? null : _jitter.first;
+
+  @visibleForTesting
+  void addJitterChunkForTesting(Uint8List chunk) {
+    _jitter.addLast(chunk);
+    _queuedBytes += chunk.length;
   }
 
   static bool isPttKey(LogicalKeyboardKey key) {
@@ -552,6 +800,7 @@ class IntercomService extends ChangeNotifier {
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     audioLevel.dispose();
+    activeSpeakerNotifier.dispose();
     _voiceSub?.cancel();
     _eventSub?.cancel();
     _micSub?.cancel();

@@ -98,6 +98,7 @@ class MedicalId {
 
 /// One rider in the notification ladder ("Arjun  1.2 km ahead", "No signal").
 class RiderLine {
+  final String userId;
   final String name;
   final double distanceM;
 
@@ -110,7 +111,7 @@ class RiderLine {
   /// False when neither the route nor my heading tell the side ("1.2 km away").
   final bool sideKnown;
 
-  const RiderLine({required this.name, required this.distanceM, required this.ahead, this.flag, this.sideKnown = true});
+  const RiderLine({this.userId = '', required this.name, required this.distanceM, required this.ahead, this.flag, this.sideKnown = true});
 
   /// "1.2 km ahead", "450 m behind", "3.4 km away" (rounded, stable across small moves).
   String get detail {
@@ -120,6 +121,7 @@ class RiderLine {
   }
 
   Map<String, Object?> toArgs() => {
+        'userId': userId,
         'name': name,
         'detail': detail,
         'distDetail': StatusText.roundedDistance(distanceM),
@@ -129,7 +131,7 @@ class RiderLine {
         'sideKnown': sideKnown,
       };
 
-  String get _key => '$name|$detail|${flag ?? ''}|$ahead';
+  String get _key => '$userId|$name|$detail|${flag ?? ''}|$ahead';
 }
 
 /// Everything the native ride notification draws. Pure data; equal snapshots
@@ -681,6 +683,7 @@ class NotificationSnapshotBuilder {
         stoppedFor: stopped,
       ));
       final line = RiderLine(
+        userId: r.userId,
         name: StatusText.shortName(r.name.isEmpty ? 'Rider' : r.name),
         distanceM: dist,
         ahead: side == true,
