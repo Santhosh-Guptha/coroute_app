@@ -19,3 +19,7 @@ Thumbs.db
 **/local.properties
 **/node_modules/
 **/key.properties
+
+# Local Credentials & Secrets Vault
+*CREDENTIALS*.md
+*.credentials*
