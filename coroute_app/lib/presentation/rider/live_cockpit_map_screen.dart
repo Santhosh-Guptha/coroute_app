@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/config/app_config.dart';
+import '../../core/config/feature_gates.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
@@ -270,6 +271,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       refresh: (category, force) => _syncEssentials(category: category, force: force),
       addStop: (place) {
         if ((s.activeConvoy?.riders[s.myUserId]?.speedKmh ?? 0) > 5 || !s.isOnline) return false;
+        if (leader && !FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
+          FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
+          return false;
+        }
         final picked = PickedPlace(name: place.name, lat: place.lat, lng: place.lng, category: place.category);
         final ok = leader ? s.addStop(picked) : s.suggestStop(picked);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Stop request sent. Waiting for the group plan to update.' : 'Could not send. Reconnect and try again.')));
@@ -557,6 +562,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
   Future<void> _addStopAt(BuildContext context, ConvoyService service, LatLng point) async {
     final lead = service.canEditRoute;
+    if (lead && !FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
+      FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
+      return;
+    }
     final p = await MapPickerScreen.pick(
       context,
       title: lead ? 'Add a stop' : 'Suggest a stop',
@@ -610,6 +619,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       return;
     }
     if (placement == null) return;
+    if (lead && !FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
+      FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
+      return;
+    }
     final ok = service.addMeetingPoint(
       PickedPlace(lat: lat, lng: lng, name: res.name.isEmpty ? StopKind.meeting.label : res.name, category: RoutePlan.meetingCategory),
       insertBefore: placement.insertBefore,

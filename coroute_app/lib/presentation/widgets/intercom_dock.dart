@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../core/config/feature_gates.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/rider_model.dart';
 import '../../data/services/intercom_service.dart';
@@ -76,8 +77,19 @@ class IntercomDock extends StatelessWidget {
         ? DsSegment<IntercomChannel>(
             values: const [IntercomChannel.all, IntercomChannel.leadOnly],
             selected: ic.channel,
-            label: (c) => c == IntercomChannel.all ? 'All Convoy' : 'Lead & Sweeper',
-            onChanged: (c) => ic.setChannel(c),
+            label: (c) {
+              if (c == IntercomChannel.all) return 'All Convoy';
+              final unlocked = FeatureGates.isUnlocked(Feature.priorityIntercomDucking);
+              return unlocked ? 'Lead & Sweeper' : 'Lead & Sweeper (Captain)';
+            },
+            onChanged: (c) {
+              if (c == IntercomChannel.leadOnly &&
+                  !FeatureGates.isUnlocked(Feature.priorityIntercomDucking)) {
+                FeatureGates.showUpgradeModal(context, Feature.priorityIntercomDucking);
+                return;
+              }
+              ic.setChannel(c);
+            },
           )
         : null;
 

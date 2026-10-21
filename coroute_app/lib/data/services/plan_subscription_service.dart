@@ -49,7 +49,7 @@ class PlanSubscriptionService extends ChangeNotifier {
   static const String keyForceUnlocked = 'coroute_force_all_unlocked';
 
   SubscriptionTier _currentTier = SubscriptionTier.roadCaptain;
-  bool _forceAllUnlocked = true;
+  bool _forceAllUnlocked = false;
   bool _loaded = false;
 
   SubscriptionTier get currentTier => _currentTier;
@@ -67,7 +67,7 @@ class PlanSubscriptionService extends ChangeNotifier {
           orElse: () => SubscriptionTier.roadCaptain,
         );
       }
-      _forceAllUnlocked = prefs.getBool(keyForceUnlocked) ?? true;
+      _forceAllUnlocked = prefs.getBool(keyForceUnlocked) ?? false;
       _syncToFeatureGates();
     } catch (_) {
       // Fallback defaults
@@ -80,12 +80,14 @@ class PlanSubscriptionService extends ChangeNotifier {
   /// Selects and activates a plan for testing or use.
   Future<void> selectTier(SubscriptionTier tier) async {
     _currentTier = tier;
+    _forceAllUnlocked = false;
     _syncToFeatureGates();
     notifyListeners();
 
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(keyTier, tier.name);
+      await prefs.setBool(keyForceUnlocked, false);
     } catch (_) {}
   }
 

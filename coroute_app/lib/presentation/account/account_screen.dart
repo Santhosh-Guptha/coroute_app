@@ -25,6 +25,8 @@ import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import '../trip_planner/offline_map_manager_screen.dart';
 import '../subscription/plan_selector_screen.dart';
+import '../../core/config/feature_gates.dart';
+import '../../data/services/plan_subscription_service.dart';
 import '../garage/garage_screen.dart';
 import '../update/force_update_screen.dart';
 import '../../data/services/app_version_service.dart';
@@ -75,10 +77,15 @@ class AccountScreen extends StatelessWidget {
     final analytics = trips == null ? null : HomeAnalytics.of(trips.trips);
 
     final bikeTitle = auth.isPillion ? 'Pillion' : (vehicleType.isNotEmpty ? vehicleType : 'Your bike');
+    final planService = context.watch<PlanSubscriptionService?>();
+    final currentTier = planService?.currentTier ?? FeatureGates.activeTier;
+    final tierLabel = FeatureGates.tierLabel(currentTier);
+
     final bikeFacts = <String>[
       if (!auth.isPillion && plate.isNotEmpty) plate,
       if (auth.isPillion) 'No bike registration needed',
       if (settings != null && settings.fuelRangeKm > 0) '${settings.fuelRangeKm} km range',
+      FeatureGates.isUnlocked(Feature.multiBikeGarage) ? 'Multi-bike garage (Pro)' : '1 bike profile (Community)',
     ];
 
     return Scaffold(
@@ -293,9 +300,27 @@ class AccountScreen extends StatelessWidget {
                       _SettingsRow(
                         icon: Icons.card_membership_rounded,
                         title: 'Subscription & Tier Selector',
-                        subtitle: 'Switch plans & test features (Community, Pro, Road Captain, Tour Operator)',
+                        subtitle: 'Current plan: $tierLabel · Tap to switch & test features',
+                        value: tierLabel.toUpperCase(),
                         divider: true,
                         onTap: () => _push(context, const PlanSelectorScreen()),
+                      ),
+                      _SettingsRow(
+                        icon: Icons.dashboard_customize_rounded,
+                        title: 'Fleet & Tour Dispatcher Matrix',
+                        subtitle: FeatureGates.isUnlocked(Feature.fleetAnalytics)
+                            ? 'Commercial live fleet map, emergency dispatch & analytics'
+                            : 'Tour Operator Pass · Fleet analytics & dispatcher overview',
+                        value: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? 'ACTIVE' : 'TOUR OPERATOR',
+                        color: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? AppTheme.accentText : null,
+                        divider: true,
+                        onTap: () {
+                          if (!FeatureGates.isUnlocked(Feature.fleetAnalytics)) {
+                            FeatureGates.showUpgradeModal(context, Feature.fleetAnalytics);
+                            return;
+                          }
+                          _push(context, const MasterAdminDashboard());
+                        },
                       ),
                       _SettingsRow(
                         icon: Icons.system_security_update_rounded,
@@ -360,6 +385,7 @@ class AccountScreen extends StatelessWidget {
                         icon: Icons.offline_pin_rounded,
                         title: 'Offline map packs',
                         subtitle: 'Manage downloaded corridors and tile storage',
+                        value: FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks) ? 'UNLIMITED' : '1 PACK (FREE)',
                         onTap: () => _push(context, const OfflineMapManagerScreen()),
                         divider: false,
                       ),

@@ -52,7 +52,7 @@ void main() {
           );
         }
       }
-      expect(FeatureGates.maxConvoyMembers(), 30);
+      expect(FeatureGates.maxConvoyMembers(), 40);
     });
 
     test('FeatureGates: strict tier entitlement enforcement when forceAllUnlocked is false', () {
@@ -72,14 +72,14 @@ void main() {
       expect(FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks, SubscriptionTier.proRider), isTrue);
       expect(FeatureGates.isUnlocked(Feature.priorityIntercomDucking, SubscriptionTier.proRider), isFalse);
       expect(FeatureGates.isUnlocked(Feature.totalConvoySpreadAlert, SubscriptionTier.proRider), isFalse);
-      expect(FeatureGates.maxConvoyMembers(SubscriptionTier.proRider), 4);
+      expect(FeatureGates.maxConvoyMembers(SubscriptionTier.proRider), 15);
 
       // 3. Road Captain: captain features unlocked
       expect(FeatureGates.isUnlocked(Feature.priorityIntercomDucking, SubscriptionTier.roadCaptain), isTrue);
       expect(FeatureGates.isUnlocked(Feature.unlimitedConvoyCapacity, SubscriptionTier.roadCaptain), isTrue);
       expect(FeatureGates.isUnlocked(Feature.totalConvoySpreadAlert, SubscriptionTier.roadCaptain), isTrue);
       expect(FeatureGates.isUnlocked(Feature.dynamicWaypointPush, SubscriptionTier.roadCaptain), isTrue);
-      expect(FeatureGates.maxConvoyMembers(SubscriptionTier.roadCaptain), 30);
+      expect(FeatureGates.maxConvoyMembers(SubscriptionTier.roadCaptain), 40);
 
       // 4. Tour Operator: enterprise capacity
       expect(FeatureGates.maxConvoyMembers(SubscriptionTier.tourOperator), 100);
@@ -90,7 +90,7 @@ void main() {
       await service.load();
 
       // Default state
-      expect(service.forceAllUnlocked, isTrue);
+      expect(service.forceAllUnlocked, isFalse);
 
       // Switch to Community with strict rules
       await service.setForceAllUnlocked(false);

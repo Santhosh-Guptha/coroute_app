@@ -3,7 +3,6 @@ import '../../core/theme/app_theme.dart';
 import '../../data/services/garage_service.dart';
 import '../../domain/garage/bike_profile.dart';
 import '../../core/config/feature_gates.dart';
-import '../subscription/plan_selector_screen.dart';
 
 /// Screen managing multiple motorcycles, service reminders, and active ride bike.
 class GarageScreen extends StatefulWidget {
@@ -31,46 +30,7 @@ class _GarageScreenState extends State<GarageScreen> {
   void _showAddBikeModal() {
     if (!FeatureGates.isUnlocked(Feature.multiBikeGarage) &&
         _garageService.bikesNotifier.value.isNotEmpty) {
-      showModalBottomSheet(
-        context: context,
-        backgroundColor: AppTheme.card,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        builder: (ctx) => Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.lock_rounded, size: 40, color: AppTheme.warnText),
-              const SizedBox(height: 12),
-              Text(
-                'Multi-Bike Garage is a Pro Feature',
-                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w800, fontSize: 18),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Community tier includes 1 motorcycle profile. Upgrading to CoRoute Pro allows unlimited motorcycles with custom tank sizes and service logs.\n\nIn this test build, you can test this by switching your plan or unlocking all features in the Plan Selector.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.4),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: AppTheme.brand),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const PlanSelectorScreen()));
-                  },
-                  child: const Text('SWITCH PLAN TO TEST (FREE)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
+      FeatureGates.showUpgradeModal(context, Feature.multiBikeGarage);
       return;
     }
     showModalBottomSheet(
@@ -173,8 +133,62 @@ class _GarageScreenState extends State<GarageScreen> {
           ),
         ),
         actions: [
+          Builder(builder: (ctx) {
+            final isMultiUnlocked = FeatureGates.isUnlocked(Feature.multiBikeGarage);
+            return Center(
+              child: GestureDetector(
+                onTap: () {
+                  if (!isMultiUnlocked) {
+                    FeatureGates.showUpgradeModal(ctx, Feature.multiBikeGarage);
+                  }
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isMultiUnlocked
+                        ? AppTheme.accentText.withValues(alpha: 0.12)
+                        : AppTheme.warnTint,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isMultiUnlocked ? AppTheme.accentText : AppTheme.warnBorder,
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isMultiUnlocked ? Icons.verified_rounded : Icons.lock_outline_rounded,
+                        size: 13,
+                        color: isMultiUnlocked ? AppTheme.accentText : AppTheme.warnText,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isMultiUnlocked ? 'PRO · UNLIMITED' : '1 BIKE · FREE',
+                        style: TextStyle(
+                          color: isMultiUnlocked ? AppTheme.accentText : AppTheme.warnText,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
           IconButton(
-            icon: Icon(Icons.add_circle, color: AppTheme.accentText, size: 26),
+            icon: Icon(
+              !FeatureGates.isUnlocked(Feature.multiBikeGarage) && _garageService.bikesNotifier.value.isNotEmpty
+                  ? Icons.lock_outline_rounded
+                  : Icons.add_circle,
+              color: !FeatureGates.isUnlocked(Feature.multiBikeGarage) && _garageService.bikesNotifier.value.isNotEmpty
+                  ? AppTheme.warnText
+                  : AppTheme.accentText,
+              size: 26,
+            ),
             tooltip: 'Add Motorcycle',
             onPressed: _showAddBikeModal,
           ),

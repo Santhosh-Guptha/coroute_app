@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/config/feature_gates.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
@@ -159,6 +160,72 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                // Plan Entitlement Status Banner
+                if (!FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks))
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.warnTint,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppTheme.warnBorder, width: 1.5),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.lock_outline_rounded, color: AppTheme.warnText, size: 22),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'COMMUNITY PLAN · 1 PACK LIMIT',
+                                style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w800, fontSize: 12),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${_packs.length} of 1 offline route pack used. Upgrade to CoRoute Pro for unlimited corridor downloads.',
+                                style: TextStyle(color: AppTheme.text2, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.brand,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            minimumSize: const Size(0, 32),
+                          ),
+                          onPressed: () => FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks),
+                          child: const Text('Upgrade', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentText.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppTheme.accentText, width: 1.2),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.verified_rounded, color: AppTheme.accentText, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '${FeatureGates.tierLabel(FeatureGates.activeTier).toUpperCase()} · UNLIMITED PACKS ACTIVE',
+                            style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w800, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
                 // Storage Gauge Card
                 Container(
                   padding: const EdgeInsets.all(16),

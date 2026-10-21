@@ -3,6 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
+import '../../../core/config/feature_gates.dart';
+import '../../../core/constants/safety_constants.dart';
+import '../../../data/local/saved_map_pack_store.dart';
 import '../../../data/models/route_model.dart';
 import '../../../data/services/tile_cache_service.dart';
 import '../offline_map_manager_screen.dart';
@@ -241,12 +244,16 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
     }
 
     if (hasError) {
+      final isEntitlement = prefetcher.error == 'entitlement_required';
       return Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: AppTheme.card,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.warnText.withValues(alpha: 0.4), width: 1.5),
+          border: Border.all(
+            color: isEntitlement ? AppTheme.warnText : AppTheme.warnText.withValues(alpha: 0.4),
+            width: 1.5,
+          ),
         ),
         child: Row(
           children: [
@@ -258,23 +265,49 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
                 color: AppTheme.warnTint,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(Icons.cloud_off_rounded, color: AppTheme.warnText, size: 22),
+              child: Icon(
+                isEntitlement ? Icons.lock_rounded : Icons.cloud_off_rounded,
+                color: AppTheme.warnText,
+                size: 22,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Download Interrupted', style: AppText.headline.copyWith(fontSize: 15)),
+                  Text(
+                    isEntitlement ? 'Offline Pack Limit Reached' : 'Download Interrupted',
+                    style: AppText.headline.copyWith(fontSize: 15),
+                  ),
                   const SizedBox(height: 2),
-                  Text('Network issue. Tap retry to resume.', style: AppText.caption),
+                  Text(
+                    isEntitlement
+                        ? 'Community tier allows 1 pack. Switch to CoRoute Pro for unlimited corridor downloads.'
+                        : 'Network issue. Tap retry to resume.',
+                    style: AppText.caption,
+                  ),
                 ],
               ),
             ),
-            TextButton(
-              onPressed: () => prefetcher.start(points, label: widget.tripName, highDetail: _highDetail),
-              child: const Text('Retry'),
-            ),
+            const SizedBox(width: 8),
+            if (isEntitlement)
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.brand,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  minimumSize: const Size(0, 36),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () => FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks),
+                child: const Text('Upgrade', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              )
+            else
+              TextButton(
+                onPressed: () => prefetcher.start(points, label: widget.tripName, highDetail: _highDetail),
+                child: const Text('Retry'),
+              ),
           ],
         ),
       );
@@ -333,7 +366,19 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
                   minimumSize: const Size(0, 36),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-                onPressed: () => prefetcher.start(points, label: widget.tripName, highDetail: _highDetail),
+                onPressed: () async {
+                  if (!FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks)) {
+                    final existingPacks = await SavedMapPackStore.loadAll();
+                    if (existingPacks.length >= SafetyConstants.freeOfflinePacksLimit &&
+                        !existingPacks.any((p) => p.name == widget.tripName)) {
+                      if (context.mounted) {
+                        FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks);
+                      }
+                      return;
+                    }
+                  }
+                  prefetcher.start(points, label: widget.tripName, highDetail: _highDetail);
+                },
                 icon: const Icon(Icons.download_rounded, size: 16),
                 label: const Text('Download', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
               ),

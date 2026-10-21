@@ -6,8 +6,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/plan_subscription_service.dart';
 import '../../core/config/feature_gates.dart';
-import '../subscription/plan_selector_screen.dart';
 
 Future<void> showGuardianSheet(
   BuildContext context, {
@@ -25,7 +25,11 @@ class GuardianSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
+    final planService = context.watch<PlanSubscriptionService?>();
+    final isUnlocked = planService?.isUnlocked(Feature.guardianLiveShare) ??
+        FeatureGates.isUnlocked(Feature.guardianLiveShare);
+
+    if (!isUnlocked) {
       return Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -33,23 +37,31 @@ class GuardianSheet extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 color: AppTheme.card,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.border2),
+                border: Border.all(color: AppTheme.warnBorder, width: 1.5),
               ),
               child: Column(
                 children: [
-                  Icon(Icons.lock_rounded, size: 40, color: AppTheme.warnText),
-                  const SizedBox(height: 12),
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: AppTheme.warnTint,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.lock_rounded, size: 28, color: AppTheme.warnText),
+                  ),
+                  const SizedBox(height: 14),
                   Text(
-                    'CoRoute Pro Feature',
+                    'Ride Guardian is a Pro Feature',
                     style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w800, fontSize: 18),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Ride Guardian encrypted browser live-share is available on CoRoute Pro and Road Captain Pass.\n\nIn this test build, you can test this by switching your plan or unlocking all features in the Plan Selector.',
+                    'Ride Guardian encrypted browser live-share is available on CoRoute Pro and Road Captain Pass.\n\nIn this test build, you can test this instantly by switching your plan to CoRoute Pro (Free).',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.4),
                   ),
@@ -60,10 +72,19 @@ class GuardianSheet extends StatelessWidget {
                     child: FilledButton(
                       style: FilledButton.styleFrom(backgroundColor: AppTheme.brand),
                       onPressed: () {
-                        Navigator.of(context).pop();
-                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlanSelectorScreen()));
+                        context.read<PlanSubscriptionService>().selectTier(SubscriptionTier.proRider);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            duration: const Duration(seconds: 2),
+                            backgroundColor: AppTheme.card,
+                            content: Text(
+                              'Activated CoRoute Pro! Ride Guardian is now unlocked.',
+                              style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        );
                       },
-                      child: const Text('SWITCH PLAN TO TEST (FREE)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+                      child: const Text('SWITCH TO COROUTE PRO TO TEST (FREE)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
                     ),
                   ),
                 ],

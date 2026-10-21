@@ -276,6 +276,37 @@ class _NoRideHero extends StatelessWidget {
             fontSize: 17,
             onPressed: () => RideStartView.startRide(context),
           ),
+          Builder(builder: (ctx) {
+            final planService = ctx.watch<PlanSubscriptionService?>();
+            final currentTier = planService?.currentTier ?? FeatureGates.activeTier;
+            final maxRiders = FeatureGates.maxConvoyMembers(currentTier);
+            final tierLabel = FeatureGates.tierLabel(currentTier);
+            return Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: GestureDetector(
+                onTap: () => Navigator.of(ctx).push(
+                  MaterialPageRoute(builder: (_) => const PlanSelectorScreen()),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.groups_rounded, size: 14, color: DsHeroCard.secondary),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Convoy limit: Max $maxRiders bikes ($tierLabel)',
+                      style: const TextStyle(
+                        color: DsHeroCard.secondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.arrow_forward_ios_rounded, size: 10, color: DsHeroCard.secondary),
+                  ],
+                ),
+              ),
+            );
+          }),
         ],
       ),
     );

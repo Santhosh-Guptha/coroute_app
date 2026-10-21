@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../core/config/feature_gates.dart';
 import '../../data/local/ride_stats_store.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../data/models/trip_history_model.dart';
@@ -131,6 +132,10 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   }
 
   Future<void> _shareGpx() async {
+    if (!FeatureGates.isUnlocked(Feature.advancedTelemetryReplay)) {
+      FeatureGates.showUpgradeModal(context, Feature.advancedTelemetryReplay);
+      return;
+    }
     setState(() => _sharing = true);
     final api = context.read<ApiClient>();
     try {
@@ -277,8 +282,17 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             ),
           IconButton(
             tooltip: '2D Replay & Scrubber',
-            icon: Icon(Icons.slow_motion_video_rounded, color: AppTheme.accentText),
+            icon: Icon(
+              Icons.slow_motion_video_rounded,
+              color: FeatureGates.isUnlocked(Feature.advancedTelemetryReplay)
+                  ? AppTheme.accentText
+                  : AppTheme.warnText,
+            ),
             onPressed: () {
+              if (!FeatureGates.isUnlocked(Feature.advancedTelemetryReplay)) {
+                FeatureGates.showUpgradeModal(context, Feature.advancedTelemetryReplay);
+                return;
+              }
               final pts = widget.trip.breadcrumbTrail
                   .map((p) => GpxTrackpoint(
                         latitude: p.lat,
@@ -1058,6 +1072,10 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
   }
 
   void _openReplay({TimelineEventModel? from}) {
+    if (!FeatureGates.isUnlocked(Feature.advancedTelemetryReplay)) {
+      FeatureGates.showUpgradeModal(context, Feature.advancedTelemetryReplay);
+      return;
+    }
     final e = from;
     Navigator.push(
       context,
