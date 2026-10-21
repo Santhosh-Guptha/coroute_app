@@ -58,7 +58,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.sos),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete'),
           ),
@@ -84,7 +84,6 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Map pack "${pack.name}" removed'),
-          backgroundColor: AppTheme.card,
         ),
       );
       _loadPacks();
@@ -98,9 +97,9 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
         backgroundColor: AppTheme.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Clear All Offline Map Packs?', style: AppText.headline),
-        content: const Text(
+        content: Text(
           'This will purge all downloaded corridor map packs and wipe cached tiles.',
-          style: TextStyle(color: Colors.white70),
+          style: TextStyle(color: AppTheme.text2),
         ),
         actions: [
           TextButton(
@@ -108,7 +107,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.sos),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Clear All'),
           ),
@@ -362,7 +361,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
               const SizedBox(width: 8),
               IconButton(
                 icon: const Icon(Icons.delete_outline_rounded, size: 20),
-                color: Colors.redAccent,
+                color: AppTheme.sos,
                 tooltip: 'Delete map pack',
                 onPressed: () => _deletePack(pack),
               ),

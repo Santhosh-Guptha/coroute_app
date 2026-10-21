@@ -350,7 +350,7 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
                   border: Border.all(color: AppTheme.subtleBorder, width: 1.5),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.5),
+                      color: AppTheme.shadow,
                       blurRadius: 18,
                       offset: const Offset(0, 6),
                     ),
@@ -362,9 +362,9 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
                     // Scrubbing Slider
                     SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: AppTheme.neonCyan,
-                        inactiveTrackColor: Colors.white.withOpacity(0.15),
-                        thumbColor: AppTheme.neonCyan,
+                        activeTrackColor: AppTheme.accentText,
+                        inactiveTrackColor: AppTheme.border2,
+                        thumbColor: AppTheme.accentText,
                         thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
                         trackHeight: 3.5,
                       ),
@@ -387,12 +387,12 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
                             width: 52,
                             height: 52,
                             decoration: BoxDecoration(
-                              color: _isPlaying ? Colors.white.withOpacity(0.1) : AppTheme.neonCyan,
+                              color: _isPlaying ? AppTheme.soft : AppTheme.brand,
                               borderRadius: BorderRadius.circular(14),
                             ),
                             child: Icon(
                               _isPlaying ? Icons.pause : Icons.play_arrow,
-                              color: _isPlaying ? AppTheme.textPrimary : Colors.black,
+                              color: _isPlaying ? AppTheme.text : Colors.white,
                               size: 28,
                             ),
                           ),

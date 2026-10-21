@@ -157,7 +157,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
           _ActionPill(
             icon: Icons.local_gas_station_rounded,
             iconColor: Colors.white,
-            accentColor: const Color(0xFFD97706),
+            accentColor: AppTheme.warnText,
             title: 'NEXT FUEL · in ${formatDistanceRounded(fuelAheadM)}$rangeText',
             subtitle: '${nearestStation.name} · Tap to route',
             onTap: () {

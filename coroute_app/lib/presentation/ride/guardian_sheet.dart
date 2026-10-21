@@ -43,27 +43,27 @@ class GuardianSheet extends StatelessWidget {
                 children: [
                   Icon(Icons.lock_rounded, size: 40, color: AppTheme.warnText),
                   const SizedBox(height: 12),
-                  const Text(
+                  Text(
                     'CoRoute Pro Feature',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18),
+                    style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w800, fontSize: 18),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'Ride Guardian encrypted browser live-share is available on CoRoute Pro and Road Captain Pass.\n\nIn this test build, you can test this by switching your plan or unlocking all features in the Plan Selector.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                    style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.4),
                   ),
                   const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,
                     height: 50,
                     child: FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: AppTheme.accentText),
+                      style: FilledButton.styleFrom(backgroundColor: AppTheme.brand),
                       onPressed: () {
                         Navigator.of(context).pop();
                         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlanSelectorScreen()));
                       },
-                      child: const Text('SWITCH PLAN TO TEST (FREE)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900)),
+                      child: const Text('SWITCH PLAN TO TEST (FREE)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
                     ),
                   ),
                 ],

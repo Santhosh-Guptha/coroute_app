@@ -120,16 +120,16 @@ class MinimalCockpitStatsRow extends StatelessWidget {
             ),
             if (meshPeersCount != null && meshPeersCount! > 0) ...[
               const SizedBox(width: 8),
-              const Icon(
+              Icon(
                 Icons.hub_outlined,
                 size: 13,
-                color: Color(0xFF00E5FF),
+                color: AppTheme.accentText,
               ),
               const SizedBox(width: 3),
               Text(
                 '$meshPeersCount mesh',
                 style: AppText.caption.copyWith(
-                  color: const Color(0xFF00E5FF),
+                  color: AppTheme.accentText,
                   fontWeight: FontWeight.w700,
                   fontSize: 12,
                 ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import '../../data/models/convoy_model.dart';
 import '../../domain/notify/notification_snapshot.dart';
 import '../../domain/notify/status_text.dart';
@@ -69,9 +70,6 @@ class ConvoyBeadWireWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
     final aheadRider = ahead.firstOrNull;
     final behind1 = behind.isNotEmpty ? behind[0] : null;
     final behind2 = behind.length > 1 ? behind[1] : null;
@@ -88,17 +86,17 @@ class ConvoyBeadWireWidget extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFF0F172A),
+        color: AppTheme.card,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: const Color(0xFF334155),
+          color: AppTheme.border2,
           width: 1,
         ),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
-            color: Color(0x33000000),
+            color: AppTheme.shadow,
             blurRadius: 10,
-            offset: Offset(0, 4),
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -117,8 +115,8 @@ class ConvoyBeadWireWidget extends StatelessWidget {
               Expanded(
                 child: Text(
                   convoyName.isNotEmpty ? convoyName : 'CoRoute Convoy',
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: AppTheme.text,
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 0.2,
@@ -131,22 +129,22 @@ class ConvoyBeadWireWidget extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF00E676).withValues(alpha: 0.15),
+                    color: AppTheme.tint,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: const Color(0xFF00E676).withValues(alpha: 0.4),
+                      color: AppTheme.accentText.withOpacity(0.4),
                       width: 1,
                     ),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.circle, size: 7, color: Color(0xFF00E676)),
-                      SizedBox(width: 4),
+                      Icon(Icons.circle, size: 7, color: AppTheme.accentText),
+                      const SizedBox(width: 4),
                       Text(
                         'LIVE',
                         style: TextStyle(
-                          color: Color(0xFF00E676),
+                          color: AppTheme.accentText,
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 0.5,
@@ -226,8 +224,8 @@ class ConvoyBeadWireWidget extends StatelessWidget {
           // 3. Telemetry Subtitle
           Text(
             telemetry ?? 'Pack #$packPos • $totalRiders riders',
-            style: const TextStyle(
-              color: Color(0xFF94A3B8),
+            style: TextStyle(
+              color: AppTheme.text2,
               fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
@@ -241,8 +239,9 @@ class ConvoyBeadWireWidget extends StatelessWidget {
                 Expanded(
                   child: _buildPillButton(
                     label: '⏸  WAIT',
-                    color: const Color(0xFF334155),
-                    textColor: Colors.white,
+                    color: AppTheme.soft,
+                    borderColor: AppTheme.border2,
+                    textColor: AppTheme.text,
                     onTap: onWait,
                   ),
                 ),
@@ -250,8 +249,9 @@ class ConvoyBeadWireWidget extends StatelessWidget {
                 Expanded(
                   child: _buildPillButton(
                     label: '📍  MAP',
-                    color: const Color(0xFF334155),
-                    textColor: Colors.white,
+                    color: AppTheme.soft,
+                    borderColor: AppTheme.border2,
+                    textColor: AppTheme.text,
                     onTap: onMap,
                   ),
                 ),
@@ -259,9 +259,9 @@ class ConvoyBeadWireWidget extends StatelessWidget {
                 Expanded(
                   child: _buildPillButton(
                     label: '⚠️  SOS',
-                    color: const Color(0xFF7F1D1D),
-                    borderColor: const Color(0xFFEF4444),
-                    textColor: const Color(0xFFFCA5A5),
+                    color: AppTheme.isLight ? const Color(0xFFFEE2E2) : const Color(0xFF7F1D1D),
+                    borderColor: AppTheme.sos,
+                    textColor: AppTheme.isLight ? AppTheme.sos : const Color(0xFFFCA5A5),
                     onTap: onSos,
                   ),
                 ),
@@ -291,17 +291,17 @@ class ConvoyBeadWireWidget extends StatelessWidget {
     final Color tagColor;
 
     if (isYou) {
-      ringColor = const Color(0xFF00E676);
-      bgColor = const Color(0xFF00E676).withValues(alpha: 0.2);
-      tagColor = const Color(0xFF00E676);
+      ringColor = AppTheme.accentText;
+      bgColor = AppTheme.tint;
+      tagColor = AppTheme.accentText;
     } else if (isWarning) {
-      ringColor = const Color(0xFFFF9100);
-      bgColor = const Color(0xFFFF9100).withValues(alpha: 0.2);
-      tagColor = const Color(0xFFFF9100);
+      ringColor = AppTheme.warnText;
+      bgColor = AppTheme.warnTint;
+      tagColor = AppTheme.warnText;
     } else {
-      ringColor = const Color(0xFF38BDF8);
-      bgColor = const Color(0xFF38BDF8).withValues(alpha: 0.2);
-      tagColor = const Color(0xFF94A3B8);
+      ringColor = AppTheme.border2;
+      bgColor = AppTheme.soft;
+      tagColor = AppTheme.muted;
     }
 
     return Column(
@@ -313,9 +313,9 @@ class ConvoyBeadWireWidget extends StatelessWidget {
           child: Text(
             name,
             style: TextStyle(
-              color: isYou ? const Color(0xFF00E676) : const Color(0xFFE2E8F0),
+              color: isYou ? AppTheme.accentText : AppTheme.text,
               fontSize: 11,
-              fontWeight: isYou ? FontWeight.bold : FontWeight.w500,
+              fontWeight: isYou ? FontWeight.bold : FontWeight.w600,
             ),
             textAlign: TextAlign.center,
             maxLines: 1,
@@ -338,7 +338,7 @@ class ConvoyBeadWireWidget extends StatelessWidget {
             boxShadow: isYou
                 ? [
                     BoxShadow(
-                      color: const Color(0xFF00E676).withValues(alpha: 0.4),
+                      color: AppTheme.accentText.withOpacity(0.3),
                       blurRadius: 8,
                       spreadRadius: 1,
                     )
@@ -383,24 +383,24 @@ class ConvoyBeadWireWidget extends StatelessWidget {
           // Dashed / solid connector wire
           Container(
             height: 2,
-            color: const Color(0xFF475569),
+            color: AppTheme.border2,
           ),
 
           // Distance Pill
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F172A),
+              color: AppTheme.card,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: const Color(0xFF475569),
+                color: AppTheme.border2,
                 width: 1,
               ),
             ),
             child: Text(
               distText,
-              style: const TextStyle(
-                color: Color(0xFFCBD5E1),
+              style: TextStyle(
+                color: AppTheme.text2,
                 fontSize: 9,
                 fontWeight: FontWeight.bold,
               ),

@@ -216,7 +216,7 @@ class _PlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = isActive ? AppTheme.accentText : (plan.isPopular ? AppTheme.neonCyan.withValues(alpha: 0.6) : AppTheme.border2);
+    final borderColor = isActive ? AppTheme.accentText : (plan.isPopular ? AppTheme.accentText.withValues(alpha: 0.6) : AppTheme.border2);
 
     return Container(
       decoration: BoxDecoration(
@@ -318,7 +318,7 @@ class _PlanCard extends StatelessWidget {
                         Icon(
                           Icons.check_circle_rounded,
                           size: 16,
-                          color: f.isHighlight ? AppTheme.accentText : AppTheme.neonCyan,
+                          color: f.isHighlight ? AppTheme.accentText : AppTheme.accentText.withValues(alpha: 0.6),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -390,16 +390,16 @@ class _PlanCard extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                 decoration: BoxDecoration(
-                  color: AppTheme.accentText,
+                  color: AppTheme.brand,
                   borderRadius: BorderRadius.circular(10),
                   boxShadow: [
-                    BoxShadow(color: AppTheme.accentText.withValues(alpha: 0.4), blurRadius: 8),
+                    BoxShadow(color: AppTheme.brand.withValues(alpha: 0.4), blurRadius: 8),
                   ],
                 ),
                 child: const Text(
                   '★ MOST POPULAR FOR CLUBS',
                   style: TextStyle(
-                    color: Colors.black,
+                    color: Colors.white,
                     fontWeight: FontWeight.w900,
                     fontSize: 10,
                     letterSpacing: 0.5,

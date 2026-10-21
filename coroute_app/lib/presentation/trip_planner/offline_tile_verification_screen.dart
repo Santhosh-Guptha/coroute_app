@@ -162,7 +162,7 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
                       height: 28,
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Colors.redAccent,
+                          color: AppTheme.sos,
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
                           boxShadow: dsFloatingShadow(),
@@ -196,8 +196,8 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
                       Container(
                         width: 10,
                         height: 10,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF10B981), // Green indicator
+                        decoration: BoxDecoration(
+                          color: StatusColors.success, // Green indicator
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -220,7 +220,7 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
                                 const Spacer(),
                                 Text(
                                   'Z ${_currentZoom.toStringAsFixed(1)}',
-                                  style: AppText.headline.copyWith(fontSize: 14, color: Colors.white),
+                                  style: AppText.headline.copyWith(fontSize: 14, color: AppTheme.text),
                                 ),
                               ],
                             ),
@@ -252,10 +252,10 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
                       _buildSnapChip('Z17 Junctions', 17.0),
                       const SizedBox(width: 6),
                       ActionChip(
-                        avatar: const Icon(Icons.fit_screen_rounded, size: 16, color: Colors.white),
+                        avatar: Icon(Icons.fit_screen_rounded, size: 16, color: AppTheme.text),
                         label: const Text('Fit Corridor'),
                         backgroundColor: AppTheme.card,
-                        labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
+                        labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.text),
                         side: BorderSide(color: AppTheme.border),
                         onPressed: _fitRoute,
                       ),

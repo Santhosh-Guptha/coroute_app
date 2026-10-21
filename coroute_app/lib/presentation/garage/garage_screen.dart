@@ -33,7 +33,7 @@ class _GarageScreenState extends State<GarageScreen> {
         _garageService.bikesNotifier.value.isNotEmpty) {
       showModalBottomSheet(
         context: context,
-        backgroundColor: AppTheme.darkCanvas,
+        backgroundColor: AppTheme.card,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
@@ -98,11 +98,11 @@ class _GarageScreenState extends State<GarageScreen> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: AppTheme.elevatedCard,
+        backgroundColor: AppTheme.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(
           'Service Completed: ${bike.name}',
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 18),
+          style: TextStyle(color: AppTheme.text, fontSize: 18),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -110,21 +110,21 @@ class _GarageScreenState extends State<GarageScreen> {
           children: [
             Text(
               'Enter the odometer reading when the service was performed:',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              style: TextStyle(color: AppTheme.text2, fontSize: 13),
             ),
             const SizedBox(height: 14),
             TextField(
               controller: controller,
               keyboardType: TextInputType.number,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 18),
+              style: TextStyle(color: AppTheme.text, fontSize: 18),
               decoration: InputDecoration(
                 suffixText: 'km',
-                suffixStyle: TextStyle(color: AppTheme.textMuted),
+                suffixStyle: TextStyle(color: AppTheme.muted),
                 filled: true,
-                fillColor: AppTheme.darkCanvas,
+                fillColor: AppTheme.soft,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: AppTheme.subtleBorder),
+                  borderSide: BorderSide(color: AppTheme.border),
                 ),
               ),
             ),
@@ -133,7 +133,7 @@ class _GarageScreenState extends State<GarageScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+            child: Text('Cancel', style: TextStyle(color: AppTheme.muted)),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -146,8 +146,8 @@ class _GarageScreenState extends State<GarageScreen> {
               }
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.neonCyan,
-              foregroundColor: Colors.black,
+              backgroundColor: AppTheme.brand,
+              foregroundColor: Colors.white,
             ),
             child: const Text('Confirm Service'),
           ),
@@ -159,14 +159,14 @@ class _GarageScreenState extends State<GarageScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.darkCanvas,
+      backgroundColor: AppTheme.bg,
       appBar: AppBar(
-        backgroundColor: AppTheme.elevatedCard,
+        backgroundColor: AppTheme.card,
         elevation: 0,
         title: Text(
           'GARAGE & MOTORCYCLES',
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: AppTheme.text,
             fontSize: 16,
             fontWeight: FontWeight.w800,
             letterSpacing: 1.2,
@@ -174,7 +174,7 @@ class _GarageScreenState extends State<GarageScreen> {
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.add_circle, color: AppTheme.neonCyan, size: 26),
+            icon: Icon(Icons.add_circle, color: AppTheme.accentText, size: 26),
             tooltip: 'Add Motorcycle',
             onPressed: _showAddBikeModal,
           ),
@@ -191,7 +191,7 @@ class _GarageScreenState extends State<GarageScreen> {
                   child: Text(
                     'No motorcycles in your garage yet.\nTap + to add one.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: AppTheme.textMuted, fontSize: 14),
+                    style: TextStyle(color: AppTheme.muted, fontSize: 14),
                   ),
                 );
               }
@@ -240,22 +240,22 @@ class _BikeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color serviceColor = AppTheme.emeraldSafe;
+    Color serviceColor = AppTheme.accentText;
     String serviceLabel = 'SERVICE OK';
     if (bike.isServiceOverdue) {
-      serviceColor = AppTheme.laserRed;
+      serviceColor = AppTheme.sos;
       serviceLabel = 'SERVICE OVERDUE';
     } else if (bike.isServiceDueSoon) {
-      serviceColor = AppTheme.hyperAmber;
+      serviceColor = AppTheme.warnText;
       serviceLabel = 'DUE IN ${bike.kmUntilService.round()} KM';
     }
 
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.elevatedCard,
+        color: AppTheme.card,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isActive ? AppTheme.neonCyan : AppTheme.subtleBorder,
+          color: isActive ? AppTheme.accentText : AppTheme.border,
           width: isActive ? 2 : 1,
         ),
       ),
@@ -270,12 +270,12 @@ class _BikeCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppTheme.darkCanvas,
+                    color: AppTheme.soft,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     Icons.two_wheeler,
-                    color: isActive ? AppTheme.neonCyan : AppTheme.textMuted,
+                    color: isActive ? AppTheme.accentText : AppTheme.muted,
                     size: 26,
                   ),
                 ),
@@ -287,7 +287,7 @@ class _BikeCard extends StatelessWidget {
                       Text(
                         bike.name,
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: AppTheme.text,
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
                         ),
@@ -295,7 +295,7 @@ class _BikeCard extends StatelessWidget {
                       Text(
                         '${bike.year} · ${bike.make} ${bike.model}',
                         style: TextStyle(
-                          color: AppTheme.textSecondary,
+                          color: AppTheme.text2,
                           fontSize: 12,
                         ),
                       ),
@@ -306,14 +306,14 @@ class _BikeCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: AppTheme.neonCyan.withOpacity(0.15),
+                      color: AppTheme.tint,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.neonCyan.withOpacity(0.5)),
+                      border: Border.all(color: AppTheme.accentText.withOpacity(0.5)),
                     ),
                     child: Text(
                       'ACTIVE',
                       style: TextStyle(
-                        color: AppTheme.neonCyan,
+                        color: AppTheme.accentText,
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 1.0,
@@ -324,7 +324,7 @@ class _BikeCard extends StatelessWidget {
                   TextButton(
                     onPressed: onSelectActive,
                     style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.textSecondary,
+                      foregroundColor: AppTheme.text2,
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                     ),
                     child: const Text('Set Active'),
@@ -333,7 +333,7 @@ class _BikeCard extends StatelessWidget {
             ),
           ),
 
-          Divider(height: 1, color: AppTheme.subtleBorder),
+          Divider(height: 1, color: AppTheme.border),
 
           // Specs Grid
           Padding(
@@ -369,7 +369,7 @@ class _BikeCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: AppTheme.darkCanvas,
+              color: AppTheme.soft,
               borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
             ),
             child: Row(
@@ -400,7 +400,7 @@ class _BikeCard extends StatelessWidget {
                     child: Text(
                       'Record Service',
                       style: TextStyle(
-                        color: AppTheme.textSecondary,
+                        color: AppTheme.text2,
                         fontSize: 12,
                         decoration: TextDecoration.underline,
                       ),
@@ -411,7 +411,7 @@ class _BikeCard extends StatelessWidget {
                   const SizedBox(width: 14),
                   InkWell(
                     onTap: onDelete,
-                    child: Icon(Icons.delete_outline, color: AppTheme.textMuted, size: 18),
+                    child: Icon(Icons.delete_outline, color: AppTheme.muted, size: 18),
                   ),
                 ],
               ],
@@ -442,7 +442,7 @@ class _MiniSpec extends StatelessWidget {
         Text(
           label,
           style: TextStyle(
-            color: AppTheme.textMuted,
+            color: AppTheme.muted,
             fontSize: 9,
             fontWeight: FontWeight.w700,
             letterSpacing: 0.6,
@@ -452,7 +452,7 @@ class _MiniSpec extends StatelessWidget {
         Text(
           value,
           style: TextStyle(
-            color: AppTheme.textPrimary,
+            color: AppTheme.text,
             fontSize: 15,
             fontWeight: FontWeight.w800,
             fontFamily: 'monospace',
@@ -461,7 +461,7 @@ class _MiniSpec extends StatelessWidget {
         Text(
           subtext,
           style: TextStyle(
-            color: AppTheme.textSecondary,
+            color: AppTheme.text2,
             fontSize: 11,
           ),
         ),
@@ -521,14 +521,14 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                 Text(
                   'ADD MOTORCYCLE',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: AppTheme.text,
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 1.2,
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Icons.close, color: AppTheme.textMuted),
+                  icon: Icon(Icons.close, color: AppTheme.muted),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -537,7 +537,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
             Text(
               'QUICK PRESETS',
               style: TextStyle(
-                color: AppTheme.textMuted,
+                color: AppTheme.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.8,
@@ -551,10 +551,10 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                   return Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ActionChip(
-                      backgroundColor: AppTheme.slateCard,
+                      backgroundColor: AppTheme.soft,
                       label: Text(
                         p.model,
-                        style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+                        style: TextStyle(color: AppTheme.text, fontSize: 12),
                       ),
                       onPressed: () => _applyPreset(p),
                     ),
@@ -565,10 +565,10 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
             const SizedBox(height: 16),
             TextField(
               controller: _nameController,
-              style: TextStyle(color: AppTheme.textPrimary),
+              style: TextStyle(color: AppTheme.text),
               decoration: InputDecoration(
                 labelText: 'Bike Name (e.g. My Himalayan 450)',
-                labelStyle: TextStyle(color: AppTheme.textMuted),
+                labelStyle: TextStyle(color: AppTheme.muted),
               ),
             ),
             const SizedBox(height: 12),
@@ -577,10 +577,10 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                 Expanded(
                   child: TextField(
                     controller: _makeController,
-                    style: TextStyle(color: AppTheme.textPrimary),
+                    style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
                       labelText: 'Make',
-                      labelStyle: TextStyle(color: AppTheme.textMuted),
+                      labelStyle: TextStyle(color: AppTheme.muted),
                     ),
                   ),
                 ),
@@ -588,10 +588,10 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                 Expanded(
                   child: TextField(
                     controller: _modelController,
-                    style: TextStyle(color: AppTheme.textPrimary),
+                    style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
                       labelText: 'Model',
-                      labelStyle: TextStyle(color: AppTheme.textMuted),
+                      labelStyle: TextStyle(color: AppTheme.muted),
                     ),
                   ),
                 ),
@@ -604,10 +604,10 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                   child: TextField(
                     controller: _tankController,
                     keyboardType: TextInputType.number,
-                    style: TextStyle(color: AppTheme.textPrimary),
+                    style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
                       labelText: 'Tank (L)',
-                      labelStyle: TextStyle(color: AppTheme.textMuted),
+                      labelStyle: TextStyle(color: AppTheme.muted),
                     ),
                   ),
                 ),
@@ -616,10 +616,10 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                   child: TextField(
                     controller: _reserveController,
                     keyboardType: TextInputType.number,
-                    style: TextStyle(color: AppTheme.textPrimary),
+                    style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
                       labelText: 'Reserve (L)',
-                      labelStyle: TextStyle(color: AppTheme.textMuted),
+                      labelStyle: TextStyle(color: AppTheme.muted),
                     ),
                   ),
                 ),
@@ -628,10 +628,10 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                   child: TextField(
                     controller: _mileageController,
                     keyboardType: TextInputType.number,
-                    style: TextStyle(color: AppTheme.textPrimary),
+                    style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
                       labelText: 'km/L',
-                      labelStyle: TextStyle(color: AppTheme.textMuted),
+                      labelStyle: TextStyle(color: AppTheme.muted),
                     ),
                   ),
                 ),
@@ -641,10 +641,10 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
             TextField(
               controller: _odometerController,
               keyboardType: TextInputType.number,
-              style: TextStyle(color: AppTheme.textPrimary),
+              style: TextStyle(color: AppTheme.text),
               decoration: InputDecoration(
                 labelText: 'Current Odometer (km)',
-                labelStyle: TextStyle(color: AppTheme.textMuted),
+                labelStyle: TextStyle(color: AppTheme.muted),
               ),
             ),
             const SizedBox(height: 20),
@@ -675,8 +675,8 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                   widget.onSave(newBike);
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.neonCyan,
-                  foregroundColor: Colors.black,
+                  backgroundColor: AppTheme.brand,
+                  foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 child: const Text(

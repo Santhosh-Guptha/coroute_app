@@ -92,7 +92,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
       return Container(
         padding: const EdgeInsets.all(Space.s16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppTheme.card,
           borderRadius: Radii.lgAll,
           border: Border.all(color: AppTheme.sos, width: 2),
         ),
@@ -117,7 +117,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppTheme.card,
         borderRadius: Radii.lgAll,
         border: Border.all(color: AppTheme.sos, width: 2),
         boxShadow: dsFloatingShadow(),
@@ -150,8 +150,8 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                       const SizedBox(height: 2),
                       Text(
                         '100% Offline Emergency Telemetry Pack',
-                        style: const TextStyle(
-                          color: Color(0xFFFFD0D7),
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.85),
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -183,7 +183,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: Space.s12, horizontal: Space.s8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFEBEE),
+                          color: AppTheme.sos.withOpacity(0.12),
                           borderRadius: Radii.mdAll,
                           border: Border.all(color: AppTheme.sos, width: 2),
                         ),
@@ -218,10 +218,10 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: Space.s12, horizontal: Space.s8),
                         decoration: BoxDecoration(
-                          color: _profile.organDonor ? const Color(0xFFE3F3F5) : const Color(0xFFEEF3F5),
+                          color: _profile.organDonor ? AppTheme.tint : AppTheme.soft,
                           borderRadius: Radii.mdAll,
                           border: Border.all(
-                            color: _profile.organDonor ? AppTheme.brand : const Color(0xFFC2CED6),
+                            color: _profile.organDonor ? AppTheme.brand : AppTheme.border2,
                             width: 2,
                           ),
                         ),
@@ -230,7 +230,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                             Text(
                               'ORGAN DONOR',
                               style: TextStyle(
-                                color: _profile.organDonor ? AppTheme.brand : const Color(0xFF5B6B78),
+                                color: _profile.organDonor ? AppTheme.brand : AppTheme.muted,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: 1,
@@ -240,7 +240,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                             Text(
                               _profile.organDonor ? 'YES - DONOR' : 'NOT DECLARED',
                               style: TextStyle(
-                                color: _profile.organDonor ? AppTheme.brand : const Color(0xFF15232E),
+                                color: _profile.organDonor ? AppTheme.brand : AppTheme.text,
                                 fontSize: 15,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -258,22 +258,22 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                   Container(
                     padding: const EdgeInsets.all(Space.s12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFFF1E6),
+                      color: AppTheme.warnTint,
                       borderRadius: Radii.mdAll,
-                      border: Border.all(color: const Color(0xFFF0C9B3), width: 2),
+                      border: Border.all(color: AppTheme.warnBorder, width: 2),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (hasAllergies) ...[
-                          const Row(
+                          Row(
                             children: [
-                              Icon(Icons.warning_amber_rounded, color: Colors.black, size: 16),
-                              SizedBox(width: 6),
+                              Icon(Icons.warning_amber_rounded, color: AppTheme.warnText, size: 16),
+                              const SizedBox(width: 6),
                               Text(
                                 'ALLERGIES / CONDITIONS:',
                                 style: TextStyle(
-                                  color: Colors.black,
+                                  color: AppTheme.warnText,
                                   fontSize: 11,
                                   fontWeight: FontWeight.w800,
                                 ),
@@ -283,23 +283,23 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                           const SizedBox(height: 2),
                           Text(
                             _profile.allergies,
-                            style: const TextStyle(
-                              color: Colors.black,
+                            style: TextStyle(
+                              color: AppTheme.text,
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          if (hasMedications) const Divider(height: 12, color: Colors.black26),
+                          if (hasMedications) Divider(height: 12, color: AppTheme.border2),
                         ],
                         if (hasMedications) ...[
-                          const Row(
+                          Row(
                             children: [
-                              Icon(Icons.medication_rounded, color: Colors.black, size: 16),
-                              SizedBox(width: 6),
+                              Icon(Icons.medication_rounded, color: AppTheme.warnText, size: 16),
+                              const SizedBox(width: 6),
                               Text(
                                 'CRITICAL MEDICATIONS:',
                                 style: TextStyle(
-                                  color: Colors.black,
+                                  color: AppTheme.warnText,
                                   fontSize: 11,
                                   fontWeight: FontWeight.w800,
                                 ),
@@ -309,8 +309,8 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                           const SizedBox(height: 2),
                           Text(
                             _profile.medications,
-                            style: const TextStyle(
-                              color: Colors.black,
+                            style: TextStyle(
+                              color: AppTheme.text,
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                             ),
@@ -327,17 +327,17 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                   Container(
                     padding: const EdgeInsets.all(Space.s12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE3F3F5),
+                      color: AppTheme.tint,
                       borderRadius: Radii.mdAll,
                       border: Border.all(color: AppTheme.brand, width: 2),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'EMERGENCY CONTACT (ICE):',
                           style: TextStyle(
-                            color: Color(0xFF0B6E78),
+                            color: AppTheme.accentText,
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 1,
@@ -346,8 +346,8 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                         const SizedBox(height: 4),
                         Text(
                           contactName.isNotEmpty ? '$contactName ($contactPhone)' : contactPhone,
-                          style: const TextStyle(
-                            color: Colors.black87,
+                          style: TextStyle(
+                            color: AppTheme.text,
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
                           ),
@@ -376,11 +376,11 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                                 icon: const Icon(Icons.sms_rounded, size: 18),
                                 label: const Text('SMS', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: 1)),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.white,
-                                  foregroundColor: const Color(0xFF0B6E78),
+                                  backgroundColor: AppTheme.card,
+                                  foregroundColor: AppTheme.accentText,
                                   minimumSize: const Size.fromHeight(44),
                                   padding: EdgeInsets.zero,
-                                  side: const BorderSide(color: Color(0xFF0B6E78), width: 2),
+                                  side: BorderSide(color: AppTheme.brand, width: 2),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
                               ),
@@ -412,7 +412,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: Space.s8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEEF3F5),
+                    color: AppTheme.soft,
                     borderRadius: Radii.mdAll,
                   ),
                   child: Row(
@@ -422,17 +422,17 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                       Expanded(
                         child: Text(
                           'Coords: ${widget.lat.toStringAsFixed(5)}, ${widget.lng.toStringAsFixed(5)}${widget.altitudeM != null ? ' (Alt: ${widget.altitudeM!.round()}m)' : ''}',
-                          style: const TextStyle(
-                            color: Colors.black87,
+                          style: TextStyle(
+                            color: AppTheme.text,
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
-                            fontFeatures: [FontFeature.tabularFigures()],
+                            fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),
                       ),
                       IconButton(
                         tooltip: 'Copy location',
-                        icon: const Icon(Icons.copy_rounded, size: 18, color: Color(0xFF0B6E78)),
+                        icon: Icon(Icons.copy_rounded, size: 18, color: AppTheme.accentText),
                         onPressed: () {
                           Clipboard.setData(ClipboardData(
                             text: 'https://maps.google.com/?q=${widget.lat},${widget.lng}',
@@ -451,7 +451,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                     padding: const EdgeInsets.only(top: 4, left: 4),
                     child: Text(
                       'Last Known Sector: ${widget.lastKnownLocation}',
-                      style: const TextStyle(color: Colors.black54, fontSize: 11, fontStyle: FontStyle.italic),
+                      style: TextStyle(color: AppTheme.muted, fontSize: 11, fontStyle: FontStyle.italic),
                     ),
                   ),
                 ],
@@ -479,13 +479,13 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF4F7F9),
+                      color: AppTheme.soft,
                       borderRadius: Radii.mdAll,
-                      border: Border.all(color: const Color(0xFFE1E9EE), width: 2),
+                      border: Border.all(color: AppTheme.border2, width: 2),
                     ),
-                    child: const Text(
+                    child: Text(
                       'Offline hospital catalog empty for current sector. Refer to nearest route waypoint or dial 112 / 108.',
-                      style: TextStyle(color: Colors.black54, fontSize: 11),
+                      style: TextStyle(color: AppTheme.muted, fontSize: 11),
                     ),
                   )
                 else
@@ -494,10 +494,10 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                       margin: const EdgeInsets.only(bottom: 6),
                       padding: const EdgeInsets.all(Space.s8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF4F7F9),
+                        color: AppTheme.soft,
                         borderRadius: Radii.mdAll,
                         border: Border.all(
-                          color: nearby.place.isTraumaCenter ? AppTheme.sos : const Color(0xFFE1E9EE),
+                          color: nearby.place.isTraumaCenter ? AppTheme.sos : AppTheme.border2,
                           width: 2,
                         ),
                       ),
@@ -512,8 +512,8 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                                     Expanded(
                                       child: Text(
                                         nearby.place.name,
-                                        style: const TextStyle(
-                                          color: Colors.black87,
+                                        style: TextStyle(
+                                          color: AppTheme.text,
                                           fontSize: 12,
                                           fontWeight: FontWeight.w700,
                                         ),
@@ -543,8 +543,8 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                                 const SizedBox(height: 2),
                                 Text(
                                   nearby.directionFormatted,
-                                  style: const TextStyle(
-                                    color: Color(0xFFC8102E),
+                                  style: TextStyle(
+                                    color: AppTheme.sos,
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                   ),
