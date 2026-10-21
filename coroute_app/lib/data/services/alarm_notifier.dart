@@ -174,18 +174,21 @@ class AlarmNotifier {
   /// with its main button and, when the prompt has one, its second button.
   static Future<void> showPrompt(SafetyPrompt p) async {
     if (!await ensureInitialized()) return;
-    final urgent = p.tier == AlertTier.important;
+    final isCritical = p.tier == AlertTier.critical;
+    final urgent = p.tier == AlertTier.important || isCritical;
     final secondary = p.secondaryLabel;
     final details = AndroidNotificationDetails(
       SafetyConstants.channelSafety,
       'Ride safety',
       channelDescription: 'Are you OK? checks and break reminders, for you only.',
-      importance: Importance.high,
-      priority: urgent ? Priority.high : Priority.defaultPriority,
-      category: AndroidNotificationCategory.reminder,
+      importance: isCritical ? Importance.max : Importance.high,
+      priority: isCritical ? Priority.max : (urgent ? Priority.high : Priority.defaultPriority),
+      category: isCritical ? AndroidNotificationCategory.alarm : AndroidNotificationCategory.reminder,
       visibility: NotificationVisibility.public,
-      onlyAlertOnce: true,
+      onlyAlertOnce: !isCritical,
       autoCancel: true,
+      enableVibration: true,
+      vibrationPattern: isCritical ? _alarmVibration : null,
       styleInformation: BigTextStyleInformation(p.message),
       actions: [
         AndroidNotificationAction(actionPromptOk, p.primaryLabel, showsUserInterface: false, cancelNotification: true),
@@ -206,6 +209,7 @@ class AlarmNotifier {
         SafetyConstants.promptCheckIn => SafetyConstants.checkInId,
         SafetyConstants.promptFuel => SafetyConstants.fuelId,
         SafetyConstants.promptFollowUp => SafetyConstants.followUpId,
+        SafetyConstants.promptOverspeed => SafetyConstants.overspeedId,
         _ => SafetyConstants.fatigueId,
       };
 

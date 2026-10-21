@@ -313,6 +313,50 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               divider: false,
             ),
           ]),
+          _section('Speed limit warning'),
+          _group([
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.speed_outlined, color: AppTheme.accentText, size: 22),
+                      const SizedBox(width: Space.s12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Speed warning limit', style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                            Text(
+                              s.speedLimitWarningKmh == 0
+                                  ? 'Uses convoy limit (or off if no group limit)'
+                                  : 'Warns via voice and notification above ${s.speedLimitWarningKmh} km/h',
+                              style: AppText.caption,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: Space.s8),
+                  Wrap(
+                    spacing: Space.s8,
+                    runSpacing: Space.s4,
+                    children: [
+                      for (final kmh in const [0, 50, 60, 80, 100, 120])
+                        ChoiceChip(
+                          label: Text(kmh == 0 ? 'Convoy limit' : '$kmh km/h'),
+                          selected: s.speedLimitWarningKmh == kmh,
+                          onSelected: (_) => s.setSpeedLimitWarningKmh(kmh),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ]),
           _section(SafetyTexts.notificationSection),
           _group([
             Padding(

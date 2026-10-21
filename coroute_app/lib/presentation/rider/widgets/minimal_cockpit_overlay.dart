@@ -85,6 +85,7 @@ class MinimalCockpitTopBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(20),
+        border: overLimit ? Border.all(color: AppTheme.sos, width: 2) : null,
         boxShadow: dsFloatingShadow(),
       ),
       child: Row(
@@ -227,7 +228,8 @@ class MinimalCockpitTopBar extends StatelessWidget {
                   Text(
                     '${speed.round()}',
                     style: AppText.metric.copyWith(
-                      color: overLimit ? AppTheme.warnText : AppTheme.accentText,
+                      color: overLimit ? AppTheme.sos : AppTheme.accentText,
+
                       height: 1,
                     ),
                   ),
@@ -245,13 +247,14 @@ class MinimalCockpitTopBar extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: overLimit ? AppTheme.warnTint : AppTheme.tint,
+                        color: overLimit ? AppTheme.sos : AppTheme.tint,
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        'LIMIT $limit',
+                        overLimit ? '⚠️ OVER $limit' : 'LIMIT $limit',
                         style: TextStyle(
-                          color: overLimit ? AppTheme.warnText : AppTheme.accentText,
+                          color: overLimit ? Colors.white : AppTheme.accentText,
+
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
                         ),

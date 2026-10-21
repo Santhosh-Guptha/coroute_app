@@ -35,7 +35,7 @@ import 'tile_cache_service.dart';
 import 'voice_service.dart';
 import 'weather_service.dart';
 
-enum SafetyPromptKind { checkIn, fatigue, fuel, followUp }
+enum SafetyPromptKind { checkIn, fatigue, fuel, followUp, overspeed }
 
 /// Where an impact reported from outside the phone's own sensor came from (3.16, item 22):
 /// a wearable (no device work this round; the hook is documented in docs/WEARABLE_HOOK.md)
@@ -61,6 +61,7 @@ class SafetyPrompt {
   });
 
   AlertTier get tier => switch (kind) {
+        SafetyPromptKind.overspeed => AlertTier.critical,
         SafetyPromptKind.checkIn || SafetyPromptKind.fuel || SafetyPromptKind.followUp => AlertTier.important,
         SafetyPromptKind.fatigue => AlertTier.normal,
       };
@@ -445,11 +446,17 @@ class SafetyService extends ChangeNotifier {
   int _brakesSaved = 0;
   String? _weatherDoneFor;
   String? _tilesDoneFor;
+  int _overspeedSince = 0;
+  int _lastOverspeedAlertMs = 0;
+  bool _isOverspeedActive = false;
+  int _lastCheckedLimit = 0;
 
   int _now() => _clock?.call() ?? DateTime.now().millisecondsSinceEpoch;
 
   // ------------------------------------------------------------------ public API
   CrashAlarmState? get alarm => _alarm;
+  bool get isOverspeedActive => _isOverspeedActive;
+  int get currentSpeedLimit => _lastCheckedLimit;
   List<SafetyPrompt> get prompts => List.unmodifiable(_prompts.values);
   SmsFallbackStatus? get smsStatus => _smsStatus;
 
@@ -611,6 +618,8 @@ class SafetyService extends ChangeNotifier {
       } else {
         _needHelpAfterCrash();
       }
+    } else if (key == SafetyConstants.promptOverspeed) {
+      _lastOverspeedAlertMs = _now();
     }
     _removePrompt(key);
   }
@@ -723,6 +732,7 @@ class SafetyService extends ChangeNotifier {
     _onFuelFix(p);
     _onDarkFix(p);
     _evalFollowUp(_port.activeConvoy);
+    _checkSpeedLimit(p);
     _updateSensor();
   }
 
@@ -759,6 +769,9 @@ class SafetyService extends ChangeNotifier {
     _darkAt = 0;
     _darkChecks = 0;
     _darkFix = null;
+    _overspeedSince = 0;
+    _lastOverspeedAlertMs = 0;
+    _isOverspeedActive = false;
     if (_dark) {
       _dark = false;
       _voice?.setNight(false);
@@ -1184,6 +1197,65 @@ class SafetyService extends ChangeNotifier {
       _dark = dark;
       _voice?.setNight(dark);
       notifyListeners();
+    }
+  }
+
+  // ------------------------------------------------------------------ overspeed alerts
+  void _checkSpeedLimit(TrackPoint p) {
+    if (_disposed || !_port.rideActive) return;
+    final convoy = _port.activeConvoy;
+    final convoyLimit = convoy?.speedLimitKmh ?? 0;
+    final personalLimit = _settings.speedLimitWarningKmh;
+    final limit = convoyLimit > 0 ? convoyLimit : personalLimit;
+    _lastCheckedLimit = limit;
+
+    if (limit <= 0) {
+      if (_isOverspeedActive) {
+        _isOverspeedActive = false;
+        _overspeedSince = 0;
+        _removePrompt(SafetyConstants.promptOverspeed);
+      }
+      return;
+    }
+
+    final speed = p.speedKmh;
+    final now = _now();
+
+    if (speed > limit + SafetyConstants.overspeedToleranceKmh) {
+      if (_overspeedSince == 0) {
+        _overspeedSince = now;
+      }
+      final holdElapsed = now - _overspeedSince;
+      final immediate = speed >= limit + SafetyConstants.overspeedImmediateOverKmh;
+
+      if (immediate || holdElapsed >= SafetyConstants.overspeedHoldMs) {
+        final wasActive = _isOverspeedActive;
+        _isOverspeedActive = true;
+
+        final shouldVoice = !wasActive || (now - _lastOverspeedAlertMs >= SafetyConstants.overspeedVoiceRenotifyMs);
+        if (shouldVoice) {
+          _lastOverspeedAlertMs = now;
+          _haptic();
+          _voice?.speakOverspeed(currentSpeedKmh: speed.round(), limitKmh: limit);
+        }
+
+        _showPrompt(
+          SafetyPrompt(
+            key: SafetyConstants.promptOverspeed,
+            kind: SafetyPromptKind.overspeed,
+            title: '⚠️ SLOW DOWN (${speed.round()} km/h)',
+            message: 'You are riding above the limit of $limit km/h. Please slow down safely.',
+            primaryLabel: 'Slowing down',
+          ),
+          notifyAlways: true,
+        );
+      }
+    } else if (speed <= limit) {
+      _overspeedSince = 0;
+      if (_isOverspeedActive) {
+        _isOverspeedActive = false;
+        _removePrompt(SafetyConstants.promptOverspeed);
+      }
     }
   }
 

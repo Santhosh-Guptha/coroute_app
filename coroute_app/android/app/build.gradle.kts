@@ -48,6 +48,8 @@ android {
                 storePassword = signingValue("storePassword", "COROUTE_STORE_PASSWORD")
                 keyAlias = signingValue("keyAlias", "COROUTE_KEY_ALIAS")
                 keyPassword = signingValue("keyPassword", "COROUTE_KEY_PASSWORD")
+                enableV1Signing = true
+                enableV2Signing = true
             }
         }
     }

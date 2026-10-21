@@ -219,6 +219,15 @@ class VoiceService extends ChangeNotifier {
     return speak('Low fuel warning: ${usableKm.round()} kilometers remaining', priority: VoicePriority.warning, key: 'fuel_low');
   }
 
+  /// Critical alert when rider exceeds speed limit.
+  Future<bool> speakOverspeed({required int currentSpeedKmh, required int limitKmh}) {
+    return speak(
+      'Warning! You are over the speed limit. Current speed $currentSpeedKmh kilometers per hour. Please slow down.',
+      priority: VoicePriority.critical,
+      key: 'overspeed_${DateTime.now().millisecondsSinceEpoch ~/ 15000}',
+    );
+  }
+
   Future<bool> _ensureEngine() async {
     final f = _init ??= _start();
     return f;

@@ -94,8 +94,21 @@ class SafetyConstants {
   static const String promptCheckIn = 'LOCAL:CHECK_IN';
   static const String promptFuel = 'LOCAL:FUEL';
   static const String promptFollowUp = 'LOCAL:FOLLOW_UP';
+  static const String promptOverspeed = 'LOCAL:OVERSPEED';
   static const int fuelId = 1104;
   static const int followUpId = 1105;
+  static const int overspeedId = 1106;
+  static const String keySpeedLimitWarningKmh = 'coroute_speed_warning_kmh';
+
+  // ---------------------------------------------------------------- overspeed warning
+  /// Speed tolerance above the limit before alerting (km/h).
+  static const double overspeedToleranceKmh = 1.5;
+  /// Immediate alert if speeding by this much over the limit (km/h).
+  static const double overspeedImmediateOverKmh = 10.0;
+  /// Required hold duration (ms) for minor overspeeding before alerting (suppresses single jitter point).
+  static const int overspeedHoldMs = 1500;
+  /// Minimum interval between voice announcements while continuously overspeeding (ms).
+  static const int overspeedVoiceRenotifyMs = 20000;
 
   // ---------------------------------------------------------------- fuel range (3.16)
   /// The reminder comes when this share of the tank range was ridden since the last fill.

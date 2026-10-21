@@ -97,6 +97,7 @@ class SettingsService extends ChangeNotifier {
   bool _voiceAnnounceAllAlerts = true;
   int _mapAlertDismissSeconds = 5;
   bool _hardwarePtt = false;
+  int _speedLimitWarningKmh = 0;
 
   bool get lowData => _lowData;
   bool get crashDetection => _crashDetection;
@@ -153,6 +154,7 @@ class SettingsService extends ChangeNotifier {
 
   /// Hardware button (volume down / media button on Bluetooth headset or handlebar remote) acts as PTT.
   bool get hardwarePtt => _hardwarePtt;
+  int get speedLimitWarningKmh => _speedLimitWarningKmh;
 
   Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
 
@@ -191,6 +193,7 @@ class SettingsService extends ChangeNotifier {
       _voiceAnnounceAllAlerts = prefs.getBool(NetworkConstants.keyVoiceAnnounceAllAlerts) ?? true;
       _mapAlertDismissSeconds = prefs.getInt(NetworkConstants.keyMapAlertDismissSeconds) ?? 5;
       _hardwarePtt = prefs.getBool('hardware_ptt_v1') ?? false;
+      _speedLimitWarningKmh = prefs.getInt(SafetyConstants.keySpeedLimitWarningKmh) ?? 0;
     } catch (e) {
       debugPrint('settings load note: $e');
     }
@@ -412,5 +415,18 @@ class SettingsService extends ChangeNotifier {
     _hardwarePtt = value;
     notifyListeners();
     await _save('hardware_ptt_v1', value);
+  }
+
+  Future<void> setSpeedLimitWarningKmh(int kmh) async {
+    final v = kmh.clamp(0, 200);
+    if (v == _speedLimitWarningKmh) return;
+    _speedLimitWarningKmh = v;
+    notifyListeners();
+    try {
+      final prefs = await _p();
+      await prefs.setInt(SafetyConstants.keySpeedLimitWarningKmh, v);
+    } catch (e) {
+      debugPrint('settings save speedLimitWarningKmh note: $e');
+    }
   }
 }

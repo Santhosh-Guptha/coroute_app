@@ -17,6 +17,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
+import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/map_tiles.dart';
@@ -914,17 +915,21 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         onAction: () => _imOk(service),
       ));
     }
-    // Ride safety prompts on this phone only ("Are you OK?", "Time for a break").
+    // Ride safety prompts on this phone only ("Are you OK?", "Time for a break", "Overspeed").
     for (final p in prompts) {
       final second = p.secondaryLabel;
+      final isOverspeed = p.kind == SafetyPromptKind.overspeed;
       out.add(_Slot(
         key: p.key,
         tier: p.tier,
+        priority: isOverspeed ? AlertPriority.sos : (p.tier == AlertTier.critical ? AlertPriority.sos : (p.tier == AlertTier.important ? AlertPriority.groupSafety : null)),
+        order: isOverspeed ? 960 : 800,
         title: p.title,
         message: p.message,
         actionLabel: p.primaryLabel,
         onAction: () => context.read<SafetyService>().answerPrompt(p.key),
         onDismiss: second == null ? null : () => context.read<SafetyService>().answerPrompt(p.key, primary: false),
+        dismissible: !isOverspeed,
       ));
     }
     final broadcast = service.systemBroadcastMessage;
@@ -1150,7 +1155,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
     if (topSlot != null) {
       if (topSlot.key != _autoDismissKey || _autoDismissDurationSec != dismissSec) {
-        _scheduleAutoDismiss(topSlot.key, dismissSec, dismissible: topSlot.dismissible || topSlot.key != 'MY_SOS');
+        final isPermanent = topSlot.key == 'MY_SOS' || topSlot.key == SafetyConstants.promptOverspeed || !topSlot.dismissible;
+        _scheduleAutoDismiss(topSlot.key, dismissSec, dismissible: !isPermanent);
       }
     } else if (_autoDismissKey != null) {
       _cancelAutoDismiss();
@@ -1169,7 +1175,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       if (i.kind == IncidentKind.possibleIncident) possible.add(i.subjectUserId);
     }
 
-    final speedLimit = convoy.speedLimitKmh;
+    final personalLimit = context.select<SettingsService?, int>((s) => s?.speedLimitWarningKmh ?? 0);
+    final speedLimit = convoy.speedLimitKmh > 0 ? convoy.speedLimitKmh : personalLimit;
     final showSpeed = speedLimit > 0 && me.speedKmh >= speedLimit - 10;
     // "Guardian on" in the ride-summary card: this phone's crash detection setting.
     final guardianOn = context.select<SettingsService?, bool>((s) => s?.crashDetection ?? true);

@@ -87,9 +87,9 @@ const config = {
   offlineAlertMinutes: int('OFFLINE_ALERT_MIN', 5),
   // Group speed limit: over (limit + tolerance) for HOLD counts, under the limit for CLEAR ends it.
   overspeedToleranceKmh: int('OVERSPEED_TOLERANCE_KMH', 2),
-  overspeedHoldMs: int('OVERSPEED_HOLD_MS', 10000),
+  overspeedHoldMs: int('OVERSPEED_HOLD_MS', 3000),
   overspeedClearMs: int('OVERSPEED_CLEAR_MS', 20000),
-  overspeedRenotifyMs: int('OVERSPEED_RENOTIFY_MS', 600000),
+  overspeedRenotifyMs: int('OVERSPEED_RENOTIFY_MS', 180000),
   stationaryAlertMinutes: int('STATIONARY_ALERT_MIN', 20),
   reachRadiusM: int('REACH_RADIUS_M', 150),
   timelineTickMs: int('TIMELINE_TICK_MS', 30000),

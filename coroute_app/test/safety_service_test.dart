@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/core/constants/safety_constants.dart';
+import 'package:coroute_app/core/ui/ride_alert.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/emergency_roster.dart';
 import 'package:coroute_app/data/models/network_wire.dart';
@@ -110,6 +111,15 @@ class FakePort extends ChangeNotifier implements SafetyPort, SafetySourcePort, S
   }
 }
 
+class CapturedVoiceEngine extends SilentEngine {
+  final List<String> spoken = [];
+  @override
+  Future<bool> speak(String text, {required bool interrupt, required String id}) async {
+    spoken.add(text);
+    return true;
+  }
+}
+
 class SilentEngine implements VoiceEngine {
   @override
   Future<bool> init() async => true;
@@ -162,7 +172,7 @@ class FakeSms implements SmsSender {
   }
 }
 
-ConvoyModel convoyWith(Map<String, RiderModel> riders, {String status = 'STARTED'}) => ConvoyModel(
+ConvoyModel convoyWith(Map<String, RiderModel> riders, {String status = 'STARTED', int speedLimitKmh = 0}) => ConvoyModel(
       groupId: 'G',
       name: 'Nandi Hills',
       joinCode: '123456',
@@ -172,6 +182,7 @@ ConvoyModel convoyWith(Map<String, RiderModel> riders, {String status = 'STARTED
       tripStatus: status,
       riders: riders,
       distanceThresholdMeters: 1000,
+      speedLimitKmh: speedLimitKmh,
     );
 
 void main() {
@@ -837,5 +848,98 @@ void main() {
     expect(partly.text, startsWith('Texted 6 of 9'));
     const none = SmsFallbackStatus(state: SmsFallbackState.failed, sent: 0, total: 0, capped: 0, at: 0);
     expect(none.text, contains('112'));
+  });
+  group('overspeed alerts', () {
+    testWidgets('triggers overspeed alert on convoy limit hold and clears on slow down', (tester) async {
+      await setUp0(tester);
+      final engine = CapturedVoiceEngine();
+      final voice = VoiceService(settings, engine: engine, clock: () => now);
+      safety = SafetyService.forTest(port, settings, accel: accel, sms: sms, clock: () => now, voice: voice);
+
+      // Convoy with 80 km/h speed limit
+      port.convoy = convoyWith({
+        'me': RiderModel(userId: 'me', name: 'Kiran', lat: 17.385, lng: 78.4867, lastSeenEpochMs: t0),
+      }, speedLimitKmh: 80);
+      port.changed();
+      await tester.pump();
+
+      // Normal speed: 70 km/h
+      port.fixes.add(TrackPoint(ts: now, lat: 17.385, lng: 78.4867, speedKmh: 70));
+      await tester.pump();
+      expect(safety.isOverspeedActive, isFalse);
+      expect(safety.prompts.where((p) => p.kind == SafetyPromptKind.overspeed), isEmpty);
+
+      // A single 1-second spike to 85 km/h, then back to 70 km/h: suppressed
+      now += 1000;
+      port.fixes.add(TrackPoint(ts: now, lat: 17.386, lng: 78.4867, speedKmh: 85));
+      await tester.pump();
+      expect(safety.isOverspeedActive, isFalse);
+
+      now += 1000;
+      port.fixes.add(TrackPoint(ts: now, lat: 17.387, lng: 78.4867, speedKmh: 70));
+      await tester.pump();
+      expect(safety.isOverspeedActive, isFalse);
+
+      // Sustained overspeed: 86 km/h (> 80 + 1.5) held for > 1500 ms
+      now += 1000;
+      port.fixes.add(TrackPoint(ts: now, lat: 17.388, lng: 78.4867, speedKmh: 86));
+      await tester.pump();
+      now += 2000; // 2 seconds later
+      port.fixes.add(TrackPoint(ts: now, lat: 17.390, lng: 78.4867, speedKmh: 88));
+      await tester.pump();
+
+      expect(safety.isOverspeedActive, isTrue);
+      expect(safety.prompts.where((p) => p.kind == SafetyPromptKind.overspeed), isNotEmpty);
+      final prompt = safety.prompts.firstWhere((p) => p.kind == SafetyPromptKind.overspeed);
+      expect(prompt.tier, AlertTier.critical);
+      expect(prompt.title, contains('SLOW DOWN'));
+      expect(engine.spoken, isNotEmpty);
+      expect(engine.spoken.last, contains('over the speed limit'));
+
+      // Slowing down back to <= 80 km/h clears the alert
+      now += 2000;
+      port.fixes.add(TrackPoint(ts: now, lat: 17.392, lng: 78.4867, speedKmh: 75));
+      await tester.pump();
+
+      expect(safety.isOverspeedActive, isFalse);
+      expect(safety.prompts.where((p) => p.kind == SafetyPromptKind.overspeed), isEmpty);
+
+      await tearDown0(tester);
+      voice.dispose();
+    });
+
+    testWidgets('triggers immediately if > 10 km/h over personal warning limit', (tester) async {
+      await setUp0(tester);
+      final engine = CapturedVoiceEngine();
+      final voice = VoiceService(settings, engine: engine, clock: () => now);
+      safety = SafetyService.forTest(port, settings, accel: accel, sms: sms, clock: () => now, voice: voice);
+
+      // Convoy has no limit (0), but rider sets personal warning limit to 60 km/h
+      await settings.setSpeedLimitWarningKmh(60);
+      port.convoy = convoyWith({
+        'me': RiderModel(userId: 'me', name: 'Kiran', lat: 17.385, lng: 78.4867, lastSeenEpochMs: t0),
+      }, speedLimitKmh: 0);
+      port.changed();
+      await tester.pump();
+
+      // Ride at 75 km/h (> 60 + 10 km/h): triggers immediately without waiting for hold
+      port.fixes.add(TrackPoint(ts: now, lat: 17.385, lng: 78.4867, speedKmh: 75));
+      await tester.pump();
+
+      expect(safety.isOverspeedActive, isTrue);
+      expect(safety.prompts.where((p) => p.kind == SafetyPromptKind.overspeed), isNotEmpty);
+      expect(engine.spoken, isNotEmpty);
+
+      // Slow down to 58 km/h: clears
+      now += 1000;
+      port.fixes.add(TrackPoint(ts: now, lat: 17.387, lng: 78.4867, speedKmh: 58));
+      await tester.pump();
+
+      expect(safety.isOverspeedActive, isFalse);
+      expect(safety.prompts.where((p) => p.kind == SafetyPromptKind.overspeed), isEmpty);
+
+      await tearDown0(tester);
+      voice.dispose();
+    });
   });
 }
