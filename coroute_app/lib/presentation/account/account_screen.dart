@@ -28,8 +28,6 @@ import '../subscription/plan_selector_screen.dart';
 import '../../core/config/feature_gates.dart';
 import '../../data/services/plan_subscription_service.dart';
 import '../garage/garage_screen.dart';
-import '../update/force_update_screen.dart';
-import '../../data/services/app_version_service.dart';
 
 /// The Profile tab: who you are, then every setting in one place.
 /// Each item (theme, data saver, permissions, sign out, version) appears
@@ -313,23 +311,13 @@ class AccountScreen extends StatelessWidget {
                             : 'Tour Operator Pass · Fleet analytics & dispatcher overview',
                         value: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? 'ACTIVE' : 'TOUR OPERATOR',
                         color: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? AppTheme.accentText : null,
-                        divider: true,
+                        divider: false,
                         onTap: () {
                           if (!FeatureGates.isUnlocked(Feature.fleetAnalytics)) {
                             FeatureGates.showUpgradeModal(context, Feature.fleetAnalytics);
                             return;
                           }
                           _push(context, const MasterAdminDashboard());
-                        },
-                      ),
-                      _SettingsRow(
-                        icon: Icons.system_security_update_rounded,
-                        title: 'Simulate Mandatory Update Screen',
-                        subtitle: 'Test non-dismissible critical version update barrier',
-                        divider: false,
-                        onTap: () {
-                          context.read<AppVersionService>().setSimulateMandatoryUpdate(true);
-                          _push(context, const ForceUpdateScreen());
                         },
                       ),
                     ],

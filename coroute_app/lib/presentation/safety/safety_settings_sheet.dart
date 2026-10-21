@@ -1,7 +1,9 @@
 import '../ride/fuel_sheet.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
@@ -19,20 +21,27 @@ class SafetyTexts {
   SafetyTexts._();
 
   static String get crashTitle => L10n.t('settings.crash');
-  static String get crashExplain =>
-      L10n.t('settings.crash.hint', {'speed': SafetyConstants.crashArmSpeedKmh.round(), 'sec': SafetyConstants.crashCountdown.inSeconds});
+  static String get crashExplain => L10n.t('settings.crash.hint', {
+    'speed': SafetyConstants.crashArmSpeedKmh.round(),
+    'sec': SafetyConstants.crashCountdown.inSeconds,
+  });
 
   static String get smsTitle => L10n.t('settings.sms');
-  static String get smsExplain => L10n.t('settings.sms.hint', {'max': SafetyConstants.smsMaxRecipients});
+  static String get smsExplain =>
+      L10n.t('settings.sms.hint', {'max': SafetyConstants.smsMaxRecipients});
   static String get smsDenied => L10n.t('settings.sms.denied');
 
   static String get fatigueTitle => L10n.t('settings.fatigue');
-  static String get fatigueExplain =>
-      L10n.t('settings.fatigue.hint', {'h': SafetyConstants.fatigueRideFor.inHours, 'min': SafetyConstants.fatigueBreakFor.inMinutes});
+  static String get fatigueExplain => L10n.t('settings.fatigue.hint', {
+    'h': SafetyConstants.fatigueRideFor.inHours,
+    'min': SafetyConstants.fatigueBreakFor.inMinutes,
+  });
 
   static String get checkInTitle => L10n.t('settings.checkin.title');
-  static String get checkInExplain =>
-      L10n.t('settings.checkin.hint', {'far': SafetyConstants.checkInFarFor.inMinutes, 'answer': SafetyConstants.checkInAnswerWithin.inMinutes});
+  static String get checkInExplain => L10n.t('settings.checkin.hint', {
+    'far': SafetyConstants.checkInFarFor.inMinutes,
+    'answer': SafetyConstants.checkInAnswerWithin.inMinutes,
+  });
 
   // Nearby riders (3.15 Rider Safety Network).
   static String get nearbySection => L10n.t('settings.nearby');
@@ -47,9 +56,11 @@ class SafetyTexts {
 
   static String get voiceSection => L10n.t('settings.voice');
   static String get voiceCriticalTitle => L10n.t('settings.voiceCritical');
-  static String get voiceCriticalExplain => L10n.t('settings.voiceCritical.hint');
+  static String get voiceCriticalExplain =>
+      L10n.t('settings.voiceCritical.hint');
   static String get voiceWarningsTitle => L10n.t('settings.voiceWarnings');
-  static String get voiceWarningsExplain => L10n.t('settings.voiceWarnings.hint');
+  static String get voiceWarningsExplain =>
+      L10n.t('settings.voiceWarnings.hint');
 
   // 3.16.
   static String get darkVoiceTitle => L10n.t('settings.darkVoice');
@@ -88,10 +99,10 @@ class SafetySettingsSheet extends StatefulWidget {
   const SafetySettingsSheet({super.key, this.requestPermission});
 
   static Future<void> show(BuildContext context) => showAppSheet<void>(
-        context,
-        isScrollControlled: true,
-        builder: (_) => const SafetySettingsSheet(),
-      );
+    context,
+    isScrollControlled: true,
+    builder: (_) => const SafetySettingsSheet(),
+  );
 
   /// Tank range choices (km); "Other" lets the rider type one (0 = off).
   static const List<int> fuelChoices = [0, 150, 200, 250, 300, 400];
@@ -124,7 +135,9 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
       await s.setSmsFallback(false);
       return;
     }
-    final ok = await (widget.requestPermission ?? PermissionsService.request)('sms');
+    final ok = await (widget.requestPermission ?? PermissionsService.request)(
+      'sms',
+    );
     if (!mounted) return;
     if (ok) {
       setState(() => _smsDenied = false);
@@ -134,10 +147,20 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
     }
   }
 
-  Future<void> _saveNet(AuthService auth, {bool? help, bool? ask, bool? medical}) async {
-    final ok = await auth.updateNetworkPrefs(assistHelp: help, assistAsk: ask, responderMedical: medical);
+  Future<void> _saveNet(
+    AuthService auth, {
+    bool? help,
+    bool? ask,
+    bool? medical,
+  }) async {
+    final ok = await auth.updateNetworkPrefs(
+      assistHelp: help,
+      assistAsk: ask,
+      responderMedical: medical,
+    );
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(SafetyTexts.saveFailed)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(SafetyTexts.saveFailed)));
     }
   }
 
@@ -147,15 +170,19 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
   }
 
   Widget _section(String text) => Padding(
-        padding: const EdgeInsets.only(top: 20, bottom: 10),
-        child: Semantics(header: true, child: DsSectionHeader(text)),
-      );
+    padding: const EdgeInsets.only(top: 20, bottom: 10),
+    child: Semantics(header: true, child: DsSectionHeader(text)),
+  );
 
   /// A card of rows (the More canvas: card, 2 px border, 18 px radius).
   Widget _group(List<Widget> rows) => DsCard(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: rows,
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -231,7 +258,9 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               divider: false,
               trailing: Flexible(
                 child: Text(
-                  s.fuelProfile.valid ? '${s.fuelProfile.rangeKm.floor()} km' : 'Set range',
+                  s.fuelProfile.valid
+                      ? '${s.fuelProfile.rangeKm.floor()} km'
+                      : 'Set range',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: AppText.caption.copyWith(fontWeight: FontWeight.w700),
@@ -242,7 +271,9 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Text(
-                s.fuelProfile.valid ? '${s.fuelProfile.rangeKm.floor()} km on a full tank. Tap to change.' : 'Set your range and update fuel left.',
+                s.fuelProfile.valid
+                    ? '${s.fuelProfile.rangeKm.floor()} km on a full tank. Tap to change.'
+                    : 'Set your range and update fuel left.',
                 style: AppText.caption,
               ),
             ),
@@ -322,13 +353,22 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.speed_outlined, color: AppTheme.accentText, size: 22),
+                      Icon(
+                        Icons.speed_outlined,
+                        color: AppTheme.accentText,
+                        size: 22,
+                      ),
                       const SizedBox(width: Space.s12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Speed warning limit', style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                            Text(
+                              'Speed warning limit',
+                              style: AppText.body.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                             Text(
                               s.speedLimitWarningKmh == 0
                                   ? 'Uses convoy limit (or off if no group limit)'
@@ -366,13 +406,22 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.timer_outlined, color: AppTheme.accentText, size: 22),
+                      Icon(
+                        Icons.timer_outlined,
+                        color: AppTheme.accentText,
+                        size: 22,
+                      ),
                       const SizedBox(width: Space.s12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Map alert banner duration', style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                            Text(
+                              'Map alert banner duration',
+                              style: AppText.body.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                             Text(
                               s.mapAlertDismissSeconds == 0
                                   ? 'Manual dismissal only on map'
@@ -422,15 +471,17 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               value: s.medicalIdOnLockScreen,
               onChanged: (v) {
                 s.setMedicalIdOnLockScreen(v);
-                final auth = context.read<AuthService>();
-                s.syncMedicalIdToLockScreen(
-                  name: auth.currentUserName ?? '',
-                  bloodGroup: auth.bloodGroup,
-                  allergies: auth.allergies,
-                  medicalNotes: auth.medicalNotes,
-                  contactName: auth.emergencyContactName ?? '',
-                  contactPhone: auth.emergencyContact ?? '',
-                );
+                final auth = context.read<AuthService?>();
+                if (auth != null) {
+                  s.syncMedicalIdToLockScreen(
+                    name: auth.currentUserName ?? '',
+                    bloodGroup: auth.bloodGroup,
+                    allergies: auth.allergies,
+                    medicalNotes: auth.medicalNotes,
+                    contactName: auth.emergencyContactName ?? '',
+                    contactPhone: auth.emergencyContact ?? '',
+                  );
+                }
               },
               divider: false,
             ),
@@ -455,16 +506,29 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               padding: EdgeInsets.zero,
               child: ListTile(
                 key: const ValueKey('devImpact'),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
                 leading: Icon(Icons.watch_outlined, color: AppTheme.accentText),
-                title: Text(SafetyTexts.devTitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
-                subtitle: Text(L10n.t('settings.dev.hint'), maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                title: Text(
+                  SafetyTexts.devTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(
+                  L10n.t('settings.dev.hint'),
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption,
+                ),
                 onTap: () {
                   context.read<SafetyService?>()?.externalImpact(
-                        source: ExternalImpactSource.developer,
-                        g: SafetyConstants.wearableImpactG,
-                        atMs: DateTime.now().millisecondsSinceEpoch,
-                      );
+                    source: ExternalImpactSource.developer,
+                    g: SafetyConstants.wearableImpactG,
+                    atMs: DateTime.now().millisecondsSinceEpoch,
+                  );
                   Navigator.of(context).maybePop();
                 },
               ),
@@ -507,11 +571,19 @@ class FuelRangeField extends StatelessWidget {
             Icon(Icons.local_gas_station_outlined, color: AppTheme.accentText),
             const SizedBox(width: Space.s16),
             Expanded(
-              child: Text(SafetyTexts.fuelTitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+              child: Text(
+                SafetyTexts.fuelTitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+              ),
             ),
             Text(
               value > 0 ? '$value km' : L10n.t('settings.fuel.off'),
-              style: AppText.body.copyWith(fontWeight: FontWeight.w700, fontFeatures: const [FontFeature.tabularFigures()]),
+              style: AppText.body.copyWith(
+                fontWeight: FontWeight.w700,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
           ],
         ),
@@ -545,7 +617,10 @@ class FuelRangeField extends StatelessWidget {
                     key: const ValueKey('fuelRange'),
                     controller: controller,
                     keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(4),
+                    ],
                     style: AppText.body,
                     decoration: const InputDecoration(
                       labelText: 'km',
@@ -556,7 +631,9 @@ class FuelRangeField extends StatelessWidget {
                 ),
                 const SizedBox(width: Space.s8),
                 FilledButton(
-                  style: FilledButton.styleFrom(minimumSize: const Size(64, 52)),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(64, 52),
+                  ),
                   onPressed: onSave,
                   child: const Text('Save'),
                 ),
@@ -564,7 +641,12 @@ class FuelRangeField extends StatelessWidget {
             ),
           ),
         const SizedBox(height: Space.s4),
-        Text(SafetyTexts.fuelExplain, maxLines: 4, overflow: TextOverflow.ellipsis, style: AppText.caption),
+        Text(
+          SafetyTexts.fuelExplain,
+          maxLines: 4,
+          overflow: TextOverflow.ellipsis,
+          style: AppText.caption,
+        ),
       ],
     );
   }
@@ -576,7 +658,11 @@ class LanguagePicker extends StatelessWidget {
   final AppLanguage value;
   final ValueChanged<AppLanguage> onChanged;
 
-  const LanguagePicker({super.key, required this.value, required this.onChanged});
+  const LanguagePicker({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -587,7 +673,10 @@ class LanguagePicker extends StatelessWidget {
         InputDecorator(
           decoration: InputDecoration(
             labelText: SafetyTexts.languageTitle,
-            prefixIcon: Icon(Icons.translate_rounded, color: AppTheme.accentText),
+            prefixIcon: Icon(
+              Icons.translate_rounded,
+              color: AppTheme.accentText,
+            ),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<AppLanguage>(
@@ -599,7 +688,15 @@ class LanguagePicker extends StatelessWidget {
               borderRadius: Radii.mdAll,
               style: AppText.body,
               items: [
-                for (final l in AppLanguage.values) DropdownMenuItem(value: l, child: Text(l.label, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                for (final l in AppLanguage.values)
+                  DropdownMenuItem(
+                    value: l,
+                    child: Text(
+                      l.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
               ],
               onChanged: (l) {
                 if (l != null) onChanged(l);
@@ -608,7 +705,12 @@ class LanguagePicker extends StatelessWidget {
           ),
         ),
         const SizedBox(height: Space.s4),
-        Text(SafetyTexts.languageExplain, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.caption),
+        Text(
+          SafetyTexts.languageExplain,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: AppText.caption,
+        ),
       ],
     );
   }
@@ -640,20 +742,40 @@ class SafetySwitch extends StatelessWidget {
   Widget build(BuildContext context) {
     final w = warning;
     return Container(
-      decoration: BoxDecoration(border: divider ? Border(bottom: BorderSide(color: AppTheme.border)) : null),
+      decoration: BoxDecoration(
+        border: divider
+            ? Border(bottom: BorderSide(color: AppTheme.border))
+            : null,
+      ),
       child: SwitchListTile(
         contentPadding: EdgeInsets.zero,
         value: value,
         onChanged: onChanged,
         activeColor: AppTheme.brand,
         secondary: Icon(icon, color: AppTheme.accentText, size: 22),
-        title: Text(title, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+        title: Text(
+          title,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(subtitle, maxLines: 10, overflow: TextOverflow.ellipsis, style: AppText.caption),
-            if (w != null) Text(w, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.warnText)),
+            Text(
+              subtitle,
+              maxLines: 10,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.caption,
+            ),
+            if (w != null)
+              Text(
+                w,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.caption.copyWith(color: AppTheme.warnText),
+              ),
           ],
         ),
       ),

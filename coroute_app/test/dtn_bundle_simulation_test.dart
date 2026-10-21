@@ -3,6 +3,24 @@ import 'package:coroute_app/domain/dtn/dtn_bundle.dart';
 import 'package:coroute_app/domain/dtn/dtn_router.dart';
 import 'package:coroute_app/domain/dtn/dtn_gateway_uploader.dart';
 
+class _FaultInjectingCloudGateway implements DtnCloudGateway {
+  final DtnCloudGateway _delegate;
+  bool injectNetworkError = false;
+
+  _FaultInjectingCloudGateway(this._delegate);
+
+  @override
+  Future<DtnUploadResult> uploadBundle(DtnBundle bundle, {DateTime? now}) async {
+    if (injectNetworkError) {
+      return DtnUploadResult.networkError(
+        bundle.bundleId,
+        'Transient cellular connection timeout',
+      );
+    }
+    return _delegate.uploadBundle(bundle, now: now);
+  }
+}
+
 void main() {
   const convoyKey = 'k_convoy_987654321_alpha_bravo_charlie';
   const wrongKey = 'k_attacker_unauthorized_relay_key_fake';
@@ -757,21 +775,22 @@ void main() {
 
       gatewayRouter.storeLocalBundle(bundle, now: t0);
 
+      final faultGateway = _FaultInjectingCloudGateway(cloudGateway);
       final uploader = DtnGatewayUploader(
         router: gatewayRouter,
-        cloudGateway: cloudGateway,
+        cloudGateway: faultGateway,
         hasInternet: true,
       );
 
       // Simulate transient network fault (e.g. packet drop, DNS outage).
-      cloudGateway.simulateNetworkFailure = true;
+      faultGateway.injectNetworkError = true;
       final failedAcks = await uploader.uploadPendingQueue(now: t0);
       expect(failedAcks.isEmpty, isTrue);
       // Bundle remains safely in store for retry.
       expect(gatewayRouter.storedBundles.containsKey(bundle.bundleId), isTrue);
 
       // Connectivity heals.
-      cloudGateway.simulateNetworkFailure = false;
+      faultGateway.injectNetworkError = false;
       final retryAcks = await uploader.uploadPendingQueue(now: t0);
       expect(retryAcks.length, equals(1));
       expect(gatewayRouter.storedBundles[bundle.bundleId]!.isDelivered, isTrue);

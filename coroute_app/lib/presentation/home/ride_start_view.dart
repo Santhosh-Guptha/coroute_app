@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/rider_model.dart';
@@ -36,11 +37,15 @@ class RideStartView extends StatelessWidget {
     this.onDismissRideSaved,
   });
 
-  static bool _needsProfile(AuthService auth) => !auth.isProfileComplete && !auth.isMasterAdmin;
+  static bool _needsProfile(AuthService auth) =>
+      !auth.isProfileComplete && !auth.isMasterAdmin;
 
   /// Opens the one profile editor. Returns true when the profile is complete afterwards.
   static Future<bool> openProfile(BuildContext context) async {
-    await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const EditProfileScreen()));
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const EditProfileScreen()),
+    );
     if (!context.mounted) return false;
     return !_needsProfile(context.read<AuthService>());
   }
@@ -51,7 +56,10 @@ class RideStartView extends StatelessWidget {
       final ok = await openProfile(context);
       if (!ok || !context.mounted) return;
     }
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => const TripPlannerScreen()));
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const TripPlannerScreen()),
+    );
   }
 
   /// "Good morning" / "Good afternoon" / "Good evening" for [hour] (0-23).
@@ -98,10 +106,7 @@ class RideStartView extends StatelessWidget {
               children: [
                 _Greeting(name: name),
                 const SizedBox(height: 22),
-                if (a != null) ...[
-                  a,
-                  const SizedBox(height: 18),
-                ],
+                if (a != null) ...[a, const SizedBox(height: 18)],
                 const _NoRideHero(),
                 const SizedBox(height: 22),
                 IntrinsicHeight(
@@ -156,7 +161,10 @@ class _Greeting extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(RideStartView.greetingFor(DateTime.now().hour), style: AppText.label),
+              Text(
+                RideStartView.greetingFor(DateTime.now().hour),
+                style: AppText.label,
+              ),
               const SizedBox(height: 2),
               Semantics(
                 header: true,
@@ -168,43 +176,65 @@ class _Greeting extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              Builder(builder: (ctx) {
-                final planService = ctx.watch<PlanSubscriptionService?>();
-                final tier = planService?.currentTier ?? SubscriptionTier.roadCaptain;
-                final tierName = FeatureGates.tierLabel(tier).toUpperCase();
-                return GestureDetector(
-                  onTap: () => Navigator.of(ctx).push(
-                    MaterialPageRoute(builder: (_) => const PlanSelectorScreen()),
-                  ),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: AppTheme.accentText.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppTheme.accentText, width: 1.2),
+              Builder(
+                builder: (ctx) {
+                  final planService = ctx.watch<PlanSubscriptionService?>();
+                  final tier =
+                      planService?.currentTier ?? SubscriptionTier.roadCaptain;
+                  final tierName = FeatureGates.tierLabel(tier).toUpperCase();
+                  return GestureDetector(
+                    onTap: () => Navigator.of(ctx).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PlanSelectorScreen(),
+                      ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.verified_rounded, size: 14, color: AppTheme.accentText),
-                        const SizedBox(width: 6),
-                        Text(
-                          'PLAN: $tierName (TEST MODE)',
-                          style: TextStyle(
-                            color: AppTheme.accentText,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.5,
-                          ),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.accentText.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: AppTheme.accentText,
+                          width: 1.2,
                         ),
-                        const SizedBox(width: 5),
-                        Icon(Icons.swap_horiz_rounded, size: 14, color: AppTheme.accentText),
-                      ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.verified_rounded,
+                            size: 14,
+                            color: AppTheme.accentText,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              'PLAN: $tierName',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppTheme.accentText,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Icon(
+                            Icons.swap_horiz_rounded,
+                            size: 14,
+                            color: AppTheme.accentText,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              }),
-
+                  );
+                },
+              ),
             ],
           ),
         ),
@@ -214,7 +244,9 @@ class _Greeting extends StatelessWidget {
           button: true,
           child: Material(
             color: AppTheme.card,
-            shape: CircleBorder(side: BorderSide(color: AppTheme.border, width: 2)),
+            shape: CircleBorder(
+              side: BorderSide(color: AppTheme.border, width: 2),
+            ),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               onTap: () => RiderHomeScreen.selectTab(context, HomeTab.profile),
@@ -226,7 +258,11 @@ class _Greeting extends StatelessWidget {
                     initials,
                     maxLines: 1,
                     textScaler: TextScaler.noScaling,
-                    style: TextStyle(color: AppTheme.accentText, fontSize: 15, fontWeight: FontWeight.w800),
+                    style: TextStyle(
+                      color: AppTheme.accentText,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ),
@@ -251,7 +287,12 @@ class _NoRideHero extends StatelessWidget {
         children: [
           const Text(
             'NEXT RIDE',
-            style: TextStyle(color: DsHeroCard.overline, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1),
+            style: TextStyle(
+              color: DsHeroCard.overline,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1,
+            ),
           ),
           const SizedBox(height: 4),
           Semantics(
@@ -260,13 +301,22 @@ class _NoRideHero extends StatelessWidget {
               'No active ride',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.2),
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                height: 1.2,
+              ),
             ),
           ),
           const SizedBox(height: 4),
           const Text(
             'Start a ride and share the code, or join with a code from your group.',
-            style: TextStyle(color: DsHeroCard.secondary, fontSize: 14, fontWeight: FontWeight.w600, height: 1.35),
+            style: TextStyle(
+              color: DsHeroCard.secondary,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
           ),
           const SizedBox(height: 16),
           DsButton(
@@ -276,41 +326,54 @@ class _NoRideHero extends StatelessWidget {
             fontSize: 17,
             onPressed: () => RideStartView.startRide(context),
           ),
-          Builder(builder: (ctx) {
-            final planService = ctx.watch<PlanSubscriptionService?>();
-            final currentTier = planService?.currentTier ?? FeatureGates.activeTier;
-            final maxRiders = FeatureGates.maxConvoyMembers(currentTier);
-            final tierLabel = FeatureGates.tierLabel(currentTier);
-            return Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: GestureDetector(
-                onTap: () => Navigator.of(ctx).push(
-                  MaterialPageRoute(builder: (_) => const PlanSelectorScreen()),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.groups_rounded, size: 14, color: DsHeroCard.secondary),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        'Convoy limit: Max $maxRiders bikes ($tierLabel)',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: DsHeroCard.secondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+          Builder(
+            builder: (ctx) {
+              final planService = ctx.watch<PlanSubscriptionService?>();
+              final currentTier =
+                  planService?.currentTier ?? FeatureGates.activeTier;
+              final maxRiders = FeatureGates.maxConvoyMembers(currentTier);
+              final tierLabel = FeatureGates.tierLabel(currentTier);
+              return Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: GestureDetector(
+                  onTap: () => Navigator.of(ctx).push(
+                    MaterialPageRoute(
+                      builder: (_) => const PlanSelectorScreen(),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.groups_rounded,
+                        size: 14,
+                        color: DsHeroCard.secondary,
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'Convoy limit: Max $maxRiders bikes ($tierLabel)',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: DsHeroCard.secondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(Icons.arrow_forward_ios_rounded, size: 10, color: DsHeroCard.secondary),
-                  ],
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.arrow_forward_ios_rounded,
+                        size: 10,
+                        color: DsHeroCard.secondary,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            );
-          }),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -324,7 +387,12 @@ class _ActionTile extends StatelessWidget {
   final String caption;
   final VoidCallback onTap;
 
-  const _ActionTile({required this.icon, required this.title, required this.caption, required this.onTap});
+  const _ActionTile({
+    required this.icon,
+    required this.title,
+    required this.caption,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -349,7 +417,12 @@ class _ActionTile extends StatelessWidget {
                   style: AppText.title.copyWith(fontSize: 15),
                 ),
                 const SizedBox(height: 2),
-                Text(caption, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                Text(
+                  caption,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption,
+                ),
               ],
             ),
           ],
@@ -381,7 +454,9 @@ class _BikeStatusCard extends StatelessWidget {
       range = 'Not set';
     }
 
-    final String crash = settings == null ? 'Not set' : (settings.crashDetection ? 'On' : 'Off');
+    final String crash = settings == null
+        ? 'Not set'
+        : (settings.crashDetection ? 'On' : 'Off');
 
     String talk;
     if (intercom == null) {
@@ -389,7 +464,9 @@ class _BikeStatusCard extends StatelessWidget {
     } else if (intercom.isMicMuted) {
       talk = 'Muted';
     } else {
-      talk = intercom.mode == IntercomMode.vox ? 'Voice activated' : 'Push to talk';
+      talk = intercom.mode == IntercomMode.vox
+          ? 'Voice activated'
+          : 'Push to talk';
     }
 
     return DsCard(
@@ -397,15 +474,29 @@ class _BikeStatusCard extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          DsListRow(icon: Icons.local_gas_station_rounded, label: 'Usable range', value: range),
-          DsListRow(icon: Icons.shield_outlined, label: 'Crash detection', value: crash),
-          DsListRow(icon: Icons.headset_mic_outlined, label: 'Helmet intercom', value: talk, divider: true),
+          DsListRow(
+            icon: Icons.local_gas_station_rounded,
+            label: 'Usable range',
+            value: range,
+          ),
+          DsListRow(
+            icon: Icons.shield_outlined,
+            label: 'Crash detection',
+            value: crash,
+          ),
+          DsListRow(
+            icon: Icons.headset_mic_outlined,
+            label: 'Helmet intercom',
+            value: talk,
+            divider: true,
+          ),
           DsListRow(
             icon: Icons.two_wheeler_rounded,
             label: 'Motorcycle Garage',
             value: 'Manage & service →',
             divider: false,
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GarageScreen())),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const GarageScreen())),
           ),
         ],
       ),
@@ -416,7 +507,10 @@ class _BikeStatusCard extends StatelessWidget {
 /// [Join Ride] and join links: a sheet with the code field. After a
 /// successful join it shows the pre-ride checklist and returns to the shell,
 /// which switches to the Ride tab by itself (it listens to the active ride).
-Future<void> showJoinRideSheet(BuildContext context, {String? initialCode}) async {
+Future<void> showJoinRideSheet(
+  BuildContext context, {
+  String? initialCode,
+}) async {
   // The join makes the ride active, so the shell swaps this Ride tab (and [context] with it)
   // for the ride map right away. The checklist is shown from the navigator, which stays.
   final nav = Navigator.of(context);
@@ -444,7 +538,9 @@ class JoinRideSheet extends StatefulWidget {
 }
 
 class _JoinRideSheetState extends State<JoinRideSheet> {
-  late final TextEditingController _code = TextEditingController(text: widget.initialCode ?? '');
+  late final TextEditingController _code = TextEditingController(
+    text: widget.initialCode ?? '',
+  );
   bool _busy = false;
   String? _error;
 
@@ -477,7 +573,8 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
     double joinLat = 0.0;
     double joinLng = 0.0;
     try {
-      final pos = await Geolocator.getLastKnownPosition() ??
+      final pos =
+          await Geolocator.getLastKnownPosition() ??
           await Geolocator.getCurrentPosition(
             locationSettings: const LocationSettings(
               accuracy: LocationAccuracy.medium,
@@ -506,14 +603,18 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
       lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
     );
 
-    final joined = await convoyService.joinConvoyByCode(code: code, rider: rider);
+    final joined = await convoyService.joinConvoyByCode(
+      code: code,
+      rider: rider,
+    );
     if (!mounted) return;
     if (joined != null) {
       Navigator.pop(context, true);
     } else {
       setState(() {
         _busy = false;
-        _error = convoyService.lastError ?? 'No active ride found for this code.';
+        _error =
+            convoyService.lastError ?? 'No active ride found for this code.';
       });
     }
   }
@@ -580,18 +681,36 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.error_outline_rounded, color: AppTheme.sos, size: 20),
+                Icon(
+                  Icons.error_outline_rounded,
+                  color: AppTheme.sos,
+                  size: 20,
+                ),
                 const SizedBox(width: Space.s8),
-                Expanded(child: Text(err, style: AppText.label.copyWith(color: AppTheme.sos))),
+                Expanded(
+                  child: Text(
+                    err,
+                    style: AppText.label.copyWith(color: AppTheme.sos),
+                  ),
+                ),
               ],
             ),
           ],
           const SizedBox(height: Space.s16),
           FilledButton(
             onPressed: (_busy || needsProfile) ? null : _join,
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(56),
+            ),
             child: _busy
-                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: Colors.white,
+                    ),
+                  )
                 : const Text('Join'),
           ),
         ],

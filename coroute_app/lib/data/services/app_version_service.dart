@@ -9,7 +9,6 @@ class AppVersionService extends ChangeNotifier {
   static const String defaultStoreUrl =
       'https://play.google.com/store/apps/details?id=space.devmonks.coroute_app';
 
-  bool _simulateMandatoryUpdate = false;
   bool _checking = false;
 
   AppVersionService(this._metaService) {
@@ -27,28 +26,19 @@ class AppVersionService extends ChangeNotifier {
   }
 
   bool get checking => _checking;
-  bool get simulateMandatoryUpdate => _simulateMandatoryUpdate;
 
   /// Whether a mandatory update is required to continue using the application.
-  bool get isMandatoryUpdateRequired {
-    if (_simulateMandatoryUpdate) return true;
-    return _metaService.updateRequired;
-  }
+  bool get isMandatoryUpdateRequired => _metaService.updateRequired;
 
   /// Whether an optional newer build is available.
-  bool get isUpdateAvailable {
-    if (_simulateMandatoryUpdate) return true;
-    return _metaService.updateAvailable;
-  }
+  bool get isUpdateAvailable => _metaService.updateAvailable;
 
   int get currentBuild => MetaService.currentBuild;
   String get currentVersion => MetaService.currentVersion;
 
-  int get minRequiredBuild =>
-      _simulateMandatoryUpdate ? 100 : (_metaService.meta?.minBuild ?? 0);
+  int get minRequiredBuild => _metaService.meta?.minBuild ?? 0;
 
-  int get latestBuild =>
-      _simulateMandatoryUpdate ? 100 : (_metaService.meta?.latestBuild ?? 0);
+  int get latestBuild => _metaService.meta?.latestBuild ?? 0;
 
   String get downloadUrl {
     final serverUrl = _metaService.meta?.downloadUrl;
@@ -62,12 +52,6 @@ class AppVersionService extends ChangeNotifier {
       'Critical Convoy Protocol & Emergency Telemetry Safety Update. '
       'Update is mandatory to maintain real-time convoy audio synchronization, '
       'crash detection telemetry, and emergency outbox escalation.';
-
-  /// Toggles simulated mandatory update for tester verification.
-  void setSimulateMandatoryUpdate(bool simulate) {
-    _simulateMandatoryUpdate = simulate;
-    notifyListeners();
-  }
 
   /// Refreshes app metadata from the server.
   Future<void> checkForUpdates() async {

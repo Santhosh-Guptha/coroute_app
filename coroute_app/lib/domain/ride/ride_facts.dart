@@ -217,7 +217,7 @@ class RideFacts {
     if (!hasPosition(r)) return null;
     if (line.length >= 2) return alongM(r.lat, r.lng, line);
     if (destLat != 0 || destLng != 0) return -GeoMath.haversine(r.lat, r.lng, destLat, destLng);
-    if (lead != null && hasPosition(lead)) {
+    if (lead != null && hasPosition(lead) && lead.heading > 0 && lead.speedKmh > 5) {
       return projectAlongHeading(r, lead);
     }
     return null;

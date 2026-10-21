@@ -208,21 +208,6 @@ class ForceUpdateScreen extends StatelessWidget {
                             ),
                     ),
                   ),
-
-                  // Developer / Tester Bypass (visible if simulated)
-                  if (versionService.simulateMandatoryUpdate) ...[
-                    const SizedBox(height: 20),
-                    TextButton(
-                      onPressed: () {
-                        versionService.setSimulateMandatoryUpdate(false);
-                        Navigator.of(context).pop();
-                      },
-                      child: Text(
-                        'Exit Simulated Update (Test Mode)',
-                        style: TextStyle(color: AppTheme.muted, fontSize: 12),
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),

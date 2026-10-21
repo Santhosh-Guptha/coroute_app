@@ -89,7 +89,6 @@ class InMemoryDtnCloudGateway implements DtnCloudGateway {
   final List<String> canonicalIncidentIds = <String>[];
   final List<String> tamperedBundleIds = <String>[];
   final List<String> expiredBundleIds = <String>[];
-  bool simulateNetworkFailure = false;
 
   InMemoryDtnCloudGateway({
     required this.convoySecretKey,
@@ -97,13 +96,6 @@ class InMemoryDtnCloudGateway implements DtnCloudGateway {
 
   @override
   Future<DtnUploadResult> uploadBundle(DtnBundle bundle, {DateTime? now}) async {
-    if (simulateNetworkFailure) {
-      return DtnUploadResult.networkError(
-        bundle.bundleId,
-        'Simulated transient cellular connection timeout',
-      );
-    }
-
     final bundleId = bundle.bundleId;
 
     // RFC 9171 invariant: expired bundles are never delivered as active emergencies.

@@ -6,6 +6,32 @@ import 'package:coroute_app/data/services/app_version_service.dart';
 import 'package:coroute_app/data/services/meta_service.dart';
 import 'package:coroute_app/data/services/plan_subscription_service.dart';
 
+class _TestMetaService extends MetaService {
+  _TestMetaService() : super(ApiClient());
+
+  AppMeta? _testMeta;
+
+  void updateMeta(AppMeta? meta) {
+    _testMeta = meta;
+    notifyListeners();
+  }
+
+  @override
+  AppMeta? get meta => _testMeta;
+
+  @override
+  bool get updateRequired {
+    if (MetaService.currentBuild <= 0 || _testMeta == null) return false;
+    return _testMeta!.minBuild > MetaService.currentBuild;
+  }
+
+  @override
+  bool get updateAvailable {
+    if (MetaService.currentBuild <= 0 || _testMeta == null) return false;
+    return _testMeta!.latestBuild > MetaService.currentBuild;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -111,22 +137,67 @@ void main() {
   });
 
   group('AppVersionService & Force Update Tests', () {
-    test('Simulated mandatory update forces isMandatoryUpdateRequired = true', () {
-      final apiClient = ApiClient();
-      final metaService = MetaService(apiClient);
+    tearDown(() {
+      MetaService.currentBuild = 0;
+    });
+
+    test('MetaService version metadata drives isMandatoryUpdateRequired accurately', () {
+      final metaService = _TestMetaService();
       final versionService = AppVersionService(metaService);
 
-      expect(versionService.simulateMandatoryUpdate, isFalse);
+      // Initially no update required
       expect(versionService.isMandatoryUpdateRequired, isFalse);
+      expect(versionService.isUpdateAvailable, isFalse);
 
-      versionService.setSimulateMandatoryUpdate(true);
-      expect(versionService.simulateMandatoryUpdate, isTrue);
+      // Client build is 100, server requires minBuild 105
+      MetaService.currentBuild = 100;
+      metaService.updateMeta(const AppMeta(
+        minBuild: 105,
+        latestBuild: 110,
+        downloadUrl: 'https://coroute.space/downloads/latest.apk',
+        privacyUrl: '',
+        termsUrl: '',
+        supportEmail: '',
+        googleSignIn: false,
+      ));
+
       expect(versionService.isMandatoryUpdateRequired, isTrue);
-      expect(versionService.minRequiredBuild, 100);
+      expect(versionService.isUpdateAvailable, isTrue);
+      expect(versionService.minRequiredBuild, 105);
+      expect(versionService.latestBuild, 110);
+      expect(versionService.downloadUrl, 'https://coroute.space/downloads/latest.apk');
+
+      // Client updates to 105: mandatory barrier clears, but optional update available
+      MetaService.currentBuild = 105;
+      metaService.updateMeta(const AppMeta(
+        minBuild: 105,
+        latestBuild: 110,
+        downloadUrl: 'https://coroute.space/downloads/latest.apk',
+        privacyUrl: '',
+        termsUrl: '',
+        supportEmail: '',
+        googleSignIn: false,
+      ));
+
+      expect(versionService.isMandatoryUpdateRequired, isFalse);
+      expect(versionService.isUpdateAvailable, isTrue);
+
+      // Client is at latest build 110: fully up to date
+      MetaService.currentBuild = 110;
+      metaService.updateMeta(const AppMeta(
+        minBuild: 105,
+        latestBuild: 110,
+        downloadUrl: '',
+        privacyUrl: '',
+        termsUrl: '',
+        supportEmail: '',
+        googleSignIn: false,
+      ));
+
+      expect(versionService.isMandatoryUpdateRequired, isFalse);
+      expect(versionService.isUpdateAvailable, isFalse);
       expect(versionService.downloadUrl, AppVersionService.defaultStoreUrl);
 
-      versionService.setSimulateMandatoryUpdate(false);
-      expect(versionService.isMandatoryUpdateRequired, isFalse);
       versionService.dispose();
     });
   });
