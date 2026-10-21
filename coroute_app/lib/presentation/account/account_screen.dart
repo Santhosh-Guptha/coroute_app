@@ -25,6 +25,9 @@ import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import '../trip_planner/offline_map_manager_screen.dart';
 import '../subscription/plan_selector_screen.dart';
+import '../garage/garage_screen.dart';
+import '../update/force_update_screen.dart';
+import '../../data/services/app_version_service.dart';
 
 /// The Profile tab: who you are, then every setting in one place.
 /// Each item (theme, data saver, permissions, sign out, version) appears
@@ -182,10 +185,11 @@ class AccountScreen extends StatelessWidget {
                 ),
 
                 const SizedBox(height: 20),
-                const DsSectionHeader('My bike'),
+                const DsSectionHeader('My bike & Garage'),
                 const SizedBox(height: 10),
                 DsCard(
                   padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                  onTap: () => _push(context, const GarageScreen()),
                   child: Row(
                     children: [
                       Container(
@@ -212,7 +216,7 @@ class AccountScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      _SquareButton(icon: Icons.edit_rounded, label: 'Edit bike', onTap: () => _push(context, const EditProfileScreen())),
+                      _SquareButton(icon: Icons.garage_rounded, label: 'Garage', onTap: () => _push(context, const GarageScreen())),
                     ],
                   ),
                 ),
@@ -284,12 +288,26 @@ class AccountScreen extends StatelessWidget {
                 const SizedBox(height: 10),
                 DsCard(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: _SettingsRow(
-                    icon: Icons.card_membership_rounded,
-                    title: 'Subscription & Tier Selector',
-                    subtitle: 'Switch plans & test features (Community, Pro, Road Captain, Tour Operator)',
-                    divider: false,
-                    onTap: () => _push(context, const PlanSelectorScreen()),
+                  child: Column(
+                    children: [
+                      _SettingsRow(
+                        icon: Icons.card_membership_rounded,
+                        title: 'Subscription & Tier Selector',
+                        subtitle: 'Switch plans & test features (Community, Pro, Road Captain, Tour Operator)',
+                        divider: true,
+                        onTap: () => _push(context, const PlanSelectorScreen()),
+                      ),
+                      _SettingsRow(
+                        icon: Icons.system_security_update_rounded,
+                        title: 'Simulate Mandatory Update Screen',
+                        subtitle: 'Test non-dismissible critical version update barrier',
+                        divider: false,
+                        onTap: () {
+                          context.read<AppVersionService>().setSimulateMandatoryUpdate(true);
+                          _push(context, const ForceUpdateScreen());
+                        },
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 20),

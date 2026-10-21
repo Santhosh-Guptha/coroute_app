@@ -18,6 +18,8 @@ import '../../domain/tracking/replay_math.dart';
 import '../timeline/member_colors.dart';
 import '../timeline/timeline_list.dart';
 import 'replay_screen.dart';
+import '../rider/ride_replay_screen.dart';
+import '../../data/services/gpx_service.dart';
 import 'ride_share_card.dart';
 import 'trip_route_map.dart';
 
@@ -273,6 +275,29 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
                   : Icon(Icons.route_outlined, color: AppTheme.accentText),
               onPressed: _sharing ? null : _shareGpx,
             ),
+          IconButton(
+            tooltip: '2D Replay & Scrubber',
+            icon: Icon(Icons.slow_motion_video_rounded, color: AppTheme.accentText),
+            onPressed: () {
+              final pts = widget.trip.breadcrumbTrail
+                  .map((p) => GpxTrackpoint(
+                        latitude: p.lat,
+                        longitude: p.lng,
+                        speedKmh: p.speedKmh,
+                        timestamp: DateTime.fromMillisecondsSinceEpoch(p.timestamp),
+                      ))
+                  .toList();
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => RideReplayScreen(
+                    rideTitle: widget.trip.tripName,
+                    trackpoints: pts,
+                  ),
+                ),
+              );
+            },
+          ),
         ],
         bottom: TabBar(
           controller: _tabs,

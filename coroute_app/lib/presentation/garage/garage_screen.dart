@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/services/garage_service.dart';
 import '../../domain/garage/bike_profile.dart';
+import '../../core/config/feature_gates.dart';
+import '../subscription/plan_selector_screen.dart';
 
 /// Screen managing multiple motorcycles, service reminders, and active ride bike.
 class GarageScreen extends StatefulWidget {
-  final GarageService garageService;
+  final GarageService? garageService;
 
   const GarageScreen({
     super.key,
-    required this.garageService,
+    this.garageService,
   });
 
   @override
@@ -17,13 +19,60 @@ class GarageScreen extends StatefulWidget {
 }
 
 class _GarageScreenState extends State<GarageScreen> {
+  late final GarageService _garageService;
+
   @override
   void initState() {
     super.initState();
-    widget.garageService.load();
+    _garageService = widget.garageService ?? GarageService();
+    _garageService.load();
   }
 
   void _showAddBikeModal() {
+    if (!FeatureGates.isUnlocked(Feature.multiBikeGarage) &&
+        _garageService.bikesNotifier.value.isNotEmpty) {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: AppTheme.darkCanvas,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (ctx) => Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_rounded, size: 40, color: AppTheme.warnText),
+              const SizedBox(height: 12),
+              const Text(
+                'Multi-Bike Garage is a Pro Feature',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Community tier includes 1 motorcycle profile. Upgrading to CoRoute Pro allows unlimited motorcycles with custom tank sizes and service logs.\n\nIn this test build, you can test this by switching your plan or unlocking all features in the Plan Selector.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: AppTheme.accentText),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const PlanSelectorScreen()));
+                  },
+                  child: const Text('SWITCH PLAN TO TEST (FREE)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -33,7 +82,7 @@ class _GarageScreenState extends State<GarageScreen> {
       ),
       builder: (sheetContext) => _AddBikeSheet(
         onSave: (newBike) async {
-          await widget.garageService.saveBike(newBike);
+          await _garageService.saveBike(newBike);
           if (sheetContext.mounted) {
             Navigator.pop(sheetContext);
           }
@@ -90,7 +139,7 @@ class _GarageScreenState extends State<GarageScreen> {
             onPressed: () async {
               final val = double.tryParse(controller.text.trim());
               if (val != null && val >= 0) {
-                await widget.garageService.recordServiceCompleted(bike.id, val);
+                await _garageService.recordServiceCompleted(bike.id, val);
                 if (dialogContext.mounted) {
                   Navigator.pop(dialogContext);
                 }
@@ -132,10 +181,10 @@ class _GarageScreenState extends State<GarageScreen> {
         ],
       ),
       body: ValueListenableBuilder<List<BikeProfile>>(
-        valueListenable: widget.garageService.bikesNotifier,
+        valueListenable: _garageService.bikesNotifier,
         builder: (context, bikes, _) {
           return ValueListenableBuilder<BikeProfile?>(
-            valueListenable: widget.garageService.activeBikeNotifier,
+            valueListenable: _garageService.activeBikeNotifier,
             builder: (context, activeBike, _) {
               if (bikes.isEmpty) {
                 return Center(
@@ -158,10 +207,10 @@ class _GarageScreenState extends State<GarageScreen> {
                   return _BikeCard(
                     bike: bike,
                     isActive: isActive,
-                    onSelectActive: () => widget.garageService.setActiveBike(bike.id),
+                    onSelectActive: () => _garageService.setActiveBike(bike.id),
                     onRecordService: () => _showRecordServiceDialog(bike),
                     onDelete: bikes.length > 1
-                        ? () => widget.garageService.deleteBike(bike.id)
+                        ? () => _garageService.deleteBike(bike.id)
                         : null,
                   );
                 },

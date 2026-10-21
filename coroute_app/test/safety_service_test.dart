@@ -894,7 +894,7 @@ void main() {
       expect(prompt.tier, AlertTier.critical);
       expect(prompt.title, contains('SLOW DOWN'));
       expect(engine.spoken, isNotEmpty);
-      expect(engine.spoken.last, contains('over the speed limit'));
+      expect(engine.spoken.last, contains('Over limit'));
 
       // Slowing down back to <= 80 km/h clears the alert
       now += 2000;

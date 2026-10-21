@@ -15,6 +15,10 @@ import '../onboarding/permissions_screen.dart';
 import '../rider/rider_home_screen.dart';
 import '../trip_planner/trip_planner_screen.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
+import '../../core/config/feature_gates.dart';
+import '../../data/services/plan_subscription_service.dart';
+import '../subscription/plan_selector_screen.dart';
+import '../garage/garage_screen.dart';
 
 /// The Home tab when no ride is active: greeting, the "No active ride" hero
 /// card with [Start Ride], the "Plan a route" / "Join Ride" tiles, the bike
@@ -163,6 +167,44 @@ class _Greeting extends StatelessWidget {
                   style: AppText.headline.copyWith(fontSize: 26),
                 ),
               ),
+              const SizedBox(height: 8),
+              Builder(builder: (ctx) {
+                final planService = ctx.watch<PlanSubscriptionService?>();
+                final tier = planService?.currentTier ?? SubscriptionTier.roadCaptain;
+                final tierName = FeatureGates.tierLabel(tier).toUpperCase();
+                return GestureDetector(
+                  onTap: () => Navigator.of(ctx).push(
+                    MaterialPageRoute(builder: (_) => const PlanSelectorScreen()),
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentText.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.accentText, width: 1.2),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.verified_rounded, size: 14, color: AppTheme.accentText),
+                        const SizedBox(width: 6),
+                        Text(
+                          'PLAN: $tierName (TEST MODE)',
+                          style: TextStyle(
+                            color: AppTheme.accentText,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Icon(Icons.swap_horiz_rounded, size: 14, color: AppTheme.accentText),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+
             ],
           ),
         ),
@@ -322,7 +364,14 @@ class _BikeStatusCard extends StatelessWidget {
         children: [
           DsListRow(icon: Icons.local_gas_station_rounded, label: 'Usable range', value: range),
           DsListRow(icon: Icons.shield_outlined, label: 'Crash detection', value: crash),
-          DsListRow(icon: Icons.headset_mic_outlined, label: 'Helmet intercom', value: talk, divider: false),
+          DsListRow(icon: Icons.headset_mic_outlined, label: 'Helmet intercom', value: talk, divider: true),
+          DsListRow(
+            icon: Icons.two_wheeler_rounded,
+            label: 'Motorcycle Garage',
+            value: 'Manage & service →',
+            divider: false,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GarageScreen())),
+          ),
         ],
       ),
     );

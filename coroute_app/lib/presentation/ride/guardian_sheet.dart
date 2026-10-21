@@ -6,6 +6,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/convoy_service.dart';
+import '../../core/config/feature_gates.dart';
+import '../subscription/plan_selector_screen.dart';
 
 Future<void> showGuardianSheet(
   BuildContext context, {
@@ -20,8 +22,57 @@ Future<void> showGuardianSheet(
 class GuardianSheet extends StatelessWidget {
   const GuardianSheet({super.key, required this.groupId});
   final String groupId;
+
   @override
   Widget build(BuildContext context) {
+    if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
+      return Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.card,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTheme.border2),
+              ),
+              child: Column(
+                children: [
+                  Icon(Icons.lock_rounded, size: 40, color: AppTheme.warnText),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'CoRoute Pro Feature',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Ride Guardian encrypted browser live-share is available on CoRoute Pro and Road Captain Pass.\n\nIn this test build, you can test this by switching your plan or unlocking all features in the Plan Selector.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: AppTheme.accentText),
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlanSelectorScreen()));
+                      },
+                      child: const Text('SWITCH PLAN TO TEST (FREE)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final token = context.select<ApiClient, String?>((api) => api.token);
     return _GuardianContent(key: ValueKey((groupId, token)), groupId: groupId);
   }

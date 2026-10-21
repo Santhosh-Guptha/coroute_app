@@ -27,7 +27,16 @@ class RideSheet extends StatefulWidget {
   /// Largest share of the screen the expanded sheet takes.
   final double maxFraction;
 
-  const RideSheet({super.key, required this.header, required this.body, this.onTopChanged, this.maxFraction = 0.85});
+  final double? minFraction;
+
+  const RideSheet({
+    super.key,
+    required this.header,
+    required this.body,
+    this.onTopChanged,
+    this.maxFraction = 0.85,
+    this.minFraction,
+  });
 
   @override
   State<RideSheet> createState() => RideSheetState();
@@ -82,7 +91,8 @@ class RideSheetState extends State<RideSheet> {
           if (mounted) widget.onTopChanged?.call((_controller.isAttached ? _controller.size : _min) * h);
         });
       }
-      final min = (_headerPx / h).clamp(0.12, 0.8).toDouble();
+      final calculatedMin = widget.minFraction ?? (_headerPx / h);
+      final min = calculatedMin.clamp(0.05, 0.8).toDouble();
       _min = min;
       final max = widget.maxFraction < min ? min : widget.maxFraction;
       return NotificationListener<DraggableScrollableNotification>(
