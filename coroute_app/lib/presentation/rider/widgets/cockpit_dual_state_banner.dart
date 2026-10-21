@@ -67,7 +67,7 @@ class CockpitDualStateBanner extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 48),
           padding: const EdgeInsets.symmetric(horizontal: Space.s16, vertical: Space.s12),
           decoration: BoxDecoration(
-            color: AppTheme.obsidianVoid.withValues(alpha: 0.94),
+            color: AppTheme.card,
             borderRadius: BorderRadius.circular(Radii.md),
             border: Border.all(color: outlineColor, width: 2.0),
             boxShadow: [
@@ -124,7 +124,7 @@ class CockpitDualStateBanner extends StatelessWidget {
             '|',
             textScaler: TextScaler.noScaling,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.35),
+              color: AppTheme.border2,
               fontSize: 14,
               fontWeight: FontWeight.w600,
             ),
@@ -145,8 +145,8 @@ class CockpitDualStateBanner extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textScaler: TextScaler.noScaling,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: AppTheme.text,
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.4,

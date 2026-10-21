@@ -169,7 +169,7 @@ class GhostRiderMarker extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                     decoration: BoxDecoration(
-                      color: AppTheme.obsidianVoid.withValues(alpha: 0.90),
+                      color: AppTheme.card,
                       borderRadius: BorderRadius.circular(Radii.sm),
                       border: Border.all(
                         color: isDroppedText ? AppTheme.hyperAmber : AppTheme.warnBorder,
@@ -177,7 +177,7 @@ class GhostRiderMarker extends StatelessWidget {
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.5),
+                          color: AppTheme.shadow,
                           blurRadius: 6,
                           offset: const Offset(0, 2),
                         ),
@@ -191,8 +191,8 @@ class GhostRiderMarker extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           textScaler: TextScaler.noScaling,
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: AppTheme.text,
                             fontSize: 11,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 0.4,

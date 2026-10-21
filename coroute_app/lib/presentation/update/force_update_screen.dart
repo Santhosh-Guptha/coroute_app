@@ -48,22 +48,22 @@ class ForceUpdateScreen extends StatelessWidget {
                   const SizedBox(height: 24),
 
                   // Title & Subtitle
-                  const Text(
+                  Text(
                     'MANDATORY UPDATE REQUIRED',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: Colors.white,
+                      color: AppTheme.text,
                       fontWeight: FontWeight.w900,
                       fontSize: 20,
                       letterSpacing: 0.8,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'A critical safety and protocol update has been released. You must update CoRoute to stay synchronized with your convoy.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: Colors.white70,
+                      color: AppTheme.text2,
                       fontSize: 13,
                       height: 1.4,
                     ),
@@ -84,14 +84,14 @@ class ForceUpdateScreen extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text(
+                            Text(
                               'Installed Version',
-                              style: TextStyle(color: Colors.white54, fontSize: 12),
+                              style: TextStyle(color: AppTheme.text2, fontSize: 12),
                             ),
                             Text(
                               '${versionService.currentVersion} (Build ${versionService.currentBuild})',
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: AppTheme.text,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 13,
                               ),
@@ -117,10 +117,10 @@ class ForceUpdateScreen extends StatelessWidget {
                           ],
                         ),
                         Divider(height: 24, color: AppTheme.border2),
-                        const Text(
+                        Text(
                           'Why is this update required?',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: AppTheme.text,
                             fontWeight: FontWeight.w800,
                             fontSize: 12,
                           ),
@@ -128,8 +128,8 @@ class ForceUpdateScreen extends StatelessWidget {
                         const SizedBox(height: 6),
                         Text(
                           versionService.releaseNotes,
-                          style: const TextStyle(
-                            color: Colors.white60,
+                          style: TextStyle(
+                            color: AppTheme.text2,
                             fontSize: 11,
                             height: 1.4,
                           ),
@@ -145,7 +145,7 @@ class ForceUpdateScreen extends StatelessWidget {
                     height: 56,
                     child: FilledButton(
                       style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.accentText,
+                        backgroundColor: AppTheme.brand,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         elevation: 4,
                       ),
@@ -153,12 +153,12 @@ class ForceUpdateScreen extends StatelessWidget {
                       child: const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.download_rounded, color: Colors.black, size: 22),
+                          Icon(Icons.download_rounded, color: Colors.white, size: 22),
                           SizedBox(width: 8),
                           Text(
                             'UPDATE NOW',
                             style: TextStyle(
-                              color: Colors.black,
+                              color: Colors.white,
                               fontWeight: FontWeight.w900,
                               fontSize: 15,
                               letterSpacing: 0.5,
@@ -176,7 +176,7 @@ class ForceUpdateScreen extends StatelessWidget {
                     height: 48,
                     child: OutlinedButton(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
+                        foregroundColor: AppTheme.text,
                         side: BorderSide(color: AppTheme.border2),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       ),

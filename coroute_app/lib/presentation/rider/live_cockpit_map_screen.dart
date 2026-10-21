@@ -1209,7 +1209,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 child: RideSheet(
                   key: _sheetKey,
                   onTopChanged: (v) => _sheetTop.value = v,
-                  minFraction: side ? null : (56.0 / h).clamp(0.06, 0.12),
+                  minFraction: null, // Anchors sheet to exact bottom of hands-free VOX/PTT bar; cannot drag down further
                   header: _sheetHeader(convoy, me, snap, stoppedFor, now,
                       guardianOn: guardianOn, meshPeersCount: service.p2pMeshPeerCount),
                   body: _sheetBody(convoy, service, me, uid, snap, stoppedFor, colors, statuses, lead, now,

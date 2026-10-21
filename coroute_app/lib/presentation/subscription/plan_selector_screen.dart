@@ -97,7 +97,7 @@ class PlanSelectorScreen extends StatelessWidget {
                         forceUnlocked
                             ? 'All 4 plan features are currently 100% free and active.'
                             : 'App is strictly constrained by your selected plan below.',
-                        style: const TextStyle(color: Colors.white70, fontSize: 11),
+                        style: TextStyle(color: AppTheme.text2, fontSize: 11),
                       ),
                     ],
                   ),
@@ -114,7 +114,7 @@ class PlanSelectorScreen extends StatelessWidget {
                         backgroundColor: AppTheme.card,
                         content: Text(
                           val ? 'Unlocked all features for global testing' : 'Enforced strict tier rules for ${FeatureGates.tierLabel(currentTier)}',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                          style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
                         ),
                       ),
                     );
@@ -126,19 +126,19 @@ class PlanSelectorScreen extends StatelessWidget {
           const SizedBox(height: 16),
 
           // Heading & Subtitle
-          const Text(
+          Text(
             'Choose Your Convoy Power',
             style: TextStyle(
-              color: Colors.white,
+              color: AppTheme.text,
               fontWeight: FontWeight.w900,
               fontSize: 20,
               letterSpacing: 0.3,
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'Select a plan to test its specific features, convoy capacities, and cockpit controls.',
-            style: TextStyle(color: Colors.white60, fontSize: 13),
+            style: TextStyle(color: AppTheme.text2, fontSize: 13),
           ),
           const SizedBox(height: 16),
 
@@ -161,7 +161,7 @@ class PlanSelectorScreen extends StatelessWidget {
                         Expanded(
                           child: Text(
                             'Activated ${plan.name}! Max ${plan.maxConvoySize} riders allowed.',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                            style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
                           ),
                         ),
                       ],
@@ -178,7 +178,7 @@ class PlanSelectorScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: const Color(0xFF141F28),
+              color: AppTheme.soft,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppTheme.border2),
             ),
@@ -187,10 +187,10 @@ class PlanSelectorScreen extends StatelessWidget {
               children: [
                 Icon(Icons.info_outline_rounded, color: AppTheme.muted, size: 18),
                 const SizedBox(width: 10),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'No payment is required in this build. You can switch between plans freely to test convoy scaling, priority ducking, and emergency systems.',
-                    style: TextStyle(color: Colors.white60, fontSize: 12, height: 1.4),
+                    style: TextStyle(color: AppTheme.text2, fontSize: 12, height: 1.4),
                   ),
                 ),
               ],
@@ -251,8 +251,8 @@ class _PlanCard extends StatelessWidget {
                         children: [
                           Text(
                             plan.name,
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: AppTheme.text,
                               fontWeight: FontWeight.w900,
                               fontSize: 18,
                             ),
@@ -260,7 +260,7 @@ class _PlanCard extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             plan.tagline,
-                            style: const TextStyle(color: Colors.white60, fontSize: 12),
+                            style: TextStyle(color: AppTheme.text2, fontSize: 12),
                           ),
                         ],
                       ),
@@ -269,7 +269,7 @@ class _PlanCard extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF141F28),
+                        color: AppTheme.soft,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: AppTheme.border2),
                       ),
@@ -293,8 +293,8 @@ class _PlanCard extends StatelessWidget {
                   children: [
                     Text(
                       plan.monthlyPrice,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: AppTheme.text,
                         fontWeight: FontWeight.w900,
                         fontSize: 20,
                       ),
@@ -302,7 +302,7 @@ class _PlanCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Text(
                       '(${plan.annualPrice})',
-                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      style: TextStyle(color: AppTheme.muted, fontSize: 12),
                     ),
                   ],
                 ),
@@ -328,14 +328,14 @@ class _PlanCard extends StatelessWidget {
                               Text(
                                 f.title,
                                 style: TextStyle(
-                                  color: f.isHighlight ? Colors.white : Colors.white.withValues(alpha: 0.9),
+                                  color: f.isHighlight ? AppTheme.accentText : AppTheme.text,
                                   fontWeight: f.isHighlight ? FontWeight.w800 : FontWeight.w600,
                                   fontSize: 13,
                                 ),
                               ),
                               Text(
                                 f.description,
-                                style: const TextStyle(color: Colors.white54, fontSize: 11, height: 1.2),
+                                style: TextStyle(color: AppTheme.muted, fontSize: 11, height: 1.2),
                               ),
                             ],
                           ),
@@ -352,7 +352,7 @@ class _PlanCard extends StatelessWidget {
                   height: 54,
                   child: FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor: isActive ? AppTheme.accentText : const Color(0xFF1E3342),
+                      backgroundColor: isActive ? AppTheme.brand : AppTheme.soft,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                     onPressed: isActive ? null : onSelect,
@@ -361,14 +361,14 @@ class _PlanCard extends StatelessWidget {
                       children: [
                         Icon(
                           isActive ? Icons.verified_rounded : Icons.touch_app_rounded,
-                          color: isActive ? Colors.black : AppTheme.accentText,
+                          color: isActive ? Colors.white : AppTheme.accentText,
                           size: 20,
                         ),
                         const SizedBox(width: 8),
                         Text(
                           isActive ? 'CURRENT PLAN ACTIVE' : 'ACTIVATE THIS PLAN (TEST)',
                           style: TextStyle(
-                            color: isActive ? Colors.black : Colors.white,
+                            color: isActive ? Colors.white : AppTheme.text,
                             fontWeight: FontWeight.w900,
                             fontSize: 13,
                             letterSpacing: 0.5,

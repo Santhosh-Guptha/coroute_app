@@ -44,27 +44,27 @@ class _GarageScreenState extends State<GarageScreen> {
             children: [
               Icon(Icons.lock_rounded, size: 40, color: AppTheme.warnText),
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'Multi-Bike Garage is a Pro Feature',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18),
+                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w800, fontSize: 18),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Community tier includes 1 motorcycle profile. Upgrading to CoRoute Pro allows unlimited motorcycles with custom tank sizes and service logs.\n\nIn this test build, you can test this by switching your plan or unlocking all features in the Plan Selector.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 height: 50,
                 child: FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: AppTheme.accentText),
+                  style: FilledButton.styleFrom(backgroundColor: AppTheme.brand),
                   onPressed: () {
                     Navigator.pop(ctx);
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const PlanSelectorScreen()));
                   },
-                  child: const Text('SWITCH PLAN TO TEST (FREE)', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w900)),
+                  child: const Text('SWITCH PLAN TO TEST (FREE)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
                 ),
               ),
             ],
@@ -76,7 +76,7 @@ class _GarageScreenState extends State<GarageScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.darkCanvas,
+      backgroundColor: AppTheme.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
