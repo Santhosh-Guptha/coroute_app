@@ -102,13 +102,13 @@ class ForceUpdateScreen extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text(
+                            Text(
                               'Minimum Required',
                               style: TextStyle(color: AppTheme.warnText, fontSize: 12, fontWeight: FontWeight.w700),
                             ),
                             Text(
                               'Build ${versionService.minRequiredBuild}+',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: AppTheme.warnText,
                                 fontWeight: FontWeight.w800,
                                 fontSize: 13,
@@ -116,7 +116,7 @@ class ForceUpdateScreen extends StatelessWidget {
                             ),
                           ],
                         ),
-                        const Divider(height: 24, color: AppTheme.border2),
+                        Divider(height: 24, color: AppTheme.border2),
                         const Text(
                           'Why is this update required?',
                           style: TextStyle(
@@ -177,7 +177,7 @@ class ForceUpdateScreen extends StatelessWidget {
                     child: OutlinedButton(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.white,
-                        side: const BorderSide(color: AppTheme.border2),
+                        side: BorderSide(color: AppTheme.border2),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       ),
                       onPressed: versionService.checking
