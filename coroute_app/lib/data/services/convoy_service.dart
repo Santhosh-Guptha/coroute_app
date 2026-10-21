@@ -953,17 +953,27 @@ class ConvoyService extends ChangeNotifier {
         );
         break;
       case 'TRIP_STATUS':
-        if (convoy == null) return;
-        final status = e['tripStatus']?.toString() ?? convoy.tripStatus;
-        _allConvoys[gid] = convoy.copyWith(tripStatus: status);
+        final status = e['tripStatus']?.toString() ?? convoy?.tripStatus;
+        if (convoy != null) {
+          _allConvoys[gid] = convoy.copyWith(tripStatus: status);
+        }
         if (status == 'ENDED') {
-          _onTripEnded(_allConvoys[gid]!);
+          if (convoy != null) {
+            _onTripEnded(convoy.copyWith(tripStatus: 'ENDED'));
+          } else {
+            _dropActiveConvoyLocally();
+          }
         } else if (status == 'STARTED' || status == 'PAUSED') {
           refreshEmergencyRoster().ignore();
         }
         break;
       case 'DISSOLVED':
-        _dropActiveConvoyLocally();
+        final c = activeConvoy;
+        if (c != null) {
+          _onTripEnded(c.copyWith(tripStatus: 'ENDED'));
+        } else {
+          _dropActiveConvoyLocally();
+        }
         break;
       default:
         return;
@@ -1044,6 +1054,7 @@ class ConvoyService extends ChangeNotifier {
     _rt.leaveRoom();
     _activeGroupId = null;
     SharedPreferences.getInstance().then((p) => p.remove(AppConstants.keyActiveGroupId)).ignore();
+    notifyListeners();
   }
 
   // ------------------------------------------------------- create / join
@@ -1444,11 +1455,13 @@ class ConvoyService extends ChangeNotifier {
     required String senderId,
     required String senderName,
     required String text,
+    String? groupId,
     bool isQuickCard = false,
     String cardType = 'CUSTOM',
   }) {
-    if (_activeGroupId == null || text.trim().isEmpty) return;
-    _enqueue('CHAT', {'text': text.trim(), 'isQuickCard': isQuickCard, 'cardType': cardType, 'sentAt': _clock()});
+    final gid = groupId ?? _activeGroupId;
+    if (gid == null || text.trim().isEmpty) return;
+    _enqueue('CHAT', {'text': text.trim(), 'isQuickCard': isQuickCard, 'cardType': cardType, 'sentAt': _clock()}, targetGroupId: gid);
   }
 
   void requestWait(String requesterName) {
@@ -1743,8 +1756,8 @@ class ConvoyService extends ChangeNotifier {
     return 'o$now-$_clientSeq-$salt';
   }
 
-  OutboxItem? _enqueue(String type, Map<String, dynamic> payload) {
-    final gid = _activeGroupId;
+  OutboxItem? _enqueue(String type, Map<String, dynamic> payload, {String? targetGroupId}) {
+    final gid = targetGroupId ?? _activeGroupId;
     if (gid == null) return null;
     final now = _clock();
     final item = OutboxItem(clientId: _newClientId(now), groupId: gid, type: type, payload: payload, createdAt: now);

@@ -204,7 +204,16 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
         _built.add(HomeTab.ride);
         setState(() => _tab = HomeTab.ride);
       } else if (ended) {
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
         setState(() => _rideSaved = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('The ride was ended. Trip saved to your history.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     }
     final code = s.pendingJoinCode;

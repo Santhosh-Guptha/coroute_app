@@ -292,12 +292,16 @@ class _NoRideHero extends StatelessWidget {
                   children: [
                     Icon(Icons.groups_rounded, size: 14, color: DsHeroCard.secondary),
                     const SizedBox(width: 6),
-                    Text(
-                      'Convoy limit: Max $maxRiders bikes ($tierLabel)',
-                      style: const TextStyle(
-                        color: DsHeroCard.secondary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                    Flexible(
+                      child: Text(
+                        'Convoy limit: Max $maxRiders bikes ($tierLabel)',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: DsHeroCard.secondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 4),

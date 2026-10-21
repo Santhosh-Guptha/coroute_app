@@ -247,8 +247,11 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.post('/convoys/:groupId/status', wrap(async (req, res) => {
     const room = await convoys.getRoom(req.params.groupId);
     const rider = room.riders.get(req.user.userId);
-    if (!rider || (rider.role !== 'LEAD' && room.meta.createdByUserId !== req.user.userId && req.user.role !== 'MASTER_ADMIN')) {
-      return res.status(403).json({ error: 'Only the convoy lead can change the trip state.' });
+    const isLead = rider && rider.role === 'LEAD';
+    const isCreator = room.meta.createdByUserId === req.user.userId;
+    const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'MASTER_ADMIN';
+    if (!isLead && !isCreator && !isAdmin) {
+      return res.status(403).json({ error: 'Only the convoy lead or admin can change the trip state.' });
     }
     res.json({ tripStatus: await convoys.setTripStatus(req.params.groupId, String(req.body?.status || '')) });
   }));

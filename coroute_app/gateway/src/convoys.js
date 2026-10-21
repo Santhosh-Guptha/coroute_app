@@ -335,6 +335,9 @@ class ConvoyManager extends EventEmitter {
     await this.flushRoom(room);
     await this.repo.saveConvoyMeta(room.meta);
     this._emit(groupId, 'TRIP_STATUS', { tripStatus: status, system });
+    if (status === 'ENDED') {
+      this._emit(groupId, 'DISSOLVED', { reason: 'TRIP_ENDED' });
+    }
     this.emit('fleet');
     if (status === 'ENDED') {
       clearTimeout(room.persistTimer);
@@ -355,6 +358,7 @@ class ConvoyManager extends EventEmitter {
    * `trusted` (server code only) also allows the co-riding fields.
    */
   patchRider(room, userId, patch, { emit = true, trusted = false } = {}) {
+    if (room.meta.tripStatus === 'ENDED') return null;
     const current = room.riders.get(userId);
     if (!current) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const next = { ...current, ...sanitizeTelemetry(patch) };
@@ -404,7 +408,10 @@ class ConvoyManager extends EventEmitter {
   // ------------------------------------------------------ chat / alerts
   async sendMessage(groupId, user, { text, isQuickCard = false, cardType = 'CUSTOM', clientId = '', sentAt } = {}) {
     const room = await this.getRoom(groupId);
-    if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    const isMember = room.riders.has(user.userId);
+    const isCreator = room.meta.createdByUserId === user.userId;
+    const isAdmin = user.role === 'ADMIN' || user.role === 'MASTER_ADMIN';
+    if (!isMember && !isCreator && !isAdmin) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
     const clean = String(text || '').trim().slice(0, 500);
     if (!clean) throw new ConvoyError('Message text is required.');
     const t = now();

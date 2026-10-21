@@ -604,8 +604,11 @@ class Hub {
         const gid = this._requireRoom(ws);
         const room = await this.convoys.getRoom(gid);
         const rider = room.riders.get(u.userId);
-        if (!rider || (rider.role !== 'LEAD' && room.meta.createdByUserId !== u.userId && u.role !== ROLE_ADMIN)) {
-          throw new ConvoyError('Only the convoy lead can change the trip state.', 403);
+        const isLead = rider && rider.role === 'LEAD';
+        const isCreator = room.meta.createdByUserId === u.userId;
+        const isAdmin = u.role === ROLE_ADMIN;
+        if (!isLead && !isCreator && !isAdmin) {
+          throw new ConvoyError('Only the convoy lead or admin can change the trip state.', 403);
         }
         await this.convoys.setTripStatus(gid, String(msg.status || ''));
         return;

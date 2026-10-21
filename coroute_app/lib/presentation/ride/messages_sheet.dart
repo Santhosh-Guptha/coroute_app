@@ -218,7 +218,7 @@ class _MessagesViewState extends State<MessagesView> {
     if (q.isWait) {
       service.requestWait(widget.me.name);
     } else {
-      service.sendGroupMessage(senderId: widget.me.userId, senderName: widget.me.name, text: q.text, isQuickCard: true, cardType: q.cardType);
+      service.sendGroupMessage(groupId: widget.convoyId, senderId: widget.me.userId, senderName: widget.me.name, text: q.text, isQuickCard: true, cardType: q.cardType);
     }
     return true;
   }
@@ -226,8 +226,8 @@ class _MessagesViewState extends State<MessagesView> {
   void _send(ConvoyService service) {
     final txt = _text.text.trim();
     if (txt.isEmpty) return;
-    service.sendGroupMessage(senderId: widget.me.userId, senderName: widget.me.name, text: txt);
     _text.clear();
+    service.sendGroupMessage(groupId: widget.convoyId, senderId: widget.me.userId, senderName: widget.me.name, text: txt);
   }
 
   @override
@@ -243,116 +243,119 @@ class _MessagesViewState extends State<MessagesView> {
       for (final m in sent) (m, null),
       for (final o in queued) (null, o),
     ];
-    final maxList = MediaQuery.sizeOf(context).height * 0.4;
+    final screenH = MediaQuery.sizeOf(context).height;
+    final sheetH = (screenH * 0.72).clamp(380.0, 750.0);
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const DsSectionHeader('Quick replies'),
-        const SizedBox(height: 10),
-        QuickReplyBar(onSend: (q) => _sendQuick(service, q), queued: () => !service.isOnline),
-        const SizedBox(height: 4),
-        Divider(height: 2, thickness: 2, color: AppTheme.border),
-        if (messages.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.forum_outlined, size: 28, color: AppTheme.muted),
-                const SizedBox(height: 6),
-                Text('No messages yet.', textAlign: TextAlign.center, style: AppText.body.copyWith(color: AppTheme.text2)),
-              ],
-            ),
-          )
-        else
-          Flexible(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: maxList),
-              child: ListView.builder(
-                reverse: true,
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                itemCount: messages.length,
-                itemBuilder: (context, i) {
-                  final (msg, item) = messages[messages.length - 1 - i];
-                  final mine = msg == null || msg.senderId == widget.me.userId;
-                  final text = msg?.text ?? item?.payload['text']?.toString() ?? '';
-                  return Align(
-                    alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.75),
-                      decoration: BoxDecoration(
-                        color: mine ? AppTheme.tint : AppTheme.soft,
-                        borderRadius: BorderRadius.only(
-                          topLeft: const Radius.circular(Radii.lg),
-                          topRight: const Radius.circular(Radii.lg),
-                          bottomLeft: Radius.circular(mine ? Radii.lg : 6),
-                          bottomRight: Radius.circular(mine ? 6 : Radii.lg),
-                        ),
-                        border: Border.all(color: mine ? AppTheme.accentText : AppTheme.border, width: 2),
-                      ),
+    return SizedBox(
+      height: sheetH,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const DsSectionHeader('Quick replies'),
+          const SizedBox(height: 8),
+          QuickReplyBar(onSend: (q) => _sendQuick(service, q), queued: () => !service.isOnline),
+          const SizedBox(height: 6),
+          Divider(height: 2, thickness: 2, color: AppTheme.border),
+          Expanded(
+            child: messages.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (!mine)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Text(msg.senderName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
-                            ),
-                          Text(text, style: AppText.body),
-                          if (item != null) QueuedLine(failed: item.state == OutboxState.failed, sending: service.isOnline),
+                          Icon(Icons.forum_outlined, size: 36, color: AppTheme.muted),
+                          const SizedBox(height: 8),
+                          Text('No messages yet.', textAlign: TextAlign.center, style: AppText.body.copyWith(color: AppTheme.text2)),
                         ],
                       ),
                     ),
-                  );
-                },
-              ),
+                  )
+                : ListView.builder(
+                    reverse: true,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    itemCount: messages.length,
+                    itemBuilder: (context, i) {
+                      final (msg, item) = messages[messages.length - 1 - i];
+                      final mine = msg == null || msg.senderId == widget.me.userId;
+                      final text = msg?.text ?? item?.payload['text']?.toString() ?? '';
+                      return Align(
+                        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.75),
+                          decoration: BoxDecoration(
+                            color: mine ? AppTheme.tint : AppTheme.soft,
+                            borderRadius: BorderRadius.only(
+                              topLeft: const Radius.circular(Radii.lg),
+                              topRight: const Radius.circular(Radii.lg),
+                              bottomLeft: Radius.circular(mine ? Radii.lg : 6),
+                              bottomRight: Radius.circular(mine ? 6 : Radii.lg),
+                            ),
+                            border: Border.all(color: mine ? AppTheme.accentText : AppTheme.border, width: 2),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (!mine)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: Text(msg.senderName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+                                ),
+                              Text(text, style: AppText.body),
+                              if (item != null) QueuedLine(failed: item.state == OutboxState.failed, sending: service.isOnline),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          Divider(height: 2, thickness: 2, color: AppTheme.border),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _text,
+                    maxLength: 300,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _send(service),
+                    style: AppText.body,
+                    decoration: InputDecoration(
+                      hintText: 'Message the group',
+                      hintStyle: AppText.label,
+                      counterText: '',
+                      filled: true,
+                      fillColor: AppTheme.soft,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md), borderSide: BorderSide(color: AppTheme.border, width: 2)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md), borderSide: BorderSide(color: AppTheme.border, width: 2)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md), borderSide: BorderSide(color: AppTheme.accentText, width: 2)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Material(
+                  color: AppTheme.brand,
+                  shape: const CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: IconButton(
+                    tooltip: 'Send message',
+                    constraints: const BoxConstraints(minWidth: 52, minHeight: 52),
+                    icon: const Icon(Icons.send_rounded, color: Colors.white, size: 22),
+                    onPressed: () => _send(service),
+                  ),
+                ),
+              ],
             ),
           ),
-        Divider(height: 2, thickness: 2, color: AppTheme.border),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _text,
-                maxLength: 300,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _send(service),
-                style: AppText.body,
-                decoration: InputDecoration(
-                  hintText: 'Message the group',
-                  hintStyle: AppText.label,
-                  counterText: '',
-                  filled: true,
-                  fillColor: AppTheme.soft,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md), borderSide: BorderSide(color: AppTheme.border, width: 2)),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md), borderSide: BorderSide(color: AppTheme.border, width: 2)),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md), borderSide: BorderSide(color: AppTheme.accentText, width: 2)),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Material(
-              color: AppTheme.brand,
-              shape: const CircleBorder(),
-              clipBehavior: Clip.antiAlias,
-              child: IconButton(
-                tooltip: 'Send message',
-                constraints: const BoxConstraints(minWidth: 52, minHeight: 52),
-                icon: const Icon(Icons.send_rounded, color: Colors.white, size: 22),
-                onPressed: () => _send(service),
-              ),
-            ),
-          ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
