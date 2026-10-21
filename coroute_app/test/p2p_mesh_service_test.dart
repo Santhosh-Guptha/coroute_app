@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:coroute_app/domain/mesh/mesh_telemetry_packet.dart';
 import 'package:coroute_app/domain/mesh/mesh_packet_codec.dart';
-import 'package:coroute_app/domain/mesh/mock_mesh_transport.dart';
+import 'mocks/mock_mesh_transport.dart';
 import 'package:coroute_app/data/services/p2p_mesh_service.dart';
 
 void main() {

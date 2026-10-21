@@ -16,7 +16,7 @@ import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
 import 'package:coroute_app/domain/mesh/mesh_packet_codec.dart';
 import 'package:coroute_app/domain/mesh/mesh_telemetry_packet.dart';
-import 'package:coroute_app/domain/mesh/mock_mesh_transport.dart';
+import 'mocks/mock_mesh_transport.dart';
 import 'package:coroute_app/presentation/rider/widgets/cockpit_action_stack.dart';
 
 void main() {

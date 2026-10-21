@@ -8,7 +8,7 @@ import '../../../domain/ride/ride_facts.dart';
 
 /// Clean single-line live ride metrics displayed directly above the HOLD TO TALK bar.
 ///
-/// Format matches the streamlined cockpit mockup:
+/// Format matches the streamlined cockpit design:
 /// - Left: "ETA 16:14 · 9.7 km left"
 /// - Right: "Kiran 1.2 km ahead · [shield] Guardian on"
 class MinimalCockpitStatsRow extends StatelessWidget {

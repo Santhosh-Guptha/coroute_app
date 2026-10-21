@@ -99,9 +99,6 @@ class AudioRouteWatchdog extends ChangeNotifier {
   double _volumeLevel;
   bool _isVolumeMuted = false;
   bool bluetoothExpected;
-  bool _mockDisconnected = false;
-  bool _mockMuted = false;
-  bool _mockConvoyActive = false;
   AudioRouteType _currentRoute = AudioRouteType.bluetooth;
 
   late final ValueNotifier<AudioHealthState> healthNotifier;
@@ -140,9 +137,9 @@ class AudioRouteWatchdog extends ChangeNotifier {
     _updateHealthState();
   }
 
-  bool get isConvoyActive => _mockConvoyActive || (convoyService?.activeConvoy != null);
-  bool get isBluetoothConnected => !_mockDisconnected && _isBluetoothConnected;
-  double get volumeLevel => _mockMuted ? 0.0 : _volumeLevel;
+  bool get isConvoyActive => convoyService == null || convoyService!.activeConvoy != null;
+  bool get isBluetoothConnected => _isBluetoothConnected;
+  double get volumeLevel => _volumeLevel;
   double get currentVolume => volumeLevel;
   bool get isVolumeMuted => _isVolumeMuted;
   bool get isAudioRoutingIssue => healthNotifier.value.isAudioRoutingIssue;
@@ -150,23 +147,23 @@ class AudioRouteWatchdog extends ChangeNotifier {
   AudioHealthState get state => healthNotifier.value;
 
   AudioHealthState _calculateHealthState() {
-    final btDropped = _mockDisconnected || (bluetoothExpected && !_isBluetoothConnected);
-    _isVolumeMuted = _mockMuted || _volumeLevel <= 0.0;
-    // Audio routing issue: Bluetooth expected but dropped, OR volume is muted during active convoy (or in mock)
-    final routingIssue = btDropped || (_isVolumeMuted && (isConvoyActive || _mockMuted));
+    final btDropped = bluetoothExpected && !_isBluetoothConnected;
+    _isVolumeMuted = _volumeLevel <= 0.0;
+    // Audio routing issue: Bluetooth expected but dropped, OR volume is muted during active convoy
+    final routingIssue = btDropped || (_isVolumeMuted && isConvoyActive);
 
     String? status;
     if (btDropped) {
       status = 'HELMET_BLUETOOTH_DISCONNECTED';
-    } else if (_isVolumeMuted && (isConvoyActive || _mockMuted)) {
+    } else if (_isVolumeMuted && isConvoyActive) {
       status = 'INTERCOM_VOLUME_MUTED';
     } else {
       status = 'HEALTHY';
     }
 
     return AudioHealthState(
-      isBluetoothConnected: !_mockDisconnected && _isBluetoothConnected,
-      volumeLevel: _mockMuted ? 0.0 : _volumeLevel,
+      isBluetoothConnected: _isBluetoothConnected,
+      volumeLevel: _volumeLevel,
       isVolumeMuted: _isVolumeMuted,
       isAudioRoutingIssue: routingIssue,
       bluetoothExpected: bluetoothExpected,
@@ -186,7 +183,7 @@ class AudioRouteWatchdog extends ChangeNotifier {
   /// Evaluates current audio setup and updates [healthNotifier].
   Future<AudioHealthState> checkAudioHealth() async {
     final ch = _channel;
-    if (ch != null && !_mockDisconnected && !_mockMuted) {
+    if (ch != null) {
       try {
         final res = await ch.invokeMethod<Map<Object?, Object?>>('getAudioStatus');
         if (res != null) {
@@ -213,7 +210,6 @@ class AudioRouteWatchdog extends ChangeNotifier {
   /// Requests Bluetooth SCO reconnection.
   Future<bool> attemptReconnectBluetooth() async {
     bool success = true;
-    _mockDisconnected = false;
     _isBluetoothConnected = true;
     _currentRoute = AudioRouteType.bluetooth;
     _updateHealthState();
@@ -245,7 +241,6 @@ class AudioRouteWatchdog extends ChangeNotifier {
 
   /// Resets intercom volume to 100%.
   Future<void> boostIntercomVolume() async {
-    _mockMuted = false;
     _volumeLevel = 1.0;
     _isVolumeMuted = false;
 
@@ -259,36 +254,6 @@ class AudioRouteWatchdog extends ChangeNotifier {
       } catch (_) {}
     }
 
-    _updateHealthState();
-  }
-
-  /// Testing helper to mock Bluetooth disconnection.
-  void setMockBluetoothDisconnected(bool disconnected) {
-    _mockDisconnected = disconnected;
-    if (disconnected) {
-      _isBluetoothConnected = false;
-    } else {
-      _isBluetoothConnected = true;
-    }
-    _updateHealthState();
-  }
-
-  /// Testing helper to mock volume mute.
-  void setMockVolumeMuted(bool muted) {
-    _mockMuted = muted;
-    if (muted) {
-      _volumeLevel = 0.0;
-      _isVolumeMuted = true;
-    } else {
-      _volumeLevel = 1.0;
-      _isVolumeMuted = false;
-    }
-    _updateHealthState();
-  }
-
-  /// Testing helper to mock active convoy status.
-  void setMockConvoyActive(bool active) {
-    _mockConvoyActive = active;
     _updateHealthState();
   }
 
@@ -347,8 +312,6 @@ class AudioRouteWatchdog extends ChangeNotifier {
   }
 
   void clearAudioRoutingIssue() {
-    _mockDisconnected = false;
-    _mockMuted = false;
     _updateHealthState();
   }
 

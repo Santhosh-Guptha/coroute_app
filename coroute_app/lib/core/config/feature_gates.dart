@@ -63,7 +63,7 @@ class FeatureGates {
   /// When false (default), features strictly adhere to [activeTier] for testing plan rules.
   static bool forceAllUnlocked = false;
 
-  /// Active mock or purchased tier for this session.
+  /// Active subscription tier for this session.
   static SubscriptionTier activeTier = SubscriptionTier.roadCaptain;
 
   /// Checks whether a given [feature] is unlocked for the user.

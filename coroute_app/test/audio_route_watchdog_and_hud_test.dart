@@ -286,7 +286,7 @@ void main() {
 
     testWidgets('Renders Intercom Muted (0%) warning with 1-tap volume boost', (tester) async {
       final watchdog = AudioRouteWatchdog(initialVolume: 1.0);
-      watchdog.setMockVolumeMuted(true);
+      watchdog.onVolumeChanged(0.0);
 
       await tester.pumpWidget(
         MaterialApp(

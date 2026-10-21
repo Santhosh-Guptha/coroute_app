@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'mesh_transport.dart';
+import 'package:coroute_app/domain/mesh/mesh_transport.dart';
 
 /// Test mock transport for deterministic testing of P2P mesh telemetry,
 /// multi-hop relay forwarding, and dead-zone emergency SOS beacons.
