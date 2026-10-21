@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/ui/ui_tokens.dart';
 import '../../data/services/app_version_service.dart';
 
 /// Full-screen, non-dismissible screen displayed when a mandatory application
@@ -40,7 +39,7 @@ class ForceUpdateScreen extends StatelessWidget {
                         ),
                       ],
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.system_security_update_rounded,
                       color: AppTheme.warnText,
                       size: 44,
