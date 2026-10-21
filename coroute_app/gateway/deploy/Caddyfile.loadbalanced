@@ -1,0 +1,26 @@
+# /etc/caddy/Caddyfile — CoRoute High Availability Dual-Node Load Balancer
+# Automatic HTTPS (Let's Encrypt), auto-renewal, HTTP->HTTPS redirect.
+coroute.duckdns.org {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		-Server
+	}
+
+	# Active Load Balancing across Node 1 (Local) and Node 2 (Private VCN 10.0.0.99)
+	reverse_proxy 127.0.0.1:3000 10.0.0.99:3000 {
+		lb_policy least_conn
+		lb_try_duration 2s
+		health_uri /status
+		health_interval 5s
+		health_timeout 2s
+		flush_interval -1
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+}

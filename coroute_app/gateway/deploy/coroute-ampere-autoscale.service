@@ -1,0 +1,17 @@
+[Unit]
+Description=CoRoute Ampere A1 Auto-Provisioner & Load-Balancer Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/coroute/gateway/deploy
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -u /opt/coroute/gateway/deploy/auto_provision_ampere.py
+Restart=always
+RestartSec=15
+StandardOutput=append:/var/log/ampere_provision.log
+StandardError=append:/var/log/ampere_provision.log
+
+[Install]
+WantedBy=multi-user.target
