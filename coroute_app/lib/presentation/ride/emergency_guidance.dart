@@ -133,6 +133,7 @@ class EmergencyGuidance extends ChangeNotifier {
   double? _heading;
 
   final Map<String, _HazardState> _hz = {};
+  final Set<String> _roadHazardSpoken = {};
   RouteProgress? _groupRoute;
   Object? _groupRouteKey;
   String _sig = '';
@@ -349,12 +350,14 @@ class EmergencyGuidance extends ChangeNotifier {
       }
       changed = true;
     }
+    final rhIds = {for (final rh in _convoys.roadHazards) rh.eventId};
+    _roadHazardSpoken.removeWhere((id) => !rhIds.contains(id));
     _syncSubscription();
     if (changed) _publish();
   }
 
   void _syncSubscription() {
-    final need = _target != null || _hz.isNotEmpty;
+    final need = _target != null || _hz.isNotEmpty || _convoys.roadHazards.isNotEmpty;
     if (need && _sub == null) {
       _sub = _convoys.myFixes.listen(_onFix);
     } else if (!need && _sub != null) {
@@ -392,7 +395,7 @@ class EmergencyGuidance extends ChangeNotifier {
       }
       _recomputeNav(feedVoice: true);
     }
-    if (_hz.isNotEmpty) _hazardFix(p, acc);
+    if (_hz.isNotEmpty || _convoys.roadHazards.isNotEmpty) _hazardFix(p, acc);
     _publish();
   }
 
@@ -547,6 +550,34 @@ class EmergencyGuidance extends ChangeNotifier {
       if ((along || toward) && !navigatingHere) {
         final hit = st.announcer.onDistance(st.distanceM!);
         if (hit != null) _say(hazardSpeech(hit, lang: _speechLang), 'HAZ:${h.hazardId}:$hit');
+      }
+    }
+
+    // FEAT-02: Collective Road Hazard AI Telemetry Mesh warnings at 300m
+    for (final rh in _convoys.roadHazards) {
+      if (_roadHazardSpoken.contains(rh.eventId)) continue;
+      double? dist;
+      var along = false;
+      if (mine != null && mine.onLine && gr != null) {
+        final hm = gr.locateAhead(rh.lat, rh.lng, fromAlongM: math.max(0.0, mine.alongM - EmergencyNavConstants.hazardPassedM));
+        if (hm != null && hm.offM <= EmergencyNavConstants.onRouteM) {
+          dist = hm.alongM - mine.alongM;
+          along = true;
+        }
+      }
+      if (!along) {
+        final s = GeoMath.haversine(me.$1, me.$2, rh.lat, rh.lng);
+        dist = s;
+        if (heading != null) {
+          final bearing = Bearing.degrees(me.$1, me.$2, rh.lat, rh.lng);
+          if (_angleDiff(heading, bearing) > EmergencyNavConstants.hazardHeadingDeg) {
+            continue;
+          }
+        }
+      }
+      if (dist != null && dist > 50 && dist <= 350) {
+        _roadHazardSpoken.add(rh.eventId);
+        _say('Caution: severe road hazard 300 meters ahead', 'ROAD_HAZARD:${rh.eventId}:300m');
       }
     }
   }

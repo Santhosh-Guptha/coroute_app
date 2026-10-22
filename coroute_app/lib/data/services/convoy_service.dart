@@ -28,6 +28,7 @@ import '../models/rider_model.dart';
 import '../models/route_model.dart';
 import '../models/safety_wire.dart';
 import '../models/sos_alert_model.dart';
+import '../models/road_hazard_telemetry.dart';
 import '../models/stop_point_model.dart';
 import '../models/trip_history_model.dart';
 import '../../domain/notify/status_text.dart';
@@ -178,6 +179,7 @@ class ConvoyService extends ChangeNotifier {
   final Map<String, AssistRequest> _assists = {};
   final List<AssistNotice> _assistNotices = [];
   final Map<String, HazardWarning> _hazards = {};
+  final Map<String, RoadHazardObservation> _roadHazards = {};
   final Map<String, Encounter> _encounters = {};
   final Map<String, EncounterType> _ignoredEncounters = {};
   final Set<String> _falseReported = {};
@@ -323,6 +325,8 @@ class ConvoyService extends ChangeNotifier {
 
   /// Accident warnings on my route, newest first. Empty while "Accident warnings on my
   /// route" is off (they are still kept, so switching it on shows them again).
+  List<RoadHazardObservation> get roadHazards => _roadHazards.values.toList();
+
   List<HazardWarning> get hazards {
     if (!_netOn || settings?.hazardAlerts == false) return const [];
     final now = _clock();
@@ -879,6 +883,14 @@ class ConvoyService extends ChangeNotifier {
           _addAssistNotice(id, AssistClosedReason.taken);
         }
         _networkRevision++;
+        break;
+      case 'ROAD_HAZARD':
+        try {
+          final obs = RoadHazardObservation.fromJson(e);
+          _roadHazards[obs.eventId] = obs;
+          _networkRevision++;
+          notifyListeners();
+        } catch (_) {}
         break;
       case 'HAZARD':
         final h = HazardWarning.fromJson(e, receivedAt: _clock());
@@ -2180,6 +2192,7 @@ class ConvoyService extends ChangeNotifier {
     _assists.clear();
     _assistNotices.clear();
     _hazards.clear();
+    _roadHazards.clear();
     _encounters.clear();
     _ignoredEncounters.clear();
     _falseReported.clear();
@@ -2199,6 +2212,13 @@ class ConvoyService extends ChangeNotifier {
     _networkRevision++;
     notifyListeners();
     return true;
+  }
+
+  /// Broadcasts a road hazard observation (FEAT-02) to downstream riders in the convoy.
+  bool broadcastRoadHazard(RoadHazardObservation observation) {
+    if (!_netOn || _activeGroupId == null) return false;
+    final item = _enqueue('ROAD_HAZARD', observation.toJson());
+    return item != null;
   }
 
   /// "Report false alert" for a request or an accident warning I received; once per id.

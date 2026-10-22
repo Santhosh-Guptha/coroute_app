@@ -456,9 +456,12 @@ class IntercomService extends ChangeNotifier {
       // Feed up to ~200 ms at a time so the native buffer stays small (low latency).
       var budget = _rxFrameBytes * 10;
       while (_jitter.isNotEmpty && budget > 0) {
-        final bytes = _jitter.removeFirst();
+        var bytes = _jitter.removeFirst();
         _queuedBytes -= bytes.length;
         budget -= bytes.length;
+        if (_isSirenDucked) {
+          bytes = attenuatePcm16(bytes, sirenDuckingFactor);
+        }
         final even = bytes.length & ~1;
         if (even == 0) continue;
         final copy = Uint8List.fromList(bytes.sublist(0, even)); // aligned copy
@@ -476,6 +479,35 @@ class IntercomService extends ChangeNotifier {
   /// Amplitude ratio: 10^(-18/20) ~= 0.12589254.
   static const double duckingDecibels = -18.0;
   static final double duckingFactor = math.pow(10.0, duckingDecibels / 20.0).toDouble();
+
+  /// Attenuation for FEAT-03 emergency siren ducking (-20 dB).
+  /// Amplitude ratio: 10^(-20/20) = 0.10.
+  static const double sirenDuckingDecibels = -20.0;
+  static final double sirenDuckingFactor = math.pow(10.0, sirenDuckingDecibels / 20.0).toDouble();
+
+  bool _isSirenDucked = false;
+
+  /// Whether intercom playback is currently ducked due to an emergency siren detection.
+  bool get isSirenDucked => _isSirenDucked;
+
+  /// Controls emergency siren ducking (-20 dB / 0.10 amplitude factor).
+  void setSirenDucking(bool ducked) {
+    if (_isSirenDucked == ducked) return;
+    _isSirenDucked = ducked;
+    if (ducked) {
+      _applySirenDucking();
+    }
+    notifyListeners();
+  }
+
+  void _applySirenDucking() {
+    if (_jitter.isEmpty) return;
+    final count = _jitter.length;
+    for (var i = 0; i < count; i++) {
+      final chunk = _jitter.removeFirst();
+      _jitter.addLast(attenuatePcm16(chunk, sirenDuckingFactor));
+    }
+  }
 
   /// Attenuates 16-bit little-endian PCM audio samples by [factor] (defaults to -18 dB ducking).
   @visibleForTesting

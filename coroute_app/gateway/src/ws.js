@@ -27,6 +27,7 @@ const { ConvoyError, publicRider, publicAlert } = require('./convoys');
 const { clientIdOf } = require('./validate');
 const { validateChunk, TrackError, uploadPermission } = require('./tracks');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
+const { RoadHazardRegistry } = require('./road_hazards');
 
 const VOICE_START = 0x01, VOICE_FRAME = 0x02, VOICE_END = 0x03;
 
@@ -47,6 +48,8 @@ const ACTION_TYPES = new Set([
   'ROLE_SET', 'MIC_STATE',
   // 4.0
   'REGROUP_SET', 'REGROUP_CLEAR', 'LAST_GASP_BEACON',
+  // FEAT-02
+  'ROAD_HAZARD',
 ]);
 /** Socket messages that alert the whole convoy: a few per 10 seconds, each type with its own budget
  * (a rider who just asked the group to wait must still be able to raise an SOS). */
@@ -92,7 +95,8 @@ class Hub {
     this.rooms = new Map(); // groupId -> Set<ws>
     this.byUser = new Map(); // userId -> Set<ws> (3.15 personal messages)
     this.admins = new Set();
-    this.voice = new Map(); // groupId -> { group: stream|null, private: Map<from, stream> }
+    this.voice = new Map();
+    this.roadHazards = new RoadHazardRegistry(); // groupId -> { group: stream|null, private: Map<from, stream> }
     this.wss = new WebSocketServer({ server, path, maxPayload: 256 * 1024 });
     this.wss.on('connection', (ws, req) => this._onConnection(ws, req));
 
@@ -683,6 +687,104 @@ class Hub {
             batteryLevel,
           });
         }
+        return;
+      }
+
+            case 'ROAD_HAZARD': {
+        const gid = this._requireRoom(ws);
+        const room = await this.convoys.getRoom(gid);
+        const rider = room.riders.get(u.userId);
+
+        // Enforce Road Captain Broadcast Entitlement (Server-Enforced)
+        const isRoadCaptain = (rider && (rider.role === 'LEAD' || rider.role === 'CAPTAIN')) ||
+          u.role === 'ROAD_CAPTAIN' || u.role === 'MASTER_ADMIN' || u.role === 'ADMIN' ||
+          (room.meta && room.meta.createdByUserId === u.userId);
+
+        if (!isRoadCaptain) {
+          throw new ConvoyError('Only the Road Captain or convoy lead can broadcast road hazard telemetry.', 403, 'ENTITLEMENT_REQUIRED');
+        }
+
+        // Validate payload
+        const lat = Number(msg.lat);
+        const lng = Number(msg.lng);
+        if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+          throw new ConvoyError('Invalid road hazard coordinates.', 400);
+        }
+
+        // Ingest into RoadHazardRegistry for 100m spatial deduplication
+        const { pin, isNew, duplicate } = this.roadHazards.ingestObservation({
+          hazardId: msg.hazardId,
+          userId: u.userId,
+          lat,
+          lng,
+          heading: Number(msg.heading) || (rider ? Number(rider.heading) : 0),
+          severity: msg.severity,
+          classification: msg.classification,
+          confidence: msg.confidence,
+          timestamp: Number(msg.timestamp) || Date.now(),
+        });
+
+        // Send ACK back to the reporting Road Captain
+        this.send(ws, {
+          type: 'ROAD_HAZARD_ACK',
+          hazardId: pin.hazardId,
+          isNew,
+          duplicate: Boolean(duplicate),
+          corroborationCount: pin.corroborationCount,
+          ts: Date.now(),
+        });
+
+        // If duplicate replayed frame, do not re-broadcast
+        if (duplicate) return;
+
+        // Downstream recipient filtering: route, carriageway heading, upstream distance
+        const connectedClients = this.rooms.get(gid);
+        if (connectedClients) {
+          const roomRidersList = [];
+          for (const clientWs of connectedClients) {
+            if (clientWs.readyState === 1 && clientWs.user) {
+              const r = room.riders.get(clientWs.user.userId);
+              if (r) {
+                roomRidersList.push({
+                  userId: clientWs.user.userId,
+                  lat: Number(r.lat),
+                  lng: Number(r.lng),
+                  heading: Number(r.heading),
+                  ws: clientWs,
+                });
+              }
+            }
+          }
+
+          const eligibleRecipients = this.roadHazards.filterEligibleRecipients(pin, roomRidersList);
+          const eligibleUserIds = new Set(eligibleRecipients.map(e => e.userId));
+          const distanceMap = new Map(eligibleRecipients.map(e => [e.userId, e.distanceM]));
+
+          for (const clientWs of connectedClients) {
+            if (clientWs.readyState === 1 && clientWs.user) {
+              const isEligible = eligibleUserIds.has(clientWs.user.userId);
+              if (isEligible) {
+                const aheadM = distanceMap.get(clientWs.user.userId) || 300;
+                this.send(clientWs, {
+                  type: 'ROAD_HAZARD',
+                  hazardId: pin.hazardId,
+                  lat: pin.lat,
+                  lng: pin.lng,
+                  heading: pin.heading,
+                  severity: pin.severity,
+                  classification: pin.classification,
+                  confidence: pin.confidence,
+                  aheadM,
+                  corroborationCount: pin.corroborationCount,
+                  reportedAt: pin.firstDetectedAt,
+                  expiresAt: pin.expiresAt,
+                  spokenWarning: pin.spokenWarning,
+                });
+              }
+            }
+          }
+        }
+
         return;
       }
 

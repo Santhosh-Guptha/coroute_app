@@ -53,6 +53,15 @@ enum Feature {
 
   /// B2B Fleet health, tour timetable variance & client risk scorecard.
   fleetAnalytics,
+
+  /// Collective road hazard AI telemetry broadcast (Road Captain only).
+  roadHazardBroadcast,
+
+  /// Collective road hazard telemetry reception and helmet audio warnings (Community & Pro).
+  roadHazardReceive,
+
+  /// Emergency siren acoustic frequency detector & audio ducking (Community & all tiers).
+  sirenAcousticDetector,
 }
 
 class FeatureGates {
@@ -79,8 +88,13 @@ class FeatureGates {
       case Feature.unlimitedConvoyCapacity:
       case Feature.dynamicWaypointPush:
       case Feature.totalConvoySpreadAlert:
+      case Feature.roadHazardBroadcast:
         return effectiveTier == SubscriptionTier.roadCaptain ||
             effectiveTier == SubscriptionTier.tourOperator;
+
+      case Feature.roadHazardReceive:
+      case Feature.sirenAcousticDetector:
+        return true;
 
       case Feature.guardianLiveShare:
       case Feature.unlimitedOfflinePacks:
@@ -100,7 +114,11 @@ class FeatureGates {
       case Feature.unlimitedConvoyCapacity:
       case Feature.dynamicWaypointPush:
       case Feature.totalConvoySpreadAlert:
+      case Feature.roadHazardBroadcast:
         return SubscriptionTier.roadCaptain;
+      case Feature.roadHazardReceive:
+      case Feature.sirenAcousticDetector:
+        return SubscriptionTier.community;
       case Feature.guardianLiveShare:
       case Feature.unlimitedOfflinePacks:
       case Feature.advancedTelemetryReplay:
@@ -133,12 +151,24 @@ class FeatureGates {
         return 'AMOLED Sunlight HUD High-Contrast';
       case Feature.fleetAnalytics:
         return 'B2B Fleet Health & Client Risk Scorecard';
+      case Feature.roadHazardBroadcast:
+        return 'Road Hazard Telemetry Mesh Broadcast';
+      case Feature.roadHazardReceive:
+        return 'Road Hazard Helmet Audio Alerts & HUD';
+      case Feature.sirenAcousticDetector:
+        return 'Emergency Siren Acoustic Frequency Detector';
     }
   }
 
   /// Human-friendly description of the feature.
   static String featureDescription(Feature feature) {
     switch (feature) {
+      case Feature.sirenAcousticDetector:
+        return 'Detects approaching emergency vehicle sirens, ducks music/intercom by -20 dB, and displays a pulsating cockpit yield alert.';
+      case Feature.roadHazardBroadcast:
+        return 'Broadcasts severe potholes and road defects detected by your bike to all following riders in the convoy.';
+      case Feature.roadHazardReceive:
+        return 'Delivers spatial helmet voice warnings and HUD alerts 300 meters before upcoming road hazards.';
       case Feature.priorityIntercomDucking:
         return 'Road Captain audio broadcasts automatically duck background chatter by -18 dB so hazard warnings cut through instantly.';
       case Feature.unlimitedConvoyCapacity:

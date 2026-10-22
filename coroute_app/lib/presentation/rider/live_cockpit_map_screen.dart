@@ -58,6 +58,9 @@ import '../ride/discovery_card.dart';
 import '../ride/emergency_guidance.dart';
 import '../ride/group_settings_sheet.dart';
 import '../ride/hazard_marker.dart';
+import 'widgets/road_hazard_hud_pill.dart';
+import 'widgets/siren_hud_pill.dart';
+import '../../data/services/siren_acoustic_detector.dart';
 import '../ride/incident_banner.dart';
 import '../ride/incident_sheet.dart';
 import '../ride/incident_view.dart';
@@ -237,6 +240,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   ConvoyService? _convoys;
   AuthService? _auth;
   GeoService? _geo;
+  SirenAcousticDetector? _sirenDetector;
+  bool _ownsSirenDetector = false;
 
   // The active line as map points, rebuilt only when the line is replaced or my matched point moves.
   RouteProgress? _lineSource;
@@ -365,7 +370,23 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       _onConvoyUpdate();
       _onFocusRequest();
       _syncEssentials(category: 'FUEL', force: true);
+
+      final existingDetector = context.read<SirenAcousticDetector?>();
+      if (existingDetector != null) {
+        _sirenDetector = existingDetector;
+        _ownsSirenDetector = false;
+      } else {
+        final intercom = context.read<IntercomService?>();
+        _sirenDetector = SirenAcousticDetector(intercomService: intercom);
+        _ownsSirenDetector = true;
+      }
+      _sirenDetector?.activeSirenNotifier.addListener(_onSirenAlert);
+      _sirenDetector?.start().ignore();
     });
+  }
+
+  void _onSirenAlert() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -508,6 +529,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     _autoDismissTimer?.cancel();
     _hudToastTimer?.cancel();
     _sheetTop.dispose();
+    _sirenDetector?.activeSirenNotifier.removeListener(_onSirenAlert);
+    if (_ownsSirenDetector) {
+      _sirenDetector?.dispose();
+    }
     if (_keepScreenOn) WakelockPlus.disable();
     super.dispose();
   }
@@ -924,6 +949,42 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           hazard: h,
           view: views[h.hazardId],
           onTap: () => _focus(h.lat, h.lng),
+          onDismiss: () => _dismissAlert(key),
+        ),
+      ));
+    }
+    // FEAT-02: Severe road hazard alerts ahead (within 500m)
+    for (final rh in service.roadHazards) {
+      final d = myPos ? GeoMath.haversine(me.lat, me.lng, rh.lat, rh.lng) : null;
+      if (d != null && d <= 500 && d >= 10) {
+        final key = 'ROAD_HAZARD:${rh.eventId}';
+        out.add(_Slot(
+          key: key,
+          tier: AlertTier.important,
+          title: 'SEVERE ROAD HAZARD',
+          priority: AlertPriority.hazard,
+          dismissible: true,
+          child: RoadHazardHudPill(
+            hazard: rh,
+            distanceM: d.round(),
+            onTap: () => _focus(rh.lat, rh.lng),
+            onDismiss: () => _dismissAlert(key),
+          ),
+        ));
+      }
+    }
+    // FEAT-03: Emergency Siren Acoustic Frequency Detector
+    final sirenEvent = _sirenDetector?.activeSirenNotifier.value;
+    if (sirenEvent != null) {
+      const key = 'EMERGENCY_SIREN';
+      out.add(_Slot(
+        key: key,
+        tier: AlertTier.critical,
+        title: 'EMERGENCY SIREN',
+        priority: AlertPriority.hazard,
+        dismissible: true,
+        child: SirenHudPill(
+          event: sirenEvent,
           onDismiss: () => _dismissAlert(key),
         ),
       ));
@@ -2031,6 +2092,19 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
           child: HazardMarker(label: hazardMarkerLabel(d), level: h.level),
         ));
       }
+    }
+    // FEAT-02: Map markers for collective road hazards
+    for (final rh in service.roadHazards) {
+      final d = myPos ? GeoMath.haversine(me.lat, me.lng, rh.lat, rh.lng) : null;
+      out.add(Marker(
+        point: LatLng(rh.lat, rh.lng),
+        width: HazardMarker.width,
+        height: HazardMarker.height,
+        child: HazardMarker(
+          label: hazardMarkerLabel(d),
+          level: HazardLevel.active,
+        ),
+      ));
     }
     // My group's open emergencies: the point where it is, unless the rider's own marker is already there.
     for (final i in incidents) {

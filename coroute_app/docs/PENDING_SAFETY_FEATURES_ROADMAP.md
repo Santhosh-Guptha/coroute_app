@@ -12,8 +12,8 @@
 | ID | Feature Name | Tier Entitlement | Primary Domain | Status |
 | :--- | :--- | :---: | :--- | :---: |
 | **FEAT-01** | **BLE Handlebar Wireless SOS & Intercom PTT Remote** | Community (Free) | Hardware / BLE GATT | `[ ] PENDING` |
-| **FEAT-02** | **Collective Pothole & Road Hazard AI Telemetry Mesh** | Road Captain / Pro | Kinematics / AI Mesh | `[ ] PENDING` |
-| **FEAT-03** | **Emergency Siren Acoustic Frequency Detector** | Community (Free) | Audio DSP / TFLite | `[ ] PENDING` |
+| **FEAT-02** | **Collective Pothole & Road Hazard AI Telemetry Mesh** | Road Captain / Pro | Kinematics / AI Mesh | `[X] COMPLETED` |
+| **FEAT-03** | **Emergency Siren Acoustic Frequency Detector** | Community (Free) | Audio DSP / TFLite | `[X] COMPLETED` |
 | **FEAT-04** | **Smartwatch Biometric Trauma & Pulse Verification** | Pro / Captain | WearOS / HealthKit | `[ ] PENDING` |
 | **FEAT-05** | **Low-Altitude Satellite SOS Gateway Relay** | Tour Operator / Pro | Iridium / Native Sat | `[ ] PENDING` |
 | **FEAT-06** | **Smart Airbag Vest Peripheral Bluetooth Bridge** | Community (Free) | BLE Wearable GATT | `[ ] PENDING` |

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/domain/garage/bike_profile.dart';
 import 'package:coroute_app/data/services/garage_service.dart';
 import 'package:coroute_app/data/services/gpx_service.dart';
@@ -10,6 +11,7 @@ void main() {
   group('Garage & BikeProfile Tests', () {
     setUp(() {
       SharedPreferences.setMockInitialValues({});
+      FeatureGates.forceAllUnlocked = true;
     });
 
     test('Default seeding creates a Royal Enfield Himalayan 450', () async {

@@ -144,6 +144,10 @@ class PlanSubscriptionService extends ChangeNotifier {
               title: 'Single Corridor Map Cache',
               description: 'Offline tile caching for your active planned route.',
             ),
+            PlanFeatureItem(
+              title: 'Road Hazard Helmet Audio Alerts',
+              description: 'Receive spatial voice warnings 300m before severe road hazards.',
+            ),
           ],
         ),
         const PlanDetails(
@@ -217,6 +221,11 @@ class PlanSubscriptionService extends ChangeNotifier {
             PlanFeatureItem(
               title: 'Live Cockpit Fleet Matrix',
               description: 'Bird\'s-eye view of every member\'s speed, battery %, and status.',
+            ),
+            PlanFeatureItem(
+              title: 'Collective Road Hazard AI Mesh Broadcast',
+              description: 'Pothole telemetry broadcast to downstream bikes with 5s lead time.',
+              isHighlight: true,
             ),
             PlanFeatureItem(
               title: 'Includes All CoRoute Pro Features',
