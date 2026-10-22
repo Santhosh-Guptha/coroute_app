@@ -160,7 +160,8 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
     );
     if (!ok && mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(SafetyTexts.saveFailed)));
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(SafetyTexts.saveFailed)));
     }
   }
 

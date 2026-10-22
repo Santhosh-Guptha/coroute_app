@@ -36,6 +36,7 @@ class _GarageScreenState extends State<GarageScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 600),
       backgroundColor: AppTheme.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -44,7 +45,7 @@ class _GarageScreenState extends State<GarageScreen> {
         onSave: (newBike) async {
           await _garageService.saveBike(newBike);
           if (sheetContext.mounted) {
-            Navigator.pop(sheetContext);
+            Navigator.of(sheetContext).maybePop();
           }
         },
       ),
@@ -92,7 +93,10 @@ class _GarageScreenState extends State<GarageScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
+            onPressed: () {
+              Navigator.of(dialogContext).maybePop();
+              controller.dispose();
+            },
             child: Text('Cancel', style: TextStyle(color: AppTheme.muted)),
           ),
           ElevatedButton(
@@ -101,7 +105,8 @@ class _GarageScreenState extends State<GarageScreen> {
               if (val != null && val >= 0) {
                 await _garageService.recordServiceCompleted(bike.id, val);
                 if (dialogContext.mounted) {
-                  Navigator.pop(dialogContext);
+                  Navigator.of(dialogContext).maybePop();
+                  controller.dispose();
                 }
               }
             },
@@ -210,24 +215,29 @@ class _GarageScreenState extends State<GarageScreen> {
                 );
               }
 
-              return ListView.separated(
-                padding: const EdgeInsets.all(16),
-                itemCount: bikes.length,
-                separatorBuilder: (ctx, idx) => const SizedBox(height: 16),
-                itemBuilder: (context, index) {
-                  final bike = bikes[index];
-                  final isActive = bike.id == activeBike?.id;
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 680),
+                  child: ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: bikes.length,
+                    separatorBuilder: (ctx, idx) => const SizedBox(height: 16),
+                    itemBuilder: (context, index) {
+                      final bike = bikes[index];
+                      final isActive = bike.id == activeBike?.id;
 
-                  return _BikeCard(
-                    bike: bike,
-                    isActive: isActive,
-                    onSelectActive: () => _garageService.setActiveBike(bike.id),
-                    onRecordService: () => _showRecordServiceDialog(bike),
-                    onDelete: bikes.length > 1
-                        ? () => _garageService.deleteBike(bike.id)
-                        : null,
-                  );
-                },
+                      return _BikeCard(
+                        bike: bike,
+                        isActive: isActive,
+                        onSelectActive: () => _garageService.setActiveBike(bike.id),
+                        onRecordService: () => _showRecordServiceDialog(bike),
+                        onDelete: bikes.length > 1
+                            ? () => _garageService.deleteBike(bike.id)
+                            : null,
+                      );
+                    },
+                  ),
+                ),
               );
             },
           );
@@ -300,6 +310,8 @@ class _BikeCard extends StatelessWidget {
                     children: [
                       Text(
                         bike.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: AppTheme.text,
                           fontSize: 16,
@@ -308,6 +320,8 @@ class _BikeCard extends StatelessWidget {
                       ),
                       Text(
                         '${bike.year} · ${bike.make} ${bike.model}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: AppTheme.text2,
                           fontSize: 12,
@@ -322,7 +336,7 @@ class _BikeCard extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: AppTheme.tint,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.accentText.withOpacity(0.5)),
+                      border: Border.all(color: AppTheme.accentText.withValues(alpha: 0.5)),
                     ),
                     child: Text(
                       'ACTIVE',
@@ -381,7 +395,7 @@ class _BikeCard extends StatelessWidget {
 
           // Maintenance Status Bar
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: AppTheme.soft,
               borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
@@ -397,20 +411,27 @@ class _BikeCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  serviceLabel,
-                  style: TextStyle(
-                    color: serviceColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.8,
+                Flexible(
+                  child: Text(
+                    serviceLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: serviceColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                    ),
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 InkWell(
                   onTap: onRecordService,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 44),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    alignment: Alignment.center,
                     child: Text(
                       'Record Service',
                       style: TextStyle(
@@ -422,10 +443,15 @@ class _BikeCard extends StatelessWidget {
                   ),
                 ),
                 if (onDelete != null) ...[
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 6),
                   InkWell(
                     onTap: onDelete,
-                    child: Icon(Icons.delete_outline, color: AppTheme.muted, size: 18),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      constraints: const BoxConstraints(minHeight: 44, minWidth: 44),
+                      alignment: Alignment.center,
+                      child: Icon(Icons.delete_outline, color: AppTheme.muted, size: 20),
+                    ),
                   ),
                 ],
               ],
@@ -455,6 +481,8 @@ class _MiniSpec extends StatelessWidget {
       children: [
         Text(
           label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: AppTheme.muted,
             fontSize: 9,
@@ -463,17 +491,24 @@ class _MiniSpec extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          value,
-          style: TextStyle(
-            color: AppTheme.text,
-            fontSize: 15,
-            fontWeight: FontWeight.w800,
-            fontFamily: 'monospace',
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            maxLines: 1,
+            style: TextStyle(
+              color: AppTheme.text,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              fontFamily: 'monospace',
+            ),
           ),
         ),
         Text(
           subtext,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: AppTheme.text2,
             fontSize: 11,
@@ -502,6 +537,18 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
   final _mileageController = TextEditingController(text: '25.0');
   final _odometerController = TextEditingController(text: '0');
 
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _makeController.dispose();
+    _modelController.dispose();
+    _tankController.dispose();
+    _reserveController.dispose();
+    _mileageController.dispose();
+    _odometerController.dispose();
+    super.dispose();
+  }
+
   void _applyPreset(BikeProfile p) {
     setState(() {
       _nameController.text = p.name;
@@ -517,36 +564,39 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
   Widget build(BuildContext context) {
     final presets = BikeProfile.popularPresets;
 
-    return Padding(
-      padding: EdgeInsets.only(
-        top: 20,
-        left: 20,
-        right: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 600),
+        child: Padding(
+          padding: EdgeInsets.only(
+            top: 20,
+            left: 20,
+            right: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  'ADD MOTORCYCLE',
-                  style: TextStyle(
-                    color: AppTheme.text,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'ADD MOTORCYCLE',
+                      style: TextStyle(
+                        color: AppTheme.text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, color: AppTheme.muted),
+                      onPressed: () => Navigator.of(context).maybePop(),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: Icon(Icons.close, color: AppTheme.muted),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
             const SizedBox(height: 12),
             Text(
               'QUICK PRESETS',
@@ -702,6 +752,8 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
           ],
         ),
       ),
-    );
+    ),
+  ),
+);
   }
 }

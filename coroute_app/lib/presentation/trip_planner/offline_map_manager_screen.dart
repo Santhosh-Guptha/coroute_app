@@ -22,6 +22,9 @@ class OfflineMapManagerScreen extends StatefulWidget {
 class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
   late List<SavedMapPack> _packs = widget.initialPacks ?? [];
   late bool _loading = widget.initialPacks == null;
+  bool _isDeleting = false;
+  bool _isClearing = false;
+  bool _isNavigating = false;
 
   @override
   void initState() {
@@ -43,91 +46,103 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
   }
 
   Future<void> _deletePack(SavedMapPack pack) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Delete Map Pack?', style: AppText.headline),
-        content: Text(
-          'Delete "${pack.name}"? Cached tiles will be removed to free storage.',
-          style: AppText.body,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+    if (_isDeleting) return;
+    _isDeleting = true;
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.card,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Delete Map Pack?', style: AppText.headline),
+          content: Text(
+            'Delete "${pack.name}"? Cached tiles will be removed to free storage.',
+            style: AppText.body,
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.sos),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    await SavedMapPackStore.delete(pack.id);
-
-    // Also delete tiles from disk cache if polyline available
-    if (pack.polyline.isNotEmpty) {
-      final tiles = TilePrefetcher.tilesAlong(
-        pack.polyline,
-        zooms: pack.zooms,
-        highDetail: pack.highDetail,
-      );
-      await TileCache.instance?.deleteTiles(tiles);
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Map pack "${pack.name}" removed'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.sos),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
         ),
       );
-      _loadPacks();
+
+      if (confirmed != true || !mounted) return;
+
+      await SavedMapPackStore.delete(pack.id);
+
+      // Also delete tiles from disk cache if polyline available
+      if (pack.polyline.isNotEmpty) {
+        final tiles = TilePrefetcher.tilesAlong(
+          pack.polyline,
+          zooms: pack.zooms,
+          highDetail: pack.highDetail,
+        );
+        await TileCache.instance?.deleteTiles(tiles);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Map pack "${pack.name}" removed'),
+          ),
+        );
+        _loadPacks();
+      }
+    } finally {
+      if (mounted) setState(() => _isDeleting = false);
     }
   }
 
   Future<void> _clearAll() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Clear All Offline Map Packs?', style: AppText.headline),
-        content: Text(
-          'This will purge all downloaded corridor map packs and wipe cached tiles.',
-          style: TextStyle(color: AppTheme.text2),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+    if (_isClearing) return;
+    _isClearing = true;
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.card,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Clear All Offline Map Packs?', style: AppText.headline),
+          content: Text(
+            'This will purge all downloaded corridor map packs and wipe cached tiles.',
+            style: TextStyle(color: AppTheme.text2),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.sos),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Clear All'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    await SavedMapPackStore.clear();
-    await TileCache.instance?.clear();
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('All offline map packs and cache cleared'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.sos),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Clear All'),
+            ),
+          ],
         ),
       );
-      _loadPacks();
+
+      if (confirmed != true || !mounted) return;
+
+      await SavedMapPackStore.clear();
+      await TileCache.instance?.clear();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All offline map packs and cache cleared'),
+          ),
+        );
+        _loadPacks();
+      }
+    } finally {
+      if (mounted) setState(() => _isClearing = false);
     }
   }
 
@@ -142,6 +157,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.bg,
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: const Text('Offline Map Packs'),
         backgroundColor: AppTheme.card,
@@ -151,58 +167,63 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
             IconButton(
               icon: const Icon(Icons.delete_sweep_rounded),
               tooltip: 'Clear all packs',
-              onPressed: _clearAll,
+              onPressed: _isClearing ? null : _clearAll,
             ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                // Plan Entitlement Status Banner
-                if (!FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks))
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 14),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.warnTint,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppTheme.warnBorder, width: 1.5),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.lock_outline_rounded, color: AppTheme.warnText, size: 22),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'COMMUNITY PLAN · 1 PACK LIMIT',
-                                style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w800, fontSize: 12),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${_packs.length} of 1 offline route pack used. Upgrade to CoRoute Pro for unlimited corridor downloads.',
-                                style: TextStyle(color: AppTheme.text2, fontSize: 12),
-                              ),
-                            ],
-                          ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : ListView(
+                  padding: const EdgeInsets.all(16),
+                  physics: const BouncingScrollPhysics(),
+                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                  children: [
+                    // Plan Entitlement Status Banner
+                    if (!FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks))
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 14),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warnTint,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppTheme.warnBorder, width: 1.5),
                         ),
-                        const SizedBox(width: 8),
-                        FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.brand,
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            minimumSize: const Size(0, 32),
-                          ),
-                          onPressed: () => FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks),
-                          child: const Text('Upgrade', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                        child: Row(
+                          children: [
+                            Icon(Icons.lock_outline_rounded, color: AppTheme.warnText, size: 22),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'COMMUNITY PLAN · 1 PACK LIMIT',
+                                    style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w800, fontSize: 12),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${_packs.length} of 1 offline route pack used. Upgrade to CoRoute Pro for unlimited corridor downloads.',
+                                    style: TextStyle(color: AppTheme.text2, fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.brand,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                minimumSize: const Size(64, 48),
+                              ),
+                              onPressed: () => FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks),
+                              child: const Text('Upgrade', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  )
+                      )
                 else
                   Container(
                     margin: const EdgeInsets.only(bottom: 14),
@@ -326,6 +347,8 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
                   ..._packs.map((pack) => _buildPackCard(pack)),
               ],
             ),
+        ),
+      ),
     );
   }
 
@@ -408,21 +431,28 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
                     side: BorderSide(color: AppTheme.brand.withValues(alpha: 0.5)),
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    minimumSize: const Size(0, 38),
+                    minimumSize: const Size(0, 48),
                   ),
                   icon: const Icon(Icons.remove_red_eye_rounded, size: 16),
                   label: const Text('Verify Offline', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => OfflineTileVerificationScreen(
-                          packName: pack.name,
-                          routePoints: pack.polyline,
-                          highDetail: pack.highDetail,
-                        ),
-                      ),
-                    );
-                  },
+                  onPressed: _isNavigating
+                      ? null
+                      : () async {
+                          setState(() => _isNavigating = true);
+                          try {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => OfflineTileVerificationScreen(
+                                  packName: pack.name,
+                                  routePoints: pack.polyline,
+                                  highDetail: pack.highDetail,
+                                ),
+                              ),
+                            );
+                          } finally {
+                            if (mounted) setState(() => _isNavigating = false);
+                          }
+                        },
                 ),
               ),
               const SizedBox(width: 8),
@@ -430,7 +460,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
                 icon: const Icon(Icons.delete_outline_rounded, size: 20),
                 color: AppTheme.sos,
                 tooltip: 'Delete map pack',
-                onPressed: () => _deletePack(pack),
+                onPressed: _isDeleting ? null : () => _deletePack(pack),
               ),
             ],
           ),

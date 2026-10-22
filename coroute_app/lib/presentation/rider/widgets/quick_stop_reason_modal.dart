@@ -25,38 +25,56 @@ class QuickStopReasonModal extends StatelessWidget {
     this.onBroadcast,
   });
 
+  static bool _isShowing = false;
+
   static Future<void> show(
     BuildContext context, {
     required ConvoyService convoyService,
     required String userId,
     String currentReason = '',
     void Function(String reason, String label)? onBroadcast,
-  }) {
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: const Color(0xFF15232E).withOpacity(0.5),
-      builder: (ctx) => QuickStopReasonModal(
-        convoyService: convoyService,
-        userId: userId,
-        currentReason: currentReason,
-        onBroadcast: onBroadcast,
-      ),
-    );
+  }) async {
+    if (_isShowing) return;
+    _isShowing = true;
+    try {
+      final screenSize = MediaQuery.sizeOf(context);
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        constraints: BoxConstraints(
+          maxWidth: 600,
+          maxHeight: screenSize.height * 0.88,
+        ),
+        backgroundColor: Colors.transparent,
+        barrierColor: const Color(0xFF15232E).withOpacity(0.5),
+        builder: (ctx) => Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: QuickStopReasonModal(
+              convoyService: convoyService,
+              userId: userId,
+              currentReason: currentReason,
+              onBroadcast: onBroadcast,
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _isShowing = false;
+    }
   }
 
   void _select(BuildContext context, String code, String label) {
     convoyService.updateStatusReason(userId: userId, reason: code, message: label);
     onBroadcast?.call(code, label);
-    Navigator.of(context).pop();
+    if (context.mounted) Navigator.of(context).maybePop();
   }
 
   void _clear(BuildContext context) {
     convoyService.updateStatusReason(userId: userId, reason: '', message: '');
     onBroadcast?.call('', 'Moving - Stop Cleared');
-    Navigator.of(context).pop();
+    if (context.mounted) Navigator.of(context).maybePop();
   }
 
   @override
@@ -150,7 +168,9 @@ class QuickStopReasonModal extends StatelessWidget {
                   key: const Key('stop_reason_close'),
                   icon: Icons.close_rounded,
                   label: 'Close modal',
-                  onTap: () => Navigator.of(context).pop(),
+                  onTap: () {
+                    if (context.mounted) Navigator.of(context).maybePop();
+                  },
                 ),
               ],
             ),
@@ -176,7 +196,9 @@ class QuickStopReasonModal extends StatelessWidget {
                       label: 'Keep riding',
                       tone: DsButtonTone.outline,
                       height: 58,
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: () {
+                        if (context.mounted) Navigator.of(context).maybePop();
+                      },
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -196,7 +218,9 @@ class QuickStopReasonModal extends StatelessWidget {
                 label: 'Keep riding',
                 tone: DsButtonTone.outline,
                 height: 58,
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () {
+                  if (context.mounted) Navigator.of(context).maybePop();
+                },
               ),
           ],
         ),
@@ -248,7 +272,7 @@ class _ReasonRow extends StatelessWidget {
                   children: [
                     Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title),
                     const SizedBox(height: 2),
-                    Text(hint, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
+                    Text(hint, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
                   ],
                 ),
               ),

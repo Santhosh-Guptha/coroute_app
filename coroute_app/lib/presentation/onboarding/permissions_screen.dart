@@ -10,6 +10,8 @@ class PermissionsScreen extends StatefulWidget {
   final bool gate;
   const PermissionsScreen({super.key, this.gate = false});
 
+  static bool _isEnsuring = false;
+
   /// Shows the screen if required permissions are missing. Returns true when the
   /// caller may continue (everything required is granted or the platform needs nothing).
   static Future<bool> ensure(BuildContext context) async {
@@ -18,8 +20,14 @@ class PermissionsScreen extends StatefulWidget {
       return true;
     }
     if (!context.mounted) return false;
-    final ok = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const PermissionsScreen(gate: true)));
-    return ok == true;
+    if (_isEnsuring) return false;
+    _isEnsuring = true;
+    try {
+      final ok = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const PermissionsScreen(gate: true)));
+      return ok == true;
+    } finally {
+      _isEnsuring = false;
+    }
   }
 
   @override
@@ -29,6 +37,8 @@ class PermissionsScreen extends StatefulWidget {
 class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindingObserver {
   List<PermissionItem> _items = const [];
   bool _loading = true;
+  bool _isRequesting = false;
+  bool _isContinuing = false;
 
   @override
   void initState() {
@@ -59,8 +69,14 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
   }
 
   Future<void> _request(PermissionItem p) async {
-    await PermissionsService.request(p.key);
-    await _refresh();
+    if (_isRequesting) return;
+    _isRequesting = true;
+    try {
+      await PermissionsService.request(p.key);
+      await _refresh();
+    } finally {
+      if (mounted) setState(() => _isRequesting = false);
+    }
   }
 
   @override
@@ -68,15 +84,18 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
     final requiredOk = _items.where((p) => p.required).every((p) => p.granted);
     return Scaffold(
       backgroundColor: AppTheme.bg,
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
+            constraints: const BoxConstraints(maxWidth: 680),
             child: LoadingState(
               loading: _loading,
               hasData: _items.isNotEmpty || !_loading,
               child: ListView(
                 padding: dsScreenPadding,
+                physics: const BouncingScrollPhysics(),
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                 children: [
                   DsScreenHeader(
                     title: 'Permissions',
@@ -97,10 +116,15 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
                     DsButton(
                       label: requiredOk ? 'Continue' : 'Allow the required permissions to continue',
                       fontSize: requiredOk ? 16 : 14,
-                      onPressed: requiredOk
+                      onPressed: (requiredOk && !_isContinuing)
                           ? () async {
-                              await PermissionsService.markIntroShown();
-                              if (context.mounted) Navigator.pop(context, true);
+                              setState(() => _isContinuing = true);
+                              try {
+                                await PermissionsService.markIntroShown();
+                                if (context.mounted) Navigator.pop(context, true);
+                              } finally {
+                                if (mounted) setState(() => _isContinuing = false);
+                              }
                             }
                           : null,
                     ),
@@ -149,13 +173,13 @@ class _PermissionRow extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(child: Text(p.title, style: AppText.title.copyWith(fontSize: 15))),
+                      Expanded(child: Text(p.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 15))),
                       const SizedBox(width: 8),
                       DsChip(statusText, warning: attention, color: p.granted ? null : (attention ? null : AppTheme.muted), background: p.granted ? null : (attention ? null : AppTheme.soft)),
                     ],
                   ),
                   const SizedBox(height: Space.s4),
-                  Text(p.reason, style: AppText.label),
+                  Text(p.reason, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.label),
                   if (!p.granted) ...[
                     const SizedBox(height: Space.s12),
                     SizedBox(

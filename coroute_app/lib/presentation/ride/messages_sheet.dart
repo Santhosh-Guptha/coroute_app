@@ -182,14 +182,22 @@ class _QuickChip extends StatelessWidget {
   }
 }
 
+bool _isMessagesSheetShowing = false;
+
 /// Opens the group messages sheet (quick messages, the conversation, a text field).
-Future<void> showMessagesSheet(BuildContext context, {required String convoyId, required RiderModel me}) {
-  return showAppSheet<void>(
-    context,
-    title: 'Messages',
-    isScrollControlled: true,
-    builder: (_) => MessagesView(convoyId: convoyId, me: me),
-  );
+Future<void> showMessagesSheet(BuildContext context, {required String convoyId, required RiderModel me}) async {
+  if (_isMessagesSheetShowing) return;
+  _isMessagesSheetShowing = true;
+  try {
+    await showAppSheet<void>(
+      context,
+      title: 'Messages',
+      isScrollControlled: true,
+      builder: (_) => MessagesView(convoyId: convoyId, me: me),
+    );
+  } finally {
+    _isMessagesSheetShowing = false;
+  }
 }
 
 class MessagesView extends StatefulWidget {

@@ -315,7 +315,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _loadDetails)],
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
+          constraints: BoxConstraints(maxWidth: widget.embedded ? adminMaxContentWidth : 800),
           child: LoadingState(
             loading: _loading,
             hasData: _user != null || _error != null,
@@ -582,6 +582,8 @@ class _ReasonSheetState extends State<_ReasonSheet> {
   Widget build(BuildContext context) {
     final side = BorderSide(color: AppTheme.border, width: 2);
     return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,

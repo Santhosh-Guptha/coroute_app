@@ -34,30 +34,31 @@ class CompleteProfileScreen extends StatelessWidget {
     return PopScope(
       canPop: !forced,
       child: Scaffold(
+        resizeToAvoidBottomInset: true,
         backgroundColor: AppTheme.bg,
         body: SafeArea(
           bottom: false,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                child: DsScreenHeader(
-                  title: 'Your safety details',
-                  subtitle: 'Needed before riding with a group',
-                  onBack: forced ? null : () => Navigator.maybePop(context),
-                  trailing: forced
-                      ? TextButton(
-                          onPressed: () => _signOut(context),
-                          style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
-                          child: const Text('Sign out'),
-                        )
-                      : null,
-                ),
-              ),
-              Expanded(
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 600),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 600),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                    child: DsScreenHeader(
+                      title: 'Your safety details',
+                      subtitle: 'Needed before riding with a group',
+                      onBack: forced ? null : () => Navigator.maybePop(context),
+                      trailing: forced
+                          ? TextButton(
+                              onPressed: () => _signOut(context),
+                              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                              child: const Text('Sign out'),
+                            )
+                          : null,
+                    ),
+                  ),
+                  Expanded(
                     child: ProfileForm(
                       saveLabel: 'Save and continue',
                       header: Padding(
@@ -85,9 +86,9 @@ class CompleteProfileScreen extends StatelessWidget {
                       onSaved: () => Navigator.of(context).pop(true),
                     ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),

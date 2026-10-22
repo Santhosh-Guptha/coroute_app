@@ -22,6 +22,7 @@ class CrashAlarmHost extends StatefulWidget {
 class _CrashAlarmHostState extends State<CrashAlarmHost> {
   SafetyService? _safety;
   Route<void>? _route;
+  bool _isPushing = false;
 
   @override
   void didChangeDependencies() {
@@ -39,22 +40,37 @@ class _CrashAlarmHostState extends State<CrashAlarmHost> {
     if (!mounted) return;
     final open = _safety?.alarm != null;
     final route = _route;
-    if (open && route == null) {
+
+    if (open && route == null && !_isPushing) {
       final nav = widget.navigatorKey?.currentState;
-      if (nav == null) return;
+      if (nav == null) {
+        // Navigator not attached yet; retry on the next frame so the emergency alarm is never missed.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _sync();
+        });
+        return;
+      }
+      _isPushing = true;
       final r = MaterialPageRoute<void>(fullscreenDialog: true, builder: (_) => const CrashAlarmScreen());
       _route = r;
       nav.push(r).whenComplete(() {
+        _isPushing = false;
         if (identical(_route, r)) _route = null;
       });
-    } else if (!open && route != null) {
+    } else if (!open && (route != null || _isPushing)) {
       // After the frame: a button on the screen may be popping it right now
       // (the SOS sheet's "I am safe" closes the alarm and then pops).
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _safety?.alarm != null || !identical(_route, route)) return;
+        if (!mounted || _safety?.alarm != null) return;
+        final currentRoute = _route;
         _route = null;
-        final nav = route.navigator;
-        if (route.isActive && nav != null) nav.removeRoute(route);
+        _isPushing = false;
+        if (currentRoute != null && currentRoute.isActive) {
+          final nav = currentRoute.navigator;
+          if (nav != null) {
+            nav.removeRoute(currentRoute);
+          }
+        }
       });
     }
   }

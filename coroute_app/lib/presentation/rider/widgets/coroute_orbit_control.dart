@@ -206,8 +206,9 @@ class _CorouteOrbitControlState extends State<CorouteOrbitControl>
         // Floating quick-access panel beside the button.
         if (_isOpen)
           Positioned(
-            left: onLeft ? _edgeGap + _fabSize + 16 : _edgeGap,
-            right: onLeft ? _edgeGap : _edgeGap + _fabSize + 16,
+            left: onLeft ? _edgeGap + _fabSize + 16 : null,
+            right: onLeft ? null : _edgeGap + _fabSize + 16,
+            width: (size.width - _fabSize - _edgeGap * 2 - 16).clamp(280.0, 360.0),
             top: (_position!.dy - 70).clamp(padding.top + 12, (size.height - 400).clamp(padding.top + 12, double.infinity)),
             child: AnimatedBuilder(
               animation: _animController,

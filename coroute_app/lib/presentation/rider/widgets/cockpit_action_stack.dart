@@ -55,6 +55,7 @@ class CockpitActionStack extends StatefulWidget {
 class _CockpitActionStackState extends State<CockpitActionStack> {
   int _currentIndex = 0;
   double _dragOffset = 0;
+  bool _isShowingSheet = false;
 
   void _nextCapsule(int total) {
     if (total <= 1) return;
@@ -442,122 +443,153 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
     Function(RouteEssential station)? onAddStationStop,
     VoidCallback? onOpenFuelSheet,
   }) {
+    if (_isShowingSheet) return;
+    _isShowingSheet = true;
+
     final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
+    final isLow = usableKm != null && usableKm <= 60;
+    final screenSize = MediaQuery.sizeOf(context);
+
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxWidth: 600,
+        maxHeight: screenSize.height * 0.88,
+      ),
       backgroundColor: AppTheme.card,
       shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),
       builder: (ctx) {
-        final isLow = usableKm != null && usableKm <= 60;
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(Space.s24, Space.s16, Space.s24, Space.s24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppTheme.border,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: Space.s16),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(Space.s8),
-                      decoration: BoxDecoration(
-                        color: (isLow ? AppTheme.sos : AppTheme.brand).withOpacity(0.15),
-                        shape: BoxShape.circle,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 600),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(Space.s24, Space.s16, Space.s24, Space.s24),
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 36,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: AppTheme.border,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
                       ),
-                      child: Icon(
-                        Icons.local_gas_station_rounded,
-                        color: isLow ? AppTheme.sos : AppTheme.brand,
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(width: Space.s12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      const SizedBox(height: Space.s16),
+                      Row(
                         children: [
-                          Text(isLow ? 'Low Fuel Warning' : 'Corridor Fuel Stations', style: AppText.title),
-                          Text(
-                            usableKm != null
-                                ? 'Estimated ~${usableKm.round()} km usable range left'
-                                : 'Upcoming petrol bunks along active route',
-                            style: AppText.caption.copyWith(
-                              color: isLow ? AppTheme.sos : AppTheme.accentText,
-                              fontWeight: FontWeight.bold,
+                          Container(
+                            padding: const EdgeInsets.all(Space.s8),
+                            decoration: BoxDecoration(
+                              color: (isLow ? AppTheme.sos : AppTheme.brand).withOpacity(0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.local_gas_station_rounded,
+                              color: isLow ? AppTheme.sos : AppTheme.brand,
+                              size: 28,
+                            ),
+                          ),
+                          const SizedBox(width: Space.s12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  isLow ? 'Low Fuel Warning' : 'Corridor Fuel Stations',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppText.title,
+                                ),
+                                Text(
+                                  usableKm != null
+                                      ? 'Estimated ~${usableKm.round()} km usable range left'
+                                      : 'Upcoming petrol bunks along active route',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppText.caption.copyWith(
+                                    color: isLow ? AppTheme.sos : AppTheme.accentText,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: Space.s16),
-                const Divider(),
-                const SizedBox(height: Space.s8),
-                Text('UPCOMING CORRIDOR STATIONS',
-                    style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.muted)),
-                const SizedBox(height: Space.s8),
-                if (stations.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: Space.s12),
-                    child: Text('No fuel stations found in current offline window. Open full map or fuel manager.',
-                        style: AppText.body.copyWith(color: AppTheme.muted)),
-                  )
-                else
-                  for (final st in stations) ...[
-                    _StationRow(
-                      station: st,
-                      progressM: progressM,
-                      riderLat: riderLat,
-                      riderLng: riderLng,
-                      onAdd: () {
-                        Navigator.pop(ctx);
-                        onAddStationStop?.call(st);
-                      },
-                    ),
-                    const SizedBox(height: Space.s8),
-                  ],
-                const SizedBox(height: Space.s12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.text,
-                          side: BorderSide(
-                            color: isSunlightHud ? AppTheme.border.withOpacity(0.9) : AppTheme.border,
-                            width: isSunlightHud ? 2 : 1.5,
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: Space.s12, horizontal: Space.s16),
-                          minimumSize: const Size(0, 48),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          onOpenFuelSheet?.call();
-                        },
-                        icon: const Icon(Icons.tune_rounded, size: 18),
-                        label: const Text('Manage Fuel'),
+                      const SizedBox(height: Space.s16),
+                      const Divider(),
+                      const SizedBox(height: Space.s8),
+                      Text(
+                        'UPCOMING CORRIDOR STATIONS',
+                        style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.muted),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: Space.s8),
+                      if (stations.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: Space.s12),
+                          child: Text(
+                            'No fuel stations found in current offline window. Open full map or fuel manager.',
+                            style: AppText.body.copyWith(color: AppTheme.muted),
+                          ),
+                        )
+                      else
+                        for (final st in stations) ...[
+                          _StationRow(
+                            station: st,
+                            progressM: progressM,
+                            riderLat: riderLat,
+                            riderLng: riderLng,
+                            onAdd: () {
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              onAddStationStop?.call(st);
+                            },
+                          ),
+                          const SizedBox(height: Space.s8),
+                        ],
+                      const SizedBox(height: Space.s12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTheme.text,
+                                side: BorderSide(
+                                  color: isSunlightHud ? AppTheme.border.withOpacity(0.9) : AppTheme.border,
+                                  width: isSunlightHud ? 2 : 1.5,
+                                ),
+                                padding: const EdgeInsets.symmetric(vertical: Space.s12, horizontal: Space.s16),
+                                minimumSize: const Size(0, 48),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              onPressed: () {
+                                if (ctx.mounted) Navigator.pop(ctx);
+                                onOpenFuelSheet?.call();
+                              },
+                              icon: const Icon(Icons.tune_rounded, size: 18),
+                              label: const Text('Manage Fuel'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
         );
       },
-    );
+    ).whenComplete(() {
+      _isShowingSheet = false;
+    });
   }
 }
 
@@ -699,6 +731,8 @@ class _StationRow extends StatelessWidget {
                 ),
                 Text(
                   '$distStr ahead on corridor',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.bold),
                 ),
               ],

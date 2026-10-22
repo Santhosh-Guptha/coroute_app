@@ -220,6 +220,7 @@ class _ProfileFormState extends State<ProfileForm> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (ok) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile saved.')));
       widget.onSaved?.call();
     } else {
@@ -290,6 +291,8 @@ class _ProfileFormState extends State<ProfileForm> {
     final header = widget.header;
     final err = _error;
     return ListView(
+      physics: const BouncingScrollPhysics(),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
       children: [
         ?header,

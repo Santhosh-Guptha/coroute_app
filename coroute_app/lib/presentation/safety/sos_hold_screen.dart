@@ -341,61 +341,71 @@ class SosHoldScreen extends StatelessWidget {
           child: LayoutBuilder(builder: (context, box) {
             final wide = box.maxWidth > box.maxHeight && box.maxWidth >= 480;
             if (wide) {
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        child: Column(
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 840),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                top,
+                                const SizedBox(height: 14),
+                                heading,
+                                const SizedBox(height: 8),
+                                help,
+                                const SizedBox(height: 16),
+                                list,
+                                const SizedBox(height: 16),
+                                bottom,
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        // The hold button shrinks on a very low landscape screen instead of overflowing.
+                        Expanded(child: FittedBox(fit: BoxFit.scaleDown, child: hold)),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 600),
+                child: SingleChildScrollView(
+                  padding: dsScreenPadding,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: box.maxHeight > 44 ? box.maxHeight - 44 : 0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             top,
+                            const SizedBox(height: 24),
+                            hold,
                             const SizedBox(height: 14),
                             heading,
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 10),
                             help,
-                            const SizedBox(height: 16),
+                            const SizedBox(height: 20),
                             list,
-                            const SizedBox(height: 16),
-                            bottom,
                           ],
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    // The hold button shrinks on a very low landscape screen instead of overflowing.
-                    Expanded(child: FittedBox(fit: BoxFit.scaleDown, child: hold)),
-                  ],
-                ),
-              );
-            }
-            return SingleChildScrollView(
-              padding: dsScreenPadding,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: box.maxHeight > 44 ? box.maxHeight - 44 : 0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        top,
-                        const SizedBox(height: 24),
-                        hold,
-                        const SizedBox(height: 14),
-                        heading,
-                        const SizedBox(height: 10),
-                        help,
-                        const SizedBox(height: 20),
-                        list,
+                        Padding(padding: const EdgeInsets.only(top: 20), child: bottom),
                       ],
                     ),
-                    Padding(padding: const EdgeInsets.only(top: 20), child: bottom),
-                  ],
+                  ),
                 ),
               ),
             );

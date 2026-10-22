@@ -180,89 +180,95 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
             top: 12,
             left: 12,
             right: 12,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.card.withValues(alpha: 0.92),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.border, width: 1.5),
-                    boxShadow: dsFloatingShadow(),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: StatusColors.success, // Green indicator
-                          shape: BoxShape.circle,
-                        ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.card.withValues(alpha: 0.92),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppTheme.border, width: 1.5),
+                        boxShadow: dsFloatingShadow(),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: StatusColors.success, // Green indicator
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'OFFLINE TILE VERIFICATION',
-                                  style: AppText.caption.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.8,
-                                    fontSize: 11,
-                                    color: AppTheme.brand,
-                                  ),
+                                Row(
+                                  children: [
+                                    Text(
+                                      'OFFLINE TILE VERIFICATION',
+                                      style: AppText.caption.copyWith(
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.8,
+                                        fontSize: 11,
+                                        color: AppTheme.brand,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      'Z ${_currentZoom.toStringAsFixed(1)}',
+                                      style: AppText.headline.copyWith(fontSize: 14, color: AppTheme.text),
+                                    ),
+                                  ],
                                 ),
-                                const Spacer(),
+                                const SizedBox(height: 2),
                                 Text(
-                                  'Z ${_currentZoom.toStringAsFixed(1)}',
-                                  style: AppText.headline.copyWith(fontSize: 14, color: AppTheme.text),
+                                  _zoomDescription(_currentZoom),
+                                  style: AppText.caption.copyWith(color: AppTheme.accentText),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              _zoomDescription(_currentZoom),
-                              style: AppText.caption.copyWith(color: AppTheme.accentText),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
+                    ),
 
-                const SizedBox(height: 8),
+                    const SizedBox(height: 8),
 
-                // Zoom Quick Snaps
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      _buildSnapChip('Z12 Overview', 12.0),
-                      const SizedBox(width: 6),
-                      _buildSnapChip('Z14 Highways', 14.0),
-                      const SizedBox(width: 6),
-                      _buildSnapChip('Z16 Streets', 16.0),
-                      const SizedBox(width: 6),
-                      _buildSnapChip('Z17 Junctions', 17.0),
-                      const SizedBox(width: 6),
-                      ActionChip(
-                        avatar: Icon(Icons.fit_screen_rounded, size: 16, color: AppTheme.text),
-                        label: const Text('Fit Corridor'),
-                        backgroundColor: AppTheme.card,
-                        labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.text),
-                        side: BorderSide(color: AppTheme.border),
-                        onPressed: _fitRoute,
+                    // Zoom Quick Snaps
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      child: Row(
+                        children: [
+                          _buildSnapChip('Z12 Overview', 12.0),
+                          const SizedBox(width: 6),
+                          _buildSnapChip('Z14 Highways', 14.0),
+                          const SizedBox(width: 6),
+                          _buildSnapChip('Z16 Streets', 16.0),
+                          const SizedBox(width: 6),
+                          _buildSnapChip('Z17 Junctions', 17.0),
+                          const SizedBox(width: 6),
+                          ActionChip(
+                            avatar: Icon(Icons.fit_screen_rounded, size: 16, color: AppTheme.text),
+                            label: const Text('Fit Corridor'),
+                            backgroundColor: AppTheme.card,
+                            labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.text),
+                            side: BorderSide(color: AppTheme.border),
+                            onPressed: _fitRoute,
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
 
@@ -271,65 +277,70 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
             left: 12,
             right: 12,
             bottom: 16,
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppTheme.card,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.border, width: 1.5),
-                boxShadow: dsFloatingShadow(),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.card,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.border, width: 1.5),
+                    boxShadow: dsFloatingShadow(),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Icon(Icons.verified_rounded, color: AppTheme.brand, size: 22),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Offline Storage Ready', style: AppText.headline.copyWith(fontSize: 15)),
-                            const SizedBox(height: 2),
-                            Text(
-                              '$cachedCount tiles cached · High detail corridor active',
-                              style: AppText.caption,
+                      Row(
+                        children: [
+                          Icon(Icons.verified_rounded, color: AppTheme.brand, size: 22),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Offline Storage Ready', style: AppText.headline.copyWith(fontSize: 15)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '$cachedCount tiles cached · High detail corridor active',
+                                  style: AppText.caption,
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppTheme.brand.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          widget.highDetail ? 'HIGH DETAIL' : 'STANDARD',
-                          style: AppText.caption.copyWith(
-                            color: AppTheme.brand,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 10,
                           ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppTheme.brand.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              widget.highDetail ? 'HIGH DETAIL' : 'STANDARD',
+                              style: AppText.caption.copyWith(
+                                color: AppTheme.brand,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.brand,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          minimumSize: const Size(double.infinity, 48),
                         ),
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        child: const Text('Return to Trip Planner', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppTheme.brand,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      minimumSize: const Size(double.infinity, 48),
-                    ),
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Return to Trip Planner', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                  ),
-                ],
+                ),
               ),
             ),
           ),

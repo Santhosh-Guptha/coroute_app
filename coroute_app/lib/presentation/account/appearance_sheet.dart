@@ -49,81 +49,86 @@ class AppearanceSheet extends StatelessWidget {
       (ThemePreference.system, Icons.phone_android_outlined, 'Same as the phone', 'Uses your phone\'s dark mode setting.'),
     ];
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Space.s8),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          AppSheetHeader(title: 'Appearance', subtitle: summary(t)),
-          DsCard(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (var i = 0; i < options.length; i++)
-                  _ThemeOptionRow(
-                    icon: options[i].$2,
-                    title: options[i].$3,
-                    subtitle: options[i].$4,
-                    selected: t.preference == options[i].$1,
-                    divider: i < options.length - 1,
-                    onTap: () => t.setPreference(options[i].$1),
-                  ),
-              ],
-            ),
-          ),
-          Builder(
-            builder: (context) {
-              final s = context.watch<SettingsService?>();
-              if (s == null) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(top: 20),
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 600),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: Space.s8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AppSheetHeader(title: 'Appearance', subtitle: summary(t)),
+              DsCard(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Semantics(header: true, child: DsSectionHeader('Map HUD & Alerts')),
-                    const SizedBox(height: 10),
-                    DsCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                    for (var i = 0; i < options.length; i++)
+                      _ThemeOptionRow(
+                        icon: options[i].$2,
+                        title: options[i].$3,
+                        subtitle: options[i].$4,
+                        selected: t.preference == options[i].$1,
+                        divider: i < options.length - 1,
+                        onTap: () => t.setPreference(options[i].$1),
+                      ),
+                  ],
+                ),
+              ),
+              Builder(
+                builder: (context) {
+                  final s = context.watch<SettingsService?>();
+                  if (s == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Semantics(header: true, child: DsSectionHeader('Map HUD & Alerts')),
+                        const SizedBox(height: 10),
+                        DsCard(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.timer_outlined, size: 22, color: AppTheme.accentText),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  s.mapAlertDismissSeconds == 0
-                                      ? 'Manual dismissal only on map'
-                                      : 'Alerts dismiss from map HUD after ${s.mapAlertDismissSeconds}s (kept in notifications)',
-                                  style: AppText.body.copyWith(fontWeight: FontWeight.w700),
-                                ),
+                              Row(
+                                children: [
+                                  Icon(Icons.timer_outlined, size: 22, color: AppTheme.accentText),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      s.mapAlertDismissSeconds == 0
+                                          ? 'Manual dismissal only on map'
+                                          : 'Alerts dismiss from map HUD after ${s.mapAlertDismissSeconds}s (kept in notifications)',
+                                      style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: Space.s8,
+                                runSpacing: Space.s8,
+                                children: [
+                                  for (final sec in NetworkConstants.mapAlertDismissChoices)
+                                    ChoiceChip(
+                                      label: Text(sec == 0 ? 'Manual' : '${sec}s'),
+                                      selected: s.mapAlertDismissSeconds == sec,
+                                      onSelected: (_) => s.setMapAlertDismissSeconds(sec),
+                                    ),
+                                ],
                               ),
                             ],
                           ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: Space.s8,
-                            runSpacing: Space.s8,
-                            children: [
-                              for (final sec in NetworkConstants.mapAlertDismissChoices)
-                                ChoiceChip(
-                                  label: Text(sec == 0 ? 'Manual' : '${sec}s'),
-                                  selected: s.mapAlertDismissSeconds == sec,
-                                  onSelected: (_) => s.setMapAlertDismissSeconds(sec),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              );
-            },
+                  );
+                },
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

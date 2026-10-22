@@ -23,12 +23,15 @@ Future<bool> confirmAction(
     builder: (ctx) {
       final Color confirmBg = destructive ? StatusColors.critical : AppTheme.neonCyan;
       final Color confirmFg = destructive ? StatusColors.onCritical : Colors.black;
-      return AlertDialog(
-        backgroundColor: AppTheme.slateCard,
-        shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
-        title: Text(title, style: AppText.title),
-        content: Text(message, style: AppText.body.copyWith(color: AppTheme.textSecondary)),
-        actionsPadding: const EdgeInsets.fromLTRB(Space.s16, 0, Space.s16, Space.s16),
+      return Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: AlertDialog(
+            backgroundColor: AppTheme.card,
+            shape: const RoundedRectangleBorder(borderRadius: Radii.lgAll),
+            title: Text(title, style: AppText.title.copyWith(color: AppTheme.text)),
+            content: Text(message, style: AppText.body.copyWith(color: AppTheme.text2)),
+            actionsPadding: const EdgeInsets.fromLTRB(Space.s16, 0, Space.s16, Space.s16),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -52,6 +55,8 @@ Future<bool> confirmAction(
             child: Text(confirmLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         ],
+          ),
+        ),
       );
     },
   );

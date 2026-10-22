@@ -57,147 +57,156 @@ class PlanSelectorScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        children: [
-          // Developer / Tester Mode Banner
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.card,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: forceUnlocked ? AppTheme.accentText : AppTheme.warnText,
-                width: 1.5,
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  forceUnlocked ? Icons.lock_open_rounded : Icons.lock_outline_rounded,
-                  color: forceUnlocked ? AppTheme.accentText : AppTheme.warnText,
-                  size: 24,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        forceUnlocked ? 'TEST MODE: ALL FEATURES UNLOCKED' : 'TEST MODE: STRICT PLAN RULES ENFORCED',
-                        style: TextStyle(
-                          color: forceUnlocked ? AppTheme.accentText : AppTheme.warnText,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 12,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        forceUnlocked
-                            ? 'All 4 plan features are currently 100% free and active.'
-                            : 'App is strictly constrained by your selected plan below.',
-                        style: TextStyle(color: AppTheme.text2, fontSize: 11),
-                      ),
-                    ],
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            children: [
+              // Developer / Tester Mode Banner
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.card,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: forceUnlocked ? AppTheme.accentText : AppTheme.warnText,
+                    width: 1.5,
                   ),
                 ),
-                Switch.adaptive(
-                  value: forceUnlocked,
-                  activeColor: AppTheme.accentText,
-                  onChanged: (val) {
-                    HapticFeedback.selectionClick();
-                    planService.setForceAllUnlocked(val);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        duration: const Duration(seconds: 2),
-                        backgroundColor: AppTheme.card,
-                        content: Text(
-                          val ? 'Unlocked all features for global testing' : 'Enforced strict tier rules for ${FeatureGates.tierLabel(currentTier)}',
-                          style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
-                        ),
+                child: Row(
+                  children: [
+                    Icon(
+                      forceUnlocked ? Icons.lock_open_rounded : Icons.lock_outline_rounded,
+                      color: forceUnlocked ? AppTheme.accentText : AppTheme.warnText,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            forceUnlocked ? 'TEST MODE: ALL FEATURES UNLOCKED' : 'TEST MODE: STRICT PLAN RULES ENFORCED',
+                            style: TextStyle(
+                              color: forceUnlocked ? AppTheme.accentText : AppTheme.warnText,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 12,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            forceUnlocked
+                                ? 'All 4 plan features are currently 100% free and active.'
+                                : 'App is strictly constrained by your selected plan below.',
+                            style: TextStyle(color: AppTheme.text2, fontSize: 11),
+                          ),
+                        ],
                       ),
-                    );
-                  },
+                    ),
+                    Switch.adaptive(
+                      value: forceUnlocked,
+                      activeColor: AppTheme.accentText,
+                      onChanged: (val) {
+                        HapticFeedback.selectionClick();
+                        planService.setForceAllUnlocked(val);
+                        ScaffoldMessenger.of(context)
+                          ..clearSnackBars()
+                          ..showSnackBar(
+                            SnackBar(
+                              duration: const Duration(seconds: 2),
+                              backgroundColor: AppTheme.card,
+                              content: Text(
+                                val ? 'Unlocked all features for global testing' : 'Enforced strict tier rules for ${FeatureGates.tierLabel(currentTier)}',
+                                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          );
+                      },
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
+              ),
+              const SizedBox(height: 16),
 
-          // Heading & Subtitle
-          Text(
-            'Choose Your Convoy Power',
-            style: TextStyle(
-              color: AppTheme.text,
-              fontWeight: FontWeight.w900,
-              fontSize: 20,
-              letterSpacing: 0.3,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Select a plan to test its specific features, convoy capacities, and cockpit controls.',
-            style: TextStyle(color: AppTheme.text2, fontSize: 13),
-          ),
-          const SizedBox(height: 16),
+              // Heading & Subtitle
+              Text(
+                'Choose Your Convoy Power',
+                style: TextStyle(
+                  color: AppTheme.text,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 20,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Select a plan to test its specific features, convoy capacities, and cockpit controls.',
+                style: TextStyle(color: AppTheme.text2, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
 
-          // Plan Cards
-          for (final plan in plans) ...[
-            _PlanCard(
-              plan: plan,
-              isActive: plan.tier == currentTier,
-              onSelect: () {
-                HapticFeedback.heavyImpact();
-                planService.selectTier(plan.tier);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    duration: const Duration(seconds: 3),
-                    backgroundColor: AppTheme.card,
-                    content: Row(
-                      children: [
-                        Icon(Icons.check_circle_rounded, color: AppTheme.accentText),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'Activated ${plan.name}! Max ${plan.maxConvoySize} riders allowed.',
-                            style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
+              // Plan Cards
+              for (final plan in plans) ...[
+                _PlanCard(
+                  plan: plan,
+                  isActive: plan.tier == currentTier,
+                  onSelect: () {
+                    HapticFeedback.heavyImpact();
+                    planService.selectTier(plan.tier);
+                    ScaffoldMessenger.of(context)
+                      ..clearSnackBars()
+                      ..showSnackBar(
+                        SnackBar(
+                          duration: const Duration(seconds: 3),
+                          backgroundColor: AppTheme.card,
+                          content: Row(
+                            children: [
+                              Icon(Icons.check_circle_rounded, color: AppTheme.accentText),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Activated ${plan.name}! Max ${plan.maxConvoySize} riders allowed.',
+                                  style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          const SizedBox(height: 12),
-          // Informative Footer
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppTheme.soft,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.border2),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.info_outline_rounded, color: AppTheme.muted, size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'No payment is required in this build. You can switch between plans freely to test convoy scaling, priority ducking, and emergency systems.',
-                    style: TextStyle(color: AppTheme.text2, fontSize: 12, height: 1.4),
-                  ),
+                      );
+                  },
                 ),
+                const SizedBox(height: 16),
               ],
-            ),
+
+              const SizedBox(height: 12),
+              // Informative Footer
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppTheme.soft,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.border2),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline_rounded, color: AppTheme.muted, size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'No payment is required in this build. You can switch between plans freely to test convoy scaling, priority ducking, and emergency systems.',
+                        style: TextStyle(color: AppTheme.text2, fontSize: 12, height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 30),
+            ],
           ),
-          const SizedBox(height: 30),
-        ],
+        ),
       ),
     );
   }
@@ -251,6 +260,8 @@ class _PlanCard extends StatelessWidget {
                         children: [
                           Text(
                             plan.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: AppTheme.text,
                               fontWeight: FontWeight.w900,
@@ -260,6 +271,8 @@ class _PlanCard extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             plan.tagline,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(color: AppTheme.text2, fontSize: 12),
                           ),
                         ],
@@ -300,9 +313,13 @@ class _PlanCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      '(${plan.annualPrice})',
-                      style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                    Flexible(
+                      child: Text(
+                        '(${plan.annualPrice})',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                      ),
                     ),
                   ],
                 ),
@@ -349,7 +366,7 @@ class _PlanCard extends StatelessWidget {
                 // Action Button (56dp glove-friendly target)
                 SizedBox(
                   width: double.infinity,
-                  height: 54,
+                  height: 56,
                   child: FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor: isActive ? AppTheme.brand : AppTheme.soft,

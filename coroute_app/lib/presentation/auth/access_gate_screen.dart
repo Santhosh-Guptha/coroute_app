@@ -237,6 +237,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
     setState(() => _isLoading = false);
 
     if (res['success'] == true) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Welcome to CoRoute, $name. Your account is ready.'),
@@ -286,9 +287,12 @@ class _AccessGateScreenState extends State<AccessGateScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: AppTheme.bg,
       body: SafeArea(
         child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
           child: Center(
             child: ConstrainedBox(
@@ -451,6 +455,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
           alignment: Alignment.centerRight,
           child: TextButton(
             onPressed: _showForgotPassword,
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
             child: const Text('Forgot password?'),
           ),
         ),
@@ -465,6 +470,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         Center(
           child: TextButton(
             onPressed: () => _tabController.animateTo(1),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
             child: const Text("Don't have an account? Register as New Rider", textAlign: TextAlign.center),
           ),
         ),
@@ -727,6 +733,7 @@ class _AccessGateScreenState extends State<AccessGateScreen>
         Center(
           child: TextButton(
             onPressed: () => _tabController.animateTo(0),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
             child: const Text('Already have an account? Sign In'),
           ),
         ),

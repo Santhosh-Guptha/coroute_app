@@ -167,15 +167,17 @@ class OemBatteryGuide extends StatelessWidget {
             onPressed: () async {
               final ok = await SafetyNative.openOemBatterySettings();
               if (!ok && context.mounted) {
-                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                  const SnackBar(content: Text('Open your phone settings and follow the steps above.')),
-                );
+                ScaffoldMessenger.maybeOf(context)
+                  ?..clearSnackBars()
+                  ..showSnackBar(
+                    const SnackBar(content: Text('Open your phone settings and follow the steps above.')),
+                  );
               }
             },
           ),
           const SizedBox(height: Space.s8),
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.of(context).maybePop(),
             style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),
             child: const Text('Done'),
           ),

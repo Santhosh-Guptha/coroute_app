@@ -93,11 +93,35 @@ class EssentialsRow extends StatelessWidget {
   });
 }
 
-Future<void> showEssentialsSheet(BuildContext context, {required RouteEssentialsService service,
-    required Future<void> Function(String category, bool force) refresh,
-    bool Function(RouteEssential place)? addStop, bool leader = false, bool moving = false}) => showAppSheet<void>(context,
-  title: 'Route essentials', isScrollControlled: true,
-  builder: (_) => _EssentialsSheet(service: service, refresh: refresh, addStop: addStop, leader: leader, moving: moving));
+bool _isEssentialsSheetShowing = false;
+
+Future<void> showEssentialsSheet(
+  BuildContext context, {
+  required RouteEssentialsService service,
+  required Future<void> Function(String category, bool force) refresh,
+  bool Function(RouteEssential place)? addStop,
+  bool leader = false,
+  bool moving = false,
+}) async {
+  if (_isEssentialsSheetShowing) return;
+  _isEssentialsSheetShowing = true;
+  try {
+    await showAppSheet<void>(
+      context,
+      title: 'Route essentials',
+      isScrollControlled: true,
+      builder: (_) => _EssentialsSheet(
+        service: service,
+        refresh: refresh,
+        addStop: addStop,
+        leader: leader,
+        moving: moving,
+      ),
+    );
+  } finally {
+    _isEssentialsSheetShowing = false;
+  }
+}
 
 class _EssentialsSheet extends StatefulWidget {
   final RouteEssentialsService service;

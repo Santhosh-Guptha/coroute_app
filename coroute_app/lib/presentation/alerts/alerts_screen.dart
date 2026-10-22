@@ -130,29 +130,39 @@ class _AlertsScreenState extends State<AlertsScreen> {
         bottom: false,
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-              child: DsScreenHeader(title: 'Alerts', subtitle: subtitle),
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                  child: DsScreenHeader(title: 'Alerts', subtitle: subtitle),
+                ),
+              ),
             ),
             if (gid != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Row(
-                  children: [
-                    _FilterPill(
-                      label: 'Alerts',
-                      icon: Icons.notifications_rounded,
-                      selected: _segment == _Segment.alerts,
-                      onTap: () => setState(() => _segment = _Segment.alerts),
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    child: Row(
+                      children: [
+                        _FilterPill(
+                          label: 'Alerts',
+                          icon: Icons.notifications_rounded,
+                          selected: _segment == _Segment.alerts,
+                          onTap: () => setState(() => _segment = _Segment.alerts),
+                        ),
+                        const SizedBox(width: 8),
+                        _FilterPill(
+                          label: 'Timeline',
+                          icon: Icons.timeline_rounded,
+                          selected: _segment == _Segment.timeline,
+                          onTap: () => setState(() => _segment = _Segment.timeline),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    _FilterPill(
-                      label: 'Timeline',
-                      icon: Icons.timeline_rounded,
-                      selected: _segment == _Segment.timeline,
-                      onTap: () => setState(() => _segment = _Segment.timeline),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             Expanded(
@@ -231,7 +241,9 @@ class _AlertsList extends StatelessWidget {
   static Future<void> _call(BuildContext context, String phone) async {
     final ok = await launchUrl(Uri(scheme: 'tel', path: phone.replaceAll(' ', '')));
     if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the phone app.')));
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(const SnackBar(content: Text('Could not open the phone app.')));
     }
   }
 
@@ -250,9 +262,11 @@ class _AlertsList extends StatelessWidget {
 
   static void _imOk(BuildContext context) {
     final ok = context.read<ConvoyService>().sendCheckIn(CheckInResult.ok);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok ? 'Your group knows you are OK.' : 'Could not tell the group right now. Riding on also closes this alert.'),
-    ));
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(ok ? 'Your group knows you are OK.' : 'Could not tell the group right now. Riding on also closes this alert.'),
+      ));
   }
 
   @override

@@ -22,17 +22,25 @@ class NetworkConsentSheet extends StatefulWidget {
     return settings.netConsentPrompts < NetworkConstants.netConsentMaxPrompts;
   }
 
+  static bool _isShowing = false;
+
   /// Shows the sheet when [due]. Never blocks the ride: always completes.
   static Future<void> maybeShow(BuildContext context) async {
+    if (_isShowing) return;
     final settings = Provider.of<SettingsService?>(context, listen: false);
     final auth = Provider.of<AuthService?>(context, listen: false);
     if (!due(settings, auth)) return;
-    final answered = await showAppSheet<bool>(
-      context,
-      isScrollControlled: true,
-      builder: (_) => const NetworkConsentSheet(),
-    );
-    if (answered != true) settings?.bumpNetConsentPrompts();
+    _isShowing = true;
+    try {
+      final answered = await showAppSheet<bool>(
+        context,
+        isScrollControlled: true,
+        builder: (_) => const NetworkConsentSheet(),
+      );
+      if (answered != true) settings?.bumpNetConsentPrompts();
+    } finally {
+      _isShowing = false;
+    }
   }
 
   @override
@@ -65,10 +73,13 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
     setState(() => _busy = false);
     if (ok) {
       settings?.markNetConsentSeen();
-      Navigator.of(context).pop(true);
+      if (context.mounted) Navigator.of(context).pop(true);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not save this now. We will ask again before your next ride.')));
-      Navigator.of(context).pop(false);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not save this now. We will ask again before your next ride.')));
+        Navigator.of(context).pop(false);
+      }
     }
   }
 

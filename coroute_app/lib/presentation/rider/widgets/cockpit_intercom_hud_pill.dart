@@ -36,6 +36,7 @@ class CockpitIntercomHudPill extends StatefulWidget {
 class _CockpitIntercomHudPillState extends State<CockpitIntercomHudPill>
     with SingleTickerProviderStateMixin {
   late final AnimationController _waveController;
+  bool _isShowingSheet = false;
 
   @override
   void initState() {
@@ -53,79 +54,109 @@ class _CockpitIntercomHudPillState extends State<CockpitIntercomHudPill>
   }
 
   void _showTacticalSignalsSheet(BuildContext context) {
+    if (_isShowingSheet) return;
+    _isShowingSheet = true;
+
+    final screenSize = MediaQuery.sizeOf(context);
+
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxWidth: 600,
+        maxHeight: screenSize.height * 0.88,
+      ),
       backgroundColor: AppTheme.darkCanvas,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.cell_tower, color: AppTheme.hyperAmber, size: 22),
-                const SizedBox(width: 10),
-                Text(
-                  'ZERO-BANDWIDTH QUICK SIGNALS',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.0,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Transmits a 12-byte signal spoken aloud via TTS into teammates helmet headsets.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 16),
-            ...TacticalSignal.values.map((sig) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      widget.onSendTacticalSignal?.call(sig);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Transmitted: ${sig.label}')),
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.elevatedCard,
-                      foregroundColor: AppTheme.textPrimary,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        side: BorderSide(color: AppTheme.subtleBorder),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(
-                          sig.label,
-                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+      builder: (ctx) => Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.cell_tower, color: AppTheme.hyperAmber, size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'ZERO-BANDWIDTH QUICK SIGNALS',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.0,
+                          ),
                         ),
-                        const Spacer(),
-                        Icon(Icons.send_rounded, color: AppTheme.neonCyan, size: 18),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ),
-              );
-            }),
-          ],
+                  const SizedBox(height: 6),
+                  Text(
+                    'Transmits a 12-byte signal spoken aloud via TTS into teammates helmet headsets.',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+                  ...TacticalSignal.values.map((sig) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            widget.onSendTacticalSignal?.call(sig);
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Transmitted: ${sig.label}')),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.elevatedCard,
+                            foregroundColor: AppTheme.textPrimary,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              side: BorderSide(color: AppTheme.subtleBorder),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  sig.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Icon(Icons.send_rounded, color: AppTheme.neonCyan, size: 18),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
-    );
+    ).whenComplete(() {
+      _isShowingSheet = false;
+    });
   }
 
   @override
@@ -254,6 +285,8 @@ class _CockpitIntercomHudPillState extends State<CockpitIntercomHudPill>
                         GestureDetector(
                           onTap: action,
                           child: Container(
+                            constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+                            alignment: Alignment.center,
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
                               color: Colors.black.withOpacity(0.38),

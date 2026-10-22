@@ -40,26 +40,41 @@ class RideStartView extends StatelessWidget {
   static bool _needsProfile(AuthService auth) =>
       !auth.isProfileComplete && !auth.isMasterAdmin;
 
+  static bool _isOpeningProfile = false;
+  static bool _isStartingRide = false;
+
   /// Opens the one profile editor. Returns true when the profile is complete afterwards.
   static Future<bool> openProfile(BuildContext context) async {
-    await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => const EditProfileScreen()),
-    );
-    if (!context.mounted) return false;
-    return !_needsProfile(context.read<AuthService>());
+    if (_isOpeningProfile) return false;
+    _isOpeningProfile = true;
+    try {
+      await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(builder: (_) => const EditProfileScreen()),
+      );
+      if (!context.mounted) return false;
+      return !_needsProfile(context.read<AuthService>());
+    } finally {
+      _isOpeningProfile = false;
+    }
   }
 
   /// [Start Ride]: safety details first (when missing), then the trip planner.
   static Future<void> startRide(BuildContext context) async {
-    if (_needsProfile(context.read<AuthService>())) {
-      final ok = await openProfile(context);
-      if (!ok || !context.mounted) return;
+    if (_isStartingRide) return;
+    _isStartingRide = true;
+    try {
+      if (_needsProfile(context.read<AuthService>())) {
+        final ok = await openProfile(context);
+        if (!ok || !context.mounted) return;
+      }
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const TripPlannerScreen()),
+      );
+    } finally {
+      _isStartingRide = false;
     }
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const TripPlannerScreen()),
-    );
   }
 
   /// "Good morning" / "Good afternoon" / "Good evening" for [hour] (0-23).
@@ -97,12 +112,15 @@ class RideStartView extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: AppTheme.bg,
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
+            constraints: const BoxConstraints(maxWidth: 680),
             child: ListView(
               padding: dsScreenPadding,
+              physics: const BouncingScrollPhysics(),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               children: [
                 _Greeting(name: name),
                 const SizedBox(height: 22),
@@ -495,14 +513,22 @@ class _BikeStatusCard extends StatelessWidget {
             label: 'Motorcycle Garage',
             value: 'Manage & service →',
             divider: false,
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const GarageScreen())),
+            onTap: () {
+              if (_isOpeningGarage) return;
+              _isOpeningGarage = true;
+              Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const GarageScreen()))
+                  .then((_) => _isOpeningGarage = false);
+            },
           ),
         ],
       ),
     );
   }
 }
+
+bool _isOpeningGarage = false;
+bool _isOpeningJoinSheet = false;
 
 /// [Join Ride] and join links: a sheet with the code field. After a
 /// successful join it shows the pre-ride checklist and returns to the shell,
@@ -511,20 +537,30 @@ Future<void> showJoinRideSheet(
   BuildContext context, {
   String? initialCode,
 }) async {
-  // The join makes the ride active, so the shell swaps this Ride tab (and [context] with it)
-  // for the ride map right away. The checklist is shown from the navigator, which stays.
-  final nav = Navigator.of(context);
-  final navContext = nav.context;
-  final joined = await showAppSheet<bool>(
-    context,
-    title: 'Join a ride',
-    isScrollControlled: true,
-    builder: (_) => JoinRideSheet(initialCode: initialCode),
-  );
-  if (joined != true || !navContext.mounted) return;
-  await PreRideChecklistSheet.show(navContext);
-  if (!navContext.mounted) return;
-  nav.popUntil((r) => r.isFirst);
+  if (_isOpeningJoinSheet) return;
+  _isOpeningJoinSheet = true;
+  try {
+    // The join makes the ride active, so the shell swaps this Ride tab (and [context] with it)
+    // for the ride map right away. The checklist is shown from the navigator, which stays.
+    final nav = Navigator.of(context);
+    final navContext = nav.context;
+    final joined = await showAppSheet<bool>(
+      context,
+      title: 'Join a ride',
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxWidth: 600,
+        maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+      ),
+      builder: (_) => JoinRideSheet(initialCode: initialCode),
+    );
+    if (joined != true || !navContext.mounted) return;
+    await PreRideChecklistSheet.show(navContext);
+    if (!navContext.mounted) return;
+    nav.popUntil((r) => r.isFirst);
+  } finally {
+    _isOpeningJoinSheet = false;
+  }
 }
 
 /// Body of the join sheet: code field, the profile gate as an inline
@@ -551,6 +587,7 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
   }
 
   Future<void> _join() async {
+    if (_busy) return;
     final code = _code.text.trim();
     if (code.length < 4) {
       setState(() => _error = 'Enter the code your group shared with you.');
@@ -625,6 +662,8 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
     final needsProfile = RideStartView._needsProfile(auth);
     final err = _error;
     return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,

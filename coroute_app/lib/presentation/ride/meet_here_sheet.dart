@@ -24,6 +24,8 @@ class MeetHereResult {
   const MeetHereResult(this.action, this.name);
 }
 
+bool _isMeetHereSheetShowing = false;
+
 /// Long-press on the ride map: a small sheet with the place name (looked up
 /// once, the sheet works without it), how far it is, and the actions. The
 /// lead gets "Meet here" (sets the group's meeting point) and "Add a stop
@@ -36,18 +38,24 @@ Future<MeetHereResult?> showMeetHereSheet(
   String? replacesName,
   bool lead = true,
   bool canReport = true,
-}) {
-  return showAppSheet<MeetHereResult>(
-    context,
-    isScrollControlled: true,
-    builder: (ctx) => MeetHereSheet(
-      placeName: placeName,
-      distanceFromMeM: distanceFromMeM,
-      replacesName: replacesName,
-      lead: lead,
-      canReport: canReport,
-    ),
-  );
+}) async {
+  if (_isMeetHereSheetShowing) return null;
+  _isMeetHereSheetShowing = true;
+  try {
+    return await showAppSheet<MeetHereResult>(
+      context,
+      isScrollControlled: true,
+      builder: (ctx) => MeetHereSheet(
+        placeName: placeName,
+        distanceFromMeM: distanceFromMeM,
+        replacesName: replacesName,
+        lead: lead,
+        canReport: canReport,
+      ),
+    );
+  } finally {
+    _isMeetHereSheetShowing = false;
+  }
 }
 
 class MeetHereSheet extends StatefulWidget {

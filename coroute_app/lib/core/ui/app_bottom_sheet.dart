@@ -16,7 +16,15 @@ Future<T?> showAppSheet<T>(
   String? title,
   bool isDismissible = true,
   bool enableDrag = true,
+  BoxConstraints? constraints,
 }) {
+  final screenSize = MediaQuery.sizeOf(context);
+  final effectiveConstraints = constraints ??
+      BoxConstraints(
+        maxWidth: 600,
+        maxHeight: screenSize.height * 0.88,
+      );
+
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: isScrollControlled,
@@ -24,6 +32,7 @@ Future<T?> showAppSheet<T>(
     enableDrag: enableDrag,
     showDragHandle: enableDrag,
     useSafeArea: true,
+    constraints: effectiveConstraints,
     backgroundColor: AppTheme.card,
     shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),
     clipBehavior: Clip.antiAlias,

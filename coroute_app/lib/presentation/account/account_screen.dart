@@ -40,6 +40,7 @@ class AccountScreen extends StatelessWidget {
   Future<void> _open(BuildContext context, String url) async {
     final ok = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open $url')));
     }
   }
@@ -504,8 +505,10 @@ class AccountScreen extends StatelessWidget {
     if (res['success'] == true) {
       final messenger = ScaffoldMessenger.of(context);
       Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const AccessGateScreen()), (_) => false);
+      messenger.clearSnackBars();
       messenger.showSnackBar(const SnackBar(content: Text('Your account has been deleted.')));
     } else {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res['error']?.toString() ?? 'Could not delete the account.')));
     }
   }
@@ -616,6 +619,8 @@ class _TypeDeleteSheetState extends State<_TypeDeleteSheet> {
   Widget build(BuildContext context) {
     final ok = _ctrl.text.trim() == 'DELETE';
     return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -683,6 +688,7 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
         'device': device,
       });
       if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Thanks. Your report was sent.')));
       Navigator.pop(context);
     } on ApiException catch (e) {
@@ -697,12 +703,15 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: AppTheme.bg,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 560),
             child: ListView(
+              physics: const BouncingScrollPhysics(),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: dsScreenPadding,
               children: [
                 DsScreenHeader(title: 'Report a problem', onBack: () => Navigator.maybePop(context)),

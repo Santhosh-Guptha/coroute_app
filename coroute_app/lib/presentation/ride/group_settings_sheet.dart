@@ -13,18 +13,26 @@ import '../../data/models/safety_wire.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/settings_service.dart';
 
+bool _isGroupSettingsShowing = false;
+
 /// Opens the group settings: separation limit, stop alert, speed limit,
 /// spoken alerts, group visibility (Private / Public), nearby group
 /// discovery and the group default for asking nearby riders to help (the
 /// lead changes them, everyone else sees them), and whether my location is
 /// being shared.
-Future<void> showGroupSettings(BuildContext context, {required String convoyId}) {
-  return showAppSheet<void>(
-    context,
-    title: 'Group settings',
-    isScrollControlled: true,
-    builder: (_) => GroupSettingsView(convoyId: convoyId),
-  );
+Future<void> showGroupSettings(BuildContext context, {required String convoyId}) async {
+  if (_isGroupSettingsShowing) return;
+  _isGroupSettingsShowing = true;
+  try {
+    await showAppSheet<void>(
+      context,
+      title: 'Group settings',
+      isScrollControlled: true,
+      builder: (_) => GroupSettingsView(convoyId: convoyId),
+    );
+  } finally {
+    _isGroupSettingsShowing = false;
+  }
 }
 
 class GroupSettingsView extends StatelessWidget {

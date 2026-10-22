@@ -9,15 +9,25 @@ import '../../data/services/convoy_service.dart';
 import '../../data/services/plan_subscription_service.dart';
 import '../../core/config/feature_gates.dart';
 
+bool _isGuardianSheetShowing = false;
+
 Future<void> showGuardianSheet(
   BuildContext context, {
   required String groupId,
-}) => showAppSheet<void>(
-  context,
-  title: 'Ride Guardian',
-  isScrollControlled: true,
-  builder: (_) => GuardianSheet(groupId: groupId),
-);
+}) async {
+  if (_isGuardianSheetShowing) return;
+  _isGuardianSheetShowing = true;
+  try {
+    await showAppSheet<void>(
+      context,
+      title: 'Ride Guardian',
+      isScrollControlled: true,
+      builder: (_) => GuardianSheet(groupId: groupId),
+    );
+  } finally {
+    _isGuardianSheetShowing = false;
+  }
+}
 
 class GuardianSheet extends StatelessWidget {
   const GuardianSheet({super.key, required this.groupId});
@@ -73,6 +83,8 @@ class GuardianSheet extends StatelessWidget {
                       style: FilledButton.styleFrom(backgroundColor: AppTheme.brand),
                       onPressed: () {
                         context.read<PlanSubscriptionService>().selectTier(SubscriptionTier.proRider);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).clearSnackBars();
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             duration: const Duration(seconds: 2),

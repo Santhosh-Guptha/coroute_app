@@ -32,6 +32,7 @@ class RouteMapPackCard extends StatefulWidget {
 
 class _RouteMapPackCardState extends State<RouteMapPackCard> {
   bool _highDetail = true;
+  bool _isNavigating = false;
 
   @override
   Widget build(BuildContext context) {
@@ -199,22 +200,29 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
                       backgroundColor: AppTheme.brand,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      minimumSize: const Size(0, 36),
+                      minimumSize: const Size(0, 48),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     icon: const Icon(Icons.remove_red_eye_rounded, size: 16),
                     label: const Text('Verify Offline', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => OfflineTileVerificationScreen(
-                            packName: widget.tripName,
-                            routePoints: points,
-                            highDetail: _highDetail,
-                          ),
-                        ),
-                      );
-                    },
+                    onPressed: _isNavigating
+                        ? null
+                        : () async {
+                            setState(() => _isNavigating = true);
+                            try {
+                              await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => OfflineTileVerificationScreen(
+                                    packName: widget.tripName,
+                                    routePoints: points,
+                                    highDetail: _highDetail,
+                                  ),
+                                ),
+                              );
+                            } finally {
+                              if (mounted) setState(() => _isNavigating = false);
+                            }
+                          },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -223,18 +231,25 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
                     foregroundColor: AppTheme.accentText,
                     side: BorderSide(color: AppTheme.border),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    minimumSize: const Size(0, 36),
+                    minimumSize: const Size(0, 48),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   icon: const Icon(Icons.folder_open_rounded, size: 16),
                   label: const Text('Manage Packs', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const OfflineMapManagerScreen(),
-                      ),
-                    );
-                  },
+                  onPressed: _isNavigating
+                      ? null
+                      : () async {
+                          setState(() => _isNavigating = true);
+                          try {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const OfflineMapManagerScreen(),
+                              ),
+                            );
+                          } finally {
+                            if (mounted) setState(() => _isNavigating = false);
+                          }
+                        },
                 ),
               ],
             ),
@@ -296,8 +311,8 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.brand,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  minimumSize: const Size(0, 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  minimumSize: const Size(0, 48),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
                 onPressed: () => FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks),
@@ -305,6 +320,7 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
               )
             else
               TextButton(
+                style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
                 onPressed: () => prefetcher.start(points, label: widget.tripName, highDetail: _highDetail),
                 child: const Text('Retry'),
               ),
@@ -363,7 +379,7 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
                   backgroundColor: AppTheme.brand,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  minimumSize: const Size(0, 36),
+                  minimumSize: const Size(0, 48),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
                 onPressed: () async {

@@ -25,35 +25,40 @@ class LiveTimelineScreen extends StatelessWidget {
       backgroundColor: AppTheme.bg,
       body: SafeArea(
         bottom: false,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: DsScreenHeader(
-                title: name.isNotEmpty ? '$name: timeline' : 'Group timeline',
-                subtitle: 'Who did what, where and when',
-                onBack: () => Navigator.maybePop(context),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DsRoundButton(
-                      icon: Icons.slow_motion_video_rounded,
-                      label: 'Replay the ride',
-                      iconColor: AppTheme.accentText,
-                      onTap: () => LiveTimelineView.openReplay(context, groupId),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 800),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                  child: DsScreenHeader(
+                    title: name.isNotEmpty ? '$name: timeline' : 'Group timeline',
+                    subtitle: 'Who did what, where and when',
+                    onBack: () => Navigator.maybePop(context),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DsRoundButton(
+                          icon: Icons.slow_motion_video_rounded,
+                          label: 'Replay the ride',
+                          iconColor: AppTheme.accentText,
+                          onTap: () => LiveTimelineView.openReplay(context, groupId),
+                        ),
+                        const SizedBox(width: 8),
+                        DsRoundButton(
+                          icon: Icons.refresh_rounded,
+                          label: 'Refresh',
+                          onTap: () => LiveTimelineView.refresh(context, groupId),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    DsRoundButton(
-                      icon: Icons.refresh_rounded,
-                      label: 'Refresh',
-                      onTap: () => LiveTimelineView.refresh(context, groupId),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+                Expanded(child: LiveTimelineView(groupId: groupId, showReplay: false)),
+              ],
             ),
-            Expanded(child: LiveTimelineView(groupId: groupId, showReplay: false)),
-          ],
+          ),
         ),
       ),
     );

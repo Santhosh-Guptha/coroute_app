@@ -72,17 +72,21 @@ class RideShareCard extends StatelessWidget {
               children: [
                 Icon(Icons.two_wheeler, color: AppTheme.neonCyan, size: 22),
                 const SizedBox(width: 10),
-                Text(
-                  'COROUTE TACTICAL',
-                  style: TextStyle(
-                    color: AppTheme.neonCyan,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.5,
+                Flexible(
+                  child: Text(
+                    'COROUTE TACTICAL',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.neonCyan,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.5,
+                    ),
                   ),
                 ),
-                const Spacer(),
-                if (convoyCode != null && convoyCode!.isNotEmpty)
+                if (convoyCode != null && convoyCode!.isNotEmpty) ...[
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
@@ -92,6 +96,8 @@ class RideShareCard extends StatelessWidget {
                     ),
                     child: Text(
                       'PACK #$convoyCode',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppTheme.neonCyan,
                         fontSize: 11,
@@ -100,6 +106,7 @@ class RideShareCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                ],
               ],
             ),
           ),
@@ -112,6 +119,8 @@ class RideShareCard extends StatelessWidget {
                 // Ride Title & Date
                 Text(
                   rideTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 20,
@@ -122,6 +131,8 @@ class RideShareCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   '${startTime.day}/${startTime.month}/${startTime.year} · ${_formatDuration(duration)} on the road',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 13,
@@ -233,6 +244,7 @@ class RideShareCard extends StatelessWidget {
                               foregroundColor: AppTheme.textPrimary,
                               side: BorderSide(color: AppTheme.subtleBorder),
                               padding: const EdgeInsets.symmetric(vertical: 14),
+                              minimumSize: const Size(0, 48),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -251,6 +263,7 @@ class RideShareCard extends StatelessWidget {
                               backgroundColor: AppTheme.brand,
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 14),
+                              minimumSize: const Size(0, 48),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -298,13 +311,17 @@ class _StatTile extends StatelessWidget {
             children: [
               Icon(icon, color: AppTheme.textMuted, size: 16),
               const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: AppTheme.textMuted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                  ),
                 ),
               ),
             ],
@@ -314,13 +331,17 @@ class _StatTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(
-                value,
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  fontFamily: 'monospace',
+              Flexible(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: 'monospace',
+                  ),
                 ),
               ),
               if (unit.isNotEmpty) ...[

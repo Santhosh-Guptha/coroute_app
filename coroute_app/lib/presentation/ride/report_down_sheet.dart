@@ -12,12 +12,20 @@ import '../../data/services/convoy_service.dart';
 /// Sends the existing REPORT_DOWN message through [ConvoyService.reportRiderDown]
 /// (kept in the outbox without signal). Returns true when it was queued,
 /// false when it could not be, null when the rider closed the sheet.
-Future<bool?> showReportDownSheet(BuildContext context, {required double lat, required double lng, String placeName = ''}) {
-  return showAppSheet<bool>(
-    context,
-    isScrollControlled: true,
-    builder: (_) => ReportDownSheet(lat: lat, lng: lng, placeName: placeName),
-  );
+bool _isReportDownSheetShowing = false;
+
+Future<bool?> showReportDownSheet(BuildContext context, {required double lat, required double lng, String placeName = ''}) async {
+  if (_isReportDownSheetShowing) return null;
+  _isReportDownSheetShowing = true;
+  try {
+    return await showAppSheet<bool>(
+      context,
+      isScrollControlled: true,
+      builder: (_) => ReportDownSheet(lat: lat, lng: lng, placeName: placeName),
+    );
+  } finally {
+    _isReportDownSheetShowing = false;
+  }
 }
 
 class ReportDownSheet extends StatefulWidget {

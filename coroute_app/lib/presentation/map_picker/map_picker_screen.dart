@@ -156,6 +156,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   late LatLng _center;
   String _category = 'REST';
   int _dwell = 0;
+  bool _isConfirming = false;
 
   @override
   void initState() {
@@ -309,6 +310,8 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   }
 
   void _confirm() {
+    if (_isConfirming || !mounted) return;
+    _isConfirming = true;
     final name = _name.text.trim();
     final place = PickedPlace(
       lat: _center.latitude,
@@ -325,6 +328,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.map,
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: AppTheme.bg,
         title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -344,9 +348,14 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         return Column(
           children: [
             Expanded(child: _mapArea()),
-            ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: c.maxHeight * 0.6),
-              child: _confirmPanel(),
+            Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: c.maxHeight * 0.6,
+                  maxWidth: c.maxWidth > 600 ? 680 : double.infinity,
+                ),
+                child: _confirmPanel(),
+              ),
             ),
           ],
         );
@@ -390,57 +399,62 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
           left: Space.s12,
           right: Space.s12,
           top: Space.s12,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _searchField(),
-              if (_parsedCoord != null || _results.isNotEmpty)
-                _resultList([
-                  if (_parsedCoord != null)
-                    _ResultRow(
-                      icon: Icons.my_location_rounded,
-                      title: 'Jump to coordinates',
-                      subtitle: '${_parsedCoord!.$1.toStringAsFixed(6)}, ${_parsedCoord!.$2.toStringAsFixed(6)}',
-                      onTap: () => _choose(
-                        LatLng(_parsedCoord!.$1, _parsedCoord!.$2),
-                        'Location (${_parsedCoord!.$1.toStringAsFixed(4)}, ${_parsedCoord!.$2.toStringAsFixed(4)})',
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _searchField(),
+                  if (_parsedCoord != null || _results.isNotEmpty)
+                    _resultList([
+                      if (_parsedCoord != null)
+                        _ResultRow(
+                          icon: Icons.my_location_rounded,
+                          title: 'Jump to coordinates',
+                          subtitle: '${_parsedCoord!.$1.toStringAsFixed(6)}, ${_parsedCoord!.$2.toStringAsFixed(6)}',
+                          onTap: () => _choose(
+                            LatLng(_parsedCoord!.$1, _parsedCoord!.$2),
+                            'Location (${_parsedCoord!.$1.toStringAsFixed(4)}, ${_parsedCoord!.$2.toStringAsFixed(4)})',
+                          ),
+                        ),
+                      for (final r in _results)
+                        _ResultRow(
+                          icon: Icons.place_rounded,
+                          title: r.name,
+                          subtitle: r.displayName,
+                          onTap: () => _choose(LatLng(r.lat, r.lng), r.name),
+                        ),
+                    ])
+                  else if (_search.text.trim().length >= 3 && !_searching && _results.isEmpty && _parsedCoord == null)
+                    _resultList([
+                      Padding(
+                        padding: const EdgeInsets.all(Space.s16),
+                        child: Center(
+                          child: Text(
+                            'No matching places found. Try entering coordinates or a town name.',
+                            style: AppText.caption,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
                       ),
-                    ),
-                  for (final r in _results)
-                    _ResultRow(
-                      icon: Icons.place_rounded,
-                      title: r.name,
-                      subtitle: r.displayName,
-                      onTap: () => _choose(LatLng(r.lat, r.lng), r.name),
-                    ),
-                ])
-              else if (_search.text.trim().length >= 3 && !_searching && _results.isEmpty && _parsedCoord == null)
-                _resultList([
-                  Padding(
-                    padding: const EdgeInsets.all(Space.s16),
-                    child: Center(
-                      child: Text(
-                        'No matching places found. Try entering coordinates or a town name.',
-                        style: AppText.caption,
-                        textAlign: TextAlign.center,
+                    ])
+                  else if (showRecent)
+                    _resultList([
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s16, Space.s4),
+                        child: Text('Recent', style: AppText.label),
                       ),
-                    ),
-                  ),
-                ])
-              else if (showRecent)
-                _resultList([
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(Space.s16, Space.s12, Space.s16, Space.s4),
-                    child: Text('Recent', style: AppText.label),
-                  ),
-                  for (final p in _recent)
-                    _ResultRow(
-                      icon: Icons.history_rounded,
-                      title: p.name,
-                      onTap: () => _choose(LatLng(p.lat, p.lng), p.name),
-                    ),
-                ]),
-            ],
+                      for (final p in _recent)
+                        _ResultRow(
+                          icon: Icons.history_rounded,
+                          title: p.name,
+                          onTap: () => _choose(LatLng(p.lat, p.lng), p.name),
+                        ),
+                    ]),
+                ],
+              ),
+            ),
           ),
         ),
         Positioned(
@@ -520,7 +534,13 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       clipBehavior: Clip.antiAlias,
       child: Material(
         type: MaterialType.transparency,
-        child: ListView(shrinkWrap: true, padding: EdgeInsets.zero, children: rows),
+        child: ListView(
+          shrinkWrap: true,
+          padding: EdgeInsets.zero,
+          physics: const BouncingScrollPhysics(),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          children: rows,
+        ),
       ),
     );
   }
@@ -552,6 +572,8 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(20, Space.s12, 20, 0),
+                physics: const BouncingScrollPhysics(),
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,

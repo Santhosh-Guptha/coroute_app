@@ -92,50 +92,60 @@ class MinimalCockpitStatsRow extends StatelessWidget {
         const SizedBox(width: 8),
 
         // Right: Group relative position / spread & Guardian badge
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              rightGroupText,
-              style: AppText.caption.copyWith(
-                color: AppTheme.accentText,
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  rightGroupText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption.copyWith(
+                    color: AppTheme.accentText,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(width: 6),
-            Icon(
-              guardianOn ? Icons.verified_user_rounded : Icons.shield_outlined,
-              size: 14,
-              color: guardianOn ? AppTheme.accentText : AppTheme.muted,
-            ),
-            const SizedBox(width: 3),
-            Text(
-              guardianOn ? 'Guardian on' : 'Guardian off',
-              style: AppText.caption.copyWith(
-                color: guardianOn ? AppTheme.accentText : AppTheme.muted,
-                fontWeight: FontWeight.w600,
-                fontSize: 12,
-              ),
-            ),
-            if (meshPeersCount != null && meshPeersCount! > 0) ...[
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Icon(
-                Icons.hub_outlined,
-                size: 13,
-                color: AppTheme.accentText,
+                guardianOn ? Icons.verified_user_rounded : Icons.shield_outlined,
+                size: 14,
+                color: guardianOn ? AppTheme.accentText : AppTheme.muted,
               ),
               const SizedBox(width: 3),
               Text(
-                '$meshPeersCount mesh',
+                guardianOn ? 'Guardian on' : 'Guardian off',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: AppText.caption.copyWith(
-                  color: AppTheme.accentText,
-                  fontWeight: FontWeight.w700,
+                  color: guardianOn ? AppTheme.accentText : AppTheme.muted,
+                  fontWeight: FontWeight.w600,
                   fontSize: 12,
                 ),
               ),
+              if (meshPeersCount != null && meshPeersCount! > 0) ...[
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.hub_outlined,
+                  size: 13,
+                  color: AppTheme.accentText,
+                ),
+                const SizedBox(width: 3),
+                Text(
+                  '$meshPeersCount mesh',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption.copyWith(
+                    color: AppTheme.accentText,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ],
     );

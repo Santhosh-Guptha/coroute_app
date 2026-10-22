@@ -72,6 +72,10 @@ class TripReviewSheet extends StatefulWidget {
     return showAppSheet<int>(
       context,
       isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxWidth: 600,
+        maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+      ),
       builder: (_) => TripReviewSheet(
         name: name,
         startName: startName,
@@ -126,6 +130,7 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
   late int _limit = widget.speedLimitKmh;
   WeatherSummary? _weather;
   bool _checking = false;
+  bool _isStarting = false;
 
   @override
   void initState() {
@@ -193,6 +198,8 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
           child: ListView(
             shrinkWrap: true,
             padding: EdgeInsets.zero,
+            physics: const BouncingScrollPhysics(),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             children: [
               if (r != null)
                 _Stats(
@@ -285,7 +292,13 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
         const SizedBox(height: Space.s16),
         // A FilledButton (tests measure it): 56 dp, teal, radius 16.
         FilledButton.icon(
-          onPressed: () => Navigator.pop(context, _limit),
+          onPressed: _isStarting
+              ? null
+              : () {
+                  if (!mounted) return;
+                  setState(() => _isStarting = true);
+                  Navigator.pop(context, _limit);
+                },
           icon: const Icon(Icons.play_arrow_rounded),
           label: const Text('Start Ride', style: TextStyle(fontWeight: FontWeight.w800)),
           style: FilledButton.styleFrom(

@@ -151,7 +151,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                       Text(
                         '100% Offline Emergency Telemetry Pack',
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
+                          color: Colors.white.withValues(alpha: 0.85),
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -183,7 +183,7 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: Space.s12, horizontal: Space.s8),
                         decoration: BoxDecoration(
-                          color: AppTheme.sos.withOpacity(0.12),
+                          color: AppTheme.sos.withValues(alpha: 0.12),
                           borderRadius: Radii.mdAll,
                           border: Border.all(color: AppTheme.sos, width: 2),
                         ),
@@ -397,11 +397,15 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                 if (hasInsurance) ...[
                   Row(
                     children: [
-                      const Icon(Icons.verified_user_rounded, color: Colors.black54, size: 16),
+                      Icon(Icons.verified_user_rounded, color: AppTheme.muted, size: 16),
                       const SizedBox(width: 6),
-                      Text(
-                        'Insurance: ${_profile.insurancePolicyNumber}',
-                        style: const TextStyle(color: Colors.black87, fontSize: 12, fontWeight: FontWeight.w600),
+                      Expanded(
+                        child: Text(
+                          'Insurance: ${_profile.insurancePolicyNumber}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: AppTheme.text, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ],
                   ),
@@ -437,9 +441,11 @@ class _IceMedicalCardState extends State<IceMedicalCard> {
                           Clipboard.setData(ClipboardData(
                             text: 'https://maps.google.com/?q=${widget.lat},${widget.lng}',
                           ));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Coordinates copied to clipboard')),
-                          );
+                          ScaffoldMessenger.of(context)
+                            ..clearSnackBars()
+                            ..showSnackBar(
+                              const SnackBar(content: Text('Coordinates copied to clipboard')),
+                            );
                         },
                         constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                       ),

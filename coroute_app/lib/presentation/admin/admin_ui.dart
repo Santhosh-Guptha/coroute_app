@@ -1127,7 +1127,9 @@ Widget adminRefresh({required Future<void> Function() onRefresh, required Widget
 
 /// Shows [message] in a snackbar (used when a refresh fails but old data stays).
 void adminSnack(BuildContext context, String message, {bool error = false}) {
-  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  messenger?.clearSnackBars();
+  messenger?.showSnackBar(
     SnackBar(
       content: Text(message),
       backgroundColor: error ? AppTheme.sos : null,

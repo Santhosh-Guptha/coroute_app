@@ -83,18 +83,27 @@ class _RideFeatureSummaryState extends State<RideFeatureSummary> {
           const SizedBox(height: 4),
           for (var i = 0; i < entries.length; i++)
             Container(
-              constraints: const BoxConstraints(minHeight: 44),
+              constraints: const BoxConstraints(minHeight: 48),
               decoration: BoxDecoration(
                 border: i < entries.length - 1 ? Border(bottom: BorderSide(color: AppTheme.border)) : null,
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Expanded(child: Text(entries[i].key, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
+                  Expanded(
+                    child: Text(
+                      entries[i].key,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
                   const SizedBox(width: 12),
                   Flexible(
                     child: Text(
                       entries[i].value,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.end,
                       style: AppText.label.copyWith(fontWeight: FontWeight.w700),
                     ),

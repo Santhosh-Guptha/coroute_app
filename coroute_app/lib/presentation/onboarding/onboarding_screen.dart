@@ -65,6 +65,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _controller = PageController();
   int _page = 0;
   bool _leaving = false;
+  bool _isTransitioning = false;
 
   @override
   void dispose() {
@@ -81,10 +82,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   void _next() {
+    if (_isTransitioning || _leaving) return;
     if (_page >= OnboardingScreen.pages.length - 1) {
       _finish();
     } else {
-      _controller.nextPage(duration: Motion.screen, curve: Motion.curve);
+      _isTransitioning = true;
+      _controller.nextPage(duration: Motion.screen, curve: Motion.curve).then((_) {
+        if (mounted) setState(() => _isTransitioning = false);
+      });
     }
   }
 
@@ -94,10 +99,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final last = _page == pages.length - 1;
     return Scaffold(
       backgroundColor: AppTheme.bg,
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
+            constraints: const BoxConstraints(maxWidth: 680),
             child: Column(
               children: [
                 Align(
@@ -106,7 +112,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
                     child: TextButton(
                       onPressed: _finish,
-                      style: TextButton.styleFrom(minimumSize: const Size(64, 44)),
+                      style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
                       child: const Text('Skip'),
                     ),
                   ),
@@ -165,6 +171,7 @@ class _PageBody extends StatelessWidget {
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: Space.s16),
+        physics: const BouncingScrollPhysics(),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

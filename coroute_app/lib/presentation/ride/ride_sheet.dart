@@ -131,10 +131,15 @@ class RideSheetState extends State<RideSheet> {
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: widget.body,
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 600),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: widget.body,
+                        ),
+                      ),
                     ),
                   ),
                 ],

@@ -37,6 +37,7 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
   bool _isPlaying = false;
   double _playbackSpeed = 2.0;
   Timer? _playbackTimer;
+  bool _isShowingSheet = false;
 
   @override
   void dispose() {
@@ -117,40 +118,57 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
 
     final avgSpeed = widget.trackpoints.isNotEmpty ? (speedSum / widget.trackpoints.length) : 0.0;
 
+    if (_isShowingSheet) return;
+    _isShowingSheet = true;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+        maxWidth: 600,
+      ),
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: SingleChildScrollView(
-          child: RideShareCard(
-            rideTitle: widget.rideTitle,
-            convoyCode: widget.convoyCode,
-            startTime: first.timestamp,
-            distanceKm: totalDistKm,
-            duration: duration,
-            avgSpeedKmh: avgSpeed,
-            topSpeedKmh: maxSpeed,
-            bike: widget.bike,
-            onExportGpx: () async {
-              Navigator.pop(ctx);
-              await GpxService.shareGpxFile(
-                rideName: widget.rideTitle,
-                trackpoints: widget.trackpoints,
-                waypoints: widget.waypoints,
-              );
-            },
-            onShareCard: () {
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Ride summary card ready to share!')),
-              );
-            },
+      builder: (ctx) => Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: RideShareCard(
+                rideTitle: widget.rideTitle,
+                convoyCode: widget.convoyCode,
+                startTime: first.timestamp,
+                distanceKm: totalDistKm,
+                duration: duration,
+                avgSpeedKmh: avgSpeed,
+                topSpeedKmh: maxSpeed,
+                bike: widget.bike,
+                onExportGpx: () async {
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  await GpxService.shareGpxFile(
+                    rideName: widget.rideTitle,
+                    trackpoints: widget.trackpoints,
+                    waypoints: widget.waypoints,
+                  );
+                },
+                onShareCard: () {
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).clearSnackBars();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Ride summary card ready to share!')),
+                  );
+                },
+              ),
+            ),
           ),
         ),
       ),
-    );
+    ).whenComplete(() {
+      _isShowingSheet = false;
+    });
   }
 
   @override
@@ -265,73 +283,79 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
 
           // Top Telemetry HUD
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(
-                children: [
-                  // Back button
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppTheme.elevatedCard.withOpacity(0.92),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppTheme.subtleBorder),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.arrow_back, color: AppTheme.textPrimary),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  // Stats capsule
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: AppTheme.elevatedCard.withOpacity(0.92),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppTheme.subtleBorder),
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 700),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(
+                    children: [
+                      // Back button
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: AppTheme.elevatedCard.withOpacity(0.92),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppTheme.subtleBorder),
+                        ),
+                        child: IconButton(
+                          icon: Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+                          onPressed: () => Navigator.pop(context),
+                        ),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          _HudItem(
-                            label: 'SPEED',
-                            value: '${currentPt.speedKmh.round()}',
-                            unit: 'km/h',
+                      const SizedBox(width: 12),
+                      // Stats capsule
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.elevatedCard.withOpacity(0.92),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppTheme.subtleBorder),
                           ),
-                          _HudItem(
-                            label: 'ALTITUDE',
-                            value: '${currentPt.elevationM?.round() ?? "--"}',
-                            unit: 'm',
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              _HudItem(
+                                label: 'SPEED',
+                                value: '${currentPt.speedKmh.round()}',
+                                unit: 'km/h',
+                              ),
+                              _HudItem(
+                                label: 'ALTITUDE',
+                                value: '${currentPt.elevationM?.round() ?? "--"}',
+                                unit: 'm',
+                              ),
+                              _HudItem(
+                                label: 'TIME',
+                                value:
+                                    '${currentPt.timestamp.hour.toString().padLeft(2, '0')}:${currentPt.timestamp.minute.toString().padLeft(2, '0')}',
+                                unit: '',
+                              ),
+                            ],
                           ),
-                          _HudItem(
-                            label: 'TIME',
-                            value:
-                                '${currentPt.timestamp.hour.toString().padLeft(2, '0')}:${currentPt.timestamp.minute.toString().padLeft(2, '0')}',
-                            unit: '',
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      // Share / GPX button
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: AppTheme.brand,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.share, color: Colors.white),
+                          tooltip: 'Share Card / Export GPX',
+                          onPressed: _openShareSheet,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  // Share / GPX button
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppTheme.brand,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: IconButton(
-                      icon: const Icon(Icons.share, color: Colors.white),
-                      tooltip: 'Share Card / Export GPX',
-                      onPressed: _openShareSheet,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -342,119 +366,133 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
             right: 16,
             bottom: 24,
             child: SafeArea(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: BoxDecoration(
-                  color: AppTheme.elevatedCard.withOpacity(0.95),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: AppTheme.subtleBorder, width: 1.5),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.shadow,
-                      blurRadius: 18,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Scrubbing Slider
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: AppTheme.accentText,
-                        inactiveTrackColor: AppTheme.border2,
-                        thumbColor: AppTheme.accentText,
-                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-                        trackHeight: 3.5,
-                      ),
-                      child: Slider(
-                        value: _currentIndex.toDouble(),
-                        min: 0,
-                        max: (widget.trackpoints.length - 1).toDouble(),
-                        onChanged: _onSliderChanged,
-                      ),
-                    ),
-
-                    // Controls Row
-                    Row(
-                      children: [
-                        // Play/Pause button
-                        InkWell(
-                          onTap: _togglePlayPause,
-                          borderRadius: BorderRadius.circular(14),
-                          child: Container(
-                            width: 52,
-                            height: 52,
-                            decoration: BoxDecoration(
-                              color: _isPlaying ? AppTheme.soft : AppTheme.brand,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Icon(
-                              _isPlaying ? Icons.pause : Icons.play_arrow,
-                              color: _isPlaying ? AppTheme.text : Colors.white,
-                              size: 28,
-                            ),
-                          ),
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.elevatedCard.withOpacity(0.95),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: AppTheme.subtleBorder, width: 1.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.shadow,
+                          blurRadius: 18,
+                          offset: const Offset(0, 6),
                         ),
-                        const SizedBox(width: 16),
-                        // Track Title and progress
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                widget.rideTitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: AppTheme.textPrimary,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              Text(
-                                'Point ${_currentIndex + 1} of ${widget.trackpoints.length}',
-                                style: TextStyle(
-                                  color: AppTheme.textMuted,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        // Speed multiplier buttons
-                        ...[1.0, 2.0, 5.0, 10.0].map((spd) {
-                          final isSelected = _playbackSpeed == spd;
-                          return Padding(
-                            padding: const EdgeInsets.only(left: 6),
-                            child: InkWell(
-                              onTap: () => setState(() => _playbackSpeed = spd),
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: isSelected ? AppTheme.neonCyan.withOpacity(0.2) : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: isSelected ? AppTheme.neonCyan : AppTheme.subtleBorder,
-                                  ),
-                                ),
-                                child: Text(
-                                  '${spd.round()}x',
-                                  style: TextStyle(
-                                    color: isSelected ? AppTheme.neonCyan : AppTheme.textMuted,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        }),
                       ],
                     ),
-                  ],
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Scrubbing Slider
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            activeTrackColor: AppTheme.accentText,
+                            inactiveTrackColor: AppTheme.border2,
+                            thumbColor: AppTheme.accentText,
+                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                            trackHeight: 3.5,
+                          ),
+                          child: Slider(
+                            value: _currentIndex.toDouble(),
+                            min: 0,
+                            max: (widget.trackpoints.length - 1).toDouble(),
+                            onChanged: _onSliderChanged,
+                          ),
+                        ),
+
+                        // Controls Row
+                        Row(
+                          children: [
+                            // Play/Pause button
+                            InkWell(
+                              onTap: _togglePlayPause,
+                              borderRadius: BorderRadius.circular(14),
+                              child: Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: _isPlaying ? AppTheme.soft : AppTheme.brand,
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: Icon(
+                                  _isPlaying ? Icons.pause : Icons.play_arrow,
+                                  color: _isPlaying ? AppTheme.text : Colors.white,
+                                  size: 28,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            // Track Title and progress
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    widget.rideTitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: AppTheme.textPrimary,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Point ${_currentIndex + 1} of ${widget.trackpoints.length}',
+                                    style: TextStyle(
+                                      color: AppTheme.textMuted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Speed multiplier buttons
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              physics: const BouncingScrollPhysics(),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [1.0, 2.0, 5.0, 10.0].map((spd) {
+                                  final isSelected = _playbackSpeed == spd;
+                                  return Padding(
+                                    padding: const EdgeInsets.only(left: 4),
+                                    child: InkWell(
+                                      onTap: () => setState(() => _playbackSpeed = spd),
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                                        decoration: BoxDecoration(
+                                          color: isSelected ? AppTheme.neonCyan.withOpacity(0.2) : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: isSelected ? AppTheme.neonCyan : AppTheme.subtleBorder,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          '${spd.round()}x',
+                                          style: TextStyle(
+                                            color: isSelected ? AppTheme.neonCyan : AppTheme.textMuted,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -478,43 +516,51 @@ class _HudItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: AppTheme.textMuted,
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.8,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              value,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                fontFamily: 'monospace',
-              ),
+    return Flexible(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textMuted,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
             ),
-            if (unit.isNotEmpty) ...[
-              const SizedBox(width: 2),
-              Text(
-                unit,
-                style: TextStyle(color: AppTheme.textMuted, fontSize: 10),
+          ),
+          const SizedBox(height: 2),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: 'monospace',
+                  ),
+                ),
               ),
+              if (unit.isNotEmpty) ...[
+                const SizedBox(width: 2),
+                Text(
+                  unit,
+                  style: TextStyle(color: AppTheme.textMuted, fontSize: 10),
+                ),
+              ],
             ],
-          ],
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }

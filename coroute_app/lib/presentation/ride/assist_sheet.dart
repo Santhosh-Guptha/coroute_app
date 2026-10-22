@@ -17,13 +17,24 @@ import 'incident_sheet.dart';
 import 'incident_view.dart';
 import 'navigate_to.dart';
 
+bool _isAssistSheetShowing = false;
+
 /// Opens the sheet of an assistance request from another group.
-Future<void> showAssistSheet(BuildContext context, {required String incidentId}) {
-  return showAppSheet<void>(
-    context,
-    isScrollControlled: true,
-    builder: (_) => SingleChildScrollView(child: AssistSheetBody(incidentId: incidentId)),
-  );
+Future<void> showAssistSheet(BuildContext context, {required String incidentId}) async {
+  if (_isAssistSheetShowing) return;
+  _isAssistSheetShowing = true;
+  try {
+    await showAppSheet<void>(
+      context,
+      isScrollControlled: true,
+      builder: (_) => SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: AssistSheetBody(incidentId: incidentId),
+      ),
+    );
+  } finally {
+    _isAssistSheetShowing = false;
+  }
 }
 
 /// The request in the service's lists (my accepted one first), or null when it closed.
@@ -275,6 +286,7 @@ class AssistSheetBody extends StatelessWidget {
           onPressed: () async {
             final ok = await navigateTo(a.lat, a.lng, label: 'Emergency');
             if (!ok && context.mounted) {
+              ScaffoldMessenger.of(context).clearSnackBars();
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No map app found on this phone.')));
             }
           },
@@ -340,7 +352,10 @@ Future<void> reportFalseAssist(BuildContext context, String incidentId) async {
   );
   if (!ok || !context.mounted) return;
   final sent = context.read<ConvoyService>().reportFalseAlert(incidentId);
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    content: Text(sent ? 'Thank you. CoRoute was told.' : 'Already reported, or could not send it.'),
-  ));
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(sent ? 'Thank you. CoRoute was told.' : 'Already reported, or could not send it.'),
+    ));
+  }
 }

@@ -23,6 +23,8 @@ import 'incident_banner.dart';
 import 'incident_view.dart';
 import 'navigate_to.dart';
 
+bool _isIncidentSheetShowing = false;
+
 /// Opens the incident sheet for [subjectUserId] (and [alertId] for an SOS or
 /// crash): where they are, my distance and ETA, the nearest member, nearby
 /// assistance from other groups, Navigate (in the app), Call, "I'm going" /
@@ -34,14 +36,21 @@ Future<void> showIncidentSheet(
   required String convoyId,
   required String subjectUserId,
   String? alertId,
-}) {
-  return showAppSheet<void>(
-    context,
-    isScrollControlled: true,
-    builder: (_) => SingleChildScrollView(
-      child: IncidentSheetBody(convoyId: convoyId, subjectUserId: subjectUserId, alertId: alertId),
-    ),
-  );
+}) async {
+  if (_isIncidentSheetShowing) return;
+  _isIncidentSheetShowing = true;
+  try {
+    await showAppSheet<void>(
+      context,
+      isScrollControlled: true,
+      builder: (_) => SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: IncidentSheetBody(convoyId: convoyId, subjectUserId: subjectUserId, alertId: alertId),
+      ),
+    );
+  } finally {
+    _isIncidentSheetShowing = false;
+  }
 }
 
 /// The body of the incident sheet. Follows live changes (responders, the
@@ -171,7 +180,8 @@ class IncidentSheetBody extends StatelessWidget {
                 final ok = service.sendCheckIn(CheckInResult.ok);
                 if (ok) {
                   Navigator.of(context).maybePop();
-                } else {
+                } else if (context.mounted) {
+                  ScaffoldMessenger.of(context).clearSnackBars();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Could not tell the group right now. Riding on also closes this alert.')),
                   );
@@ -190,6 +200,7 @@ class IncidentSheetBody extends StatelessWidget {
     Future<void> openMaps() async {
       final ok = await navigateTo(inc.lat, inc.lng, label: inc.who);
       if (!ok && context.mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No map app found on this phone.')));
       }
     }
@@ -405,7 +416,8 @@ class _RespondButtons extends StatelessWidget {
 
   void _send(BuildContext context, SosResponseKind kind) {
     final ok = service.respondToSos(alertId, kind);
-    if (!ok) {
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not send your answer. Try again.')));
     }
   }
@@ -783,6 +795,7 @@ class HospitalLine extends StatelessWidget {
             onPressed: () async {
               final ok = await navigateTo(place.lat, place.lng, label: place.name);
               if (!ok && context.mounted) {
+                ScaffoldMessenger.of(context).clearSnackBars();
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No map app found on this phone.')));
               }
             },
@@ -837,7 +850,10 @@ class _LiveLinkControlsState extends State<LiveLinkControls> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (link == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L10n.t('sos.share.failed'))));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L10n.t('sos.share.failed'))));
+      }
       return;
     }
     await _share(link.url);
@@ -883,7 +899,10 @@ class _LiveLinkControlsState extends State<LiveLinkControls> {
               style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: link.url));
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L10n.t('sos.share.copied'))));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).clearSnackBars();
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L10n.t('sos.share.copied'))));
+                }
               },
               icon: const Icon(Icons.copy_rounded, size: 18),
               label: const Text('Copy link', maxLines: 1, overflow: TextOverflow.ellipsis),

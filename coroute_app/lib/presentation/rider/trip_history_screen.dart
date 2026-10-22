@@ -80,7 +80,16 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
       confirmLabel: 'Delete',
       destructive: true,
     );
-    if (ok) await storage.deleteTrip(trip.tripId);
+    if (!mounted) return;
+    if (ok) {
+      await storage.deleteTrip(trip.tripId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Trip deleted')),
+        );
+      }
+    }
   }
 
   @override
@@ -135,29 +144,34 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
       backgroundColor: AppTheme.bg,
       body: SafeArea(
         bottom: false,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-              child: DsScreenHeader(
-                title: 'Trips',
-                subtitle: subtitle ?? 'Every ride you finish is saved here',
-                onBack: widget.embedded ? null : () => Navigator.maybePop(context),
-                trailing: _NewRideButton(onTap: () => RiderHomeScreen.selectTab(context, HomeTab.ride)),
-              ),
-            ),
-            Expanded(
-              child: LoadingState(
-                loading: _isSyncing,
-                hasData: trips.isNotEmpty,
-                child: RefreshIndicator(
-                  color: AppTheme.accentText,
-                  onRefresh: _triggerSync,
-                  child: content,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 840),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                  child: DsScreenHeader(
+                    title: 'Trips',
+                    subtitle: subtitle ?? 'Every ride you finish is saved here',
+                    onBack: widget.embedded ? null : () => Navigator.maybePop(context),
+                    trailing: _NewRideButton(onTap: () => RiderHomeScreen.selectTab(context, HomeTab.ride)),
+                  ),
                 ),
-              ),
+                Expanded(
+                  child: LoadingState(
+                    loading: _isSyncing,
+                    hasData: trips.isNotEmpty,
+                    child: RefreshIndicator(
+                      color: AppTheme.accentText,
+                      onRefresh: _triggerSync,
+                      child: content,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

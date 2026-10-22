@@ -246,6 +246,8 @@ class ConvoyCommsCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         convoy.joinCode,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: AppText.headline.copyWith(
                           letterSpacing: 4,
                           fontWeight: FontWeight.w900,
@@ -431,7 +433,7 @@ class _CardTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: AppText.caption,
                   ),

@@ -42,26 +42,35 @@ class EmergencySosSheet extends StatelessWidget {
     this.onResolved,
   });
 
+  static bool _isShowing = false;
+
   static Future<void> show(
     BuildContext context, {
     required double lat,
     required double lng,
     String? alertId,
     VoidCallback? onResolved,
-  }) {
-    // No haptic here: the SOS button already gave one when the hold completed.
-    return showAppSheet<void>(
-      context,
-      isScrollControlled: true,
-      builder: (ctx) => SingleChildScrollView(
-        child: EmergencySosSheet(
-          lat: lat,
-          lng: lng,
-          alertId: alertId,
-          onResolved: onResolved,
+  }) async {
+    if (_isShowing) return;
+    _isShowing = true;
+    try {
+      // No haptic here: the SOS button already gave one when the hold completed.
+      await showAppSheet<void>(
+        context,
+        isScrollControlled: true,
+        builder: (ctx) => SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          child: EmergencySosSheet(
+            lat: lat,
+            lng: lng,
+            alertId: alertId,
+            onResolved: onResolved,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _isShowing = false;
+    }
   }
 
   /// Delivery state from what the phone knows (pure, for tests).
@@ -128,7 +137,8 @@ class EmergencySosSheet extends StatelessWidget {
     }
     onResolved?.call();
     final messenger = ScaffoldMessenger.maybeOf(context);
-    Navigator.pop(context);
+    if (context.mounted) Navigator.pop(context);
+    messenger?.clearSnackBars();
     messenger?.showSnackBar(SnackBar(
       content: Text(reason == ResolveReason.falseAlarm ? 'SOS cancelled. Your convoy sees that it was a false alarm.' : 'SOS closed. Your convoy sees that help reached you.'),
     ));
@@ -166,6 +176,7 @@ class EmergencySosSheet extends StatelessWidget {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else if (context.mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Cannot initiate phone call to $clean')),
       );
@@ -178,6 +189,7 @@ class EmergencySosSheet extends StatelessWidget {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else if (context.mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Cannot compose SMS to $clean')),
       );
@@ -336,9 +348,12 @@ class EmergencySosSheet extends StatelessWidget {
                     style: TextButton.styleFrom(minimumSize: const Size(48, 48), foregroundColor: AppTheme.accentText),
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: mapsUrl));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Map link copied.')),
-                      );
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).clearSnackBars();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Map link copied.')),
+                        );
+                      }
                     },
                     icon: const Icon(Icons.copy_rounded, size: 18),
                     label: const Text('Copy link', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
@@ -451,15 +466,30 @@ class EmergencySosSheet extends StatelessWidget {
               onPressed: () async {
                 final ok = await showDialog<bool>(
                   context: context,
-                  builder: (ctx) => AlertDialog(
-                    backgroundColor: AppTheme.card,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    title: const Text('Cancel SOS?'),
-                    content: const Text('Confirm that help has reached you and your distress beacon can be turned off.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep SOS Active')),
-                      FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm Cancel')),
-                    ],
+                  builder: (ctx) => Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 480),
+                      child: AlertDialog(
+                        backgroundColor: AppTheme.card,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        title: const Text('Cancel SOS?'),
+                        content: const Text('Confirm that help has reached you and your distress beacon can be turned off.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () {
+                              if (ctx.mounted) Navigator.pop(ctx, false);
+                            },
+                            child: const Text('Keep SOS Active'),
+                          ),
+                          FilledButton(
+                            onPressed: () {
+                              if (ctx.mounted) Navigator.pop(ctx, true);
+                            },
+                            child: const Text('Confirm Cancel'),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 );
                 if (ok == true && context.mounted) {
@@ -475,15 +505,30 @@ class EmergencySosSheet extends StatelessWidget {
               onPressed: () async {
                 final ok = await showDialog<bool>(
                   context: context,
-                  builder: (ctx) => AlertDialog(
-                    backgroundColor: AppTheme.card,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    title: const Text('Cancel as False Alarm?'),
-                    content: const Text('Confirm that this SOS was triggered accidentally and you are safe.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep SOS Active')),
-                      FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm False Alarm')),
-                    ],
+                  builder: (ctx) => Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 480),
+                      child: AlertDialog(
+                        backgroundColor: AppTheme.card,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        title: const Text('Cancel as False Alarm?'),
+                        content: const Text('Confirm that this SOS was triggered accidentally and you are safe.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () {
+                              if (ctx.mounted) Navigator.pop(ctx, false);
+                            },
+                            child: const Text('Keep SOS Active'),
+                          ),
+                          FilledButton(
+                            onPressed: () {
+                              if (ctx.mounted) Navigator.pop(ctx, true);
+                            },
+                            child: const Text('Confirm False Alarm'),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 );
                 if (ok == true && context.mounted) {
@@ -494,7 +539,9 @@ class EmergencySosSheet extends StatelessWidget {
             const SizedBox(height: Space.s4),
             TextButton(
               style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppTheme.accentText),
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                if (context.mounted) Navigator.pop(context);
+              },
               child: const Text('Keep it on', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
             ),
           ],

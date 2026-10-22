@@ -479,6 +479,8 @@ class _BroadcastSheetState extends State<_BroadcastSheet> {
   Widget build(BuildContext context) {
     final ready = _ctrl.text.trim().isNotEmpty;
     return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,

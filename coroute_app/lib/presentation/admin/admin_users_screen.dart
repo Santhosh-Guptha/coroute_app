@@ -155,7 +155,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
         final wide = c.maxWidth >= adminWideBreakpoint;
         final list = _buildList(visible, me, wide, filter);
         if (!wide) {
-          return Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: adminMaxContentWidth), child: list));
+          return Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 800), child: list));
         }
         Map<String, dynamic>? selected;
         for (final u in _users) {

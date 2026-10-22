@@ -17,6 +17,8 @@ import 'incident_sheet.dart';
 import 'incident_view.dart';
 import 'riders_ladder.dart';
 
+bool _isRiderCardShowing = false;
+
 /// Opens the compact rider card (a sheet, never a new screen): name, status,
 /// distance from me, speed, last update, distance to the destination, and
 /// the actions Show on map, Call, Talk privately, Pair as pillion. When the
@@ -28,14 +30,21 @@ Future<void> showRiderCard(
   required String convoyId,
   required String userId,
   required ValueChanged<RiderModel> onShowOnMap,
-}) {
-  return showAppSheet<void>(
-    context,
-    isScrollControlled: true,
-    builder: (ctx) => SingleChildScrollView(
-      child: RiderCard(convoyId: convoyId, userId: userId, onShowOnMap: onShowOnMap),
-    ),
-  );
+}) async {
+  if (_isRiderCardShowing) return;
+  _isRiderCardShowing = true;
+  try {
+    await showAppSheet<void>(
+      context,
+      isScrollControlled: true,
+      builder: (ctx) => SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: RiderCard(convoyId: convoyId, userId: userId, onShowOnMap: onShowOnMap),
+      ),
+    );
+  } finally {
+    _isRiderCardShowing = false;
+  }
 }
 
 /// The body of the rider card. Follows live updates of the rider.
@@ -53,6 +62,7 @@ class RiderCard extends StatelessWidget {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else if (context.mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cannot call $clean')));
     }
   }

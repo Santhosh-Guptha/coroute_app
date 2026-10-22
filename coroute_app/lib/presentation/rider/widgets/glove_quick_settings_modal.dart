@@ -48,6 +48,8 @@ class GloveQuickSettingsModal extends StatelessWidget {
     this.onLaunchOfflineNav,
   });
 
+  static bool _isShowing = false;
+
   static Future<void> show(
     BuildContext context, {
     SettingsService? settingsService,
@@ -61,27 +63,43 @@ class GloveQuickSettingsModal extends StatelessWidget {
     VoidCallback? onOpenGuardian,
     VoidCallback? onOpenFuel,
     VoidCallback? onLaunchOfflineNav,
-  }) {
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: const Color(0xFF15232E).withOpacity(0.5),
-      builder: (ctx) => GloveQuickSettingsModal(
-        settingsService: settingsService,
-        intercomService: intercomService,
-        keepScreenOn: keepScreenOn,
-        autoFollow: autoFollow,
-        onToggleKeepScreenOn: onToggleKeepScreenOn,
-        onToggleAutoFollow: onToggleAutoFollow,
-        onSettingToggled: onSettingToggled,
-        groupId: groupId,
-        onOpenGuardian: onOpenGuardian,
-        onOpenFuel: onOpenFuel,
-        onLaunchOfflineNav: onLaunchOfflineNav,
-      ),
-    );
+  }) async {
+    if (_isShowing) return;
+    _isShowing = true;
+    try {
+      final screenSize = MediaQuery.sizeOf(context);
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        constraints: BoxConstraints(
+          maxWidth: 600,
+          maxHeight: screenSize.height * 0.88,
+        ),
+        backgroundColor: Colors.transparent,
+        barrierColor: const Color(0xFF15232E).withOpacity(0.5),
+        builder: (ctx) => Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: GloveQuickSettingsModal(
+              settingsService: settingsService,
+              intercomService: intercomService,
+              keepScreenOn: keepScreenOn,
+              autoFollow: autoFollow,
+              onToggleKeepScreenOn: onToggleKeepScreenOn,
+              onToggleAutoFollow: onToggleAutoFollow,
+              onSettingToggled: onSettingToggled,
+              groupId: groupId,
+              onOpenGuardian: onOpenGuardian,
+              onOpenFuel: onOpenFuel,
+              onLaunchOfflineNav: onLaunchOfflineNav,
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _isShowing = false;
+    }
   }
 
   @override
@@ -228,7 +246,9 @@ class GloveQuickSettingsModal extends StatelessWidget {
                   key: const Key('quick_settings_close'),
                   icon: Icons.close_rounded,
                   label: 'Close settings',
-                  onTap: () => Navigator.of(context).pop(),
+                  onTap: () {
+                    if (context.mounted) Navigator.of(context).maybePop();
+                  },
                 ),
               ],
             ),

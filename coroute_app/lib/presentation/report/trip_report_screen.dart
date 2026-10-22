@@ -243,6 +243,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
 
   void _snack(String msg) {
     if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
@@ -395,103 +396,108 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
     final others = r == null ? const <MemberReport>[] : [for (final m in r.members) if (m.userId != myId) m];
 
     final error = _error;
-    return ListView(
-      padding: dsScreenPadding,
-      children: [
-        if (error != null) ...[
-          RideAlert(tier: AlertTier.normal, title: 'Could not load the group report', message: error, actionLabel: 'Try again', onAction: _load),
-          const SizedBox(height: 18),
-        ],
-        if (route != null)
-          Text(route, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.headline.copyWith(fontSize: 20)),
-        Padding(
-          padding: EdgeInsets.only(top: route == null ? 0 : 2),
-          child: Text(dateFmt.format(DateTime.fromMillisecondsSinceEpoch(t.startTimeEpochMs)), style: AppText.label),
-        ),
-        const SizedBox(height: 18),
-        if (widget.adminView)
-          DsCard(
-            child: RouteSummary(
-              distanceKm: (r?.distanceM ?? t.totalDistanceKm * 1000) / 1000,
-              duration: Duration(milliseconds: r?.durationMs ?? (t.endTimeEpochMs - t.startTimeEpochMs)),
-              stops: r?.plannedStops ?? t.stopCount,
-              riders: r?.memberCount ?? t.riderCount,
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 800),
+        child: ListView(
+          padding: dsScreenPadding,
+          children: [
+            if (error != null) ...[
+              RideAlert(tier: AlertTier.normal, title: 'Could not load the group report', message: error, actionLabel: 'Try again', onAction: _load),
+              const SizedBox(height: 18),
+            ],
+            if (route != null)
+              Text(route, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.headline.copyWith(fontSize: 20)),
+            Padding(
+              padding: EdgeInsets.only(top: route == null ? 0 : 2),
+              child: Text(dateFmt.format(DateTime.fromMillisecondsSinceEpoch(t.startTimeEpochMs)), style: AppText.label),
             ),
-          )
-        else ...[
-          Semantics(header: true, child: DsSectionHeader('Your ride')),
-          const SizedBox(height: 10),
-          DsHeroCard(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (sketch.length >= 2) ...[
-                  AspectRatio(
-                    aspectRatio: 350 / 110,
-                    child: CustomPaint(
-                      painter: RouteSketchPainter(
-                        points: sketch,
-                        lineColor: Colors.white.withValues(alpha: 0.9),
-                        startColor: Colors.white,
-                        endColor: Colors.white,
-                        ringColor: AppTheme.brand,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 18),
+            if (widget.adminView)
+              DsCard(
+                child: RouteSummary(
+                  distanceKm: (r?.distanceM ?? t.totalDistanceKm * 1000) / 1000,
+                  duration: Duration(milliseconds: r?.durationMs ?? (t.endTimeEpochMs - t.startTimeEpochMs)),
+                  stops: r?.plannedStops ?? t.stopCount,
+                  riders: r?.memberCount ?? t.riderCount,
+                ),
+              )
+            else ...[
+              Semantics(header: true, child: DsSectionHeader('Your ride')),
+              const SizedBox(height: 10),
+              DsHeroCard(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (var i = 0; i < heroStats.length; i++) ...[
-                      if (i > 0) const SizedBox(width: 10),
-                      Expanded(child: heroStats[i]),
+                    if (sketch.length >= 2) ...[
+                      AspectRatio(
+                        aspectRatio: 350 / 110,
+                        child: CustomPaint(
+                          painter: RouteSketchPainter(
+                            points: sketch,
+                            lineColor: Colors.white.withValues(alpha: 0.9),
+                            startColor: Colors.white,
+                            endColor: Colors.white,
+                            ringColor: AppTheme.brand,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                     ],
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (var i = 0; i < heroStats.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 10),
+                          Expanded(child: heroStats[i]),
+                        ],
+                      ],
+                    ),
                   ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              _StatGrid(children: cells),
+              if (t.isEstimate && r == null && !_loading)
+                Padding(
+                  padding: const EdgeInsets.only(top: Space.s12),
+                  child: Text('These numbers are from your phone. The exact report is ready about a minute after the trip ends.', style: AppText.caption),
+                ),
+            ],
+            if (!widget.adminView && r != null && others.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              Semantics(header: true, child: DsSectionHeader('Rode with')),
+              const SizedBox(height: 10),
+              _RodeWithCard(members: others, colors: _colors, allArrived: r.arrived >= r.memberCount, arrived: r.arrived, total: r.memberCount),
+            ],
+            const SizedBox(height: 20),
+            _moreDetails(r, me, myId),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: DsButton(
+                    label: 'Share',
+                    icon: Icons.ios_share_rounded,
+                    tone: DsButtonTone.outline,
+                    fontSize: 15,
+                    onPressed: widget.adminView ? _shareSummary : (_preparingCard ? null : _openShareCard),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: DsButton(
+                    label: 'Done',
+                    fontSize: 15,
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 10),
-          _StatGrid(children: cells),
-          if (t.isEstimate && r == null && !_loading)
-            Padding(
-              padding: const EdgeInsets.only(top: Space.s12),
-              child: Text('These numbers are from your phone. The exact report is ready about a minute after the trip ends.', style: AppText.caption),
-            ),
-        ],
-        if (!widget.adminView && r != null && others.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          Semantics(header: true, child: DsSectionHeader('Rode with')),
-          const SizedBox(height: 10),
-          _RodeWithCard(members: others, colors: _colors, allArrived: r.arrived >= r.memberCount, arrived: r.arrived, total: r.memberCount),
-        ],
-        const SizedBox(height: 20),
-        _moreDetails(r, me, myId),
-        const SizedBox(height: 20),
-        Row(
-          children: [
-            Expanded(
-              child: DsButton(
-                label: 'Share',
-                icon: Icons.ios_share_rounded,
-                tone: DsButtonTone.outline,
-                fontSize: 15,
-                onPressed: widget.adminView ? _shareSummary : (_preparingCard ? null : _openShareCard),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: DsButton(
-                label: 'Done',
-                fontSize: 15,
-                onPressed: () => Navigator.of(context).maybePop(),
-              ),
-            ),
           ],
         ),
-      ],
+      ),
     );
   }
 
@@ -984,6 +990,7 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
   void _sheet(String title, List<String> lines) {
     showAppSheet<void>(
       context,
+      isScrollControlled: true,
       title: title,
       builder: (_) => SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1068,7 +1075,7 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
   }
 
   void _showLegend() {
-    showAppSheet<void>(context, title: 'Map key', builder: (_) => const SingleChildScrollView(child: TripMapLegend()));
+    showAppSheet<void>(context, isScrollControlled: true, title: 'Map key', builder: (_) => const SingleChildScrollView(child: TripMapLegend()));
   }
 
   void _openReplay({TimelineEventModel? from}) {

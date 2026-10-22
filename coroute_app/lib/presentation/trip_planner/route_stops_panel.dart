@@ -19,7 +19,7 @@ import '../ride/navigate_to.dart';
 ///
 /// Trip progress (ticks and "You are here") is shown in the ride sheet; this
 /// panel is where the route is managed.
-class RouteStopsPanel extends StatelessWidget {
+class RouteStopsPanel extends StatefulWidget {
   final ConvoyModel convoy;
   final bool shrinkWrap;
   const RouteStopsPanel({super.key, required this.convoy, this.shrinkWrap = false});
@@ -35,7 +35,16 @@ class RouteStopsPanel extends StatelessWidget {
   };
 
   @override
+  State<RouteStopsPanel> createState() => _RouteStopsPanelState();
+}
+
+class _RouteStopsPanelState extends State<RouteStopsPanel> {
+  bool _isPicking = false;
+
+  @override
   Widget build(BuildContext context) {
+    final convoy = widget.convoy;
+    final shrinkWrap = widget.shrinkWrap;
     final service = context.watch<ConvoyService>();
     final lead = service.canEditRoute;
     final me = service.myUserId != null ? convoy.riders[service.myUserId] : null;
@@ -78,29 +87,41 @@ class RouteStopsPanel extends StatelessWidget {
     String fromMe(double lat, double lng) => hasMe ? formatDistanceRounded(GeoMath.haversine(meLat, meLng, lat, lng)) : '';
 
     Future<void> addOrSuggest() async {
-      final p = await MapPickerScreen.pick(
-        context,
-        title: lead ? 'Add a stop' : 'Suggest a stop',
-        forStop: true,
-        confirmLabel: lead ? 'Add stop' : 'Send suggestion',
-        initial: hasMe ? PickedPlace(lat: meLat, lng: meLng) : null,
-      );
-      if (p == null) return;
-      final ok = lead ? service.addStop(p) : service.suggestStop(p);
-      if (ok && !lead && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suggestion sent to the lead.')));
+      if (_isPicking) return;
+      _isPicking = true;
+      try {
+        final p = await MapPickerScreen.pick(
+          context,
+          title: lead ? 'Add a stop' : 'Suggest a stop',
+          forStop: true,
+          confirmLabel: lead ? 'Add stop' : 'Send suggestion',
+          initial: hasMe ? PickedPlace(lat: meLat, lng: meLng) : null,
+        );
+        if (p == null || !mounted) return;
+        final ok = lead ? service.addStop(p) : service.suggestStop(p);
+        if (ok && !lead && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suggestion sent to the lead.')));
+        }
+      } finally {
+        _isPicking = false;
       }
     }
 
     Future<void> changeDestination() async {
-      final p = await MapPickerScreen.pick(
-        context,
-        title: 'Destination',
-        initial: (convoy.destinationLat != 0 || convoy.destinationLng != 0)
-            ? PickedPlace(lat: convoy.destinationLat, lng: convoy.destinationLng, name: convoy.destinationName)
-            : null,
-      );
-      if (p != null) service.setDestination(p);
+      if (_isPicking) return;
+      _isPicking = true;
+      try {
+        final p = await MapPickerScreen.pick(
+          context,
+          title: 'Destination',
+          initial: (convoy.destinationLat != 0 || convoy.destinationLng != 0)
+              ? PickedPlace(lat: convoy.destinationLat, lng: convoy.destinationLng, name: convoy.destinationName)
+              : null,
+        );
+        if (p != null && mounted) service.setDestination(p);
+      } finally {
+        _isPicking = false;
+      }
     }
 
     void move(int from, int to) {
@@ -320,7 +341,8 @@ class RouteStopsPanel extends StatelessWidget {
 
     return ListView(
       shrinkWrap: shrinkWrap,
-      physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
+      physics: shrinkWrap ? const NeverScrollableScrollPhysics() : const BouncingScrollPhysics(),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.symmetric(vertical: Space.s8),
       children: children,
     );

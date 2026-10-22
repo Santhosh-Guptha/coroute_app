@@ -150,29 +150,33 @@ class MinimalCockpitTopBar extends StatelessWidget {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: AppTheme.brand.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: AppTheme.brand.withValues(alpha: 0.4), width: 1),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.edit_road_rounded, size: 12, color: AppTheme.brand),
-                            const SizedBox(width: 4),
-                            Text(
-                              roadName!,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppText.caption.copyWith(
-                                color: AppTheme.brand,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.2,
+                      Flexible(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: AppTheme.brand.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: AppTheme.brand.withValues(alpha: 0.4), width: 1),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.edit_road_rounded, size: 12, color: AppTheme.brand),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  roadName!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppText.caption.copyWith(
+                                    color: AppTheme.brand,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                       if (sub != null && sub.isNotEmpty) ...[
@@ -474,8 +478,8 @@ class MinimalStoppedBar extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 48,
+                  height: 48,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(color: AppTheme.warnTint, borderRadius: BorderRadius.circular(12)),
                   child: Icon(Icons.pause_rounded, color: AppTheme.warnText, size: 24),
@@ -485,9 +489,16 @@ class MinimalStoppedBar extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(dur, style: AppText.title.copyWith(color: AppTheme.warnText)),
+                      Text(
+                        dur,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.title.copyWith(color: AppTheme.warnText),
+                      ),
                       Text(
                         nearbyCount > 0 ? '$nearbyCount riders nearby' : 'Group riding ahead',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: AppText.label,
                       ),
                     ],
@@ -499,7 +510,7 @@ class MinimalStoppedBar extends StatelessWidget {
                     foregroundColor: AppTheme.warnText,
                     backgroundColor: AppTheme.warnTint,
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    minimumSize: const Size(64, 44),
+                    minimumSize: const Size(64, 48),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   child: const Text('Tell why', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),

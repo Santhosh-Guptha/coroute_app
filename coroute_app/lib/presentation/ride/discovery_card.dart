@@ -163,48 +163,57 @@ class WavedLine extends StatelessWidget {
   }
 }
 
+bool _isDiscoverySheetShowing = false;
+
 /// Opens "View Group": the group's name, rider count, rough distance and
 /// how the groups move, plus Wave. No map position, no members.
-Future<void> showDiscoverySheet(BuildContext context, Encounter e, {required VoidCallback onWave}) {
-  return showAppSheet<void>(
-    context,
-    isScrollControlled: true,
-    title: e.groupName.trim().isEmpty ? 'Riding group' : e.groupName.trim(),
-    builder: (ctx) {
-      final meet = DiscoveryTexts.meeting(e);
-      Widget line(IconData icon, String text) => Padding(
-            padding: const EdgeInsets.only(bottom: Space.s8),
-            child: Row(
-              children: [
-                Icon(icon, size: 22, color: AppTheme.accentText),
-                const SizedBox(width: 10),
-                Expanded(child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body)),
-              ],
-            ),
-          );
-      return SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            line(Icons.groups_rounded, DiscoveryTexts.size(e)),
-            line(Icons.alt_route_rounded, DiscoveryTexts.how(e)),
-            if (meet != null) line(Icons.schedule_rounded, meet),
-            Text('A public riding group that also chose to be seen. Only its name and rider count are shared, never positions.', style: AppText.caption),
-            const SizedBox(height: Space.s16),
-            DsButton(
-              icon: Icons.waving_hand_rounded,
-              label: e.iWaved ? 'Waved' : 'Wave',
-              onPressed: e.iWaved
-                  ? null
-                  : () {
-                      onWave();
-                      Navigator.of(ctx).maybePop();
-                    },
-            ),
-          ],
-        ),
-      );
-    },
-  );
+Future<void> showDiscoverySheet(BuildContext context, Encounter e, {required VoidCallback onWave}) async {
+  if (_isDiscoverySheetShowing) return;
+  _isDiscoverySheetShowing = true;
+  try {
+    await showAppSheet<void>(
+      context,
+      isScrollControlled: true,
+      title: e.groupName.trim().isEmpty ? 'Riding group' : e.groupName.trim(),
+      builder: (ctx) {
+        final meet = DiscoveryTexts.meeting(e);
+        Widget line(IconData icon, String text) => Padding(
+              padding: const EdgeInsets.only(bottom: Space.s8),
+              child: Row(
+                children: [
+                  Icon(icon, size: 22, color: AppTheme.accentText),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.body)),
+                ],
+              ),
+            );
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              line(Icons.groups_rounded, DiscoveryTexts.size(e)),
+              line(Icons.alt_route_rounded, DiscoveryTexts.how(e)),
+              if (meet != null) line(Icons.schedule_rounded, meet),
+              Text('A public riding group that also chose to be seen. Only its name and rider count are shared, never positions.', style: AppText.caption),
+              const SizedBox(height: Space.s16),
+              DsButton(
+                icon: Icons.waving_hand_rounded,
+                label: e.iWaved ? 'Waved' : 'Wave',
+                onPressed: e.iWaved
+                    ? null
+                    : () {
+                        onWave();
+                        if (ctx.mounted) Navigator.of(ctx).maybePop();
+                      },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  } finally {
+    _isDiscoverySheetShowing = false;
+  }
 }

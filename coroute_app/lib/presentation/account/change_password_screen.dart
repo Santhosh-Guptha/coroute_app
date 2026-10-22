@@ -52,6 +52,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (res['success'] == true) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password changed.')));
       Navigator.pop(context, true);
     } else {
@@ -75,12 +76,15 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     return PopScope(
       canPop: !widget.forced,
       child: Scaffold(
+        resizeToAvoidBottomInset: true,
         backgroundColor: AppTheme.bg,
         body: SafeArea(
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 480),
               child: ListView(
+                physics: const BouncingScrollPhysics(),
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                 padding: dsScreenPadding,
                 children: [
                   DsScreenHeader(

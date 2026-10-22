@@ -7,8 +7,13 @@ import '../../domain/safety/fuel_profile.dart';
 import '../../data/services/settings_service.dart';
 import '../../data/services/safety_service.dart';
 
-Future<void> showFuelSheet(BuildContext context, {bool configure = false}) =>
-    showAppSheet<void>(
+bool _isFuelSheetShowing = false;
+
+Future<void> showFuelSheet(BuildContext context, {bool configure = false}) async {
+  if (_isFuelSheetShowing) return;
+  _isFuelSheetShowing = true;
+  try {
+    await showAppSheet<void>(
       context,
       title: 'Fuel',
       isScrollControlled: true,
@@ -18,6 +23,10 @@ Future<void> showFuelSheet(BuildContext context, {bool configure = false}) =>
         configure: configure,
       ),
     );
+  } finally {
+    _isFuelSheetShowing = false;
+  }
+}
 
 class _FuelSheet extends StatefulWidget {
   final SettingsService settings;
@@ -171,7 +180,7 @@ class _FuelSheetState extends State<_FuelSheet> {
       setState(() { saving = true; error = null; });
       final saved = await safety.waitForFuelSave();
       if (!mounted) return;
-      if (saved) { Navigator.pop(context); }
+      if (saved) { if (context.mounted) Navigator.pop(context); }
       else { setState(() { saving = false; error = 'Fuel updated, but could not be saved. Try again before closing.'; }); }
     } else {
       setState(

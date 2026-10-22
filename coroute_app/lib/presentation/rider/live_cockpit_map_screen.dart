@@ -277,7 +277,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         }
         final picked = PickedPlace(name: place.name, lat: place.lat, lng: place.lng, category: place.category);
         final ok = leader ? s.addStop(picked) : s.suggestStop(picked);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Stop request sent. Waiting for the group plan to update.' : 'Could not send. Reconnect and try again.')));
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Stop request sent. Waiting for the group plan to update.' : 'Could not send. Reconnect and try again.')));
+        }
         return ok;
       });
   }
@@ -576,6 +579,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     if (p == null) return;
     final ok = lead ? service.addStop(p) : service.suggestStop(p);
     if (ok && !lead && context.mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suggestion sent to the lead.')));
     }
   }
@@ -629,6 +633,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       replaceStopId: old?.stopId,
     );
     if (ok && mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Meeting point set. Your group gets an alert.')));
     }
   }
@@ -637,11 +642,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   /// REPORT_DOWN message. Needs a gateway with the safety network.
   Future<void> _reportDownAt(ConvoyService service, double lat, double lng, String placeName) async {
     if (!service.supports(ProtocolFeatures.safetyNet)) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L10n.t('report.unavailable'))));
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L10n.t('report.unavailable'))));
+      }
       return;
     }
     final sent = await showReportDownSheet(context, lat: lat, lng: lng, placeName: placeName);
     if (sent == null || !mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(sent ? L10n.t('report.sent') : 'Could not send the report. Try again.'),
     ));
@@ -691,7 +700,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
   void _copyCode(ConvoyModel convoy) {
     Clipboard.setData(ClipboardData(text: convoy.joinCode));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Code ${convoy.joinCode} copied')));
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Code ${convoy.joinCode} copied')));
+    }
   }
 
   Future<void> _endRide(ConvoyService service) async {
@@ -706,6 +718,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     // The end is a message to the server; without signal it would be dropped silently and the
     // ride (and location sharing) would go on while the lead thinks it ended.
     if (!service.isOnline) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No signal, so the ride was not ended. Try again when you are back online.')),
       );
@@ -780,6 +793,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   void _imOk(ConvoyService service) {
     final ok = service.sendCheckIn(CheckInResult.ok);
     if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(ok ? 'Your group knows you are OK.' : 'Could not tell the group right now. Riding on also closes this alert.'),
     ));
@@ -1465,6 +1479,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                           final picked = PickedPlace(name: station.name.isEmpty ? 'Petrol Pump' : station.name, lat: station.lat, lng: station.lng, category: 'FUEL');
                           final ok = lead ? service.addStop(picked) : service.suggestStop(picked);
                           if (mounted) {
+                            ScaffoldMessenger.of(context).clearSnackBars();
                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Fuel stop added to route plan.' : 'Could not add stop. Check connection.')));
                           }
                         },

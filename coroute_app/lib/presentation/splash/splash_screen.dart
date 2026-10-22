@@ -24,6 +24,8 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  bool _navigated = false;
+
   @override
   void initState() {
     super.initState();
@@ -44,53 +46,52 @@ class _SplashScreenState extends State<SplashScreen> {
     return done.future;
   }
 
-  Future<void> _navigateToNext() async {
-    final auth = context.read<AuthService>();
-    await _authReady(auth);
-    if (!mounted) return;
-
+  bool _checkMandatoryUpdate() {
     final versionService = context.read<AppVersionService?>();
     if (versionService != null && versionService.isMandatoryUpdateRequired) {
+      _navigated = true;
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ForceUpdateScreen()));
-      return;
+      return true;
     }
+    return false;
+  }
+
+  Future<void> _navigateToNext() async {
+    if (_navigated) return;
+    final auth = context.read<AuthService>();
+    await _authReady(auth);
+    if (!mounted || _navigated) return;
+
+    if (_checkMandatoryUpdate()) return;
 
     if (auth.isAuthenticated && auth.mustChangePassword) {
       final changed = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen(forced: true)));
-      if (!mounted) return;
+      if (!mounted || _navigated) return;
 
-    final versionService = context.read<AppVersionService?>();
-    if (versionService != null && versionService.isMandatoryUpdateRequired) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ForceUpdateScreen()));
-      return;
-    }
+      if (_checkMandatoryUpdate()) return;
       if (changed != true) {
         await auth.logout();
-        if (!mounted) return;
+        if (!mounted || _navigated) return;
 
-    final versionService = context.read<AppVersionService?>();
-    if (versionService != null && versionService.isMandatoryUpdateRequired) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ForceUpdateScreen()));
-      return;
-    }
+        if (_checkMandatoryUpdate()) return;
+        _navigated = true;
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AccessGateScreen()));
         return;
       }
     }
 
     if (auth.isAuthenticated && auth.isMasterAdmin) {
+      _navigated = true;
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MasterAdminDashboard()));
     } else if (auth.isAuthenticated) {
+      _navigated = true;
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const RiderHomeScreen()));
     } else {
       final onboarded = await OnboardingScreen.isDone();
-      if (!mounted) return;
+      if (!mounted || _navigated) return;
 
-    final versionService = context.read<AppVersionService?>();
-    if (versionService != null && versionService.isMandatoryUpdateRequired) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ForceUpdateScreen()));
-      return;
-    }
+      if (_checkMandatoryUpdate()) return;
+      _navigated = true;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => onboarded ? const AccessGateScreen() : const OnboardingScreen()),
@@ -102,48 +103,53 @@ class _SplashScreenState extends State<SplashScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.bg,
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: Column(
           children: [
             Expanded(
               child: Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(Space.s24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: AppTheme.card,
-                          borderRadius: BorderRadius.circular(Radii.xl + 4),
-                          border: Border.all(color: AppTheme.border, width: 2),
-                          boxShadow: dsFloatingShadow(),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: Radii.xlAll,
-                          child: Image.asset(
-                            'assets/branding/coroute_icon.png',
-                            width: 88,
-                            height: 88,
-                            cacheWidth: 264,
-                            filterQuality: FilterQuality.medium,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(Space.s24),
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: AppTheme.card,
+                            borderRadius: BorderRadius.circular(Radii.xl + 4),
+                            border: Border.all(color: AppTheme.border, width: 2),
+                            boxShadow: dsFloatingShadow(),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: Radii.xlAll,
+                            child: Image.asset(
+                              'assets/branding/coroute_icon.png',
+                              width: 88,
+                              height: 88,
+                              cacheWidth: 264,
+                              filterQuality: FilterQuality.medium,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: Space.s24),
-                      Text(
-                        AppConstants.appName,
-                        textAlign: TextAlign.center,
-                        style: AppText.metric,
-                      ),
-                      const SizedBox(height: Space.s8),
-                      Text(
-                        AppConstants.appTagline,
-                        textAlign: TextAlign.center,
-                        style: AppText.label.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                    ],
+                        const SizedBox(height: Space.s24),
+                        Text(
+                          AppConstants.appName,
+                          textAlign: TextAlign.center,
+                          style: AppText.metric,
+                        ),
+                        const SizedBox(height: Space.s8),
+                        Text(
+                          AppConstants.appTagline,
+                          textAlign: TextAlign.center,
+                          style: AppText.label.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

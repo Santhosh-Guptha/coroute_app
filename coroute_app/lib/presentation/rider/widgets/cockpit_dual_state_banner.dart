@@ -93,33 +93,37 @@ class CockpitDualStateBanner extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         // Map Pack Status Pill
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              '🗺️',
-              textScaler: TextScaler.noScaling,
-              style: TextStyle(fontSize: 15),
-            ),
-            const SizedBox(width: Space.s8),
-            Text(
-              'OFFLINE · PACK ACTIVE',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textScaler: TextScaler.noScaling,
-              style: TextStyle(
-                color: AppTheme.neonCyan,
-                fontSize: 13,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.8,
-                fontFamily: AppTheme.fontFamily,
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '🗺️',
+                textScaler: TextScaler.noScaling,
+                style: TextStyle(fontSize: 15),
               ),
-            ),
-          ],
+              const SizedBox(width: Space.s8),
+              Flexible(
+                child: Text(
+                  'OFFLINE · PACK ACTIVE',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textScaler: TextScaler.noScaling,
+                  style: TextStyle(
+                    color: AppTheme.neonCyan,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.8,
+                    fontFamily: AppTheme.fontFamily,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
         // High-contrast vertical divider
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: Space.s12),
+          padding: const EdgeInsets.symmetric(horizontal: Space.s8),
           child: Text(
             '|',
             textScaler: TextScaler.noScaling,
@@ -131,29 +135,33 @@ class CockpitDualStateBanner extends StatelessWidget {
           ),
         ),
         // P2P Mesh Peers Pill
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              '📶',
-              textScaler: TextScaler.noScaling,
-              style: TextStyle(fontSize: 15),
-            ),
-            const SizedBox(width: Space.s8),
-            Text(
-              '$peerCount P2P Peers',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textScaler: TextScaler.noScaling,
-              style: TextStyle(
-                color: AppTheme.text,
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.4,
-                fontFamily: AppTheme.fontFamily,
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '📶',
+                textScaler: TextScaler.noScaling,
+                style: TextStyle(fontSize: 15),
               ),
-            ),
-          ],
+              const SizedBox(width: Space.s8),
+              Flexible(
+                child: Text(
+                  '$peerCount P2P Peers',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textScaler: TextScaler.noScaling,
+                  style: TextStyle(
+                    color: AppTheme.text,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
+                    fontFamily: AppTheme.fontFamily,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );

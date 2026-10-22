@@ -46,6 +46,7 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
     convoyService.adminDissolveConvoy(convoy.groupId);
     final messenger = ScaffoldMessenger.of(context);
     Navigator.pop(context); // close the inspector
+    messenger.clearSnackBars();
     messenger.showSnackBar(SnackBar(content: Text('Ride ${convoy.name} ended.')));
   }
 
@@ -66,7 +67,10 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
     final hasFix = r.lat != 0 || r.lng != 0;
     showAppSheet<void>(
       context,
+      isScrollControlled: true,
       builder: (ctx) => SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,

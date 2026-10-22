@@ -128,8 +128,9 @@ class CrashAlarmScreen extends StatelessWidget {
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: AppTheme.sos,
                                     foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    minimumSize: const Size.fromHeight(56),
+                                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                   ),
                                 ),
                               ],
@@ -288,70 +289,81 @@ class CrashAlarmView extends StatelessWidget {
             final wide = box.maxWidth > box.maxHeight && box.maxWidth >= 480;
             if (wide) {
               // Landscape: text on the left, the ring and the two big buttons on the right.
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            top,
-                            const SizedBox(height: 14),
-                            heading,
-                            const SizedBox(height: 8),
-                            countdown,
-                            const SizedBox(height: 4),
-                            hint,
-                            const SizedBox(height: 16),
-                            list,
-                          ],
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 840),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                top,
+                                const SizedBox(height: 14),
+                                heading,
+                                const SizedBox(height: 8),
+                                countdown,
+                                const SizedBox(height: 4),
+                                hint,
+                                const SizedBox(height: 16),
+                                list,
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [Center(child: count), const SizedBox(height: 16), buttons],
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [Center(child: count), const SizedBox(height: 16), buttons],
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               );
             }
-            return SingleChildScrollView(
-              padding: dsScreenPadding,
+            final compact = box.maxHeight < 800;
+            return Center(
               child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: box.maxHeight > 44 ? box.maxHeight - 44 : 0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
+                constraints: const BoxConstraints(maxWidth: 600),
+                child: SingleChildScrollView(
+                  padding: compact ? const EdgeInsets.fromLTRB(16, 12, 16, 16) : dsScreenPadding,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: box.maxHeight > 44 ? box.maxHeight - 44 : 0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        top,
-                        const SizedBox(height: 24),
-                        Center(child: count),
-                        const SizedBox(height: 14),
-                        heading,
-                        const SizedBox(height: 10),
-                        countdown,
-                        const SizedBox(height: 4),
-                        hint,
-                        const SizedBox(height: 20),
-                        list,
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            top,
+                            SizedBox(height: compact ? 12 : 24),
+                            Center(child: count),
+                            SizedBox(height: compact ? 8 : 14),
+                            heading,
+                            SizedBox(height: compact ? 6 : 10),
+                            countdown,
+                            const SizedBox(height: 4),
+                            hint,
+                            SizedBox(height: compact ? 12 : 20),
+                            list,
+                          ],
+                        ),
+                        Padding(padding: EdgeInsets.only(top: compact ? 12 : 20), child: buttons),
                       ],
                     ),
-                    Padding(padding: const EdgeInsets.only(top: 20), child: buttons),
-                  ],
+                  ),
                 ),
               ),
             );

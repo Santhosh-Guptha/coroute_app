@@ -46,6 +46,9 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   RouteModel? _route;
   bool _routing = false;
   bool _launching = false;
+  bool _isPicking = false;
+  bool _isAddingStopSheet = false;
+  bool _isReviewing = false;
   String? _nameError;
   int _speedLimit = 0;
   int _routeRequest = 0;
@@ -120,16 +123,28 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   }
 
   Future<void> _pickStart() async {
-    final p = await MapPickerScreen.pick(context, title: 'Start', initial: _start);
-    if (p == null) return;
-    setState(() => _start = p);
-    _refreshRoute();
+    if (_isPicking || _launching) return;
+    _isPicking = true;
+    try {
+      final p = await MapPickerScreen.pick(context, title: 'Start', initial: _start);
+      if (p == null || !mounted) return;
+      setState(() => _start = p);
+      _refreshRoute();
+    } finally {
+      _isPicking = false;
+    }
   }
 
   Future<void> _pickDestination() async {
-    final p = await MapPickerScreen.pick(context, title: 'Destination', initial: _destination);
-    if (p == null) return;
-    _setDestination(p);
+    if (_isPicking || _launching) return;
+    _isPicking = true;
+    try {
+      final p = await MapPickerScreen.pick(context, title: 'Destination', initial: _destination);
+      if (p == null || !mounted) return;
+      _setDestination(p);
+    } finally {
+      _isPicking = false;
+    }
   }
 
   void _setDestination(PickedPlace p) {
@@ -138,37 +153,69 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   }
 
   Future<void> _addStop() async {
-    final near = _stops.isNotEmpty ? _stops.last : (_start ?? _destination);
-    final p = await MapPickerScreen.pick(context, title: 'Add a stop', forStop: true, confirmLabel: 'Add stop',
-        initial: near == null ? null : PickedPlace(lat: near.lat, lng: near.lng));
-    if (p == null) return;
-    setState(() => _stops.add(p));
-    _refreshRoute();
+    if (_isPicking || _launching) return;
+    _isPicking = true;
+    try {
+      final near = _stops.isNotEmpty ? _stops.last : (_start ?? _destination);
+      final p = await MapPickerScreen.pick(
+        context,
+        title: 'Add a stop',
+        forStop: true,
+        confirmLabel: 'Add stop',
+        initial: near == null ? null : PickedPlace(lat: near.lat, lng: near.lng),
+      );
+      if (p == null || !mounted) return;
+      setState(() => _stops.add(p));
+      _refreshRoute();
+    } finally {
+      _isPicking = false;
+    }
   }
 
   /// Long-press on the map: name the place, choose its type, add it.
   Future<void> _addStopAt(LatLng point) async {
-    if (_launching) return;
+    if (_launching || _isAddingStopSheet) return;
     if (_stops.length >= _maxStops) {
       _snack('A trip can have up to $_maxStops stops.');
       return;
     }
-    final p = await showAppSheet<PickedPlace>(
-      context,
-      title: 'Add a stop here',
-      isScrollControlled: true,
-      builder: (_) => _AddStopSheet(geo: _geo, point: point),
-    );
-    if (p == null || !mounted) return;
-    setState(() => _stops.add(p));
-    _refreshRoute();
+    _isAddingStopSheet = true;
+    try {
+      final p = await showAppSheet<PickedPlace>(
+        context,
+        title: 'Add a stop here',
+        isScrollControlled: true,
+        constraints: BoxConstraints(
+          maxWidth: 600,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+        ),
+        builder: (_) => _AddStopSheet(geo: _geo, point: point),
+      );
+      if (p == null || !mounted) return;
+      setState(() => _stops.add(p));
+      _refreshRoute();
+    } finally {
+      _isAddingStopSheet = false;
+    }
   }
 
   Future<void> _editStop(int i) async {
-    final p = await MapPickerScreen.pick(context, title: 'Edit stop', forStop: true, confirmLabel: 'Save stop', initial: _stops[i]);
-    if (p == null) return;
-    setState(() => _stops[i] = p);
-    _refreshRoute();
+    if (_isPicking || _launching || i < 0 || i >= _stops.length) return;
+    _isPicking = true;
+    try {
+      final p = await MapPickerScreen.pick(
+        context,
+        title: 'Edit stop',
+        forStop: true,
+        confirmLabel: 'Save stop',
+        initial: _stops[i],
+      );
+      if (p == null || !mounted) return;
+      setState(() => _stops[i] = p);
+      _refreshRoute();
+    } finally {
+      _isPicking = false;
+    }
   }
 
   void _removeStop(int i) {
@@ -177,33 +224,40 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   }
 
   Future<void> _review() async {
+    if (_isReviewing || _launching) return;
     final name = _name.text.trim();
     if (name.length < 2) {
       setState(() => _nameError = 'Give the trip a name.');
       _nameFocus.requestFocus();
       return;
     }
+    _isReviewing = true;
     FocusScope.of(context).unfocus();
-    final limit = await TripReviewSheet.show(
-      context,
-      name: name,
-      startName: _start?.name,
-      destinationName: _destination?.name,
-      route: _route,
-      stops: _stops.length,
-      speedLimitKmh: _speedLimit,
-      namedStops: [for (final s in _stops) (s.name, s.lat, s.lng)],
-      startLat: _start?.lat,
-      startLng: _start?.lng,
-      destinationLat: _destination?.lat,
-      destinationLng: _destination?.lng,
-    );
-    if (limit == null || !mounted) return;
-    setState(() => _speedLimit = limit);
-    await _launch(name);
+    try {
+      final limit = await TripReviewSheet.show(
+        context,
+        name: name,
+        startName: _start?.name,
+        destinationName: _destination?.name,
+        route: _route,
+        stops: _stops.length,
+        speedLimitKmh: _speedLimit,
+        namedStops: [for (final s in _stops) (s.name, s.lat, s.lng)],
+        startLat: _start?.lat,
+        startLng: _start?.lng,
+        destinationLat: _destination?.lat,
+        destinationLng: _destination?.lng,
+      );
+      if (limit == null || !mounted) return;
+      setState(() => _speedLimit = limit);
+      await _launch(name);
+    } finally {
+      _isReviewing = false;
+    }
   }
 
   Future<void> _launch(String name) async {
+    if (_launching) return;
     final auth = context.read<AuthService>();
     final convoys = context.read<ConvoyService>();
     if (!await PermissionsScreen.ensure(context)) return;
@@ -248,11 +302,12 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.map,
+      resizeToAvoidBottomInset: true,
       body: LayoutBuilder(builder: (context, c) {
         final map = LoadingState(loading: _routing, child: _mapView());
         final sideBySide = c.maxWidth > c.maxHeight && c.maxWidth >= 560;
         if (sideBySide) {
-          final formWidth = (c.maxWidth * 0.45).clamp(280.0, 420.0).toDouble();
+          final formWidth = (c.maxWidth * 0.45).clamp(280.0, 480.0).toDouble();
           return Row(
             children: [
               SizedBox(width: formWidth, child: _sheet(sideBySide: true)),
@@ -268,7 +323,19 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
             // The map runs under the sheet's rounded corners.
             Positioned(left: 0, right: 0, top: 0, bottom: sheetHeight - Radii.sheet, child: map),
             _floatingTop(),
-            Positioned(left: 0, right: 0, bottom: 0, height: sheetHeight, child: _sheet()),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: sheetHeight,
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 680),
+                  child: _sheet(),
+                ),
+              ),
+            ),
           ],
         );
       }),
@@ -290,46 +357,51 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       top: 0,
       child: SafeArea(
         bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Row(
-            children: [
-              DecoratedBox(
-                decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: dsFloatingShadow()),
-                child: DsRoundButton(
-                  icon: Icons.chevron_left_rounded,
-                  label: 'Back',
-                  onTap: () => Navigator.of(context).maybePop(),
-                ),
-              ),
-              Expanded(
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.card,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: dsFloatingShadow(),
-                    ),
-                    child: Text(
-                      pill,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: AppTheme.text, fontSize: 14, fontWeight: FontWeight.w800),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  DecoratedBox(
+                    decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: dsFloatingShadow()),
+                    child: DsRoundButton(
+                      icon: Icons.chevron_left_rounded,
+                      label: 'Back',
+                      onTap: () => Navigator.of(context).maybePop(),
                     ),
                   ),
-                ),
+                  Expanded(
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.card,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: dsFloatingShadow(),
+                        ),
+                        child: Text(
+                          pill,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: AppTheme.text, fontSize: 14, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ),
+                  DecoratedBox(
+                    decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: dsFloatingShadow()),
+                    child: DsRoundButton(
+                      icon: Icons.fit_screen_rounded,
+                      label: 'Fit the route on the map',
+                      iconColor: AppTheme.accentText,
+                      onTap: _fit,
+                    ),
+                  ),
+                ],
               ),
-              DecoratedBox(
-                decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: dsFloatingShadow()),
-                child: DsRoundButton(
-                  icon: Icons.fit_screen_rounded,
-                  label: 'Fit the route on the map',
-                  iconColor: AppTheme.accentText,
-                  onTap: _fit,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -443,6 +515,8 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     final destinationName = _destination?.name;
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+      physics: const BouncingScrollPhysics(),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
         TextField(
           controller: _name,
@@ -533,8 +607,8 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
                   child: Semantics(
                     label: 'Drag to reorder ${s.name}',
                     child: SizedBox(
-                      width: 44,
-                      height: 44,
+                      width: 48,
+                      height: 48,
                       child: Icon(Icons.drag_handle_rounded, color: AppTheme.muted),
                     ),
                   ),
@@ -762,6 +836,7 @@ class _AddStopSheetState extends State<_AddStopSheet> {
     if (kind == null) return;
     final typed = _name.text.trim();
     final p = widget.point;
+    if (!mounted) return;
     Navigator.pop(
       context,
       PickedPlace(
@@ -776,6 +851,8 @@ class _AddStopSheetState extends State<_AddStopSheet> {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,

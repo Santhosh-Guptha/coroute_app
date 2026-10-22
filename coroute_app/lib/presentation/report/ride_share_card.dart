@@ -417,6 +417,7 @@ class _RideSharePreviewState extends State<RideSharePreview> {
       }
     } catch (_) {
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open sharing.')));
       }
     } finally {

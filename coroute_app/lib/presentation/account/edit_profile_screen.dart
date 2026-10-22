@@ -13,28 +13,29 @@ class EditProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: AppTheme.bg,
       body: SafeArea(
         bottom: false,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-              child: DsScreenHeader(
-                title: 'Edit profile',
-                subtitle: 'How your group reaches you',
-                onBack: () => Navigator.maybePop(context),
-              ),
-            ),
-            Expanded(
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 600),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                  child: DsScreenHeader(
+                    title: 'Edit profile',
+                    subtitle: 'How your group reaches you',
+                    onBack: () => Navigator.maybePop(context),
+                  ),
+                ),
+                Expanded(
                   child: ProfileForm(onSaved: () => Navigator.of(context).pop(true)),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
