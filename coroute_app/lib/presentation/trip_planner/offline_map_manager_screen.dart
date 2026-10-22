@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/config/feature_gates.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/theme/app_theme.dart';
@@ -6,7 +7,9 @@ import '../../core/ui/ui.dart';
 import '../../data/local/saved_map_pack_store.dart';
 import '../../data/models/saved_map_pack.dart';
 import '../../data/services/tile_cache_service.dart';
+import '../../data/services/plan_subscription_service.dart';
 import 'offline_tile_verification_screen.dart';
+import 'trip_planner_screen.dart';
 
 /// Offline Map Pack Manager screen displaying storage usage, downloaded
 /// corridor map packs, high-detail zoom statuses, one-tap tile verification,
@@ -146,8 +149,20 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
     }
   }
 
+  void _onDownloadNewPack() {
+    final isUnlimited = FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks);
+    if (!isUnlimited && _packs.length >= SafetyConstants.freeOfflinePacksLimit) {
+      FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks);
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const TripPlannerScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    context.watch<PlanSubscriptionService?>();
     final cacheBytes = TileCache.instance?.approxBytes ?? 0;
     final maxBytes = SafetyConstants.tileCacheMaxBytes;
     final usedMb = (cacheBytes / (1024 * 1024)).toStringAsFixed(1);
@@ -163,6 +178,18 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
         backgroundColor: AppTheme.card,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: Icon(
+              !FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks) && _packs.length >= SafetyConstants.freeOfflinePacksLimit
+                  ? Icons.lock_outline_rounded
+                  : Icons.add_circle_outline_rounded,
+              color: !FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks) && _packs.length >= SafetyConstants.freeOfflinePacksLimit
+                  ? AppTheme.warnText
+                  : AppTheme.accentText,
+            ),
+            tooltip: 'Download Corridor Pack',
+            onPressed: _onDownloadNewPack,
+          ),
           if (_packs.isNotEmpty || tileCount > 0)
             IconButton(
               icon: const Icon(Icons.delete_sweep_rounded),

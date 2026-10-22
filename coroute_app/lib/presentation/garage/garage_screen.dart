@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/services/garage_service.dart';
 import '../../domain/garage/bike_profile.dart';
 import '../../core/config/feature_gates.dart';
+import '../../data/services/plan_subscription_service.dart';
 
 /// Screen managing multiple motorcycles, service reminders, and active ride bike.
 class GarageScreen extends StatefulWidget {
@@ -43,6 +45,11 @@ class _GarageScreenState extends State<GarageScreen> {
       ),
       builder: (sheetContext) => _AddBikeSheet(
         onSave: (newBike) async {
+          if (!FeatureGates.isUnlocked(Feature.multiBikeGarage) &&
+              _garageService.bikesNotifier.value.isNotEmpty) {
+            FeatureGates.showUpgradeModal(context, Feature.multiBikeGarage);
+            return;
+          }
           await _garageService.saveBike(newBike);
           if (sheetContext.mounted) {
             Navigator.of(sheetContext).maybePop();
@@ -123,6 +130,7 @@ class _GarageScreenState extends State<GarageScreen> {
 
   @override
   Widget build(BuildContext context) {
+    context.watch<PlanSubscriptionService?>();
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(

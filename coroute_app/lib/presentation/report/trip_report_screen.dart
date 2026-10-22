@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../core/config/feature_gates.dart';
+import '../../data/services/plan_subscription_service.dart';
 import '../../data/local/ride_stats_store.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../data/models/trip_history_model.dart';
@@ -255,6 +256,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
 
   @override
   Widget build(BuildContext context) {
+    context.watch<PlanSubscriptionService?>();
     final myId = context.read<AuthService>().currentUserId;
     return Scaffold(
       backgroundColor: AppTheme.bg,

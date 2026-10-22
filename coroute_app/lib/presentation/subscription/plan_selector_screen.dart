@@ -399,8 +399,39 @@ class _PlanCard extends StatelessWidget {
             ),
           ),
 
-          // "POPULAR" Pill
-          if (plan.isPopular)
+          // "ACTIVE" or "POPULAR" Pill
+          if (isActive)
+            Positioned(
+              top: -10,
+              right: 18,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppTheme.accentText,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(color: AppTheme.accentText.withValues(alpha: 0.4), blurRadius: 8),
+                  ],
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check_circle_rounded, color: Colors.black, size: 12),
+                    SizedBox(width: 4),
+                    Text(
+                      'ACTIVE PLAN',
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 10,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (plan.isPopular)
             Positioned(
               top: -10,
               right: 18,

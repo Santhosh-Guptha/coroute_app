@@ -48,7 +48,7 @@ class PlanSubscriptionService extends ChangeNotifier {
   static const String keyTier = 'coroute_active_subscription_plan';
   static const String keyForceUnlocked = 'coroute_force_all_unlocked';
 
-  SubscriptionTier _currentTier = SubscriptionTier.roadCaptain;
+  SubscriptionTier _currentTier = SubscriptionTier.community;
   bool _forceAllUnlocked = false;
   bool _loaded = false;
 
@@ -64,7 +64,7 @@ class PlanSubscriptionService extends ChangeNotifier {
       if (tierName != null) {
         _currentTier = SubscriptionTier.values.firstWhere(
           (t) => t.name == tierName,
-          orElse: () => SubscriptionTier.roadCaptain,
+          orElse: () => SubscriptionTier.community,
         );
       }
       _forceAllUnlocked = prefs.getBool(keyForceUnlocked) ?? false;
@@ -192,11 +192,11 @@ class PlanSubscriptionService extends ChangeNotifier {
           tagline: 'Host the Pack — One Pass Unlocks the Entire Convoy',
           monthlyPrice: '₹599 / mo (\$12.99)',
           annualPrice: '₹4,499 / yr (\$99.99)',
-          maxConvoySize: 30,
+          maxConvoySize: 40,
           isPopular: true,
           features: [
             PlanFeatureItem(
-              title: 'Host up to 30 Riders in One Convoy',
+              title: 'Host up to 40 Riders in One Convoy',
               description: 'Every joined rider automatically gets premium perks during the ride.',
               isHighlight: true,
             ),

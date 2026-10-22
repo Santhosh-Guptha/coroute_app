@@ -1,9 +1,8 @@
-import '../ride/fuel_sheet.dart';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/config/feature_gates.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
@@ -12,8 +11,11 @@ import '../../core/ui/ui.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/permissions_service.dart';
+import '../../data/services/plan_subscription_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/settings_service.dart';
+import '../ride/fuel_sheet.dart';
+import '../subscription/plan_selector_screen.dart';
 
 /// Plain-language texts of the ride safety switches (shared with the pre-ride
 /// checklist). Read at build time so they follow the rider's language (3.16).
@@ -22,9 +24,9 @@ class SafetyTexts {
 
   static String get crashTitle => L10n.t('settings.crash');
   static String get crashExplain => L10n.t('settings.crash.hint', {
-    'speed': SafetyConstants.crashArmSpeedKmh.round(),
-    'sec': SafetyConstants.crashCountdown.inSeconds,
-  });
+        'speed': SafetyConstants.crashArmSpeedKmh.round(),
+        'sec': SafetyConstants.crashCountdown.inSeconds,
+      });
 
   static String get smsTitle => L10n.t('settings.sms');
   static String get smsExplain =>
@@ -33,15 +35,15 @@ class SafetyTexts {
 
   static String get fatigueTitle => L10n.t('settings.fatigue');
   static String get fatigueExplain => L10n.t('settings.fatigue.hint', {
-    'h': SafetyConstants.fatigueRideFor.inHours,
-    'min': SafetyConstants.fatigueBreakFor.inMinutes,
-  });
+        'h': SafetyConstants.fatigueRideFor.inHours,
+        'min': SafetyConstants.fatigueBreakFor.inMinutes,
+      });
 
   static String get checkInTitle => L10n.t('settings.checkin.title');
   static String get checkInExplain => L10n.t('settings.checkin.hint', {
-    'far': SafetyConstants.checkInFarFor.inMinutes,
-    'answer': SafetyConstants.checkInAnswerWithin.inMinutes,
-  });
+        'far': SafetyConstants.checkInFarFor.inMinutes,
+        'answer': SafetyConstants.checkInAnswerWithin.inMinutes,
+      });
 
   // Nearby riders (3.15 Rider Safety Network).
   static String get nearbySection => L10n.t('settings.nearby');
@@ -86,23 +88,21 @@ class SafetyTexts {
   static String get saveFailed => L10n.t('settings.saveFailed');
 }
 
-/// "Ride safety" (Profile tab): the ride safety switches, the fuel range,
-/// the nearby riders switches (help others, ask others to help me, medical
-/// for responders, accident warnings), voice (incl. "Speak more after
-/// dark"), the ride notification (incl. the medical ID on the lock screen),
-/// the route map prefetch, the documents reminder and the language, one
-/// line each. Tapping the title 7 times reveals the developer row that
-/// simulates a wearable impact (only while a ride is active).
+/// "Ride safety" (Profile tab): plan entitlement status, essential pre-armed
+/// defaults, fuel range, nearby riders network, voice alerts, lock screen emergency ID,
+/// route caching and offline preferences.
+///
+/// Tapping the title 7 times reveals the developer row simulating wearable impact.
 class SafetySettingsSheet extends StatefulWidget {
   /// Asks for a permission (tests pass a fake); defaults to [PermissionsService.request].
   final Future<bool> Function(String key)? requestPermission;
   const SafetySettingsSheet({super.key, this.requestPermission});
 
   static Future<void> show(BuildContext context) => showAppSheet<void>(
-    context,
-    isScrollControlled: true,
-    builder: (_) => const SafetySettingsSheet(),
-  );
+        context,
+        isScrollControlled: true,
+        builder: (_) => const SafetySettingsSheet(),
+      );
 
   /// Tank range choices (km); "Other" lets the rider type one (0 = off).
   static const List<int> fuelChoices = [0, 150, 200, 250, 300, 400];
@@ -110,7 +110,7 @@ class SafetySettingsSheet extends StatefulWidget {
   /// Title taps that reveal the developer row.
   static const int devTaps = 7;
 
-  /// One line for the Profile row.
+  /// One line summary for Profile / Account screen.
   static String summary(SettingsService s) {
     final on = <String>[
       if (s.crashDetection) 'crash detection',
@@ -130,6 +130,7 @@ class SafetySettingsSheet extends StatefulWidget {
 class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
   bool _smsDenied = false;
   int _titleTaps = 0;
+
   Future<void> _setSms(SettingsService s, bool on) async {
     if (!on) {
       await s.setSmsFallback(false);
@@ -171,19 +172,18 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
   }
 
   Widget _section(String text) => Padding(
-    padding: const EdgeInsets.only(top: 20, bottom: 10),
-    child: Semantics(header: true, child: DsSectionHeader(text)),
-  );
+        padding: const EdgeInsets.only(top: 20, bottom: 10),
+        child: Semantics(header: true, child: DsSectionHeader(text)),
+      );
 
-  /// A card of rows (the More canvas: card, 2 px border, 18 px radius).
   Widget _group(List<Widget> rows) => DsCard(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: rows,
-    ),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: rows,
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -197,21 +197,140 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
     final s = context.watch<SettingsService?>();
     if (s == null) return const SizedBox.shrink();
     final auth = context.watch<AuthService?>();
+    final planService = context.watch<PlanSubscriptionService?>();
+    final currentTier = planService?.currentTier ?? FeatureGates.activeTier;
+    final tierLabel = FeatureGates.tierLabel(currentTier);
+    final maxRiders = FeatureGates.maxConvoyMembers(currentTier);
+
+    String tierSummary;
+    switch (currentTier) {
+      case SubscriptionTier.community:
+        tierSummary = 'Max convoy: $maxRiders bikes · Standard Telemetry · Essential SOS';
+        break;
+      case SubscriptionTier.proRider:
+        tierSummary = 'Max convoy: $maxRiders bikes · Live Guardian Share · Full Telemetry';
+        break;
+      case SubscriptionTier.roadCaptain:
+        tierSummary = 'Max convoy: $maxRiders bikes · Priority Audio Ducking · Regroup Waypoints';
+        break;
+      case SubscriptionTier.tourOperator:
+        tierSummary = 'Max convoy: $maxRiders bikes · Fleet Matrix & Compliance Exports';
+        break;
+    }
+
     final convoy = context.select<ConvoyService?, bool>((c) {
       final a = c?.activeConvoy;
       return a != null && a.tripStatus != 'ENDED';
     });
     final showDev = _titleTaps >= SafetySettingsSheet.devTaps && convoy;
+
     return SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Header: Tapping title 7 times reveals developer impact simulation
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: _titleTap,
             child: AppSheetHeader(title: L10n.t('settings.title')),
           ),
+
+          // Plan & Tier Entitlements Card
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: DsCard(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: AppTheme.tint,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          Icons.workspace_premium_rounded,
+                          color: AppTheme.accentText,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'ACTIVE SUBSCRIPTION PLAN',
+                              style: TextStyle(
+                                color: AppTheme.muted,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              tierLabel,
+                              style: AppText.body.copyWith(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.brand.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: AppTheme.brand.withValues(alpha: 0.4)),
+                        ),
+                        child: Text(
+                          'ARMED',
+                          style: TextStyle(
+                            color: AppTheme.accentText,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    tierSummary,
+                    style: AppText.caption.copyWith(color: AppTheme.text2),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: DsButton(
+                      label: 'Manage Subscription Plan',
+                      icon: Icons.tune_rounded,
+                      tone: DsButtonTone.outline,
+                      height: 44,
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const PlanSelectorScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Primary Safety Engines (All default pre-armed)
           _group([
             SafetySwitch(
               icon: Icons.car_crash_outlined,
@@ -251,6 +370,7 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               divider: false,
             ),
           ]),
+
           _section(L10n.t('settings.ride')),
           _group([
             DsListRow(
@@ -279,6 +399,7 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               ),
             ),
           ]),
+
           _section(SafetyTexts.nearbySection),
           _group([
             if (auth != null) ...[
@@ -313,6 +434,7 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               divider: false,
             ),
           ]),
+
           _section(SafetyTexts.voiceSection),
           _group([
             SafetySwitch(
@@ -345,6 +467,7 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               divider: false,
             ),
           ]),
+
           _section('Speed limit warning'),
           _group([
             Padding(
@@ -398,6 +521,7 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               ),
             ),
           ]),
+
           _section(SafetyTexts.notificationSection),
           _group([
             Padding(
@@ -487,6 +611,7 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               divider: false,
             ),
           ]),
+
           _section(L10n.t('settings.mapsSection')),
           _group([
             SafetySwitch(
@@ -498,8 +623,10 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
               divider: false,
             ),
           ]),
+
           _section(SafetyTexts.languageTitle),
           LanguagePicker(value: s.language, onChanged: (l) => s.setLanguage(l)),
+
           if (showDev) ...[
             const SizedBox(height: 12),
             DsCard(
@@ -526,10 +653,10 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
                 ),
                 onTap: () {
                   context.read<SafetyService?>()?.externalImpact(
-                    source: ExternalImpactSource.developer,
-                    g: SafetyConstants.wearableImpactG,
-                    atMs: DateTime.now().millisecondsSinceEpoch,
-                  );
+                        source: ExternalImpactSource.developer,
+                        g: SafetyConstants.wearableImpactG,
+                        atMs: DateTime.now().millisecondsSinceEpoch,
+                      );
                   Navigator.of(context).maybePop();
                 },
               ),
@@ -541,8 +668,7 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
   }
 }
 
-/// "Tank range (km)" (3.16, item 2): a row of choices (Off, 150 ... 400) and
-/// "Other" with a number field. Shared by the safety settings and the profile.
+/// Tank range choices (km); retained for profile_form.dart compatibility.
 class FuelRangeField extends StatelessWidget {
   final int value;
   final bool custom;
@@ -653,8 +779,7 @@ class FuelRangeField extends StatelessWidget {
   }
 }
 
-/// System / English / Hindi / Telugu (3.16, item 23). Shared by the safety
-/// settings and the profile; writes [SettingsService.setLanguage].
+/// Language picker (system / English / Hindi / Telugu); retained for compatibility.
 class LanguagePicker extends StatelessWidget {
   final AppLanguage value;
   final ValueChanged<AppLanguage> onChanged;

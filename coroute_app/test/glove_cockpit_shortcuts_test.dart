@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
@@ -427,15 +428,13 @@ void main() {
     await tester.tap(find.text('Open Settings Modal'));
     await tester.pumpAndSettle();
 
-    // Verify all 6 setting cards exist in 2x3 grid
+    // Verify the 4 essential in-flight settings exist
     expect(find.byKey(const Key('quick_setting_voice_alerts')), findsOneWidget);
-    expect(find.byKey(const Key('quick_setting_screen_always_on')), findsOneWidget);
-    expect(find.byKey(const Key('quick_setting_auto_follow_map')), findsOneWidget);
-    expect(find.byKey(const Key('quick_setting_intercom_vox')), findsOneWidget);
+    expect(find.byKey(const Key('quick_setting_sunlight_mode')), findsOneWidget);
     expect(find.byKey(const Key('quick_setting_battery_conserve')), findsOneWidget);
-    expect(find.byKey(const Key('quick_setting_ride_guardian')), findsOneWidget);
+    expect(find.byKey(const Key('quick_setting_screen_always_on')), findsOneWidget);
 
-    // Verify touch target dimensions are glove-friendly
+    // Verify touch target dimensions are glove-friendly (>= 56 dp)
     final voiceCardSize = tester.getSize(find.byKey(const Key('quick_setting_voice_alerts')));
     expect(voiceCardSize.height, greaterThanOrEqualTo(56.0));
 
@@ -449,25 +448,10 @@ void main() {
     await tester.pump();
     expect(screenOn, isTrue);
 
-    // Toggle Auto-Follow Map
-    await tester.tap(find.byKey(const Key('quick_setting_auto_follow_map')));
-    await tester.pump();
-    expect(autoFollow, isFalse);
-
-    // Toggle Intercom VOX
-    await tester.tap(find.byKey(const Key('quick_setting_intercom_vox')));
-    await tester.pump();
-    expect(toggles['Intercom VOX'], isTrue);
-
     // Toggle Battery Conserve
     await tester.tap(find.byKey(const Key('quick_setting_battery_conserve')));
     await tester.pump();
     expect(toggles['Battery Conserve'], isTrue);
-
-    // Toggle Ride Guardian
-    await tester.tap(find.byKey(const Key('quick_setting_ride_guardian')));
-    await tester.pump();
-    expect(toggles['Ride Guardian'], isFalse);
 
     // Close with Done
     await tester.ensureVisible(find.byKey(const Key('quick_settings_done')));
@@ -575,6 +559,8 @@ void main() {
   });
 
   testWidgets('GloveQuickSettingsModal renders Guardian and Fuel action buttons', (tester) async {
+    FeatureGates.activeTier = SubscriptionTier.proRider;
+    addTearDown(() => FeatureGates.activeTier = SubscriptionTier.community);
     final settings = SettingsService();
     await settings.load();
 

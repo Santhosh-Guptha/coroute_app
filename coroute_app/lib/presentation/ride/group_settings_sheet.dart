@@ -3,6 +3,7 @@ import 'ride_feature_summary.dart';
 import 'ride_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/config/feature_gates.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/theme/app_theme.dart';
@@ -12,6 +13,7 @@ import '../../data/models/network_wire.dart';
 import '../../data/models/safety_wire.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/settings_service.dart';
+import '../../data/services/plan_subscription_service.dart';
 
 bool _isGroupSettingsShowing = false;
 
@@ -53,6 +55,7 @@ class GroupSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    context.watch<PlanSubscriptionService?>();
     final service = context.watch<ConvoyService>();
     final convoy = service.allConvoys[convoyId];
     if (convoy == null) return const SizedBox.shrink();
@@ -315,6 +318,24 @@ class GroupSettingsView extends StatelessWidget {
             ),
           const SizedBox(height: 8),
 
+          // Mid-Ride Dynamic Waypoint Push
+          SheetSectionTitle('Mid-ride dynamic waypoint push'),
+          group([
+            DsSwitchRow(
+              label: 'Dynamic waypoint & regroup push',
+              subtitle: 'Lead broadcasts live route adjustments and regroup waypoints to all riders.',
+              value: FeatureGates.isUnlocked(Feature.dynamicWaypointPush),
+              onChanged: (v) {
+                if (!FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
+                  FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
+                  return;
+                }
+              },
+              divider: false,
+            ),
+          ]),
+          const SizedBox(height: 8),
+
           // 4. Alerts & Voice Guidance
           SheetSectionTitle('Audio & guidance alerts'),
           Builder(
@@ -329,6 +350,18 @@ class GroupSettingsView extends StatelessWidget {
                       subtitle: 'Separation and emergency warnings are read out.',
                       value: convoy.voiceGuidanceEnabled,
                       onChanged: lead ? (v) => service.updateGroupConfig(voiceGuidanceEnabled: v) : null,
+                      divider: true,
+                    ),
+                    DsSwitchRow(
+                      label: 'Priority Voice Ducking (-18 dB)',
+                      subtitle: 'Lead speech automatically ducks convoy intercom chatter by -18 dB.',
+                      value: FeatureGates.isUnlocked(Feature.priorityIntercomDucking),
+                      onChanged: (v) {
+                        if (!FeatureGates.isUnlocked(Feature.priorityIntercomDucking)) {
+                          FeatureGates.showUpgradeModal(context, Feature.priorityIntercomDucking);
+                          return;
+                        }
+                      },
                       divider: riderSettings != null,
                     ),
                     if (riderSettings != null)

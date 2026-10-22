@@ -69,6 +69,7 @@ class _FuelSheetState extends State<_FuelSheet> {
 
   @override
   void dispose() {
+    _isFuelSheetShowing = false;
     for (final c in [capacity, mileage, range, margin, amount]) {
       c.dispose();
     }

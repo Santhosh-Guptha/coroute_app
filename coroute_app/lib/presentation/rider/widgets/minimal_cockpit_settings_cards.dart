@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/config/feature_gates.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
 import '../../../data/models/convoy_model.dart';
 import '../../../domain/safety/fuel_profile.dart';
 
-/// Structured, minimal cockpit settings cards for the live ride bottom sheet.
+/// Structured, ultra-minimal cockpit settings cards for the live ride bottom sheet.
 ///
-/// Replaces the loose 12-item list with 4 high-efficiency cards:
-/// 1. Navigation & Route Tools (Route & Stops, Turn-by-turn, Offline Map, Messages)
-/// 2. Safety & Fuel Health (Fuel range with inline refuel, Ride Guardian, Stop reason)
-/// 3. Convoy & Comms (Invite code, Intercom options, Group settings, Share ETA)
+/// Designed to be distraction-free and strictly enforce subscription plan gates:
+/// 1. Navigation & Route Tools (Route & Stops, Mid-Ride Waypoint Push, Turn-by-turn, Messages)
+/// 2. Safety & Fuel Health (Fuel range with inline refuel, Ride Guardian with plan gate, Stop reason)
+/// 3. Convoy & Comms (Invite code with capacity gate, Intercom with priority ducking, Group settings, Share ETA)
 /// 4. Ride Controls (Pause/Resume, End ride, Leave ride)
 
 class NavigationToolsCard extends StatelessWidget {
@@ -18,6 +19,8 @@ class NavigationToolsCard extends StatelessWidget {
   final VoidCallback onOpenStops;
   final VoidCallback onOpenMessages;
   final VoidCallback? onTurnByTurn;
+  final VoidCallback? onAddStop;
+  final bool isLead;
   final Widget? saveMapWidget;
   final int chatQueued;
   final bool isOnline;
@@ -28,6 +31,8 @@ class NavigationToolsCard extends StatelessWidget {
     required this.onOpenStops,
     required this.onOpenMessages,
     this.onTurnByTurn,
+    this.onAddStop,
+    this.isLead = false,
     this.saveMapWidget,
     required this.chatQueued,
     required this.isOnline,
@@ -42,6 +47,8 @@ class NavigationToolsCard extends StatelessWidget {
     final msgSubtitle = chatQueued > 0
         ? (isOnline ? '$chatQueued sending' : '$chatQueued waiting for signal')
         : (convoy.messages.isEmpty ? 'No unread messages' : convoy.messages.last.text);
+
+    final canPushWaypoint = FeatureGates.isUnlocked(Feature.dynamicWaypointPush);
 
     return Container(
       decoration: BoxDecoration(
@@ -60,6 +67,28 @@ class NavigationToolsCard extends StatelessWidget {
             subtitle: stopsSubtitle,
             onTap: onOpenStops,
           ),
+          if (isLead && onAddStop != null) ...[
+            const Divider(height: 1),
+            _CardTile(
+              key: const Key('sheet_row_push_waypoint'),
+              icon: Icons.add_location_alt_rounded,
+              iconColor: canPushWaypoint ? AppTheme.accentText : AppTheme.muted,
+              title: 'Push mid-ride waypoint',
+              subtitle: canPushWaypoint
+                  ? 'Dispatch instant regroup stop to convoy'
+                  : 'Requires Road Captain plan · Tap to unlock',
+              onTap: () {
+                if (!canPushWaypoint) {
+                  FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
+                } else {
+                  onAddStop!();
+                }
+              },
+              trailing: canPushWaypoint
+                  ? null
+                  : Icon(Icons.lock_rounded, size: 20, color: AppTheme.warnText),
+            ),
+          ],
           const Divider(height: 1),
           if (onTurnByTurn != null) ...[
             _CardTile(
@@ -67,7 +96,9 @@ class NavigationToolsCard extends StatelessWidget {
               icon: Icons.navigation_rounded,
               iconColor: AppTheme.accentText,
               title: 'Turn-by-turn navigation',
-              subtitle: convoy.destinationName.isEmpty ? 'Active route guidance' : 'Route to ${convoy.destinationName}',
+              subtitle: convoy.destinationName.isEmpty
+                  ? 'Active route guidance'
+                  : 'Route to ${convoy.destinationName}',
               onTap: onTurnByTurn!,
             ),
             const Divider(height: 1),
@@ -146,7 +177,10 @@ class SafetyFuelCard extends StatelessWidget {
     }
 
     final reason = stopReasonText ?? '';
-    final reasonSubtitle = queuedStopReason ?? (reason.isEmpty ? 'Tap to inform convoy why you stopped' : reason);
+    final reasonSubtitle = queuedStopReason ??
+        (reason.isEmpty ? 'Tap to inform convoy why you stopped' : reason);
+
+    final isGuardianUnlocked = FeatureGates.isUnlocked(Feature.guardianLiveShare);
 
     return Container(
       decoration: BoxDecoration(
@@ -181,17 +215,29 @@ class SafetyFuelCard extends StatelessWidget {
           _CardTile(
             key: const Key('sheet_row_guardian'),
             icon: Icons.shield_rounded,
-            iconColor: AppTheme.accentText,
+            iconColor: isGuardianUnlocked ? AppTheme.accentText : AppTheme.muted,
             title: 'Share Ride Guardian link',
-            subtitle: 'Live web tracking link with PIN protection for family or friends',
-            onTap: onOpenGuardian,
-            trailing: Icon(Icons.share_rounded, size: 20, color: AppTheme.accentText),
+            subtitle: isGuardianUnlocked
+                ? 'Live encrypted web tracking link for family or friends'
+                : 'Requires Pro Rider plan · Tap to unlock',
+            onTap: () {
+              if (!isGuardianUnlocked) {
+                FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
+              } else {
+                onOpenGuardian();
+              }
+            },
+            trailing: isGuardianUnlocked
+                ? Icon(Icons.share_rounded, size: 20, color: AppTheme.accentText)
+                : Icon(Icons.lock_rounded, size: 20, color: AppTheme.warnText),
           ),
           const Divider(height: 1),
           _CardTile(
             icon: Icons.pause_circle_outline_rounded,
             iconColor: AppTheme.warnText,
-            title: stopReasonText?.isEmpty == true ? 'Tell the group why you stop' : 'Your stop reason',
+            title: stopReasonText?.isEmpty == true
+                ? 'Tell the group why you stop'
+                : 'Your stop reason',
             subtitle: reasonSubtitle,
             onTap: onTellWhy,
           ),
@@ -223,6 +269,11 @@ class ConvoyCommsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isCapacityUnlocked = FeatureGates.isUnlocked(Feature.unlimitedConvoyCapacity);
+    final maxCapacity = FeatureGates.maxConvoyMembers();
+    final isAtCapacity = convoy.riders.length >= maxCapacity;
+    final hasPriorityDucking = FeatureGates.isUnlocked(Feature.priorityIntercomDucking);
+
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.card,
@@ -233,47 +284,122 @@ class ConvoyCommsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Invite code row
+          // Invite code row with capacity check
           Padding(
             padding: const EdgeInsets.all(Space.s16),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('INVITE CODE', style: AppText.overline),
-                      const SizedBox(height: 4),
-                      Text(
-                        convoy.joinCode,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppText.headline.copyWith(
-                          letterSpacing: 4,
-                          fontWeight: FontWeight.w900,
-                          color: AppTheme.brand,
-                        ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text('INVITE CODE', style: AppText.overline),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: isAtCapacity && !isCapacityUnlocked
+                                      ? AppTheme.warnTint
+                                      : AppTheme.tint,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '${convoy.riders.length}/$maxCapacity BIKES',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: isAtCapacity && !isCapacityUnlocked
+                                        ? AppTheme.warnText
+                                        : AppTheme.accentText,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            convoy.joinCode,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.headline.copyWith(
+                              letterSpacing: 4,
+                              fontWeight: FontWeight.w900,
+                              color: AppTheme.brand,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.copy_rounded, size: 20),
+                      tooltip: 'Copy code',
+                      onPressed: onCopyCode,
+                    ),
+                    const SizedBox(width: Space.s4),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isAtCapacity && !isCapacityUnlocked
+                            ? AppTheme.warnText
+                            : AppTheme.brand,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      ),
+                      onPressed: () {
+                        if (isAtCapacity && !isCapacityUnlocked) {
+                          FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
+                        } else {
+                          onShareInvite();
+                        }
+                      },
+                      icon: Icon(
+                        isAtCapacity && !isCapacityUnlocked
+                            ? Icons.lock_rounded
+                            : Icons.share_rounded,
+                        size: 16,
+                      ),
+                      label: Text(
+                        isAtCapacity && !isCapacityUnlocked ? 'Upgrade' : 'Share',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+                if (!isCapacityUnlocked && isAtCapacity) ...[
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: () => FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warnTint,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppTheme.warnBorder, width: 1),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline_rounded, size: 14, color: AppTheme.warnText),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Free convoy full (4 bikes). Upgrade to Road Captain for up to 40 bikes.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.warnText,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.copy_rounded, size: 20),
-                  tooltip: 'Copy code',
-                  onPressed: onCopyCode,
-                ),
-                const SizedBox(width: Space.s4),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.brand,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  ),
-                  onPressed: onShareInvite,
-                  icon: const Icon(Icons.share_rounded, size: 16),
-                  label: const Text('Share', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
+                ],
               ],
             ),
           ),
@@ -282,7 +408,9 @@ class ConvoyCommsCard extends StatelessWidget {
             icon: Icons.headset_mic_rounded,
             iconColor: AppTheme.brand,
             title: 'Intercom options',
-            subtitle: 'Microphone, VOX hands-free, and audio routing',
+            subtitle: hasPriorityDucking
+                ? 'Mic, VOX hands-free, and priority ducking active'
+                : 'Microphone, VOX hands-free, and audio routing',
             onTap: onOpenIntercom,
           ),
           const Divider(height: 1),
@@ -334,7 +462,10 @@ class RideControlsCard extends StatelessWidget {
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
               foregroundColor: isPaused ? AppTheme.accentText : AppTheme.warnText,
-              side: BorderSide(color: isPaused ? AppTheme.accentText : AppTheme.warnText, width: 1.5),
+              side: BorderSide(
+                color: isPaused ? AppTheme.accentText : AppTheme.warnText,
+                width: 1.5,
+              ),
               minimumSize: const Size.fromHeight(48),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),

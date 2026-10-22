@@ -64,7 +64,7 @@ class FeatureGates {
   static bool forceAllUnlocked = false;
 
   /// Active subscription tier for this session.
-  static SubscriptionTier activeTier = SubscriptionTier.roadCaptain;
+  static SubscriptionTier activeTier = SubscriptionTier.community;
 
   /// Checks whether a given [feature] is unlocked for the user.
   static bool isUnlocked(Feature feature, [SubscriptionTier? tier]) {
@@ -275,14 +275,14 @@ class FeatureGates {
 
   /// Returns the maximum allowable convoy size for the given tier.
   static int maxConvoyMembers([SubscriptionTier? tier]) {
-    if (forceAllUnlocked) return 40;
+    if (forceAllUnlocked) return 100;
 
     final effectiveTier = tier ?? activeTier;
     switch (effectiveTier) {
       case SubscriptionTier.community:
         return 4;
       case SubscriptionTier.proRider:
-        return 15;
+        return 4;
       case SubscriptionTier.roadCaptain:
         return 40;
       case SubscriptionTier.tourOperator:

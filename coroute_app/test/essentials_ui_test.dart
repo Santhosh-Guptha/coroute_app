@@ -21,10 +21,10 @@ void main() {
     )));
     await tester.tap(find.text('Open')); await tester.pumpAndSettle();
     expect(find.text('Fuel'), findsOneWidget);
-    expect(find.byKey(const ValueKey('shareFuelEstimate')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.scrollUntilVisible(find.byKey(const ValueKey('shareFuelEstimate')), 150, scrollable: find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first);
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('shareFuelEstimate')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('shareFuelEstimate'))); await tester.pumpAndSettle();
     expect(settings.shareFuelEstimate, true);
     await tester.scrollUntilVisible(find.byKey(const ValueKey('fuelLitresMode')), -150, scrollable: find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first);

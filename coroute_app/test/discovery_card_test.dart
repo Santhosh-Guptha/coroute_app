@@ -101,7 +101,9 @@ void main() {
     expect(find.text('Weekend Riders'), findsOneWidget);
     expect(find.text('Approaching from the opposite direction'), findsOneWidget);
     expect(find.text('You may meet in about 3 min'), findsOneWidget);
-    await tester.tap(find.text('Wave'));
+    final waveFinder = find.text('Wave');
+    await tester.scrollUntilVisible(waveFinder, 100);
+    await tester.tap(waveFinder, warnIfMissed: false);
     await tester.pumpAndSettle();
     expect(waves, 1);
   });

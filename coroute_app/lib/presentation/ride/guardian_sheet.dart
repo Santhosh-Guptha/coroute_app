@@ -15,6 +15,10 @@ Future<void> showGuardianSheet(
   BuildContext context, {
   required String groupId,
 }) async {
+  if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
+    FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
+    return;
+  }
   if (_isGuardianSheetShowing) return;
   _isGuardianSheetShowing = true;
   try {
@@ -82,19 +86,7 @@ class GuardianSheet extends StatelessWidget {
                     child: FilledButton(
                       style: FilledButton.styleFrom(backgroundColor: AppTheme.brand),
                       onPressed: () {
-                        context.read<PlanSubscriptionService>().selectTier(SubscriptionTier.proRider);
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).clearSnackBars();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            duration: const Duration(seconds: 2),
-                            backgroundColor: AppTheme.card,
-                            content: Text(
-                              'Activated CoRoute Pro! Ride Guardian is now unlocked.',
-                              style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                        );
+                        FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
                       },
                       child: const Text('SWITCH TO COROUTE PRO TO TEST (FREE)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
                     ),
@@ -186,6 +178,10 @@ class _GuardianSheetState extends State<_GuardianContent> {
   }
 
   Future<void> _create() => _run(() async {
+    if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
+      FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
+      return;
+    }
     if (_pin.text.isNotEmpty && !RegExp(r'^[0-9]{4,8}$').hasMatch(_pin.text)) {
       throw const ApiException(400, 'Use a PIN of 4 to 8 digits.');
     }

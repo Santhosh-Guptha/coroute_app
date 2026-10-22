@@ -68,6 +68,24 @@ class RideStartView extends StatelessWidget {
         final ok = await openProfile(context);
         if (!ok || !context.mounted) return;
       }
+      final planService = context.read<PlanSubscriptionService?>();
+      final maxAllowed = planService?.maxConvoyMembers ?? FeatureGates.maxConvoyMembers();
+      final activeConvoy = context.read<ConvoyService?>()?.activeConvoy;
+      if (activeConvoy != null && activeConvoy.riders.length > maxAllowed) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppTheme.card,
+              content: Text(
+                'Active convoy exceeds your plan limit ($maxAllowed riders max). Please upgrade to continue.',
+                style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w700),
+              ),
+            ),
+          );
+          FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
+        }
+        return;
+      }
       await Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const TripPlannerScreen()),
@@ -646,6 +664,28 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
     );
     if (!mounted) return;
     if (joined != null) {
+      final planService = context.read<PlanSubscriptionService?>();
+      final maxAllowed = planService?.maxConvoyMembers ?? FeatureGates.maxConvoyMembers();
+      final currentMembers = joined.riders.length;
+      if (currentMembers > maxAllowed) {
+        await convoyService.leaveActiveConvoy(rider.userId);
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _error = 'Convoy has $currentMembers riders. Your current plan (${FeatureGates.tierLabel(planService?.currentTier ?? FeatureGates.activeTier)}) allows up to $maxAllowed riders.';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppTheme.card,
+            content: Text(
+              'Convoy exceeds plan limit ($maxAllowed riders max). Upgrade your plan to join larger convoys.',
+              style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w700),
+            ),
+          ),
+        );
+        FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
+        return;
+      }
       Navigator.pop(context, true);
     } else {
       setState(() {

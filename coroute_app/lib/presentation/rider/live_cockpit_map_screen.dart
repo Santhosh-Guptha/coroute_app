@@ -691,6 +691,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   }
 
   void _shareInvite(ConvoyModel convoy) {
+    if (convoy.riders.length >= FeatureGates.maxConvoyMembers() &&
+        !FeatureGates.isUnlocked(Feature.unlimitedConvoyCapacity)) {
+      FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
+      return;
+    }
     final link = '${AppConfig.apiBaseUrl}/join/${convoy.joinCode}';
     SharePlus.instance.share(ShareParams(
       text: 'Join my CoRoute ride "${convoy.name}". Code ${convoy.joinCode}. Tap to open: $link',
@@ -699,6 +704,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   }
 
   void _copyCode(ConvoyModel convoy) {
+    if (convoy.riders.length >= FeatureGates.maxConvoyMembers() &&
+        !FeatureGates.isUnlocked(Feature.unlimitedConvoyCapacity)) {
+      FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
+      return;
+    }
     Clipboard.setData(ClipboardData(text: convoy.joinCode));
     if (mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
@@ -1476,6 +1486,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         estimatedUsableKm: safety?.estimatedUsableKm,
                         isLead: lead,
                         onAddStationStop: (station) async {
+                          if (lead && !FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
+                            FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
+                            return;
+                          }
                           final picked = PickedPlace(name: station.name.isEmpty ? 'Petrol Pump' : station.name, lat: station.lat, lng: station.lng, category: 'FUEL');
                           final ok = lead ? service.addStop(picked) : service.suggestStop(picked);
                           if (mounted) {
@@ -1536,7 +1550,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               onGroupTap: () => showGroupSettings(context, convoyId: widget.convoyId),
               onFuelTap: () => showFuelSheet(context),
               onRouteTap: _openEssentials,
-              onGuardianTap: () => showGuardianSheet(context, groupId: convoy.groupId),
+              onGuardianTap: () {
+                if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
+                  FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
+                  return;
+                }
+                showGuardianSheet(context, groupId: convoy.groupId);
+              },
               onMoreTap: () {
                 final settings = context.read<SettingsService?>();
                 final intercom = context.read<IntercomService?>();
@@ -1549,7 +1569,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   onToggleKeepScreenOn: _toggleKeepScreenOn,
                   onToggleAutoFollow: () => setState(() => _autoFollow = !_autoFollow),
                   groupId: convoy.groupId,
-                  onOpenGuardian: () => showGuardianSheet(context, groupId: convoy.groupId),
+                  onOpenGuardian: () {
+                    if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
+                      FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
+                      return;
+                    }
+                    showGuardianSheet(context, groupId: convoy.groupId);
+                  },
                   onOpenFuel: () => showFuelSheet(context),
                   onLaunchOfflineNav: () => _launchOfflineNav(convoy, me, snap),
                   onSettingToggled: (name, isEnabled) => _showHudToast(
@@ -1724,7 +1750,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       const SizedBox(height: Space.s16),
       NavigationToolsCard(
         convoy: convoy,
+        isLead: lead,
         onOpenStops: () => _openStops(convoy),
+        onAddStop: () => _addStopAt(context, service, LatLng(me.lat, me.lng)),
         onOpenMessages: () => showMessagesSheet(context, convoyId: convoy.groupId, me: me),
         onTurnByTurn: (hasDest || snap.nextStop != null) ? () => _launchOfflineNav(convoy, me, snap) : null,
         saveMapWidget: (pf != null && canSaveMap)
@@ -1733,7 +1761,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 done: pf.done,
                 total: pf.total,
                 error: pf.error,
-                onSave: () => pf.start(routeLine, label: convoy.name),
+                onSave: () {
+                  if (!FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks)) {
+                    FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks);
+                    return;
+                  }
+                  pf.start(routeLine, label: convoy.name);
+                },
               )
             : null,
         chatQueued: chatQueued,
@@ -1762,7 +1796,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             fuelUncertain: safety?.fuelEstimateUncertain ?? false,
             riddenSinceFillM: safety?.riddenSinceFillM ?? 0,
             onOpenFuel: () => showFuelSheet(ctx),
-            onOpenGuardian: () => showGuardianSheet(context, groupId: convoy.groupId),
+            onOpenGuardian: () {
+              if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
+                FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
+                return;
+              }
+              showGuardianSheet(context, groupId: convoy.groupId);
+            },
             onTellWhy: () => RiderStatusSheet.show(context, userId: me.userId),
             stopReasonText: riderReasonText(me),
             queuedStopReason: statusQueued == null

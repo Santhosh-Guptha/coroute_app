@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../core/config/feature_gates.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_controller.dart';
@@ -71,7 +72,14 @@ class AppearanceSheet extends StatelessWidget {
                         subtitle: options[i].$4,
                         selected: t.preference == options[i].$1,
                         divider: i < options.length - 1,
-                        onTap: () => t.setPreference(options[i].$1),
+                        onTap: () {
+                          if (options[i].$1 == ThemePreference.light &&
+                              !FeatureGates.isUnlocked(Feature.sunlightHudMode)) {
+                            FeatureGates.showUpgradeModal(context, Feature.sunlightHudMode);
+                            return;
+                          }
+                          t.setPreference(options[i].$1);
+                        },
                       ),
                   ],
                 ),

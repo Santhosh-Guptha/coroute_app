@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/map_tiles.dart';
 import '../../data/services/gpx_service.dart';
@@ -147,6 +148,10 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
                 bike: widget.bike,
                 onExportGpx: () async {
                   if (ctx.mounted) Navigator.pop(ctx);
+                  if (!FeatureGates.isUnlocked(Feature.advancedTelemetryReplay)) {
+                    FeatureGates.showUpgradeModal(context, Feature.advancedTelemetryReplay);
+                    return;
+                  }
                   await GpxService.shareGpxFile(
                     rideName: widget.rideTitle,
                     trackpoints: widget.trackpoints,

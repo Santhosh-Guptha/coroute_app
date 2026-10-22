@@ -116,6 +116,10 @@ class SettingsService extends ChangeNotifier {
   /// Accident warnings on my route (on by default).
   bool get hazardAlerts => _hazardAlerts;
 
+  /// Single master switch for road hazard, nav & convoy audio alerts.
+  bool get voiceAlertsMaster =>
+      _voiceCritical || _voiceWarnings || _hazardAlerts || _voiceAnnounceAllAlerts;
+
   /// Show the ride on the lock screen (on by default).
   bool get rideOnLockScreen => _rideOnLockScreen;
 
@@ -261,6 +265,18 @@ class SettingsService extends ChangeNotifier {
     _voiceWarnings = value;
     notifyListeners();
     await _save(NetworkConstants.keyVoiceWarnings, value);
+  }
+
+  Future<void> setVoiceAlertsMaster(bool value) async {
+    _voiceCritical = value;
+    _voiceWarnings = value;
+    _hazardAlerts = value;
+    _voiceAnnounceAllAlerts = value;
+    notifyListeners();
+    await _save(NetworkConstants.keyVoiceCritical, value);
+    await _save(NetworkConstants.keyVoiceWarnings, value);
+    await _save(NetworkConstants.keyHazardAlerts, value);
+    await _save(NetworkConstants.keyVoiceAnnounceAllAlerts, value);
   }
 
   Future<void> setHazardAlerts(bool value) async {

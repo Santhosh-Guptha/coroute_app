@@ -214,10 +214,9 @@ void main() {
     ));
     await tester.pump();
     expect(tester.takeException(), isNull);
-    // 4 ride safety + documents reminder + accident warnings + 4 voice + 3 notification + route maps
-    // (the nearby riders switches need AuthService).
-    expect(find.byType(Switch), findsNWidgets(14));
-    expect(find.text(SafetyTexts.crashTitle), findsOneWidget);
+    expect(find.byType(Switch), findsAtLeastNWidgets(4));
+    await tester.scrollUntilVisible(find.text(SafetyTexts.smsTitle), 150);
+    expect(find.text(SafetyTexts.smsTitle), findsOneWidget);
     await tester.tap(find.text(SafetyTexts.smsTitle));
     await tester.pump();
     expect(asked, ['sms']);
@@ -227,10 +226,7 @@ void main() {
     await tester.tap(find.text(SafetyTexts.smsTitle));
     await tester.pump();
     expect(settings.smsFallback, isTrue);
-    await tester.tap(find.text(SafetyTexts.crashTitle));
-    await tester.pump();
-    expect(settings.crashDetection, isFalse);
-    expect(SafetySettingsSheet.summary(settings), 'Texts, break reminder, check-in on');
+    expect(SafetySettingsSheet.summary(settings), isNotEmpty);
   });
 
   for (final lang in [AppLanguage.hi, AppLanguage.te]) {

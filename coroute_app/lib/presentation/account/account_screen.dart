@@ -298,8 +298,8 @@ class AccountScreen extends StatelessWidget {
                     children: [
                       _SettingsRow(
                         icon: Icons.card_membership_rounded,
-                        title: 'Subscription & Tier Selector',
-                        subtitle: 'Current plan: $tierLabel · Tap to switch & test features',
+                        title: 'Active Subscription Plan',
+                        subtitle: '$tierLabel · Tap to switch tier & test entitlements',
                         value: tierLabel.toUpperCase(),
                         divider: true,
                         onTap: () => _push(context, const PlanSelectorScreen()),
@@ -334,8 +334,9 @@ class AccountScreen extends StatelessWidget {
                       if (settings != null)
                         _SettingsRow(
                           icon: Icons.health_and_safety_rounded,
-                          title: 'Ride safety',
+                          title: 'Ride preferences & safety',
                           subtitle: SafetySettingsSheet.summary(settings),
+                          value: 'ARMED',
                           onTap: () => SafetySettingsSheet.show(context),
                         ),
                       _SettingsRow(
