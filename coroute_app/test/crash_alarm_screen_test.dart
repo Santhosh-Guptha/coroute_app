@@ -56,6 +56,8 @@ class _Port extends ChangeNotifier implements SafetyPort {
   @override
   RosterContact? get myEmergencyContact => null;
   @override
+  String? get myBloodGroup => null;
+  @override
   SosDelivery raiseSos({
     required String type,
     required double lat,

@@ -1616,6 +1616,8 @@ class ConvoyService extends ChangeNotifier {
     double? impactG,
     int? occurredAtMs,
     EmergencySource? source,
+    Map<String, dynamic>? biometrics,
+    String? traumaLevel,
   }) =>
       _raise(
         type: type,
@@ -1627,6 +1629,8 @@ class ConvoyService extends ChangeNotifier {
         occurredAtMs: occurredAtMs,
         // An automatic crash SOS without an explicit source is a crash detection, not a button press.
         source: source ?? (auto ? EmergencySource.crashAuto : EmergencySource.manual),
+        biometrics: biometrics,
+        traumaLevel: traumaLevel,
       );
 
   SosDelivery _raise({
@@ -1639,6 +1643,8 @@ class ConvoyService extends ChangeNotifier {
     double? impactG,
     int? occurredAtMs,
     EmergencySource source = EmergencySource.manual,
+    Map<String, dynamic>? biometrics,
+    String? traumaLevel,
   }) {
     final gid = _activeGroupId;
     if (gid == null) return SosDelivery.notInConvoy;
@@ -1669,6 +1675,8 @@ class ConvoyService extends ChangeNotifier {
               heading: heading,
               speedKmh: speed,
               accuracyM: accuracy,
+              biometrics: biometrics ?? existing.biometrics,
+              traumaLevel: traumaLevel ?? existing.traumaLevel,
             )
           : existing.copyWith(
               lat: lat,
@@ -1678,6 +1686,8 @@ class ConvoyService extends ChangeNotifier {
               heading: heading,
               speedKmh: speed,
               accuracyM: accuracy,
+              biometrics: biometrics ?? existing.biometrics,
+              traumaLevel: traumaLevel ?? existing.traumaLevel,
             );
     } else {
       final who = (idHint != null && idHint.isNotEmpty) ? idHint : (_myUserId ?? 'rider');
@@ -1695,6 +1705,8 @@ class ConvoyService extends ChangeNotifier {
         heading: heading,
         speedKmh: speed,
         accuracyM: accuracy,
+        biometrics: biometrics,
+        traumaLevel: traumaLevel,
       );
     }
     _pendingSos = pending;

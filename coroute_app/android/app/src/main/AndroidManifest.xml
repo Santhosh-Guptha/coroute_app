@@ -13,6 +13,7 @@
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <!-- Rider safety: crash alarm over the lock screen. Direct SMS permission removed for Play compliance; emergency SOS uses SMS composer intent. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <!-- SEND_SMS would otherwise make Play hide CoRoute from tablets without a SIM. -->

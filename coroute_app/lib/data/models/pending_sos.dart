@@ -39,6 +39,10 @@ class PendingSos {
   final double? speedKmh;
   final double? accuracyM;
 
+  /// FEAT-04: Smartwatch biometric trauma & pulse verification payload (trauma level, BPM, history, blood group).
+  final Map<String, dynamic>? biometrics;
+  final String? traumaLevel;
+
   const PendingSos({
     required this.clientId,
     required this.groupId,
@@ -53,6 +57,8 @@ class PendingSos {
     this.heading,
     this.speedKmh,
     this.accuracyM,
+    this.biometrics,
+    this.traumaLevel,
   });
 
   /// The same SOS (same [clientId]) with a newer position, or upgraded to a crash.
@@ -68,6 +74,8 @@ class PendingSos {
     double? heading,
     double? speedKmh,
     double? accuracyM,
+    Map<String, dynamic>? biometrics,
+    String? traumaLevel,
   }) =>
       PendingSos(
         clientId: clientId,
@@ -83,6 +91,8 @@ class PendingSos {
         heading: heading ?? this.heading,
         speedKmh: speedKmh ?? this.speedKmh,
         accuracyM: accuracyM ?? this.accuracyM,
+        biometrics: biometrics ?? this.biometrics,
+        traumaLevel: traumaLevel ?? this.traumaLevel,
       );
 
   /// The message the gateway expects. Older gateways ignore the extra fields.
@@ -100,6 +110,8 @@ class PendingSos {
         if (heading != null) 'heading': heading!.round() % 360,
         if (speedKmh != null) 'speedKmh': double.parse(speedKmh!.clamp(0.0, 300.0).toStringAsFixed(1)),
         if (accuracyM != null) 'accuracyM': accuracyM!.round().clamp(0, 5000),
+        if (biometrics != null) 'biometrics': biometrics,
+        if (traumaLevel != null) 'traumaLevel': traumaLevel,
       };
 
   Map<String, dynamic> toJson() => {
@@ -116,6 +128,8 @@ class PendingSos {
         'heading': ?heading,
         'speedKmh': ?speedKmh,
         'accuracyM': ?accuracyM,
+        if (biometrics != null) 'biometrics': biometrics,
+        if (traumaLevel != null) 'traumaLevel': traumaLevel,
       };
 
   static PendingSos? fromJson(Object? json) {
@@ -137,6 +151,8 @@ class PendingSos {
       heading: (json['heading'] as num?)?.toDouble(),
       speedKmh: (json['speedKmh'] as num?)?.toDouble(),
       accuracyM: (json['accuracyM'] as num?)?.toDouble(),
+      biometrics: (json['biometrics'] is Map) ? Map<String, dynamic>.from(json['biometrics'] as Map) : null,
+      traumaLevel: json['traumaLevel']?.toString(),
     );
   }
 

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../data/services/biometric_safety_bridge.dart';
 import '../../data/services/safety_service.dart';
 import '../widgets/emergency_sos_sheet.dart';
 import 'sos_hold_screen.dart';
@@ -157,6 +158,8 @@ class CrashAlarmScreen extends StatelessWidget {
         onSendNow: safety.alarmSendNow,
         lat: alarm.lat,
         lng: alarm.lng,
+        currentBpm: alarm.currentBpm,
+        traumaLevel: alarm.traumaLevel,
       ),
     );
   }
@@ -181,6 +184,10 @@ class CrashAlarmView extends StatelessWidget {
   final double? lat;
   final double? lng;
 
+  /// FEAT-04: Smartwatch biometric trauma & pulse verification during crash countdown.
+  final int? currentBpm;
+  final BiometricTraumaLevel? traumaLevel;
+
   const CrashAlarmView({
     super.key,
     required this.secondsLeft,
@@ -188,6 +195,8 @@ class CrashAlarmView extends StatelessWidget {
     required this.onSendNow,
     this.lat,
     this.lng,
+    this.currentBpm,
+    this.traumaLevel,
   });
 
   static const double buttonHeight = 72;
@@ -281,6 +290,58 @@ class CrashAlarmView extends StatelessWidget {
     );
     const list = SosAlertList();
 
+    Widget? pulseBadge;
+    if (currentBpm != null) {
+      final isCrit = traumaLevel == BiometricTraumaLevel.criticalTraumaLevel1;
+      final isElevated = traumaLevel == BiometricTraumaLevel.elevatedTrauma;
+      final bg = isCrit
+          ? Colors.black.withValues(alpha: 0.45)
+          : (isElevated ? const Color(0xFFB45309).withValues(alpha: 0.45) : Colors.black.withValues(alpha: 0.25));
+      final textColor = isCrit ? const Color(0xFFFFD1D1) : Colors.white;
+      final label = currentBpm == 0
+          ? '0 BPM · CRITICAL PULSELESSNESS'
+          : '$currentBpm BPM · ${traumaLevel?.label ?? "Live Pulse"}';
+
+      pulseBadge = Container(
+        constraints: const BoxConstraints(maxWidth: 320),
+        margin: const EdgeInsets.only(top: 8, bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isCrit ? Colors.redAccent.withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.3),
+            width: isCrit ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              currentBpm == 0 ? Icons.heart_broken_rounded : Icons.favorite_rounded,
+              color: isCrit ? const Color(0xFFFF4B4B) : const Color(0xFFFF6B6B),
+              size: 16,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.sos,
       body: SafeArea(
@@ -321,7 +382,12 @@ class CrashAlarmView extends StatelessWidget {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [Center(child: count), const SizedBox(height: 16), buttons],
+                              children: [
+                                Center(child: count),
+                                if (pulseBadge != null) Center(child: pulseBadge),
+                                const SizedBox(height: 16),
+                                buttons,
+                              ],
                             ),
                           ),
                         ),
@@ -350,6 +416,7 @@ class CrashAlarmView extends StatelessWidget {
                             top,
                             SizedBox(height: compact ? 12 : 24),
                             Center(child: count),
+                            if (pulseBadge != null) Center(child: pulseBadge),
                             SizedBox(height: compact ? 8 : 14),
                             heading,
                             SizedBox(height: compact ? 6 : 10),

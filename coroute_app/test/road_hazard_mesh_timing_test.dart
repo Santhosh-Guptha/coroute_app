@@ -5,8 +5,6 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/data/models/road_hazard_telemetry.dart';
-import 'package:coroute_app/data/models/convoy_model.dart';
-import 'package:coroute_app/data/models/network_models.dart';
 import 'package:coroute_app/data/services/api_client.dart';
 import 'package:coroute_app/data/services/convoy_service.dart';
 import 'package:coroute_app/data/services/realtime_service.dart';

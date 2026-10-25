@@ -11,16 +11,16 @@
 
 | ID | Feature Name | Tier Entitlement | Primary Domain | Status |
 | :--- | :--- | :---: | :--- | :---: |
-| **FEAT-01** | **BLE Handlebar Wireless SOS & Intercom PTT Remote** | Community (Free) | Hardware / BLE GATT | `[ ] PENDING` |
+| **FEAT-01** | **BLE Handlebar Wireless SOS & Intercom PTT Remote** | Community (Free) | Hardware / BLE GATT | `[X] COMPLETED` |
 | **FEAT-02** | **Collective Pothole & Road Hazard AI Telemetry Mesh** | Road Captain / Pro | Kinematics / AI Mesh | `[X] COMPLETED` |
 | **FEAT-03** | **Emergency Siren Acoustic Frequency Detector** | Community (Free) | Audio DSP / TFLite | `[X] COMPLETED` |
-| **FEAT-04** | **Smartwatch Biometric Trauma & Pulse Verification** | Pro / Captain | WearOS / HealthKit | `[ ] PENDING` |
-| **FEAT-05** | **Low-Altitude Satellite SOS Gateway Relay** | Tour Operator / Pro | Iridium / Native Sat | `[ ] PENDING` |
+| **FEAT-04** | **Smartwatch Biometric Trauma & Pulse Verification** | Pro / Captain | WearOS / HealthKit | `[X] COMPLETED` |
+| **FEAT-05** | **Low-Altitude Satellite SOS Gateway Relay** | Tour Operator / Pro | Iridium / Native Sat | `[X] COMPLETED` |
 | **FEAT-06** | **Smart Airbag Vest Peripheral Bluetooth Bridge** | Community (Free) | BLE Wearable GATT | `[ ] PENDING` |
-| **FEAT-07** | **Helmet Bluetooth Intercom Voice Safety Hotwords** | Community (Free) | Offline STT / DSP | `[ ] PENDING` |
+| **FEAT-07** | **Helmet Bluetooth Intercom Voice Safety Hotwords** | Community (Free) | Offline STT / DSP | `[X] COMPLETED` |
 | **FEAT-08** | **Server-Side Emergency SMS & WhatsApp Web Gateway** | Community (Free) | Cloud / Twilio API | `[ ] PENDING` |
 | **FEAT-09** | **Dead Reckoning & Tunnel IMU Motion Estimation** | Community (Free) | Sensor Fusion / GIS | `[ ] PENDING` |
-| **FEAT-10** | **Peer-to-Peer Bluetooth Offline Convoy Mesh** | Road Captain | Local P2P Network | `[ ] PENDING` |
+| **FEAT-10** | **Peer-to-Peer Bluetooth Offline Convoy Mesh** | Road Captain | Local P2P Network | `[X] COMPLETED` |
 
 ---
 

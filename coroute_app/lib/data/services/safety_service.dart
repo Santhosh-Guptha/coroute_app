@@ -27,7 +27,9 @@ import '../models/safety_wire.dart';
 import 'accel_source.dart';
 import 'alarm_notifier.dart';
 import 'auth_service.dart';
+import 'biometric_safety_bridge.dart';
 import 'convoy_service.dart';
+import '../../core/config/feature_gates.dart';
 import 'safety_native.dart';
 import 'settings_service.dart';
 import 'sms_sender.dart';
@@ -87,6 +89,10 @@ class CrashAlarmState {
   final bool isUnresponsive;
   final bool isSirenActive;
 
+  /// FEAT-04: Smartwatch biometric trauma & pulse verification vitals during crash alarm.
+  final int? currentBpm;
+  final BiometricTraumaLevel? traumaLevel;
+
   const CrashAlarmState({
     required this.startedAtMs,
     required this.secondsLeft,
@@ -97,6 +103,8 @@ class CrashAlarmState {
     this.sent = false,
     this.isUnresponsive = false,
     this.isSirenActive = false,
+    this.currentBpm,
+    this.traumaLevel,
   });
 
   CrashAlarmState copyWith({
@@ -104,6 +112,8 @@ class CrashAlarmState {
     bool? sent,
     bool? isUnresponsive,
     bool? isSirenActive,
+    int? currentBpm,
+    BiometricTraumaLevel? traumaLevel,
   }) => CrashAlarmState(
         startedAtMs: startedAtMs,
         secondsLeft: secondsLeft ?? this.secondsLeft,
@@ -114,6 +124,8 @@ class CrashAlarmState {
         sent: sent ?? this.sent,
         isUnresponsive: isUnresponsive ?? this.isUnresponsive,
         isSirenActive: isSirenActive ?? this.isSirenActive,
+        currentBpm: currentBpm ?? this.currentBpm,
+        traumaLevel: traumaLevel ?? this.traumaLevel,
       );
 }
 
@@ -188,6 +200,7 @@ abstract class SafetyPort implements Listenable {
   PendingSos? get pendingSos;
   EmergencyRoster? get emergencyRoster;
   RosterContact? get myEmergencyContact;
+  String? get myBloodGroup;
 
   SosDelivery raiseSos({
     required String type,
@@ -214,6 +227,8 @@ abstract class SafetySourcePort {
     double? speedBeforeKmh,
     double? impactG,
     int? occurredAtMs,
+    Map<String, dynamic>? biometrics,
+    String? traumaLevel,
   });
 }
 
@@ -271,6 +286,9 @@ class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPor
   }
 
   @override
+  String? get myBloodGroup => _auth.bloodGroup;
+
+  @override
   SosDelivery raiseSos({
     required String type,
     required double lat,
@@ -300,6 +318,8 @@ class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPor
     double? speedBeforeKmh,
     double? impactG,
     int? occurredAtMs,
+    Map<String, dynamic>? biometrics,
+    String? traumaLevel,
   }) =>
       _convoys.raiseSos(
         type: type,
@@ -310,6 +330,8 @@ class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPor
         impactG: impactG,
         occurredAtMs: occurredAtMs,
         source: source,
+        biometrics: biometrics,
+        traumaLevel: traumaLevel,
       );
 
   @override
@@ -642,10 +664,32 @@ class SafetyService extends ChangeNotifier {
     final lat = f?.lat ?? me?.lat ?? fu?.lat ?? 0;
     final lng = f?.lng ?? me?.lng ?? fu?.lng ?? 0;
     final port = _port;
+
+    final biometricsBridge = BiometricSafetyBridge();
+    Map<String, dynamic>? bioPayload;
+    String? traumaLevel;
+    String alertType = SosTypes.crash;
+    if (biometricsBridge.isActive) {
+      final snap = biometricsBridge.snapshot;
+      traumaLevel = snap.traumaLevel.wire;
+      if (snap.isCritical) {
+        alertType = 'CRITICAL_TRAUMA_L1';
+      }
+      bioPayload = biometricsBridge.toBiometricPayload(bloodGroup: _port.myBloodGroup);
+    }
+
     if (port is SafetySourcePort) {
-      (port as SafetySourcePort).raiseSosFrom(EmergencySource.needHelp, type: SosTypes.crash, lat: lat, lng: lng, impactG: _lastImpactG);
+      (port as SafetySourcePort).raiseSosFrom(
+        EmergencySource.needHelp,
+        type: alertType,
+        lat: lat,
+        lng: lng,
+        impactG: _lastImpactG,
+        biometrics: bioPayload,
+        traumaLevel: traumaLevel,
+      );
     } else {
-      port.raiseSos(type: SosTypes.crash, lat: lat, lng: lng, impactG: _lastImpactG);
+      port.raiseSos(type: alertType, lat: lat, lng: lng, impactG: _lastImpactG);
     }
   }
 
@@ -686,6 +730,15 @@ class SafetyService extends ChangeNotifier {
     _evalCheckIn();
     _evalFollowUp(convoy);
     _updateSensor();
+    if (active) {
+      if (FeatureGates.isUnlocked(Feature.biometricTraumaPulse) && !BiometricSafetyBridge().isActive) {
+        BiometricSafetyBridge().start();
+      }
+    } else {
+      if (BiometricSafetyBridge().isActive) {
+        BiometricSafetyBridge().stop();
+      }
+    }
   }
 
   void _onSettings() {
@@ -832,6 +885,7 @@ class SafetyService extends ChangeNotifier {
     }
     final seconds = SafetyConstants.crashCountdown.inSeconds;
     _alarmEvent = CrashEvent(impactAtMs: e.impactAtMs, impactG: e.impactG, speedBeforeKmh: e.speedBeforeKmh, lat: lat, lng: lng);
+    final bioSnap = BiometricSafetyBridge().isActive ? BiometricSafetyBridge().snapshot : null;
     _alarm = CrashAlarmState(
       startedAtMs: now,
       secondsLeft: seconds,
@@ -839,6 +893,8 @@ class SafetyService extends ChangeNotifier {
       speedBeforeKmh: e.speedBeforeKmh,
       lat: lat,
       lng: lng,
+      currentBpm: bioSnap?.currentBpm,
+      traumaLevel: bioSnap?.traumaLevel,
     );
     _alarmTimer?.cancel();
     _alarmTimer = Timer.periodic(const Duration(seconds: 1), (_) => _tickAlarm());
@@ -866,8 +922,13 @@ class SafetyService extends ChangeNotifier {
       _sendCrash(EmergencySource.crashAuto);
       return;
     }
-    if (left != a.secondsLeft) {
-      _alarm = a.copyWith(secondsLeft: left);
+    final bioSnap = BiometricSafetyBridge().isActive ? BiometricSafetyBridge().snapshot : null;
+    if (left != a.secondsLeft || bioSnap?.currentBpm != a.currentBpm || bioSnap?.traumaLevel != a.traumaLevel) {
+      _alarm = a.copyWith(
+        secondsLeft: left,
+        currentBpm: bioSnap?.currentBpm,
+        traumaLevel: bioSnap?.traumaLevel,
+      );
       _haptic();
       notifyListeners();
     }
@@ -882,21 +943,38 @@ class SafetyService extends ChangeNotifier {
     // An impact from outside the phone (wearable hook) is sent as such, whatever the answer.
     final external = _alarmExternal != null;
     _alarmExternal = null;
+
+    final biometricsBridge = BiometricSafetyBridge();
+    Map<String, dynamic>? bioPayload;
+    String? traumaLevel;
+    String alertType = SosTypes.crash;
+
+    if (biometricsBridge.isActive) {
+      final snap = biometricsBridge.snapshot;
+      traumaLevel = snap.traumaLevel.wire;
+      if (snap.isCritical) {
+        alertType = 'CRITICAL_TRAUMA_L1';
+      }
+      bioPayload = biometricsBridge.toBiometricPayload(bloodGroup: _port.myBloodGroup);
+    }
+
     final port = _port;
     if (port is SafetySourcePort) {
       (port as SafetySourcePort).raiseSosFrom(
         external ? EmergencySource.wearable : source,
-        type: SosTypes.crash,
+        type: alertType,
         lat: e.lat,
         lng: e.lng,
         auto: true,
         speedBeforeKmh: e.speedBeforeKmh,
         impactG: e.impactG,
         occurredAtMs: e.impactAtMs,
+        biometrics: bioPayload,
+        traumaLevel: traumaLevel,
       );
     } else {
       port.raiseSos(
-        type: SosTypes.crash,
+        type: alertType,
         lat: e.lat,
         lng: e.lng,
         auto: true,
@@ -1451,6 +1529,9 @@ class SafetyService extends ChangeNotifier {
     _alarmTimer?.cancel();
     _checkInTimer?.cancel();
     _smsTimer?.cancel();
+    if (BiometricSafetyBridge().isActive) {
+      BiometricSafetyBridge().stop();
+    }
     if (_native) {
       AlarmNotifier.removeAction(AlarmNotifier.payloadCrash);
       AlarmNotifier.removeAction(AlarmNotifier.payloadPrompt);

@@ -60,7 +60,17 @@ import '../ride/group_settings_sheet.dart';
 import '../ride/hazard_marker.dart';
 import 'widgets/road_hazard_hud_pill.dart';
 import 'widgets/siren_hud_pill.dart';
+import 'widgets/ble_remote_hud_pill.dart';
+import 'widgets/biometric_pulse_hud_pill.dart';
+import 'widgets/voice_assistant_hud_pill.dart';
+import '../../data/services/voice/voice_assistant_controller.dart';
+import '../../data/services/voice/voice_action_executor.dart';
+import '../../data/services/voice/speech_recognition_adapter.dart';
+import '../../data/services/voice_service.dart';
+import '../../data/services/helmet_voice_service.dart';
 import '../../data/services/siren_acoustic_detector.dart';
+import '../../data/services/ble_remote_service.dart';
+import '../../data/services/biometric_safety_bridge.dart';
 import '../ride/incident_banner.dart';
 import '../ride/incident_sheet.dart';
 import '../ride/incident_view.dart';
@@ -242,6 +252,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   GeoService? _geo;
   SirenAcousticDetector? _sirenDetector;
   bool _ownsSirenDetector = false;
+  BleRemoteService? _bleRemote;
+  bool _ownsBleRemote = false;
+  VoiceAssistantController? _voiceAssistant;
+  bool _ownsVoiceAssistant = false;
+  HelmetVoiceService? _helmetVoice;
 
   // The active line as map points, rebuilt only when the line is replaced or my matched point moves.
   RouteProgress? _lineSource;
@@ -382,7 +397,73 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       }
       _sirenDetector?.activeSirenNotifier.addListener(_onSirenAlert);
       _sirenDetector?.start().ignore();
+
+      final existingRemote = context.read<BleRemoteService?>();
+      if (existingRemote != null) {
+        _bleRemote = existingRemote;
+        _ownsBleRemote = false;
+      } else {
+        final intercom = context.read<IntercomService?>();
+        final safety = context.read<SafetyService?>();
+        final convoys = context.read<ConvoyService?>();
+        _bleRemote = BleRemoteService(
+          intercomService: intercom,
+          safetyService: safety,
+          convoyService: convoys,
+        );
+        _ownsBleRemote = true;
+      }
+      _bleRemote?.statusNotifier.addListener(_onRemoteStatus);
+      BiometricSafetyBridge().snapshotNotifier.addListener(_onBiometricSnapshot);
+
+      final helmetVoice = context.read<HelmetVoiceService?>();
+      _helmetVoice = helmetVoice;
+      if (FeatureGates.isUnlocked(Feature.voiceSafetyHotwords)) {
+        _helmetVoice?.startListening();
+      }
+
+      final existingVoice = context.read<VoiceAssistantController?>();
+      if (existingVoice != null) {
+        _voiceAssistant = existingVoice;
+        _ownsVoiceAssistant = false;
+      } else {
+        final intercom = context.read<IntercomService?>();
+        final safety = context.read<SafetyService?>();
+        final convoys = context.read<ConvoyService?>();
+        final voiceService = context.read<VoiceService?>();
+        _voiceAssistant = VoiceAssistantController(
+          speechAdapter: SpeechRecognitionAdapter(),
+          actionExecutor: VoiceActionExecutor(
+            convoyService: convoys,
+            intercomService: intercom,
+            safetyService: safety,
+          ),
+          convoyService: convoys,
+          intercomService: intercom,
+          safetyService: safety,
+          voiceService: voiceService,
+          helmetVoiceService: helmetVoice,
+          enforcePhase1Scope: false,
+          allowMessaging: true,
+          allowStopsAndAlerts: true,
+          allowIntercom: true,
+        );
+        _ownsVoiceAssistant = true;
+      }
+      _voiceAssistant?.addListener(_onVoiceAssistantUpdate);
     });
+  }
+
+  void _onVoiceAssistantUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  void _onRemoteStatus() {
+    if (mounted) setState(() {});
+  }
+
+  void _onBiometricSnapshot() {
+    if (mounted) setState(() {});
   }
 
   void _onSirenAlert() {
@@ -533,6 +614,16 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     if (_ownsSirenDetector) {
       _sirenDetector?.dispose();
     }
+    _bleRemote?.statusNotifier.removeListener(_onRemoteStatus);
+    BiometricSafetyBridge().snapshotNotifier.removeListener(_onBiometricSnapshot);
+    if (_ownsBleRemote) {
+      _bleRemote?.dispose();
+    }
+    _voiceAssistant?.removeListener(_onVoiceAssistantUpdate);
+    if (_ownsVoiceAssistant) {
+      _voiceAssistant?.dispose();
+    }
+    _helmetVoice?.stopListening();
     if (_keepScreenOn) WakelockPlus.disable();
     super.dispose();
   }
@@ -986,6 +1077,55 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         child: SirenHudPill(
           event: sirenEvent,
           onDismiss: () => _dismissAlert(key),
+        ),
+      ));
+    }
+    // FEAT-01: BLE Handlebar Wireless Remote Paired Status
+    final remote = _bleRemote;
+    if (remote != null && remote.status == BleRemoteStatus.paired) {
+      const key = 'BLE_REMOTE_STATUS';
+      out.add(_Slot(
+        key: key,
+        tier: AlertTier.normal,
+        title: 'HANDLEBAR REMOTE',
+        priority: AlertPriority.routeInfo,
+        dismissible: true,
+        child: BleRemoteHudPill(
+          status: remote.status,
+          batteryPercent: remote.batteryLevel,
+          onDismiss: () => _dismissAlert(key),
+        ),
+      ));
+    }
+    // FEAT-04: Smartwatch Biometric Trauma & Pulse HUD Pill
+    final bioBridge = BiometricSafetyBridge();
+    if (bioBridge.isActive && (bioBridge.snapshot.isConnected || bioBridge.snapshot.currentBpm > 0)) {
+      const key = 'BIOMETRIC_PULSE_STATUS';
+      out.add(_Slot(
+        key: key,
+        tier: bioBridge.snapshot.isCritical ? AlertTier.critical : AlertTier.normal,
+        title: 'BIOMETRIC PULSE',
+        priority: bioBridge.snapshot.isCritical ? AlertPriority.sos : AlertPriority.routeInfo,
+        dismissible: !bioBridge.snapshot.isCritical,
+        child: BiometricPulseHudPill(
+          snapshot: bioBridge.snapshot,
+          onDismiss: () => _dismissAlert(key),
+        ),
+      ));
+    }
+    // FEAT-VA: Multilingual Voice Assistant HUD Pill (0.8s glance budget, AMOLED high contrast)
+    final va = _voiceAssistant;
+    if (va != null && (va.state != VoiceSessionState.idle || va.statusFeedback.isNotEmpty)) {
+      const key = 'VOICE_ASSISTANT_STATUS';
+      out.add(_Slot(
+        key: key,
+        tier: va.statusFeedback.contains('🚨') ? AlertTier.critical : AlertTier.normal,
+        title: 'VOICE ASSISTANT',
+        priority: va.statusFeedback.contains('🚨') ? AlertPriority.sos : AlertPriority.hazard,
+        dismissible: false,
+        child: VoiceAssistantHudPill(
+          controller: va,
+          onPttPressed: () => va.startListening(),
         ),
       ));
     }
@@ -1585,6 +1725,27 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                   left: Space.s12,
                   bottom: bottom,
                   child: RideSosButton(onTriggered: () => _triggerSos(service, auth)),
+                );
+              },
+            ),
+
+            // 7b. Voice Assistant Glove PTT Action Trigger (56dp round thumb button)
+            ValueListenableBuilder<double>(
+              valueListenable: _sheetTop,
+              builder: (context, top, _) {
+                if (side) {
+                  return Positioned(
+                    right: Space.s12,
+                    bottom: Space.s12 + 68.0,
+                    child: VoicePttButton(controller: _voiceAssistant),
+                  );
+                }
+                final maxBottom = (h - 220).clamp(Space.s8, double.infinity).toDouble();
+                final bottom = (top + Space.s8 + 68.0).clamp(Space.s8 + 68.0, maxBottom + 68.0).toDouble();
+                return Positioned(
+                  left: Space.s12,
+                  bottom: bottom,
+                  child: VoicePttButton(controller: _voiceAssistant),
                 );
               },
             ),

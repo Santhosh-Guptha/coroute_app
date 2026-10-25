@@ -62,6 +62,21 @@ enum Feature {
 
   /// Emergency siren acoustic frequency detector & audio ducking (Community & all tiers).
   sirenAcousticDetector,
+
+  /// BLE handlebar wireless remote for hands-free PTT, tactical signals, and SOS (Community & all tiers).
+  bleHandlebarRemote,
+
+  /// Smartwatch biometric trauma & pulse verification for crash escalation (Pro Rider & Road Captain).
+  biometricTraumaPulse,
+
+  /// Low-connectivity SOS & satellite emergency relay (Pro Rider & Tour Operator).
+  satelliteSosRelay,
+
+  /// Hands-free helmet Bluetooth intercom voice safety hotwords (Community & all tiers).
+  voiceSafetyHotwords,
+
+  /// Peer-to-Peer Bluetooth & Wi-Fi offline convoy mesh networking (Road Captain & Pro Rider).
+  p2pOfflineMesh,
 }
 
 class FeatureGates {
@@ -94,6 +109,8 @@ class FeatureGates {
 
       case Feature.roadHazardReceive:
       case Feature.sirenAcousticDetector:
+      case Feature.bleHandlebarRemote:
+      case Feature.voiceSafetyHotwords:
         return true;
 
       case Feature.guardianLiveShare:
@@ -101,6 +118,9 @@ class FeatureGates {
       case Feature.advancedTelemetryReplay:
       case Feature.multiBikeGarage:
       case Feature.sunlightHudMode:
+      case Feature.biometricTraumaPulse:
+      case Feature.satelliteSosRelay:
+      case Feature.p2pOfflineMesh:
         return effectiveTier != SubscriptionTier.community;
     }
   }
@@ -118,12 +138,17 @@ class FeatureGates {
         return SubscriptionTier.roadCaptain;
       case Feature.roadHazardReceive:
       case Feature.sirenAcousticDetector:
+      case Feature.bleHandlebarRemote:
+      case Feature.voiceSafetyHotwords:
         return SubscriptionTier.community;
       case Feature.guardianLiveShare:
       case Feature.unlimitedOfflinePacks:
       case Feature.advancedTelemetryReplay:
       case Feature.multiBikeGarage:
       case Feature.sunlightHudMode:
+      case Feature.biometricTraumaPulse:
+      case Feature.satelliteSosRelay:
+      case Feature.p2pOfflineMesh:
         return SubscriptionTier.proRider;
     }
   }
@@ -157,12 +182,32 @@ class FeatureGates {
         return 'Road Hazard Helmet Audio Alerts & HUD';
       case Feature.sirenAcousticDetector:
         return 'Emergency Siren Acoustic Frequency Detector';
+      case Feature.bleHandlebarRemote:
+        return 'BLE Handlebar Wireless Remote & PTT';
+      case Feature.biometricTraumaPulse:
+        return 'Smartwatch Biometric Trauma & Pulse Verification';
+      case Feature.satelliteSosRelay:
+        return 'Low-Connectivity SOS & Satellite Relay';
+      case Feature.voiceSafetyHotwords:
+        return 'Helmet Intercom Voice Safety Hotwords';
+      case Feature.p2pOfflineMesh:
+        return 'Peer-to-Peer Bluetooth Offline Convoy Mesh';
     }
   }
 
   /// Human-friendly description of the feature.
   static String featureDescription(Feature feature) {
     switch (feature) {
+      case Feature.voiceSafetyHotwords:
+        return 'Hands-free voice recognition recognizing "CoRoute I\'m OK", "CoRoute SOS", "CoRoute Fuel", and "CoRoute Regroup" through helmet microphone in noisy riding conditions.';
+      case Feature.p2pOfflineMesh:
+        return 'Direct peer-to-peer wireless mesh connecting convoy bikes without cellular coverage, synchronizing telemetry, relative positions, and emergency distress beacons.';
+      case Feature.satelliteSosRelay:
+        return 'Relays 16-byte emergency SOS distress packets via native OS satellite assistant, cellular ERSS 112, or connected satellite communicators when in deep dead zones.';
+      case Feature.biometricTraumaPulse:
+        return 'Connects Apple Watch, WearOS, or BLE heart rate sensors to verify rider pulse during crashes and escalate emergency dispatch for acute trauma.';
+      case Feature.bleHandlebarRemote:
+        return 'Hands-on-handlebar wireless remote control for push-to-talk intercom, tactical hazard signals, and emergency SOS trigger.';
       case Feature.sirenAcousticDetector:
         return 'Detects approaching emergency vehicle sirens, ducks music/intercom by -20 dB, and displays a pulsating cockpit yield alert.';
       case Feature.roadHazardBroadcast:

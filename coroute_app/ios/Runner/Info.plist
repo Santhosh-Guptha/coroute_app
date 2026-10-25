@@ -4,6 +4,8 @@
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>CoRoute uses the microphone for the live convoy intercom while you hold Talk or arm VOX.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>CoRoute uses speech recognition to operate hands-free riding features via voice commands.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>CoRoute shares your position with your convoy so riders can stay together.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

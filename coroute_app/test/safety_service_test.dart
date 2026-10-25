@@ -61,6 +61,8 @@ class FakePort extends ChangeNotifier implements SafetyPort, SafetySourcePort, S
   EmergencyRoster? get emergencyRoster => roster;
   @override
   RosterContact? get myEmergencyContact => contact;
+  @override
+  String? get myBloodGroup => null;
 
   @override
   SosDelivery raiseSos({
@@ -89,9 +91,13 @@ class FakePort extends ChangeNotifier implements SafetyPort, SafetySourcePort, S
     double? speedBeforeKmh,
     double? impactG,
     int? occurredAtMs,
+    Map<String, dynamic>? biometrics,
+    String? traumaLevel,
   }) {
     final r = raiseSos(type: type, lat: lat, lng: lng, auto: auto, speedBeforeKmh: speedBeforeKmh, impactG: impactG, occurredAtMs: occurredAtMs);
     raised.last['source'] = source;
+    if (biometrics != null) raised.last['biometrics'] = biometrics;
+    if (traumaLevel != null) raised.last['traumaLevel'] = traumaLevel;
     return r;
   }
 

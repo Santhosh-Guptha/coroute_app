@@ -46,6 +46,8 @@ class FakeSirenPort extends ChangeNotifier implements SafetyPort, SafetySourcePo
   EmergencyRoster? get emergencyRoster => null;
   @override
   RosterContact? get myEmergencyContact => null;
+  @override
+  String? get myBloodGroup => null;
 
   @override
   SosDelivery raiseSos({
@@ -78,6 +80,8 @@ class FakeSirenPort extends ChangeNotifier implements SafetyPort, SafetySourcePo
     double? speedBeforeKmh,
     double? impactG,
     int? occurredAtMs,
+    Map<String, dynamic>? biometrics,
+    String? traumaLevel,
   }) {
     raised.add({
       'type': type,
@@ -86,6 +90,8 @@ class FakeSirenPort extends ChangeNotifier implements SafetyPort, SafetySourcePo
       'lat': lat,
       'lng': lng,
       'impactG': impactG,
+      'biometrics': biometrics,
+      'traumaLevel': traumaLevel,
     });
     return SosDelivery.queued;
   }

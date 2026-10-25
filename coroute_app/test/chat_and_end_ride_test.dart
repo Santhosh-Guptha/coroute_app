@@ -21,7 +21,7 @@ class MockRt extends RealtimeService {
   MockRt({Set<String>? features}) : features = features ?? {'ack'};
 
   Set<String> features;
-  bool _connected = true;
+  final bool _connected = true;
   final List<Map<String, dynamic>> sent = [];
   final StreamController<Map<String, dynamic>> _ctrl = StreamController<Map<String, dynamic>>.broadcast();
 
