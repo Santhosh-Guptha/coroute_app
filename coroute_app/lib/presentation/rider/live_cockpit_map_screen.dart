@@ -62,6 +62,7 @@ import 'widgets/road_hazard_hud_pill.dart';
 import 'widgets/siren_hud_pill.dart';
 import 'widgets/ble_remote_hud_pill.dart';
 import 'widgets/biometric_pulse_hud_pill.dart';
+import 'widgets/smart_airbag_hud_pill.dart';
 import 'widgets/voice_assistant_hud_pill.dart';
 import '../../data/services/voice/voice_assistant_controller.dart';
 import '../../data/services/voice/voice_action_executor.dart';
@@ -71,6 +72,7 @@ import '../../data/services/helmet_voice_service.dart';
 import '../../data/services/siren_acoustic_detector.dart';
 import '../../data/services/ble_remote_service.dart';
 import '../../data/services/biometric_safety_bridge.dart';
+import '../../data/services/smart_airbag_bridge_service.dart';
 import '../ride/incident_banner.dart';
 import '../ride/incident_sheet.dart';
 import '../ride/incident_view.dart';
@@ -415,6 +417,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       }
       _bleRemote?.statusNotifier.addListener(_onRemoteStatus);
       BiometricSafetyBridge().snapshotNotifier.addListener(_onBiometricSnapshot);
+      SmartAirbagBridgeService().connectionStateNotifier.addListener(_onAirbagUpdate);
+      SmartAirbagBridgeService().telemetryNotifier.addListener(_onAirbagUpdate);
 
       final helmetVoice = context.read<HelmetVoiceService?>();
       _helmetVoice = helmetVoice;
@@ -463,6 +467,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   }
 
   void _onBiometricSnapshot() {
+    if (mounted) setState(() {});
+  }
+
+  void _onAirbagUpdate() {
     if (mounted) setState(() {});
   }
 
@@ -616,6 +624,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     }
     _bleRemote?.statusNotifier.removeListener(_onRemoteStatus);
     BiometricSafetyBridge().snapshotNotifier.removeListener(_onBiometricSnapshot);
+    SmartAirbagBridgeService().connectionStateNotifier.removeListener(_onAirbagUpdate);
+    SmartAirbagBridgeService().telemetryNotifier.removeListener(_onAirbagUpdate);
     if (_ownsBleRemote) {
       _bleRemote?.dispose();
     }
@@ -1113,6 +1123,26 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         ),
       ));
     }
+    // FEAT-06: Smart Airbag Vest Peripheral Bluetooth Bridge HUD Pill
+    final airbag = SmartAirbagBridgeService();
+    if (airbag.isConnected ||
+        airbag.connectionState == AirbagConnectionState.fault) {
+      const key = 'SMART_AIRBAG_STATUS';
+      final isDeployed = airbag.connectionState == AirbagConnectionState.deployed;
+      out.add(_Slot(
+        key: key,
+        tier: isDeployed ? AlertTier.critical : AlertTier.normal,
+        title: 'AIRBAG VEST',
+        priority: isDeployed ? AlertPriority.sos : AlertPriority.routeInfo,
+        dismissible: !isDeployed,
+        child: SmartAirbagHudPill(
+          connectionState: airbag.connectionState,
+          telemetry: airbag.telemetry,
+          batteryLevel: airbag.batteryLevel,
+          onDismiss: () => _dismissAlert(key),
+        ),
+      ));
+    }
     // FEAT-VA: Multilingual Voice Assistant HUD Pill (0.8s glance budget, AMOLED high contrast)
     final va = _voiceAssistant;
     if (va != null && (va.state != VoiceSessionState.idle || va.statusFeedback.isNotEmpty)) {
@@ -1484,7 +1514,38 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                     roadName: _guide.currentRoadName,
                     speedKmh: RideFacts.hasPosition(me) ? me.speedKmh : null,
                     speedLimitKmh: speedLimit,
+                    riderCount: convoy.riders.length,
+                    isAirbagPaired: SmartAirbagBridgeService().isConnected ||
+                        SmartAirbagBridgeService().connectionState == AirbagConnectionState.connected,
+                    isRemotePaired: _bleRemote?.status == BleRemoteStatus.paired,
                   ),
+                  if (me.isTunnelCoasting)
+                    Container(
+                      key: const Key('tunnel_mode_banner'),
+                      margin: const EdgeInsets.only(top: Space.s8),
+                      padding: const EdgeInsets.symmetric(horizontal: Space.s12, vertical: Space.s8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.card.withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppTheme.brand.withValues(alpha: 0.8), width: 1.5),
+                        boxShadow: dsFloatingShadow(),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('🚇', style: TextStyle(fontSize: 14)),
+                          const SizedBox(width: Space.s8),
+                          Text(
+                            'Tunnel Mode · IMU Dead Reckoning Active',
+                            style: AppText.label.copyWith(
+                              color: AppTheme.accentText,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   if (connection != null && prefetcher != null)
                     CockpitDualStateBanner(
                       isOffline: true,
@@ -1712,9 +1773,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             ValueListenableBuilder<double>(
               valueListenable: _sheetTop,
               builder: (context, top, _) {
+                final isExpanded = !side && top > h * 0.5;
                 if (side) {
                   return Positioned(
-                    right: Space.s12,
+                    left: panelW + Space.s12,
                     bottom: Space.s12,
                     child: RideSosButton(onTriggered: () => _triggerSos(service, auth)),
                   );
@@ -1724,28 +1786,43 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                 return Positioned(
                   left: Space.s12,
                   bottom: bottom,
-                  child: RideSosButton(onTriggered: () => _triggerSos(service, auth)),
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 200),
+                    opacity: isExpanded ? 0.0 : 1.0,
+                    child: IgnorePointer(
+                      ignoring: isExpanded,
+                      child: RideSosButton(onTriggered: () => _triggerSos(service, auth)),
+                    ),
+                  ),
                 );
               },
             ),
 
-            // 7b. Voice Assistant Glove PTT Action Trigger (56dp round thumb button)
+            // 7b. Voice Assistant Glove PTT Action Trigger (bottom-right)
             ValueListenableBuilder<double>(
               valueListenable: _sheetTop,
               builder: (context, top, _) {
+                final isExpanded = !side && top > h * 0.5;
                 if (side) {
                   return Positioned(
                     right: Space.s12,
-                    bottom: Space.s12 + 68.0,
+                    bottom: Space.s12,
                     child: VoicePttButton(controller: _voiceAssistant),
                   );
                 }
                 final maxBottom = (h - 220).clamp(Space.s8, double.infinity).toDouble();
-                final bottom = (top + Space.s8 + 68.0).clamp(Space.s8 + 68.0, maxBottom + 68.0).toDouble();
+                final bottom = (top + Space.s8).clamp(Space.s8, maxBottom).toDouble();
                 return Positioned(
-                  left: Space.s12,
+                  right: Space.s12,
                   bottom: bottom,
-                  child: VoicePttButton(controller: _voiceAssistant),
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 200),
+                    opacity: isExpanded ? 0.0 : 1.0,
+                    child: IgnorePointer(
+                      ignoring: isExpanded,
+                      child: VoicePttButton(controller: _voiceAssistant),
+                    ),
+                  ),
                 );
               },
             ),
@@ -2491,7 +2568,7 @@ class RideSosButton extends StatelessWidget {
       hint: 'Press and hold to send',
       excludeSemantics: true,
       onLongPress: onTriggered,
-      child: SOSButton(onTriggered: onTriggered, size: 56),
+      child: SOSButton(onTriggered: onTriggered, size: 68),
     );
   }
 }

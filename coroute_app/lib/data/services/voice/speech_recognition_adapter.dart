@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 
 /// Encapsulates the recognized speech result from a speech recognition engine.
 class SpeechRecognitionResult {
@@ -53,6 +54,7 @@ abstract class SpeechRecognitionAdapter {
 }
 
 /// Test and offline mock adapter that allows simulating spoken phrases.
+@visibleForTesting
 class MockSpeechRecognitionAdapter implements SpeechRecognitionAdapter {
   bool _listening = false;
   bool _initialized = false;

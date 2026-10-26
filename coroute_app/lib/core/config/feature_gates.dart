@@ -77,6 +77,9 @@ enum Feature {
 
   /// Peer-to-Peer Bluetooth & Wi-Fi offline convoy mesh networking (Road Captain & Pro Rider).
   p2pOfflineMesh,
+
+  /// Smart airbag vest BLE bridge for instantaneous pyrotechnic deployment escalation (Community & all tiers).
+  smartAirbagVest,
 }
 
 class FeatureGates {
@@ -111,6 +114,7 @@ class FeatureGates {
       case Feature.sirenAcousticDetector:
       case Feature.bleHandlebarRemote:
       case Feature.voiceSafetyHotwords:
+      case Feature.smartAirbagVest:
         return true;
 
       case Feature.guardianLiveShare:
@@ -140,6 +144,7 @@ class FeatureGates {
       case Feature.sirenAcousticDetector:
       case Feature.bleHandlebarRemote:
       case Feature.voiceSafetyHotwords:
+      case Feature.smartAirbagVest:
         return SubscriptionTier.community;
       case Feature.guardianLiveShare:
       case Feature.unlimitedOfflinePacks:
@@ -192,6 +197,8 @@ class FeatureGates {
         return 'Helmet Intercom Voice Safety Hotwords';
       case Feature.p2pOfflineMesh:
         return 'Peer-to-Peer Bluetooth Offline Convoy Mesh';
+      case Feature.smartAirbagVest:
+        return 'Smart Airbag Vest BLE Peripheral Bridge';
     }
   }
 
@@ -202,6 +209,8 @@ class FeatureGates {
         return 'Hands-free voice recognition recognizing "CoRoute I\'m OK", "CoRoute SOS", "CoRoute Fuel", and "CoRoute Regroup" through helmet microphone in noisy riding conditions.';
       case Feature.p2pOfflineMesh:
         return 'Direct peer-to-peer wireless mesh connecting convoy bikes without cellular coverage, synchronizing telemetry, relative positions, and emergency distress beacons.';
+      case Feature.smartAirbagVest:
+        return 'Multi-brand Bluetooth Low Energy bridge for In&motion, Alpinestars Tech-Air, Helite, and Dainese D-air airbag vests with sub-150ms crash escalation.';
       case Feature.satelliteSosRelay:
         return 'Relays 16-byte emergency SOS distress packets via native OS satellite assistant, cellular ERSS 112, or connected satellite communicators when in deep dead zones.';
       case Feature.biometricTraumaPulse:

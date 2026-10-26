@@ -1,0 +1,65 @@
+# Ralph Loop Progress & Codebase Patterns Ledger
+
+## Codebase Patterns
+- **Hardware Integration & BLE Services**: Peripheral listeners like `SmartAirbagBridgeService` and `BleRemoteService` implement stateful notifiers (`ValueNotifier<AirbagConnectionState>`, `ValueNotifier<AirbagTelemetry>`) and hook directly into `SafetyService.instance.externalImpact(...)` to avoid intermediary UI bottlenecks and guarantee sub-150ms execution.
+- **Dead Reckoning Fusion**: `DeadReckoningEngine` acts as an autonomous sensor fusion layer inside `ConvoyService`. It intercepts track point creation when GPS accuracy drops >50m or fix age exceeds 3s, projects along polyline segments, and smoothly interpolates positions back to native fixes over a 4-second convergence window upon tunnel exit.
+- **Defense-in-Depth Emergency Fallback**: Emergency dispatch adheres to the hierarchy: Native Cellular / WebSockets -> Server Emergency Gateway (Twilio/Infobip/WhatsApp) -> Local P2P Mesh -> 112 ERSS Dialer / Satellite SOS.
+- **Glove-Friendly Touch Guidelines**: All cockpit actionable targets strictly enforce `BoxConstraints(minWidth: 48, minHeight: 48)` or larger (SOS button uses `minWidth: 56, minHeight: 56` with hold gesture) to ensure effortless operation with thick riding gloves in extreme weather.
+- **Zero Mocks in Production Runtime**: All mock adapters are strictly confined to test fixtures under `test/` or default to concrete production implementations when initialized without arguments in production code.
+- **Convoy Multi-Rider Orchestration**:
+  - Sub-cluster split detection calculates along-route distances between forward pack and trailing cluster, automatically tagging `CONVOY_SPLIT` to suppress `SEPARATED` alarm spam during toll booths or railway crossings.
+  - Dynamic Rendezvous markers calculate convergence vectors and auto-resolve split state when all riders arrive within a $150\text{ m}$ radius.
+  - Sweeper monitoring runs an asynchronous watchdog detecting halted sweeper nodes ($0\text{ km/h}$ or offline $>60\text{ s}$) while the forward pack moves, triggering high-priority reverse escalation to the Lead.
+  - Concurrent multi-incident handling isolates state per `alertId`, ensuring responder assignments, medical data, and resolution events never collide.
+
+---
+
+## 2026-10-26T17:55:00Z - Verification Pass: Convoy Ride Orchestration & 5-Tier Suite
+- Implemented & Verified User Stories:
+  - `US-CONVOY-01`: Sub-Cluster Toll Plaza Split & Separation Alarm Suppression (REQ-11)
+  - `US-CONVOY-02`: Dynamic Rendezvous Protocol & Regrouping (REQ-12)
+  - `US-CONVOY-03`: Sweeper Distress Detection & Reverse Escalation to Lead (REQ-13)
+  - `US-CONVOY-04`: Lost Rider Homing Vectors & Route Intercept Recovery (REQ-14)
+  - `US-CONVOY-05`: High-Jitter Patchy Cellular Network & Idempotent Emergency Delivery (Scenario B)
+  - `US-CONVOY-06`: Low Battery Critical Throttle & Power Conservation (Scenario C)
+  - `US-CONVOY-07`: Concurrent Multi-Incident Emergency Handling & Responder Isolation (Scenario E)
+  - `US-CONVOY-08`: Convoy Dissolution & Multi-Client Session Synchronization (Admin End Ride)
+- 5-Tier Verification Results:
+  1. **Syntax**: Clean, zero parse errors across all Flutter/Dart and Node.js gateway files.
+  2. **Types**: Static type checking complete with 0 diagnostic type errors (`flutter analyze`).
+  3. **Lint**: Full conformance to `analysis_options.yaml` with 0 warnings, 0 hints, 0 errors.
+  4. **Tests**:
+     - `flutter test test/scenario_convoy_dynamics_test.dart` (4/4 PASSED)
+     - `flutter test test/scenario_d_convoy_split_test.dart`
+       `test/scenario_b_high_jitter_network_test.dart`
+       `test/scenario_c_low_battery_throttle_test.dart`
+       `test/scenario_e_multi_incident_alarm_test.dart`
+       `test/chat_and_end_ride_test.dart`
+       `test/convoy_network_test.dart` (41/41 PASSED)
+     - `node --test test/scenario_convoy.test.js test/scenario_extreme_riding.test.js test/convoy_watchdog.test.js test/sweeper.test.js` (12/12 PASSED)
+     - Cumulative: 115 Dart integration tests + 338 Node gateway tests = 453 tests passing cleanly.
+  5. **Build / Compilation**:
+     - `flutter build bundle` compiled cleanly with exit code 0.
+---
+
+## 2026-10-26T19:45:00Z - Verification Pass: Live Multi-Rider Cluster & Production Release Readiness
+- Target Environment:
+  - Gateway Endpoint: `https://coroute.duckdns.org`
+  - Real-Time WebSocket: `wss://coroute.duckdns.org/ws`
+  - Live Convoy ID: `GRP-6CE093E3` ("Sunday Ride", Code: `612495`)
+  - Connected Test Devices: `emulator-5554` (Lead: `pilotqa`), `emulator-5556` (Wingman / Sweeper peer)
+- 7-Scenario Live Matrix Results (`coroute_app/test/integration/live_convoy_verifier.js`):
+  1. `scenarioA_roster_echelon` (3-Rider Echelon Ladder & Dynamic Roles): ✓ PASSED
+  2. `scenarioB_road_hazard` (POWDER_GRAVEL Spatial Deduplication & Downstream Alerts): ✓ PASSED
+  3. `scenarioC_tunnel_coasting` (Inertial Dead Reckoning with GPS Outage): ✓ PASSED
+  4. `scenarioD_wearable_airbag` (6.2G Pyrotechnic Deceleration & Emergency SOS): ✓ PASSED
+  5. `scenarioE_ptt_active_speaker` (Microphone Keying & Priority Intercom Relay): ✓ PASSED
+  6. `scenarioF_regroup_beacon` (Sweeper/Lead Waypoint Rendezvous Broadcast): ✓ PASSED
+  7. `scenarioG_plan_tier_gating` (403 Entitlement Enforcements across 4 Tiers): ✓ PASSED
+- Static Analysis: `dart analyze lib` -> 0 issues found (0 errors, 0 warnings, 0 lints).
+- Backend Test Suite: `npm test` -> 338/338 passing (100%).
+- Production Artifacts:
+  - Universal Fat APK: `coroute_app/build/app/outputs/flutter-apk/app-release.apk` (31.4 MB)
+  - Split ABI APKs: `app-arm64-v8a-release.apk`, `app-armeabi-v7a-release.apk`, `app-x86_64-release.apk`
+- Release State: Handed over for end-user manual testing.
+---

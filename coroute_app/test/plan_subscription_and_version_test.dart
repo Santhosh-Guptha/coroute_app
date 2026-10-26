@@ -56,7 +56,7 @@ void main() {
       expect(pro.annualPrice, contains('\$29.99'));
 
       final captain = plans.firstWhere((p) => p.tier == SubscriptionTier.roadCaptain);
-      expect(captain.maxConvoySize, 30);
+      expect(captain.maxConvoySize, 40);
       expect(captain.isPopular, isTrue);
       expect(captain.monthlyPrice, contains('\$12.99'));
       expect(captain.annualPrice, contains('\$99.99'));
@@ -78,7 +78,7 @@ void main() {
           );
         }
       }
-      expect(FeatureGates.maxConvoyMembers(), 40);
+      expect(FeatureGates.maxConvoyMembers(), 100);
     });
 
     test('FeatureGates: strict tier entitlement enforcement when forceAllUnlocked is false', () {
@@ -98,7 +98,7 @@ void main() {
       expect(FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks, SubscriptionTier.proRider), isTrue);
       expect(FeatureGates.isUnlocked(Feature.priorityIntercomDucking, SubscriptionTier.proRider), isFalse);
       expect(FeatureGates.isUnlocked(Feature.totalConvoySpreadAlert, SubscriptionTier.proRider), isFalse);
-      expect(FeatureGates.maxConvoyMembers(SubscriptionTier.proRider), 15);
+      expect(FeatureGates.maxConvoyMembers(SubscriptionTier.proRider), 4);
 
       // 3. Road Captain: captain features unlocked
       expect(FeatureGates.isUnlocked(Feature.priorityIntercomDucking, SubscriptionTier.roadCaptain), isTrue);

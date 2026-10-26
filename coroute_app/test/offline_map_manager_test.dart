@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/core/constants/safety_constants.dart';
 import 'package:coroute_app/data/local/saved_map_pack_store.dart';
 import 'package:coroute_app/data/models/saved_map_pack.dart';
@@ -17,10 +18,12 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
+    FeatureGates.forceAllUnlocked = true;
     SharedPreferences.setMockInitialValues({});
   });
 
   tearDown(() {
+    FeatureGates.forceAllUnlocked = false;
     TileCache.instance = null;
   });
 

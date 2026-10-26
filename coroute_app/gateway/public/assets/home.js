@@ -32,15 +32,15 @@
   }
 
   /* Camera for a W x H scene. p (0..1) tilts it from the rider's view toward a top-down map. */
-  function camera(W, H, p, camZ) {
+  function camera(W, H, p, camZ, tiltX, tiltY) {
     var wide = W >= 1024, mid = W >= 640;
     var e = smooth(0, 0.9, p || 0);
-    var th = 0.03 + e * 0.78;
+    var th = 0.03 + e * 0.78 + (tiltY || 0) * 0.03;
     var slope = roadC(camZ + 0.5) - roadC(camZ - 0.5);
     return {
       W: W, H: H, camZ: camZ, slope: slope, base: roadC(camZ),
-      cx: W * (W >= 1280 ? 0.68 : wide ? 0.74 : mid ? 0.6 : 0.5),
-      cy: H * (wide ? 0.56 : 0.64),
+      cx: W * (W >= 1280 ? 0.68 : wide ? 0.74 : mid ? 0.6 : 0.5) + (tiltX || 0) * (wide ? 32 : 16),
+      cy: H * (wide ? 0.56 : 0.64) + (tiltY || 0) * (wide ? 20 : 12),
       f: wide ? H * 0.92 : Math.max(W * 1.15, H * 0.6),
       hC: (wide ? 6 : mid ? 7.5 : 9) + e * 20,
       cs: Math.cos(th), sn: Math.sin(th)
@@ -137,8 +137,8 @@
     });
   }
 
-  function render(pens, W, H, t, p) {
-    var c = camera(W, H, p, t * SPEED), riders = riderState(t);
+  function render(pens, W, H, t, p, tiltX, tiltY) {
+    var c = camera(W, H, p, t * SPEED, tiltX, tiltY), riders = riderState(t);
     var zBack = Math.min.apply(null, riders.map(function (r) { return r.z; })) - 3;
     if (pens.ridges) drawRidges(pens.ridges, c);
     drawGround(pens.ground, c);
@@ -184,6 +184,7 @@
   var riderSvg = hero && hero.querySelector('.hero__riders');
   var heroOn = !!ctx, heroVisible = true, W = 0, H = 0, t = 0, last = 0, lastDraw = 0, lastP = -1;
   var riderEls = [];
+  var curTiltX = 0, curTiltY = 0, targetTiltX = 0, targetTiltY = 0;
 
   function sizeHero() {
     if (!heroOn) return;
@@ -198,7 +199,9 @@
     var p = reduce ? 0 : clamp(pOf(hero), 0, 1);
     ctx.clearRect(0, 0, W, H);
     var rp = p !== lastP ? svgPen() : null;   // ridges only change with the tilt or the size
-    var marks = render({ ground: canvasPen(ctx), ridges: rp }, W, H, t, p);
+    curTiltX += (targetTiltX - curTiltX) * 0.08;
+    curTiltY += (targetTiltY - curTiltY) * 0.08;
+    var marks = render({ ground: canvasPen(ctx), ridges: rp }, W, H, t, p, curTiltX, curTiltY);
     if (rp) ridgeSvg.innerHTML = rp.out.join('');
     marks.forEach(function (m, i) {
       var g = riderEls[i];
@@ -299,6 +302,22 @@
     }, { rootMargin: '15% 0px 15% 0px' });
     if (heroOn) io.observe(hero);
     stories.forEach(function (s) { io.observe(s.el); });
+  }
+  win.addEventListener('pointermove', function (e) {
+    if (!reduce && heroVisible) {
+      targetTiltX = (e.clientX / (win.innerWidth || 1) - 0.5) * 2;
+      targetTiltY = (e.clientY / (win.innerHeight || 1) - 0.5) * 2;
+      schedule();
+    }
+  }, { passive: true });
+  if (win.DeviceOrientationEvent) {
+    win.addEventListener('deviceorientation', function (e) {
+      if (!reduce && heroVisible && e.gamma !== null && e.beta !== null) {
+        targetTiltX = Math.max(-1, Math.min(1, (e.gamma || 0) / 30));
+        targetTiltY = Math.max(-1, Math.min(1, ((e.beta || 45) - 45) / 30));
+        schedule();
+      }
+    }, { passive: true });
   }
   win.addEventListener('scroll', schedule, { passive: true });
   win.addEventListener('resize', function () { sizeHero(); stories.forEach(function (s) { s.p = -1; }); schedule(); }, { passive: true });

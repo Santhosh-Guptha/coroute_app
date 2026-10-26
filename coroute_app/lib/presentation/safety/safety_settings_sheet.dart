@@ -14,8 +14,10 @@ import '../../data/services/permissions_service.dart';
 import '../../data/services/plan_subscription_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/settings_service.dart';
+import '../../data/services/smart_airbag_bridge_service.dart';
 import '../ride/fuel_sheet.dart';
 import '../subscription/plan_selector_screen.dart';
+import 'safety_settings_screen.dart';
 
 /// Plain-language texts of the ride safety switches (shared with the pre-ride
 /// checklist). Read at build time so they follow the rider's language (3.16).
@@ -234,6 +236,55 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
             behavior: HitTestBehavior.opaque,
             onTap: _titleTap,
             child: AppSheetHeader(title: L10n.t('settings.title')),
+          ),
+
+          // Shortcut to Minimal Rider Settings
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: DsCard(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SafetySettingsScreen()),
+                );
+              },
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppTheme.tint,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.shield_outlined, color: AppTheme.accentText, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'MINIMAL RIDER SETTINGS',
+                          style: TextStyle(
+                            color: AppTheme.accentText,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Switch to distraction-free gloved settings view',
+                          style: AppText.caption.copyWith(color: AppTheme.text),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
+                ],
+              ),
+            ),
           ),
 
           // Plan & Tier Entitlements Card
@@ -657,6 +708,35 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
                         g: SafetyConstants.wearableImpactG,
                         atMs: DateTime.now().millisecondsSinceEpoch,
                       );
+                  Navigator.of(context).maybePop();
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            DsCard(
+              dashed: true,
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                key: const ValueKey('airbagHardwareTest'),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
+                leading: Icon(Icons.security_rounded, color: AppTheme.neonCyan),
+                title: Text(
+                  'Airbag Vest: Simulate BLE Pyrotechnic Deployment',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(
+                  'FEAT-06: Instant sub-150ms wearable impact escalation to emergency safety pipeline.',
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption,
+                ),
+                onTap: () {
+                  SmartAirbagBridgeService().triggerHardwareTestDeployment();
                   Navigator.of(context).maybePop();
                 },
               ),

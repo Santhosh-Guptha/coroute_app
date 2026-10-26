@@ -47,9 +47,10 @@ const r5 = (x) => Math.round(x * 1e5) / 1e5;
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0].slice(0, 20);
 
 class SafetyNetwork extends EventEmitter {
-  constructor({ convoys, geo = null, audit = null, logger = console, clock = Date.now, tickMs = config.netTickMs, routes = null, enabled = config.safetyNetEnabled } = {}) {
+  constructor({ convoys, geo = null, audit = null, logger = console, clock = Date.now, tickMs = config.netTickMs, routes = null, enabled = config.safetyNetEnabled, emergencyGateway = null } = {}) {
     super();
     this.convoys = convoys; this.geo = geo; this.audit = audit; this.log = logger; this.clock = clock;
+    this.emergencyGateway = emergencyGateway || convoys?.emergencyGateway;
     this.enabled = enabled;
     this.routes = routes || new RouteIndexCache({ simplifyM: config.netRouteSimplifyM, maxPoints: config.netRouteMaxPoints, G: gridSize(config.netGridMillideg) });
     this.grid = new SpatialGrid(gridSize(config.netGridMillideg));
@@ -85,6 +86,14 @@ class SafetyNetwork extends EventEmitter {
   onEmergency(gid, alert, kind, ctx = {}) {
     if (!alert || !alert.alertId) return;
     if (kind === 'RAISED') {
+      const gw = this.emergencyGateway || this.convoys?.emergencyGateway;
+      if (gw && !alert.clientSentSms && !alert.serverDispatchedByGateway) {
+        gw.dispatchForSos({
+          groupId: gid,
+          user: ctx.owner || { userId: alert.userId, name: alert.userName },
+          alert,
+        }).catch((err) => this.log.warn('[safety_network] emergency gateway auto-dispatch failed', err.message));
+      }
       const inc = this._raised(gid, alert, ctx.owner || null);
       this._audit({ kind: 'RAISE', alertId: alert.alertId, groupId: gid, subjectId: alert.userId, incidentId: inc?.incidentId, detail: `${sourceOf(alert)} ${statusOf(alert)}` });
       if (inc) {

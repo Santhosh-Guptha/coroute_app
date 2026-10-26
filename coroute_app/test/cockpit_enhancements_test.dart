@@ -439,5 +439,131 @@ void main() {
     await tester.tap(find.byTooltip('Open ride sheet'));
     expect(sheetOpened, isTrue);
   });
+
+  testWidgets('CockpitSpeedometer renders big bold tabular figures with glow and speed limit badge', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: CockpitSpeedometer(
+            speedKmh: 85.0,
+            speedLimitKmh: 80,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(CockpitSpeedometer), findsOneWidget);
+    expect(find.text('85'), findsOneWidget);
+    expect(find.text('KM/H'), findsOneWidget);
+    expect(find.text('OVER 80'), findsOneWidget);
+    expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
+
+    final textWidget = tester.widget<Text>(find.text('85'));
+    expect(textWidget.style?.fontFeatures?.contains(const FontFeature.tabularFigures()), isTrue);
+    expect(textWidget.style?.shadows, isNotNull);
+    expect(textWidget.style?.shadows!.isNotEmpty, isTrue);
+  });
+
+  testWidgets('CockpitSosButton enforces glove-friendly minimum 56dp size and hold-to-send confirmation', (tester) async {
+    bool triggered = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: CockpitSosButton(
+              size: 50.0, // smaller size requested, must be clamped to 56dp minimum
+              holdDuration: const Duration(milliseconds: 500),
+              showLabel: true,
+              onTriggered: () => triggered = true,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(CockpitSosButton), findsOneWidget);
+    expect(find.text('SOS'), findsOneWidget);
+    expect(find.byIcon(Icons.emergency_rounded), findsOneWidget);
+
+    // Verify touch target dimension is at least 56dp
+    final containerFinder = find.descendant(
+      of: find.byType(CockpitSosButton),
+      matching: find.byType(Container),
+    );
+    final box = tester.renderObject<RenderBox>(containerFinder.first);
+    expect(box.size.width, greaterThanOrEqualTo(56.0));
+    expect(box.size.height, greaterThanOrEqualTo(56.0));
+
+    // Tap and release immediately does NOT trigger SOS
+    await tester.tap(find.byType(CockpitSosButton));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(triggered, isFalse);
+
+    // Hold for duration triggers SOS
+    final gesture = await tester.startGesture(tester.getCenter(find.byType(CockpitSosButton)));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(triggered, isFalse);
+
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(triggered, isTrue);
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('CockpitStatusPillsBar renders all 4 HUD status pills cleanly with pure vector icons', (tester) async {
+    bool ridersTapped = false;
+    bool airbagTapped = false;
+    bool remoteTapped = false;
+    bool tunnelTapped = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CockpitStatusPillsBar(
+            riderCount: 4,
+            isAirbagPaired: true,
+            isRemotePaired: true,
+            isTunnelMode: true,
+            onRidersTap: () => ridersTapped = true,
+            onAirbagTap: () => airbagTapped = true,
+            onRemoteTap: () => remoteTapped = true,
+            onTunnelTap: () => tunnelTapped = true,
+          ),
+        ),
+      ),
+    );
+
+    // Verify all 4 status pills render
+    expect(find.byKey(const Key('cockpit_pill_live_riders')), findsOneWidget);
+    expect(find.byKey(const Key('cockpit_pill_airbag')), findsOneWidget);
+    expect(find.byKey(const Key('cockpit_pill_remote')), findsOneWidget);
+    expect(find.byKey(const Key('cockpit_pill_tunnel_mode')), findsOneWidget);
+
+    expect(find.text('Live · 4 Riders'), findsOneWidget);
+    expect(find.text('Airbag'), findsOneWidget);
+    expect(find.text('Remote'), findsOneWidget);
+    expect(find.text('Tunnel Mode'), findsOneWidget);
+
+    // Verify vector icons
+    expect(find.byIcon(Icons.shield_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.radio_button_checked_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.alt_route_rounded), findsOneWidget);
+
+    // Verify tap handlers
+    await tester.tap(find.byKey(const Key('cockpit_pill_live_riders')));
+    expect(ridersTapped, isTrue);
+
+    await tester.tap(find.byKey(const Key('cockpit_pill_airbag')));
+    expect(airbagTapped, isTrue);
+
+    await tester.tap(find.byKey(const Key('cockpit_pill_remote')));
+    expect(remoteTapped, isTrue);
+
+    await tester.tap(find.byKey(const Key('cockpit_pill_tunnel_mode')));
+    expect(tunnelTapped, isTrue);
+  });
 }
 

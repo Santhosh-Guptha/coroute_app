@@ -15,7 +15,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network = null, audit = null, publicLiveLimiter = null }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null }) {
   const r = express.Router();
   r.use((req, res, next) => {
     const feature = req.path.startsWith('/geo/essentials') ? 'essentials' : req.path.startsWith('/geo/weather') ? 'weather'
@@ -243,6 +243,51 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     await convoys.revokeLiveLink(String(req.params.groupId || ''), req.user, String(req.params.alertId || ''));
     res.json({ ok: true });
   }));
+  // Server-Side Emergency SMS & WhatsApp Web Gateway (FEAT-08)
+  const dispatchExternalHandler = wrap(async (req, res) => {
+    const gw = emergencyGateway || convoys?.emergencyGateway;
+    if (!gw) {
+      return res.status(503).json({ error: 'Emergency gateway service is unavailable.', code: 'GATEWAY_UNAVAILABLE' });
+    }
+    const b = req.body || {};
+    const riderId = String(b.riderId || req.user?.userId || '').trim();
+    const riderName = String(b.riderName || req.user?.name || 'CoRoute Rider').trim();
+    const lat = Number(b.lat);
+    const lng = Number(b.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return res.status(400).json({ error: 'Valid lat (-90..90) and lng (-180..180) are required.', code: 'INVALID_COORDINATES' });
+    }
+
+    let contacts = Array.isArray(b.contacts) ? b.contacts : [];
+    if (contacts.length === 0 && repo && riderId) {
+      const u = await repo.findUserById(riderId).catch(() => null);
+      if (u?.emergencyContact) {
+        contacts.push({ phone: u.emergencyContact, name: u.emergencyContactName || 'Emergency Contact' });
+      }
+    }
+
+    if (contacts.length === 0) {
+      return res.status(400).json({ error: 'No emergency contacts provided or found on profile.', code: 'NO_CONTACTS' });
+    }
+
+    const out = await gw.dispatchExternal({
+      tripId: b.tripId || `trip-${Date.now()}`,
+      riderId,
+      riderName,
+      lat,
+      lng,
+      speedKmh: Number(b.speedKmh) || 0,
+      contacts,
+      severity: b.severity || 'CRITICAL',
+      bloodGroup: b.bloodGroup || '',
+      trackingUrl: b.trackingUrl || null,
+    });
+
+    res.status(200).json(out);
+  });
+  r.post('/v1/sos/dispatch-external', dispatchExternalHandler);
+  r.post('/sos/dispatch-external', dispatchExternalHandler);
+
   r.post('/convoys/:groupId/leave', wrap(async (req, res) => { await convoys.leave(req.params.groupId, req.user.userId); res.json({ ok: true }); }));
   r.post('/convoys/:groupId/status', wrap(async (req, res) => {
     const room = await convoys.getRoom(req.params.groupId);

@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import '../../domain/safety/sos_event.dart';
+import 'server_emergency_gateway_service.dart';
 
 /// Provider-neutral transport abstraction for SOS distress dispatches.
 abstract class SosTransportAdapter {
@@ -18,12 +20,6 @@ abstract class SosTransportAdapter {
 class CoRouteOnlineTransportAdapter implements SosTransportAdapter {
   final Future<bool> Function()? connectivityChecker;
   final Future<bool> Function(SosEvent event)? onlineDispatcher;
-
-  CoRouteOnlineTransportAdapter({
-    this.connectivityChecker,
-    this.onlineDispatcher,
-  });
-
   @override
   String get providerId => 'coroute_gateway_online';
 
@@ -31,7 +27,13 @@ class CoRouteOnlineTransportAdapter implements SosTransportAdapter {
   String get displayName => 'CoRoute Online Gateway';
 
   @override
-  bool get isSimulated => false;
+  final bool isSimulated;
+
+  CoRouteOnlineTransportAdapter({
+    this.connectivityChecker,
+    this.onlineDispatcher,
+    this.isSimulated = false,
+  });
 
   @override
   Future<bool> isAvailable() async {
@@ -74,11 +76,20 @@ class CoRouteOnlineTransportAdapter implements SosTransportAdapter {
         }
       }
 
-      // Default online simulation if no custom dispatcher injected
+      // If no online dispatcher is configured and not in simulation mode, fail
+      if (!isSimulated) {
+        return SosTransmissionResult.failed(
+          providerId: providerId,
+          reason: 'CoRoute online gateway dispatcher is not configured',
+          isSimulated: false,
+        );
+      }
+
+      // Default online simulation if no custom dispatcher injected but isSimulated is true
       return SosTransmissionResult.accepted(
         providerId: providerId,
         message: 'Dispatched to online mesh',
-        isSimulated: isSimulated,
+        isSimulated: true,
       );
     } catch (e) {
       return SosTransmissionResult.failed(
@@ -90,14 +101,18 @@ class CoRouteOnlineTransportAdapter implements SosTransportAdapter {
   }
 }
 
-/// Cellular emergency dialer and SMS handoff for India 112 ERSS.
+/// Cellular emergency dialer and SMS handoff for India 112 ERSS with Server Gateway fallback.
 class CellularEmergencyHandoffAdapter implements SosTransportAdapter {
   final Future<bool> Function(String message)? smsLauncher;
   final Future<bool> Function()? dialerLauncher;
+  final ServerEmergencyGatewayService? serverGateway;
+  final Future<bool> Function(SosEvent event)? serverDispatcher;
 
   CellularEmergencyHandoffAdapter({
     this.smsLauncher,
     this.dialerLauncher,
+    this.serverGateway,
+    this.serverDispatcher,
   });
 
   @override
@@ -114,6 +129,29 @@ class CellularEmergencyHandoffAdapter implements SosTransportAdapter {
 
   @override
   Future<SosTransmissionResult> transmit(SosEvent event) async {
+    // Transparent server gateway fallback for data-only SIMs or Apple platforms
+    if (serverGateway != null) {
+      try {
+        final serverResult = await serverGateway!.dispatchFromSosEvent(event);
+        if (serverResult.success) {
+          return serverResult;
+        }
+      } catch (_) {}
+    }
+
+    if (serverDispatcher != null) {
+      try {
+        final dispatched = await serverDispatcher!(event);
+        if (dispatched) {
+          return SosTransmissionResult.accepted(
+            providerId: 'server_emergency_gateway',
+            message: 'SOS dispatched via server emergency gateway fallback',
+            isSimulated: isSimulated,
+          );
+        }
+      } catch (_) {}
+    }
+
     final message = event.toIndiaErssMessage();
 
     if (smsLauncher != null) {
@@ -133,6 +171,45 @@ class CellularEmergencyHandoffAdapter implements SosTransportAdapter {
       isSimulated: isSimulated,
     );
   }
+}
+
+/// Direct SosTransportAdapter utilizing ServerEmergencyGatewayService.
+class ServerEmergencyGatewayTransportAdapter implements SosTransportAdapter {
+  final ServerEmergencyGatewayService gatewayService;
+  final String? tripId;
+  final String? riderId;
+  final String? riderName;
+  final List<EmergencyContactInfo>? contacts;
+
+  ServerEmergencyGatewayTransportAdapter({
+    required this.gatewayService,
+    this.tripId,
+    this.riderId,
+    this.riderName,
+    this.contacts,
+  });
+
+  @override
+  String get providerId => 'server_emergency_gateway';
+
+  @override
+  String get displayName => 'Server Emergency SMS & WhatsApp Gateway';
+
+  @override
+  bool get isSimulated => false;
+
+  @override
+  Future<bool> isAvailable() async => true;
+
+  @override
+  Future<SosTransmissionResult> transmit(SosEvent event) =>
+      gatewayService.dispatchFromSosEvent(
+        event,
+        tripId: tripId,
+        riderId: riderId,
+        riderName: riderName,
+        contacts: contacts,
+      );
 }
 
 /// Native system satellite emergency assistant (Android 15 NTN / Apple Satellite SOS).
@@ -188,6 +265,7 @@ class NativeSatelliteHandoffAdapter implements SosTransportAdapter {
 }
 
 /// Simulated mock satellite adapter strictly for automated unit and CI testing.
+@visibleForTesting
 class MockSatelliteTransportAdapter implements SosTransportAdapter {
   bool shouldSucceed;
   bool returnHandoff;

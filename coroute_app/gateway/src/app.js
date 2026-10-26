@@ -31,19 +31,28 @@ const { sha256 } = require('./convoys');
 const { GuardianService } = require('./guardians');
 const { GuardianPush } = require('./guardian_push');
 const { guardianRouter } = require('./guardian_routes');
+const { EmergencySmsGateway } = require('./emergency_sms_gateway');
 
 function createSoda() {
   if (config.sodaUrl === 'memory' || config.sodaUrl === 'http://mock') return new MemorySoda();
   return new SodaClient({ baseUrl: config.sodaUrl, user: config.oracleUser, password: config.oraclePassword, timeoutMs: config.oracleTimeoutMs });
 }
 
-async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock } = {}) {
+async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch } = {}) {
   const repo = new Repo(soda);
   if (migrate) await repo.migrate();
 
   const gate = new UserGate(repo);
   const auth = new AuthService(repo, { googleVerifier, gate });
   const convoys = new ConvoyManager(repo, { logger });
+  const emergencyGateway = new EmergencySmsGateway({
+    repo,
+    convoys,
+    logger,
+    fetchImpl: emergencyFetch || geoFetch || globalThis.fetch,
+    config,
+  });
+  convoys.emergencyGateway = emergencyGateway;
   // 3.16: the live link index and the role / live link audit rows go through the same audit as the network.
   const audit = new SafetyAudit({ repo, logger });
   convoys.audit = audit;
@@ -62,7 +71,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const timeline = new TimelineEngine({ convoys, repo, tracks, geo, logger, ...(clock ? { clock } : {}) });
   // 3.15: rider safety network and rider discovery (separate modules; they share only route geometry).
   const routes = new RouteIndexCache({ simplifyM: config.netRouteSimplifyM, maxPoints: config.netRouteMaxPoints, G: gridSize(config.netGridMillideg) });
-  const network = new SafetyNetwork({ convoys, geo, audit, logger, routes });
+  const network = new SafetyNetwork({ convoys, geo, audit, logger, routes, emergencyGateway });
   const discovery = new Discovery({ convoys, network, audit, logger, routes });
   convoys.network = network;
   convoys.on('emergency', (gid, alert, kind, ctx) => network.onEmergency(gid, alert, kind, ctx));
@@ -100,7 +109,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
 
   const server = http.createServer(app);
   const startedAt = Date.now();
-  const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate, network, discovery });
+  const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate, network, discovery, emergencyGateway });
   network.attach(hub);
   discovery.attach(hub);
   let guardianPush = null;
@@ -173,7 +182,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     const token = liveTokenOf(req.params.token);
     if (!token) return notFoundPage(req, res);
     res.set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer').set('X-Robots-Tag', 'noindex');
-    const view = convoys.liveView(sha256(token));
+    const view = convoys.liveView(sha256(token)) || emergencyGateway.liveView(sha256(token));
     if (!view) {
       const html = site.has('live_expired.html') ? site.render('live_expired.html', pageVars(req)) : plainLivePage(null);
       return res.status(410).type('html').send(html);
@@ -201,7 +210,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       }
     },
   }));
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network, audit, publicLiveLimiter }));
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network, audit, publicLiveLimiter, emergencyGateway }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -225,7 +234,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { app, server, hub, repo, soda, auth, gate, convoys, retention, tracks, timeline, geo, network, discovery, audit, routes, shutdown };
+  return { app, server, hub, repo, soda, auth, gate, convoys, retention, tracks, timeline, geo, network, discovery, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

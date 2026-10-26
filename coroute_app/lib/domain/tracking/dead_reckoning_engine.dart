@@ -70,7 +70,7 @@ class ConvergencePoint {
   });
 }
 
-/// Dead-zone tunnel coasting and GPS shadow dead-reckoning engine (REQ-03).
+/// Dead-zone tunnel coasting and GPS shadow dead-reckoning engine (REQ-03, FEAT-09).
 ///
 /// Keeps smooth, along-route dead-reckoning progression when GPS fix is lost
 /// in mountain tunnels (e.g. Atal Tunnel 9.02 km, Dr. Syama Prasad Mookerjee Tunnel)
@@ -190,7 +190,19 @@ class DeadReckoningEngine {
   int _lastVibrationMs = 0;
   int _lowVibrationSeconds = 0;
 
+  // Convergence state when GPS recovers upon tunnel exit
+  bool _isConverging = false;
+  int _convergenceStartMs = 0;
+  int _convergenceDurationMs = 4000;
+  double _convStartLat = 0.0;
+  double _convStartLng = 0.0;
+  double _convTargetGpsLat = 0.0;
+  double _convTargetGpsLng = 0.0;
+  double _convGpsSpeedKmh = 0.0;
+  double _convGpsHeading = 0.0;
+
   bool get isCoasting => _isCoasting;
+  bool get isConverging => _isConverging;
   bool get crashDetectedInTunnel => _crashDetectedInTunnel;
   bool get isEngineRunning => _engineRunning;
   int get lastVibrationMs => _lastVibrationMs;
@@ -241,6 +253,7 @@ class DeadReckoningEngine {
   /// Resets or cancels coasting (e.g. when valid GPS fix is recovered).
   void onGpsRecovered() {
     _isCoasting = false;
+    _isConverging = false;
     _coastingStartMs = 0;
     _crashDetectedInTunnel = false;
     _engineRunning = true;
@@ -256,6 +269,7 @@ class DeadReckoningEngine {
     required int timestampMs,
   }) {
     _isCoasting = true;
+    _isConverging = false;
     _coastingStartMs = timestampMs;
     _entrySpeedKmh = speedKmh.clamp(10.0, 120.0);
     _lastKnownLat = lat;
@@ -290,6 +304,11 @@ class DeadReckoningEngine {
       _frozenLat = _lastKnownLat;
       _frozenLng = _lastKnownLng;
       return;
+    }
+
+    // Heavy braking / deceleration adjustment
+    if (bucket.peakG >= 1.8 && bucket.peakG < crashDecelPeakG) {
+      _entrySpeedKmh = math.max(5.0, _entrySpeedKmh * 0.85);
     }
 
     // Road & engine vibration signature analysis:
@@ -423,6 +442,76 @@ class DeadReckoningEngine {
     );
   }
 
+  /// Begins smooth convergence towards newly re-acquired GPS fix over [durationMs] (3-5s).
+  void startConvergence({
+    required double gpsLat,
+    required double gpsLng,
+    required double gpsSpeedKmh,
+    required double gpsHeading,
+    required int nowMs,
+    int durationMs = 4000,
+  }) {
+    _isConverging = true;
+    _isCoasting = false;
+    _convergenceStartMs = nowMs;
+    _convergenceDurationMs = durationMs;
+    _convStartLat = _lastKnownLat;
+    _convStartLng = _lastKnownLng;
+    _convTargetGpsLat = gpsLat;
+    _convTargetGpsLng = gpsLng;
+    _convGpsSpeedKmh = gpsSpeedKmh;
+    _convGpsHeading = gpsHeading;
+  }
+
+  /// Updates the target GPS coordinates during an active convergence window.
+  void updateConvergenceTarget({
+    required double gpsLat,
+    required double gpsLng,
+    required double gpsSpeedKmh,
+    required double gpsHeading,
+  }) {
+    _convTargetGpsLat = gpsLat;
+    _convTargetGpsLng = gpsLng;
+    _convGpsSpeedKmh = gpsSpeedKmh;
+    _convGpsHeading = gpsHeading;
+  }
+
+  /// Computes the current convergence coordinate at [nowMs].
+  ConvergencePoint computeConvergence(int nowMs) {
+    if (!_isConverging) {
+      return ConvergencePoint(
+        lat: _convTargetGpsLat,
+        lng: _convTargetGpsLng,
+        speedKmh: _convGpsSpeedKmh,
+        heading: _convGpsHeading,
+        distanceM: 0.0,
+        isCompleted: true,
+      );
+    }
+    final elapsedMs = nowMs - _convergenceStartMs;
+    final blendFactor = (elapsedMs / _convergenceDurationMs).clamp(0.0, 1.0);
+    final point = convergeToGps(
+      coastedLat: _convStartLat,
+      coastedLng: _convStartLng,
+      gpsLat: _convTargetGpsLat,
+      gpsLng: _convTargetGpsLng,
+      blendFactor: blendFactor,
+      gpsSpeedKmh: _convGpsSpeedKmh,
+      gpsHeading: _convGpsHeading,
+    );
+    if (point.isCompleted) {
+      _isConverging = false;
+      _lastKnownLat = point.lat;
+      _lastKnownLng = point.lng;
+    }
+    return point;
+  }
+
+  /// Terminates convergence session immediately.
+  void finishConvergence() {
+    _isConverging = false;
+  }
+
   /// Smoothly converges coasted coordinate towards newly acquired GPS fix over time,
   /// preventing map avatars from abruptly snapping across the screen upon tunnel exit.
   static ConvergencePoint convergeToGps({
@@ -459,13 +548,22 @@ class DeadReckoningEngine {
   }
 
   /// Proactive GPS blackout & canyon shadow detector.
+  /// Activates when GPS position reports accuracy > 50m, or no GPS fix is received
+  /// for > 3 seconds while moving (> 15 km/h) near a tunnel portal or along an active route.
   static bool shouldInitiateCoasting({
     required double fixAgeSec,
     required double accuracyM,
     required double lat,
     required double lng,
     double speedKmh = 0.0,
+    bool hasActiveRoute = false,
   }) {
+    if (speedKmh <= 15.0) return false;
+    if (isNearTunnelPortal(lat, lng) || hasActiveRoute) {
+      if (accuracyM > 50.0 || fixAgeSec > 3.0) {
+        return true;
+      }
+    }
     if (fixAgeSec < 3.5 && accuracyM <= 80.0) return false;
     if (isNearTunnelPortal(lat, lng)) return true;
     if (fixAgeSec >= 4.0 && accuracyM > 80.0 && speedKmh >= 10.0) return true;
@@ -524,7 +622,7 @@ class DeadReckoningEngine {
   static (double, double) _projectDeadReckoningCoord(
     double lat,
     double lng,
-    double distanceM,
+    distanceM,
     double bearingDeg,
   ) {
     final dDivR = distanceM / GeoMath.earthRadiusM;

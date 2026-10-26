@@ -1,4 +1,7 @@
 import '../../domain/tracking/ride_power_policy.dart';
+import '../../domain/safety/accel_bucket.dart';
+import '../../domain/tracking/dead_reckoning_engine.dart';
+import 'accel_source.dart';
 import '../../domain/mesh/mesh_telemetry_packet.dart';
 import 'p2p_mesh_service.dart';
 import '../models/ride_feature_policy.dart';
@@ -58,11 +61,14 @@ class ConvoyService extends ChangeNotifier {
     this.timeline,
     this.settings,
     this.mesh,
+    this._accel,
+    DeadReckoningEngine? deadReckoning,
     OutboxStore? outboxStore,
     RosterStore? rosterStore,
     int Function()? clock,
     this._rosterDebounce = NetConstants.rosterRefreshDebounce,
-  })  : _outboxStore = outboxStore ?? OutboxStore(),
+  })  : _deadReckoning = deadReckoning ?? DeadReckoningEngine(),
+        _outboxStore = outboxStore ?? OutboxStore(),
         _rosterStore = rosterStore ?? RosterStore(),
         _clock = clock ?? _wallClock {
     _eventSub = _rt.events.listen(_onEvent);
@@ -98,6 +104,15 @@ class ConvoyService extends ChangeNotifier {
 
   /// Data saver setting (optional: tests and older call sites work without it).
   final SettingsService? settings;
+  final DeadReckoningEngine _deadReckoning;
+  DeadReckoningEngine get deadReckoning => _deadReckoning;
+  bool get isTunnelCoasting => _deadReckoning.isCoasting;
+
+  final AccelSource? _accel;
+  StreamSubscription<AccelBucket>? _deadReckoningAccelSub;
+  Timer? _deadReckoningTimer;
+  int _lastGpsFixTime = 0;
+
   AppLifecycleListener? _lifecycle;
   bool _compassPaused = false;
   final RidePowerPolicy _power = RidePowerPolicy();
@@ -1230,6 +1245,9 @@ class ConvoyService extends ChangeNotifier {
     _stationarySince = null;
     _subscribeGps();
     _isRealGpsActive = true;
+    _lastGpsFixTime = DateTime.now().millisecondsSinceEpoch;
+    _deadReckoningTimer?.cancel();
+    _deadReckoningTimer = Timer.periodic(const Duration(seconds: 1), (t) => _onDeadReckoningTick(t));
 
     _idleHeartbeat?.cancel();
     _idleHeartbeat = Timer.periodic(AppConfig.telemetryIdleInterval, (_) {
@@ -1252,24 +1270,324 @@ class ConvoyService extends ChangeNotifier {
     });
   }
 
+  void feedAccelerometer(AccelBucket bucket) {
+    _deadReckoning.checkAccelerometer(bucket);
+  }
+
+  void _subscribeAccelForDeadReckoning() {
+    if (_deadReckoningAccelSub != null) return;
+    final source = _accel;
+    if (source != null) {
+      _deadReckoningAccelSub = source.buckets().listen((bucket) {
+        feedAccelerometer(bucket);
+      }, onError: (_) {
+        _deadReckoningAccelSub?.cancel();
+        _deadReckoningAccelSub = null;
+      });
+    }
+  }
+
+  void _unsubscribeAccelForDeadReckoning() {
+    _deadReckoningAccelSub?.cancel();
+    _deadReckoningAccelSub = null;
+  }
+
+  void _onDeadReckoningTick([Timer? timer, int? overrideNowMs]) {
+    if (!(settings?.tunnelDeadReckoning ?? true)) return;
+    if (!_isRealGpsActive && timer != null) return;
+    final userId = _myUserId;
+    final convoy = activeConvoy;
+    if (userId == null || convoy == null) return;
+    final me = convoy.riders[userId];
+    if (me == null) return;
+    final now = overrideNowMs ?? _clock();
+
+    if (convoy.routeLine.isNotEmpty) {
+      _deadReckoning.setPlannedRoute(convoy.routeLine);
+    }
+
+    if (_deadReckoning.isCoasting) {
+      final fix = _deadReckoning.computeFix(now);
+      final coastingFix = TrackPoint(
+        ts: now,
+        lat: fix.lat,
+        lng: fix.lng,
+        speedKmh: fix.speedKmh,
+        accuracyM: 80.0,
+      );
+      recorder?.onFix(coastingFix);
+      if (_myFixes.hasListener) _myFixes.add(coastingFix);
+
+      final updated = me.copyWith(
+        lat: fix.lat,
+        lng: fix.lng,
+        speedKmh: fix.speedKmh,
+        heading: fix.heading,
+        lastSeenEpochMs: now,
+        trackingConfidence: fix.confidence,
+        stoppedSince: fix.isCrashStop ? (me.stoppedSince > 0 ? me.stoppedSince : now) : 0,
+      );
+      _setMyRiderLocally(updated);
+      _pushTelemetry(updated);
+      return;
+    }
+
+    if (_deadReckoning.isConverging) {
+      final point = _deadReckoning.computeConvergence(now);
+      final convFix = TrackPoint(
+        ts: now,
+        lat: point.lat,
+        lng: point.lng,
+        speedKmh: point.speedKmh,
+        accuracyM: 20.0,
+      );
+      recorder?.onFix(convFix);
+      if (_myFixes.hasListener) _myFixes.add(convFix);
+
+      final updated = me.copyWith(
+        lat: point.lat,
+        lng: point.lng,
+        speedKmh: point.speedKmh,
+        heading: point.heading,
+        lastSeenEpochMs: now,
+        trackingConfidence: TrackingConfidence.gpsFix,
+      );
+      _setMyRiderLocally(updated);
+      _pushTelemetry(updated);
+      return;
+    }
+
+    if (_lastGpsFixTime > 0) {
+      final fixAgeSec = (now - _lastGpsFixTime) / 1000.0;
+      final accuracy = _lastFixAccuracyM ?? 999.0;
+      final hasActiveRoute = convoy.routeLine.length >= 2;
+      if (DeadReckoningEngine.shouldInitiateCoasting(
+        fixAgeSec: fixAgeSec,
+        accuracyM: accuracy,
+        lat: me.lat,
+        lng: me.lng,
+        speedKmh: me.speedKmh,
+        hasActiveRoute: hasActiveRoute,
+      )) {
+        _startCoasting(me, now);
+      }
+    }
+  }
+
+  void _startCoasting(RiderModel rider, int nowMs) {
+    _deadReckoning.startCoasting(
+      lat: rider.lat,
+      lng: rider.lng,
+      speedKmh: rider.speedKmh,
+      heading: rider.heading,
+      timestampMs: nowMs,
+    );
+    _subscribeAccelForDeadReckoning();
+    final fix = _deadReckoning.computeFix(nowMs);
+    final coastingFix = TrackPoint(
+      ts: nowMs,
+      lat: fix.lat,
+      lng: fix.lng,
+      speedKmh: fix.speedKmh,
+      accuracyM: 80.0,
+    );
+    recorder?.onFix(coastingFix);
+    if (_myFixes.hasListener) _myFixes.add(coastingFix);
+
+    final updated = rider.copyWith(
+      lat: fix.lat,
+      lng: fix.lng,
+      speedKmh: fix.speedKmh,
+      heading: fix.heading,
+      lastSeenEpochMs: nowMs,
+      trackingConfidence: fix.confidence,
+      stoppedSince: 0,
+    );
+    _setMyRiderLocally(updated);
+    _pushTelemetry(updated);
+  }
+
+  void triggerCoasting({double? lat, double? lng, double? speedKmh, double? heading, int? timestampMs}) {
+    final userId = _myUserId;
+    final me = userId != null ? activeConvoy?.riders[userId] : null;
+    final now = timestampMs ?? _clock();
+    _startCoasting(
+      me != null
+          ? me.copyWith(
+              lat: lat ?? me.lat,
+              lng: lng ?? me.lng,
+              speedKmh: speedKmh ?? me.speedKmh,
+              heading: heading ?? me.heading,
+            )
+          : RiderModel(
+              userId: userId ?? 'me',
+              name: 'Me',
+              lat: lat ?? 32.3639,
+              lng: lng ?? 77.1462,
+              speedKmh: speedKmh ?? 60.0,
+              heading: heading ?? 10.0,
+              lastSeenEpochMs: now,
+            ),
+      now,
+    );
+  }
+
+  void triggerConvergence({required double gpsLat, required double gpsLng, double? speedKmh, double? heading, int? nowMs}) {
+    final now = nowMs ?? _clock();
+    _deadReckoning.startConvergence(
+      gpsLat: gpsLat,
+      gpsLng: gpsLng,
+      gpsSpeedKmh: speedKmh ?? 60.0,
+      gpsHeading: heading ?? 10.0,
+      nowMs: now,
+      durationMs: 4000,
+    );
+    _unsubscribeAccelForDeadReckoning();
+    final point = _deadReckoning.computeConvergence(now);
+    final userId = _myUserId;
+    final current = userId != null ? activeConvoy?.riders[userId] : null;
+    if (current != null) {
+      final updated = current.copyWith(
+        lat: point.lat,
+        lng: point.lng,
+        speedKmh: point.speedKmh,
+        heading: point.heading,
+        lastSeenEpochMs: now,
+        trackingConfidence: TrackingConfidence.gpsFix,
+      );
+      _setMyRiderLocally(updated);
+      _pushTelemetry(updated);
+    }
+  }
+
+  void tickDeadReckoning([int? nowMs]) {
+    _onDeadReckoningTick(null, nowMs);
+  }
+
   void _onPosition(Position position) {
     final userId = _myUserId;
     final convoy = activeConvoy;
     if (userId == null || convoy == null) return;
     final current = convoy.riders[userId];
-
+    final now = position.timestamp.millisecondsSinceEpoch;
     final speedKmh = (position.speed.isFinite ? position.speed * 3.6 : 0.0).clamp(0.0, 300.0).toDouble();
-    _lastFixAccuracyM = position.accuracy.isFinite ? position.accuracy : null;
-    final fix = TrackPoint(
-      ts: position.timestamp.millisecondsSinceEpoch,
+    final accuracy = position.accuracy.isFinite ? position.accuracy : 999.0;
+    final gpsHeading = position.heading.isFinite ? position.heading.clamp(0.0, 360.0).toDouble() : 0.0;
+    final hasActiveRoute = convoy.routeLine.length >= 2;
+
+    if (convoy.routeLine.isNotEmpty) {
+      _deadReckoning.setPlannedRoute(convoy.routeLine);
+    }
+
+    // 1. If currently coasting:
+    if (_deadReckoning.isCoasting) {
+      if (accuracy <= 50.0) {
+        // GPS re-acquired upon tunnel exit!
+        // Apply ConvergencePoint to smoothly interpolate from coasted coordinate to real GPS fix over 3-5 seconds.
+        _deadReckoning.startConvergence(
+          gpsLat: position.latitude,
+          gpsLng: position.longitude,
+          gpsSpeedKmh: speedKmh,
+          gpsHeading: gpsHeading,
+          nowMs: now,
+          durationMs: 4000,
+        );
+        _unsubscribeAccelForDeadReckoning();
+        _lastGpsFixTime = now;
+        _lastFixAccuracyM = accuracy;
+        final point = _deadReckoning.computeConvergence(now);
+        final fix = TrackPoint(
+          ts: now,
+          lat: point.lat,
+          lng: point.lng,
+          speedKmh: point.speedKmh,
+          accuracyM: accuracy,
+        );
+        recorder?.onFix(fix);
+        if (_myFixes.hasListener) _myFixes.add(fix);
+        final base = current ?? RiderModel(userId: userId, name: 'Rider', lat: point.lat, lng: point.lng, lastSeenEpochMs: now);
+        final updated = base.copyWith(
+          lat: point.lat,
+          lng: point.lng,
+          speedKmh: point.speedKmh,
+          heading: point.heading,
+          batteryLevel: _currentBatteryLevel,
+          isCharging: _isCharging,
+          lastSeenEpochMs: now,
+          trackingConfidence: TrackingConfidence.gpsFix,
+        );
+        _setMyRiderLocally(updated);
+        _pushTelemetry(updated);
+        return;
+      } else {
+        // Still degraded inside tunnel/shadow, continue coasting
+        return;
+      }
+    }
+
+    // 2. If converging:
+    if (_deadReckoning.isConverging) {
+      if (accuracy <= 50.0) {
+        _lastGpsFixTime = now;
+        _lastFixAccuracyM = accuracy;
+        _deadReckoning.updateConvergenceTarget(
+          gpsLat: position.latitude,
+          gpsLng: position.longitude,
+          gpsSpeedKmh: speedKmh,
+          gpsHeading: gpsHeading,
+        );
+        final point = _deadReckoning.computeConvergence(now);
+        final fix = TrackPoint(
+          ts: now,
+          lat: point.lat,
+          lng: point.lng,
+          speedKmh: point.speedKmh,
+          accuracyM: accuracy,
+        );
+        recorder?.onFix(fix);
+        if (_myFixes.hasListener) _myFixes.add(fix);
+        final base = current ?? RiderModel(userId: userId, name: 'Rider', lat: point.lat, lng: point.lng, lastSeenEpochMs: now);
+        final updated = base.copyWith(
+          lat: point.lat,
+          lng: point.lng,
+          speedKmh: point.speedKmh,
+          heading: point.heading,
+          batteryLevel: _currentBatteryLevel,
+          isCharging: _isCharging,
+          lastSeenEpochMs: now,
+          trackingConfidence: TrackingConfidence.gpsFix,
+        );
+        _setMyRiderLocally(updated);
+        _pushTelemetry(updated);
+        return;
+      }
+    }
+
+    // 3. Not coasting & not converging: check if coasting should initiate
+    if (DeadReckoningEngine.shouldInitiateCoasting(
+      fixAgeSec: 0.0,
+      accuracyM: accuracy,
       lat: position.latitude,
       lng: position.longitude,
       speedKmh: speedKmh,
-      accuracyM: position.accuracy.isFinite ? position.accuracy : 999,
+      hasActiveRoute: hasActiveRoute,
+    )) {
+      _startCoasting(current ?? RiderModel(userId: userId, name: 'Rider', lat: position.latitude, lng: position.longitude, lastSeenEpochMs: now), now);
+      return;
+    }
+
+    _lastGpsFixTime = now;
+    _lastFixAccuracyM = accuracy;
+    final fix = TrackPoint(
+      ts: now,
+      lat: position.latitude,
+      lng: position.longitude,
+      speedKmh: speedKmh,
+      accuracyM: accuracy,
     );
     recorder?.onFix(fix);
     if (_myFixes.hasListener) _myFixes.add(fix);
-    final gpsHeading = position.heading.isFinite ? position.heading.clamp(0.0, 360.0).toDouble() : 0.0;
+    final gpsHeadingDeg = gpsHeading;
     final isMoving = speedKmh >= 3.0;
 
     // Adaptive power profile.
@@ -1289,17 +1607,17 @@ class ConvoyService extends ChangeNotifier {
 
     // Sensor fusion: GPS course when moving, magnetometer when (nearly) stopped.
     double fusedHeading = current?.heading ?? 0.0;
-    if (speedKmh >= 10.0 && gpsHeading > 0) {
-      fusedHeading = gpsHeading;
+    if (speedKmh >= 10.0 && gpsHeadingDeg > 0) {
+      fusedHeading = gpsHeadingDeg;
     } else if (_deviceCompassHeading != null) {
       fusedHeading = _deviceCompassHeading!;
-    } else if (gpsHeading > 0) {
-      fusedHeading = gpsHeading;
+    } else if (gpsHeadingDeg > 0) {
+      fusedHeading = gpsHeadingDeg;
     }
 
     final wasStopped = current?.statusReason.isNotEmpty == true;
     final base = current ??
-        RiderModel(userId: userId, name: 'Rider', lat: position.latitude, lng: position.longitude, lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch);
+        RiderModel(userId: userId, name: 'Rider', lat: position.latitude, lng: position.longitude, lastSeenEpochMs: now);
     final isLimpMode = base.statusReason == 'MECHANICAL' || base.statusReason == 'FLAT_TIRE';
     final shouldClearStatus = isMoving && wasStopped && (!isLimpMode || speedKmh >= 25.0);
     final updated = base.copyWith(
@@ -1309,10 +1627,11 @@ class ConvoyService extends ChangeNotifier {
       heading: fusedHeading,
       batteryLevel: _currentBatteryLevel,
       isCharging: _isCharging,
-      lastSeenEpochMs: DateTime.now().millisecondsSinceEpoch,
+      lastSeenEpochMs: now,
       statusReason: shouldClearStatus ? '' : base.statusReason,
       statusMessage: shouldClearStatus ? '' : base.statusMessage,
-      stoppedSince: isMoving ? 0 : (base.stoppedSince != 0 ? base.stoppedSince : DateTime.now().millisecondsSinceEpoch),
+      stoppedSince: isMoving ? 0 : (base.stoppedSince != 0 ? base.stoppedSince : now),
+      trackingConfidence: TrackingConfidence.gpsFix,
     );
 
     // Local UI updates immediately; the network push is throttled.
@@ -1388,6 +1707,8 @@ class ConvoyService extends ChangeNotifier {
       'statusReason': r.statusReason,
       'statusMessage': r.statusMessage,
       'stoppedSince': r.stoppedSince,
+      'trackingConfidence': r.trackingConfidence.toWire(),
+      'isCoasting': r.isTunnelCoasting,
     });
   }
 
@@ -1395,6 +1716,10 @@ class ConvoyService extends ChangeNotifier {
     _gpsSub?.cancel();
     _gpsSub = null;
     _idleHeartbeat?.cancel();
+    _deadReckoningTimer?.cancel();
+    _deadReckoningTimer = null;
+    _unsubscribeAccelForDeadReckoning();
+    _deadReckoning.onGpsRecovered();
     _isRealGpsActive = false;
     mesh?.stop().ignore();
     notifyListeners();
@@ -2421,6 +2746,8 @@ class ConvoyService extends ChangeNotifier {
     _broadcastClear?.cancel();
     _sosOkClear?.cancel();
     _statusTimer?.cancel();
+    _deadReckoningTimer?.cancel();
+    _deadReckoningAccelSub?.cancel();
     _disposed = true;
     _outboxTimer?.cancel();
     _rosterTimer?.cancel();

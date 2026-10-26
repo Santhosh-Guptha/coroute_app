@@ -258,9 +258,14 @@ void main() {
     });
 
     test('FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks) hook connects correctly', () {
-      // FeatureGates is currently unlocked by default
-      expect(TilePrefetcher.hasUnlimitedOfflinePacks, isTrue);
-      expect(FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks), isTrue);
+      final prevForce = FeatureGates.forceAllUnlocked;
+      FeatureGates.forceAllUnlocked = true;
+      try {
+        expect(TilePrefetcher.hasUnlimitedOfflinePacks, isTrue);
+        expect(FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks), isTrue);
+      } finally {
+        FeatureGates.forceAllUnlocked = prevForce;
+      }
     });
   });
 }

@@ -85,6 +85,7 @@ class RiderModel {
 
   /// Whether this rider is coasting inside a tunnel or dead zone.
   bool get isTunnelCoasting => trackingConfidence == TrackingConfidence.tunnelCoasting;
+  bool get isCoasting => isTunnelCoasting;
 
   /// Whether the rider's latest telemetry was received directly or relayed via P2P offline mesh.
   final bool isMeshPeer;

@@ -98,6 +98,13 @@ class SettingsService extends ChangeNotifier {
   int _mapAlertDismissSeconds = 5;
   bool _hardwarePtt = false;
   int _speedLimitWarningKmh = 0;
+  bool _airbagVestBridge = true;
+  bool _smartwatchVitals = true;
+  bool _emergencySirenAlert = true;
+  bool _tunnelDeadReckoning = true;
+  bool _helmetVoiceHotwords = true;
+  bool _intercomAudioDucking = true;
+  bool _emergencyWhatsApp = true;
 
   bool get lowData => _lowData;
   bool get crashDetection => _crashDetection;
@@ -160,6 +167,27 @@ class SettingsService extends ChangeNotifier {
   bool get hardwarePtt => _hardwarePtt;
   int get speedLimitWarningKmh => _speedLimitWarningKmh;
 
+  /// Smart Airbag Vest Bridge (Auto-detects In&motion, Tech-Air, Helite).
+  bool get airbagVestBridge => _airbagVestBridge;
+
+  /// Smartwatch Vitals (Monitors pulse & escalates trauma alerts).
+  bool get smartwatchVitals => _smartwatchVitals;
+
+  /// Emergency Siren Alert (Ducks intercom when ambulances approach).
+  bool get emergencySirenAlert => _emergencySirenAlert;
+
+  /// Tunnel Dead Reckoning (Keeps moving through GPS-dead mountain tunnels).
+  bool get tunnelDeadReckoning => _tunnelDeadReckoning;
+
+  /// Helmet Voice Hotwords ("CoRoute I'm OK", "CoRoute Emergency").
+  bool get helmetVoiceHotwords => _helmetVoiceHotwords;
+
+  /// Intercom Audio Ducking (Lowers background chatter when Road Captain or sirens speak).
+  bool get intercomAudioDucking => _intercomAudioDucking;
+
+  /// Emergency Contacts WhatsApp notifications.
+  bool get emergencyWhatsApp => _emergencyWhatsApp;
+
   Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
 
   /// Reads the saved settings. Safe to call more than once.
@@ -198,6 +226,13 @@ class SettingsService extends ChangeNotifier {
       _mapAlertDismissSeconds = prefs.getInt(NetworkConstants.keyMapAlertDismissSeconds) ?? 5;
       _hardwarePtt = prefs.getBool('hardware_ptt_v1') ?? false;
       _speedLimitWarningKmh = prefs.getInt(SafetyConstants.keySpeedLimitWarningKmh) ?? 0;
+      _airbagVestBridge = prefs.getBool('airbag_vest_bridge_v1') ?? true;
+      _smartwatchVitals = prefs.getBool('smartwatch_vitals_v1') ?? true;
+      _emergencySirenAlert = prefs.getBool('emergency_siren_alert_v1') ?? true;
+      _tunnelDeadReckoning = prefs.getBool('tunnel_dead_reckoning_v1') ?? true;
+      _helmetVoiceHotwords = prefs.getBool('helmet_voice_hotwords_v1') ?? true;
+      _intercomAudioDucking = prefs.getBool('intercom_audio_ducking_v1') ?? true;
+      _emergencyWhatsApp = prefs.getBool('emergency_whatsapp_v1') ?? true;
     } catch (e) {
       debugPrint('settings load note: $e');
     }
@@ -444,5 +479,54 @@ class SettingsService extends ChangeNotifier {
     } catch (e) {
       debugPrint('settings save speedLimitWarningKmh note: $e');
     }
+  }
+
+  Future<void> setAirbagVestBridge(bool value) async {
+    if (value == _airbagVestBridge) return;
+    _airbagVestBridge = value;
+    notifyListeners();
+    await _save('airbag_vest_bridge_v1', value);
+  }
+
+  Future<void> setSmartwatchVitals(bool value) async {
+    if (value == _smartwatchVitals) return;
+    _smartwatchVitals = value;
+    notifyListeners();
+    await _save('smartwatch_vitals_v1', value);
+  }
+
+  Future<void> setEmergencySirenAlert(bool value) async {
+    if (value == _emergencySirenAlert) return;
+    _emergencySirenAlert = value;
+    notifyListeners();
+    await _save('emergency_siren_alert_v1', value);
+  }
+
+  Future<void> setTunnelDeadReckoning(bool value) async {
+    if (value == _tunnelDeadReckoning) return;
+    _tunnelDeadReckoning = value;
+    notifyListeners();
+    await _save('tunnel_dead_reckoning_v1', value);
+  }
+
+  Future<void> setHelmetVoiceHotwords(bool value) async {
+    if (value == _helmetVoiceHotwords) return;
+    _helmetVoiceHotwords = value;
+    notifyListeners();
+    await _save('helmet_voice_hotwords_v1', value);
+  }
+
+  Future<void> setIntercomAudioDucking(bool value) async {
+    if (value == _intercomAudioDucking) return;
+    _intercomAudioDucking = value;
+    notifyListeners();
+    await _save('intercom_audio_ducking_v1', value);
+  }
+
+  Future<void> setEmergencyWhatsApp(bool value) async {
+    if (value == _emergencyWhatsApp) return;
+    _emergencyWhatsApp = value;
+    notifyListeners();
+    await _save('emergency_whatsapp_v1', value);
   }
 }

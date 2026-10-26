@@ -117,11 +117,14 @@ class AuthService extends ChangeNotifier {
       (_vehicleType ?? '').trim().toLowerCase() == 'pillion rider' ||
       (_vehicleNo ?? '').trim().toUpperCase() == 'PILLION';
 
+  /// True if the user is in quick guest ride mode.
+  bool get isGuest => (_userId ?? '').startsWith('guest_');
+
   /// Mandatory safety invariant:
   /// Every rider must have verified contact numbers, bike registration (or pillion status),
   /// and emergency (ICE) contacts before creating or participating in group rides.
   bool get isProfileComplete {
-    if (isMasterAdmin) return true;
+    if (isMasterAdmin || isGuest) return true;
     final nameOk = (_name ?? '').trim().length >= 2;
     final emailOk = (_email ?? '').trim().contains('@');
     final phoneOk = (_phone ?? '').trim().length >= 7;
@@ -289,6 +292,32 @@ class AuthService extends ChangeNotifier {
       debugPrint('Google Sign-In note: $e');
       return _fail(e);
     }
+  }
+
+  /// Direct guest / quick ride mode for riders hopping on immediately without an account.
+  Future<Map<String, dynamic>> continueAsGuest({String? callsign}) async {
+    final guestId = 'guest_${DateTime.now().millisecondsSinceEpoch}';
+    final guestName = callsign?.trim().isNotEmpty == true ? callsign!.trim() : 'Guest Rider';
+    _userId = guestId;
+    _role = AppConstants.riderRole;
+    _name = guestName;
+    _email = '$guestId@guest.coroute.local';
+    _vehicleType = 'Motorcycle (Guest)';
+    _phone = '';
+    _vehicleNo = 'GUEST';
+    _emergencyContact = '';
+    _emergencyContactName = '';
+    _isLoading = false;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(AppConstants.keyUserId, _userId!);
+    await prefs.setString(AppConstants.keyUserName, _name!);
+    await prefs.setString(AppConstants.keyUserRole, _role!);
+    await prefs.setString(AppConstants.keyUserEmail, _email!);
+    await prefs.setString(AppConstants.keyVehicleType, _vehicleType!);
+    await prefs.setString(AppConstants.keyVehicleNo, _vehicleNo!);
+    notifyListeners();
+    return {'success': true, 'isAdmin': false, 'userId': _userId, 'name': _name};
   }
 
   String? _lastProfileError;

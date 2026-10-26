@@ -263,6 +263,24 @@ const config = {
 
   // CORS: comma separated origins or empty for same-origin/mobile only
   corsOrigins: list('CORS_ORIGINS'),
+
+  // Telephony & Server Emergency Gateway (Twilio / AWS SNS / Infobip / Webhook / WhatsApp Business)
+  telephonyPrimaryProvider: (process.env.TELEPHONY_PRIMARY_PROVIDER || 'twilio').trim().toLowerCase(),
+  telephonySecondaryProvider: (process.env.TELEPHONY_SECONDARY_PROVIDER || 'webhook').trim().toLowerCase(),
+  twilioAccountSid: (process.env.TWILIO_ACCOUNT_SID || '').trim(),
+  twilioAuthToken: (process.env.TWILIO_AUTH_TOKEN || '').trim(),
+  twilioFromNumber: (process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || '').trim(),
+  awsSnsRegion: (process.env.AWS_SNS_REGION || 'ap-south-1').trim(),
+  awsAccessKeyId: (process.env.AWS_ACCESS_KEY_ID || '').trim(),
+  awsSecretAccessKey: (process.env.AWS_SECRET_ACCESS_KEY || '').trim(),
+  awsSnsTopicArn: (process.env.AWS_SNS_TOPIC_ARN || '').trim(),
+  infobipApiKey: (process.env.INFOBIP_API_KEY || '').trim(),
+  infobipBaseUrl: (process.env.INFOBIP_BASE_URL || '').trim().replace(/\/+$/, ''),
+  telephonyWebhookUrl: (process.env.TELEPHONY_WEBHOOK_URL || '').trim(),
+  telephonyWebhookToken: (process.env.TELEPHONY_WEBHOOK_TOKEN || '').trim(),
+  whatsappApiUrl: (process.env.WHATSAPP_API_URL || 'https://graph.facebook.com/v20.0').trim().replace(/\/+$/, ''),
+  whatsappPhoneNumberId: (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim(),
+  whatsappApiToken: (process.env.WHATSAPP_API_TOKEN || '').trim(),
 };
 
 if (!isTest && config.jwtSecret.length < 32) {

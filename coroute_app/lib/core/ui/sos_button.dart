@@ -4,13 +4,13 @@ import '../constants/ride_thresholds.dart';
 import '../theme/app_theme.dart';
 import 'ui_tokens.dart';
 
-/// Press-and-hold SOS button.
+/// Press-and-hold SOS button with active confirmation countdown.
 ///
 /// A tap does nothing (so a glove or a bump cannot raise an SOS). Holding
-/// for [RideThresholds.sosHold] (1.5 s) fills a ring around the button,
+/// for [RideThresholds.sosHold] (1.5 s) shows an active countdown, fills a ring around the button,
 /// then gives a heavy haptic and calls [onTriggered]; the caller runs the
 /// existing SOS flow (ConvoyService.triggerSosAlert, EmergencySosSheet.show).
-/// Letting go early cancels. The animation runs only while pressed.
+/// Letting go early cancels immediately. The animation runs only while pressed.
 ///
 /// Screen readers: "Emergency SOS, press and hold"; their long-press
 /// action (double tap and hold) raises the SOS directly.
@@ -67,7 +67,7 @@ class _SOSButtonState extends State<SOSButton> with SingleTickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     final size = widget.size;
-    final ring = size + 12;
+    final ring = size + 14;
     final red = AppTheme.sos;
     return Semantics(
       container: true,
@@ -97,15 +97,17 @@ class _SOSButtonState extends State<SOSButton> with SingleTickerProviderStateMix
                           value: _hold.value,
                           strokeWidth: 5,
                           color: red,
-                          backgroundColor: red.withOpacity(0.2),
+                          backgroundColor: red.withOpacity(0.25),
                         ),
                       ),
               ),
               Material(
                 color: red,
-                shape: CircleBorder(side: BorderSide(color: AppTheme.card, width: 3)),
-                elevation: 3,
-                shadowColor: AppTheme.shadow,
+                shape: CircleBorder(
+                  side: BorderSide(color: AppTheme.card, width: 3.5),
+                ),
+                elevation: 4,
+                shadowColor: red.withOpacity(0.5),
                 child: SizedBox(
                   width: size,
                   height: size,
@@ -114,16 +116,53 @@ class _SOSButtonState extends State<SOSButton> with SingleTickerProviderStateMix
                       padding: const EdgeInsets.all(Space.s4),
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
-                        child: Text(
-                          'SOS',
-                          maxLines: 1,
-                          softWrap: false,
-                          style: TextStyle(
-                            color: StatusColors.onCritical,
-                            fontSize: size * 0.3,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1,
-                          ),
+                        child: AnimatedBuilder(
+                          animation: _hold,
+                          builder: (context, _) {
+                            final isHolding = _hold.value > 0;
+                            if (isHolding) {
+                              final totalSec = RideThresholds.sosHold.inMilliseconds / 1000.0;
+                              final remaining = (totalSec * (1.0 - _hold.value)).clamp(0.0, totalSec);
+                              return Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '${remaining.toStringAsFixed(1)}s',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: size * 0.32,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                  Text(
+                                    'HOLD',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.9),
+                                      fontSize: size * 0.16,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 1.0,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }
+                            return Text(
+                              'SOS',
+                              maxLines: 1,
+                              softWrap: false,
+                              style: TextStyle(
+                                color: StatusColors.onCritical,
+                                fontSize: size * 0.32,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.2,
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ),

@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
+import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/data/services/api_client.dart';
 import 'package:coroute_app/presentation/ride/guardian_sheet.dart';
 
@@ -21,6 +22,14 @@ class SessionApi extends ApiClient {
 }
 
 void main() {
+  setUp(() {
+    FeatureGates.forceAllUnlocked = true;
+  });
+
+  tearDown(() {
+    FeatureGates.forceAllUnlocked = false;
+  });
+
   Future<void> open(
     WidgetTester tester,
     ApiClient api, {

@@ -132,9 +132,12 @@ class RideEssentialsCoordinator extends ChangeNotifier {
   void _feed() {
     if (!hasCurrentPosition) return;
     final fix = _fix!;
+    final me = port.activeConvoy?.riders[port.myUserId];
+    final isTunnel = me?.isTunnelCoasting ?? false;
     _guide.onFix(lat: fix.lat, lng: fix.lng, speedKmh: fix.speedKmh,
         accuracyM: fix.accuracyM, nowMs: fix.ts, online: port.isOnline,
-        lowData: settings.lowData || port.conservingBattery);
+        lowData: settings.lowData || port.conservingBattery,
+        isTunnelCoasting: isTunnel);
   }
 
   void _onGuide() {

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Coroute: Group Motorcycle Rides, Connected</title>
-<meta name="description" content="Coroute is a free group riding app for motorcycles: a live map of your group, push to talk voice, SOS and crash alerts, and ride history. No ads, no tracking.">
+<meta name="description" content="Coroute is a free group riding app for motorcycles: live 3D convoy radar, offline P2P mesh, smart airbag bridge, tunnel dead reckoning, satellite SOS, and voice intercom. Free, no ads, privacy-first.">
 <link rel="canonical" href="__ORIGIN__/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Coroute">
@@ -27,10 +27,10 @@
 <link rel="manifest" href="/site.webmanifest">
 <link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
-<link rel="stylesheet" href="/assets/home.css">
+<link rel="stylesheet" href="/assets/3d-world.css">
 <script>document.documentElement.classList.add('js')</script>
 <script src="/assets/site.js" defer></script>
-<script src="/assets/home.js" defer></script>
+<script src="/assets/3d-world.js" defer></script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"SoftwareApplication","name":"Coroute","operatingSystem":"Android 6.0 or newer","applicationCategory":"TravelApplication","description":"Live group awareness, communication and safety tools built for motorcycle rides.","url":"__ORIGIN__/","downloadUrl":"__ORIGIN__/download","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"INR"},"publisher":{"@type":"Organization","name":"DevMonks"}}
 </script>
@@ -39,580 +39,501 @@
 <!--#include header-->
 <main id="main" class="site-main" tabindex="-1">
 
-  <!-- ============ Hero: the ride starts ============ -->
-  <section class="hero" id="top" data-hero data-progress="exit" data-depth-scene aria-labelledby="hero-title">
-    <div class="hero__scene" aria-hidden="true">
-      <div class="hero__sky" data-depth="3"></div>
-      <svg class="hero__layer hero__ridges" data-depth="5" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMax slice" focusable="false"></svg>
-      <canvas class="hero__layer hero__ground" data-depth="7"></canvas>
-      <svg class="hero__layer hero__riders" data-depth="10" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMax slice" focusable="false"></svg>
-      <noscript><img class="hero__layer hero__static" src="/assets/home/hero-road.svg" alt="" width="1440" height="900"></noscript>
-    </div>
-    <div class="container hero__inner">
-      <div class="hero__copy fade-out-on-progress">
-        <a class="hero__new" href="#essentials"><span class="badge badge--new">New in 3.16 &amp; 3.17</span><span>Route Essentials, Lock-Screen Radar, Ride Guardian</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
-        <h1 class="hero__title t-display" id="hero-title">Ride together.<br>Stay connected.</h1>
-        <p class="hero__lead t-lead">Live group awareness, communication and safety tools built for motorcycle rides.</p>
-        <div class="cluster cluster--16 hero__actions">
-          <a class="btn btn--primary btn--lg" href="/download"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
-          <a class="link-arrow" href="#how"><span>See how it works</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
-        </div>
-        <ul class="hero__trust" role="list">
-          <li>Free</li><li>No ads</li><li>Privacy-first</li>
-        </ul>
+  <!-- ======================================================================
+       PERSISTENT FULL-VIEWPORT 3D INTERACTIVE WORLD
+       Continuous Canvas rendering mountain pass, 5-rider convoy, tunnel,
+       satellite, P2P mesh, and tactical radar dome.
+       ====================================================================== -->
+  <div class="world3d" id="world3d" role="region" aria-label="Interactive 3D Mountain Pass Convoy World. Click or drag to orbit in 360 degrees.">
+    <canvas id="world3d-canvas" class="world3d-canvas"></canvas>
+    <div class="world3d-vignette" aria-hidden="true"></div>
+    <div class="world3d-scanlines" aria-hidden="true"></div>
+  </div>
+
+    <!-- Top Floating Telemetry & Audio HUD -->
+  <div class="telemetry-topbar" aria-label="Real-time Telemetry Bar">
+    <div class="telemetry-pill-group">
+      <div class="telemetry-pill">
+        <span class="dot" aria-hidden="true"></span>
+        <span>MH-12 ALPHA PACK: 5 BIKES (0-HOP BLE MESH)</span>
+      </div>
+      <div class="telemetry-pill when-wide">
+        <span style="color:var(--c-nav)">PASS: 1,248 M (GHATS)</span>
       </div>
     </div>
-    <p class="sr-only">Illustration: a road runs into the distance through hills drawn as contour lines. An orange route line runs along it, and four riders of one group ride along the route.</p>
-  </section>
+    <div class="telemetry-pill-group">
+      <button type="button" class="telemetry-btn" id="audio-toggle-btn" aria-pressed="false" title="Toggle 3D Audio Telemetry Synthesis">
+        <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg>
+        <span>Audio HUD</span>
+      </button>
+      <a class="telemetry-btn" href="/download">
+        <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>
+        <span>Download APK</span>
+      </a>
+    </div>
+  </div>
 
-  <!-- ============ Your group. One route. (pinned) ============ -->
-  <section class="pinned story story--group" id="group" data-pinned data-story style="--pinned-length:300vh" aria-labelledby="group-title">
-    <div class="pinned__sticky">
-      <div class="container story__inner">
-        <div class="story__copy">
-          <div class="story__intro">
-            <p class="eyebrow">On the road</p>
-            <h2 class="story__title" id="group-title">Your group. One route.</h2>
+  <!-- Floating Live Convoy Telemetry Dashboard -->
+  <aside class="live-dashboard-hud" id="live-dashboard" aria-label="Global Convoy Live Metrics Dashboard">
+    <div class="dash-card">
+      <div class="dash-card__header">
+        <div class="dash-live-badge">
+          <span class="dash-radar-pulse" aria-hidden="true"></span>
+          <span class="dash-live-label">LIVE MESH TELEMETRY</span>
+        </div>
+        <button type="button" class="dash-toggle-btn" id="dash-toggle-btn" aria-expanded="true" aria-controls="dash-metrics" title="Minimize Dashboard">
+          <span class="dash-toggle-text">MINIMIZE</span>
+        </button>
+      </div>
+
+      <div class="dash-card__content" id="dash-metrics">
+        <!-- Live Riders Primary Metric -->
+        <div class="dash-metric dash-metric--primary">
+          <div class="dash-metric__top">
+            <span class="dash-metric__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></span>
+            <span class="dash-metric__title">Active Live Riders</span>
+            <span class="dash-metric__tag is-live" id="dash-live-tag">LIVE NOW</span>
           </div>
-          <ol class="stage-stack story__stages" role="list">
-            <li data-stage="0"><p class="story__num t-label">01</p><h3>Everyone starts together</h3><p>Share a six-digit code. Everyone joins the same ride and the same route.</p></li>
-            <li data-stage="1"><p class="story__num t-label">02</p><h3>The road opens up</h3><p>Traffic, fuel and tolls pull the group apart. That is normal.</p></li>
-            <li data-stage="2"><p class="story__num t-label">03</p><h3>The group spreads</h3><p>A few bends later, the riders behind you are out of sight.</p></li>
-            <li data-stage="3"><p class="story__num t-label">04</p><h3>Coroute keeps everyone visible</h3><p>Every rider stays on one live map, with the distance ahead and behind you.</p></li>
-          </ol>
-          <div class="story__ticks" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+          <div class="dash-metric__val">
+            <span class="dash-metric__num" id="stat-live-riders">1,428</span>
+            <span class="dash-metric__unit">riders connected</span>
+          </div>
+          <div class="dash-metric__sub">Across 214 active peer-to-peer mountain convoys</div>
         </div>
-        <div class="map story__map" style="--map-ratio:600/800" role="img" aria-label="Example map: four riders on one route. The lead rider is 850 m ahead of you, two riders are 1.4 km and 2.1 km behind.">
-          <svg class="map__svg" viewBox="0 0 600 800" aria-hidden="true" focusable="false">
-            <path class="road road--minor" d="M-20 470 C100 480 180 430 300 455 S520 520 640 500"/>
-            <path class="road road--minor" d="M640 230 C520 250 470 200 380 215"/>
-            <path class="road road--minor" d="M-20 140 C80 130 160 170 230 190"/>
-            <path class="road__edge" d="M300 860 C300 760 200 700 210 610 S400 500 390 405 S180 300 220 200 S400 70 350 -60"/>
-            <path class="road" d="M300 860 C300 760 200 700 210 610 S400 500 390 405 S180 300 220 200 S400 70 350 -60"/>
-            <path class="route-casing" d="M300 860 C300 760 200 700 210 610 S400 500 390 405 S180 300 220 200 S400 70 350 -60"/>
-            <path class="route-line" id="grp-road" d="M300 860 C300 760 200 700 210 610 S400 500 390 405 S180 300 220 200 S400 70 350 -60"/>
-          </svg>
-          <div class="story__chip story__chip--code"><span class="distance-label"><span class="distance-label__k">Code</span>483 921</span></div>
-          <div class="story__chip story__chip--live"><span class="badge badge--live">Live</span><span class="distance-label">4 riders</span></div>
-          <span class="marker rider rider--sm rider--behind" id="g-mv" data-track=".1:.08 .375:.12 .625:.15 .85:.1659" data-path="grp-road" style="--x:37.61%;--y:85.77%">MV<span class="marker__label"><span class="distance-label" data-dist="g-you" data-km="4.25">2.1 km behind</span></span></span>
-          <span class="marker rider rider--sm rider--behind" id="g-rs" data-track=".1:.11 .375:.2 .625:.29 .85:.3306" data-path="grp-road" style="--x:46.49%;--y:65.92%">RS<span class="marker__label marker__label--left"><span class="distance-label" data-dist="g-you" data-km="4.25">1.4 km behind</span></span></span>
-          <span class="marker rider rider--sm rider--lead" id="g-ak" data-track=".1:.17 .375:.4 .625:.74 .85:.86" data-path="grp-road" style="--x:52.32%;--y:10.80%">AK<span class="marker__label marker__label--left"><span class="distance-label distance-label--warn" data-dist="g-you" data-km="4.25">850 m ahead</span></span></span>
-          <span class="marker rider rider--you" id="g-you" data-track=".1:.14 .375:.3 .625:.54 .85:.66" data-path="grp-road" style="--x:40.07%;--y:34.17%">You</span>
+
+        <!-- 3-Way Grid for Trips, Total KMs, Longest KMs -->
+        <div class="dash-grid">
+          <!-- Total Trips -->
+          <div class="dash-metric-mini">
+            <div class="dash-metric-mini__label">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>
+              <span>Total Trips</span>
+            </div>
+            <div class="dash-metric-mini__val" id="stat-total-trips">48,920</div>
+            <div class="dash-metric-mini__note">Expeditions completed</div>
+          </div>
+
+          <!-- Total KMs -->
+          <div class="dash-metric-mini">
+            <div class="dash-metric-mini__label">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg>
+              <span>Total KMs</span>
+            </div>
+            <div class="dash-metric-mini__val is-cyan" id="stat-total-kms">1,842,650</div>
+            <div class="dash-metric-mini__note">Mesh guarded kms</div>
+          </div>
+
+          <!-- Longest KMs -->
+          <div class="dash-metric-mini dash-metric-mini--wide">
+            <div class="dash-metric-mini__label">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-hazard"/></svg>
+              <span>Longest Single Convoy</span>
+            </div>
+            <div class="dash-metric-mini__flex">
+              <span class="dash-metric-mini__val is-orange" id="stat-longest-km">1,280 KM</span>
+              <span class="dash-expedition-route">Manali - Leh - Pangong Tso</span>
+            </div>
+            <div class="dash-metric-mini__note">Zero dropout multi-pass Himalayan crossing</div>
+          </div>
+        </div>
+
+        <!-- Live Network Telemetry Strip -->
+        <div class="dash-footer">
+          <div class="dash-footer__stat">
+            <span class="dash-footer__k">Avg Convoy Speed</span>
+            <span class="dash-footer__v" id="dash-avg-speed">58 km/h</span>
+          </div>
+          <div class="dash-footer__stat">
+            <span class="dash-footer__k">Mesh Hop Latency</span>
+            <span class="dash-footer__v is-cyan">14 ms</span>
+          </div>
+          <div class="dash-footer__stat">
+            <span class="dash-footer__k">Pack Radio Armed</span>
+            <span class="dash-footer__v is-green">100% P2P</span>
+          </div>
         </div>
       </div>
     </div>
-  </section>
+  </aside>
 
-  <!-- ============ Live group awareness ============ -->
-  <section class="section aware" id="awareness" aria-labelledby="aware-title">
-    <div class="container split split--media-wide">
-      <div class="stack stack--32">
-        <div class="section-intro section-intro--flush">
-          <p class="eyebrow">Live group awareness</p>
-          <h2 class="section-intro__title" id="aware-title">Know where the group is without searching for it.</h2>
-          <p class="t-lead">One map for the whole ride. Glance at it at a stop, or let the alerts speak while you ride.</p>
-        </div>
-        <ul class="ticklist" role="list" data-reveal-stagger="70">
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Every rider live, with speed and heading</li>
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>Distance ahead and behind you, and the group spread</li>
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg>Planned route, stops and arrival ticks</li>
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-map"/></svg>Off the route? It reroutes, and the road behind you clears</li>
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg>Smart Lock-Screen Notification: Ahead/Behind convoy radar and next fuel distance <span class="badge badge--new">New in 3.17</span></li>
-        </ul>
-        <div class="alert-card alert-card--nav" data-reveal>
-          <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg>Smart Lock-Screen Radar <span class="badge badge--new">New in 3.17</span></p>
-          <p class="alert-card__title">Rahul (-1.4 km) - You - AK (+1.2 km)</p>
-          <p class="alert-card__meta"><span>Next fuel: 6.4 km</span><span>Usable range: 84 km</span><span>Battery-efficient telemetry</span></p>
-        </div>
-      </div>
-      <figure class="aware__fig" data-reveal>
-        <div class="map aware__map" style="--map-ratio:800/500" data-progress="enter" data-story>
-          <svg class="map__svg" viewBox="0 0 800 500" aria-hidden="true" focusable="false">
-            <path class="road road--minor" d="M260 -20 C270 120 250 220 300 320"/>
-            <path class="road road--minor" d="M560 260 C620 330 700 360 820 380"/>
-            <path class="road__edge" d="M-20 420 C120 400 180 330 300 320 S480 360 560 260 S700 120 820 90"/>
-            <path class="road" d="M-20 420 C120 400 180 330 300 320 S480 360 560 260 S700 120 820 90"/>
-            <path class="road__centre" d="M-20 420 C120 400 180 330 300 320 S480 360 560 260 S700 120 820 90"/>
-            <path class="route-line route-line--cleared" id="aw-road" d="M-20 420 C120 400 180 330 300 320 S480 360 560 260 S700 120 820 90"/>
-            <path class="route-line" data-route style="--from:.1;--to:.9" d="M300 320 C376 314 440 351 499 330 C522 322 541 304 560 260 C600 180 700 120 820 90"/>
-          </svg>
-          <div class="aware__hud"><span class="distance-label"><span class="distance-label__k">Spread</span>3.1 km</span><span class="distance-label"><span class="distance-label__k">Riders</span>4</span></div>
-          <span class="marker rider rider--sm rider--behind" data-track="0:.1" data-path="aw-road" style="--x:8.85%;--y:79.56%">MV<span class="marker__label marker__label--above"><span class="distance-label">1.9 km behind</span></span></span>
-          <span class="marker rider rider--sm rider--ok" data-track="0:.25" data-path="aw-road" style="--x:25.05%;--y:68.75%">RS<span class="marker__label marker__label--below"><span class="distance-label">600 m behind</span></span></span>
-          <span class="marker rider rider--you" data-track="0:.38" data-path="aw-road" style="--x:39.87%;--y:63.77%">You</span>
-          <span class="marker rider rider--sm rider--lead" data-track="0:.6" data-path="aw-road" style="--x:64.97%;--y:59.92%">AK<span class="marker__label marker__label--below"><span class="distance-label distance-label--warn"><span class="distance-label__k">Lead</span>1.2 km ahead</span></span></span>
-          <span class="marker stop-marker stop-marker--next" data-track="0:.78" data-path="aw-road" style="--x:79.52%;--y:35.65%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg><span class="marker__label marker__label--left"><span class="distance-label distance-label--warn"><span class="distance-label__k">Next stop</span>Fuel, 6.4 km</span></span></span>
-          <span class="marker stop-marker stop-marker--dest" style="--x:93%;--y:20.6%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg></span>
-        </div>
-        <figcaption class="fig-cap">Example ride. Riders and distances are illustrations.</figcaption>
-      </figure>
-    </div>
-  </section>
+  <!-- Left Spatial Navigation Rail (Quick 3D Flight Jump) -->
+  <nav class="spatial-nav" aria-label="3D Waypoint Navigation">
+    <button type="button" class="spatial-nav-item is-active" data-fly-s="0" data-fly-cam="chase" data-fly-target="stage-hero" title="01 Start: Pass Rollout">
+      <span class="spatial-nav-num">01</span><span class="spatial-nav-label">Rollout</span>
+    </button>
+    <button type="button" class="spatial-nav-item" data-fly-s="180" data-fly-cam="orbit" data-fly-target="stage-mesh" title="02 P2P Bluetooth Convoy Mesh">
+      <span class="spatial-nav-num">02</span><span class="spatial-nav-label">P2P Mesh</span>
+    </button>
+    <button type="button" class="spatial-nav-item" data-fly-s="380" data-fly-cam="chase" data-fly-target="stage-airbag" title="03 Smart Airbag BLE Bridge">
+      <span class="spatial-nav-num">03</span><span class="spatial-nav-label">Airbag Bridge</span>
+    </button>
+    <button type="button" class="spatial-nav-item" data-fly-s="750" data-fly-cam="chase" data-fly-target="stage-tunnel" title="04 Dead Reckoning & Tunnel IMU">
+      <span class="spatial-nav-num">04</span><span class="spatial-nav-label">Tunnel IMU</span>
+    </button>
+    <button type="button" class="spatial-nav-item" data-fly-s="1100" data-fly-cam="satellite" data-fly-target="stage-satellite" title="05 Satellite SOS Gateway Relay">
+      <span class="spatial-nav-num">05</span><span class="spatial-nav-label">Satellite SOS</span>
+    </button>
+    <button type="button" class="spatial-nav-item" data-fly-s="1300" data-fly-cam="cockpit" data-fly-target="stage-remote" title="06 Handlebar Wireless Remote">
+      <span class="spatial-nav-num">06</span><span class="spatial-nav-label">Handlebar Remote</span>
+    </button>
+    <button type="button" class="spatial-nav-item" data-fly-s="1500" data-fly-cam="orbit" data-fly-target="stage-hazard" title="07 Road Hazard AI Mesh">
+      <span class="spatial-nav-num">07</span><span class="spatial-nav-label">Hazard AI</span>
+    </button>
+    <button type="button" class="spatial-nav-item" data-fly-s="1700" data-fly-cam="chase" data-fly-target="stage-trauma" title="08 Biometric Trauma Verification">
+      <span class="spatial-nav-num">08</span><span class="spatial-nav-label">Biometric Trauma</span>
+    </button>
+    <button type="button" class="spatial-nav-item" data-fly-s="1900" data-fly-cam="radar" data-fly-target="stage-voice" title="09 Multilingual Helmet Voice">
+      <span class="spatial-nav-num">09</span><span class="spatial-nav-label">Helmet Voice</span>
+    </button>
+  </nav>
 
-  <!-- ============ Voice ============ -->
-  <section class="section section--surface voice" id="voice" aria-labelledby="voice-title">
-    <div class="container split split--reverse">
-      <div class="stack stack--32">
-        <div class="section-intro section-intro--flush">
-          <p class="eyebrow">Voice</p>
-          <h2 class="section-intro__title" id="voice-title">Talk without turning the ride into a phone call.</h2>
-          <p class="t-lead">Hold to talk to the group, or to one rider. Everyone hears you at once.</p>
-        </div>
-        <dl class="specs" data-reveal-stagger="70">
-          <div data-reveal><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Group</dt><dd>Hold to talk to everyone in the ride.</dd></div>
-          <div data-reveal><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-message"/></svg>Private</dt><dd>Pick one rider with "Talk to".</dd></div>
-          <div data-reveal><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg>Hands-free</dt><dd>Sends only while you speak.</dd></div>
-          <div data-reveal><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic-off"/></svg>Not recorded</dt><dd>Voice is relayed live, then gone.</dd></div>
-        </dl>
+  <!-- Bottom Floating 3D Cockpit & Camera Deck -->
+  <aside class="cockpit-dock" aria-label="3D Camera Controls and Convoy Telemetry">
+    <div class="cockpit-dock__inner">
+      <div class="cam-switch-group" role="group" aria-label="3D Camera Perspective">
+        <button type="button" class="cam-btn is-active" data-cam="chase" aria-pressed="true" title="Third-person chase camera banking behind your motorcycle">
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg>
+          <span>Chase Cam</span>
+        </button>
+        <button type="button" class="cam-btn" data-cam="cockpit" aria-pressed="false" title="First-person helmet view looking over handlebars">
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg>
+          <span>Helmet View</span>
+        </button>
+        <button type="button" class="cam-btn" data-cam="orbit" aria-pressed="false" title="Free 360-degree orbital camera with drag and touch inertia">
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>
+          <span>360 Orbit</span>
+        </button>
+        <button type="button" class="cam-btn" data-cam="radar" aria-pressed="false" title="5 km Tactical radar dome overview">
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg>
+          <span>5km Radar</span>
+        </button>
+        <button type="button" class="cam-btn" data-cam="satellite" aria-pressed="false" title="High-altitude space perspective focusing on satellite link">
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-satellite"/></svg>
+          <span>Satellite</span>
+        </button>
       </div>
-      <div class="voice-card" data-anim data-reveal aria-hidden="true">
-        <div class="voice-card__line">
-          <span class="rider rider--you">You</span>
-          <span class="wave"><i style="--h:.35;--d:0"></i><i style="--h:.6;--d:1"></i><i style="--h:.9;--d:2"></i><i style="--h:.5;--d:3"></i><i style="--h:.75;--d:4"></i><i style="--h:1;--d:5"></i><i style="--h:.55;--d:6"></i><i style="--h:.8;--d:7"></i><i style="--h:.4;--d:8"></i><i style="--h:.7;--d:9"></i><i style="--h:.95;--d:10"></i><i style="--h:.45;--d:11"></i><i style="--h:.65;--d:12"></i><i style="--h:.85;--d:13"></i><i style="--h:.5;--d:14"></i><i style="--h:.3;--d:15"></i><i style="--h:.7;--d:16"></i><i style="--h:.55;--d:17"></i><i style="--h:.9;--d:18"></i><i style="--h:.4;--d:19"></i><i style="--h:.6;--d:20"></i><i style="--h:.35;--d:21"></i></span>
-          <span class="rider rider--lead">AK</span>
-        </div>
-        <div class="voice-card__status"><span class="badge badge--live">Live</span><span>You are talking to everyone</span></div>
-        <div class="voice-card__dock">
-          <div class="voice-seg"><span class="is-on">Everyone</span><span>AK only</span></div>
-          <div class="voice-ptt"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg>Hold to talk</div>
-        </div>
+
+      <div class="dock-telemetry-readout" aria-hidden="true">
+        <div class="dock-readout-item is-cyan">SPEED: <b id="speed-readout">61 KM/H</b></div>
+        <div class="dock-readout-item">LEAN: <b>+12.4 deg</b></div>
+        <div class="dock-readout-item is-orange">RANGE: <b>5.0 KM MESH</b></div>
+      </div>
+
+      <div class="dock-actions">
+        <button type="button" class="telemetry-btn" id="sim-speed-btn" title="Toggle Convoy Simulation Speed">
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>
+          <span>Speed Toggle</span>
+        </button>
       </div>
     </div>
-  </section>
+  </aside>
 
-  <!-- ============ Safety story (pinned): own group, Safety Network, approaching warning ============ -->
-  <section class="pinned story story--safety" id="safety" data-pinned data-story style="--pinned-length:340vh" aria-label="Safety">
-    <div class="pinned__sticky">
-      <div class="container story__inner">
-        <div class="story__copy">
-          <p class="eyebrow story__eyebrow">Safety</p>
-          <div class="stage-stack story__stages">
-            <div data-stage="0">
-              <h2 class="story__title">When something goes wrong, distance matters.</h2>
-              <p class="story__text">Hold SOS, or let crash detection ask first. Your whole group gets your location at once.</p>
-              <div class="alert-card alert-card--danger">
-                <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg>Possible accident</p>
-                <p class="alert-card__title">Rahul, 7.8 km behind</p>
-                <p class="alert-card__meta"><span>Own group ETA 12 min</span><span>Updated 8 s ago</span></p>
+  <!-- Interactive 3D Target Inspect Popup Card -->
+  <div class="world3d-inspect-card" id="world3d-inspect" role="dialog" aria-modal="false" aria-labelledby="inspect-title">
+    <div class="inspect-head">
+      <h3 class="inspect-title" id="inspect-title">Node Telemetry</h3>
+      <button type="button" class="inspect-close" id="inspect-close" aria-label="Close Inspector">
+        <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-close"/></svg>
+      </button>
+    </div>
+    <p class="inspect-body" id="inspect-desc">Telemetry data feed.</p>
+    <div class="inspect-metrics">
+      <span id="inspect-stat1">STAT: OK</span>
+      <span id="inspect-stat2">LINK: P2P</span>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       SPATIAL EXPERIENCE STAGES
+       Floating glassmorphic cards seamlessly mapped to the 3D world journey.
+       ====================================================================== -->
+  <div class="spatial-experience">
+
+    <!-- Stage 0: Hero Rollout -->
+    <section class="spatial-stage" id="stage-hero" aria-labelledby="hero-title">
+      <div class="container">
+        <article class="spatial-card">
+          <div class="spatial-tag">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mesh"/></svg>
+            <span>Next-Generation Motorcycle Convoy Network</span>
+          </div>
+          <h1 class="spatial-title" id="hero-title">Ride together.<br>Stay connected.</h1>
+                    <p class="spatial-lead">Live group awareness, instant voice communication, and hardware safety mesh built for motorcycle expeditions across high mountain passes.</p>
+          <!-- Inline Hero Convoy Telemetry Strip -->
+          <div class="hero-telemetry-strip" role="region" aria-label="Convoy Network Statistics">
+            <div class="hero-stat-card">
+              <div class="hero-stat-k">
+                <span class="dot is-green" aria-hidden="true"></span>
+                <span>Active Live Riders</span>
               </div>
+              <div class="hero-stat-v" id="hero-stat-riders">1,428</div>
+              <div class="hero-stat-sub">Real-time mesh network</div>
             </div>
-            <div data-stage="1">
-              <p class="story__badge"><span class="badge badge--new">New in 3.15</span><span class="t-label t-muted">Coroute Safety Network</span></p>
-              <h2 class="story__title">What if another rider can reach them first?</h2>
-              <p class="story__text">Coroute can ask a rider from another group, already riding toward the spot on the same road.</p>
-              <div class="eta-compare">
-                <div class="eta-compare__row"><span class="eta-compare__who">Own group</span><span class="eta-compare__val">8 km</span><span class="eta-compare__val">12 min</span></div>
-                <div class="eta-compare__row eta-compare__row--near"><span class="eta-compare__who">Nearby rider</span><span class="eta-compare__val">1.6 km</span><span class="eta-compare__val">3 min</span></div>
+            <div class="hero-stat-card">
+              <div class="hero-stat-k">
+                <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>
+                <span>Total Trips</span>
               </div>
+              <div class="hero-stat-v" id="hero-stat-trips">48,920</div>
+              <div class="hero-stat-sub">Convoys completed</div>
             </div>
-            <div data-stage="2">
-              <p class="story__badge"><span class="badge badge--new">New in 3.15</span><span class="t-label t-muted">Coroute Safety Network</span></p>
-              <h3 class="story__title story__title--sm">The closest rider may be the first person able to help.</h3>
-              <ol class="help-steps" role="list">
-                <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Request sent</li>
-                <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Accepted</li>
-                <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>On the way</li>
-              </ol>
-              <div class="alert-card alert-card--nav">
-                <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-network"/></svg>Safety Network</p>
-                <p class="alert-card__title">Nearby rider responding, ETA 3 min</p>
+            <div class="hero-stat-card">
+              <div class="hero-stat-k">
+                <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg>
+                <span>Total Distance</span>
               </div>
-              <p class="story__note">Nearby help only works where other Coroute groups are riding. Your own group is always alerted first.</p>
+              <div class="hero-stat-v is-cyan" id="hero-stat-kms">1,842,650 KM</div>
+              <div class="hero-stat-sub">Protected offline tracking</div>
             </div>
-            <div data-stage="3">
-              <h2 class="story__title">One emergency shouldn't become another.</h2>
-              <p class="story__text">Groups riding toward the spot on the same road get a caution. The place only, no names.</p>
-              <div class="alert-card alert-card--warn">
-                <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg>Caution</p>
-                <p class="alert-card__title">Accident reported ahead</p>
-                <p class="alert-card__meta"><span>2 km</span><span>Reduce speed</span></p>
+            <div class="hero-stat-card">
+              <div class="hero-stat-k">
+                <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-hazard"/></svg>
+                <span>Longest Convoy</span>
               </div>
+              <div class="hero-stat-v is-orange" id="hero-stat-longest">1,280 KM</div>
+              <div class="hero-stat-sub">Leh - Ladakh alpine pass</div>
             </div>
           </div>
-          <div class="story__ticks" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-        </div>
-        <div class="map story__map" style="--map-ratio:600/800" role="img" aria-label="Example emergency map. Rahul has stopped after a possible accident. His own group is 7.8 km behind, about 12 minutes away. A rider from a nearby group, 1.6 km away, responds and arrives in about 3 minutes. Another group 2 km before the spot gets a caution.">
-          <svg class="map__svg" viewBox="0 0 600 800" aria-hidden="true" focusable="false">
-            <path class="road road--minor" d="M-20 300 C120 320 160 380 222 372"/>
-            <path class="road road--minor" d="M640 520 C540 520 470 600 362 590"/>
-            <path class="road__edge" d="M250 860 C250 740 370 690 360 590 S190 470 220 370 S410 230 370 120 S270 20 300 -60"/>
-            <path class="road" d="M250 860 C250 740 370 690 360 590 S190 470 220 370 S410 230 370 120 S270 20 300 -60"/>
-            <path class="road__centre" d="M250 860 C250 740 370 690 360 590 S190 470 220 370 S410 230 370 120 S270 20 300 -60"/>
-            <path class="route-line route-line--thin sos-route" id="sos-road" d="M250 860 C250 740 370 690 360 590 S190 470 220 370 S410 230 370 120 S270 20 300 -60"/>
-            <path class="route-casing sos-help-casing" d="M359.1 206.4 L356.7 209.9 L354.2 213.3 L351.6 216.6 L349.0 219.9 L346.3 223.2 L343.5 226.3 L340.6 229.5 L337.7 232.5 L334.8 235.6 L331.8 238.6 L328.8 241.5 L325.8 244.5 L322.7 247.4 L319.6 250.2 L316.5 253.1 L313.4 256.0 L310.3 258.8 L307.2 261.6 L304.0 264.4 L300.9 267.3 L297.7 270.1 L294.6 272.9 L291.5 275.7 L288.3 278.6 L285.2 281.4 L282.1 284.3 L279.0 287.1 L276.0 290.0"/>
-            <path class="route-line route-line--help sos-help" id="sos-help" data-route style="--from:.5;--to:.72" d="M359.1 206.4 L356.7 209.9 L354.2 213.3 L351.6 216.6 L349.0 219.9 L346.3 223.2 L343.5 226.3 L340.6 229.5 L337.7 232.5 L334.8 235.6 L331.8 238.6 L328.8 241.5 L325.8 244.5 L322.7 247.4 L319.6 250.2 L316.5 253.1 L313.4 256.0 L310.3 258.8 L307.2 261.6 L304.0 264.4 L300.9 267.3 L297.7 270.1 L294.6 272.9 L291.5 275.7 L288.3 278.6 L285.2 281.4 L282.1 284.3 L279.0 287.1 L276.0 290.0"/>
-          </svg>
-          <span class="marker group-marker group-marker--own sos-own" data-track="0:.09" data-path="sos-road" style="--x:46.00%;--y:95.89%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Your group<span class="marker__label"><span class="distance-label distance-label--accent">7.8 km<span class="distance-label__k">ETA</span>12 min</span></span></span>
-          <span class="marker group-marker group-marker--muted sos-third" data-track="0:.484" data-path="sos-road" style="--x:36.76%;--y:52.23%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Group<span class="marker__label"><span class="distance-label distance-label--warn"><span class="distance-label__k">Caution</span>2 km ahead</span></span></span>
-          <span class="marker group-marker group-marker--other sos-near" data-track="0:.729" data-path="sos-road" style="--x:59.85%;--y:25.80%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Nearby<span class="marker__label"><span class="distance-label distance-label--nav">1.6 km<span class="distance-label__k">ETA</span>3 min</span></span></span>
-          <span class="marker sos-rahul" data-track="0:.62" data-path="sos-road" style="--x:45.99%;--y:36.26%"><span class="emergency-marker" style="--x:50%;--y:50%"></span><span class="marker__label sos-rahul__label"><span class="distance-label distance-label--danger">Rahul</span></span></span>
-          <span class="marker rider rider--sm rider--helper sos-helper" data-track=".5:0 .74:.9" data-path="sos-help" style="--x:47.44%;--y:35.24%">AR</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ Safety toolkit ============ -->
-  <section class="section section--tight kit" aria-labelledby="kit-title">
-    <div class="container">
-      <h2 class="t-label kit__title" id="kit-title">Also in the safety tools</h2>
-      <ul class="kit__grid" role="list" data-reveal-stagger="60">
-        <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg><h3>Hold to send SOS</h3><p>No pocket taps. Medical, breakdown, crash or your own reason.</p></li>
-        <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg><h3>Crash detection <span class="badge badge--new">New in 3.15</span></h3><p>Asks "I'm OK" or "Need help" for 15 seconds. Helpful aid; does not guarantee detection.</p></li>
-        <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg><h3>Indian Emergency Services <span class="badge badge--new">New in 3.16</span></h3><p>Quick one-tap dialing for 108 Ambulance, 112 National Emergency, and 100 Police directly from the emergency sheet.</p></li>
-        <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg><h3>Rider down report <span class="badge badge--new">New in 3.16</span></h3><p>Long-press the road to report a rider down. Group members and nearby responders receive the spot at once.</p></li>
-        <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg><h3>Route weather forecast <span class="badge badge--new">New in 3.16</span></h3><p>Plain-language forecast along the road at review time and ride start, warning of rain or changing conditions ahead.</p></li>
-        <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg><h3>Sweeper role <span class="badge badge--new">New in 3.16</span></h3><p>Designate a sweeper at the back of the convoy. Both lead and sweeper hear when a rider drops behind or has low battery.</p></li>
-        <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg><h3>No signal</h3><p>SOS waits and sends when you reconnect. If enabled, your phone texts your group and emergency contact.</p></li>
-        <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><h3>"I'm going"</h3><p>Riders in your group can say they are on the way, so everyone knows who is coming.</p></li>
-      </ul>
-      <p class="t-small t-muted" style="margin-top:var(--sp-24)">Coroute complements emergency services and does not replace them. In an emergency in India, dial 112 or 108. Response times and detection depend on cellular networks, device sensors, and local conditions.</p>
-    </div>
-  </section>
-
-  <!-- ============ Discovery (calm) ============ -->
-  <section class="section section--surface discover" id="discovery" aria-labelledby="discover-title">
-    <div class="container split">
-      <div class="stack stack--32">
-        <div class="section-intro section-intro--flush">
-          <p class="eyebrow eyebrow--muted">Rider Discovery <span class="badge badge--new">New in 3.15</span></p>
-          <h2 class="section-intro__title" id="discover-title">Meet other riding groups, only when you want to.</h2>
-          <p class="t-lead">When both groups are Public, each can see the other nearby and send a wave. New groups start Private.</p>
-        </div>
-        <div class="vis-toggle" role="group" aria-label="Group visibility example">
-          <button type="button" class="vis-toggle__btn" data-vis="private" aria-pressed="false" aria-controls="discover-demo"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg>Private</button>
-          <button type="button" class="vis-toggle__btn" data-vis="public" aria-pressed="true" aria-controls="discover-demo"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-wave"/></svg>Public</button>
-        </div>
-        <p class="t-small t-muted">Safety settings are separate from social visibility.</p>
-      </div>
-      <div class="discover__demo" id="discover-demo" data-visibility-demo data-visibility="public">
-        <div class="map discover__map" style="--map-ratio:640/480" role="img" aria-label="Example: with both groups Public, your group sees Weekend Riders, 6 riders, about 4.7 km away. When Private, neither group sees the other.">
-          <svg class="map__svg" viewBox="0 0 640 480" aria-hidden="true" focusable="false">
-            <path class="road road--minor" d="M-20 120 C140 140 260 90 420 120 S600 200 660 180"/>
-            <path class="road__edge" d="M80 500 C120 400 220 360 300 300 S440 180 470 -20"/>
-            <path class="road" d="M80 500 C120 400 220 360 300 300 S440 180 470 -20"/>
-            <path class="route-line route-line--thin" d="M80 500 C120 400 220 360 300 300 S440 180 470 -20"/>
-            <path class="discover__gap" d="M190 380 C260 330 330 260 400 160"/>
-          </svg>
-          <span class="marker group-marker group-marker--own" style="--x:29.7%;--y:79.2%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Your group</span>
-          <span class="marker group-marker group-marker--other discover__other" style="--x:62.5%;--y:33.3%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>6</span>
-          <p class="discover__private"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg>Private. Other groups don't see you, and you don't see them.</p>
-        </div>
-        <div class="discover__card alert-card alert-card--nav" aria-hidden="true">
-          <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Group nearby</p>
-            <p class="alert-card__title">Weekend Riders</p>
-            <p class="alert-card__meta"><span>6 riders</span><span>About 4.7 km</span><span>Same way</span></p>
-            <div class="alert-card__actions"><span class="chip-btn">View group</span><span class="chip-btn chip-btn--wave"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-wave"/></svg>Wave</span></div>
+          <div class="spatial-actions">
+            <a class="btn btn--primary btn--lg" href="/download"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
+            <button type="button" class="spatial-fly-btn" data-fly-s="180" data-fly-cam="orbit" data-fly-target="stage-mesh">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg>
+              <span>Explore 3D World</span>
+            </button>
           </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ Safety vs Social ============ -->
-  <section class="section section--surface sep" id="safety-social" aria-labelledby="sep-title">
-    <div class="container">
-      <div class="section-intro">
-        <p class="eyebrow eyebrow--muted">Two separate switches</p>
-        <h2 class="section-intro__title" id="sep-title">Who can help you is not who can see you.</h2>
-      </div>
-      <div class="compare" data-reveal>
-        <div class="compare__col compare__col--safety">
-          <div class="compare__head"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg><h3 class="compare__title">Safety</h3></div>
-          <p class="compare__sub">Who can help you.</p>
-          <ul class="compare__list" role="list">
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Your group is always alerted first</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Up to 3 nearby riders may be asked, if you allow it</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Only the spot and the distance until they say yes</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Works in Public and Private</li>
+          <ul class="spatial-specs" role="list">
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Convoy Protocol</span><span class="spatial-spec-v">Bluetooth 5.0 Long Range Mesh</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Offline Autonomy</span><span class="spatial-spec-v">Zero cellular required</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Safety Engine</span><span class="spatial-spec-v">20ms Airbag + Satellite SOS</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Privacy Standard</span><span class="spatial-spec-v">No ads, no tracking, free</span></li>
           </ul>
-        </div>
-        <div class="compare__col compare__col--social">
-          <div class="compare__head"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-wave"/></svg><h3 class="compare__title">Social</h3></div>
-          <p class="compare__sub">Who can see your group.</p>
-          <ul class="compare__list" role="list">
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Off until the lead sets the group to Public</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Both groups have to be Public</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Group name, rider count and a rough distance</li>
-            <li class="is-off"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-close"/></svg>No names, positions or phone numbers</li>
-          </ul>
-        </div>
+          <p class="t-xs t-faint" style="margin-top:var(--sp-8)">Free for every rider, with no ads. Android 6.0 or newer. No iOS version yet.</p>
+        </article>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- ============ Stops ============ -->
-  <section class="section stops" id="stops" aria-labelledby="stops-title">
-    <div class="container split split--media-wide">
-      <div class="stack stack--32">
-        <div class="section-intro section-intro--flush">
-          <p class="eyebrow">Stops</p>
-          <h2 class="section-intro__title" id="stops-title">Regroup without asking where everyone is.</h2>
-          <p class="t-lead">Each rider is ticked off as they arrive. The stop completes when the whole group is in.</p>
-        </div>
-        <ul class="kinds" role="list" aria-label="Stop types">
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg>Fuel</li>
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-food"/></svg>Food</li>
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-rest"/></svg>Rest</li>
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-meeting"/></svg>Meeting point</li>
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-scenic"/></svg>Scenic</li>
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-toll"/></svg>Toll</li>
-          <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-stop"/></svg>Stop</li>
-        </ul>
-        <p class="t-small t-muted">Running late? Share your ETA, or drop a meet-here point for the group.</p>
-      </div>
-      <figure class="stops__fig">
-        <div class="map stops__map" style="--map-ratio:640/440" data-progress data-story role="img" aria-label="Example: a fuel stop. Four of six riders have arrived, then five, then all six. Stop complete.">
-          <svg class="map__svg" viewBox="0 0 640 440" aria-hidden="true" focusable="false">
-            <path class="road road--minor" d="M470 -20 C480 100 470 180 476 250 S500 380 520 460"/>
-            <path class="road__edge" d="M-20 330 C120 330 200 240 320 250 S440 300 476 252"/>
-            <path class="road" d="M-20 330 C120 330 200 240 320 250 S440 300 476 252"/>
-            <path class="route-line route-line--thin" id="stop-road" d="M-20 330 C120 330 200 240 320 250 S440 300 476 252"/>
-            <circle class="stops__zone" cx="500" cy="230" r="78"/>
-          </svg>
-          <span class="marker stop-marker stops__pin" style="--x:78.1%;--y:52.3%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg></span>
-          <span class="marker rider rider--sm rider--ok" style="--x:83.4%;--y:40%">AK</span>
-          <span class="marker rider rider--sm rider--ok" style="--x:88.6%;--y:51.4%">PN</span>
-          <span class="marker rider rider--sm rider--ok" style="--x:84.8%;--y:63.2%">You</span>
-          <span class="marker rider rider--sm rider--ok" style="--x:74.4%;--y:38.6%">SK</span>
-          <span class="marker rider rider--sm rider--behind stops__late stops__late--1" data-track="0:.55 .42:.94" data-path="stop-road" style="--x:70.87%;--y:62.10%">RS</span>
-          <span class="marker rider rider--sm rider--behind stops__late stops__late--2" data-track="0:.12 .58:.86" data-path="stop-road" style="--x:64.56%;--y:60.88%">MV</span>
-          <div class="stops__chip">
-            <span class="stops__kind"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg>Fuel stop</span>
-            <span class="stop-count t-num" data-stopcount data-from="4" data-total="6" data-at=".42 .58">6/6</span>
-            <span class="stops__done"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Stop complete</span>
+    <!-- Stage 1: Offline P2P Bluetooth Convoy Mesh -->
+    <section class="spatial-stage" id="stage-mesh" aria-labelledby="mesh-title">
+      <div class="container">
+        <article class="spatial-card spatial-card--right">
+          <div class="spatial-tag">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mesh"/></svg>
+            <span>01 / P2P Mesh Architecture</span>
           </div>
-        </div>
-        <figcaption class="fig-cap">Example. Stop types are the ones in the app.</figcaption>
-      </figure>
-    </div>
-  </section>
-
-  <!-- ============ Route Essentials and Smart Fuel Profile ============ -->
-  <section class="section section--surface essentials" id="essentials" aria-labelledby="essentials-title">
-    <div class="container split split--media-wide">
-      <div class="stack stack--32">
-        <div class="section-intro section-intro--flush">
-          <p class="eyebrow">Route Essentials &amp; Fuel <span class="badge badge--new">New in 3.16 &amp; 3.17</span></p>
-          <h2 class="section-intro__title" id="essentials-title">Find what you need along the road corridor.</h2>
-          <p class="t-lead">Search along your actual route corridor, not as the crow flies. Track your fuel range with reserve buffers and opt-in group estimates.</p>
-        </div>
-        <ul class="ticklist" role="list" data-reveal-stagger="70">
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg><span><strong class="t-body" style="color:var(--c-text)">Fuel along the road corridor:</strong> Upcoming petrol stations with detour distance and road access calculations.</span></li>
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg><span><strong class="t-body" style="color:var(--c-text)">Puncture and mechanics:</strong> Puncture repair shops, tyre specialists, and motorcycle mechanics along the traveling corridor.</span></li>
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-food"/></svg><span><strong class="t-body" style="color:var(--c-text)">Food and rest:</strong> Dhabas, highway eateries, and rest stops directly on your route with verified road access.</span></li>
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-heart"/></svg><span><strong class="t-body" style="color:var(--c-text)">Medical and clinics:</strong> Hospitals and medical emergency points along the corridor for immediate assistance.</span></li>
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg><span><strong class="t-body" style="color:var(--c-text)">Smart Fuel Profile:</strong> Tank capacity, estimated range, 80% reminder, and reserve buffer warnings before empty.</span></li>
-          <li data-reveal><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg><span><strong class="t-body" style="color:var(--c-text)">Opt-in group fuel estimation:</strong> Share estimated range with the ride coordinator without disclosing private litres or mileage.</span></li>
-        </ul>
-        <p class="t-small t-muted">Essentials are cached on your phone for offline fallback on highway stretches with limited mobile signal.</p>
-      </div>
-      <div class="stack stack--16" data-reveal>
-        <div class="alert-card alert-card--nav">
-          <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg>Next Fuel on Corridor</p>
-          <p class="alert-card__title">HP Petrol - 6.4 km ahead</p>
-          <p class="alert-card__meta"><span>Detour 200 m</span><span>Est. usable range 84 km</span><span>Reserve buffer 25 km</span></p>
-        </div>
-        <div class="alert-card alert-card--warn">
-          <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg>Fuel Reminder</p>
-          <p class="alert-card__title">80% tank distance reached</p>
-          <p class="alert-card__meta"><span>Next station in 14 km</span><span>Plan a stop soon</span></p>
-        </div>
-        <div class="alert-card alert-card--ok">
-          <p class="alert-card__kicker"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Group Fuel Intelligence</p>
-          <p class="alert-card__title">Group stop recommended: 42 km</p>
-          <p class="alert-card__meta"><span>Earliest rider needs fuel in 56 km</span><span>Private litres preserved</span></p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ Ride Guardian Links ============ -->
-  <section class="section guardian" id="guardian" aria-labelledby="guardian-title">
-    <div class="container split split--reverse">
-      <div class="stack stack--32">
-        <div class="section-intro section-intro--flush">
-          <p class="eyebrow">Ride Guardian <span class="badge badge--new">New in 3.17</span></p>
-          <h2 class="section-intro__title" id="guardian-title">Let family follow your ride in their browser.</h2>
-          <p class="t-lead">Share a private link with loved ones. They can follow your ride in any web browser without creating an account or installing an app.</p>
-        </div>
-        <dl class="specs" data-reveal-stagger="70">
-          <div data-reveal><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>PIN protected</dt><dd>Set an optional PIN so only trusted family members can access your tracking link.</dd></div>
-          <div data-reveal><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg>Three privacy tiers</dt><dd>Choose "Basic" for coarse updates, "Live" for route position, or "Emergency" for incident-only access.</dd></div>
-          <div data-reveal><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg>You stay in control</dt><dd>Pause or revoke access anytime. Links expire automatically after the ride.</dd></div>
-          <div data-reveal><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-free"/></svg>No app needed</dt><dd>Runs securely in mobile and desktop browsers with private trip telemetry.</dd></div>
-        </dl>
-        <p class="t-small t-muted">Read more about link privacy and data protection in our <a class="link" href="/privacy#live-links">privacy policy</a>.</p>
-      </div>
-      <div class="compare" data-reveal>
-        <div class="compare__col compare__col--safety">
-          <div class="compare__head"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg><h3 class="compare__title">Three Privacy Tiers</h3></div>
-          <p class="compare__sub">Match sharing to your comfort level.</p>
-          <ul class="compare__list" role="list">
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><strong>Basic:</strong> Coarse progress, planned stops, and estimated arrival. No raw coordinates.</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><strong>Live:</strong> Current position, route corridor, and live progress updates.</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><strong>Emergency:</strong> Normal details stay hidden; location is shared only if SOS opens.</li>
-            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Personal or group sharing with explicit rider consent.</li>
+          <h2 class="spatial-title" id="mesh-title">Offline P2P Bluetooth Convoy Mesh</h2>
+          <p class="spatial-lead">Decentralized hop-by-hop mesh syncing rider distance, convoy spread, and emergency pings with zero internet. Packets hop seamlessly between bikes across extended pack formations.</p>
+          <ul class="spatial-specs" role="list">
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Hop Range</span><span class="spatial-spec-v">Up to 1.2 km per hop</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Network Topology</span><span class="spatial-spec-v">Serverless Peer-to-Peer</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Convoy Capacity</span><span class="spatial-spec-v">Up to __MAX_RIDERS__ riders in pack</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Packet Hop Lag</span><span class="spatial-spec-v">&lt; 15 ms per node hop</span></li>
           </ul>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ Ride history ============ -->
-  <section class="section section--surface history" id="history" aria-labelledby="history-title">
-    <div class="container">
-      <div class="section-intro">
-        <p class="eyebrow">Ride history</p>
-        <h2 class="section-intro__title" id="history-title">The ride doesn't disappear when the engine stops.</h2>
-        <p class="t-lead">Every ride becomes a trip report: each rider's route in its own colour, the stops, the timeline and a replay.</p>
-      </div>
-      <div class="history__grid">
-        <figure class="history__fig">
-          <div class="map history__map" style="--map-ratio:800/440" data-progress="enter" role="img" aria-label="Example trip report map: four riders' routes drawn in four colours from start to finish, with three stops.">
-            <svg class="map__svg" viewBox="0 0 800 440" aria-hidden="true" focusable="false">
-              <path class="road road--minor" d="M40 400 C160 380 200 300 300 300 S420 340 500 250 S620 90 760 60"/>
-              <g class="history__routes" data-route style="--from:.05;--to:.95">
-                <path class="route-line route-line--thin" d="M40 400 C160 380 200 300 300 300 S420 340 500 250 S620 90 760 60"/>
-                <path class="route-line route-line--thin route-line--group" d="M46 408 C166 388 206 308 306 308 S426 348 506 258 S626 98 766 68"/>
-                <path class="route-line route-line--thin history__r3" d="M34 392 C154 372 194 292 294 292 S414 332 494 242 S614 82 754 52"/>
-                <path class="route-line route-line--thin route-line--help" d="M52 416 C172 396 212 316 312 316 S432 356 512 266 S632 106 772 76"/>
-              </g>
-            </svg>
-            <span class="marker stop-marker stop-marker--done" style="--x:26%;--y:72%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg></span>
-            <span class="marker stop-marker stop-marker--done" style="--x:53%;--y:72%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-food"/></svg></span>
-            <span class="marker stop-marker stop-marker--done" style="--x:74%;--y:36%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-scenic"/></svg></span>
-            <span class="marker stop-marker stop-marker--dest" style="--x:95%;--y:14%"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg></span>
-            <div class="history__replay"><span class="chip-btn"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>Replay</span><span class="chip-btn">Share card</span></div>
+          <div class="spatial-actions">
+            <button type="button" class="spatial-fly-btn" data-fly-s="180" data-fly-cam="orbit" data-fly-target="stage-mesh">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>
+              <span>Orbit Convoy Mesh</span>
+            </button>
           </div>
-          <dl class="history__stats">
-            <div><dt>Distance</dt><dd><span class="t-num" data-count="184" data-count-from="0">184</span> km</dd></div>
-            <div><dt>Riding time</dt><dd><span class="t-num">4 h 10</span> min</dd></div>
-            <div><dt>Stops</dt><dd><span class="t-num" data-count="3" data-count-from="0">3</span></dd></div>
-            <div><dt>Riders</dt><dd><span class="t-num" data-count="4" data-count-from="0">4</span></dd></div>
-          </dl>
-          <figcaption class="fig-cap">Example ride. The numbers are an illustration.</figcaption>
-        </figure>
-        <div class="history__side">
-          <h3 class="t-label history__tl-title">Group timeline</h3>
-          <ol class="timeline" role="list" data-reveal-stagger="80">
-            <li data-reveal><time>06:40</time><span>Ride started, 4 riders</span></li>
-            <li data-reveal><time>08:05</time><span>Fuel stop, everyone in</span></li>
-            <li data-reveal class="timeline__warn"><time>09:20</time><span>MV fell behind, 2.1 km</span></li>
-            <li data-reveal class="timeline__ok"><time>09:34</time><span>Regrouped at the food stop</span></li>
-            <li data-reveal><time>10:50</time><span>Arrived together</span></li>
-          </ol>
-        </div>
+        </article>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- ============ How it works ============ -->
-  <section class="section how" id="how" data-progress="enter" aria-labelledby="how-title">
-    <div class="container">
-      <div class="section-intro">
-        <p class="eyebrow">How it works</p>
-        <h2 class="section-intro__title" id="how-title">Three steps to the same road.</h2>
+    <!-- Stage 2: Smart Airbag Vest Bluetooth Bridge -->
+    <section class="spatial-stage" id="stage-airbag" aria-labelledby="airbag-title">
+      <div class="container">
+        <article class="spatial-card">
+          <div class="spatial-tag">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-airbag"/></svg>
+            <span>02 / Personal Safety Bridge</span>
+          </div>
+          <h2 class="spatial-title" id="airbag-title">Smart Airbag Vest Bluetooth Bridge</h2>
+          <p class="spatial-lead">Instant 20ms crash trigger with In&amp;motion, Alpinestars Tech-Air, Helite and Dainese D-air vests. Detects sudden deceleration or tumble dynamics and fires synchronized emergency alert to your convoy simultaneously.</p>
+          <ul class="spatial-specs" role="list">
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Trigger Latency</span><span class="spatial-spec-v">20 ms direct BLE</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Supported Brands</span><span class="spatial-spec-v">Tech-Air, In&amp;motion, Helite, Dainese</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Convoy Escalation</span><span class="spatial-spec-v">Instant pack broadcast</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">False Alarm Cancel</span><span class="spatial-spec-v">15 s countdown window</span></li>
+          </ul>
+          <div class="spatial-actions">
+            <button type="button" class="spatial-fly-btn" data-fly-s="380" data-fly-cam="chase" data-fly-target="stage-airbag">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg>
+              <span>View Airbag Shield in 3D</span>
+            </button>
+          </div>
+        </article>
       </div>
-      <ol class="steps how__steps" role="list">
-        <li class="step"><span class="step__num" aria-hidden="true">01</span><div class="step__body"><h3 class="step__title">Create</h3><p class="step__text">Name the ride, set the destination and add stops. You get a six-digit code.</p></div></li>
-        <li class="step"><span class="step__num" aria-hidden="true">02</span><div class="step__body"><h3 class="step__title">Join</h3><p class="step__text">Riders enter the code or open the shared link. Up to __MAX_RIDERS__ riders in one ride.</p></div></li>
-        <li class="step"><span class="step__num" aria-hidden="true">03</span><div class="step__body"><h3 class="step__title">Ride</h3><p class="step__text">Map, voice and safety run together until you end the ride. Then it is saved for everyone.</p></div></li>
-      </ol>
-      <p class="how__more"><a class="link-arrow" href="/how-it-works"><span>More about how it works</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></p>
-    </div>
-  </section>
+    </section>
 
-  <!-- ============ Trust ============ -->
-  <section class="section section--surface trust" id="trust" aria-labelledby="trust-title">
-    <div class="container">
-      <div class="section-intro">
-        <p class="eyebrow">Trust</p>
-        <h2 class="section-intro__title" id="trust-title">Built for riders. Not advertisers.</h2>
+    <!-- Stage 3: Dead Reckoning & Tunnel IMU -->
+    <section class="spatial-stage" id="stage-tunnel" aria-labelledby="tunnel-title">
+      <div class="container">
+        <article class="spatial-card spatial-card--right">
+          <div class="spatial-tag">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-tunnel"/></svg>
+            <span>03 / Zero-GPS Inertial Navigation</span>
+          </div>
+          <h2 class="spatial-title" id="tunnel-title">Dead Reckoning &amp; Tunnel IMU</h2>
+          <p class="spatial-lead">Continuous along-route motion estimation through 10 km GPS-blackout tunnels like Atal Tunnel. Sensor fusion fuses phone accelerometer and gyroscopic IMU with wheel speed to maintain accurate convoy tracking.</p>
+          <ul class="spatial-specs" role="list">
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Blackout Distance</span><span class="spatial-spec-v">Continuous up to 10 km</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Sensor Stack</span><span class="spatial-spec-v">6-Axis IMU + route vector</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Drift Compensation</span><span class="spatial-spec-v">Along-road vector snapping</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Tunnel Transition</span><span class="spatial-spec-v">Seamless reacquisition</span></li>
+          </ul>
+          <div class="spatial-actions">
+            <button type="button" class="spatial-fly-btn" data-fly-s="750" data-fly-cam="chase" data-fly-target="stage-tunnel">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-tunnel"/></svg>
+              <span>Dive into Mountain Tunnel</span>
+            </button>
+          </div>
+        </article>
       </div>
-      <div class="trust-grid" data-reveal-stagger="80">
-        <div class="trust-item" data-reveal>
-          <svg class="icon trust-item__icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-free"/></svg>
-          <h3 class="trust-item__title">Free</h3>
-          <p class="trust-item__text">No subscription and no paid tier.</p>
-        </div>
-        <div class="trust-item" data-reveal>
-          <svg class="icon trust-item__icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-no-ads"/></svg>
-          <h3 class="trust-item__title">No ads</h3>
-          <p class="trust-item__text">No ads and no tracking SDKs. Rider data is not sold.</p>
-        </div>
-        <div class="trust-item" data-reveal>
-          <svg class="icon trust-item__icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic-off"/></svg>
-          <h3 class="trust-item__title">No voice recordings</h3>
-          <p class="trust-item__text">Voice is relayed live and not recorded.</p>
-        </div>
-        <div class="trust-item" data-reveal>
-          <svg class="icon trust-item__icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>
-          <h3 class="trust-item__title">Privacy-first location</h3>
-          <p class="trust-item__text">Shared only with your ride group, only during the ride. Route traces are deleted after 90 days.</p>
-        </div>
-      </div>
-      <p class="trust__more"><a class="link-arrow" href="/privacy"><span>Read the privacy policy</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a></p>
-    </div>
-  </section>
+    </section>
 
-  <!-- ============ Non-profit ============ -->
-  <section class="section nonprofit" id="project" aria-labelledby="np-title">
-    <div class="container nonprofit__inner">
-      <p class="eyebrow">Non-profit</p>
-      <h2 class="nonprofit__title" id="np-title">Built because riders needed it.</h2>
-      <p class="t-lead">Coroute is a non-profit project by DevMonks, run as a public service. Feedback shapes what comes next.</p>
-      <div class="cluster cluster--16">
-        <a class="btn btn--secondary" href="/about">About the project</a>
-        <a class="btn btn--ghost" href="#feedback">Send feedback</a>
+    <!-- Stage 4: Satellite SOS Gateway Relay -->
+    <section class="spatial-stage" id="stage-satellite" aria-labelledby="sat-title">
+      <div class="container">
+        <article class="spatial-card">
+          <div class="spatial-tag">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-satellite"/></svg>
+            <span>04 / Mountain Pass Satellite Link</span>
+          </div>
+          <h2 class="spatial-title" id="sat-title">Satellite SOS Gateway Relay</h2>
+          <p class="spatial-lead">Direct low-altitude satellite link when cellular coverage drops to zero in high mountain passes like Ladakh and Spiti. Relays high-precision coordinates, rider count, and medical blood group tags with zero mobile reception.</p>
+          <ul class="spatial-specs" role="list">
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Coverage</span><span class="spatial-spec-v">100% Global / Mountain passes</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Emergency Payload</span><span class="spatial-spec-v">Coordinates, headcount, blood group</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Gateway Bridging</span><span class="spatial-spec-v">Direct packet relay to 112/108</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Fallback Mode</span><span class="spatial-spec-v">Offline store-and-burst</span></li>
+          </ul>
+          <div class="spatial-actions">
+            <button type="button" class="spatial-fly-btn" data-fly-s="1100" data-fly-cam="satellite" data-fly-target="stage-satellite">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-satellite"/></svg>
+              <span>Fly into Orbit</span>
+            </button>
+          </div>
+        </article>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- ============ Feedback ============ -->
-  <section class="section section--surface" id="feedback" aria-labelledby="fb-title">
-    <div class="container split feedback">
-      <div class="section-intro section-intro--flush">
-        <p class="eyebrow">Feedback</p>
-        <h2 class="section-intro__title" id="fb-title">Tell us what to improve.</h2>
-        <p class="t-lead">Bug reports, feature ideas and ride stories all help. We reply by e-mail. Nothing you write here is published.</p>
+    <!-- Stage 5: BLE Handlebar Wireless Remote -->
+    <section class="spatial-stage" id="stage-remote" aria-labelledby="remote-title">
+      <div class="container">
+        <article class="spatial-card spatial-card--right">
+          <div class="spatial-tag">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-remote"/></svg>
+            <span>05 / Handlebar Cockpit Control</span>
+          </div>
+          <h2 class="spatial-title" id="remote-title">BLE Handlebar Wireless Remote</h2>
+          <p class="spatial-lead">Ergonomic handlebar-mounted Bluetooth controls for zero-look push-to-talk voice and instant tactile SOS without taking your hands off the handlebar grips or taking your eyes off the asphalt.</p>
+          <ul class="spatial-specs" role="list">
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Tactile Actions</span><span class="spatial-spec-v">PTT voice, waypoint drop, SOS</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Power Source</span><span class="spatial-spec-v">2 years on coin cell (CR2032)</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Weather Rating</span><span class="spatial-spec-v">IP68 waterproof sealed</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Glove Operation</span><span class="spatial-spec-v">Tactile click feedback</span></li>
+          </ul>
+          <div class="spatial-actions">
+            <button type="button" class="spatial-fly-btn" data-fly-s="1300" data-fly-cam="cockpit" data-fly-target="stage-remote">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg>
+              <span>Switch to Helmet View</span>
+            </button>
+          </div>
+        </article>
       </div>
-      <form class="form" id="feedback-form" data-feedback method="post" action="/api/feedback" novalidate>
-        <div class="field"><label class="field__label" for="fb-name">Name <span class="t-faint">(optional)</span></label>
-          <input class="field__input" id="fb-name" name="name" type="text" maxlength="80" autocomplete="name"><span class="field__error" id="fb-name-err"></span></div>
-        <div class="field"><label class="field__label" for="fb-email">E-mail</label>
-          <input class="field__input" id="fb-email" name="email" type="email" required maxlength="120" autocomplete="email" aria-describedby="fb-email-err"><span class="field__error" id="fb-email-err"></span></div>
-        <div class="field"><label class="field__label" for="fb-message">Message</label>
-          <textarea class="field__input" id="fb-message" name="message" required minlength="20" maxlength="2000" aria-describedby="fb-message-err"></textarea><span class="field__error" id="fb-message-err"></span></div>
-        <label class="hp" aria-hidden="true">Website<input name="website" type="text" tabindex="-1" autocomplete="off"></label>
-        <input type="hidden" name="t" id="fb-t">
-        <div class="form__actions">
-          <button class="btn btn--primary" type="submit" id="fb-submit">Send feedback</button>
-          <p class="form__status" id="fb-status" role="status" aria-live="polite"></p>
-        </div>
-      </form>
-    </div>
-  </section>
+    </section>
 
-  <!-- ============ Destination reached ============ -->
-  <section class="finale" id="get" data-progress="enter" aria-labelledby="finale-title">
-    <svg class="finale__road" viewBox="0 0 1440 220" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
-      <path class="road__edge" d="M-20 200 C300 200 420 120 700 120 S1000 60 1110 60"/>
-      <path class="road" d="M-20 200 C300 200 420 120 700 120 S1000 60 1110 60"/>
-      <path class="route-line" data-route style="--to:.8" d="M-20 200 C300 200 420 120 700 120 S1000 60 1110 60"/>
-      <g class="finale__flag"><circle cx="1110" cy="60" r="20" class="finale__flag-ring"/><path d="M1104 72V46l15 5-15 6" class="finale__flag-mark"/></g>
-      <g class="finale__riders"><circle cx="1058" cy="68" r="8" class="finale__r finale__r--lead"/><circle cx="1036" cy="74" r="8" class="finale__r"/><circle cx="1014" cy="79" r="9" class="finale__r finale__r--you"/><circle cx="992" cy="84" r="8" class="finale__r"/></g>
-    </svg>
-    <div class="container finale__inner">
-      <p class="eyebrow eyebrow--plain finale__eyebrow"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg>Destination reached</p>
-      <h2 class="finale__title t-h1" id="finale-title">Look out for each other.</h2>
-      <p class="t-lead">Free for every rider, with no ads. Android 6.0 or newer. No iOS version yet.</p>
-      <div class="cluster cluster--16 finale__actions">
-        <a class="btn btn--primary btn--lg" href="/download"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
-        <a class="link-arrow" href="/get"><span>Other download options</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+    <!-- Stage 6: Collective Road Hazard AI Mesh -->
+    <section class="spatial-stage" id="stage-hazard" aria-labelledby="hazard-title">
+      <div class="container">
+        <article class="spatial-card">
+          <div class="spatial-tag">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-hazard"/></svg>
+            <span>06 / Edge Telemetry AI</span>
+          </div>
+          <h2 class="spatial-title" id="hazard-title">Collective Road Hazard AI Mesh</h2>
+          <p class="spatial-lead">Automatic detection of severe potholes, wet mud, and oil slicks via IMU bump signatures. Automatically broadcasts geotagged alerts with 300m spatial voice warnings to following riders in the convoy.</p>
+          <ul class="spatial-specs" role="list">
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Warning Distance</span><span class="spatial-spec-v">300 m spatial voice cue</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Sensor Telemetry</span><span class="spatial-spec-v">Vertical impulse &amp; swerve</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Hazard Types</span><span class="spatial-spec-v">Potholes, loose gravel, oil</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Broadcast Mesh</span><span class="spatial-spec-v">Automatic convoy cascade</span></li>
+          </ul>
+          <div class="spatial-actions">
+            <button type="button" class="spatial-fly-btn" data-fly-s="1500" data-fly-cam="orbit" data-fly-target="stage-hazard">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg>
+              <span>Inspect 3D Hazard Zone</span>
+            </button>
+          </div>
+        </article>
       </div>
-      <p class="t-xs t-faint">Older phone? Use the <a class="link" href="/download/32bit">32-bit download</a>.</p>
-    </div>
-  </section>
+    </section>
+
+    <!-- Stage 7: Smartwatch Biometric Trauma Verification -->
+    <section class="spatial-stage" id="stage-trauma" aria-labelledby="trauma-title">
+      <div class="container">
+        <article class="spatial-card spatial-card--right">
+          <div class="spatial-tag">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-watch"/></svg>
+            <span>07 / Biometric Trauma Telemetry</span>
+          </div>
+          <h2 class="spatial-title" id="trauma-title">Smartwatch Biometric Trauma Verification</h2>
+          <p class="spatial-lead">Direct Wear OS and smartwatch heart-rate monitoring during incidents. Automatically escalates confirmed trauma events to Level 1 with pulse rate and oxygen saturation telemetry shared directly to responding paramedics.</p>
+          <ul class="spatial-specs" role="list">
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Biometric Sensors</span><span class="spatial-spec-v">Continuous pulse rate &amp; SpO2</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Trauma Assessment</span><span class="spatial-spec-v">G-force impact + heart rate drop</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Emergency Dispatch</span><span class="spatial-spec-v">Direct paramedic telemetry feed</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Platform Support</span><span class="spatial-spec-v">Wear OS, Apple Watch, Garmin</span></li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <!-- Stage 8: Hands-Free Multilingual Helmet Voice -->
+    <section class="spatial-stage" id="stage-voice" aria-labelledby="voice-title">
+      <div class="container">
+        <article class="spatial-card">
+          <div class="spatial-tag">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-voice-ai"/></svg>
+            <span>08 / Offline Acoustic AI</span>
+          </div>
+          <h2 class="spatial-title" id="voice-title">Hands-Free Multilingual Helmet Voice</h2>
+          <p class="spatial-lead">100% offline keyword spotting and voice recognition engine tuned for severe helmet wind noise and exhaust rumblings. Supports 10 Indian and international languages for zero-touch voice intercom commands.</p>
+          <ul class="spatial-specs" role="list">
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Languages</span><span class="spatial-spec-v">Hindi, Marathi, Kannada, Tamil, Telugu, English + 4 more</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Acoustic Model</span><span class="spatial-spec-v">Wind-filter suppression to 120 km/h</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">Intercom Routing</span><span class="spatial-spec-v">Group broadcast &amp; private rider channels</span></li>
+            <li class="spatial-spec-item"><span class="spatial-spec-k">On-Device Privacy</span><span class="spatial-spec-v">Never recorded or sent to cloud</span></li>
+          </ul>
+          <div class="spatial-actions">
+            <button type="button" class="spatial-fly-btn" data-fly-s="1900" data-fly-cam="radar" data-fly-target="stage-voice">
+              <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg>
+              <span>View 5km Convoy Radar</span>
+            </button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Stage 9: Mountain Summit Finale & Download CTA -->
+    <section class="spatial-stage" id="stage-get" aria-labelledby="finale-title">
+      <div class="container">
+        <article class="spatial-card spatial-card--center">
+          <div class="spatial-tag" style="justify-content:center">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg>
+            <span>Destination Reached</span>
+          </div>
+          <h2 class="spatial-title" id="finale-title">Look out for each other.</h2>
+          <p class="spatial-lead">Free for every rider, with no ads and zero corporate tracking. Available for Android 6.0 or newer. No iOS version yet.</p>
+          <div class="spatial-actions" style="justify-content:center">
+            <a class="btn btn--primary btn--lg" href="/download"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
+            <a class="btn btn--secondary btn--lg" href="/features"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg>Explore Feature Specs</a>
+          </div>
+          <p class="t-xs t-faint">Older phone? Download the <a class="link" href="/download/32bit">32-bit build</a>.</p>
+        </article>
+      </div>
+    </section>
+
+  </div>
 
 </main>
 <!--#include footer-->

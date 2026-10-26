@@ -89,9 +89,10 @@ class Hub {
   /**
    * @param {{server: import('http').Server, convoys: import('./convoys').ConvoyManager, repo: any, logger?: any}} deps
    */
-  constructor({ server, convoys, repo, tracks = null, timeline = null, logger = console, path = '/ws', gate = null, network = null, discovery = null }) {
+  constructor({ server, convoys, repo, tracks = null, timeline = null, logger = console, path = '/ws', gate = null, network = null, discovery = null, emergencyGateway = null }) {
     this.convoys = convoys; this.repo = repo; this.tracks = tracks; this.timeline = timeline; this.log = logger; this.gate = gate;
     this.network = network; this.discovery = discovery;
+    this.emergencyGateway = emergencyGateway || convoys?.emergencyGateway;
     this.rooms = new Map(); // groupId -> Set<ws>
     this.byUser = new Map(); // userId -> Set<ws> (3.15 personal messages)
     this.admins = new Set();
@@ -518,6 +519,12 @@ class Hub {
       case 'SOS': {
         const gid = this._requireRoom(ws);
         const r = await this.convoys.raiseSos(gid, u, msg);
+        if (!r.duplicate && (this.emergencyGateway || this.convoys?.emergencyGateway)) {
+          const gw = this.emergencyGateway || this.convoys?.emergencyGateway;
+          gw.dispatchForSos({ groupId: gid, user: u, alert: r.alert, msg }).catch((err) => {
+            this.log.warn('[ws] Emergency gateway dispatch failed', err.message);
+          });
+        }
         // A retried SOS: only the sender hears it again, so the phone can mark it delivered.
         if (r.duplicate) this.send(ws, { type: 'ALERT', alert: publicAlert(r.alert), duplicate: true, ts: Date.now() });
         return;

@@ -161,6 +161,20 @@ class SosEvent {
         bloodGroup: bloodGroup,
       );
 
+  /// Decodes a 16-byte internal binary packet into an SosEvent.
+  factory SosEvent.fromBinaryPacket(Uint8List packet) {
+    final decoded = SosPacketCodec.decode(packet);
+    return SosEvent(
+      id: 'sat_${decoded.timestamp.millisecondsSinceEpoch}',
+      latitude: decoded.latitude,
+      longitude: decoded.longitude,
+      altitudeMeters: decoded.altitudeMeters,
+      timestamp: decoded.timestamp,
+      severity: decoded.severity,
+      bloodGroup: decoded.bloodGroup,
+    );
+  }
+
   /// Human-readable coordinates formatted for Indian ERSS 112 SMS / dispatch.
   String toIndiaErssMessage() {
     final latStr = latitude.toStringAsFixed(6);

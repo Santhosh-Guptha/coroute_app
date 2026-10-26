@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/config/feature_gates.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
@@ -53,6 +54,15 @@ class MinimalCockpitTopBar extends StatelessWidget {
   /// Live turn-by-turn navigation tap handler.
   final VoidCallback? onNavigationTap;
 
+  /// Number of riders in the convoy for the status pill.
+  final int? riderCount;
+
+  /// Whether the smart airbag vest is paired/active.
+  final bool isAirbagPaired;
+
+  /// Whether the handlebar BLE remote is paired.
+  final bool isRemotePaired;
+
   const MinimalCockpitTopBar({
     super.key,
     required this.title,
@@ -68,11 +78,13 @@ class MinimalCockpitTopBar extends StatelessWidget {
     this.roadName,
     this.speedKmh,
     this.speedLimitKmh,
+    this.riderCount,
+    this.isAirbagPaired = false,
+    this.isRemotePaired = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final hasWarn = connection != null || gps != GpsState.accurate;
     final hasRoute = routeStatus != null;
     final back = onBack;
     final speed = speedKmh;
@@ -196,25 +208,17 @@ class MinimalCockpitTopBar extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
                 ],
-                // Secondary: tunnel / connection / GPS / route status
-                if (isTunnelCoasting) ...[
-                  const SizedBox(height: 3),
-                  _StatusRow(
-                    icon: Icons.tune_rounded,
-                    label: 'Tunnel Coasting (Dead-Reckoning)',
-                    color: AppTheme.accentText,
-                  ),
-                ] else if (hasWarn) ...[
-                  const SizedBox(height: 3),
-                  _StatusRow(
-                    icon: connection != null ? Icons.cloud_off_rounded : Icons.gps_not_fixed_rounded,
-                    label: [
-                      ?connection,
-                      if (gps != GpsState.accurate) 'GPS ${gps.label.toLowerCase()}',
-                    ].join(', '),
-                    color: AppTheme.warnText,
-                  ),
-                ],
+                // Minimal status pills across top status bar:
+                // [ 🟢 Live · N Riders ] [ 🦺 Airbag ] [ 🔘 Remote ] [ 🚇 Tunnel Mode ]
+                const SizedBox(height: 5),
+                CockpitStatusPillsBar(
+                  riderCount: riderCount,
+                  isLive: connection == null,
+                  connectionStatus: connection,
+                  isAirbagPaired: isAirbagPaired,
+                  isRemotePaired: isRemotePaired,
+                  isTunnelMode: isTunnelCoasting,
+                ),
                 if (hasRoute && !isTunnelCoasting) ...[
                   const SizedBox(height: 3),
                   _StatusRow(
@@ -227,53 +231,11 @@ class MinimalCockpitTopBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          // Right: live speed column, or the GPS dot when no speed is given.
+          // Right: Big bold speed readout in high-contrast neon white/orange
           if (speed != null)
-            Semantics(
-              label: '${speed.round()} km/h${limit > 0 ? ', limit $limit km/h' : ''}',
-              excludeSemantics: true,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '${speed.round()}',
-                    style: AppText.metric.copyWith(
-                      color: overLimit ? AppTheme.sos : AppTheme.accentText,
-
-                      height: 1,
-                    ),
-                  ),
-                  Text(
-                    'KM/H',
-                    style: TextStyle(
-                      color: AppTheme.muted,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                  if (limit > 0) ...[
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: overLimit ? AppTheme.sos : AppTheme.tint,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        overLimit ? '⚠️ OVER $limit' : 'LIMIT $limit',
-                        style: TextStyle(
-                          color: overLimit ? Colors.white : AppTheme.accentText,
-
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+            CockpitSpeedometer(
+              speedKmh: speed,
+              speedLimitKmh: speedLimitKmh,
             )
           else
             _GpsDot(gps: gps),
@@ -361,6 +323,197 @@ class _GpsDot extends StatelessWidget {
           shape: BoxShape.circle,
           color: color,
           border: Border.all(color: AppTheme.card, width: 2),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CockpitStatusPillsBar
+// ---------------------------------------------------------------------------
+
+/// Minimal status pills across the top status bar for motorcycle cockpit glancability.
+/// Displays:
+/// - [ 🟢 Live · N Riders ]
+/// - [ 🦺 Airbag ] (when paired)
+/// - [ 🔘 Remote ] (when paired)
+/// - [ 🚇 Tunnel Mode ] (when dead-reckoning)
+class CockpitStatusPillsBar extends StatelessWidget {
+  final int? riderCount;
+  final bool isLive;
+  final String? connectionStatus;
+  final bool isAirbagPaired;
+  final bool isRemotePaired;
+  final bool isTunnelMode;
+  final bool forceShowAll;
+  final VoidCallback? onRidersTap;
+  final VoidCallback? onAirbagTap;
+  final VoidCallback? onRemoteTap;
+  final VoidCallback? onTunnelTap;
+
+  const CockpitStatusPillsBar({
+    super.key,
+    this.riderCount,
+    this.isLive = true,
+    this.connectionStatus,
+    this.isAirbagPaired = false,
+    this.isRemotePaired = false,
+    this.isTunnelMode = false,
+    this.forceShowAll = false,
+    this.onRidersTap,
+    this.onAirbagTap,
+    this.onRemoteTap,
+    this.onTunnelTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pills = <Widget>[];
+
+    // 1. [ Live · N Riders ]
+    final count = riderCount ?? 1;
+    final countText = count == 1 ? '1 Rider' : '$count Riders';
+    final liveText = connectionStatus != null ? connectionStatus! : 'Live · $countText';
+    final liveColor = connectionStatus != null ? const Color(0xFFFF9100) : const Color(0xFF00E676);
+
+    pills.add(
+      _StatusPill(
+        key: const Key('cockpit_pill_live_riders'),
+        iconDot: liveColor,
+        label: liveText,
+        onTap: onRidersTap,
+      ),
+    );
+
+    // 2. [ Airbag ] (when paired or forced)
+    if (isAirbagPaired || forceShowAll) {
+      pills.add(
+        _StatusPill(
+          key: const Key('cockpit_pill_airbag'),
+          icon: Icons.shield_rounded,
+          iconColor: const Color(0xFFFF9100),
+          label: 'Airbag',
+          accentColor: const Color(0xFFFF9100).withOpacity(0.4),
+          onTap: onAirbagTap,
+        ),
+      );
+    }
+
+    // 3. [ Remote ] (when paired or forced)
+    if (isRemotePaired || forceShowAll) {
+      pills.add(
+        _StatusPill(
+          key: const Key('cockpit_pill_remote'),
+          icon: Icons.radio_button_checked_rounded,
+          iconColor: const Color(0xFF00E5FF),
+          label: 'Remote',
+          accentColor: const Color(0xFF00E5FF).withOpacity(0.4),
+          onTap: onRemoteTap,
+        ),
+      );
+    }
+
+    // 4. [ Tunnel Mode ] (when dead-reckoning or forced)
+    if (isTunnelMode || forceShowAll) {
+      pills.add(
+        _StatusPill(
+          key: const Key('cockpit_pill_tunnel_mode'),
+          icon: Icons.alt_route_rounded,
+          iconColor: const Color(0xFFFFB300),
+          label: 'Tunnel Mode',
+          accentColor: const Color(0xFFFFB300).withOpacity(0.5),
+          onTap: onTunnelTap,
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int i = 0; i < pills.length; i++) ...[
+            if (i > 0) const SizedBox(width: 6),
+            pills[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  final Color? iconDot;
+  final IconData? icon;
+  final Color? iconColor;
+  final String label;
+  final Color? accentColor;
+  final VoidCallback? onTap;
+
+  const _StatusPill({
+    super.key,
+    this.iconDot,
+    this.icon,
+    this.iconColor,
+    required this.label,
+    this.accentColor,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF131722),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: accentColor ?? AppTheme.border.withOpacity(0.6),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (iconDot != null) ...[
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: iconDot,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: iconDot!.withOpacity(0.6),
+                        blurRadius: 4,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 5),
+              ] else if (icon != null) ...[
+                Icon(icon, size: 12, color: iconColor ?? AppTheme.text),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -691,3 +844,285 @@ class _SideControl extends StatelessWidget {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// CockpitSpeedometer
+// ---------------------------------------------------------------------------
+
+/// Clean, high-contrast HUD speedometer component for motorcycle cockpits.
+///
+/// Features a big bold readout with tabular figures, dynamic glow based on speed
+/// thresholds, crisp "KM/H" unit label, and speed limit badge.
+class CockpitSpeedometer extends StatelessWidget {
+  final double speedKmh;
+  final int? speedLimitKmh;
+  final double fontSize;
+  final bool showUnit;
+  final bool showLimitBadge;
+  final Alignment alignment;
+
+  const CockpitSpeedometer({
+    super.key,
+    required this.speedKmh,
+    this.speedLimitKmh,
+    this.fontSize = 38,
+    this.showUnit = true,
+    this.showLimitBadge = true,
+    this.alignment = Alignment.centerRight,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final limit = speedLimitKmh ?? 0;
+    final overLimit = limit > 0 && speedKmh > limit;
+    final isNearLimit = limit > 0 && speedKmh >= (limit - 5) && !overLimit;
+    final Color speedColor = overLimit
+        ? const Color(0xFFFF3D00)
+        : (isNearLimit ? const Color(0xFFFF9100) : (AppTheme.isLight ? AppTheme.text : const Color(0xFFFFFFFF)));
+
+    final crossAxis = alignment == Alignment.center
+        ? CrossAxisAlignment.center
+        : (alignment == Alignment.centerLeft ? CrossAxisAlignment.start : CrossAxisAlignment.end);
+
+    return Semantics(
+      label: '${speedKmh.round()} km/h${limit > 0 ? ', limit $limit km/h' : ''}',
+      excludeSemantics: true,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: crossAxis,
+        children: [
+          Text(
+            '${speedKmh.round()}',
+            style: TextStyle(
+              color: speedColor,
+              fontSize: fontSize,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -1.2,
+              height: 1.0,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              shadows: [
+                Shadow(
+                  color: speedColor.withOpacity(overLimit || isNearLimit ? 0.6 : 0.25),
+                  blurRadius: overLimit || isNearLimit ? 10 : 4,
+                ),
+              ],
+            ),
+          ),
+          if (showUnit)
+            Text(
+              'KM/H',
+              style: TextStyle(
+                color: overLimit
+                    ? const Color(0xFFFF6E40)
+                    : (isNearLimit ? const Color(0xFFFFB74D) : const Color(0xFFB0BEC5)),
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2,
+              ),
+            ),
+          if (showLimitBadge && limit > 0) ...[
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: overLimit
+                    ? const Color(0xFFFF3D00)
+                    : (isNearLimit ? const Color(0xFFFF9100).withOpacity(0.25) : AppTheme.tint),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: overLimit
+                      ? Colors.white
+                      : (isNearLimit ? const Color(0xFFFF9100) : AppTheme.accentText.withOpacity(0.3)),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (overLimit) ...[
+                    const Icon(Icons.warning_amber_rounded, size: 12, color: Colors.white),
+                    const SizedBox(width: 3),
+                  ],
+                  Text(
+                    overLimit ? 'OVER $limit' : 'LIMIT $limit',
+                    style: TextStyle(
+                      color: overLimit
+                          ? Colors.white
+                          : (isNearLimit ? const Color(0xFFFF9100) : AppTheme.accentText),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+typedef MinimalCockpitSpeedometer = CockpitSpeedometer;
+
+// ---------------------------------------------------------------------------
+// CockpitSosButton (Glove-Friendly SOS Button)
+// ---------------------------------------------------------------------------
+
+/// Clean, high-contrast, glove-friendly SOS button for motorcycle cockpit overlays.
+///
+/// Ergonomically sized (minimum 56x56 dp, default 60 dp) for thick motorcycle
+/// leather gloves and bumpy handlebar mounts. Features prominent high-contrast
+/// emergency styling, subtle pulse/glow, and press-and-hold activation to
+/// prevent accidental false alarms while riding.
+class CockpitSosButton extends StatefulWidget {
+  final VoidCallback onTriggered;
+  final double size;
+  final Duration holdDuration;
+  final bool showLabel;
+
+  const CockpitSosButton({
+    super.key,
+    required this.onTriggered,
+    this.size = 60.0,
+    this.holdDuration = const Duration(milliseconds: 1500),
+    this.showLabel = false,
+  });
+
+  @override
+  State<CockpitSosButton> createState() => _CockpitSosButtonState();
+}
+
+class _CockpitSosButtonState extends State<CockpitSosButton> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.holdDuration,
+    reverseDuration: const Duration(milliseconds: 200),
+  )..addStatusListener(_onStatus);
+
+  bool _fired = false;
+
+  void _onStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed && !_fired) {
+      _fired = true;
+      _trigger();
+    }
+  }
+
+  void _trigger() {
+    HapticFeedback.heavyImpact();
+    widget.onTriggered();
+  }
+
+  void _down() {
+    _fired = false;
+    _controller.forward(from: 0);
+  }
+
+  void _release() {
+    if (_fired) {
+      _controller.value = 0;
+    } else if (_controller.value > 0 || _controller.isAnimating) {
+      _controller.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Strictly enforce 56 dp minimum dimension for motorcycle glove safety
+    final effectiveSize = widget.size < 56.0 ? 56.0 : widget.size;
+    final ringSize = effectiveSize + 12;
+    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
+
+    return Semantics(
+      container: true,
+      button: true,
+      label: 'Emergency SOS, press and hold',
+      hint: 'Press and hold to send SOS to convoy',
+      excludeSemantics: true,
+      onLongPress: _trigger,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => _down(),
+        onTapUp: (_) => _release(),
+        onTapCancel: _release,
+        child: SizedBox(
+          width: ringSize,
+          height: ringSize,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              AnimatedBuilder(
+                animation: _controller,
+                builder: (context, _) => _controller.value == 0
+                    ? const SizedBox.shrink()
+                    : SizedBox(
+                        width: ringSize,
+                        height: ringSize,
+                        child: CircularProgressIndicator(
+                          value: _controller.value,
+                          strokeWidth: 4,
+                          color: AppTheme.sos,
+                          backgroundColor: AppTheme.sos.withOpacity(0.25),
+                        ),
+                      ),
+              ),
+              Container(
+                width: effectiveSize,
+                height: effectiveSize,
+                constraints: const BoxConstraints(minWidth: 56, minHeight: 56),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppTheme.sos,
+                  border: Border.all(
+                    color: Colors.white,
+                    width: isSunlightHud ? 2.5 : 2.0,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.sos.withOpacity(0.5),
+                      blurRadius: isSunlightHud ? 14 : 10,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.emergency_rounded,
+                      color: Colors.white,
+                      size: 26,
+                    ),
+                    if (widget.showLabel) ...[
+                      const SizedBox(height: 1),
+                      const Text(
+                        'SOS',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+typedef GloveFriendlySosButton = CockpitSosButton;
+typedef MinimalCockpitSosButton = CockpitSosButton;

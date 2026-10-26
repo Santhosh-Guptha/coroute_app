@@ -110,32 +110,34 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       // Sign In Tab Active by default
-      expect(find.text('Sign In'), findsOneWidget);
-      expect(find.text('Register Account'), findsOneWidget);
-      expect(find.textContaining('EMAIL OR CALLSIGN'), findsOneWidget);
-      expect(find.text('SIGN IN'), findsOneWidget);
+      expect(find.widgetWithText(Tab, 'Sign In'), findsOneWidget);
+      expect(find.widgetWithText(Tab, 'Register Account'), findsOneWidget);
+      expect(find.textContaining('Rider Callsign or Email'), findsOneWidget);
+      expect(find.widgetWithText(DsButton, 'Continue'), findsOneWidget);
 
       // Validate Sign In Empty fields
-      await tester.tap(find.text('SIGN IN'));
+      await tester.ensureVisible(find.widgetWithText(DsButton, 'Continue'));
+      await tester.tap(find.widgetWithText(DsButton, 'Continue'));
       await tester.pump(const Duration(milliseconds: 200));
       expect(find.textContaining('Please enter your email or callsign'), findsOneWidget);
 
       // Switch to Register Account Tab
-      await tester.tap(find.text('Register Account'));
+      await tester.ensureVisible(find.widgetWithText(Tab, 'Register Account'));
+      await tester.tap(find.widgetWithText(Tab, 'Register Account'));
       await tester.pump(const Duration(milliseconds: 300));
 
       // Verify registration fields
-      expect(find.textContaining('CALLSIGN / FULL NAME'), findsOneWidget);
-      expect(find.textContaining('EMAIL ADDRESS'), findsOneWidget);
-      expect(find.textContaining('MOBILE PHONE NUMBER'), findsOneWidget);
-      expect(find.textContaining('VEHICLE TYPE'), findsOneWidget);
-      expect(find.textContaining('EMERGENCY CONTACT'), findsOneWidget);
+      expect(find.textContaining('Callsign or Full Name'), findsOneWidget);
+      expect(find.textContaining('Email Address'), findsOneWidget);
+      expect(find.textContaining('Mobile Phone Number'), findsOneWidget);
+      expect(find.textContaining('Vehicle Type'), findsOneWidget);
+      expect(find.textContaining('Emergency Contact'), findsOneWidget);
       expect(find.textContaining('I accept the '), findsOneWidget);
-      expect(find.text('REGISTER RIDER ACCOUNT'), findsOneWidget);
+      expect(find.text('Register Rider Account'), findsOneWidget);
 
       // Try creating account with empty fields
-      await tester.ensureVisible(find.text('REGISTER RIDER ACCOUNT'));
-      await tester.tap(find.text('REGISTER RIDER ACCOUNT'));
+      await tester.ensureVisible(find.text('Register Rider Account'));
+      await tester.tap(find.text('Register Rider Account'));
       await tester.pump(const Duration(milliseconds: 200));
       expect(find.textContaining('Please enter your callsign or full name'), findsOneWidget);
     });
@@ -178,8 +180,8 @@ void main() {
       await tester.enterText(textFields.at(2), 'SecretPassword123');
       await tester.enterText(textFields.at(3), 'MismatchPassword999');
 
-      await tester.ensureVisible(find.text('REGISTER RIDER ACCOUNT'));
-      await tester.tap(find.text('REGISTER RIDER ACCOUNT'));
+      await tester.ensureVisible(find.text('Register Rider Account'));
+      await tester.tap(find.text('Register Rider Account'));
       await tester.pump(const Duration(milliseconds: 200));
 
       expect(find.textContaining('Passwords do not match'), findsOneWidget);

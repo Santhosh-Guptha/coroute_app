@@ -354,6 +354,25 @@ class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPor
 /// alarm countdown, the SMS wait and the check-in answer wait are one-shot or
 /// alarm-only timers; everything new in 3.16 rides on fixes and convoy changes.
 class SafetyService extends ChangeNotifier {
+  static SafetyService? _instance;
+
+  /// Globally accessible instance of [SafetyService] (initialized during app bootstrap).
+  static SafetyService get instance {
+    final inst = _instance;
+    if (inst == null) {
+      throw StateError('SafetyService.instance has not been initialized');
+    }
+    return inst;
+  }
+
+  /// Override or assign the active [SafetyService] instance (e.g. for testing or mocking).
+  static set instance(SafetyService? service) {
+    _instance = service;
+  }
+
+  /// Whether a global [SafetyService] instance is currently active.
+  static bool get hasInstance => _instance != null;
+
   SafetyService(
     ConvoyService convoys,
     SettingsService settings,
@@ -400,6 +419,7 @@ class SafetyService extends ChangeNotifier {
       AlarmNotifier.onAction(AlarmNotifier.payloadPrompt, _onPromptAction);
     }
     _onConvoy();
+    _instance = this;
   }
 
   final SafetyPort _port;
@@ -1074,10 +1094,18 @@ class SafetyService extends ChangeNotifier {
   // ------------------------------------------------------------------ solo check-in
   void _evalCheckIn() {
     if (!_settings.soloCheckIn || !_port.rideActive) return;
+    final convoy = _port.activeConvoy;
+    final uid = _port.myUserId;
+    final me = uid == null || convoy == null ? null : convoy.riders[uid];
+    if (me != null && (me.isTunnelCoasting || me.isCoasting)) {
+      _checkInTimer?.cancel();
+      _checkInTimer = null;
+      _removePrompt(SafetyConstants.promptCheckIn);
+      return;
+    }
     final now = _now();
     if (_lastCheckInEval != 0 && now - _lastCheckInEval < SafetyConstants.checkInEvalEvery.inMilliseconds) return;
     _lastCheckInEval = now;
-    final convoy = _port.activeConvoy;
     if (convoy == null || _port.hasOpenSos) return;
     // Only while the ride is under way: before the start riders come from home to the meeting
     // point, and during a pause the group is spread out on purpose. Nothing counts then.
@@ -1128,6 +1156,9 @@ class SafetyService extends ChangeNotifier {
   static double? awayFromGroup(ConvoyModel convoy, String? myUserId, int nowMs, {TrackPoint? myFix}) {
     if (myUserId == null) return null;
     final meRider = convoy.riders[myUserId];
+    if (meRider != null && (meRider.isTunnelCoasting || meRider.isCoasting)) {
+      return null;
+    }
     final myLat = myFix?.lat ?? meRider?.lat;
     final myLng = myFix?.lng ?? meRider?.lng;
     if (myLat == null || myLng == null || (myLat == 0 && myLng == 0)) return null;
@@ -1236,12 +1267,15 @@ class SafetyService extends ChangeNotifier {
   void _evalFollowUp(ConvoyModel? convoy) {
     final fu = _followUp;
     if (fu == null || !_rideActive || _port.hasOpenSos) {
-      if (fu != null && _port.hasOpenSos) _followUp = null; // an SOS is open: the group already knows
+      if (fu != null && _port.hasOpenSos) _followUp = null;
+      return;
+    }
+    final uid = _port.myUserId;
+    final me = uid == null || convoy == null ? null : convoy.riders[uid];
+    if (me != null && (me.isTunnelCoasting || me.isCoasting)) {
       return;
     }
     final now = _now();
-    final uid = _port.myUserId;
-    final me = uid == null || convoy == null ? null : convoy.riders[uid];
     final stoppedSince = me?.stoppedSince ?? 0;
     final stopped = stoppedSince > fu.at && now - stoppedSince >= SafetyConstants.followUpStopFor.inMilliseconds;
     final overdue = now - fu.at >= SafetyConstants.followUpAfter.inMilliseconds;
@@ -1516,6 +1550,15 @@ class SafetyService extends ChangeNotifier {
     }
   }
 
+  /// Suppresses "Rider Stopped" and "Rider Separated" false alarms during active tunnel coasting (FEAT-09).
+  bool shouldSuppressFalseAlarm(String alertType) {
+    final uid = _port.myUserId;
+    final me = uid != null ? _port.activeConvoy?.riders[uid] : null;
+    if (me == null || (!me.isTunnelCoasting && !me.isCoasting)) return false;
+    final upper = alertType.toUpperCase();
+    return upper.contains('STOP') || upper.contains('SEPARAT');
+  }
+
   @override
   void dispose() {
     _disposed = true;
@@ -1535,6 +1578,9 @@ class SafetyService extends ChangeNotifier {
     if (_native) {
       AlarmNotifier.removeAction(AlarmNotifier.payloadCrash);
       AlarmNotifier.removeAction(AlarmNotifier.payloadPrompt);
+    }
+    if (_instance == this) {
+      _instance = null;
     }
     super.dispose();
   }

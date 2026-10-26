@@ -1,0 +1,194 @@
+{
+  "project": "CoRoute Rider Safety Defense-in-Depth Matrix",
+  "branchName": "main",
+  "description": "Multi-rider real-time scenario verification against user story specifications in prd.json with 5-tier task verification (Syntax, Types, Lint, Tests, Build/Bundle) for convoy ride orchestration.",
+  "userStories": [
+    {
+      "id": "US-FEAT-06",
+      "title": "Smart Airbag Vest Peripheral Bluetooth Bridge",
+      "description": "As a motorcycle rider wearing a smart airbag vest (In&motion, Alpinestars Tech-Air, Helite, Dainese), I want instant BLE deployment detection to escalate directly to the emergency SOS pipeline with sub-150ms latency.",
+      "acceptanceCriteria": [
+        "Detects In&motion, Alpinestars Tech-Air, Helite e-Vest, and Dainese D-air peripherals via BLE UUID and model heuristics",
+        "Triggers SafetyService.externalImpact(source: ExternalImpactSource.wearable, g: 6.0) immediately upon deployment signal",
+        "Strict immunity to false positives on low battery warnings and firmware update / OTA modes",
+        "Renders dynamic HUD pill in cockpit with connection state, battery percentage, and armed status",
+        "flutter test test/services/smart_airbag_bridge_service_test.dart passes cleanly with 0 failures"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Verified 23/23 tests passing with sub-150ms latency execution path."
+    },
+    {
+      "id": "US-FEAT-08",
+      "title": "Server-Side Emergency SMS & WhatsApp Web Gateway Fallback",
+      "description": "As a stranded rider whose phone is data-only or on iOS where background SMS is restricted, I want distress signals to trigger cloud-dispatched SMS and WhatsApp messages with live tracking links.",
+      "acceptanceCriteria": [
+        "Exposes POST /api/v1/sos/dispatch-external on gateway microservice",
+        "Integrates Twilio, Infobip, WhatsApp Cloud API, and webhook fallback with E.164 phone normalization",
+        "ServerEmergencyGatewayService routes SOS seamlessly on iOS or when native SIM is missing",
+        "Outbox resilience queue guarantees zero signal loss on unconfigured or failing providers",
+        "flutter test test/services/server_emergency_gateway_service_test.dart and npm test pass cleanly"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Verified 10/10 Dart unit tests and 338/338 Node gateway tests passing cleanly."
+    },
+    {
+      "id": "US-FEAT-09",
+      "title": "Highway Tunnel Entry Dead Reckoning Takeover",
+      "description": "As a rider entering a mountain highway tunnel (e.g., Atal Tunnel 9.02 km) with sudden GPS loss, I want the dead reckoning engine to smoothly project my location along the route and suppress false stopped alarms.",
+      "acceptanceCriteria": [
+        "Detects tunnel entry via GPS accuracy degradation (>50m) or fix age (>3s) while moving on active route",
+        "Smooth along-route projection using exponential speed decay v(t) = v0 * exp(-alpha * t) for up to 720s",
+        "Suppresses false 'Rider Stopped' and 'Rider Separated' alarms during tunnel coasting",
+        "Halts dead reckoning at crash impact point if accelerometer registers severe impact (>4.0G)",
+        "Smoothly re-converges to recovered GPS fix upon tunnel exit over 4s without teleportation jumps",
+        "flutter test test/tracking/dead_reckoning_integration_test.dart passes cleanly"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Verified 13/13 tests passing cleanly."
+    },
+    {
+      "id": "US-COCKPIT-UX",
+      "title": "Glove-Friendly Cockpit Operation in Extreme Sunlight & Pouring Rain",
+      "description": "As a motorcyclist riding in harsh outdoor conditions, I want high-contrast UI with oversized touch targets so I can safely operate controls with thick gloves.",
+      "acceptanceCriteria": [
+        "All critical interactive controls enforce minimum 48-56dp touch targets",
+        "Emergency SOS button enforces 56-60dp touch target with press-and-hold activation to prevent rain false triggers",
+        "Cockpit speedometer provides big bold tabular readouts with high-contrast OLED styling",
+        "Safety settings screen provides clear status badges and accessible 48dp thumb rows",
+        "flutter test test/screens/ passes cleanly"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Verified 5/5 tests passing in safety_settings_screen_test.dart."
+    },
+    {
+      "id": "US-FEAT-10",
+      "title": "Peer-to-Peer Wi-Fi Direct & Convoy Mesh Fallback",
+      "description": "As a convoy member riding through cellular dead zones, I want local peer-to-peer mesh networking to sync rider telemetry and broadcast distress alerts.",
+      "acceptanceCriteria": [
+        "Multi-hop packet relay forwards telemetry frames with decremented TTL and incremented hopCount",
+        "Local emergency SOS beacon propagates instantly across local mesh nodes",
+        "Teammate offline SOS distress renders on action stack and updates ConvoyService",
+        "flutter test test/p2p_mesh_service_test.dart and test/convoy_mesh_integration_test.dart pass cleanly"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Verified 9/9 mesh unit & integration tests passing cleanly."
+    },
+    {
+      "id": "US-CONVOY-01",
+      "title": "Sub-Cluster Toll Plaza Split & Separation Alarm Suppression (REQ-11)",
+      "description": "As a convoy pack experiencing a physical split at a highway toll plaza or bottleneck, I want the system to calculate sub-cluster gaps and suppress false individual separation spam while tracking lead/trail group distances.",
+      "acceptanceCriteria": [
+        "Calculates along-route gap distance between Lead cluster and Trail cluster accurately",
+        "Emits CONVOY_SPLIT alert to Lead rider indicating trail pack lag distance",
+        "Suppresses false 'Rider Separated' spam for riders stationary at known toll barriers or in clusters",
+        "Verified by scenario_convoy_dynamics_test.dart and scenario_d_convoy_split_test.dart"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Passed REQ-11 tests in Flutter and Gateway test suites."
+    },
+    {
+      "id": "US-CONVOY-02",
+      "title": "Dynamic Rendezvous Protocol & Regrouping (REQ-12)",
+      "description": "As a Road Captain managing a split convoy, I want to broadcast dynamic rendezvous points with convergence tracking so separated clusters regroup within 150m without manual coordination.",
+      "acceptanceCriteria": [
+        "Road Captain broadcasts dynamic rendezvous stop marker to active convoy",
+        "Riders track convergence distance along route corridor to rendezvous point",
+        "Automatically marks rendezvous complete and dissolves split state when riders arrive within 150m",
+        "Verified by scenario_convoy_dynamics_test.dart and scenario_convoy.test.js"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Passed REQ-12 rendezvous tests in Flutter and Gateway test suites."
+    },
+    {
+      "id": "US-CONVOY-03",
+      "title": "Sweeper Distress Detection & Reverse Escalation to Lead (REQ-13)",
+      "description": "As the convoy lead, I want immediate reverse escalation alerts if the tail sweeper halts or loses telemetry while the rest of the pack continues riding.",
+      "acceptanceCriteria": [
+        "Detects sweeper halt (speed 0 km/h or offline >60s) while pack is in motion",
+        "Triggers high-priority SWEEPER_DISTRESS alert on Lead rider cockpit HUD",
+        "Sweeper distress clears immediately upon sweeper resuming speed or manual acknowledgment",
+        "Verified by scenario_convoy_dynamics_test.dart and sweeper.test.js"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Passed REQ-13 sweeper distress tests in Flutter and Gateway test suites."
+    },
+    {
+      "id": "US-CONVOY-04",
+      "title": "Lost Rider Homing Vectors & Route Intercept Recovery (REQ-14)",
+      "description": "As a rider who missed a turn and separated from the convoy, I want offline homing vectors pointing back to the route corridor and sweeper backtrack intercept.",
+      "acceptanceCriteria": [
+        "Calculates shortest perpendicular homing vector to active route corridor",
+        "Provides cardinal direction, bearing, and distance to nearest route point offline",
+        "Computes sweeper backtrack intercept point for efficient group reunion",
+        "Verified by scenario_convoy_dynamics_test.dart"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Passed REQ-14 lost rider recovery tests."
+    },
+    {
+      "id": "US-CONVOY-05",
+      "title": "High-Jitter Patchy Cellular Network & Idempotent Emergency Delivery (Scenario B)",
+      "description": "As a rider navigating rural highways with 500ms-2000ms latency and 30% packet loss, I want telemetry filtering to discard jittery teleported fixes and guarantee idempotent SOS delivery.",
+      "acceptanceCriteria": [
+        "TrackFilter strictly rejects out-of-order, duplicate, and teleported fixes (>180 km/h jump)",
+        "ConvoyService deduplicates chat messages and socket frames over flaky connections",
+        "Local SOS outbox queues distress signals offline and confirms idempotently upon reconnection",
+        "Verified by scenario_b_high_jitter_network_test.dart and scenario_convoy.test.js"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Passed Scenario B high-jitter network tests."
+    },
+    {
+      "id": "US-CONVOY-06",
+      "title": "Low Battery Critical Throttle & Power Conservation (Scenario C)",
+      "description": "As a rider whose phone reaches critical battery (<15%), I want the app to halve telemetry polling and throttle non-essential network updates while preserving life safety tracking.",
+      "acceptanceCriteria": [
+        "Enters battery conservation mode at <=15% battery with hysteresis clearing at >=20%",
+        "Throttles moving telemetry interval to 5s and stationary interval to 30s",
+        "Preserves emergency SOS and crash detection at full priority regardless of battery state",
+        "Verified by scenario_c_low_battery_throttle_test.dart"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Passed Scenario C battery throttling tests."
+    },
+    {
+      "id": "US-CONVOY-07",
+      "title": "Concurrent Multi-Incident Emergency Handling & Responder Isolation (Scenario E)",
+      "description": "As an emergency dispatcher or convoy lead, I want concurrent crash alarms and manual SOS events to be tracked independently with isolated responder allocations.",
+      "acceptanceCriteria": [
+        "Prioritizes crash impact alarms over concurrent manual SOS events on cockpit HUD",
+        "Tracks responder assignments independently per incident without IDOR or state collision",
+        "Resolving one incident leaves concurrent active incidents in open emergency state",
+        "Verified by scenario_e_multi_incident_alarm_test.dart and scenario_convoy.test.js"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Passed Scenario E multi-incident tests."
+    },
+    {
+      "id": "US-CONVOY-08",
+      "title": "Convoy Dissolution & Multi-Client Session Synchronization",
+      "description": "As a convoy member or admin, I want ride termination by the admin to dissolve active convoy sessions cleanly across all rider devices without orphaned state.",
+      "acceptanceCriteria": [
+        "When DISSOLVED frame arrives, ConvoyService immediately clears active convoy state and notifies listeners",
+        "Terminates active background location recording and resets cockpit HUD",
+        "Prevents orphaned session references or ghost riders in local storage",
+        "Verified by chat_and_end_ride_test.dart and convoy_network_test.dart"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Passed ride dissolution and multi-client synchronization tests."
+    }
+  ]
+}

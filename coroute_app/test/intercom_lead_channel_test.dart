@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/core/ui/ui.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
@@ -56,6 +57,11 @@ class _TestRt extends RealtimeService {
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    FeatureGates.forceAllUnlocked = true;
+  });
+
+  tearDown(() {
+    FeatureGates.forceAllUnlocked = false;
   });
 
   group('RiderModel mic state & voice telemetry', () {

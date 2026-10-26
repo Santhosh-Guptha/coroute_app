@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/core/constants/app_constants.dart';
 import 'package:coroute_app/core/constants/safety_constants.dart';
 import 'package:coroute_app/core/theme/map_tiles.dart';
@@ -21,12 +22,14 @@ void main() {
   late int now;
 
   setUp(() async {
+    FeatureGates.forceAllUnlocked = true;
     tmp = await Directory.systemTemp.createTemp('coroute_tiles_');
     // Real time: a reopened cache reads file times from the disk.
     now = DateTime.now().millisecondsSinceEpoch;
   });
 
   tearDown(() async {
+    FeatureGates.forceAllUnlocked = false;
     TileCache.instance = null;
     try {
       await tmp.delete(recursive: true);

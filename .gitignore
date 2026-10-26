@@ -23,3 +23,7 @@ Thumbs.db
 # Local Credentials & Secrets Vault
 *CREDENTIALS*.md
 *.credentials*
+tmp/
+*.xml
+qa_screenshots/
+

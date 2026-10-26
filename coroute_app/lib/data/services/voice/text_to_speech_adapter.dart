@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import '../voice_service.dart';
 
 /// Abstract contract for pluggable text-to-speech output engines.
@@ -75,6 +76,7 @@ class NativeVoiceEngineTtsAdapter implements TextToSpeechAdapter {
 }
 
 /// In-memory mock TTS adapter for testing and deterministic verification.
+@visibleForTesting
 class MockTextToSpeechAdapter implements TextToSpeechAdapter {
   final List<String> spokenHistory = [];
   String _currentLanguage = 'en-IN';
