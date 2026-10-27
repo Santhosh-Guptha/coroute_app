@@ -23,6 +23,24 @@ class AuthService extends ChangeNotifier {
 
   String? _lastSignOutReason;
 
+  /// The last `subscriptionStatus` object the gateway sent with `/me` or a login,
+  /// kept so the plan service can pick it up even if it is created after the reply.
+  Map<String, dynamic>? _lastSubscriptionStatus;
+  Map<String, dynamic>? get lastSubscriptionStatus => _lastSubscriptionStatus;
+
+  /// Called with every `subscriptionStatus` object received (wired to PlanSubscriptionService).
+  void Function(Map<String, dynamic> status)? onSubscriptionStatus;
+
+  /// Called when the session on this phone ends (sign out, revoked token, deleted account).
+  VoidCallback? onSessionCleared;
+
+  void _noteSubscriptionStatus(dynamic status) {
+    if (status is! Map) return;
+    final m = Map<String, dynamic>.from(status);
+    _lastSubscriptionStatus = m;
+    onSubscriptionStatus?.call(m);
+  }
+
   /// Why the gateway ended the last session (hold, block, deleted, signed out elsewhere).
   /// Shown once on the sign-in screen, then cleared with [clearSignOutReason].
   String? get lastSignOutReason => _lastSignOutReason;
@@ -205,6 +223,8 @@ class AuthService extends ChangeNotifier {
     final consent = u['netConsentAt'];
     if (consent is num) _netConsentAt = consent.toInt();
     if (u.containsKey('assistHelp') || u.containsKey('assistAsk') || u.containsKey('responderMedical')) _netLoaded = true;
+    // Plan state travels with the profile; an expired paid tier arrives as community.
+    _noteSubscriptionStatus(u['subscriptionStatus']);
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(AppConstants.keyUserId, _userId ?? '');
@@ -232,6 +252,8 @@ class AuthService extends ChangeNotifier {
     clearSignOutReason();
     await _api.setToken(res['token'].toString());
     await _applyUser(Map<String, dynamic>.from(res['user'] as Map));
+    // Login replies may carry the plan beside the user rather than inside it.
+    if ((res['user'] as Map)['subscriptionStatus'] is! Map) _noteSubscriptionStatus(res['subscriptionStatus']);
     return _ok();
   }
 
@@ -475,6 +497,8 @@ class AuthService extends ChangeNotifier {
     _responderMedical = false;
     _netConsentAt = 0;
     _netLoaded = false;
+    _lastSubscriptionStatus = null;
+    onSessionCleared?.call();
     final prefs = await SharedPreferences.getInstance();
     for (final k in [
       AppConstants.keyUserId, AppConstants.keyUserRole, AppConstants.keyUserEmail, AppConstants.keyUserName,

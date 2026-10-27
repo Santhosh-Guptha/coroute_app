@@ -43,6 +43,7 @@ import 'domain/notify/notification_snapshot.dart';
 import 'presentation/auth/access_gate_screen.dart';
 import 'presentation/ride/emergency_guidance.dart';
 import 'presentation/safety/crash_alarm_host.dart';
+import 'presentation/subscription/subscription_notice_host.dart';
 import 'presentation/splash/splash_screen.dart';
 
 /// Lets services navigate (sign-out on session expiry, deep links) without a BuildContext.
@@ -108,7 +109,18 @@ class CoRouteApp extends StatelessWidget {
           dispose: (_, binding) => binding.dispose()),
         ChangeNotifierProvider(create: (ctx) => MetaService(ctx.read<ApiClient>())..load()),
         ChangeNotifierProvider(create: (ctx) => AppVersionService(ctx.read<MetaService>())),
-        ChangeNotifierProvider(create: (ctx) => PlanSubscriptionService(ctx.read<ApiClient>())..load()),
+        ChangeNotifierProvider(create: (ctx) {
+          final plan = PlanSubscriptionService(ctx.read<ApiClient>());
+          // The plan rides along with /me and login replies; sign-out drops it back to Community.
+          final auth = ctx.read<AuthService>();
+          auth.onSubscriptionStatus = plan.applySubscriptionStatus;
+          auth.onSessionCleared = () => plan.resetLocal().ignore();
+          plan.load().then((_) {
+            final status = auth.lastSubscriptionStatus;
+            if (status != null) plan.applySubscriptionStatus(status);
+          }).ignore();
+          return plan;
+        }),
         ChangeNotifierProvider(create: (ctx) => TripStorageService(ctx.read<ApiClient>())),
         ChangeNotifierProvider(create: (ctx) => TimelineService(ctx.read<ApiClient>(), ctx.read<RealtimeService>())),
         ChangeNotifierProvider(create: (ctx) {
@@ -257,7 +269,10 @@ class _App extends StatelessWidget {
           data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1.0).clamp(0.85, 1.3).toDouble())),
           child: CrashAlarmHost(
             navigatorKey: appNavigatorKey,
-            child: _UpdateGate(child: child ?? const SizedBox.shrink()),
+            child: SubscriptionNoticeHost(
+              navigatorKey: appNavigatorKey,
+              child: _UpdateGate(child: child ?? const SizedBox.shrink()),
+            ),
           ),
         );
       },

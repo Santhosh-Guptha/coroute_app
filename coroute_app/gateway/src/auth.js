@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const config = require('./config');
+const { effectiveSubscription } = require('./subscription_lifecycle');
 const { profileFields, ValidationError, SWITCHES } = require('./validate');
 
 const ROLE_ADMIN = 'MASTER_ADMIN';
@@ -85,6 +86,9 @@ function selfUser(u) {
     netConsentAt: Number(u.netConsentAt) || 0,
     subscriptionTier: u.subscriptionTier || 'community',
     subscriptionValidUntil: Number(u.subscriptionValidUntil) || 0,
+    // Effective state: a paid tier past its validUntil reads as community here even before the
+    // sweeper rolled the document back. Shape: { tier, validUntil, isActive, isExpired, daysRemaining, expiringSoon, previousTier }.
+    subscriptionStatus: effectiveSubscription(u),
   };
 }
 
@@ -201,6 +205,8 @@ class AuthService {
     this.gate = gate;
     /** (user, changedKeys) => void: set by app.js so a live ride hears about phone / opt-out changes. */
     this.onProfileChanged = null;
+    /** async (user) => user|null: set by app.js; rolls an expired paid tier back on login and /me. */
+    this.onUserSeen = null;
     this.google = googleVerifier || (config.googleClientIds.length ? new OAuth2Client() : null);
   }
 
@@ -266,7 +272,7 @@ class AuthService {
     if (user.status === 'ON_HOLD') throw new AuthError(MSG_ON_HOLD, 403, 'ACCOUNT_ON_HOLD');
     if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
     const role = bootstrapRoleFor(user.email, user.role);
-    const updated = await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role }) || user;
+    const updated = await this._seen(await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role }) || user);
     return { token: signToken(updated), user: selfUser(updated) };
   }
 
@@ -299,7 +305,7 @@ class AuthService {
     } else {
       if (user.status === 'ON_HOLD') throw new AuthError(MSG_ON_HOLD, 403, 'ACCOUNT_ON_HOLD');
       if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
-      user = await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role: bootstrapRoleFor(email, user.role), googleSub: payload.sub }) || user;
+      user = await this._seen(await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role: bootstrapRoleFor(email, user.role), googleSub: payload.sub }) || user);
     }
     return { token: signToken(user), user: selfUser(user) };
   }
@@ -448,9 +454,16 @@ class AuthService {
   /** A fresh session token for an already verified user (sliding refresh). */
   issueToken(user) { return signToken(user); }
 
+  /** Runs the subscription hook (expiry rollback); never fails the caller. */
+  async _seen(user) {
+    if (!this.onUserSeen || !user) return user;
+    try { return (await this.onUserSeen(user)) || user; } catch { return user; }
+  }
+
   async me(userId, { appBuild = 0, now = Date.now() } = {}) {
-    const user = await this.repo.findUserById(userId);
+    let user = await this.repo.findUserById(userId);
     if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
+    user = await this._seen(user);
     if (user.status === 'ON_HOLD') throw new AuthError(MSG_ON_HOLD, 403, 'ACCOUNT_ON_HOLD');
     if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
     // Which app build each rider uses, so the minimum build can be raised safely.

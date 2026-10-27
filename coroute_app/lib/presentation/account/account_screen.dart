@@ -24,7 +24,9 @@ import 'appearance_sheet.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import '../trip_planner/offline_map_manager_screen.dart';
+import '../subscription/payment_history_screen.dart';
 import '../subscription/plan_selector_screen.dart';
+import '../subscription/subscription_expiry_banner.dart';
 import '../../core/config/feature_gates.dart';
 import '../../data/services/plan_subscription_service.dart';
 import '../garage/garage_screen.dart';
@@ -107,6 +109,9 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 18),
+
+                // Paid plan ending or ended: one tap opens the plan selector to renew.
+                const SubscriptionExpiryBanner(),
 
                 // Who you are: one tap opens the one profile editor.
                 DsCard(
@@ -301,8 +306,16 @@ class AccountScreen extends StatelessWidget {
                         title: 'Active Subscription Plan',
                         subtitle: '$tierLabel · View plan benefits & convoy limits',
                         value: tierLabel.toUpperCase(),
+                        color: planService != null && (planService.isExpired || planService.expiringSoon) ? AppTheme.warnText : null,
                         divider: true,
                         onTap: () => _push(context, const PlanSelectorScreen()),
+                      ),
+                      _SettingsRow(
+                        icon: Icons.receipt_long_rounded,
+                        title: 'Payments & plan history',
+                        subtitle: 'Past plans, UPI payments and order status',
+                        divider: true,
+                        onTap: () => _push(context, const PaymentHistoryScreen()),
                       ),
                       _SettingsRow(
                         icon: Icons.dashboard_customize_rounded,

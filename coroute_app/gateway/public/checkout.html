@@ -410,7 +410,7 @@
       RAZORPAY_KEY_ID = data.key_id || RAZORPAY_KEY_ID;
       document.getElementById('app-order-box').style.display = 'block';
       document.getElementById('app-order-title').textContent =
-        data.planLabel + ' (' + (data.billingCycle === 'annual' ? 'Annual' : 'Monthly') + ') — Rs ' + (data.amount / 100);
+        data.planLabel + ' (' + (data.billingCycle === 'annual' ? 'Annual' : 'Monthly') + ') - Rs ' + (data.amount / 100);
       ['select-plan-heading', 'plan-grid-container'].forEach(function(id) {
         const el = document.getElementById(id); if (el) el.style.display = 'none';
       });
@@ -444,7 +444,7 @@
         '<div class="tx-detail-row"><span>Mode:</span> <strong>' + escapeHtml((q.get('mode') || '').toUpperCase()) + '</strong></div>' +
         '<div class="tx-detail-row"><span>HMAC-SHA256 Signature:</span> <strong>Verified by server</strong></div>' +
         '<div class="tx-detail-row"><span>Status:</span> <strong style="color:#66BB6A">PAID</strong></div>' +
-        (q.get('app') ? '<p style="margin:12px 0 0;font-size:14px;font-weight:700">Your ' + escapeHtml(q.get('tier') || '') + ' plan is active. Go back to the CoRoute app — it updates on its own.</p>' : ''));
+        (q.get('app') ? '<p style="margin:12px 0 0;font-size:14px;font-weight:700">Your ' + escapeHtml(q.get('tier') || '') + ' plan is active. Go back to the CoRoute app - it updates on its own.</p>' : ''));
       statusBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else if (q.get('failed')) {
       showStatus('error', '[Failed] ' + escapeHtml(q.get('failed')) +

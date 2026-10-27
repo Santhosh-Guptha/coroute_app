@@ -778,6 +778,12 @@ class ConvoyService extends ChangeNotifier {
       return;
     }
 
+    // Plan events concern the account, not a convoy: handled whether or not a ride is active.
+    if (type == 'SUBSCRIPTION_ACTIVATED' || type == 'SUBSCRIPTION_EXPIRING' || type == 'SUBSCRIPTION_EXPIRED') {
+      _onSubscriptionEvent(type!, e);
+      return;
+    }
+
     final gid = _activeGroupId;
     if (gid == null) return;
     final convoy = _allConvoys[gid];
@@ -924,14 +930,6 @@ class ConvoyService extends ChangeNotifier {
       case 'DISCOVERY':
         if (!_onDiscovery(e)) return;
         break;
-      case 'SUBSCRIPTION_ACTIVATED':
-        final tierName = e['tier']?.toString();
-        final until = e['validUntil'] is num ? (e['validUntil'] as num).toInt() : 0;
-        if (tierName != null) {
-          planSubscription?.applyServerSubscription(tierName, until);
-          notifyListeners();
-        }
-        break;
       case 'WAVED':
         final id = e['encounterId']?.toString();
         final enc = id == null ? null : _encounters[id];
@@ -1017,6 +1015,30 @@ class ConvoyService extends ChangeNotifier {
         return;
     }
     notifyListeners();
+  }
+
+  /// `SUBSCRIPTION_ACTIVATED {tier, validUntil}`, `SUBSCRIPTION_EXPIRING {daysRemaining, tier, validUntil}`
+  /// and `SUBSCRIPTION_EXPIRED {previousTier, expiredAt}` from the gateway.
+  void _onSubscriptionEvent(String type, Map<String, dynamic> e) {
+    final plan = planSubscription;
+    if (plan == null) return;
+    switch (type) {
+      case 'SUBSCRIPTION_ACTIVATED':
+        final tierName = e['tier']?.toString();
+        final until = e['validUntil'] is num ? (e['validUntil'] as num).toInt() : 0;
+        if (tierName == null) return;
+        plan.applyServerSubscription(tierName, until);
+        break;
+      case 'SUBSCRIPTION_EXPIRING':
+        plan.handleExpiringEvent(e);
+        break;
+      case 'SUBSCRIPTION_EXPIRED':
+        plan.handleExpiredEvent(e);
+        break;
+      default:
+        return;
+    }
+    notifyListeners(); // convoy capacity and gated controls follow the tier
   }
 
   void _applyFleet(dynamic list) {

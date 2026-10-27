@@ -5,11 +5,16 @@ import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/services/plan_subscription_service.dart';
 import 'payment_checkout_modal.dart';
+import 'subscription_expiry_banner.dart';
 
 /// Screen allowing riders, captains, and tour operators to review entitlements
 /// and upgrade their membership via Razorpay UPI.
 class PlanSelectorScreen extends StatefulWidget {
-  const PlanSelectorScreen({super.key});
+  /// The plan to highlight for renewal (from an expiry banner or dialog); its
+  /// card is marked "Renew" and the page opens scrolled to it.
+  final SubscriptionTier? preselectTier;
+
+  const PlanSelectorScreen({super.key, this.preselectTier});
 
   @override
   State<PlanSelectorScreen> createState() => _PlanSelectorScreenState();
@@ -17,12 +22,32 @@ class PlanSelectorScreen extends StatefulWidget {
 
 class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
   bool _isAnnual = false;
+  final Map<SubscriptionTier, GlobalKey> _cardKeys = {
+    for (final t in SubscriptionTier.values) t: GlobalKey(),
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    final pre = widget.preselectTier;
+    if (pre != null && pre != SubscriptionTier.community) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ctx = _cardKeys[pre]?.currentContext;
+        if (ctx != null && mounted) {
+          Scrollable.ensureVisible(ctx, alignment: 0.1, duration: const Duration(milliseconds: 350), curve: Curves.easeOutCubic);
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final planService = context.watch<PlanSubscriptionService>();
     final currentTier = planService.currentTier;
     final plans = PlanSubscriptionService.allPlans;
+    // Expired or ending: the plan to renew (never the free tier).
+    final renewTier = widget.preselectTier ??
+        ((planService.isExpired || planService.expiringSoon) ? planService.renewTier : null);
 
     return Scaffold(
       backgroundColor: AppTheme.bg,
@@ -67,6 +92,9 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
+              // Ending soon / ended: a tap only scrolls here, so no navigation.
+              const SubscriptionExpiryBanner(opensPlanSelector: false),
+
               // Razorpay Security Trust Banner
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -203,9 +231,11 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
               // Plan Cards
               for (final plan in plans) ...[
                 _PlanCard(
+                  key: _cardKeys[plan.tier],
                   plan: plan,
                   isAnnual: _isAnnual,
                   isActive: plan.tier == currentTier,
+                  isRenewal: renewTier != null && plan.tier == renewTier && plan.tier != currentTier,
                   onSelect: () async {
                     if (plan.tier == currentTier) return;
 
@@ -294,12 +324,17 @@ class _PlanCard extends StatelessWidget {
   final PlanDetails plan;
   final bool isAnnual;
   final bool isActive;
+
+  /// The plan that ran out (or is about to): offered as "Renew" instead of "Upgrade".
+  final bool isRenewal;
   final VoidCallback onSelect;
 
   const _PlanCard({
+    super.key,
     required this.plan,
     required this.isAnnual,
     required this.isActive,
+    this.isRenewal = false,
     required this.onSelect,
   });
 
@@ -307,14 +342,16 @@ class _PlanCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final borderColor = isActive
         ? AppTheme.accentText
-        : (plan.isPopular ? AppTheme.accentText.withValues(alpha: 0.6) : AppTheme.border2);
+        : isRenewal
+            ? AppTheme.warnText
+            : (plan.isPopular ? AppTheme.accentText.withValues(alpha: 0.6) : AppTheme.border2);
     final price = isAnnual ? plan.annualPrice : plan.monthlyPrice;
 
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: borderColor, width: isActive ? 2.2 : 1.2),
+        border: Border.all(color: borderColor, width: (isActive || isRenewal) ? 2.2 : 1.2),
         boxShadow: isActive
             ? [
                 BoxShadow(
@@ -474,9 +511,11 @@ class _PlanCard extends StatelessWidget {
                         Text(
                           isActive
                               ? 'CURRENT PLAN ACTIVE'
-                              : (plan.tier == SubscriptionTier.community
-                                  ? 'SELECT COMMUNITY PLAN'
-                                  : 'UPGRADE VIA RAZORPAY UPI'),
+                              : isRenewal
+                                  ? 'RENEW VIA RAZORPAY UPI'
+                                  : (plan.tier == SubscriptionTier.community
+                                      ? 'SELECT COMMUNITY PLAN'
+                                      : 'UPGRADE VIA RAZORPAY UPI'),
                           style: TextStyle(
                             color: isActive ? AppTheme.accentText : Colors.white,
                             fontWeight: FontWeight.w900,
@@ -492,8 +531,39 @@ class _PlanCard extends StatelessWidget {
             ),
           ),
 
-          // "ACTIVE" or "POPULAR" Pill
-          if (isActive)
+          // "ACTIVE", "RENEW" or "POPULAR" Pill
+          if (isRenewal && !isActive)
+            Positioned(
+              top: -10,
+              right: 18,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppTheme.warnText,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(color: AppTheme.warnText.withValues(alpha: 0.4), blurRadius: 8),
+                  ],
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.autorenew_rounded, color: Colors.white, size: 12),
+                    SizedBox(width: 4),
+                    Text(
+                      'RENEW THIS PLAN',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 10,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (isActive)
             Positioned(
               top: -10,
               right: 18,

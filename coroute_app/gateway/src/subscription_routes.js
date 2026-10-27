@@ -3,6 +3,7 @@ const express = require('express');
 const crypto = require('crypto');
 const config = require('./config');
 const { createRazorpayGateway, RazorpayError } = require('./razorpay_gateway');
+const { effectiveSubscription, isPaidTier } = require('./subscription_lifecycle');
 
 const PLAN_PRICES_INR = {
   community: { monthly: 0, annual: 0, label: 'Community Rider' },
@@ -188,17 +189,35 @@ async function saveOrder(repo, order) {
   await repo.saveRazorpayOrder({ ...order, createdAt: Date.now(), status: order.status || 'CREATED' });
 }
 
+/** One ledger order as the app / admin sees it (no gateway secrets, no raw payloads). */
+function orderView(o) {
+  return {
+    orderId: o.orderId, userId: o.userId || null, status: o.status || 'CREATED',
+    amount: (Number(o.amountInPaise) || 0) / 100, amountInPaise: Number(o.amountInPaise) || 0, currency: o.currency || 'INR',
+    mode: o.mode || null, paymentId: o.paymentId || '', utr: o.utr || '', planTier: o.planTier || null, billingCycle: o.billingCycle || null,
+    couponCode: o.couponCode || null, createdAt: Number(o.createdAt) || 0, paidAt: Number(o.paidAt) || 0, updatedAt: Number(o.updatedAt) || 0,
+  };
+}
+/** The rider's ledger orders, newest first. */
+async function riderOrders(repo, userId) {
+  const rows = await repo.listRazorpayOrders({ userId }, 100);
+  return rows.map(orderView).sort((a, b) => b.createdAt - a.createdAt);
+}
+/** Tier periods (expired / revoked / granted entries), oldest first. */
+function periodsOf(userDoc) { return Array.isArray(userDoc?.subscriptionHistory) ? [...userDoc.subscriptionHistory] : []; }
+
 /** Grants the plan to the user once per order (idempotent). */
 async function activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, vpa, method, source }) {
   const planTier = order.planTier;
-  const billingCycle = order.billingCycle === 'annual' ? 'annual' : 'monthly';
+  const billingCycle = order.billingCycle === 'annual' ? 'annual' : (order.billingCycle === 'manual' ? 'manual' : 'monthly');
   const history = Array.isArray(userDoc.paymentHistory) ? [...userDoc.paymentHistory] : [];
   const prior = history.find((p) => p.orderId === order.orderId);
   if (prior) {
     return { tier: userDoc.subscriptionTier, validUntil: userDoc.subscriptionValidUntil, record: prior, already: true };
   }
   const currentExpiry = Number(userDoc.subscriptionValidUntil) || 0;
-  const duration = billingCycle === 'annual' ? 365 * 86400000 : 30 * 86400000;
+  const manualDays = billingCycle === 'manual' && Number.isInteger(order.durationDays) && order.durationDays > 0 ? order.durationDays : 0;
+  const duration = billingCycle === 'annual' ? 365 * 86400000 : (manualDays || 30) * 86400000;
   // Extend from current expiry when renewing the same tier, so paid days are never lost.
   const baseTime = (currentExpiry > Date.now() && userDoc.subscriptionTier === planTier) ? currentExpiry : Date.now();
   const expiry = baseTime + duration;
@@ -232,6 +251,7 @@ async function activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, v
     subscriptionValidUntil: expiry,
     lastPayment: record,
     paymentHistory: history,
+    subscriptionWarnedAt: {}, // a fresh period gets fresh 7/3/1-day warnings
   });
   await repo.updateRazorpayOrder(order.orderId, { status: 'PAID', paymentId: paymentId || '', paidAt: Date.now() });
   if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
@@ -735,7 +755,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     return res.status(400).json({ error: 'Missing required fields: paymentId and signature (or a UPI UTR) are required' });
   }));
 
-  // Fetch full payment history / audit receipts
+  // Fetch full payment history / audit receipts, tier periods and the rider's orders from the ledger
   r.get('/subscription/history', wrap(async (req, res) => {
     const userId = req.user.userId;
     const userDoc = req.dbUser || (await repo.findUserById(userId));
@@ -744,14 +764,24 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     const history = Array.isArray(userDoc.paymentHistory)
       ? userDoc.paymentHistory
       : (userDoc.lastPayment ? [userDoc.lastPayment] : []);
+    const status = effectiveSubscription(userDoc);
+    const orders = await riderOrders(repo, userId);
 
     res.json({
       userId,
       history,
       totalPayments: history.length,
-      currentTier: userDoc.subscriptionTier || 'community',
-      validUntil: userDoc.subscriptionValidUntil || 0,
+      currentTier: status.tier,
+      validUntil: status.validUntil,
+      subscriptionStatus: status,
+      subscriptionHistory: periodsOf(userDoc),
+      orders,
     });
+  }));
+
+  // The rider's orders from the ledger alone, newest first
+  r.get('/subscription/orders', wrap(async (req, res) => {
+    res.json({ userId: req.user.userId, orders: await riderOrders(repo, req.user.userId) });
   }));
 
   // Fetch current user subscription status
@@ -760,22 +790,20 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     const userDoc = req.dbUser || (await repo.findUserById(userId));
     if (!userDoc) return res.status(404).json({ error: 'User not found' });
 
-    const tier = normalizeTier(userDoc.subscriptionTier);
-    const validUntil = Number(userDoc.subscriptionValidUntil) || 0;
-    const isActive = tier === 'community' || validUntil > Date.now();
-    const daysRemaining = isActive && tier !== 'community'
-      ? Math.max(0, Math.ceil((validUntil - Date.now()) / (24 * 60 * 60 * 1000)))
-      : 0;
-
+    const status = effectiveSubscription(userDoc);
     const plans = await getEffectivePlans(repo);
     res.json({
-      tier: isActive ? tier : 'community',
-      validUntil,
-      isActive,
-      daysRemaining,
+      tier: status.tier,
+      validUntil: status.validUntil,
+      isActive: status.isActive,
+      isExpired: status.isExpired,
+      daysRemaining: status.daysRemaining,
+      expiringSoon: status.expiringSoon,
+      previousTier: status.previousTier,
+      subscriptionStatus: status,
       lastPayment: userDoc.lastPayment || null,
       paymentHistoryCount: Array.isArray(userDoc.paymentHistory) ? userDoc.paymentHistory.length : (userDoc.lastPayment ? 1 : 0),
-      planLabel: plans[isActive ? tier : 'community']?.label || 'Community Rider',
+      planLabel: plans[status.tier]?.label || 'Community Rider',
     });
   }));
 
@@ -830,6 +858,94 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       if (!order || order.status !== 'UTR_CLAIMED') return res.status(404).json({ error: 'No pending claim for this order' });
       await repo.updateRazorpayOrder(order.orderId, { status: 'UTR_REJECTED', rejectedAt: Date.now(), rejectedBy: req.user?.userId || 'admin' });
       res.json({ success: true });
+    }));
+  }
+
+  // ===========================================================================
+  // ADMIN PAYMENTS LEDGER, PER-USER HISTORY, MANUAL GRANT / REVOKE
+  // ===========================================================================
+  if (requireAdmin) {
+    // GET /api/admin/payments?userId=&status=&limit=  -> ledger orders joined with the rider's name/email
+    r.get('/admin/payments', requireAdmin, wrap(async (req, res) => {
+      const filter = {};
+      if (typeof req.query.userId === 'string' && req.query.userId.trim()) filter.userId = req.query.userId.trim();
+      if (typeof req.query.status === 'string' && req.query.status.trim()) filter.status = req.query.status.trim().toUpperCase();
+      const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit, 10) || 200));
+      const rows = (await repo.listRazorpayOrders(filter, limit)).sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+      const users = new Map();
+      for (const o of rows) {
+        if (!o.userId || users.has(o.userId)) continue;
+        const u = await repo.findUserById(o.userId).catch(() => null);
+        users.set(o.userId, u ? { name: u.name || '', email: u.email || '', callsign: u.callsign || '' } : null);
+      }
+      res.set('Cache-Control', 'no-store').json({
+        payments: rows.map((o) => ({ ...orderView(o), user: users.get(o.userId) || null })),
+        total: rows.length,
+      });
+    }));
+
+    // GET /api/admin/payments/users/:userId -> paymentHistory + subscriptionHistory + effective status
+    r.get('/admin/payments/users/:userId', requireAdmin, wrap(async (req, res) => {
+      const userDoc = await repo.findUserById(req.params.userId);
+      if (!userDoc) return res.status(404).json({ error: 'User not found' });
+      res.set('Cache-Control', 'no-store').json({
+        userId: userDoc.userId, name: userDoc.name || '', email: userDoc.email || '',
+        subscriptionTier: userDoc.subscriptionTier || 'community',
+        subscriptionValidUntil: Number(userDoc.subscriptionValidUntil) || 0,
+        subscriptionStatus: effectiveSubscription(userDoc),
+        lastPayment: userDoc.lastPayment || null,
+        paymentHistory: Array.isArray(userDoc.paymentHistory) ? userDoc.paymentHistory : [],
+        subscriptionHistory: periodsOf(userDoc),
+        subscriptionWarnedAt: userDoc.subscriptionWarnedAt || {},
+        orders: await riderOrders(repo, userDoc.userId),
+      });
+    }));
+
+    // POST /api/admin/subscription/users/:userId/grant { planTier, days, reason } -> grants / extends manually
+    r.post('/admin/subscription/users/:userId/grant', requireAdmin, wrap(async (req, res) => {
+      const body = req.body || {};
+      const planTier = normalizeTier(body.planTier);
+      const days = Number.isInteger(body.days) ? body.days : parseInt(body.days, 10);
+      if (!isPaidTier(planTier)) return res.status(400).json({ error: 'planTier must be proRider, roadCaptain or tourOperator' });
+      if (!Number.isInteger(days) || days < 1 || days > 3660) return res.status(400).json({ error: 'days must be an integer between 1 and 3660' });
+      const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
+      const userDoc = await repo.findUserById(req.params.userId);
+      if (!userDoc) return res.status(404).json({ error: 'User not found' });
+      const adminId = req.user?.userId || 'admin';
+      const order = {
+        orderId: `manual_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+        userId: userDoc.userId, planTier, billingCycle: 'manual', durationDays: days,
+        amountInPaise: 0, currency: 'INR', mode: 'manual', grantedBy: adminId, reason,
+      };
+      await saveOrder(repo, order);
+      const result = await activatePlan({ repo, auth, hub, userDoc, order, paymentId: order.orderId, method: 'MANUAL', source: `admin_grant:${adminId}` });
+      const after = await repo.findUserById(userDoc.userId);
+      const periods = periodsOf(after);
+      periods.push({ tier: planTier, validFrom: result.record.validFrom, validUntil: result.validUntil, startedAt: Date.now(), reason: 'granted', days, note: reason, by: adminId, orderId: order.orderId });
+      await repo.updateUser(after.key, { subscriptionHistory: periods, subscriptionExpiredAt: 0 });
+      if (auth?.gate) auth.gate.invalidate(userDoc.userId);
+      res.json({ success: true, userId: userDoc.userId, orderId: order.orderId, subscriptionTier: result.tier, subscriptionValidUntil: result.validUntil,
+        subscriptionStatus: effectiveSubscription({ ...after, subscriptionTier: result.tier, subscriptionValidUntil: result.validUntil }) });
+    }));
+
+    // POST /api/admin/subscription/users/:userId/revoke { reason } -> community now
+    r.post('/admin/subscription/users/:userId/revoke', requireAdmin, wrap(async (req, res) => {
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
+      const userDoc = await repo.findUserById(req.params.userId);
+      if (!userDoc) return res.status(404).json({ error: 'User not found' });
+      const adminId = req.user?.userId || 'admin';
+      const now = Date.now();
+      const current = effectiveSubscription(userDoc, now);
+      const periods = periodsOf(userDoc);
+      periods.push({ tier: current.rawTier, validFrom: Number(userDoc.lastPayment?.validFrom) || 0, validUntil: Number(userDoc.subscriptionValidUntil) || 0, endedAt: now, reason: 'revoked', note: reason, by: adminId });
+      await repo.updateUser(userDoc.key, {
+        subscriptionTier: 'community', subscriptionValidUntil: 0,
+        subscriptionExpiredAt: now, previousTier: current.rawTier !== 'community' ? current.rawTier : (userDoc.previousTier || null),
+        subscriptionWarnedAt: {}, subscriptionHistory: periods,
+      });
+      if (auth?.gate) auth.gate.invalidate(userDoc.userId);
+      if (hub && current.rawTier !== 'community') hub.sendToUser(userDoc.userId, { type: 'SUBSCRIPTION_REVOKED', previousTier: current.rawTier, revokedAt: now, reason });
+      res.json({ success: true, userId: userDoc.userId, subscriptionTier: 'community', previousTier: current.rawTier, subscriptionStatus: effectiveSubscription(await repo.findUserById(userDoc.userId)) });
     }));
   }
 
@@ -1006,6 +1122,7 @@ module.exports = {
   normalizeTier,
   gatewayFor,
   activatePlan,
+  orderView,
   registerSubscriptionPublicRoutes,
   registerSubscriptionAuthRoutes,
 };

@@ -216,7 +216,7 @@ class _Greeting extends StatelessWidget {
                 builder: (ctx) {
                   final planService = ctx.watch<PlanSubscriptionService?>();
                   final tier =
-                      planService?.currentTier ?? SubscriptionTier.roadCaptain;
+                      planService?.currentTier ?? FeatureGates.activeTier;
                   final tierName = FeatureGates.tierLabel(tier).toUpperCase();
                   return GestureDetector(
                     onTap: () => Navigator.of(ctx).push(

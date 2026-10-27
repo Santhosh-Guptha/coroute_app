@@ -249,6 +249,11 @@ class Repo {
     const rows = await this.soda.query(C.users, {}, { orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }], limit });
     return rows.map((r) => ({ ...r.value, key: r.key }));
   }
+  /** Users on a paid tier (the sweeper's working set); expired-but-not-rolled-back documents included. */
+  async listPaidSubscribers(limit = 2000) {
+    const rows = await this.soda.query(C.users, { subscriptionTier: { $in: ['proRider', 'roadCaptain', 'tourOperator'] } }, { limit });
+    return rows.map((r) => ({ ...r.value, key: r.key }));
+  }
   async countAdmins() {
     return (await this.soda.query(C.users, { role: 'MASTER_ADMIN' }, { limit: 1000 })).length;
   }

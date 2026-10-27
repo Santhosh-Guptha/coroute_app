@@ -1,7 +1,35 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/feature_gates.dart';
 import 'api_client.dart';
+
+/// A `SUBSCRIPTION_EXPIRING` warning from the gateway, kept until the UI shows it once.
+class SubscriptionExpiringNotice {
+  final int daysRemaining;
+  final SubscriptionTier tier;
+  final int validUntil;
+
+  /// 7, 3 or 1: the warning step this notice belongs to (shown once per step).
+  final int threshold;
+
+  const SubscriptionExpiringNotice({
+    required this.daysRemaining,
+    required this.tier,
+    required this.validUntil,
+    required this.threshold,
+  });
+}
+
+/// A `SUBSCRIPTION_EXPIRED` event from the gateway, kept until the UI shows it once.
+class SubscriptionExpiredNotice {
+  final SubscriptionTier previousTier;
+  final int expiredAt;
+
+  const SubscriptionExpiredNotice({required this.previousTier, required this.expiredAt});
+}
 
 /// Information describing a capability or feature of a plan.
 class PlanFeatureItem {
@@ -41,10 +69,18 @@ class PlanDetails {
 
 /// Service managing subscription plan selection, feature entitlements,
 /// Razorpay UPI payments, and server-synchronized subscription state.
-class PlanSubscriptionService extends ChangeNotifier {
+class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver {
   static const String keyTier = 'coroute_active_subscription_plan';
   static const String keyValidUntil = 'coroute_subscription_valid_until';
   static const String keyForceUnlocked = 'coroute_force_all_unlocked';
+  static const String keyPreviousTier = 'coroute_subscription_previous_tier';
+  static const String keyExpiredAt = 'coroute_subscription_expired_at';
+
+  /// Prefix of the per-step "expiring" warning marker (value: the validUntil it was shown for).
+  static const String keyExpiringNoticePrefix = 'coroute_subscription_expiring_notice_';
+
+  /// Days-left steps at which an expiry warning is shown, once each per subscription period.
+  static const List<int> warningThresholds = [7, 3, 1];
 
   final ApiClient? _api;
 
@@ -53,12 +89,244 @@ class PlanSubscriptionService extends ChangeNotifier {
   bool _forceAllUnlocked = false;
   bool _loaded = false;
 
-  PlanSubscriptionService([this._api]);
+  /// The paid tier the rider had before it ran out (null while a plan is active or never had one).
+  SubscriptionTier? _previousTier;
+  int _expiredAt = 0;
 
+  /// Days left as the server computed them (used when it is fresher than the local clock).
+  int? _serverDaysRemaining;
+
+  SubscriptionExpiringNotice? _expiringNotice;
+  SubscriptionExpiredNotice? _expiredNotice;
+  Timer? _expiryTimer;
+  bool _observing = false;
+
+  PlanSubscriptionService([this._api]) {
+    _expiryTimer = Timer.periodic(const Duration(minutes: 1), (_) => checkExpiry());
+    try {
+      WidgetsBinding.instance.addObserver(this);
+      _observing = true;
+    } catch (_) {
+      // No binding (unit tests): expiry is still checked by the timer and on sync.
+    }
+  }
+
+  @override
+  void dispose() {
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
+    if (_observing) {
+      WidgetsBinding.instance.removeObserver(this);
+      _observing = false;
+    }
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) onAppResumed();
+  }
+
+  /// Back in the foreground: the clock may have moved past validUntil while asleep.
+  void onAppResumed() {
+    checkExpiry();
+    if (_api != null && _api.hasToken) syncFromServer().ignore();
+  }
+
+  /// The tier whose features are unlocked right now (an expired paid plan reads as community).
   SubscriptionTier get currentTier => _currentTier;
+
+  /// Alias of [currentTier], named for call sites that gate features.
+  SubscriptionTier get effectiveTier => _currentTier;
   int get validUntil => _validUntil;
   bool get forceAllUnlocked => _forceAllUnlocked;
   bool get loaded => _loaded;
+
+  /// The paid tier that ran out, until the rider renews or picks Community on purpose.
+  SubscriptionTier? get previousTier => _previousTier;
+  int get expiredAt => _expiredAt;
+
+  /// True when a paid plan ended and the rider has been rolled back to Community.
+  bool get isExpired => _previousTier != null && _currentTier == SubscriptionTier.community;
+
+  bool get _isPaid => _currentTier != SubscriptionTier.community;
+
+  /// Whole days left on the current paid plan (0 when none, or when it already ended).
+  int get daysRemaining {
+    if (!_isPaid || _validUntil <= 0) return 0;
+    final ms = _validUntil - DateTime.now().millisecondsSinceEpoch;
+    if (ms <= 0) return 0;
+    final local = (ms / Duration.millisecondsPerDay).ceil();
+    final server = _serverDaysRemaining;
+    return server != null && server < local ? server : local;
+  }
+
+  /// True when the paid plan ends within [warningThresholds].first days.
+  bool get expiringSoon => _isPaid && _validUntil > 0 && daysRemaining <= warningThresholds.first;
+
+  /// The tier to offer when the rider taps "Renew": the expired one, or the one that is ending.
+  SubscriptionTier get renewTier => _previousTier ?? (_isPaid ? _currentTier : SubscriptionTier.community);
+
+  /// Pending warning from the gateway (or the local countdown), null once shown.
+  SubscriptionExpiringNotice? get expiringNotice => _expiringNotice;
+
+  /// Pending "your plan ended" notice, null once shown.
+  SubscriptionExpiredNotice? get expiredNotice => _expiredNotice;
+
+  /// Marks the pending warning as shown.
+  void consumeExpiringNotice() {
+    if (_expiringNotice == null) return;
+    _expiringNotice = null;
+    notifyListeners();
+  }
+
+  /// Marks the pending expired dialog as shown.
+  void consumeExpiredNotice() {
+    if (_expiredNotice == null) return;
+    _expiredNotice = null;
+    notifyListeners();
+  }
+
+  /// The warning step (7, 3 or 1) a number of days left falls into.
+  static int thresholdFor(int daysRemaining) {
+    for (final t in warningThresholds.reversed) {
+      if (daysRemaining <= t) return t;
+    }
+    return warningThresholds.first;
+  }
+
+  /// Two or three headline features of a paid tier, for renewal copy.
+  static String keyFeatureSummary(SubscriptionTier tier) {
+    switch (tier) {
+      case SubscriptionTier.proRider:
+        return 'live radar, voice alerts and crash detection';
+      case SubscriptionTier.roadCaptain:
+        return '40-rider convoys, priority intercom and waypoint push';
+      case SubscriptionTier.tourOperator:
+        return 'fleet dispatch, 100-rider fleets and satellite backup';
+      case SubscriptionTier.community:
+        return 'your Community features';
+    }
+  }
+
+  /// Rolls a paid plan back to Community once its validUntil is in the past.
+  /// Returns true when a rollback happened.
+  bool checkExpiry() {
+    if (!_isPaid || _validUntil <= 0) return false;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_validUntil > now) {
+      // Still valid: raise the 7/3/1-day warning locally too, in case the gateway's push is missed.
+      if (expiringSoon) _noteExpiring(daysRemaining, _currentTier, _validUntil);
+      return false;
+    }
+    _expire(previousTier: _currentTier, expiredAt: _validUntil, notice: false);
+    return true;
+  }
+
+  void _expire({required SubscriptionTier previousTier, required int expiredAt, required bool notice}) {
+    _previousTier = previousTier == SubscriptionTier.community ? _previousTier : previousTier;
+    _expiredAt = expiredAt;
+    _currentTier = SubscriptionTier.community;
+    _validUntil = 0;
+    _serverDaysRemaining = null;
+    _expiringNotice = null;
+    _forceAllUnlocked = false;
+    if (notice && _previousTier != null) {
+      _expiredNotice = SubscriptionExpiredNotice(previousTier: _previousTier!, expiredAt: expiredAt);
+    }
+    _syncToFeatureGates();
+    notifyListeners();
+    _persist();
+  }
+
+  void _persist() {
+    SharedPreferences.getInstance().then((prefs) async {
+      await prefs.setString(keyTier, _currentTier.name);
+      await prefs.setInt(keyValidUntil, _validUntil);
+      await prefs.setBool(keyForceUnlocked, _forceAllUnlocked);
+      final prev = _previousTier;
+      if (prev == null) {
+        await prefs.remove(keyPreviousTier);
+        await prefs.remove(keyExpiredAt);
+      } else {
+        await prefs.setString(keyPreviousTier, prev.name);
+        await prefs.setInt(keyExpiredAt, _expiredAt);
+      }
+    }).ignore();
+  }
+
+  static SubscriptionTier? _tierNamed(String? name) {
+    if (name == null || name.isEmpty) return null;
+    for (final t in SubscriptionTier.values) {
+      if (t.name.toLowerCase() == name.toLowerCase()) return t;
+    }
+    return null;
+  }
+
+  /// Applies the `subscriptionStatus` object the gateway sends with `/me`,
+  /// `/auth/login` and `/subscription/status`:
+  /// `{ tier, validUntil, isActive, isExpired, daysRemaining, expiringSoon, previousTier }`.
+  /// An expired paid tier arrives already reported as `community`.
+  void applySubscriptionStatus(Map<String, dynamic> status) {
+    final tierName = status['tier']?.toString();
+    if (tierName == null || tierName.isEmpty) return;
+    final until = status['validUntil'] is num ? (status['validUntil'] as num).toInt() : 0;
+    final prev = _tierNamed(status['previousTier']?.toString());
+    final expired = status['isExpired'] == true;
+    final days = status['daysRemaining'] is num ? (status['daysRemaining'] as num).toInt() : null;
+    applyServerSubscription(tierName, until, previousTier: expired ? (prev ?? _previousTier) : prev, serverDaysRemaining: days);
+    if (status['expiringSoon'] == true && _isPaid && days != null) {
+      _noteExpiring(days, _currentTier, _validUntil);
+    }
+  }
+
+  /// Records a warning for [daysRemaining] days left, once per threshold step per plan period.
+  void _noteExpiring(int daysRemaining, SubscriptionTier tier, int validUntil) {
+    final threshold = thresholdFor(daysRemaining);
+    SharedPreferences.getInstance().then((prefs) {
+      final key = '$keyExpiringNoticePrefix$threshold';
+      if (prefs.getInt(key) == validUntil) return; // already shown for this period
+      prefs.setInt(key, validUntil).ignore();
+      _expiringNotice = SubscriptionExpiringNotice(
+        daysRemaining: daysRemaining,
+        tier: tier,
+        validUntil: validUntil,
+        threshold: threshold,
+      );
+      notifyListeners();
+    }).ignore();
+  }
+
+  /// Gateway `SUBSCRIPTION_EXPIRING` `{daysRemaining, tier, validUntil}`.
+  void handleExpiringEvent(Map<String, dynamic> e) {
+    final days = e['daysRemaining'] is num ? (e['daysRemaining'] as num).toInt() : daysRemaining;
+    final tier = _tierNamed(e['tier']?.toString()) ?? _currentTier;
+    final until = e['validUntil'] is num ? (e['validUntil'] as num).toInt() : _validUntil;
+    if (tier == SubscriptionTier.community) return;
+    if (until > 0 && (tier != _currentTier || until != _validUntil)) {
+      applyServerSubscription(tier.name, until, serverDaysRemaining: days);
+    } else {
+      _serverDaysRemaining = days;
+      notifyListeners();
+    }
+    _noteExpiring(days, tier, until);
+  }
+
+  /// Gateway `SUBSCRIPTION_EXPIRED` `{previousTier, expiredAt}`: roll back right away.
+  void handleExpiredEvent(Map<String, dynamic> e) {
+    final prev = _tierNamed(e['previousTier']?.toString()) ?? (_isPaid ? _currentTier : _previousTier);
+    final at = e['expiredAt'] is num ? (e['expiredAt'] as num).toInt() : DateTime.now().millisecondsSinceEpoch;
+    if (prev == null) return;
+    _expire(previousTier: prev, expiredAt: at, notice: true);
+  }
+
+  /// `GET /subscription/history`: `{ history: [...], subscriptionHistory: [...], orders: [...] }`.
+  Future<Map<String, dynamic>> fetchHistory() async {
+    if (_api == null) throw const ApiException(0, 'API client unavailable.');
+    final res = await _api.get('/subscription/history');
+    if (res is Map) return Map<String, dynamic>.from(res);
+    return const {'history': [], 'subscriptionHistory': [], 'orders': []};
+  }
 
   /// Loads the persisted plan and unlock state from SharedPreferences and syncs with server.
   Future<void> load() async {
@@ -73,6 +341,8 @@ class PlanSubscriptionService extends ChangeNotifier {
       }
       _validUntil = prefs.getInt(keyValidUntil) ?? 0;
       _forceAllUnlocked = prefs.getBool(keyForceUnlocked) ?? false;
+      _previousTier = _tierNamed(prefs.getString(keyPreviousTier));
+      _expiredAt = prefs.getInt(keyExpiredAt) ?? 0;
       _syncToFeatureGates();
     } catch (_) {
       // Fallback defaults
@@ -80,6 +350,7 @@ class PlanSubscriptionService extends ChangeNotifier {
       _loaded = true;
       notifyListeners();
     }
+    checkExpiry();
 
     // Background sync from Gateway API
     if (_api != null && _api.hasToken) {
@@ -93,32 +364,51 @@ class PlanSubscriptionService extends ChangeNotifier {
     try {
       final res = await _api.get('/subscription/status');
       if (res is Map) {
-        final tierName = res['tier']?.toString();
-        final until = res['validUntil'] is num ? (res['validUntil'] as num).toInt() : 0;
-        if (tierName != null) {
-          applyServerSubscription(tierName, until);
+        final m = Map<String, dynamic>.from(res);
+        final status = m['subscriptionStatus'];
+        if (status is Map) {
+          applySubscriptionStatus(Map<String, dynamic>.from(status));
+        } else if (m['tier'] != null) {
+          // Flat shape (older gateway or the status object itself).
+          applySubscriptionStatus(m);
         }
       }
     } catch (_) {}
+    checkExpiry();
   }
 
   /// Applies a server-confirmed subscription tier and persists it locally.
-  void applyServerSubscription(String tierName, int? validUntilEpochMs) {
-    final matched = SubscriptionTier.values.firstWhere(
-      (t) => t.name.toLowerCase() == tierName.toLowerCase(),
-      orElse: () => SubscriptionTier.community,
-    );
+  ///
+  /// A paid tier whose [validUntilEpochMs] is already past is stored as Community
+  /// with the paid tier kept as [previousTier]. A paid tier that is still valid
+  /// clears any earlier expiry (the rider renewed).
+  void applyServerSubscription(
+    String tierName,
+    int? validUntilEpochMs, {
+    SubscriptionTier? previousTier,
+    int? serverDaysRemaining,
+  }) {
+    final matched = _tierNamed(tierName) ?? SubscriptionTier.community;
+    final until = validUntilEpochMs ?? 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (matched != SubscriptionTier.community && until > 0 && until <= now) {
+      _expire(previousTier: matched, expiredAt: until, notice: false);
+      return;
+    }
     _currentTier = matched;
-    _validUntil = validUntilEpochMs ?? 0;
+    _validUntil = until;
     _forceAllUnlocked = false;
+    _serverDaysRemaining = matched == SubscriptionTier.community ? null : serverDaysRemaining;
+    if (matched != SubscriptionTier.community) {
+      _previousTier = null; // an active paid plan supersedes any earlier expiry
+      _expiredAt = 0;
+    } else if (previousTier != null && previousTier != SubscriptionTier.community) {
+      _previousTier = previousTier;
+      if (_expiredAt == 0) _expiredAt = now;
+    }
     _syncToFeatureGates();
     notifyListeners();
-
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.setString(keyTier, matched.name);
-      prefs.setInt(keyValidUntil, _validUntil);
-      prefs.setBool(keyForceUnlocked, false);
-    }).ignore();
+    _persist();
   }
 
   /// Validates a promotional discount coupon code with the Gateway.
@@ -188,7 +478,11 @@ class PlanSubscriptionService extends ChangeNotifier {
         final until = res['subscriptionValidUntil'] is num
             ? (res['subscriptionValidUntil'] as num).toInt()
             : 0;
-        applyServerSubscription(newTier, until);
+        if (res['subscriptionStatus'] is Map) {
+          applySubscriptionStatus(Map<String, dynamic>.from(res['subscriptionStatus'] as Map));
+        } else {
+          applyServerSubscription(newTier, until);
+        }
         return {'success': true, 'tier': newTier, 'validUntil': until};
       }
       if (res is Map && res['pending'] == true) {
@@ -204,12 +498,47 @@ class PlanSubscriptionService extends ChangeNotifier {
   Future<void> selectTier(SubscriptionTier tier) async {
     _currentTier = tier;
     _forceAllUnlocked = false;
+    if (tier == SubscriptionTier.community) {
+      // Chosen on purpose: no longer "expired", just free.
+      _previousTier = null;
+      _expiredAt = 0;
+      _validUntil = 0;
+      _serverDaysRemaining = null;
+      _expiringNotice = null;
+    }
     _syncToFeatureGates();
     notifyListeners();
 
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(keyTier, tier.name);
+      await prefs.setBool(keyForceUnlocked, false);
+      if (tier == SubscriptionTier.community) {
+        await prefs.setInt(keyValidUntil, 0);
+        await prefs.remove(keyPreviousTier);
+        await prefs.remove(keyExpiredAt);
+      }
+    } catch (_) {}
+  }
+
+  /// Signed out: back to the free tier with no history of a paid plan.
+  Future<void> resetLocal() async {
+    _currentTier = SubscriptionTier.community;
+    _validUntil = 0;
+    _previousTier = null;
+    _expiredAt = 0;
+    _serverDaysRemaining = null;
+    _expiringNotice = null;
+    _expiredNotice = null;
+    _forceAllUnlocked = false;
+    _syncToFeatureGates();
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(keyTier);
+      await prefs.remove(keyValidUntil);
+      await prefs.remove(keyPreviousTier);
+      await prefs.remove(keyExpiredAt);
       await prefs.setBool(keyForceUnlocked, false);
     } catch (_) {}
   }

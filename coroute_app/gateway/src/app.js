@@ -15,6 +15,7 @@ const { AuthService, UserGate } = require('./auth');
 const { ConvoyManager } = require('./convoys');
 const { Hub } = require('./ws');
 const { Retention } = require('./retention');
+const { SubscriptionSweeper, expireIfDue } = require('./subscription_lifecycle');
 const { buildRouter } = require('./routes');
 const { TrackStore } = require('./tracks');
 const { GeoProxy } = require('./geo');
@@ -219,10 +220,16 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   });
 
   const retention = new Retention({ repo, soda, convoys, logger });
+  // Subscription expiry warnings (7/3/1 days) and rollback to community, hourly; started with retention.
+  const subscriptions = new SubscriptionSweeper({ repo, auth, hub, logger });
+  auth.onUserSeen = (user) => expireIfDue({ repo, auth, hub }, user);
+  const retentionStart = retention.start.bind(retention);
+  retention.start = () => { retentionStart(); subscriptions.start(); };
 
   async function shutdown() {
     guardianPush?.stop();
     retention.stop();
+    subscriptions.stop();
     timeline.stop();
     network.stop();
     discovery.stop();
@@ -235,7 +242,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { app, server, hub, repo, soda, auth, gate, convoys, retention, tracks, timeline, geo, network, discovery, audit, routes, emergencyGateway, shutdown };
+  return { app, server, hub, repo, soda, auth, gate, convoys, retention, subscriptions, tracks, timeline, geo, network, discovery, audit, routes, emergencyGateway, shutdown };
 }
 
 /**
