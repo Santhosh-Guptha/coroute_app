@@ -87,23 +87,26 @@ void main() {
       expect(service.currentTier, equals(SubscriptionTier.community));
       expect(FeatureGates.activeTier, equals(SubscriptionTier.community));
 
-      // Switch to Pro Rider
-      await service.selectTier(SubscriptionTier.proRider);
+      final future = DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch;
+
+      // Switch to Pro Rider (server-confirmed entitlement)
+      service.applyServerSubscription('proRider', future);
       expect(service.currentTier, equals(SubscriptionTier.proRider));
       expect(FeatureGates.activeTier, equals(SubscriptionTier.proRider));
       expect(FeatureGates.isUnlocked(Feature.guardianLiveShare), isTrue);
       expect(FeatureGates.isUnlocked(Feature.priorityIntercomDucking), isFalse);
 
-      // Switch to Road Captain
-      await service.selectTier(SubscriptionTier.roadCaptain);
+      // Switch to Road Captain (server-confirmed entitlement)
+      service.applyServerSubscription('roadCaptain', future);
       expect(service.currentTier, equals(SubscriptionTier.roadCaptain));
       expect(FeatureGates.activeTier, equals(SubscriptionTier.roadCaptain));
       expect(FeatureGates.isUnlocked(Feature.priorityIntercomDucking), isTrue);
       expect(FeatureGates.maxConvoyMembers(), equals(40));
 
-      // Switch back to Community
-      await service.selectTier(SubscriptionTier.community);
+      // Switch back to Community: a free local preference, the pass is kept
+      expect(await service.selectTier(SubscriptionTier.community), isTrue);
       expect(service.currentTier, equals(SubscriptionTier.community));
+      expect(service.entitledTier, equals(SubscriptionTier.roadCaptain));
       expect(FeatureGates.activeTier, equals(SubscriptionTier.community));
       expect(FeatureGates.isUnlocked(Feature.guardianLiveShare), isFalse);
       expect(FeatureGates.maxConvoyMembers(), equals(4));

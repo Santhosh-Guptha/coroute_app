@@ -25,16 +25,159 @@ void main() {
       expect(service.isUnlocked(Feature.priorityIntercomDucking), isFalse);
     });
 
-    test('selectTier updates current tier and synchronizes with FeatureGates', () async {
+    test('selectTier within the entitlement updates the effective tier and FeatureGates', () async {
       final service = PlanSubscriptionService();
       await service.load();
 
-      await service.selectTier(SubscriptionTier.roadCaptain);
+      final futureExpiry = DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch;
+      service.applyServerSubscription('roadCaptain', futureExpiry);
+      expect(await service.selectTier(SubscriptionTier.community), isTrue);
+      expect(service.currentTier, equals(SubscriptionTier.community));
+
+      expect(await service.selectTier(SubscriptionTier.roadCaptain), isTrue);
 
       expect(service.currentTier, equals(SubscriptionTier.roadCaptain));
+      expect(FeatureGates.activeTier, equals(SubscriptionTier.roadCaptain));
       expect(service.maxConvoyMembers, equals(40));
       expect(service.isUnlocked(Feature.priorityIntercomDucking), isTrue);
       expect(service.isUnlocked(Feature.roadHazardBroadcast), isTrue);
+    });
+
+    test('selectTier above the entitlement is refused and changes nothing (needs checkout)', () async {
+      final service = PlanSubscriptionService();
+      await service.load();
+
+      expect(await service.selectTier(SubscriptionTier.proRider), isFalse);
+      expect(service.currentTier, equals(SubscriptionTier.community));
+      expect(service.preferredTier, equals(SubscriptionTier.community));
+      expect(FeatureGates.activeTier, equals(SubscriptionTier.community));
+
+      final futureExpiry = DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch;
+      service.applyServerSubscription('proRider', futureExpiry);
+      expect(service.canSelect(SubscriptionTier.proRider), isTrue);
+      expect(service.canSelect(SubscriptionTier.roadCaptain), isFalse);
+      expect(await service.selectTier(SubscriptionTier.roadCaptain), isFalse);
+      expect(service.currentTier, equals(SubscriptionTier.proRider));
+      expect(service.entitledTier, equals(SubscriptionTier.proRider));
+      expect(service.validUntil, equals(futureExpiry));
+    });
+
+    test('a paid plan survives selectTier(community) and comes back without paying', () async {
+      final service = PlanSubscriptionService();
+      await service.load();
+
+      final futureExpiry = DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch;
+      service.applyServerSubscription('proRider', futureExpiry);
+      expect(service.isEntitledTo(SubscriptionTier.proRider), isTrue);
+      expect(service.currentTier, equals(SubscriptionTier.proRider));
+
+      expect(await service.selectTier(SubscriptionTier.community), isTrue);
+      expect(service.currentTier, equals(SubscriptionTier.community));
+      expect(service.preferredTier, equals(SubscriptionTier.community));
+      expect(service.entitledTier, equals(SubscriptionTier.proRider));
+      expect(service.validUntil, equals(futureExpiry));
+      expect(service.isEntitledTo(SubscriptionTier.proRider), isTrue);
+      expect(service.isExpired, isFalse);
+      expect(FeatureGates.isUnlocked(Feature.guardianLiveShare), isFalse);
+
+      // Persisted both ways round
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(PlanSubscriptionService.keyTier), equals('proRider'));
+      expect(prefs.getInt(PlanSubscriptionService.keyValidUntil), equals(futureExpiry));
+      expect(prefs.getString(PlanSubscriptionService.keyPreferredTier), equals('community'));
+
+      final reloaded = PlanSubscriptionService();
+      await reloaded.load();
+      expect(reloaded.entitledTier, equals(SubscriptionTier.proRider));
+      expect(reloaded.currentTier, equals(SubscriptionTier.community));
+
+      // Switching back is free
+      expect(await reloaded.selectTier(SubscriptionTier.proRider), isTrue);
+      expect(reloaded.currentTier, equals(SubscriptionTier.proRider));
+      expect(reloaded.validUntil, equals(futureExpiry));
+      expect(FeatureGates.isUnlocked(Feature.guardianLiveShare), isTrue);
+    });
+
+    test('server status re-sync keeps a Community preference; a new plan becomes preferred', () async {
+      final service = PlanSubscriptionService();
+      await service.load();
+
+      final futureExpiry = DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch;
+      service.applySubscriptionStatus({
+        'tier': 'proRider',
+        'validUntil': futureExpiry,
+        'isActive': true,
+        'isExpired': false,
+        'daysRemaining': 30,
+      });
+      expect(service.currentTier, equals(SubscriptionTier.proRider));
+
+      await service.selectTier(SubscriptionTier.community);
+      // Same plan reported again (e.g. after resume): the rider's choice sticks.
+      service.applySubscriptionStatus({
+        'tier': 'proRider',
+        'validUntil': futureExpiry,
+        'isActive': true,
+        'isExpired': false,
+        'daysRemaining': 30,
+      });
+      expect(service.currentTier, equals(SubscriptionTier.community));
+      expect(service.entitledTier, equals(SubscriptionTier.proRider));
+
+      // An upgrade paid for on the server becomes the plan in use.
+      service.applySubscriptionStatus({
+        'tier': 'roadCaptain',
+        'validUntil': futureExpiry + 1000,
+        'isActive': true,
+        'isExpired': false,
+        'daysRemaining': 30,
+      });
+      expect(service.entitledTier, equals(SubscriptionTier.roadCaptain));
+      expect(service.preferredTier, equals(SubscriptionTier.roadCaptain));
+      expect(service.currentTier, equals(SubscriptionTier.roadCaptain));
+      expect(service.maxConvoyMembers, equals(40));
+    });
+
+    test('expiry rolls the effective tier to Community but leaves the preference alone', () async {
+      final service = PlanSubscriptionService();
+      await service.load();
+
+      final soon = DateTime.now().add(const Duration(milliseconds: 60)).millisecondsSinceEpoch;
+      service.applyServerSubscription('roadCaptain', soon);
+      expect(service.currentTier, equals(SubscriptionTier.roadCaptain));
+      expect(service.checkExpiry(), isFalse);
+
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(service.checkExpiry(), isTrue);
+      expect(service.currentTier, equals(SubscriptionTier.community));
+      expect(service.entitledTier, equals(SubscriptionTier.community));
+      expect(service.validUntil, equals(0));
+      expect(service.preferredTier, equals(SubscriptionTier.roadCaptain));
+      expect(service.isExpired, isTrue);
+      expect(service.previousTier, equals(SubscriptionTier.roadCaptain));
+      expect(service.renewTier, equals(SubscriptionTier.roadCaptain));
+      expect(FeatureGates.activeTier, equals(SubscriptionTier.community));
+
+      // Paid again: the preference is still the paid tier, so it is in use right away.
+      final renewed = DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch;
+      service.applyServerSubscription('roadCaptain', renewed);
+      expect(service.currentTier, equals(SubscriptionTier.roadCaptain));
+      expect(service.isExpired, isFalse);
+    });
+
+    test('SUBSCRIPTION_EXPIRED event re-applies the entitlement only', () async {
+      final service = PlanSubscriptionService();
+      await service.load();
+
+      final futureExpiry = DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch;
+      service.applyServerSubscription('proRider', futureExpiry);
+      service.handleExpiredEvent({'previousTier': 'proRider', 'expiredAt': futureExpiry});
+
+      expect(service.currentTier, equals(SubscriptionTier.community));
+      expect(service.entitledTier, equals(SubscriptionTier.community));
+      expect(service.preferredTier, equals(SubscriptionTier.proRider));
+      expect(service.expiredNotice?.previousTier, equals(SubscriptionTier.proRider));
+      expect(await service.selectTier(SubscriptionTier.proRider), isFalse);
     });
 
     test('applyServerSubscription persists and unlocks entitlements from gateway push', () async {
