@@ -176,7 +176,6 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
         tier: widget.plan.tier,
         annual: widget.isAnnual,
         couponCode: _appliedCoupon?['code']?.toString(),
-        paymentId: 'pay_free_${DateTime.now().millisecondsSinceEpoch}',
       );
 
       if (res['success'] == true) {
@@ -218,9 +217,13 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
       _errorMessage = null;
     });
 
+    // The server sends the key id of the active mode (test or live).
     final keyId = _orderData?['razorpayOptions']?['key']?.toString() ??
-        _orderData?['razorpayKeyId']?.toString() ??
-        'rzp_test_sample_123';
+        _orderData?['razorpayKeyId']?.toString();
+    if (keyId == null || keyId.isEmpty) {
+      setState(() => _errorMessage = 'Online payment is not configured. Please try again later.');
+      return;
+    }
 
     final orderId = _orderData?['orderId']?.toString() ?? '';
     int amountInPaise = _orderData?['amountInPaise'] is num
@@ -400,8 +403,20 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
         tier: widget.plan.tier,
         annual: widget.isAnnual,
         utr: utrText,
-        paymentId: 'pay_manual_${DateTime.now().millisecondsSinceEpoch}',
       );
+
+      // A UTR is only a claim: the plan is activated once the payment is
+      // confirmed by the CoRoute team (server answers 202 / pending).
+      if (res['pending'] == true) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = res['message']?.toString() ??
+                'UTR received. Your plan is activated once the payment is confirmed.';
+          });
+        }
+        return;
+      }
 
       if (res['success'] == true) {
         HapticFeedback.heavyImpact();

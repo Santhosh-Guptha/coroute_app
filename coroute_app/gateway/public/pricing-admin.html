@@ -199,6 +199,37 @@
         </div>
       </div>
 
+      <!-- Section 0: Payment Gateway (Razorpay test/live) -->
+      <div class="admin-card" id="gateway-card">
+        <h2>0. Payment Gateway (Razorpay) <span id="gw-mode-badge" style="font-size:12px;padding:2px 10px;border-radius:4px;margin-left:8px;background:#455A64;color:#FFF">&hellip;</span></h2>
+        <p class="t-small t-muted">Keep a TEST and a LIVE key pair and choose which one new orders use. Secrets are stored encrypted on the server and are never shown again; leave a secret blank to keep the saved one. Orders already created keep the mode they were created in.</p>
+        <div class="form-row">
+          <div class="form-col">
+            <label for="gw-mode">Active mode</label>
+            <select id="gw-mode"><option value="test">Test (no real money)</option><option value="live">Live (real payments)</option></select>
+          </div>
+        </div>
+        <h3 class="t-h4" style="margin:8px 0">Test keys <small id="gw-test-src" class="t-muted"></small></h3>
+        <div class="form-row">
+          <div class="form-col"><label for="gw-test-id">Key ID</label><input type="text" id="gw-test-id" placeholder="rzp_test_..." autocomplete="off"></div>
+          <div class="form-col"><label for="gw-test-secret">Key Secret <span id="gw-test-secret-state"></span></label><input type="password" id="gw-test-secret" autocomplete="new-password"></div>
+          <div class="form-col"><label for="gw-test-hook">Webhook Secret <span id="gw-test-hook-state"></span></label><input type="password" id="gw-test-hook" autocomplete="new-password"></div>
+        </div>
+        <h3 class="t-h4" style="margin:8px 0">Live keys <small id="gw-live-src" class="t-muted"></small></h3>
+        <div class="form-row">
+          <div class="form-col"><label for="gw-live-id">Key ID</label><input type="text" id="gw-live-id" placeholder="rzp_live_..." autocomplete="off"></div>
+          <div class="form-col"><label for="gw-live-secret">Key Secret <span id="gw-live-secret-state"></span></label><input type="password" id="gw-live-secret" autocomplete="new-password"></div>
+          <div class="form-col"><label for="gw-live-hook">Webhook Secret <span id="gw-live-hook-state"></span></label><input type="password" id="gw-live-hook" autocomplete="new-password"></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" id="gw-save-btn" class="btn-admin">Save Gateway Settings</button>
+          <button type="button" id="gw-test-btn" class="btn-admin-secondary">Check Test Keys</button>
+          <button type="button" id="gw-live-btn" class="btn-admin-secondary">Check Live Keys</button>
+        </div>
+        <h3 class="t-h4" style="margin:16px 0 8px">Direct UPI claims awaiting confirmation</h3>
+        <div id="gw-claims" class="t-small t-muted">&hellip;</div>
+      </div>
+
       <!-- Section 1: Configurable Plan Pricing -->
       <div class="admin-card">
         <h2>1. Plan Pricing Customizer</h2>
@@ -603,7 +634,81 @@
     }
   });
 
+  // ---------------- Payment gateway ----------------
+  const $ = (id) => document.getElementById(id);
+  function gwState(set) { return set ? '(saved)' : '(not set)'; }
+  function fillGateway(g) {
+    $('gw-mode').value = g.mode;
+    const badge = $('gw-mode-badge');
+    badge.textContent = g.mode.toUpperCase();
+    badge.style.background = g.mode === 'live' ? '#2E7D32' : '#EF6C00';
+    for (const m of ['test', 'live']) {
+      $('gw-' + m + '-id').value = g[m].keyId || '';
+      $('gw-' + m + '-secret').value = '';
+      $('gw-' + m + '-hook').value = '';
+      $('gw-' + m + '-secret-state').textContent = gwState(g[m].keySecretSet);
+      $('gw-' + m + '-hook-state').textContent = gwState(g[m].webhookSecretSet);
+      $('gw-' + m + '-src').textContent = g[m].source === 'admin' ? '(saved here)' : (g[m].source === 'env' ? '(from server environment)' : '(not configured)');
+    }
+  }
+  async function loadGateway() {
+    try {
+      const res = await fetch('/api/admin/payment-gateway', { headers: getHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { $('gw-mode-badge').textContent = 'admin only'; return; }
+      fillGateway(data);
+    } catch (e) { showNotice('error', '[Error] ' + e.message); }
+  }
+  async function saveGateway() {
+    const mode = $('gw-mode').value;
+    if (mode === 'live' && $('gw-mode-badge').textContent !== 'LIVE' &&
+        !confirm('Switch to LIVE? Riders will be charged real money from now on.')) return;
+    const body = { mode };
+    for (const m of ['test', 'live']) {
+      body[m] = { keyId: $('gw-' + m + '-id').value.trim(), keySecret: $('gw-' + m + '-secret').value.trim(), webhookSecret: $('gw-' + m + '-hook').value.trim() };
+    }
+    const res = await fetch('/api/admin/payment-gateway', { method: 'PUT', headers: getHeaders(), body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showNotice('error', '[Not saved] ' + (data.error || res.status));
+    fillGateway(data);
+    showNotice('success', 'Gateway saved. New orders use ' + data.mode.toUpperCase() + ' keys.');
+  }
+  async function checkKeys(mode) {
+    const res = await fetch('/api/admin/payment-gateway/test', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ mode }) });
+    const data = await res.json().catch(() => ({}));
+    showNotice(res.ok ? 'success' : 'error', res.ok ? ('Razorpay accepted the ' + mode.toUpperCase() + ' keys.') : ('[' + mode.toUpperCase() + ' keys] ' + (data.error || res.status)));
+  }
+  async function loadClaims() {
+    const box = $('gw-claims');
+    const res = await fetch('/api/admin/payment-claims', { headers: getHeaders() });
+    if (!res.ok) { box.textContent = 'Administrator authorization required.'; return; }
+    const { claims } = await res.json();
+    if (!claims.length) { box.textContent = 'None.'; return; }
+    box.innerHTML = '';
+    claims.forEach((c) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px';
+      row.textContent = c.orderId + ' · ' + c.planTier + ' · Rs ' + (c.amountInPaise / 100) + ' · UTR ' + c.utr + ' ';
+      for (const act of ['approve', 'reject']) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = act === 'approve' ? 'btn-admin' : 'btn-admin-secondary'; b.textContent = act === 'approve' ? 'Approve' : 'Reject';
+        b.onclick = async () => {
+          const r = await fetch('/api/admin/payment-claims/' + encodeURIComponent(c.orderId) + '/' + act, { method: 'POST', headers: getHeaders(), body: '{}' });
+          showNotice(r.ok ? 'success' : 'error', r.ok ? ('Claim ' + act + 'd') : 'Failed');
+          loadClaims();
+        };
+        row.appendChild(b);
+      }
+      box.appendChild(row);
+    });
+  }
+  $('gw-save-btn').addEventListener('click', saveGateway);
+  $('gw-test-btn').addEventListener('click', () => checkKeys('test'));
+  $('gw-live-btn').addEventListener('click', () => checkKeys('live'));
+
   function loadAll() {
+    loadGateway();
+    loadClaims();
     loadPricing();
     loadCoupons();
   }

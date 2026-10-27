@@ -191,6 +191,9 @@ class PlanSubscriptionService extends ChangeNotifier {
         applyServerSubscription(newTier, until);
         return {'success': true, 'tier': newTier, 'validUntil': until};
       }
+      if (res is Map && res['pending'] == true) {
+        return {'success': false, 'pending': true, 'message': res['message']?.toString()};
+      }
       return {'success': false, 'error': res is Map ? res['error']?.toString() : 'Verification failed'};
     } catch (e) {
       return {'success': false, 'error': e.toString()};
