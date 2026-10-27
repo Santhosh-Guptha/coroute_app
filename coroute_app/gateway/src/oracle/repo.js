@@ -254,6 +254,12 @@ class Repo {
     const rows = await this.soda.query(C.users, { subscriptionTier: { $in: ['proRider', 'roadCaptain', 'tourOperator'] } }, { limit });
     return rows.map((r) => ({ ...r.value, key: r.key }));
   }
+  /** Users filtered by subscription tier ('community' = everyone not on a paid tier); all users when no tiers given. */
+  async listUsersBySubscription(tiers = null, limit = 10000) {
+    const filter = Array.isArray(tiers) && tiers.length ? { subscriptionTier: { $in: tiers } } : {};
+    const rows = await this.soda.query(C.users, filter, { limit });
+    return rows.map((r) => ({ ...r.value, key: r.key }));
+  }
   async countAdmins() {
     return (await this.soda.query(C.users, { role: 'MASTER_ADMIN' }, { limit: 1000 })).length;
   }
@@ -669,13 +675,60 @@ class Repo {
     const r = await this.soda.findOne(C.subscriptionConfig, { k: 'pricing' });
     return r ? r.value.prices : null;
   }
+  /** The whole pricing document: { prices, history: [{at, by, prices}], updatedAt, updatedBy } or null. */
+  async getSubscriptionPricingDoc() {
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'pricing' });
+    return r ? r.value : null;
+  }
+  /** Saves the prices and appends an audit entry to `history` (the last 50 are kept). */
   async setSubscriptionPricing(prices, updatedBy = 'system') {
+    const existing = await this.getSubscriptionPricingDoc();
+    const at = Date.now();
+    const history = Array.isArray(existing?.history) ? [...existing.history] : [];
+    history.push({ at, by: updatedBy, prices });
     return this.soda.upsertBy(C.subscriptionConfig, { k: 'pricing' }, {
       k: 'pricing',
       prices,
-      updatedAt: Date.now(),
+      history: history.slice(-50),
+      updatedAt: at,
       updatedBy,
     });
+  }
+  // ---------- offers (automatic discounts; subscription_config k='offer') ----------
+  async listOffers(limit = 200) {
+    const rows = await this.soda.query(C.subscriptionConfig, { k: 'offer' }, { limit });
+    return rows.map((r) => r.value);
+  }
+  async findOffer(id) {
+    if (!id) return null;
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'offer', id: String(id) });
+    return r ? r.value : null;
+  }
+  async saveOffer(offer) {
+    if (!offer || !offer.id) throw new Error('Offer id is required');
+    const doc = { ...offer, k: 'offer', id: String(offer.id), updatedAt: Date.now() };
+    delete doc.key;
+    await this.soda.upsertBy(C.subscriptionConfig, { k: 'offer', id: doc.id }, doc);
+    return doc;
+  }
+  async deleteOffer(id) {
+    return this.soda.removeWhere(C.subscriptionConfig, { k: 'offer', id: String(id) });
+  }
+  /** Counts one PAID order against the offer. */
+  async recordOfferRedemption(id) {
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'offer', id: String(id) });
+    if (!r) return null;
+    const next = { ...r.value, redemptions: (Number(r.value.redemptions) || 0) + 1, lastRedeemedAt: Date.now(), updatedAt: Date.now() };
+    await this.soda.replace(C.subscriptionConfig, r.key, next);
+    return next;
+  }
+  // ---------- subscription sweeper status (subscription_config k='sweep') ----------
+  async getSubscriptionSweepStatus() {
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'sweep' });
+    return r ? r.value : null;
+  }
+  async setSubscriptionSweepStatus(status) {
+    return this.soda.upsertBy(C.subscriptionConfig, { k: 'sweep' }, { ...status, k: 'sweep' });
   }
   // ---------- Razorpay settings & order ledger (subscription_config) ----------
   /** Admin-saved gateway settings (secrets already encrypted by razorpay_gateway.js). */

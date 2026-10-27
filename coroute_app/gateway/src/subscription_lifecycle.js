@@ -118,6 +118,11 @@ class SubscriptionSweeper {
       }
     }
     this.log.info('[subscriptions] sweep', JSON.stringify(stats));
+    this.lastSweepAt = nowMs;
+    this.lastStats = stats;
+    if (typeof this.repo.setSubscriptionSweepStatus === 'function') {
+      await this.repo.setSubscriptionSweepStatus({ lastSweepAt: nowMs, ...stats }).catch(() => {});
+    }
     return stats;
   }
 }

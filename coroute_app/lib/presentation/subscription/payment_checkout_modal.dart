@@ -109,7 +109,8 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
       final service = context.read<PlanSubscriptionService>();
       await service.syncFromServer();
       if (!mounted) return;
-      if (service.currentTier == widget.plan.tier && service.validUntil > DateTime.now().millisecondsSinceEpoch) {
+      // The server's entitlement is what counts, not the rider's local preference.
+      if (service.isEntitledTo(widget.plan.tier)) {
         HapticFeedback.heavyImpact();
         setState(() {
           _isLoading = false;

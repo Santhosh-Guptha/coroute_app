@@ -166,6 +166,113 @@ function normalizeTier(tier) {
   return 'community';
 }
 
+// ---------------------------------------------------------------------------
+// OFFERS: automatic discounts an admin schedules per tier / cycle. Stored in
+// subscription_config (k='offer'). An offer without a linked couponCode is
+// applied automatically when the rider gives no coupon; an offer WITH a
+// couponCode only advertises that code (the rider enters it). A coupon, when
+// given, always wins over an offer: there is no stacking.
+// ---------------------------------------------------------------------------
+const OFFER_DISCOUNT_TYPES = ['percentage', 'fixed', 'price'];
+
+function offerView(o) {
+  return {
+    id: o.id, title: o.title || '', description: o.description || '',
+    planTier: o.planTier || 'all', billingCycle: o.billingCycle || 'all',
+    discountType: o.discountType || 'percentage', discountValue: Number(o.discountValue) || 0,
+    startsAt: Number(o.startsAt) || 0, endsAt: Number(o.endsAt) || 0,
+    isActive: o.isActive !== false, showOnCheckout: o.showOnCheckout !== false,
+    couponCode: o.couponCode || null,
+    maxRedemptions: Number(o.maxRedemptions) || 0, redemptions: Number(o.redemptions) || 0,
+    createdAt: Number(o.createdAt) || 0, updatedAt: Number(o.updatedAt) || 0, createdBy: o.createdBy || null,
+  };
+}
+/** Public shape (no counters, no author). */
+function publicOfferView(o) {
+  const v = offerView(o);
+  return {
+    id: v.id, title: v.title, description: v.description, planTier: v.planTier, billingCycle: v.billingCycle,
+    discountType: v.discountType, discountValue: v.discountValue, startsAt: v.startsAt, endsAt: v.endsAt,
+    couponCode: v.couponCode, autoApplied: !v.couponCode,
+  };
+}
+/** Active, inside its dates, and not sold out. */
+function offerIsLive(o, nowMs = Date.now()) {
+  if (!o || o.isActive === false) return false;
+  if (Number(o.startsAt) && nowMs < Number(o.startsAt)) return false;
+  if (Number(o.endsAt) && nowMs > Number(o.endsAt)) return false;
+  if (Number(o.maxRedemptions) > 0 && (Number(o.redemptions) || 0) >= Number(o.maxRedemptions)) return false;
+  return true;
+}
+function offerApplies(o, planTier, billingCycle) {
+  const t = o.planTier || 'all';
+  const c = o.billingCycle || 'all';
+  return (t === 'all' || t === planTier) && (c === 'all' || c === billingCycle);
+}
+/** Discount in INR for a base amount. An offer never makes an order free (at least ₹1 stays payable). */
+function offerDiscount(o, amountInInr) {
+  const base = Math.max(0, Number(amountInInr) || 0);
+  const v = Math.max(0, Number(o.discountValue) || 0);
+  let d = 0;
+  if (o.discountType === 'percentage') d = Math.round((base * Math.min(100, v)) / 100);
+  else if (o.discountType === 'fixed') d = Math.round(v);
+  else if (o.discountType === 'price') d = Math.round(base - v);
+  return Math.max(0, Math.min(d, Math.max(0, base - 1)));
+}
+/** Live, auto-applicable offers for a tier/cycle (newest ending first is irrelevant: we pick the biggest discount). */
+async function liveOffers(repo, nowMs = Date.now()) {
+  if (!repo || typeof repo.listOffers !== 'function') return [];
+  try { return (await repo.listOffers(500)).filter((o) => offerIsLive(o, nowMs)); } catch { return []; }
+}
+/** The best automatic offer for this order, or null. */
+async function bestOffer(repo, { planTier, billingCycle, amountInInr }) {
+  if (!isPaidTier(planTier) || !(Number(amountInInr) > 0)) return null;
+  const candidates = (await liveOffers(repo)).filter((o) => !o.couponCode && offerApplies(o, planTier, billingCycle));
+  let best = null;
+  for (const o of candidates) {
+    const discountAmount = offerDiscount(o, amountInInr);
+    if (discountAmount <= 0) continue;
+    if (!best || discountAmount > best.discountAmount) {
+      best = { id: o.id, title: o.title || '', discountType: o.discountType, discountValue: Number(o.discountValue) || 0,
+        originalAmount: Number(amountInInr), discountAmount, finalAmount: Number(amountInInr) - discountAmount };
+    }
+  }
+  return best;
+}
+/** What create-order responses carry when an offer was applied. */
+function offerResponse(applied) {
+  return applied ? { id: applied.id, title: applied.title, discountAmount: applied.discountAmount } : undefined;
+}
+/** Validates + normalizes an offer document; throws { status: 400, message } on bad input. */
+function normalizeOfferInput(body, existing = null) {
+  const b = body || {};
+  const bad = (m) => { const e = new Error(m); e.status = 400; throw e; };
+  const pick = (k, dflt) => (b[k] !== undefined ? b[k] : (existing ? existing[k] : dflt));
+  const title = String(pick('title', '') || '').trim();
+  if (!title || title.length > 120) bad('title is required (max 120 characters)');
+  const description = String(pick('description', '') || '').trim().slice(0, 500);
+  const rawTier = pick('planTier', 'all');
+  const planTier = rawTier === 'all' || !rawTier ? 'all' : normalizeTier(rawTier);
+  if (planTier !== 'all' && !isPaidTier(planTier)) bad('planTier must be all, proRider, roadCaptain or tourOperator');
+  const billingCycle = pick('billingCycle', 'all') || 'all';
+  if (!['all', 'monthly', 'annual'].includes(billingCycle)) bad('billingCycle must be all, monthly or annual');
+  const discountType = pick('discountType', 'percentage') || 'percentage';
+  if (!OFFER_DISCOUNT_TYPES.includes(discountType)) bad('discountType must be percentage, fixed or price');
+  const discountValue = Number(pick('discountValue', 0));
+  if (!Number.isFinite(discountValue) || discountValue <= 0) bad('discountValue must be a positive number');
+  if (discountType === 'percentage' && discountValue > 100) bad('Percentage discount cannot exceed 100%');
+  const startsAt = Number(pick('startsAt', 0)) || (existing ? Number(existing.startsAt) || Date.now() : Date.now());
+  const endsAt = Number(pick('endsAt', 0)) || (existing ? Number(existing.endsAt) || 0 : startsAt + 30 * 86400000);
+  if (endsAt && endsAt <= startsAt) bad('endsAt must be after startsAt');
+  const isActive = pick('isActive', true) !== false;
+  const showOnCheckout = pick('showOnCheckout', true) !== false;
+  const rawCoupon = pick('couponCode', null);
+  const couponCode = rawCoupon ? String(rawCoupon).trim().toUpperCase() : null;
+  if (couponCode && !/^[A-Z0-9_-]{3,20}$/.test(couponCode)) bad('couponCode must be 3-20 alphanumeric characters');
+  const maxRedemptions = Math.max(0, Math.round(Number(pick('maxRedemptions', 0)) || 0));
+  return { title, description, planTier, billingCycle, discountType, discountValue, startsAt, endsAt, isActive, showOnCheckout, couponCode, maxRedemptions };
+}
+
 
 // One gateway (keys + mode + API client) per repository.
 const gateways = new WeakMap();
@@ -195,7 +302,9 @@ function orderView(o) {
     orderId: o.orderId, userId: o.userId || null, status: o.status || 'CREATED',
     amount: (Number(o.amountInPaise) || 0) / 100, amountInPaise: Number(o.amountInPaise) || 0, currency: o.currency || 'INR',
     mode: o.mode || null, paymentId: o.paymentId || '', utr: o.utr || '', planTier: o.planTier || null, billingCycle: o.billingCycle || null,
-    couponCode: o.couponCode || null, createdAt: Number(o.createdAt) || 0, paidAt: Number(o.paidAt) || 0, updatedAt: Number(o.updatedAt) || 0,
+    couponCode: o.couponCode || null, offerId: o.offerId || null, offerTitle: o.offerTitle || null, discountAmount: Number(o.discountAmount) || 0,
+    channel: o.channel || null, isFree: Boolean(o.isFree), isTest: o.mode === 'test',
+    createdAt: Number(o.createdAt) || 0, paidAt: Number(o.paidAt) || 0, updatedAt: Number(o.updatedAt) || 0,
   };
 }
 /** The rider's ledger orders, newest first. */
@@ -237,6 +346,8 @@ async function activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, v
     source,
     mode: order.mode || null,
     couponCode: order.couponCode || null,
+    offerId: order.offerId || null,
+    discountAmount: Number(order.discountAmount) || 0,
     userSnapshot: {
       userId: userDoc.userId,
       name: userDoc.name || '',
@@ -258,6 +369,9 @@ async function activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, v
     await repo.recordCouponUsage(order.couponCode, {
       userId: userDoc.userId, orderId: order.orderId, discountAmount: order.discountAmount || 0,
     }).catch(() => {});
+  }
+  if (order.offerId && typeof repo.recordOfferRedemption === 'function') {
+    await repo.recordOfferRedemption(order.offerId).catch(() => {});
   }
   if (auth && auth.gate) auth.gate.invalidate(userDoc.userId);
   if (hub) {
@@ -292,6 +406,9 @@ async function settleVerifiedOrder({ repo, auth, hub, order, paymentId, source }
     await repo.updateRazorpayOrder(order.orderId, { status: 'PAID', paymentId, paidAt: Date.now() });
     if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
       await repo.recordCouponUsage(order.couponCode, { userId: 'guest', orderId: order.orderId, discountAmount: order.discountAmount || 0 }).catch(() => {});
+    }
+    if (order.offerId && typeof repo.recordOfferRedemption === 'function') {
+      await repo.recordOfferRedemption(order.offerId).catch(() => {});
     }
   }
   return null;
@@ -395,6 +512,15 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   r.get('/subscription/config', handleGetConfig);
   r.get('/api/subscription/config', handleGetConfig);
 
+  // Public offers: active, inside their dates, flagged for the checkout page.
+  const handlePublicOffers = wrap(async (req, res) => {
+    const now = Date.now();
+    const offers = (await liveOffers(repo, now)).filter((o) => o.showOnCheckout !== false).map(publicOfferView);
+    res.set('Cache-Control', 'no-store').json({ offers, serverTime: now });
+  });
+  r.get('/subscription/offers', handlePublicOffers);
+  r.get('/api/subscription/offers', handlePublicOffers);
+
   // An order the app created, opened on the website to pay by UPI
   // (checkout.html?order=…&t=…). The token is the only credential needed;
   // it reveals plan + amount, never the rider's account.
@@ -458,6 +584,12 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
       if (!couponResult.valid) return res.status(400).json({ error: couponResult.error });
       finalAmountPaise = couponResult.finalAmountPaise;
     }
+    // No coupon: the best live offer for this plan is applied automatically.
+    let appliedOffer = null;
+    if (!couponResult && planTier !== 'community' && Number.isFinite(finalAmountPaise)) {
+      appliedOffer = await bestOffer(repo, { planTier, billingCycle, amountInInr: finalAmountPaise / 100 });
+      if (appliedOffer) finalAmountPaise = Math.round(appliedOffer.finalAmount * 100);
+    }
 
     if (couponResult && couponResult.isFree) {
       const freeOrderId = `order_free_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -478,14 +610,15 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
         amountInPaise: finalAmountPaise,
         currency: String(currency || 'INR').toUpperCase(),
         receipt: receipt || `rcpt_${Date.now()}`,
-        notes: { ...(notes || {}), planTier, billingCycle, couponCode: couponResult?.code || '' },
+        notes: { ...(notes || {}), planTier, billingCycle, couponCode: couponResult?.code || '', offerId: appliedOffer?.id || '' },
       });
     } catch (e) {
       return sendRzpError(res, e);
     }
     await saveOrder(repo, {
       orderId: order.id, userId: null, planTier, billingCycle, amountInPaise: order.amount,
-      couponCode: couponResult?.code || null, discountAmount: couponResult?.discountAmount || 0,
+      couponCode: couponResult?.code || null, discountAmount: couponResult?.discountAmount || appliedOffer?.discountAmount || 0,
+      offerId: appliedOffer?.id || null, offerTitle: appliedOffer?.title || null,
       isFree: false, mode: order.mode, channel: 'public',
     });
     return res.status(200).json({
@@ -495,6 +628,7 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
       key_id: order.keyId,
       mode: order.mode,
       coupon: couponResult || undefined,
+      offer: offerResponse(appliedOffer),
     });
   });
 
@@ -609,6 +743,12 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       if (!couponResult.valid) return res.status(400).json({ error: couponResult.error });
       amountInInr = couponResult.finalAmount;
     }
+    // No coupon: the best live offer for this plan is applied automatically (a coupon always wins; no stacking).
+    let appliedOffer = null;
+    if (!couponResult) {
+      appliedOffer = await bestOffer(repo, { planTier, billingCycle, amountInInr });
+      if (appliedOffer) amountInInr = appliedOffer.finalAmount;
+    }
 
     if (amountInInr === 0 && couponResult && couponResult.isFree) {
       const freeOrderId = `order_free_${crypto.randomBytes(8).toString('hex')}`;
@@ -633,7 +773,8 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
         notes: {
           userId, planTier, billingCycle,
           couponCode: couponResult?.code || '',
-          discountAmount: couponResult?.discountAmount || 0,
+          offerId: appliedOffer?.id || '',
+          discountAmount: couponResult?.discountAmount || appliedOffer?.discountAmount || 0,
           app: 'CoRoute Motorcycle Safety',
         },
       });
@@ -642,7 +783,8 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     }
     await saveOrder(repo, {
       orderId: order.id, userId, planTier, billingCycle, amountInPaise: order.amount,
-      couponCode: couponResult?.code || null, discountAmount: couponResult?.discountAmount || 0,
+      couponCode: couponResult?.code || null, discountAmount: couponResult?.discountAmount || appliedOffer?.discountAmount || 0,
+      offerId: appliedOffer?.id || null, offerTitle: appliedOffer?.title || null,
       isFree: false, mode: order.mode, channel: 'app',
     });
 
@@ -690,6 +832,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       upiUri,
       razorpayOptions,
       coupon: couponResult || undefined,
+      offer: offerResponse(appliedOffer),
     });
   }));
 
@@ -870,8 +1013,11 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       const filter = {};
       if (typeof req.query.userId === 'string' && req.query.userId.trim()) filter.userId = req.query.userId.trim();
       if (typeof req.query.status === 'string' && req.query.status.trim()) filter.status = req.query.status.trim().toUpperCase();
+      if (typeof req.query.mode === 'string' && ['test', 'live', 'manual'].includes(req.query.mode.trim())) filter.mode = req.query.mode.trim();
       const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit, 10) || 200));
-      const rows = (await repo.listRazorpayOrders(filter, limit)).sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+      const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+      const all = (await repo.listRazorpayOrders(filter, 10000)).sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+      const rows = all.slice(offset, offset + limit);
       const users = new Map();
       for (const o of rows) {
         if (!o.userId || users.has(o.userId)) continue;
@@ -880,7 +1026,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       }
       res.set('Cache-Control', 'no-store').json({
         payments: rows.map((o) => ({ ...orderView(o), user: users.get(o.userId) || null })),
-        total: rows.length,
+        total: all.length, offset, limit, hasMore: offset + rows.length < all.length,
       });
     }));
 
@@ -956,11 +1102,18 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     // GET /api/admin/subscription/pricing - View current plans & overrides
     r.get('/admin/subscription/pricing', requireAdmin, wrap(async (req, res) => {
       const plans = await getEffectivePlans(repo);
-      const custom = await repo.getSubscriptionPricing().catch(() => null);
-      res.json({
+      const doc = typeof repo.getSubscriptionPricingDoc === 'function'
+        ? await repo.getSubscriptionPricingDoc().catch(() => null)
+        : null;
+      const custom = doc ? doc.prices : await repo.getSubscriptionPricing().catch(() => null);
+      const history = Array.isArray(doc?.history) ? doc.history.slice(-20).reverse() : [];
+      res.set('Cache-Control', 'no-store').json({
         plans,
         isCustomized: Boolean(custom),
         defaultPlans: PLAN_PRICES_INR,
+        history,
+        updatedAt: Number(doc?.updatedAt) || 0,
+        updatedBy: doc?.updatedBy || null,
       });
     }));
 
@@ -986,7 +1139,18 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
         }
       }
 
-      await repo.setSubscriptionPricing(updated, req.user?.userId || 'admin');
+      for (const tier of ['proRider', 'roadCaptain', 'tourOperator']) {
+        const m = updated[tier];
+        if (!m) continue;
+        if (!Number.isFinite(m.monthly) || !Number.isFinite(m.annual) || m.monthly < 1 || m.annual < 1) {
+          return res.status(400).json({ error: `${tier}: monthly and annual prices must be positive numbers` });
+        }
+        if (m.annual < m.monthly) {
+          return res.status(400).json({ error: `${tier}: annual price (₹${m.annual}) must be at least the monthly price (₹${m.monthly})` });
+        }
+      }
+
+      await repo.setSubscriptionPricing(updated, req.user?.email || req.user?.userId || 'admin');
       res.json({
         success: true,
         message: 'Subscription pricing successfully updated by administrator',
@@ -1111,6 +1275,130 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       });
     }));
   }
+
+  // ===========================================================================
+  // ADMIN CONSOLE: OVERVIEW, SUBSCRIBERS LIST, OFFERS
+  // ===========================================================================
+  if (requireAdmin) {
+    const DAY = 86400000;
+    const emptyRevenue = () => ({ today: 0, last7Days: 0, last30Days: 0, allTime: 0 });
+    const startOfToday = (now) => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); };
+    const addRevenue = (bucket, amountInr, at, now) => {
+      bucket.allTime += amountInr;
+      if (at >= now - 30 * DAY) bucket.last30Days += amountInr;
+      if (at >= now - 7 * DAY) bucket.last7Days += amountInr;
+      if (at >= startOfToday(now)) bucket.today += amountInr;
+    };
+    const allUsers = async () => (typeof repo.listUsersBySubscription === 'function' ? repo.listUsersBySubscription(null, 10000) : repo.listUsers(10000));
+    /** One subscribers-table row. */
+    const subscriberRow = (u, now) => {
+      const st = effectiveSubscription(u, now);
+      const history = Array.isArray(u.paymentHistory) ? u.paymentHistory : (u.lastPayment ? [u.lastPayment] : []);
+      const lp = u.lastPayment || null;
+      const totalPaid = history.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      const state = st.isExpired ? 'expired' : (st.tier === 'community' ? 'community' : (st.expiringSoon ? 'expiring' : 'active'));
+      return {
+        userId: u.userId, name: u.name || '', email: u.email || '', phone: u.phone || '', callsign: u.callsign || '',
+        tier: st.tier, rawTier: st.rawTier, state, previousTier: st.previousTier,
+        validUntil: st.validUntil, daysRemaining: st.daysRemaining, expiredAt: st.expiredAt,
+        lastPayment: lp ? { paidAt: Number(lp.paidAt) || 0, amount: Number(lp.amount) || 0, method: lp.method || '', orderId: lp.orderId || '', mode: lp.mode || null } : null,
+        totalPaid, paymentsCount: history.length, createdAt: Number(u.createdAt) || 0,
+      };
+    };
+
+    // GET /api/admin/subscription/overview
+    r.get('/admin/subscription/overview', requireAdmin, wrap(async (req, res) => {
+      const now = Date.now();
+      const users = await allUsers();
+      const subscribers = { community: 0, proRider: 0, roadCaptain: 0, tourOperator: 0 };
+      let active = 0; let expiringIn7Days = 0; let expiredLast30Days = 0;
+      for (const u of users) {
+        const st = effectiveSubscription(u, now);
+        subscribers[st.tier] = (subscribers[st.tier] || 0) + 1;
+        if (st.tier !== 'community') { active++; if (st.expiringSoon) expiringIn7Days++; }
+        if (st.isExpired && st.expiredAt >= now - 30 * DAY) expiredLast30Days++;
+      }
+      const orders = await repo.listRazorpayOrders({}, 10000);
+      const revenue = emptyRevenue(); const testRevenue = emptyRevenue();
+      let pendingClaims = 0; let failedSignatures = 0; let paidOrders = 0;
+      for (const o of orders) {
+        if (o.status === 'UTR_CLAIMED') pendingClaims++;
+        if (o.status === 'SIGNATURE_MISMATCH') failedSignatures++;
+        if (o.status !== 'PAID') continue;
+        const amountInr = (Number(o.amountInPaise) || 0) / 100;
+        if (amountInr <= 0) continue;
+        paidOrders++;
+        addRevenue(o.mode === 'test' ? testRevenue : revenue, amountInr, Number(o.paidAt) || Number(o.createdAt) || 0, now);
+      }
+      const sweep = typeof repo.getSubscriptionSweepStatus === 'function' ? await repo.getSubscriptionSweepStatus().catch(() => null) : null;
+      res.set('Cache-Control', 'no-store').json({
+        subscribers, totalUsers: users.length, active, expiringIn7Days, expiredLast30Days,
+        revenue, testRevenue, paidOrders, pendingClaims, failedSignatures,
+        lastSweepAt: Number(sweep?.lastSweepAt) || 0, lastSweep: sweep ? { scanned: sweep.scanned || 0, expired: sweep.expired || 0, warned: sweep.warned || 0 } : null,
+        generatedAt: now,
+      });
+    }));
+
+    // GET /api/admin/subscriptions?tier=&state=active|expiring|expired|community&q=&limit=&cursor=
+    r.get('/admin/subscriptions', requireAdmin, wrap(async (req, res) => {
+      const now = Date.now();
+      const q = String(req.query.q || '').trim().toLowerCase();
+      const state = String(req.query.state || '').trim();
+      const rawTier = String(req.query.tier || '').trim();
+      const tier = rawTier ? (rawTier === 'community' ? 'community' : normalizeTier(rawTier)) : '';
+      const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 50));
+      const cursor = Math.max(0, parseInt(req.query.cursor, 10) || 0);
+      let rows = (await allUsers()).map((u) => subscriberRow(u, now));
+      if (state === 'active') rows = rows.filter((x) => x.state === 'active' || x.state === 'expiring');
+      else if (state === 'expiring') rows = rows.filter((x) => x.state === 'expiring');
+      else if (state === 'expired') rows = rows.filter((x) => x.state === 'expired');
+      else if (state === 'community') rows = rows.filter((x) => x.state === 'community');
+      if (tier) rows = rows.filter((x) => (x.state === 'expired' && tier !== 'community' ? x.previousTier === tier : x.tier === tier));
+      if (q) rows = rows.filter((x) => [x.name, x.email, x.phone, x.userId, x.callsign].some((v) => String(v || '').toLowerCase().includes(q)));
+      const rank = { expiring: 0, active: 1, expired: 2, community: 3 };
+      rows.sort((a, b) => (rank[a.state] - rank[b.state]) || (a.state === 'expired' ? b.expiredAt - a.expiredAt : (a.validUntil - b.validUntil) || (b.createdAt - a.createdAt)));
+      const page = rows.slice(cursor, cursor + limit);
+      res.set('Cache-Control', 'no-store').json({
+        subscribers: page, total: rows.length, cursor, limit,
+        nextCursor: cursor + page.length < rows.length ? String(cursor + page.length) : null,
+      });
+    }));
+
+    // Offers CRUD
+    r.get('/admin/offers', requireAdmin, wrap(async (req, res) => {
+      const now = Date.now();
+      const offers = (await repo.listOffers(500)).map((o) => ({ ...offerView(o), isLive: offerIsLive(o, now) }))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      res.set('Cache-Control', 'no-store').json({ offers, total: offers.length });
+    }));
+
+    r.post('/admin/offers', requireAdmin, wrap(async (req, res) => {
+      let input;
+      try { input = normalizeOfferInput(req.body); } catch (e) { if (e.status === 400) return res.status(400).json({ error: e.message }); throw e; }
+      const offer = {
+        ...input, id: `offer_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`,
+        redemptions: 0, createdAt: Date.now(), createdBy: req.user?.email || req.user?.userId || 'admin',
+      };
+      const saved = await repo.saveOffer(offer);
+      res.status(201).json({ success: true, message: `Offer "${input.title}" created`, offer: { ...offerView(saved), isLive: offerIsLive(saved) } });
+    }));
+
+    r.patch('/admin/offers/:id', requireAdmin, wrap(async (req, res) => {
+      const existing = await repo.findOffer(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Offer not found' });
+      let input;
+      try { input = normalizeOfferInput(req.body, existing); } catch (e) { if (e.status === 400) return res.status(400).json({ error: e.message }); throw e; }
+      const saved = await repo.saveOffer({ ...existing, ...input, id: existing.id, updatedBy: req.user?.email || req.user?.userId || 'admin' });
+      res.json({ success: true, message: 'Offer updated', offer: { ...offerView(saved), isLive: offerIsLive(saved) } });
+    }));
+
+    r.delete('/admin/offers/:id', requireAdmin, wrap(async (req, res) => {
+      const existing = await repo.findOffer(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Offer not found' });
+      await repo.deleteOffer(existing.id);
+      res.json({ success: true, message: 'Offer deleted', id: existing.id });
+    }));
+  }
 }
 
 module.exports = {
@@ -1123,6 +1411,10 @@ module.exports = {
   gatewayFor,
   activatePlan,
   orderView,
+  offerView,
+  offerIsLive,
+  offerDiscount,
+  bestOffer,
   registerSubscriptionPublicRoutes,
   registerSubscriptionAuthRoutes,
 };

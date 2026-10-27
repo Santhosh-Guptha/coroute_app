@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Pricing and Coupons Admin | Coroute</title>
+<title>Payments and Plans Admin | Coroute</title>
 <meta name="description" content="Administrator management portal for CoRoute membership pricing and promotional coupons.">
 <link rel="canonical" href="__ORIGIN__/pricing-admin">
 <meta property="og:type" content="website">
@@ -167,6 +167,42 @@
     height: 100%;
     background: #FF7043;
   }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px 16px; }
+  .tile .tile-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #90A4AE; }
+  .tile .tile-value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+  .tile .tile-sub { font-size: 12px; color: #8C9BAE; margin-top: 2px; }
+  .tile.warn .tile-value { color: #FFB74D; }
+  .tile.bad .tile-value { color: #EF5350; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .filters input, .filters select {
+    background: rgba(11, 15, 20, 0.9); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px 10px; color: #FFF; font-size: 13px;
+  }
+  .table-wrap { overflow-x: auto; }
+  .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .data-table th { text-align: left; padding: 8px 10px; background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); color: #90A4AE; font-weight: 600; white-space: nowrap; }
+  .data-table td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: top; }
+  .data-table tr.detail-row td { background: rgba(0,0,0,0.25); font-size: 12px; }
+  .badge-test { background: rgba(255,152,0,0.2); color: #FFB74D; }
+  .badge-live { background: rgba(76,175,80,0.2); color: #81C784; }
+  .badge-manual { background: rgba(96,125,139,0.3); color: #B0BEC5; }
+  .badge-expiring { background: rgba(255,152,0,0.2); color: #FFB74D; }
+  .badge-muted { background: rgba(255,255,255,0.08); color: #B0BEC5; }
+  .row-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .row-actions button { padding: 4px 8px; font-size: 11px; }
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 12px; color: #8C9BAE; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+  .modal-backdrop.open { display: flex; }
+  .modal { background: #14181E; border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 20px; width: 100%; max-width: 420px; }
+  .modal h3 { margin: 0 0 12px; }
+  .history-list { font-size: 12px; color: #B0BEC5; margin: 8px 0 0; padding: 0; list-style: none; }
+  .history-list li { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .history-list code { color: #FFF; }
+  .switch { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #B0BEC5; }
+  @media (max-width: 600px) {
+    .admin-card { padding: 16px; }
+    .tile .tile-value { font-size: 20px; }
+  }
 </style>
 </head>
 <body data-page="pricing-admin">
@@ -177,8 +213,8 @@
     <div class="container">
       <div class="page-hero__inner">
         <p class="eyebrow">Administration Control Panel</p>
-        <h1>Subscription Pricing and Coupon Manager</h1>
-        <p class="t-lead">Configure base tier pricing, create promotional coupons, enforce redemption limitations, and inspect usage audit ledgers.</p>
+        <h1>Payments and Plans Console</h1>
+        <p class="t-lead">Subscribers, revenue, the payment ledger, offers, coupons, plan pricing and the Razorpay gateway, all in one place.</p>
       </div>
     </div>
   </section>
@@ -197,6 +233,73 @@
           <input type="text" id="admin-token-input" placeholder="Admin Bearer Token or leave blank to use active cookie" style="flex:1;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:8px 12px;color:#FFF">
           <button type="button" id="save-token-btn" class="btn-admin-secondary">Load Dashboard</button>
         </div>
+      </div>
+
+      <!-- Overview tiles -->
+      <div class="admin-card" id="overview-card">
+        <h2>Overview <button type="button" id="overview-refresh" class="btn-admin-secondary" style="margin-left:auto">Refresh</button></h2>
+        <div class="tiles" id="overview-tiles"><div class="tile"><div class="tile-label">Loading</div><div class="tile-value">&hellip;</div></div></div>
+        <p class="t-small t-muted" id="overview-meta" style="margin:10px 0 0"></p>
+      </div>
+
+      <!-- Subscribers -->
+      <div class="admin-card" id="subscribers-card">
+        <h2>Subscribers</h2>
+        <div class="filters">
+          <select id="sub-tier">
+            <option value="">All tiers</option>
+            <option value="proRider">CoRoute Pro</option>
+            <option value="roadCaptain">Road Captain</option>
+            <option value="tourOperator">Tour Operator</option>
+            <option value="community">Community</option>
+          </select>
+          <select id="sub-state">
+            <option value="">Any state</option>
+            <option value="active" selected>Active (incl. expiring)</option>
+            <option value="expiring">Expiring in 7 days</option>
+            <option value="expired">Expired</option>
+            <option value="community">Community only</option>
+          </select>
+          <input type="search" id="sub-q" placeholder="Search name, email, phone, id" style="flex:1;min-width:160px">
+          <button type="button" id="sub-search-btn" class="btn-admin-secondary">Search</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="sub-table">
+            <thead><tr><th>Rider</th><th>Tier</th><th>State</th><th>Valid until</th><th>Last payment</th><th>Total paid</th><th>Actions</th></tr></thead>
+            <tbody id="sub-tbody"><tr><td colspan="7" style="text-align:center;color:#90A4AE">&hellip;</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pager"><span id="sub-count"></span><button type="button" id="sub-prev" class="btn-admin-secondary">Prev</button><button type="button" id="sub-next" class="btn-admin-secondary">Next</button></div>
+      </div>
+
+      <!-- Payments ledger -->
+      <div class="admin-card" id="payments-card">
+        <h2>Payments ledger</h2>
+        <div class="filters">
+          <select id="pay-status">
+            <option value="">Any status</option>
+            <option value="PAID">PAID</option>
+            <option value="CREATED">CREATED</option>
+            <option value="UTR_CLAIMED">UTR_CLAIMED</option>
+            <option value="UTR_REJECTED">UTR_REJECTED</option>
+            <option value="SIGNATURE_MISMATCH">SIGNATURE_MISMATCH</option>
+          </select>
+          <select id="pay-mode">
+            <option value="">Any mode</option>
+            <option value="live">Live</option>
+            <option value="test">Test</option>
+            <option value="manual">Manual grants</option>
+          </select>
+          <input type="text" id="pay-user" placeholder="User id" style="min-width:140px">
+          <button type="button" id="pay-search-btn" class="btn-admin-secondary">Filter</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Created</th><th>Order</th><th>Rider</th><th>Plan</th><th>Amount</th><th>Status</th><th>Mode</th><th>Discount</th></tr></thead>
+            <tbody id="pay-tbody"><tr><td colspan="8" style="text-align:center;color:#90A4AE">&hellip;</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pager"><span id="pay-count"></span><button type="button" id="pay-prev" class="btn-admin-secondary">Prev</button><button type="button" id="pay-next" class="btn-admin-secondary">Next</button></div>
       </div>
 
       <!-- Section 0: Payment Gateway (Razorpay test/live) -->
@@ -280,6 +383,52 @@
         <div style="display:flex;justify-content:flex-end;margin-top:16px">
           <button type="button" id="save-pricing-btn" class="btn-admin">Save Updated Pricing</button>
         </div>
+        <h3 class="t-h4" style="margin:16px 0 4px">Pricing history</h3>
+        <p class="t-small t-muted" style="margin:0">Last 20 changes, newest first. Annual prices must be at least the monthly price.</p>
+        <ul class="history-list" id="pricing-history"><li>&hellip;</li></ul>
+      </div>
+
+      <!-- Offers -->
+      <div class="admin-card" id="offers-card">
+        <h2>Offers (automatic discounts)</h2>
+        <p class="t-small t-muted">An offer applies itself at checkout for its tier and billing cycle while it is active and inside its dates. The biggest live discount wins; a coupon entered by the rider replaces the offer (no stacking). An offer linked to a coupon code is only advertised: the rider must enter that code.</p>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Title</th><th>Plan / cycle</th><th>Discount</th><th>Window</th><th>Redemptions</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="offer-tbody"><tr><td colspan="7" style="text-align:center;color:#90A4AE">&hellip;</td></tr></tbody>
+          </table>
+        </div>
+        <h3 class="t-h4" style="margin:16px 0 8px" id="offer-form-title">Create offer</h3>
+        <form id="offer-form">
+          <input type="hidden" id="of-id" value="">
+          <div class="form-row">
+            <div class="form-col"><label for="of-title">Title</label><input type="text" id="of-title" placeholder="e.g. Diwali 20% off CoRoute Pro" required maxlength="120"></div>
+            <div class="form-col"><label for="of-desc">Description (shown on checkout)</label><input type="text" id="of-desc" maxlength="500"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-col"><label for="of-tier">Plan</label>
+              <select id="of-tier"><option value="all">All paid plans</option><option value="proRider">CoRoute Pro</option><option value="roadCaptain">Road Captain Pass</option><option value="tourOperator">Tour Operator</option></select></div>
+            <div class="form-col"><label for="of-cycle">Billing cycle</label>
+              <select id="of-cycle"><option value="all">Monthly and annual</option><option value="monthly">Monthly only</option><option value="annual">Annual only</option></select></div>
+            <div class="form-col"><label for="of-type">Discount type</label>
+              <select id="of-type"><option value="percentage">Percentage off (%)</option><option value="fixed">Flat amount off (INR)</option><option value="price">Override price (INR)</option></select></div>
+            <div class="form-col"><label for="of-value">Discount value</label><input type="number" id="of-value" min="1" step="1" value="20" required></div>
+          </div>
+          <div class="form-row">
+            <div class="form-col"><label for="of-start">Starts</label><input type="datetime-local" id="of-start"></div>
+            <div class="form-col"><label for="of-end">Ends</label><input type="datetime-local" id="of-end"></div>
+            <div class="form-col"><label for="of-max">Max redemptions (0 = unlimited)</label><input type="number" id="of-max" min="0" step="1" value="0"></div>
+            <div class="form-col"><label for="of-coupon">Linked coupon code (optional)</label><input type="text" id="of-coupon" placeholder="Advertise a code instead of auto-applying" style="text-transform:uppercase"></div>
+          </div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+            <label class="switch"><input type="checkbox" id="of-active" checked> Active</label>
+            <label class="switch"><input type="checkbox" id="of-show" checked> Show banner on checkout</label>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <button type="button" id="of-cancel" class="btn-admin-secondary" style="display:none">Cancel edit</button>
+            <button type="submit" class="btn-admin" id="of-submit">Create Offer</button>
+          </div>
+        </form>
       </div>
 
       <!-- Section 2: Promotional Coupons Management -->
@@ -379,6 +528,22 @@
   </div>
 
 </main>
+<div class="modal-backdrop" id="grant-modal">
+  <div class="modal" role="dialog" aria-labelledby="grant-title">
+    <h3 id="grant-title">Grant / extend plan</h3>
+    <p class="t-small t-muted" id="grant-who" style="margin:0 0 12px"></p>
+    <div class="form-row" style="grid-template-columns:1fr 1fr">
+      <div class="form-col"><label for="grant-tier">Tier</label>
+        <select id="grant-tier"><option value="proRider">CoRoute Pro</option><option value="roadCaptain">Road Captain Pass</option><option value="tourOperator">Tour Operator</option></select></div>
+      <div class="form-col"><label for="grant-days">Days</label><input type="number" id="grant-days" min="1" max="3660" value="30"></div>
+    </div>
+    <div class="form-col" style="margin-bottom:12px"><label for="grant-reason">Reason</label><input type="text" id="grant-reason" maxlength="500" placeholder="e.g. goodwill extension"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button type="button" id="grant-cancel" class="btn-admin-secondary">Cancel</button>
+      <button type="button" id="grant-confirm" class="btn-admin">Grant</button>
+    </div>
+  </div>
+</div>
 <!--#include footer-->
 
 <script>
@@ -406,6 +571,22 @@
     loadAll();
   });
 
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  const fmtDate = (ms) => (ms ? new Date(ms).toLocaleDateString() : '-');
+  const fmtDateTime = (ms) => (ms ? new Date(ms).toLocaleString() : '-');
+  const fmtInr = (n) => 'Rs ' + (Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-IN');
+  const TIER_LABELS = { community: 'Community', proRider: 'CoRoute Pro', roadCaptain: 'Road Captain', tourOperator: 'Tour Operator' };
+  const tierLabel = (t) => TIER_LABELS[t] || t || '-';
+  async function apiJson(method, path, body) {
+    const res = await fetch(path, { method, headers: getHeaders(), body: body === undefined ? undefined : JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  }
+
   function showNotice(type, msg) {
     notice.className = 'notice-banner ' + type;
     notice.textContent = msg;
@@ -431,9 +612,21 @@
       }
       const data = await res.json();
       fillPricing(data.plans);
+      fillPricingHistory(data.history || []);
     } catch (e) {
       console.warn('Failed to fetch pricing:', e);
     }
+  }
+
+  function fillPricingHistory(history) {
+    const ul = document.getElementById('pricing-history');
+    if (!history.length) { ul.innerHTML = '<li>No changes recorded yet.</li>'; return; }
+    ul.innerHTML = history.map((h) => {
+      const p = h.prices || {};
+      const parts = ['proRider', 'roadCaptain', 'tourOperator'].filter((t) => p[t]).map((t) =>
+        esc(tierLabel(t)) + ' <code>' + esc(p[t].monthly) + '/' + esc(p[t].annual) + '</code>');
+      return '<li>' + esc(fmtDateTime(h.at)) + ' by ' + esc(h.by || '?') + ' &mdash; ' + parts.join(' &middot; ') + '</li>';
+    }).join('');
   }
 
   function fillPricing(plans) {
@@ -489,6 +682,7 @@
       const data = await res.json();
       if (res.ok && data.success) {
         showNotice('success', '[Success] Plan pricing saved and activated across gateway cluster.');
+        loadPricing();
       } else {
         showNotice('error', '[Failed] ' + (data.error || 'Failed to save pricing'));
       }
@@ -528,11 +722,11 @@
           ? '<span class="badge badge-free">100% Free</span>' 
           : (c.discountType === 'percentage' ? (c.discountValue + '% Off') : ('Rs ' + c.discountValue + ' Off'));
 
-        const applies = (c.applicableTiers || ['all']).join(', ');
+        const applies = esc((c.applicableTiers || ['all']).join(', '));
         const expiryStr = c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : 'Never';
 
         return '<tr>' +
-          '<td><strong><code>' + c.code + '</code></strong><br><small style="color:#8C9BAE">' + (c.description || '') + '</small></td>' +
+          '<td><strong><code>' + esc(c.code) + '</code></strong><br><small style="color:#8C9BAE">' + esc(c.description || '') + '</small></td>' +
           '<td>' + discountText + '</td>' +
           '<td>' + applies + '</td>' +
           '<td>' + uses + ' / ' + max + ' (' + pct + '%)' +
@@ -541,14 +735,14 @@
           '<td>' + expiryStr + '</td>' +
           '<td>' + statusBadge + '</td>' +
           '<td>' +
-            '<button type="button" class="btn-admin-secondary" onclick="toggleCoupon(\'' + c.code + '\', ' + (!c.isActive) + ')">' + (c.isActive ? 'Pause' : 'Activate') + '</button> ' +
-            '<button type="button" class="btn-danger" onclick="deleteCoupon(\'' + c.code + '\')">Delete</button>' +
+            '<button type="button" class="btn-admin-secondary" onclick="toggleCoupon(this.dataset.code, ' + (!c.isActive) + ')" data-code="' + esc(c.code) + '">' + (c.isActive ? 'Pause' : 'Activate') + '</button> ' +
+            '<button type="button" class="btn-danger" onclick="deleteCoupon(this.dataset.code)" data-code="' + esc(c.code) + '">Delete</button>' +
           '</td>' +
         '</tr>';
       }).join('');
 
     } catch (e) {
-      couponTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#EF9A9A">Failed to load coupons: ' + e.message + '</td></tr>';
+      couponTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#EF9A9A">Failed to load coupons: ' + esc(e.message) + '</td></tr>';
     }
   }
 
@@ -695,7 +889,7 @@
         b.onclick = async () => {
           const r = await fetch('/api/admin/payment-claims/' + encodeURIComponent(c.orderId) + '/' + act, { method: 'POST', headers: getHeaders(), body: '{}' });
           showNotice(r.ok ? 'success' : 'error', r.ok ? ('Claim ' + act + 'd') : 'Failed');
-          loadClaims();
+          loadClaims(); loadOverview(); loadPayments(); loadSubscribers();
         };
         row.appendChild(b);
       }
@@ -706,11 +900,274 @@
   $('gw-test-btn').addEventListener('click', () => checkKeys('test'));
   $('gw-live-btn').addEventListener('click', () => checkKeys('live'));
 
+  // ---------------- Overview ----------------
+  async function loadOverview() {
+    const box = $('overview-tiles');
+    const r = await apiJson('GET', '/api/admin/subscription/overview');
+    if (!r.ok) { box.innerHTML = '<div class="tile"><div class="tile-label">Overview</div><div class="tile-sub">Administrator authorization required.</div></div>'; return; }
+    const o = r.data;
+    const tile = (label, value, sub, cls) => '<div class="tile ' + (cls || '') + '"><div class="tile-label">' + esc(label) + '</div><div class="tile-value">' + esc(value) + '</div>' + (sub ? '<div class="tile-sub">' + esc(sub) + '</div>' : '') + '</div>';
+    box.innerHTML =
+      tile('CoRoute Pro', o.subscribers.proRider, 'subscribers') +
+      tile('Road Captain', o.subscribers.roadCaptain, 'subscribers') +
+      tile('Tour Operator', o.subscribers.tourOperator, 'subscribers') +
+      tile('Community', o.subscribers.community, o.totalUsers + ' riders total') +
+      tile('Active paid', o.active, '') +
+      tile('Expiring in 7 days', o.expiringIn7Days, o.expiredLast30Days + ' expired in 30 days', o.expiringIn7Days ? 'warn' : '') +
+      tile('Revenue 7 days', fmtInr(o.revenue.last7Days), 'today ' + fmtInr(o.revenue.today)) +
+      tile('Revenue 30 days', fmtInr(o.revenue.last30Days), 'all time ' + fmtInr(o.revenue.allTime)) +
+      tile('Pending UPI claims', o.pendingClaims, '', o.pendingClaims ? 'warn' : '') +
+      tile('Failed signatures', o.failedSignatures, '', o.failedSignatures ? 'bad' : '');
+    $('overview-meta').textContent = 'Test-mode revenue (not counted above): ' + fmtInr(o.testRevenue.allTime) + ' all time, ' + fmtInr(o.testRevenue.last30Days) + ' in 30 days. ' +
+      'Last expiry sweep: ' + (o.lastSweepAt ? fmtDateTime(o.lastSweepAt) + (o.lastSweep ? ' (' + o.lastSweep.scanned + ' scanned, ' + o.lastSweep.expired + ' expired, ' + o.lastSweep.warned + ' warned)' : '') : 'not yet run') + '.';
+  }
+  $('overview-refresh').addEventListener('click', loadOverview);
+
+  // ---------------- Subscribers ----------------
+  const subPage = { cursor: 0, limit: 25, prev: [], next: null };
+  function stateBadge(st) {
+    const map = { active: 'badge-active', expiring: 'badge-expiring', expired: 'badge-inactive', community: 'badge-muted' };
+    return '<span class="badge ' + (map[st] || 'badge-muted') + '">' + esc(st) + '</span>';
+  }
+  async function loadSubscribers() {
+    const tbody = $('sub-tbody');
+    const qs = new URLSearchParams({ limit: subPage.limit, cursor: subPage.cursor });
+    if ($('sub-tier').value) qs.set('tier', $('sub-tier').value);
+    if ($('sub-state').value) qs.set('state', $('sub-state').value);
+    if ($('sub-q').value.trim()) qs.set('q', $('sub-q').value.trim());
+    const r = await apiJson('GET', '/api/admin/subscriptions?' + qs);
+    if (!r.ok) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#EF9A9A">Administrator authorization required.</td></tr>'; return; }
+    const rows = r.data.subscribers || [];
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#90A4AE">No riders match.</td></tr>'; }
+    else {
+      tbody.innerHTML = rows.map((u) => {
+        const lp = u.lastPayment;
+        const tier = u.state === 'expired' ? 'was ' + tierLabel(u.previousTier) : tierLabel(u.tier);
+        const until = u.state === 'expired' ? 'expired ' + fmtDate(u.expiredAt) : (u.validUntil ? fmtDate(u.validUntil) + ' (' + u.daysRemaining + 'd)' : '-');
+        return '<tr data-user="' + esc(u.userId) + '" data-name="' + esc(u.name) + '">' +
+          '<td><strong>' + esc(u.name || '(no name)') + '</strong><br><small style="color:#8C9BAE">' + esc(u.email) + (u.phone ? ' · ' + esc(u.phone) : '') + '</small><br><small style="color:#607D8B"><code>' + esc(u.userId) + '</code></small></td>' +
+          '<td>' + esc(tier) + '</td>' +
+          '<td>' + stateBadge(u.state) + '</td>' +
+          '<td>' + esc(until) + '</td>' +
+          '<td>' + (lp ? esc(fmtInr(lp.amount)) + '<br><small style="color:#8C9BAE">' + esc(lp.method || '') + ' · ' + esc(fmtDate(lp.paidAt)) + '</small>' : '-') + '</td>' +
+          '<td>' + esc(fmtInr(u.totalPaid)) + '<br><small style="color:#8C9BAE">' + esc(u.paymentsCount) + ' payments</small></td>' +
+          '<td><div class="row-actions">' +
+            '<button type="button" class="btn-admin-secondary" data-act="grant">Grant/extend</button>' +
+            (u.tier !== 'community' ? '<button type="button" class="btn-danger" data-act="revoke">Revoke</button>' : '') +
+            '<button type="button" class="btn-admin-secondary" data-act="payments">View payments</button>' +
+          '</div></td></tr>';
+      }).join('');
+    }
+    const total = r.data.total || 0;
+    $('sub-count').textContent = total ? ((subPage.cursor + 1) + '-' + (subPage.cursor + rows.length) + ' of ' + total) : '0 riders';
+    $('sub-prev').disabled = subPage.cursor === 0;
+    $('sub-next').disabled = !r.data.nextCursor;
+    subPage.next = r.data.nextCursor ? parseInt(r.data.nextCursor, 10) : null;
+  }
+  const subReset = () => { subPage.cursor = 0; subPage.prev = []; loadSubscribers(); };
+  $('sub-search-btn').addEventListener('click', subReset);
+  $('sub-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); subReset(); } });
+  $('sub-tier').addEventListener('change', subReset);
+  $('sub-state').addEventListener('change', subReset);
+  $('sub-next').addEventListener('click', () => { if (subPage.next == null) return; subPage.prev.push(subPage.cursor); subPage.cursor = subPage.next; loadSubscribers(); });
+  $('sub-prev').addEventListener('click', () => { subPage.cursor = subPage.prev.pop() || 0; loadSubscribers(); });
+
+  function paymentRowsHtml(list) {
+    if (!list.length) return '<em>No payments.</em>';
+    return '<table class="data-table"><thead><tr><th>Paid</th><th>Order</th><th>Plan</th><th>Amount</th><th>Method</th><th>Valid</th><th>Source</th></tr></thead><tbody>' +
+      list.map((p) => '<tr><td>' + esc(fmtDateTime(p.paidAt)) + '</td><td><code>' + esc(p.orderId) + '</code>' + (p.mode === 'test' ? ' <span class="badge badge-test">TEST</span>' : '') + '</td>' +
+        '<td>' + esc(tierLabel(p.planTier)) + ' / ' + esc(p.billingCycle) + '</td><td>' + esc(fmtInr(p.amount)) + (p.couponCode ? '<br><small>coupon ' + esc(p.couponCode) + '</small>' : '') + (p.offerId ? '<br><small>offer -' + esc(fmtInr(p.discountAmount)) + '</small>' : '') + '</td>' +
+        '<td>' + esc(p.method || '') + '</td><td>' + esc(fmtDate(p.validFrom)) + ' - ' + esc(fmtDate(p.validUntil)) + '</td><td>' + esc(p.source || '') + '</td></tr>').join('') +
+      '</tbody></table>';
+  }
+  $('sub-tbody').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const tr = btn.closest('tr');
+    const userId = tr.dataset.user; const name = tr.dataset.name;
+    if (btn.dataset.act === 'grant') { openGrant(userId, name); return; }
+    if (btn.dataset.act === 'revoke') {
+      const reason = prompt('Revoke the paid plan of ' + name + ' now? Enter a reason:');
+      if (reason === null) return;
+      const r = await apiJson('POST', '/api/admin/subscription/users/' + encodeURIComponent(userId) + '/revoke', { reason });
+      showNotice(r.ok ? 'success' : 'error', r.ok ? 'Plan revoked for ' + name + '.' : (r.data.error || 'Revoke failed'));
+      loadSubscribers(); loadOverview();
+      return;
+    }
+    if (btn.dataset.act === 'payments') {
+      const existing = tr.nextElementSibling;
+      if (existing && existing.classList.contains('detail-row')) { existing.remove(); return; }
+      const r = await apiJson('GET', '/api/admin/payments/users/' + encodeURIComponent(userId));
+      const row = document.createElement('tr'); row.className = 'detail-row';
+      const td = document.createElement('td'); td.colSpan = 7;
+      if (!r.ok) td.textContent = r.data.error || 'Failed to load';
+      else {
+        const periods = (r.data.subscriptionHistory || []).map((h) => esc(tierLabel(h.tier)) + ' ' + esc(fmtDate(h.validFrom)) + ' - ' + esc(fmtDate(h.validUntil)) + ' (' + esc(h.reason) + (h.note ? ': ' + esc(h.note) : '') + (h.by ? ', by ' + esc(h.by) : '') + ')').join('<br>');
+        td.innerHTML = '<strong>Payment history</strong><div class="table-wrap">' + paymentRowsHtml(r.data.paymentHistory || []) + '</div>' +
+          '<strong style="display:block;margin-top:8px">Tier periods</strong>' + (periods || '<em>None.</em>');
+      }
+      row.appendChild(td); tr.after(row);
+    }
+  });
+
+  // Grant modal
+  const grantModal = $('grant-modal'); let grantUser = null;
+  function openGrant(userId, name) {
+    grantUser = userId; $('grant-who').textContent = name + ' (' + userId + ')';
+    $('grant-reason').value = ''; grantModal.classList.add('open');
+  }
+  $('grant-cancel').addEventListener('click', () => grantModal.classList.remove('open'));
+  grantModal.addEventListener('click', (e) => { if (e.target === grantModal) grantModal.classList.remove('open'); });
+  $('grant-confirm').addEventListener('click', async () => {
+    if (!grantUser) return;
+    const body = { planTier: $('grant-tier').value, days: parseInt($('grant-days').value, 10), reason: $('grant-reason').value.trim() };
+    const r = await apiJson('POST', '/api/admin/subscription/users/' + encodeURIComponent(grantUser) + '/grant', body);
+    showNotice(r.ok ? 'success' : 'error', r.ok ? ('Granted ' + tierLabel(r.data.subscriptionTier) + ' until ' + fmtDate(r.data.subscriptionValidUntil) + '.') : (r.data.error || 'Grant failed'));
+    if (r.ok) { grantModal.classList.remove('open'); loadSubscribers(); loadOverview(); loadPayments(); }
+  });
+
+  // ---------------- Payments ledger ----------------
+  const payPage = { offset: 0, limit: 25 };
+  function modeBadge(o) {
+    if (o.mode === 'manual') return '<span class="badge badge-manual">MANUAL</span>';
+    if (o.isFree) return '<span class="badge badge-free">FREE</span>';
+    if (o.mode === 'test') return '<span class="badge badge-test">TEST</span>';
+    if (o.mode === 'live') return '<span class="badge badge-live">LIVE</span>';
+    return '<span class="badge badge-muted">' + esc(o.mode || '-') + '</span>';
+  }
+  async function loadPayments() {
+    const tbody = $('pay-tbody');
+    const qs = new URLSearchParams({ limit: payPage.limit, offset: payPage.offset });
+    if ($('pay-status').value) qs.set('status', $('pay-status').value);
+    if ($('pay-mode').value) qs.set('mode', $('pay-mode').value);
+    if ($('pay-user').value.trim()) qs.set('userId', $('pay-user').value.trim());
+    const r = await apiJson('GET', '/api/admin/payments?' + qs);
+    if (!r.ok) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#EF9A9A">Administrator authorization required.</td></tr>'; return; }
+    const rows = r.data.payments || [];
+    tbody.innerHTML = rows.length ? rows.map((o) => {
+      const stCls = o.status === 'PAID' ? 'badge-active' : (o.status === 'SIGNATURE_MISMATCH' || o.status === 'UTR_REJECTED' ? 'badge-inactive' : (o.status === 'UTR_CLAIMED' ? 'badge-expiring' : 'badge-muted'));
+      const discount = o.couponCode ? 'coupon ' + o.couponCode + (o.discountAmount ? ' (-' + fmtInr(o.discountAmount) + ')' : '') : (o.offerId ? 'offer ' + (o.offerTitle || o.offerId) + ' (-' + fmtInr(o.discountAmount) + ')' : '-');
+      return '<tr><td>' + esc(fmtDateTime(o.createdAt)) + (o.paidAt ? '<br><small style="color:#8C9BAE">paid ' + esc(fmtDateTime(o.paidAt)) + '</small>' : '') + '</td>' +
+        '<td><code>' + esc(o.orderId) + '</code>' + (o.paymentId ? '<br><small style="color:#8C9BAE">' + esc(o.paymentId) + '</small>' : '') + (o.utr ? '<br><small style="color:#8C9BAE">UTR ' + esc(o.utr) + '</small>' : '') + '</td>' +
+        '<td>' + (o.user ? esc(o.user.name || '') + '<br><small style="color:#8C9BAE">' + esc(o.user.email || '') + '</small>' : (o.userId ? '<code>' + esc(o.userId) + '</code>' : '<em>guest</em>')) + '</td>' +
+        '<td>' + esc(tierLabel(o.planTier)) + '<br><small style="color:#8C9BAE">' + esc(o.billingCycle || '') + '</small></td>' +
+        '<td>' + esc(fmtInr(o.amount)) + '</td>' +
+        '<td><span class="badge ' + stCls + '">' + esc(o.status) + '</span></td>' +
+        '<td>' + modeBadge(o) + '</td>' +
+        '<td>' + esc(discount) + '</td></tr>';
+    }).join('') : '<tr><td colspan="8" style="text-align:center;color:#90A4AE">No orders match.</td></tr>';
+    const total = r.data.total || 0;
+    $('pay-count').textContent = total ? ((payPage.offset + 1) + '-' + (payPage.offset + rows.length) + ' of ' + total) : '0 orders';
+    $('pay-prev').disabled = payPage.offset === 0;
+    $('pay-next').disabled = !r.data.hasMore;
+  }
+  $('pay-search-btn').addEventListener('click', () => { payPage.offset = 0; loadPayments(); });
+  $('pay-status').addEventListener('change', () => { payPage.offset = 0; loadPayments(); });
+  $('pay-mode').addEventListener('change', () => { payPage.offset = 0; loadPayments(); });
+  $('pay-next').addEventListener('click', () => { payPage.offset += payPage.limit; loadPayments(); });
+  $('pay-prev').addEventListener('click', () => { payPage.offset = Math.max(0, payPage.offset - payPage.limit); loadPayments(); });
+
+  // ---------------- Offers ----------------
+  let offersCache = [];
+  function toLocalInput(ms) {
+    if (!ms) return '';
+    const d = new Date(ms); const pad = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function offerDiscountText(o) {
+    if (o.discountType === 'percentage') return o.discountValue + '% off';
+    if (o.discountType === 'fixed') return fmtInr(o.discountValue) + ' off';
+    return 'price ' + fmtInr(o.discountValue);
+  }
+  async function loadOffers() {
+    const tbody = $('offer-tbody');
+    const r = await apiJson('GET', '/api/admin/offers');
+    if (!r.ok) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#EF9A9A">Administrator authorization required.</td></tr>'; return; }
+    offersCache = r.data.offers || [];
+    if (!offersCache.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#90A4AE">No offers yet.</td></tr>'; return; }
+    const now = Date.now();
+    tbody.innerHTML = offersCache.map((o) => {
+      const status = !o.isActive ? '<span class="badge badge-inactive">Paused</span>'
+        : (o.isLive ? '<span class="badge badge-active">Live</span>'
+          : (o.startsAt > now ? '<span class="badge badge-expiring">Scheduled</span>'
+            : (o.maxRedemptions && o.redemptions >= o.maxRedemptions ? '<span class="badge badge-inactive">Sold out</span>' : '<span class="badge badge-inactive">Ended</span>')));
+      return '<tr data-id="' + esc(o.id) + '">' +
+        '<td><strong>' + esc(o.title) + '</strong>' + (o.description ? '<br><small style="color:#8C9BAE">' + esc(o.description) + '</small>' : '') + (o.couponCode ? '<br><small>advertises code <code>' + esc(o.couponCode) + '</code></small>' : '') + (!o.showOnCheckout ? '<br><small style="color:#8C9BAE">hidden on checkout</small>' : '') + '</td>' +
+        '<td>' + esc(o.planTier === 'all' ? 'All plans' : tierLabel(o.planTier)) + '<br><small style="color:#8C9BAE">' + esc(o.billingCycle) + '</small></td>' +
+        '<td>' + esc(offerDiscountText(o)) + '</td>' +
+        '<td>' + esc(fmtDate(o.startsAt)) + ' - ' + esc(o.endsAt ? fmtDate(o.endsAt) : 'open') + '</td>' +
+        '<td>' + esc(o.redemptions) + (o.maxRedemptions ? ' / ' + esc(o.maxRedemptions) : '') + '</td>' +
+        '<td>' + status + '</td>' +
+        '<td><div class="row-actions">' +
+          '<button type="button" class="btn-admin-secondary" data-act="edit">Edit</button>' +
+          '<button type="button" class="btn-admin-secondary" data-act="toggle">' + (o.isActive ? 'Pause' : 'Activate') + '</button>' +
+          '<button type="button" class="btn-danger" data-act="delete">Delete</button>' +
+        '</div></td></tr>';
+    }).join('');
+  }
+  function resetOfferForm() {
+    $('offer-form').reset(); $('of-id').value = '';
+    $('of-start').value = toLocalInput(Date.now());
+    $('of-end').value = toLocalInput(Date.now() + 30 * 86400000);
+    $('of-active').checked = true; $('of-show').checked = true;
+    $('offer-form-title').textContent = 'Create offer'; $('of-submit').textContent = 'Create Offer'; $('of-cancel').style.display = 'none';
+  }
+  function fillOfferForm(o) {
+    $('of-id').value = o.id; $('of-title').value = o.title; $('of-desc').value = o.description || '';
+    $('of-tier').value = o.planTier; $('of-cycle').value = o.billingCycle; $('of-type').value = o.discountType; $('of-value').value = o.discountValue;
+    $('of-start').value = toLocalInput(o.startsAt); $('of-end').value = toLocalInput(o.endsAt); $('of-max').value = o.maxRedemptions || 0;
+    $('of-coupon').value = o.couponCode || ''; $('of-active').checked = o.isActive; $('of-show').checked = o.showOnCheckout;
+    $('offer-form-title').textContent = 'Edit offer'; $('of-submit').textContent = 'Save Offer'; $('of-cancel').style.display = '';
+    $('offer-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  $('of-cancel').addEventListener('click', resetOfferForm);
+  $('offer-tbody').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const id = btn.closest('tr').dataset.id;
+    const o = offersCache.find((x) => x.id === id);
+    if (!o) return;
+    if (btn.dataset.act === 'edit') { fillOfferForm(o); return; }
+    if (btn.dataset.act === 'toggle') {
+      const r = await apiJson('PATCH', '/api/admin/offers/' + encodeURIComponent(id), { isActive: !o.isActive });
+      showNotice(r.ok ? 'success' : 'error', r.ok ? 'Offer updated.' : (r.data.error || 'Failed'));
+      loadOffers(); return;
+    }
+    if (btn.dataset.act === 'delete') {
+      if (!confirm('Delete offer "' + o.title + '"?')) return;
+      const r = await apiJson('DELETE', '/api/admin/offers/' + encodeURIComponent(id));
+      showNotice(r.ok ? 'success' : 'error', r.ok ? 'Offer deleted.' : (r.data.error || 'Failed'));
+      loadOffers();
+    }
+  });
+  $('offer-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = $('of-id').value;
+    const body = {
+      title: $('of-title').value.trim(), description: $('of-desc').value.trim(),
+      planTier: $('of-tier').value, billingCycle: $('of-cycle').value,
+      discountType: $('of-type').value, discountValue: Number($('of-value').value),
+      startsAt: $('of-start').value ? new Date($('of-start').value).getTime() : undefined,
+      endsAt: $('of-end').value ? new Date($('of-end').value).getTime() : undefined,
+      maxRedemptions: parseInt($('of-max').value, 10) || 0,
+      couponCode: $('of-coupon').value.trim().toUpperCase() || null,
+      isActive: $('of-active').checked, showOnCheckout: $('of-show').checked,
+    };
+    const r = id ? await apiJson('PATCH', '/api/admin/offers/' + encodeURIComponent(id), body) : await apiJson('POST', '/api/admin/offers', body);
+    showNotice(r.ok ? 'success' : 'error', r.ok ? (r.data.message || 'Offer saved.') : (r.data.error || 'Failed to save offer'));
+    if (r.ok) { resetOfferForm(); loadOffers(); }
+  });
+  resetOfferForm();
+
   function loadAll() {
+    loadOverview();
+    loadSubscribers();
+    loadPayments();
     loadGateway();
     loadClaims();
     loadPricing();
     loadCoupons();
+    loadOffers();
   }
 
   loadAll();

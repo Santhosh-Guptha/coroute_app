@@ -692,3 +692,269 @@ test('Subscription lifecycle: effective tier, expiry rollback, warnings, history
     ws.close();
   });
 });
+
+test('Admin console: overview, subscribers list, offers (auto-apply, coupon wins, redemptions), pricing history, 403s', async (t) => {
+  const env = await boot();
+  // The first suite resets the Razorpay fake in its t.after(); this suite needs its own.
+  setRazorpayFetch(async (url, opts = {}) => {
+    const reply = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
+    if (opts.method === 'POST' && url.endsWith('/orders')) {
+      const b = JSON.parse(opts.body);
+      return reply(200, { id: `order_${crypto.randomBytes(7).toString('hex')}`, amount: b.amount, currency: b.currency, receipt: b.receipt, status: 'created' });
+    }
+    if (opts.method === 'GET' && url.includes('/orders')) return reply(200, { items: [] });
+    return reply(404, {});
+  });
+  t.after(() => { setRazorpayFetch(null); env.gw.shutdown(); });
+  const DAY = 86400000;
+  const repo = env.gw.repo;
+
+  const admin = await env.register('ConsoleAdmin', 'admin@coroute.test');
+  const paid = await env.register('PaidRider', 'console.paid@test.com');
+  const lapsed = await env.register('LapsedRider', 'console.lapsed@test.com');
+  const buyer = await env.register('OfferBuyer', 'console.buyer@test.com');
+  const A = admin.token;
+
+  await t.test('non-admin gets 403 on every console endpoint', async () => {
+    const calls = [
+      ['GET', '/admin/subscription/overview'], ['GET', '/admin/subscriptions'],
+      ['GET', '/admin/offers'], ['POST', '/admin/offers', { title: 'x', discountValue: 10 }],
+      ['PATCH', '/admin/offers/nope', { title: 'y' }], ['DELETE', '/admin/offers/nope'],
+      ['GET', '/admin/subscription/pricing'], ['PUT', '/admin/subscription/pricing', { plans: { proRider: { monthly: 1 } } }],
+      ['GET', '/admin/payments'], ['GET', `/admin/payments/users/${paid.user.userId}`],
+    ];
+    for (const [m, path, body] of calls) {
+      const res = await env.api(m, path, body || null, paid.token);
+      assert.equal(res.status, 403, `${m} ${path} -> ${res.status}`);
+    }
+  });
+
+  let paidOrderId = '';
+  await t.test('one paid rider (signed verify), one lapsed rider, one bad signature, one UTR claim', async () => {
+    const order = await env.api('POST', '/subscription/create-order', { planTier: 'roadCaptain', billingCycle: 'monthly' }, paid.token);
+    assert.equal(order.status, 200, JSON.stringify(order.json));
+    assert.equal(order.json.offer, undefined);
+    paidOrderId = order.json.orderId;
+    const bad = await env.api('POST', '/subscription/verify-payment', { orderId: paidOrderId, paymentId: 'pay_bad', signature: 'nope' }, paid.token);
+    assert.equal(bad.status, 400);
+    const ok = await env.api('POST', '/subscription/verify-payment', {
+      orderId: paidOrderId, paymentId: 'pay_ok_1', signature: sign('unit_test_secret_456', paidOrderId, 'pay_ok_1'),
+    }, paid.token);
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    assert.equal(ok.json.subscriptionTier, 'roadCaptain');
+
+    const d = await repo.findUserById(lapsed.user.userId);
+    await repo.updateUser(d.key, { subscriptionTier: 'proRider', subscriptionValidUntil: Date.now() - 2 * DAY, lastPayment: { validFrom: Date.now() - 32 * DAY, amount: 149, method: 'RAZORPAY', paidAt: Date.now() - 32 * DAY } });
+    env.gw.gate.invalidate(lapsed.user.userId);
+
+    const claimOrder = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly' }, buyer.token);
+    const claim = await env.api('POST', '/subscription/verify-payment', { orderId: claimOrder.json.orderId, utr: '999888777666' }, buyer.token);
+    assert.equal(claim.status, 202);
+  });
+
+  await t.test('overview counts subscribers, revenue (test mode separate), claims and failed signatures', async () => {
+    const res = await env.api('GET', '/admin/subscription/overview', null, A);
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    const o = res.json;
+    assert.equal(o.subscribers.roadCaptain, 1);
+    assert.equal(o.subscribers.proRider, 0);
+    assert.equal(o.subscribers.community, 3); // admin, lapsed (effective community), buyer
+    assert.equal(o.active, 1);
+    assert.equal(o.expiringIn7Days, 0);
+    assert.equal(o.expiredLast30Days, 1);
+    assert.equal(o.revenue.allTime, 0); // test-mode orders are not real revenue
+    assert.equal(o.testRevenue.today, 599);
+    assert.equal(o.testRevenue.last7Days, 599);
+    assert.equal(o.testRevenue.allTime, 599);
+    assert.equal(o.pendingClaims, 1);
+    assert.equal(o.failedSignatures, 0); // the bad signature was followed by a good one on the same order (now PAID)
+    assert.equal(typeof o.lastSweepAt, 'number');
+    // A sweep records lastSweepAt
+    await env.gw.subscriptions.runOnce();
+    const again = await env.api('GET', '/admin/subscription/overview', null, A);
+    assert.ok(again.json.lastSweepAt > 0);
+    assert.equal(again.json.lastSweep.scanned >= 1, true);
+  });
+
+  await t.test('subscribers list: state/tier filters, search, rows shape', async () => {
+    const active = await env.api('GET', '/admin/subscriptions?state=active', null, A);
+    assert.equal(active.status, 200);
+    assert.equal(active.json.subscribers.length, 1);
+    const row = active.json.subscribers[0];
+    assert.equal(row.userId, paid.user.userId);
+    assert.equal(row.tier, 'roadCaptain');
+    assert.equal(row.email, 'console.paid@test.com');
+    assert.ok(row.phone);
+    assert.ok(row.validUntil > Date.now());
+    assert.equal(row.daysRemaining, 30);
+    assert.equal(row.lastPayment.amount, 599);
+    assert.equal(row.lastPayment.method, 'RAZORPAY');
+    assert.ok(row.lastPayment.paidAt > 0);
+    assert.equal(row.totalPaid, 599);
+
+    const expired = await env.api('GET', '/admin/subscriptions?state=expired', null, A);
+    assert.equal(expired.json.subscribers.length, 1);
+    assert.equal(expired.json.subscribers[0].userId, lapsed.user.userId);
+    assert.equal(expired.json.subscribers[0].tier, 'community');
+    assert.equal(expired.json.subscribers[0].previousTier, 'proRider');
+
+    const expiring = await env.api('GET', '/admin/subscriptions?state=expiring', null, A);
+    assert.equal(expiring.json.subscribers.length, 0);
+
+    const byTier = await env.api('GET', '/admin/subscriptions?tier=roadCaptain', null, A);
+    assert.equal(byTier.json.subscribers.length, 1);
+    const expiredPro = await env.api('GET', '/admin/subscriptions?tier=proRider&state=expired', null, A);
+    assert.equal(expiredPro.json.subscribers.length, 1);
+
+    const search = await env.api('GET', '/admin/subscriptions?q=console.buyer', null, A);
+    assert.equal(search.json.subscribers.length, 1);
+    assert.equal(search.json.subscribers[0].userId, buyer.user.userId);
+
+    const all = await env.api('GET', '/admin/subscriptions?limit=2', null, A);
+    assert.equal(all.json.subscribers.length, 2);
+    assert.equal(all.json.total, 4);
+    assert.equal(all.json.nextCursor, '2');
+    const page2 = await env.api('GET', '/admin/subscriptions?limit=2&cursor=2', null, A);
+    assert.equal(page2.json.subscribers.length, 2);
+    assert.equal(page2.json.nextCursor, null);
+  });
+
+  let offerId = '';
+  await t.test('offers: validation, create, list, patch, public listing', async () => {
+    const bad = await env.api('POST', '/admin/offers', { title: '', discountValue: 10 }, A);
+    assert.equal(bad.status, 400);
+    const badPct = await env.api('POST', '/admin/offers', { title: 'Too much', discountType: 'percentage', discountValue: 150 }, A);
+    assert.equal(badPct.status, 400);
+    const badDates = await env.api('POST', '/admin/offers', { title: 'Dates', discountValue: 10, startsAt: Date.now(), endsAt: Date.now() - 1 }, A);
+    assert.equal(badDates.status, 400);
+
+    const created = await env.api('POST', '/admin/offers', {
+      title: 'Diwali 20% off Pro', description: 'Festive', planTier: 'proRider', billingCycle: 'all',
+      discountType: 'percentage', discountValue: 20, endsAt: Date.now() + 10 * DAY, showOnCheckout: true,
+    }, A);
+    assert.equal(created.status, 201, JSON.stringify(created.json));
+    offerId = created.json.offer.id;
+    assert.ok(offerId.startsWith('offer_'));
+    assert.equal(created.json.offer.redemptions, 0);
+    assert.equal(created.json.offer.isLive, true);
+
+    // A hidden (showOnCheckout=false) and an inactive offer must not reach the public list
+    const hidden = await env.api('POST', '/admin/offers', { title: 'Hidden fixed', discountType: 'fixed', discountValue: 5, planTier: 'proRider', showOnCheckout: false }, A);
+    assert.equal(hidden.status, 201);
+    const off = await env.api('POST', '/admin/offers', { title: 'Paused', discountType: 'fixed', discountValue: 100, planTier: 'proRider', isActive: false }, A);
+    assert.equal(off.status, 201);
+
+    const list = await env.api('GET', '/admin/offers', null, A);
+    assert.equal(list.json.total, 3);
+
+    const patched = await env.api('PATCH', `/admin/offers/${offerId}`, { title: 'Diwali 20% off CoRoute Pro' }, A);
+    assert.equal(patched.status, 200);
+    assert.equal(patched.json.offer.title, 'Diwali 20% off CoRoute Pro');
+    assert.equal(patched.json.offer.discountValue, 20);
+    const missing = await env.api('PATCH', '/admin/offers/offer_nope', { title: 'x' }, A);
+    assert.equal(missing.status, 404);
+
+    const pub = await env.api('GET', '/subscription/offers');
+    assert.equal(pub.status, 200);
+    assert.equal(pub.json.offers.length, 1);
+    assert.equal(pub.json.offers[0].id, offerId);
+    assert.equal(pub.json.offers[0].autoApplied, true);
+    assert.equal(pub.json.offers[0].redemptions, undefined);
+  });
+
+  let offerOrderId = '';
+  await t.test('create-order applies the best live offer automatically (both paths); a coupon wins over the offer', async () => {
+    const app = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly' }, buyer.token);
+    assert.equal(app.status, 200, JSON.stringify(app.json));
+    assert.equal(app.json.amount, 119); // 149 - 20% (30), the fixed ₹5 offer is hidden but live: 30 > 5
+    assert.equal(app.json.amountInPaise, 11900);
+    assert.deepEqual(app.json.offer, { id: offerId, title: 'Diwali 20% off CoRoute Pro', discountAmount: 30 });
+    assert.equal(app.json.coupon, undefined);
+    offerOrderId = app.json.orderId;
+    const ledger = await repo.findRazorpayOrder(offerOrderId);
+    assert.equal(ledger.offerId, offerId);
+    assert.equal(ledger.discountAmount, 30);
+
+    // Other tier: no offer
+    const captain = await env.api('POST', '/subscription/create-order', { planTier: 'roadCaptain', billingCycle: 'monthly' }, buyer.token);
+    assert.equal(captain.json.amount, 599);
+    assert.equal(captain.json.offer, undefined);
+
+    // Public path
+    const pub = await env.api('POST', '/api/create-order', { planTier: 'proRider', billingCycle: 'annual', currency: 'INR' });
+    assert.equal(pub.status, 200, JSON.stringify(pub.json));
+    assert.equal(pub.json.amount, Math.round(1199 * 0.8) * 100);
+    assert.equal(pub.json.offer.id, offerId);
+    assert.equal(pub.json.offer.discountAmount, Math.round(1199 * 0.2));
+
+    // Coupon given: the coupon applies, the offer does not (no stacking)
+    const withCoupon = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly', couponCode: 'WELCOME50' }, buyer.token);
+    assert.equal(withCoupon.status, 200, JSON.stringify(withCoupon.json));
+    assert.equal(withCoupon.json.amount, 74); // 149 - round(74.5) = 74
+    assert.equal(withCoupon.json.coupon.code, 'WELCOME50');
+    assert.equal(withCoupon.json.offer, undefined);
+    const couponLedger = await repo.findRazorpayOrder(withCoupon.json.orderId);
+    assert.equal(couponLedger.offerId, null);
+  });
+
+  await t.test('a verified redirect callback settles the offer order and counts one redemption', async () => {
+    const paymentId = 'pay_offer_1';
+    const form = new URLSearchParams({ razorpay_order_id: offerOrderId, razorpay_payment_id: paymentId, razorpay_signature: sign('unit_test_secret_456', offerOrderId, paymentId) });
+    const res = await fetch(env.base + '/razorpay/callback', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form, redirect: 'manual' });
+    assert.equal(res.status, 303);
+    assert.ok(res.headers.get('location').includes('paid=' + encodeURIComponent(offerOrderId)));
+    const me = await env.api('GET', '/subscription/status', null, buyer.token);
+    assert.equal(me.json.tier, 'proRider');
+    const list = await env.api('GET', '/admin/offers', null, A);
+    const offer = list.json.offers.find((o) => o.id === offerId);
+    assert.equal(offer.redemptions, 1);
+    // Replaying the callback does not count twice
+    await fetch(env.base + '/razorpay/callback', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form, redirect: 'manual' });
+    const again = (await env.api('GET', '/admin/offers', null, A)).json.offers.find((o) => o.id === offerId);
+    assert.equal(again.redemptions, 1);
+    // Ledger / payments table carries the offer and the TEST flag
+    const pay = await env.api('GET', `/admin/payments?userId=${buyer.user.userId}&status=PAID`, null, A);
+    assert.equal(pay.json.payments.length, 1);
+    assert.equal(pay.json.payments[0].offerId, offerId);
+    assert.equal(pay.json.payments[0].isTest, true);
+    assert.equal(pay.json.payments[0].discountAmount, 30);
+    const paged = await env.api('GET', '/admin/payments?limit=1&offset=0', null, A);
+    assert.equal(paged.json.payments.length, 1);
+    assert.equal(paged.json.hasMore, true);
+    const testOnly = await env.api('GET', '/admin/payments?mode=manual', null, A);
+    assert.equal(testOnly.json.total, 0);
+  });
+
+  await t.test('sold-out and deleted offers stop applying', async () => {
+    const capped = await env.api('PATCH', `/admin/offers/${offerId}`, { maxRedemptions: 1 }, A);
+    assert.equal(capped.json.offer.isLive, false);
+    const full = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly' }, buyer.token);
+    assert.equal(full.json.amount, 144); // only the hidden ₹5 fixed offer remains
+    assert.equal(full.json.offer.discountAmount, 5);
+    const del = await env.api('DELETE', `/admin/offers/${offerId}`, null, A);
+    assert.equal(del.status, 200);
+    assert.equal((await env.api('DELETE', `/admin/offers/${offerId}`, null, A)).status, 404);
+    assert.equal((await env.api('GET', '/admin/offers', null, A)).json.total, 2);
+  });
+
+  await t.test('pricing: annual must be >= monthly; every change is recorded in history', async () => {
+    const bad = await env.api('PUT', '/admin/subscription/pricing', { plans: { proRider: { monthly: 500, annual: 400 } } }, A);
+    assert.equal(bad.status, 400);
+    assert.match(bad.json.error, /annual/);
+    const before = await env.api('GET', '/admin/subscription/pricing', null, A);
+    assert.equal(before.status, 200);
+    assert.deepEqual(before.json.history, []);
+    const ok = await env.api('PUT', '/admin/subscription/pricing', { plans: { proRider: { monthly: 179, annual: 1499 } } }, A);
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    const ok2 = await env.api('PUT', '/admin/subscription/pricing', { plans: { roadCaptain: { monthly: 649 } } }, A);
+    assert.equal(ok2.status, 200);
+    const after = await env.api('GET', '/admin/subscription/pricing', null, A);
+    assert.equal(after.json.isCustomized, true);
+    assert.equal(after.json.history.length, 2);
+    assert.equal(after.json.history[0].prices.roadCaptain.monthly, 649); // newest first
+    assert.equal(after.json.history[1].prices.proRider.monthly, 179);
+    assert.equal(after.json.history[0].by, 'admin@coroute.test');
+    assert.ok(after.json.history[0].at >= after.json.history[1].at);
+    assert.equal(after.json.updatedBy, 'admin@coroute.test');
+  });
+});

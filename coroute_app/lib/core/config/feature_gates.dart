@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../../data/services/plan_subscription_service.dart';
+import '../../presentation/subscription/plan_selector_screen.dart';
 
 /// Subscription tiers and feature entitlements for CoRoute.
 ///
-/// In the test phase, riders can switch between tiers freely on the Plan Selector
-/// screen, allowing all screens, buttons, and cockpit controls to dynamically and
-/// strictly map to the selected plan.
+/// Riders pick the plan to ride with on the Plan Selector screen, at or below the
+/// tier the gateway says they hold; every screen, button and cockpit control maps
+/// strictly to that effective plan.
 enum SubscriptionTier {
   /// Free community tier: standard convoy (up to 4 bikes), basic telemetry, SOS.
   community,
@@ -246,10 +247,13 @@ class FeatureGates {
     }
   }
 
-  /// Displays a plan-gate modal offering one-tap switching to test the feature.
+  /// Displays a plan-gate modal: a one-tap switch when the rider already holds
+  /// the needed tier (e.g. after dropping to Community), otherwise a way to upgrade.
   static void showUpgradeModal(BuildContext context, Feature feature) {
     final neededTier = requiredTier(feature);
     final neededLabel = tierLabel(neededTier);
+    final planService = context.read<PlanSubscriptionService>();
+    final heldAlready = planService.canSelect(neededTier);
 
     showModalBottomSheet(
       context: context,
@@ -326,22 +330,32 @@ class FeatureGates {
                   backgroundColor: AppTheme.brand,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
-                onPressed: () {
+                onPressed: () async {
                   Navigator.pop(ctx);
-                  context.read<PlanSubscriptionService>().selectTier(neededTier);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      duration: const Duration(seconds: 2),
-                      backgroundColor: AppTheme.card,
-                      content: Text(
-                        'Activated $neededLabel! Feature is now unlocked.',
-                        style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
+                  // Only switches within what the rider holds; a higher tier needs checkout.
+                  final switched = await planService.selectTier(neededTier);
+                  if (!context.mounted) return;
+                  if (switched) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        duration: const Duration(seconds: 2),
+                        backgroundColor: AppTheme.card,
+                        content: Text(
+                          'Activated $neededLabel! Feature is now unlocked.',
+                          style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
+                        ),
                       ),
-                    ),
-                  );
+                    );
+                  } else {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => PlanSelectorScreen(preselectTier: neededTier),
+                      ),
+                    );
+                  }
                 },
                 child: Text(
-                  'SWITCH TO $neededLabel TO TEST (FREE)'.toUpperCase(),
+                  (heldAlready ? 'SWITCH TO $neededLabel (FREE)' : 'UPGRADE TO $neededLabel').toUpperCase(),
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w900,

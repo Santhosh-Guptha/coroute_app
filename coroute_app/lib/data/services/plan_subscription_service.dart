@@ -69,8 +69,12 @@ class PlanDetails {
 /// Service managing subscription plan selection, feature entitlements,
 /// Razorpay UPI payments, and server-synchronized subscription state.
 class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver {
+  /// The tier the server says the rider is entitled to (`entitledTier`).
   static const String keyTier = 'coroute_active_subscription_plan';
   static const String keyValidUntil = 'coroute_subscription_valid_until';
+
+  /// The tier the rider chose to ride with (`preferredTier`, never above the entitlement).
+  static const String keyPreferredTier = 'coroute_preferred_subscription_plan';
   static const String keyForceUnlocked = 'coroute_force_all_unlocked';
   static const String keyPreviousTier = 'coroute_subscription_previous_tier';
   static const String keyExpiredAt = 'coroute_subscription_expired_at';
@@ -83,8 +87,13 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
 
   final ApiClient? _api;
 
-  SubscriptionTier _currentTier = SubscriptionTier.community;
+  /// Server truth: the tier the rider has paid for (Community when none), with [_validUntil].
+  SubscriptionTier _entitledTier = SubscriptionTier.community;
   int _validUntil = 0;
+
+  /// Local choice: the tier the rider wants to use right now. Kept at or below the entitlement
+  /// by [effectiveTier]; a paid rider may pick Community without giving the paid plan up.
+  SubscriptionTier _preferredTier = SubscriptionTier.community;
   bool _forceAllUnlocked = false;
   bool _loaded = false;
 
@@ -132,12 +141,39 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     if (_api != null && _api.hasToken) syncFromServer().ignore();
   }
 
-  /// The tier whose features are unlocked right now (an expired paid plan reads as community).
-  SubscriptionTier get currentTier => _currentTier;
+  /// The tier the server says is paid for and not yet expired (Community when none).
+  SubscriptionTier get entitledTier => _entitledTier;
 
-  /// Alias of [currentTier], named for call sites that gate features.
-  SubscriptionTier get effectiveTier => _currentTier;
+  /// The tier the rider chose to use; may sit below [entitledTier] (never above it in effect).
+  SubscriptionTier get preferredTier => _preferredTier;
+
+  /// The tier whose features are unlocked right now: the preference while it is covered by the
+  /// entitlement, otherwise Community (an expired paid plan reads as community).
+  SubscriptionTier get effectiveTier =>
+      _withinEntitlement(_preferredTier) ? _preferredTier : SubscriptionTier.community;
+
+  /// Alias of [effectiveTier] for existing call sites.
+  SubscriptionTier get currentTier => effectiveTier;
   int get validUntil => _validUntil;
+
+  /// True when [tier] can be used without paying: Community, or at/below the entitlement.
+  bool canSelect(SubscriptionTier tier) => _withinEntitlement(tier);
+
+  /// True when [tier] is the paid plan the rider currently holds (valid, not expired).
+  bool isEntitledTo(SubscriptionTier tier) =>
+      tier != SubscriptionTier.community && tier == _entitledTier && !_entitlementLapsed;
+
+  bool _withinEntitlement(SubscriptionTier tier) {
+    if (tier == SubscriptionTier.community) return true;
+    if (_entitlementLapsed) return false;
+    return tier.index <= _entitledTier.index;
+  }
+
+  /// A paid entitlement whose validUntil is already behind us (before [checkExpiry] ran).
+  bool get _entitlementLapsed =>
+      _entitledTier != SubscriptionTier.community &&
+      _validUntil > 0 &&
+      _validUntil <= DateTime.now().millisecondsSinceEpoch;
   bool get forceAllUnlocked => _forceAllUnlocked;
   bool get loaded => _loaded;
 
@@ -146,9 +182,10 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   int get expiredAt => _expiredAt;
 
   /// True when a paid plan ended and the rider has been rolled back to Community.
-  bool get isExpired => _previousTier != null && _currentTier == SubscriptionTier.community;
+  bool get isExpired => _previousTier != null && _entitledTier == SubscriptionTier.community;
 
-  bool get _isPaid => _currentTier != SubscriptionTier.community;
+  /// True while the server-side entitlement is a paid tier.
+  bool get _isPaid => _entitledTier != SubscriptionTier.community;
 
   /// Whole days left on the current paid plan (0 when none, or when it already ended).
   int get daysRemaining {
@@ -164,7 +201,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   bool get expiringSoon => _isPaid && _validUntil > 0 && daysRemaining <= warningThresholds.first;
 
   /// The tier to offer when the rider taps "Renew": the expired one, or the one that is ending.
-  SubscriptionTier get renewTier => _previousTier ?? (_isPaid ? _currentTier : SubscriptionTier.community);
+  SubscriptionTier get renewTier => _previousTier ?? (_isPaid ? _entitledTier : SubscriptionTier.community);
 
   /// Pending warning from the gateway (or the local countdown), null once shown.
   SubscriptionExpiringNotice? get expiringNotice => _expiringNotice;
@@ -215,17 +252,19 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     final now = DateTime.now().millisecondsSinceEpoch;
     if (_validUntil > now) {
       // Still valid: raise the 7/3/1-day warning locally too, in case the gateway's push is missed.
-      if (expiringSoon) _noteExpiring(daysRemaining, _currentTier, _validUntil);
+      if (expiringSoon) _noteExpiring(daysRemaining, _entitledTier, _validUntil);
       return false;
     }
-    _expire(previousTier: _currentTier, expiredAt: _validUntil, notice: false);
+    _expire(previousTier: _entitledTier, expiredAt: _validUntil, notice: false);
     return true;
   }
 
   void _expire({required SubscriptionTier previousTier, required int expiredAt, required bool notice}) {
     _previousTier = previousTier == SubscriptionTier.community ? _previousTier : previousTier;
     _expiredAt = expiredAt;
-    _currentTier = SubscriptionTier.community;
+    // Only the entitlement ends; the preference is left as it is and effectiveTier
+    // reads as Community until a renewal brings the entitlement back.
+    _entitledTier = SubscriptionTier.community;
     _validUntil = 0;
     _serverDaysRemaining = null;
     _expiringNotice = null;
@@ -240,8 +279,9 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
 
   void _persist() {
     SharedPreferences.getInstance().then((prefs) async {
-      await prefs.setString(keyTier, _currentTier.name);
+      await prefs.setString(keyTier, _entitledTier.name);
       await prefs.setInt(keyValidUntil, _validUntil);
+      await prefs.setString(keyPreferredTier, _preferredTier.name);
       await prefs.setBool(keyForceUnlocked, _forceAllUnlocked);
       final prev = _previousTier;
       if (prev == null) {
@@ -275,7 +315,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     final days = status['daysRemaining'] is num ? (status['daysRemaining'] as num).toInt() : null;
     applyServerSubscription(tierName, until, previousTier: expired ? (prev ?? _previousTier) : prev, serverDaysRemaining: days);
     if (status['expiringSoon'] == true && _isPaid && days != null) {
-      _noteExpiring(days, _currentTier, _validUntil);
+      _noteExpiring(days, _entitledTier, _validUntil);
     }
   }
 
@@ -299,10 +339,10 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   /// Gateway `SUBSCRIPTION_EXPIRING` `{daysRemaining, tier, validUntil}`.
   void handleExpiringEvent(Map<String, dynamic> e) {
     final days = e['daysRemaining'] is num ? (e['daysRemaining'] as num).toInt() : daysRemaining;
-    final tier = _tierNamed(e['tier']?.toString()) ?? _currentTier;
+    final tier = _tierNamed(e['tier']?.toString()) ?? _entitledTier;
     final until = e['validUntil'] is num ? (e['validUntil'] as num).toInt() : _validUntil;
     if (tier == SubscriptionTier.community) return;
-    if (until > 0 && (tier != _currentTier || until != _validUntil)) {
+    if (until > 0 && (tier != _entitledTier || until != _validUntil)) {
       applyServerSubscription(tier.name, until, serverDaysRemaining: days);
     } else {
       _serverDaysRemaining = days;
@@ -313,7 +353,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
 
   /// Gateway `SUBSCRIPTION_EXPIRED` `{previousTier, expiredAt}`: roll back right away.
   void handleExpiredEvent(Map<String, dynamic> e) {
-    final prev = _tierNamed(e['previousTier']?.toString()) ?? (_isPaid ? _currentTier : _previousTier);
+    final prev = _tierNamed(e['previousTier']?.toString()) ?? (_isPaid ? _entitledTier : _previousTier);
     final at = e['expiredAt'] is num ? (e['expiredAt'] as num).toInt() : DateTime.now().millisecondsSinceEpoch;
     if (prev == null) return;
     _expire(previousTier: prev, expiredAt: at, notice: true);
@@ -333,12 +373,14 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
       final prefs = await SharedPreferences.getInstance();
       final tierName = prefs.getString(keyTier);
       if (tierName != null) {
-        _currentTier = SubscriptionTier.values.firstWhere(
+        _entitledTier = SubscriptionTier.values.firstWhere(
           (t) => t.name == tierName,
           orElse: () => SubscriptionTier.community,
         );
       }
       _validUntil = prefs.getInt(keyValidUntil) ?? 0;
+      // Older builds stored only one tier: the rider was using what they held.
+      _preferredTier = _tierNamed(prefs.getString(keyPreferredTier)) ?? _entitledTier;
       _forceAllUnlocked = prefs.getBool(keyForceUnlocked) ?? false;
       _previousTier = _tierNamed(prefs.getString(keyPreviousTier));
       _expiredAt = prefs.getInt(keyExpiredAt) ?? 0;
@@ -378,9 +420,12 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
 
   /// Applies a server-confirmed subscription tier and persists it locally.
   ///
-  /// A paid tier whose [validUntilEpochMs] is already past is stored as Community
-  /// with the paid tier kept as [previousTier]. A paid tier that is still valid
-  /// clears any earlier expiry (the rider renewed).
+  /// Updates the entitlement only. A paid tier whose [validUntilEpochMs] is
+  /// already past is stored as Community with the paid tier kept as
+  /// [previousTier]. A paid tier that is still valid clears any earlier expiry
+  /// (the rider renewed). A new or renewed paid plan also becomes the preferred
+  /// tier (the rider just paid for it); a re-sync of an unchanged plan leaves
+  /// the preference alone, so choosing Community on purpose sticks.
   void applyServerSubscription(
     String tierName,
     int? validUntilEpochMs, {
@@ -394,13 +439,15 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
       _expire(previousTier: matched, expiredAt: until, notice: false);
       return;
     }
-    _currentTier = matched;
+    final changed = matched != _entitledTier || until != _validUntil;
+    _entitledTier = matched;
     _validUntil = until;
     _forceAllUnlocked = false;
     _serverDaysRemaining = matched == SubscriptionTier.community ? null : serverDaysRemaining;
     if (matched != SubscriptionTier.community) {
       _previousTier = null; // an active paid plan supersedes any earlier expiry
       _expiredAt = 0;
+      if (changed) _preferredTier = matched;
     } else if (previousTier != null && previousTier != SubscriptionTier.community) {
       _previousTier = previousTier;
       if (_expiredAt == 0) _expiredAt = now;
@@ -493,15 +540,19 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     }
   }
 
-  /// Selects and activates a plan directly (used for free Community tier or local fallback).
-  Future<void> selectTier(SubscriptionTier tier) async {
-    _currentTier = tier;
+  /// Chooses the plan to ride with. Only the preference changes: the paid
+  /// entitlement ([entitledTier] / [validUntil]) is never touched, so a rider
+  /// can drop to Community and come back to the paid plan for free while it is
+  /// valid. Returns false, changing nothing, when [tier] is above the
+  /// entitlement: the caller then has to open checkout.
+  Future<bool> selectTier(SubscriptionTier tier) async {
+    if (!_withinEntitlement(tier)) return false;
+    _preferredTier = tier;
     _forceAllUnlocked = false;
-    if (tier == SubscriptionTier.community) {
-      // Chosen on purpose: no longer "expired", just free.
+    if (tier == SubscriptionTier.community && !_isPaid) {
+      // Free on purpose after a plan ran out: no longer "expired", just free.
       _previousTier = null;
       _expiredAt = 0;
-      _validUntil = 0;
       _serverDaysRemaining = null;
       _expiringNotice = null;
     }
@@ -510,19 +561,20 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(keyTier, tier.name);
+      await prefs.setString(keyPreferredTier, tier.name);
       await prefs.setBool(keyForceUnlocked, false);
-      if (tier == SubscriptionTier.community) {
-        await prefs.setInt(keyValidUntil, 0);
+      if (tier == SubscriptionTier.community && !_isPaid) {
         await prefs.remove(keyPreviousTier);
         await prefs.remove(keyExpiredAt);
       }
     } catch (_) {}
+    return true;
   }
 
   /// Signed out: back to the free tier with no history of a paid plan.
   Future<void> resetLocal() async {
-    _currentTier = SubscriptionTier.community;
+    _entitledTier = SubscriptionTier.community;
+    _preferredTier = SubscriptionTier.community;
     _validUntil = 0;
     _previousTier = null;
     _expiredAt = 0;
@@ -536,6 +588,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(keyTier);
       await prefs.remove(keyValidUntil);
+      await prefs.remove(keyPreferredTier);
       await prefs.remove(keyPreviousTier);
       await prefs.remove(keyExpiredAt);
       await prefs.setBool(keyForceUnlocked, false);
@@ -555,15 +608,15 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   }
 
   void _syncToFeatureGates() {
-    FeatureGates.activeTier = _currentTier;
+    FeatureGates.activeTier = effectiveTier;
     FeatureGates.forceAllUnlocked = _forceAllUnlocked;
   }
 
   /// Checks if a feature is unlocked under the current plan.
-  bool isUnlocked(Feature feature) => FeatureGates.isUnlocked(feature, _currentTier);
+  bool isUnlocked(Feature feature) => FeatureGates.isUnlocked(feature, effectiveTier);
 
   /// Current max allowable convoy size.
-  int get maxConvoyMembers => FeatureGates.maxConvoyMembers(_currentTier);
+  int get maxConvoyMembers => FeatureGates.maxConvoyMembers(effectiveTier);
 
   /// Returns full plan specifications for all available tiers.
   static List<PlanDetails> get allPlans => [

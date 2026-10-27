@@ -280,6 +280,7 @@
         <div class="t-small t-muted" id="app-order-sub">Pay by UPI below. Your plan is activated in the app as soon as the payment is verified.</div>
       </div>
 
+      <div id="offer-banner" style="display:none;background:rgba(76,175,80,0.12);border:1px solid rgba(76,175,80,0.4);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:14px"></div>
       <h2 class="t-h3" style="margin-bottom:8px" id="select-plan-heading">1. Select Plan</h2>
       <div class="plan-grid" id="plan-grid-container">
         <div class="plan-card active" data-amount="10000" data-tier="testVerification" data-name="Test Transaction (Rs 100)">
@@ -336,7 +337,7 @@
         <!-- Order Summary Breakdown -->
         <div id="order-summary" style="background:rgba(0,0,0,0.25);padding:14px 18px;border-radius:8px;margin-bottom:20px;display:none">
           <div class="tx-detail-row"><span>Original Plan Price:</span> <span id="summary-original-price">Rs 100</span></div>
-          <div class="tx-detail-row" id="summary-discount-row" style="color:#81C784"><span>Coupon Discount:</span> <span id="summary-discount-val">-Rs 0</span></div>
+          <div class="tx-detail-row" id="summary-discount-row" style="color:#81C784"><span id="summary-discount-label">Coupon Discount:</span> <span id="summary-discount-val">-Rs 0</span></div>
           <div class="tx-detail-row" style="font-weight:700;font-size:16px;border-top:1px solid rgba(255,255,255,0.15);padding-top:8px"><span>Final Payable Amount:</span> <span id="summary-final-price" style="color:#FF7043">Rs 100</span></div>
         </div>
 
@@ -382,6 +383,9 @@
   const summaryOrig = document.getElementById('summary-original-price');
   const summaryDisc = document.getElementById('summary-discount-val');
   const summaryFinal = document.getElementById('summary-final-price');
+  const summaryDiscLabel = document.getElementById('summary-discount-label');
+  const offerBanner = document.getElementById('offer-banner');
+  let liveOffers = [];
 
   // Dynamically load Razorpay Checkout Script to comply with zero external static tag requirements
   function ensureRazorpayScript(callback) {
@@ -481,9 +485,56 @@
     }
   }).catch(() => {});
 
+  // Active offers (the server applies the best one automatically when no coupon is given).
+  const TIER_NAMES = { all: 'all plans', proRider: 'CoRoute Pro', roadCaptain: 'Road Captain Pass', tourOperator: 'Tour Operator' };
+  function offerText(o) {
+    const what = o.discountType === 'percentage' ? o.discountValue + '% off' : (o.discountType === 'fixed' ? 'Rs ' + o.discountValue + ' off' : 'Rs ' + o.discountValue + ' flat');
+    const cycle = o.billingCycle === 'all' ? '' : ' (' + o.billingCycle + ')';
+    const until = o.endsAt ? ' until ' + new Date(o.endsAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '';
+    return what + ' ' + (TIER_NAMES[o.planTier] || o.planTier) + cycle + until;
+  }
+  function renderOfferBanner() {
+    if (!liveOffers.length) { offerBanner.style.display = 'none'; return; }
+    offerBanner.innerHTML = liveOffers.map(function(o) {
+      return '<div><strong>Offer:</strong> ' + escapeHtml(o.title) + ' &mdash; ' + escapeHtml(offerText(o)) +
+        (o.autoApplied ? ' &mdash; applied automatically' : (o.couponCode ? ' &mdash; use code <code>' + escapeHtml(o.couponCode) + '</code>' : '')) +
+        (o.description ? '<br><small class="t-muted">' + escapeHtml(o.description) + '</small>' : '') + '</div>';
+    }).join('');
+    offerBanner.style.display = 'block';
+  }
+  fetch('/api/subscription/offers').then(r => r.json()).then(data => {
+    liveOffers = (data && Array.isArray(data.offers)) ? data.offers : [];
+    renderOfferBanner();
+    updatePricingDisplay();
+  }).catch(() => {});
+  // Client-side preview of the offer the server will apply (the server's own calculation is authoritative).
+  function previewOffer(tier, cycle, amountInr) {
+    let best = null;
+    liveOffers.forEach(function(o) {
+      if (!o.autoApplied) return;
+      if (!(o.planTier === 'all' || o.planTier === tier)) return;
+      if (!(o.billingCycle === 'all' || o.billingCycle === cycle)) return;
+      let d = 0;
+      if (o.discountType === 'percentage') d = Math.round(amountInr * Math.min(100, o.discountValue) / 100);
+      else if (o.discountType === 'fixed') d = Math.round(o.discountValue);
+      else if (o.discountType === 'price') d = Math.round(amountInr - o.discountValue);
+      d = Math.max(0, Math.min(d, Math.max(0, amountInr - 1)));
+      if (d > 0 && (!best || d > best.discountAmount)) best = { id: o.id, title: o.title, discountAmount: d, finalAmount: amountInr - d };
+    });
+    return best;
+  }
+  function showOfferSummary(baseInr, offer) {
+    orderSummary.style.display = 'block';
+    summaryOrig.textContent = 'Rs ' + baseInr;
+    summaryDiscLabel.textContent = 'Offer (' + offer.title + '):';
+    summaryDisc.textContent = '-Rs ' + offer.discountAmount;
+    summaryFinal.textContent = 'Rs ' + (baseInr - offer.discountAmount);
+  }
+
   function updatePricingDisplay() {
     const baseInr = baseAmountPaise / 100;
     if (appliedCoupon && appliedCoupon.valid) {
+      summaryDiscLabel.textContent = 'Coupon Discount:';
       orderSummary.style.display = 'block';
       summaryOrig.textContent = 'Rs ' + baseInr;
       summaryDisc.textContent = '-Rs ' + appliedCoupon.discountAmount;
@@ -496,9 +547,16 @@
         payBtnLabel.textContent = 'Pay with Razorpay (Rs ' + appliedCoupon.finalAmount + ')';
       }
     } else {
-      orderSummary.style.display = 'none';
-      payableAmountPaise = baseAmountPaise;
-      payBtnLabel.textContent = 'Pay with Razorpay (Rs ' + baseInr + ')';
+      const offer = (!appOrder && selectedTier !== 'testVerification') ? previewOffer(selectedTier, 'monthly', baseInr) : null;
+      if (offer) {
+        showOfferSummary(baseInr, offer);
+        payableAmountPaise = offer.finalAmount * 100;
+        payBtnLabel.textContent = 'Pay with Razorpay (Rs ' + offer.finalAmount + ')';
+      } else {
+        orderSummary.style.display = 'none';
+        payableAmountPaise = baseAmountPaise;
+        payBtnLabel.textContent = 'Pay with Razorpay (Rs ' + baseInr + ')';
+      }
     }
   }
 
@@ -658,7 +716,14 @@
         return;
       }
 
-      showStatus('info', 'Order generated! <code>' + orderData.order_id + '</code> (' + (orderData.amount / 100) + ' ' + orderData.currency + '). Opening Razorpay Checkout...');
+      if (orderData.offer && orderData.offer.id) {
+        showOfferSummary(baseAmountPaise / 100, orderData.offer);
+        payableAmountPaise = orderData.amount;
+        payBtnLabel.textContent = 'Pay with Razorpay (Rs ' + (orderData.amount / 100) + ')';
+      }
+      showStatus('info', 'Order generated! <code>' + escapeHtml(orderData.order_id) + '</code> (' + (orderData.amount / 100) + ' ' + escapeHtml(orderData.currency) + ').' +
+        (orderData.offer && orderData.offer.id ? ' Offer applied: ' + escapeHtml(orderData.offer.title) + ' (-Rs ' + escapeHtml(orderData.offer.discountAmount) + ').' : '') +
+        ' Opening Razorpay Checkout...');
 
       // -------------------------------------------------------------
       // STEP 2: FRONTEND - Open Razorpay Modal (UPI Only)

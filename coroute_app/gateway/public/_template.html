@@ -33,6 +33,7 @@
 <link rel="manifest" href="/site.webmanifest">
 <link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/home.css">
 <script>document.documentElement.classList.add('js')</script>
 <script src="/assets/site.js" defer></script>
 <!-- Optional page-only styles go here, in one <style> block, using the tokens from site.css. -->
@@ -41,34 +42,28 @@
 <!--#include header-->
 <main id="main" class="site-main" tabindex="-1">
 
-  <section class="page-hero topo">
+  <section class="hm-hero hm-hero--page topo" aria-labelledby="hero-title">
     <div class="container">
-      <div class="page-hero__inner">
+      <div class="hm-hero__inner">
         <p class="eyebrow">PAGE_EYEBROW</p>
-        <h1>PAGE_HEADLINE</h1>
+        <h1 id="hero-title">PAGE_HEADLINE</h1>
         <p class="t-lead">PAGE_LEAD</p>
-        <div class="cluster cluster--16">
-          <a class="btn btn--primary btn--lg" href="/download">Download for Android</a>
-          <a class="link-arrow" href="/how-it-works"><span>See how it works</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+        <div class="hm-hero__cta">
+          <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
+          <a class="btn btn--secondary btn--lg" href="/checkout">See plans</a>
         </div>
       </div>
     </div>
-    <svg class="page-hero__route" viewBox="0 0 1440 160" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
-      <path class="road__edge" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
-      <path class="road" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
-      <path class="road__centre" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
-      <path class="route-line" data-route="reveal" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
-    </svg>
   </section>
 
-  <section class="section">
+  <section class="section section--surface">
     <div class="container">
-      <div class="section-intro">
+      <div class="hm-head">
         <p class="eyebrow">Section eyebrow</p>
-        <h2 class="section-intro__title">Section headline</h2>
-        <p class="t-lead">One or two short sentences.</p>
+        <h2>Section headline</h2>
+        <p>One or two short sentences.</p>
       </div>
-      <!-- content -->
+      <!-- content: use .hm-features, .hm-steps, .hm-facts or .hm-cta from home.css -->
     </div>
   </section>
 

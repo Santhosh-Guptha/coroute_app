@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
@@ -21,6 +22,12 @@ class PlanSelectorScreen extends StatefulWidget {
 }
 
 class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
+  static final DateFormat _dateFmt = DateFormat('d MMM yyyy');
+
+  /// "27 Nov 2026" for an epoch-ms validUntil (empty when the plan has no end date).
+  static String formatValidUntil(int validUntilMs) =>
+      validUntilMs > 0 ? _dateFmt.format(DateTime.fromMillisecondsSinceEpoch(validUntilMs)) : '';
+
   bool _isAnnual = false;
   final Map<SubscriptionTier, GlobalKey> _cardKeys = {
     for (final t in SubscriptionTier.values) t: GlobalKey(),
@@ -43,7 +50,12 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
   @override
   Widget build(BuildContext context) {
     final planService = context.watch<PlanSubscriptionService>();
-    final currentTier = planService.currentTier;
+    // What is unlocked now (the rider's choice, at or below what they hold).
+    final currentTier = planService.effectiveTier;
+    // What the server says they paid for (Community when nothing is active).
+    final entitledTier = planService.entitledTier;
+    final heldPlanActive = planService.isEntitledTo(entitledTier);
+    final activeUntil = heldPlanActive ? formatValidUntil(planService.validUntil) : '';
     final plans = PlanSubscriptionService.allPlans;
     // Expired or ending: the plan to renew (never the free tier).
     final renewTier = widget.preselectTier ??
@@ -235,30 +247,71 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
                   plan: plan,
                   isAnnual: _isAnnual,
                   isActive: plan.tier == currentTier,
-                  isRenewal: renewTier != null && plan.tier == renewTier && plan.tier != currentTier,
+                  // The paid plan the rider holds (shown with its end date; free to switch back to).
+                  isHeld: heldPlanActive && plan.tier == entitledTier,
+                  activeUntil: heldPlanActive && plan.tier == entitledTier ? activeUntil : '',
+                  isRenewal: renewTier != null &&
+                      plan.tier == renewTier &&
+                      plan.tier != currentTier &&
+                      !(heldPlanActive && plan.tier == entitledTier),
                   onSelect: () async {
                     if (plan.tier == currentTier) return;
 
                     if (plan.tier == SubscriptionTier.community) {
+                      // Dropping to Community never gives a paid plan up: the entitlement
+                      // (validUntil) is kept and the rider can switch back for free.
+                      if (heldPlanActive) {
+                        final ok = await _confirmSwitchToCommunity(
+                          context,
+                          planName: FeatureGates.tierLabel(entitledTier),
+                          until: activeUntil,
+                        );
+                        if (ok != true || !context.mounted) return;
+                      }
                       HapticFeedback.heavyImpact();
                       await planService.selectTier(SubscriptionTier.community);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            duration: Duration(seconds: 3),
-                            content: Text('Switched to Community Rider Plan (Free Forever).'),
+                          SnackBar(
+                            duration: const Duration(seconds: 3),
+                            content: Text(
+                              heldPlanActive
+                                  ? 'Switched to Community Rider. Your ${FeatureGates.tierLabel(entitledTier)} stays valid until $activeUntil.'
+                                  : 'Switched to Community Rider Plan (Free Forever).',
+                            ),
                           ),
                         );
                       }
                       return;
                     }
 
-                    // Launch Razorpay UPI Checkout Bottom Sheet
+                    // A paid plan the rider already holds: just switch back to it, no payment.
+                    if (await planService.selectTier(plan.tier)) {
+                      HapticFeedback.heavyImpact();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            duration: const Duration(seconds: 3),
+                            content: Text('${plan.name} is active again (valid until $activeUntil).'),
+                          ),
+                        );
+                      }
+                      return;
+                    }
+
+                    // Above the entitlement: launch Razorpay UPI Checkout Bottom Sheet.
+                    // The current plan stays in place until the payment is verified.
                     final upgraded = await PaymentCheckoutModal.show(
                       context,
                       plan: plan,
                       isAnnual: _isAnnual,
                     );
+
+                    if (upgraded == true) {
+                      // Re-read the server's subscriptionStatus so the card shows "Active until".
+                      await planService.syncFromServer();
+                      if (context.mounted) setState(() {});
+                    }
 
                     if (upgraded == true && context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -318,12 +371,52 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
       ),
     );
   }
+
+  /// "Switch to Community?" for a rider who holds a valid paid plan. Resolves true to switch.
+  Future<bool?> _confirmSwitchToCommunity(
+    BuildContext context, {
+    required String planName,
+    required String until,
+  }) {
+    final when = until.isEmpty ? 'its end date' : until;
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.card,
+        title: Text(
+          'Switch to Community?',
+          style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          'Your $planName stays valid until $when; you can switch back any time without paying.',
+          style: TextStyle(color: AppTheme.text2, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Keep $planName', style: TextStyle(color: AppTheme.text2)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.brand),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Switch to Community', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _PlanCard extends StatelessWidget {
   final PlanDetails plan;
   final bool isAnnual;
   final bool isActive;
+
+  /// A paid plan the rider holds (valid): "Active until"; switching to it is free.
+  final bool isHeld;
+
+  /// Formatted end date of the held plan ('' when none).
+  final String activeUntil;
 
   /// The plan that ran out (or is about to): offered as "Renew" instead of "Upgrade".
   final bool isRenewal;
@@ -334,13 +427,15 @@ class _PlanCard extends StatelessWidget {
     required this.plan,
     required this.isAnnual,
     required this.isActive,
+    this.isHeld = false,
+    this.activeUntil = '',
     this.isRenewal = false,
     required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = isActive
+    final borderColor = isActive || isHeld
         ? AppTheme.accentText
         : isRenewal
             ? AppTheme.warnText
@@ -351,7 +446,7 @@ class _PlanCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: borderColor, width: (isActive || isRenewal) ? 2.2 : 1.2),
+        border: Border.all(color: borderColor, width: (isActive || isHeld || isRenewal) ? 2.2 : 1.2),
         boxShadow: isActive
             ? [
                 BoxShadow(
@@ -441,6 +536,27 @@ class _PlanCard extends StatelessWidget {
                     ],
                   ],
                 ),
+                if (isHeld && activeUntil.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.event_available_rounded, size: 14, color: AppTheme.accentText),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          isActive
+                              ? 'Current plan \u2014 active until $activeUntil'
+                              : 'Active until $activeUntil \u2014 switch back any time, no payment needed',
+                          style: TextStyle(
+                            color: AppTheme.accentText,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 14),
 
                 Divider(height: 1, color: AppTheme.border2),
@@ -511,11 +627,13 @@ class _PlanCard extends StatelessWidget {
                         Text(
                           isActive
                               ? 'CURRENT PLAN ACTIVE'
-                              : isRenewal
-                                  ? 'RENEW VIA RAZORPAY UPI'
-                                  : (plan.tier == SubscriptionTier.community
-                                      ? 'SELECT COMMUNITY PLAN'
-                                      : 'UPGRADE VIA RAZORPAY UPI'),
+                              : isHeld
+                                  ? 'SWITCH BACK (NO PAYMENT)'
+                                  : isRenewal
+                                      ? 'RENEW VIA RAZORPAY UPI'
+                                      : (plan.tier == SubscriptionTier.community
+                                          ? 'SELECT COMMUNITY PLAN'
+                                          : 'UPGRADE VIA RAZORPAY UPI'),
                           style: TextStyle(
                             color: isActive ? AppTheme.accentText : Colors.white,
                             fontWeight: FontWeight.w900,
@@ -563,7 +681,7 @@ class _PlanCard extends StatelessWidget {
                 ),
               ),
             )
-          else if (isActive)
+          else if (isActive || isHeld)
             Positioned(
               top: -10,
               right: 18,
@@ -581,9 +699,13 @@ class _PlanCard extends StatelessWidget {
                   children: [
                     const Icon(Icons.check_circle_rounded, color: Colors.black, size: 12),
                     const SizedBox(width: 4),
-                    const Text(
-                      'ACTIVE PLAN',
-                      style: TextStyle(
+                    Text(
+                      isActive
+                          ? 'ACTIVE PLAN'
+                          : activeUntil.isEmpty
+                              ? 'PAID \u00b7 ACTIVE'
+                              : 'ACTIVE UNTIL ${activeUntil.toUpperCase()}',
+                      style: const TextStyle(
                         color: Colors.black,
                         fontWeight: FontWeight.w900,
                         fontSize: 10,
