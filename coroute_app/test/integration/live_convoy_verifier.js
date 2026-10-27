@@ -399,6 +399,25 @@ async function runVerification() {
     console.log(`-> Road Captain (Lead) broadcasting ROAD_HAZARD event: ${hazardId}`);
     console.log(`   Location: (${hazardLat}, ${hazardLng}), Classification: UNCERTAIN_SURFACE_ANOMALY (POWDER_GRAVEL)`);
 
+    const pAck = leadClient.waitForEvent(
+      (m) => m.type === 'ROAD_HAZARD_ACK',
+      8000
+    );
+    const pHazard = safeRace([
+      leadClient.waitForEvent(
+        (m) => m.type === 'ROAD_HAZARD',
+        8000
+      ),
+      rider3.waitForEvent(
+        (m) => m.type === 'ROAD_HAZARD',
+        8000
+      ),
+      rider2.waitForEvent(
+        (m) => m.type === 'ROAD_HAZARD',
+        8000
+      ),
+    ]);
+
     leadClient.send({
       type: 'ROAD_HAZARD',
       hazardId: hazardId,
@@ -413,10 +432,7 @@ async function runVerification() {
       note: 'Loose powder gravel on right curve',
     });
 
-    const hazardAck = await leadClient.waitForEvent(
-      (m) => m.type === 'ROAD_HAZARD_ACK',
-      8000
-    );
+    const hazardAck = await pAck;
     const activeHazardId = hazardAck.hazardId || hazardId;
     console.log(`✓ Confirmed ROAD_HAZARD_ACK received: hazardId=${hazardAck.hazardId}, isNew=${hazardAck.isNew}, corroborationCount=${hazardAck.corroborationCount}`);
 
@@ -424,16 +440,7 @@ async function runVerification() {
       console.log(`✓ Spatial Deduplication active: Corroborated existing pin ${activeHazardId} without redundant broadcast.`);
       verificationSummary.scenarioB_road_hazard = true;
     } else {
-      const hazardBroadcast = await safeRace([
-        rider3.waitForEvent(
-          (m) => m.type === 'ROAD_HAZARD',
-          8000
-        ),
-        rider2.waitForEvent(
-          (m) => m.type === 'ROAD_HAZARD',
-          8000
-        ),
-      ]);
+      const hazardBroadcast = await pHazard;
       console.log(`✓ Confirmed Downstream ROAD_HAZARD Broadcast: severity=${hazardBroadcast.severity}, aheadM=${hazardBroadcast.aheadM}m, warning="${hazardBroadcast.spokenWarning}"`);
       verificationSummary.scenarioB_road_hazard = true;
     }
