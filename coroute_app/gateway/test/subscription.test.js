@@ -93,6 +93,20 @@ test('Subscription Razorpay UPI Payment Suite', async (t) => {
     assert.equal(status.status, 200);
     assert.equal(status.json.tier, 'roadCaptain');
     assert.equal(status.json.isActive, true);
+    assert.ok(status.json.daysRemaining >= 29);
+    assert.equal(status.json.paymentHistoryCount, 1);
+    assert.equal(status.json.lastPayment.orderId, orderData.orderId);
+    assert.equal(status.json.lastPayment.utr, '123456789012');
+
+    // Verify /subscription/history endpoint
+    const historyRes = await env.api('GET', '/subscription/history', null, riderToken);
+    assert.equal(historyRes.status, 200);
+    assert.equal(historyRes.json.totalPayments, 1);
+    assert.equal(historyRes.json.history[0].orderId, orderData.orderId);
+    assert.equal(historyRes.json.history[0].utr, '123456789012');
+    assert.equal(historyRes.json.history[0].paymentId, paymentId);
+    assert.equal(historyRes.json.history[0].method, 'UPI');
+    assert.equal(historyRes.json.history[0].userSnapshot.userId, riderUser.userId);
 
     // Verify WebSocket event
     const activated = await pActivated;

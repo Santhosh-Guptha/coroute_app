@@ -57,19 +57,45 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
       if (userId && planTier && planTier !== 'community') {
         const user = await repo.findUserById(userId);
         if (user) {
+          const currentExpiry = Number(user.subscriptionValidUntil) || 0;
           const duration = billingCycle === 'annual' ? 365 * 86400000 : 30 * 86400000;
-          const expiry = Date.now() + duration;
+          // If already active on the same plan, extend from current expiry rather than cutting existing days short
+          const baseTime = (currentExpiry > Date.now() && user.subscriptionTier === planTier) ? currentExpiry : Date.now();
+          const expiry = baseTime + duration;
+
+          const paymentRecord = {
+            orderId: payment.order_id || event.payload?.order?.entity?.id || '',
+            paymentId: payment.id || '',
+            utr: payment.acquirer_data?.rrn || payment.acquirer_data?.upi_transaction_id || notes.utr || '',
+            vpa: payment.vpa || '',
+            amount: (payment.amount || 0) / 100,
+            currency: 'INR',
+            method: 'UPI',
+            planTier,
+            billingCycle,
+            validFrom: baseTime,
+            validUntil: expiry,
+            paidAt: Date.now(),
+            source: 'razorpay_webhook',
+            userSnapshot: {
+              userId,
+              name: user.name || '',
+              email: user.email || '',
+              phone: user.phone || '',
+              callsign: user.callsign || '',
+            },
+          };
+
+          const history = Array.isArray(user.paymentHistory) ? [...user.paymentHistory] : [];
+          if (!history.some(p => p.paymentId && p.paymentId === paymentRecord.paymentId)) {
+            history.push(paymentRecord);
+          }
+
           await repo.updateUser(user.key, {
             subscriptionTier: planTier,
             subscriptionValidUntil: expiry,
-            lastPayment: {
-              orderId: payment.order_id || event.payload?.order?.entity?.id || '',
-              paymentId: payment.id || '',
-              method: 'UPI',
-              amount: (payment.amount || 0) / 100,
-              at: Date.now(),
-              source: 'razorpay_webhook',
-            },
+            lastPayment: paymentRecord,
+            paymentHistory: history,
           });
 
           if (auth.gate) auth.gate.invalidate(userId);
@@ -214,22 +240,49 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap }) {
     }
 
     const billingCycle = rawCycle === 'annual' ? 'annual' : 'monthly';
+    const currentExpiry = Number(userDoc.subscriptionValidUntil) || 0;
     const duration = billingCycle === 'annual' ? 365 * 86400000 : 30 * 86400000;
-    const expiry = Date.now() + duration;
+    // Extend from current expiry if already active on the same tier, preventing loss of paid days
+    const baseTime = (currentExpiry > Date.now() && userDoc.subscriptionTier === planTier) ? currentExpiry : Date.now();
+    const expiry = baseTime + duration;
 
-    // Persist entitlement to Oracle Autonomous Database
+    const planMeta = PLAN_PRICES_INR[planTier] || { monthly: 0, annual: 0, label: planTier };
+    const amountInInr = billingCycle === 'annual' ? planMeta.annual : planMeta.monthly;
+
+    const paymentRecord = {
+      orderId,
+      paymentId: paymentId || `pay_upi_${Date.now()}`,
+      utr: utr || '',
+      vpa: req.body?.vpa || '',
+      amount: amountInInr,
+      currency: 'INR',
+      method: 'UPI',
+      planTier,
+      billingCycle,
+      validFrom: baseTime,
+      validUntil: expiry,
+      paidAt: Date.now(),
+      source: 'razorpay_checkout',
+      userSnapshot: {
+        userId,
+        name: userDoc.name || req.user.name || '',
+        email: userDoc.email || req.user.email || '',
+        phone: userDoc.phone || '',
+        callsign: userDoc.callsign || '',
+      },
+    };
+
+    const history = Array.isArray(userDoc.paymentHistory) ? [...userDoc.paymentHistory] : [];
+    if (!history.some(p => (orderId && p.orderId === orderId) || (p.paymentId && p.paymentId === paymentRecord.paymentId))) {
+      history.push(paymentRecord);
+    }
+
+    // Persist entitlement, references, user mappings, and payment history to Oracle DB
     await repo.updateUser(userDoc.key, {
       subscriptionTier: planTier,
       subscriptionValidUntil: expiry,
-      lastPayment: {
-        orderId,
-        paymentId: paymentId || `pay_upi_${Date.now()}`,
-        utr: utr || '',
-        planTier,
-        billingCycle,
-        method: 'UPI',
-        at: Date.now(),
-      },
+      lastPayment: paymentRecord,
+      paymentHistory: history,
     });
 
     if (auth.gate) auth.gate.invalidate(userId);
@@ -249,7 +302,29 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap }) {
       success: true,
       subscriptionTier: planTier,
       subscriptionValidUntil: expiry,
-      message: `${PLAN_PRICES_INR[planTier].label} successfully activated via Razorpay UPI!`,
+      orderId,
+      paymentId: paymentRecord.paymentId,
+      utr: paymentRecord.utr,
+      message: `${planMeta.label} successfully activated via Razorpay UPI!`,
+    });
+  }));
+
+  // Fetch full payment history / audit receipts
+  r.get('/subscription/history', wrap(async (req, res) => {
+    const userId = req.user.userId;
+    const userDoc = req.dbUser || (await repo.findUserById(userId));
+    if (!userDoc) return res.status(404).json({ error: 'User not found' });
+
+    const history = Array.isArray(userDoc.paymentHistory)
+      ? userDoc.paymentHistory
+      : (userDoc.lastPayment ? [userDoc.lastPayment] : []);
+
+    res.json({
+      userId,
+      history,
+      totalPayments: history.length,
+      currentTier: userDoc.subscriptionTier || 'community',
+      validUntil: userDoc.subscriptionValidUntil || 0,
     });
   }));
 
@@ -262,12 +337,17 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap }) {
     const tier = normalizeTier(userDoc.subscriptionTier);
     const validUntil = Number(userDoc.subscriptionValidUntil) || 0;
     const isActive = tier === 'community' || validUntil > Date.now();
+    const daysRemaining = isActive && tier !== 'community'
+      ? Math.max(0, Math.ceil((validUntil - Date.now()) / (24 * 60 * 60 * 1000)))
+      : 0;
 
     res.json({
       tier: isActive ? tier : 'community',
       validUntil,
       isActive,
+      daysRemaining,
       lastPayment: userDoc.lastPayment || null,
+      paymentHistoryCount: Array.isArray(userDoc.paymentHistory) ? userDoc.paymentHistory.length : (userDoc.lastPayment ? 1 : 0),
       planLabel: PLAN_PRICES_INR[isActive ? tier : 'community']?.label || 'Community Rider',
     });
   }));

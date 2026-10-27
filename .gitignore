@@ -28,4 +28,6 @@ tmp/
 qa_screenshots/
 *.png
 *.tar.gz
+*.apk
+release/**/*.apk
 
