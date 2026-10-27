@@ -16,3 +16,15 @@
 
 # Flutter references Play Core (deferred components) that this app does not ship
 -dontwarn com.google.android.play.core.**
+
+# Razorpay Checkout SDK
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keepattributes JavascriptInterface
+-keepclassmembers class com.razorpay.RazorpayHttpCallback {
+    *;
+}
+-keep class com.razorpay.** { *; }
+-dontwarn com.razorpay.**
+-dontwarn javax.annotation.**

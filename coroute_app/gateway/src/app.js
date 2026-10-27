@@ -86,22 +86,23 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://checkout.razorpay.com"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", "https://api.razorpay.com", "https://lumberjack.razorpay.com", "https://*.razorpay.com"],
         fontSrc: ["'self'"],
+        frameSrc: ["'self'", "https://api.razorpay.com", "https://checkout.razorpay.com"],
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
         baseUri: ["'self'"],
-        formAction: ["'self'"],
+        formAction: ["'self'", "https://api.razorpay.com"],
       },
     },
     frameguard: { action: 'deny' },
     xContentTypeOptions: true,
   }));
   app.use((req, res, next) => {
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(self "https://checkout.razorpay.com" "https://api.razorpay.com")');
     next();
   });
   app.use(cors(config.corsOrigins.length ? { origin: config.corsOrigins } : { origin: false }));

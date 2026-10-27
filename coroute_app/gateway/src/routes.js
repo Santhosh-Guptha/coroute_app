@@ -773,8 +773,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.post('/admin/users/:userId/reset-password', requireAdmin, wrap(async (req, res) => res.json(await auth.adminResetPassword(req.user, req.params.userId))));
   r.delete('/admin/convoys/:groupId', requireAdmin, wrap(async (req, res) => { await convoys.adminDissolve(req.params.groupId); res.json({ ok: true, groupId: req.params.groupId }); }));
 
-  // Subscription and Razorpay UPI-only payment routes
-  registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap });
+  // Subscription and Razorpay UPI-only payment routes (including admin pricing & coupon management)
+  registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin });
 
   // Errors
   // eslint-disable-next-line no-unused-vars

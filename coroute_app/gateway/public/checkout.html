@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Subscription Checkout | Coroute</title>
+<meta name="description" content="Subscribe to CoRoute Pro and Road Captain passes with Razorpay Standard Checkout and discount coupons.">
+<link rel="canonical" href="__ORIGIN__/checkout">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Coroute">
+<meta property="og:title" content="Subscription Checkout | Coroute">
+<meta property="og:description" content="Official CoRoute rider subscription checkout powered by Razorpay.">
+<meta property="og:url" content="__ORIGIN__/checkout">
+<meta property="og:image" content="__ORIGIN__/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Subscription Checkout | Coroute">
+<meta name="theme-color" content="#0B0D0E">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<script>document.documentElement.classList.add('js')</script>
+<script src="/assets/site.js" defer></script>
+
+<style>
+  .checkout-container {
+    max-width: 840px;
+    margin: 0 auto;
+    padding: 32px 16px 64px;
+  }
+  .plan-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin: 24px 0;
+  }
+  .plan-card {
+    background: rgba(18, 22, 28, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+  .plan-card:hover {
+    border-color: rgba(255, 87, 34, 0.5);
+    transform: translateY(-2px);
+  }
+  .plan-card.active {
+    border-color: #FF5722;
+    background: rgba(255, 87, 34, 0.08);
+    box-shadow: 0 0 20px rgba(255, 87, 34, 0.2);
+  }
+  .plan-card input[type="radio"] {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    accent-color: #FF5722;
+    width: 18px;
+    height: 18px;
+  }
+  .plan-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(255, 87, 34, 0.2);
+    color: #FF7043;
+    margin-bottom: 8px;
+  }
+  .plan-price {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ECF1F6;
+    margin: 8px 0 4px;
+  }
+  .plan-price small {
+    font-size: 14px;
+    font-weight: 400;
+    color: #8C9BAE;
+  }
+  .checkout-form {
+    background: rgba(18, 22, 28, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 24px;
+    margin-top: 24px;
+  }
+  .form-group {
+    margin-bottom: 16px;
+  }
+  .form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #B0BEC5;
+    margin-bottom: 6px;
+  }
+  .form-group input {
+    width: 100%;
+    background: rgba(11, 15, 20, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 12px 14px;
+    color: #ECF1F6;
+    font-size: 14px;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+  }
+  .form-group input:focus {
+    outline: none;
+    border-color: #FF5722;
+  }
+  .coupon-box {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .coupon-box input {
+    flex: 1;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 700;
+  }
+  .coupon-btn {
+    background: rgba(255, 87, 34, 0.2);
+    border: 1px solid rgba(255, 87, 34, 0.5);
+    color: #FF7043;
+    font-weight: 700;
+    padding: 0 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .coupon-btn:hover {
+    background: #FF5722;
+    color: #FFF;
+  }
+  .coupon-feedback {
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+    display: none;
+  }
+  .coupon-feedback.success {
+    display: block;
+    color: #81C784;
+  }
+  .coupon-feedback.error {
+    display: block;
+    color: #E57373;
+  }
+  .test-creds-callout {
+    background: rgba(33, 150, 243, 0.08);
+    border: 1px solid rgba(33, 150, 243, 0.25);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 20px 0;
+    font-size: 13px;
+    color: #90CAF9;
+    line-height: 1.6;
+  }
+  .test-creds-callout strong {
+    color: #E3F2FD;
+  }
+  .test-creds-callout code {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    color: #FFF;
+  }
+  .status-box {
+    margin-top: 24px;
+    padding: 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.5;
+    display: none;
+  }
+  .status-box.success {
+    display: block;
+    background: rgba(76, 175, 80, 0.12);
+    border: 1px solid rgba(76, 175, 80, 0.4);
+    color: #81C784;
+  }
+  .status-box.error {
+    display: block;
+    background: rgba(244, 67, 54, 0.12);
+    border: 1px solid rgba(244, 67, 54, 0.4);
+    color: #E57373;
+  }
+  .status-box.info {
+    display: block;
+    background: rgba(255, 152, 0, 0.12);
+    border: 1px solid rgba(255, 152, 0, 0.4);
+    color: #FFB74D;
+  }
+  .btn-pay {
+    width: 100%;
+    background: #FF5722;
+    color: #FFF;
+    font-size: 16px;
+    font-weight: 700;
+    padding: 16px 24px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn-pay:hover {
+    background: #E64A19;
+  }
+  .btn-pay:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .tx-detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .tx-detail-row:last-child {
+    border-bottom: none;
+  }
+  .admin-bar-link {
+    margin-top: 24px;
+    text-align: center;
+    font-size: 13px;
+  }
+  .admin-bar-link a {
+    color: #FF7043;
+    text-decoration: underline;
+  }
+</style>
+</head>
+<body data-page="checkout">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="page-hero topo">
+    <div class="container">
+      <div class="page-hero__inner">
+        <p class="eyebrow">Rider Membership and Checkout</p>
+        <h1>Razorpay Checkout Integration</h1>
+        <p class="t-lead">Instant activation with Razorpay Standard Web Checkout. Supports UPI, Test Cards, Netbanking, and Promotional Discount Coupons.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="container">
+    <div class="checkout-container">
+
+      <!-- Test Credentials Helper Callout -->
+      <div class="test-creds-callout">
+        <strong>Razorpay Test Credentials (Sandbox):</strong><br>
+        - <strong>Test Card:</strong> <code>4100 2800 0000 1007</code> | <strong>CVV:</strong> <code>123</code> | <strong>Expiry:</strong> <code>12/26</code><br>
+        - <strong>Test UPI:</strong> <code>test@razorpay</code><br>
+        - <strong>Key ID:</strong> <code>rzp_test_TstfWWwQUC19Pv</code><br>
+        - <strong>Available Coupons:</strong> <code>WELCOME50</code> (50% off), <code>CAPTAIN100</code> (Flat 100 off), <code>RIDERFREE</code> (100% Free Pass)
+      </div>
+
+      <!-- Plan Selection -->
+      <h2 class="t-h3" style="margin-bottom:8px">1. Select Plan</h2>
+      <div class="plan-grid" id="plan-grid-container">
+        <div class="plan-card active" data-amount="10000" data-tier="testVerification" data-name="Test Transaction (Rs 100)">
+          <input type="radio" name="plan" value="10000" checked id="p-test">
+          <span class="plan-badge">Verification</span>
+          <h3 class="t-h4" style="margin:4px 0">Test Verification</h3>
+          <div class="plan-price" id="price-display-test">Rs 100 <small>/ one-time</small></div>
+          <p class="t-small t-muted" style="margin:4px 0 0">10,000 paise test transaction to verify payment gateway and signature.</p>
+        </div>
+
+        <div class="plan-card" data-amount="14900" data-tier="proRider" data-name="CoRoute Pro (Rs 149)">
+          <input type="radio" name="plan" value="14900" id="p-pro">
+          <span class="plan-badge">Most Popular</span>
+          <h3 class="t-h4" style="margin:4px 0">CoRoute Pro</h3>
+          <div class="plan-price" id="price-display-pro">Rs 149 <small>/ month</small></div>
+          <p class="t-small t-muted" style="margin:4px 0 0">Offline mesh clustering, live radar telemetry and helmet voice alerts.</p>
+        </div>
+
+        <div class="plan-card" data-amount="59900" data-tier="roadCaptain" data-name="Road Captain Pass (Rs 599)">
+          <input type="radio" name="plan" value="59900" id="p-captain">
+          <span class="plan-badge">Full Fleet</span>
+          <h3 class="t-h4" style="margin:4px 0">Road Captain Pass</h3>
+          <div class="plan-price" id="price-display-captain">Rs 599 <small>/ month</small></div>
+          <p class="t-small t-muted" style="margin:4px 0 0">Up to 50 convoy members, emergency gateway SMS and group audit logs.</p>
+        </div>
+      </div>
+
+      <!-- Rider Info Form -->
+      <div class="checkout-form">
+        <h2 class="t-h3" style="margin-bottom:16px">2. Rider Details and Coupon</h2>
+        <div class="form-group">
+          <label for="rider-name">Rider Name</label>
+          <input type="text" id="rider-name" value="Santhosh Rider" placeholder="Your Name">
+        </div>
+        <div class="form-group">
+          <label for="rider-email">Email Address</label>
+          <input type="email" id="rider-email" value="santhoshbukka5@gmail.com" placeholder="rider@example.com">
+        </div>
+        <div class="form-group">
+          <label for="rider-phone">Mobile Phone (for UPI / SMS)</label>
+          <input type="tel" id="rider-phone" value="+919876543210" placeholder="+919876543210">
+        </div>
+
+        <!-- Coupon Code Field -->
+        <div class="form-group">
+          <label for="coupon-code">Promotional Coupon Code</label>
+          <div class="coupon-box">
+            <input type="text" id="coupon-code" placeholder="Enter coupon (e.g. WELCOME50, RIDERFREE)">
+            <button type="button" id="apply-coupon-btn" class="coupon-btn">Apply</button>
+          </div>
+          <div id="coupon-feedback" class="coupon-feedback"></div>
+        </div>
+
+        <!-- Order Summary Breakdown -->
+        <div id="order-summary" style="background:rgba(0,0,0,0.25);padding:14px 18px;border-radius:8px;margin-bottom:20px;display:none">
+          <div class="tx-detail-row"><span>Original Plan Price:</span> <span id="summary-original-price">Rs 100</span></div>
+          <div class="tx-detail-row" id="summary-discount-row" style="color:#81C784"><span>Coupon Discount:</span> <span id="summary-discount-val">-Rs 0</span></div>
+          <div class="tx-detail-row" style="font-weight:700;font-size:16px;border-top:1px solid rgba(255,255,255,0.15);padding-top:8px"><span>Final Payable Amount:</span> <span id="summary-final-price" style="color:#FF7043">Rs 100</span></div>
+        </div>
+
+        <!-- Checkout Action Button -->
+        <button type="button" id="pay-btn" class="btn-pay">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
+          <span id="pay-btn-label">Pay with Razorpay (Rs 100)</span>
+        </button>
+
+        <!-- Live Status Box -->
+        <div id="status-box" class="status-box" role="alert"></div>
+
+        <div class="admin-bar-link">
+          Administrator? <a href="/pricing-admin">Open Pricing and Coupon Configuration Screen</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+<!--#include footer-->
+
+<script>
+(function() {
+  const RAZORPAY_KEY_ID = 'rzp_test_TstfWWwQUC19Pv';
+
+  let baseAmountPaise = 10000;
+  let payableAmountPaise = 10000;
+  let selectedTier = 'testVerification';
+  let selectedName = 'Test Transaction (Rs 100)';
+  let appliedCoupon = null;
+
+  const planCards = document.querySelectorAll('.plan-card');
+  const payBtn = document.getElementById('pay-btn');
+  const payBtnLabel = document.getElementById('pay-btn-label');
+  const statusBox = document.getElementById('status-box');
+  const couponInput = document.getElementById('coupon-code');
+  const applyCouponBtn = document.getElementById('apply-coupon-btn');
+  const couponFeedback = document.getElementById('coupon-feedback');
+  const orderSummary = document.getElementById('order-summary');
+  const summaryOrig = document.getElementById('summary-original-price');
+  const summaryDisc = document.getElementById('summary-discount-val');
+  const summaryFinal = document.getElementById('summary-final-price');
+
+  // Dynamically load Razorpay Checkout Script to comply with zero external static tag requirements
+  function ensureRazorpayScript(callback) {
+    if (window.Razorpay) return callback();
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.onload = callback;
+    s.onerror = function() {
+      showStatus('error', '[Failed] Could not load Razorpay checkout script from checkout.razorpay.com');
+    };
+    document.head.appendChild(s);
+  }
+
+  // Load latest configured prices from server
+  fetch('/api/subscription/config').then(r => r.json()).then(cfg => {
+    if (cfg && cfg.plans) {
+      if (cfg.plans.proRider) {
+        document.getElementById('price-display-pro').innerHTML = 'Rs ' + cfg.plans.proRider.monthly + ' <small>/ month</small>';
+        const proCard = document.querySelector('[data-tier="proRider"]');
+        if (proCard) proCard.setAttribute('data-amount', cfg.plans.proRider.monthly * 100);
+      }
+      if (cfg.plans.roadCaptain) {
+        document.getElementById('price-display-captain').innerHTML = 'Rs ' + cfg.plans.roadCaptain.monthly + ' <small>/ month</small>';
+        const capCard = document.querySelector('[data-tier="roadCaptain"]');
+        if (capCard) capCard.setAttribute('data-amount', cfg.plans.roadCaptain.monthly * 100);
+      }
+    }
+  }).catch(() => {});
+
+  function updatePricingDisplay() {
+    const baseInr = baseAmountPaise / 100;
+    if (appliedCoupon && appliedCoupon.valid) {
+      orderSummary.style.display = 'block';
+      summaryOrig.textContent = 'Rs ' + baseInr;
+      summaryDisc.textContent = '-Rs ' + appliedCoupon.discountAmount;
+      summaryFinal.textContent = 'Rs ' + appliedCoupon.finalAmount;
+      payableAmountPaise = appliedCoupon.finalAmountPaise;
+
+      if (appliedCoupon.isFree) {
+        payBtnLabel.textContent = 'Claim and Activate Free Pass (Rs 0)';
+      } else {
+        payBtnLabel.textContent = 'Pay with Razorpay (Rs ' + appliedCoupon.finalAmount + ')';
+      }
+    } else {
+      orderSummary.style.display = 'none';
+      payableAmountPaise = baseAmountPaise;
+      payBtnLabel.textContent = 'Pay with Razorpay (Rs ' + baseInr + ')';
+    }
+  }
+
+  // Plan card selection handling
+  planCards.forEach(card => {
+    card.addEventListener('click', () => {
+      planCards.forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      const radio = card.querySelector('input[type="radio"]');
+      if (radio) radio.checked = true;
+      baseAmountPaise = parseInt(card.getAttribute('data-amount'), 10);
+      selectedTier = card.getAttribute('data-tier');
+      selectedName = card.getAttribute('data-name');
+
+      // Re-evaluate coupon on plan change
+      if (appliedCoupon && couponInput.value.trim()) {
+        applyCoupon();
+      } else {
+        updatePricingDisplay();
+      }
+    });
+  });
+
+  async function applyCoupon() {
+    const code = couponInput.value.trim().toUpperCase();
+    if (!code) {
+      appliedCoupon = null;
+      couponFeedback.className = 'coupon-feedback';
+      couponFeedback.style.display = 'none';
+      updatePricingDisplay();
+      return;
+    }
+
+    applyCouponBtn.disabled = true;
+    applyCouponBtn.textContent = '...';
+
+    try {
+      const res = await fetch('/api/subscription/validate-coupon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          planTier: selectedTier,
+          billingCycle: 'monthly',
+          amount: baseAmountPaise / 100,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.valid) {
+        appliedCoupon = data;
+        couponFeedback.className = 'coupon-feedback success';
+        couponFeedback.textContent = '[Success] Coupon ' + data.code + ' applied: Saved Rs ' + data.discountAmount + ' (' + (data.usagesRemaining) + ' uses remaining)';
+      } else {
+        appliedCoupon = null;
+        couponFeedback.className = 'coupon-feedback error';
+        couponFeedback.textContent = '[Invalid] ' + (data.error || 'Coupon code not applicable');
+      }
+    } catch (e) {
+      appliedCoupon = null;
+      couponFeedback.className = 'coupon-feedback error';
+      couponFeedback.textContent = '[Error] Failed to validate coupon: ' + e.message;
+    } finally {
+      applyCouponBtn.disabled = false;
+      applyCouponBtn.textContent = 'Apply';
+      updatePricingDisplay();
+    }
+  }
+
+  applyCouponBtn.addEventListener('click', applyCoupon);
+  couponInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      applyCoupon();
+    }
+  });
+
+  function showStatus(type, html) {
+    statusBox.className = 'status-box ' + type;
+    statusBox.innerHTML = html;
+    statusBox.style.display = 'block';
+  }
+
+  payBtn.addEventListener('click', async function() {
+    payBtn.disabled = true;
+    payBtnLabel.textContent = 'Processing...';
+    showStatus('info', 'Connecting to backend to generate Order (POST /api/create-order)...');
+
+    const name = document.getElementById('rider-name').value.trim() || 'Rider';
+    const email = document.getElementById('rider-email').value.trim() || 'rider@coroute.app';
+    const phone = document.getElementById('rider-phone').value.trim() || '+919999999999';
+    const couponCode = appliedCoupon ? appliedCoupon.code : '';
+
+    try {
+      // -------------------------------------------------------------
+      // STEP 1: BACKEND - Create Order
+      // -------------------------------------------------------------
+      const createRes = await fetch('/api/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: payableAmountPaise,
+          currency: 'INR',
+          receipt: 'rcpt_' + Date.now(),
+          coupon_code: couponCode,
+          notes: {
+            planTier: selectedTier,
+            billingCycle: 'monthly',
+          },
+        }),
+      });
+
+      let orderData;
+      if (!createRes.ok) {
+        const errJson = await createRes.json().catch(() => ({}));
+        if (createRes.status === 401) {
+          throw new Error('Razorpay Authentication Failed (401): ' + (errJson.error || 'Invalid API credentials'));
+        }
+        throw new Error(errJson.error || ('Order creation failed with status ' + createRes.status));
+      } else {
+        orderData = await createRes.json();
+      }
+
+      // If order is free (100% discount coupon)
+      if (orderData.is_free) {
+        showStatus('info', '100% Free Pass confirmed! Activating membership...');
+        const verifyRes = await fetch('/api/verify-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            order_id: orderData.order_id,
+            is_free: true,
+            coupon_code: couponCode,
+            planTier: selectedTier,
+          }),
+        });
+
+        const vData = await verifyRes.json();
+        if (verifyRes.ok && vData.success) {
+          showStatus('success',
+            '<h3 style="margin-top:0;color:#A5D6A7">[Verified] Subscription Activated Free!</h3>' +
+            '<div class="tx-detail-row"><span>Order ID:</span> <strong><code>' + orderData.order_id + '</code></strong></div>' +
+            '<div class="tx-detail-row"><span>Coupon Code:</span> <strong><code>' + couponCode + '</code></strong></div>' +
+            '<div class="tx-detail-row"><span>Status:</span> <strong style="color:#66BB6A">ACTIVE / FULLY GRANTED</strong></div>' +
+            '<p style="margin:12px 0 0;font-size:13px">Your rider pass is activated without charge using promotional coupon.</p>'
+          );
+        } else {
+          showStatus('error', '[Failed] Could not activate free pass: ' + (vData.error || 'Unknown error'));
+        }
+        payBtn.disabled = false;
+        updatePricingDisplay();
+        return;
+      }
+
+      showStatus('info', 'Order generated! <code>' + orderData.order_id + '</code> (' + (orderData.amount / 100) + ' ' + orderData.currency + '). Opening Razorpay Checkout Modal...');
+
+      // -------------------------------------------------------------
+      // STEP 2: FRONTEND - Open Razorpay Modal
+      // -------------------------------------------------------------
+      ensureRazorpayScript(function() {
+        const options = {
+          key: RAZORPAY_KEY_ID,
+          amount: orderData.amount,
+          currency: orderData.currency || 'INR',
+          name: 'CoRoute Motorcycle Safety',
+          description: selectedName,
+          order_id: orderData.order_id,
+          prefill: {
+            name: name,
+            email: email,
+            contact: phone,
+          },
+          theme: {
+            color: '#FF5722',
+          },
+          handler: async function(response) {
+            showStatus('info', 'Payment authorized! Verifying cryptographic signature with backend (POST /api/verify-payment)...');
+
+            try {
+              // -------------------------------------------------------------
+              // STEP 3: BACKEND - Verify Signature
+              // -------------------------------------------------------------
+              const verifyRes = await fetch('/api/verify-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  coupon_code: couponCode,
+                }),
+              });
+
+              const verifyData = await verifyRes.json();
+              if (verifyRes.ok && verifyData.success) {
+                showStatus('success', 
+                  '<h3 style="margin-top:0;color:#A5D6A7">[Verified] Payment Verified Successfully!</h3>' +
+                  '<div class="tx-detail-row"><span>Payment ID:</span> <strong><code>' + response.razorpay_payment_id + '</code></strong></div>' +
+                  '<div class="tx-detail-row"><span>Order ID:</span> <strong><code>' + response.razorpay_order_id + '</code></strong></div>' +
+                  '<div class="tx-detail-row"><span>HMAC-SHA256 Signature:</span> <strong>Verified Match</strong></div>' +
+                  '<div class="tx-detail-row"><span>Status:</span> <strong style="color:#66BB6A">ACTIVE / PAID</strong></div>' +
+                  '<p style="margin:12px 0 0;font-size:13px">Your transaction was verified and recorded in the database.</p>'
+                );
+              } else {
+                showStatus('error', '[Failed] Signature Verification Failed: ' + (verifyData.error || 'Invalid signature'));
+              }
+            } catch (vErr) {
+              showStatus('error', '[Failed] Error verifying payment: ' + vErr.message);
+            } finally {
+              payBtn.disabled = false;
+              updatePricingDisplay();
+            }
+          },
+          modal: {
+            ondismiss: function() {
+              showStatus('error', '[Dismissed] Checkout cancelled by the user.');
+              payBtn.disabled = false;
+              updatePricingDisplay();
+            }
+          }
+        };
+
+        const rzp = new window.Razorpay(options);
+
+        rzp.on('payment.failed', function(resp) {
+          showStatus('error', 
+            '[Failed] Payment Failed: ' + (resp.error?.description || 'Transaction declined') + 
+            (resp.error?.reason ? ' (' + resp.error.reason + ')' : '') +
+            '<br><small>Payment ID: ' + (resp.error?.metadata?.payment_id || 'N/A') + '</small>'
+          );
+          payBtn.disabled = false;
+          updatePricingDisplay();
+        });
+
+        rzp.open();
+      });
+
+    } catch (err) {
+      showStatus('error', '[Error] ' + err.message);
+      payBtn.disabled = false;
+      updatePricingDisplay();
+    }
+  });
+})();
+</script>
+</body>
+</html>

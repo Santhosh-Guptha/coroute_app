@@ -121,12 +121,37 @@ class PlanSubscriptionService extends ChangeNotifier {
     }).ignore();
   }
 
-  /// Creates a Razorpay UPI order via Gateway API.
-  Future<Map<String, dynamic>?> createOrder(SubscriptionTier tier, {bool annual = false}) async {
+  /// Validates a promotional discount coupon code with the Gateway.
+  Future<Map<String, dynamic>?> validateCoupon({
+    required String code,
+    required SubscriptionTier tier,
+    bool annual = false,
+    int? amount,
+  }) async {
+    if (_api == null) throw Exception('API client unavailable.');
+    final res = await _api.post('/subscription/validate-coupon', {
+      'code': code.trim().toUpperCase(),
+      'planTier': tier.name,
+      'billingCycle': annual ? 'annual' : 'monthly',
+      'amount': ?amount,
+    });
+    if (res is Map) {
+      return Map<String, dynamic>.from(res);
+    }
+    return null;
+  }
+
+  /// Creates a Razorpay UPI order via Gateway API with optional promotional coupon.
+  Future<Map<String, dynamic>?> createOrder(
+    SubscriptionTier tier, {
+    bool annual = false,
+    String? couponCode,
+  }) async {
     if (_api == null) throw Exception('API client unavailable.');
     final res = await _api.post('/subscription/create-order', {
       'planTier': tier.name,
       'billingCycle': annual ? 'annual' : 'monthly',
+      'couponCode': ?couponCode,
     });
     if (res is Map) {
       return Map<String, dynamic>.from(res);
@@ -142,6 +167,7 @@ class PlanSubscriptionService extends ChangeNotifier {
     String? paymentId,
     String? utr,
     String? signature,
+    String? couponCode,
   }) async {
     if (_api == null) {
       return {'success': false, 'error': 'API client unavailable'};
@@ -154,6 +180,7 @@ class PlanSubscriptionService extends ChangeNotifier {
         'paymentId': ?paymentId,
         'utr': ?utr,
         'signature': ?signature,
+        'couponCode': ?couponCode,
       });
 
       if (res is Map && res['success'] == true) {

@@ -1,11 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../core/theme/app_theme.dart';
+import '../../data/services/auth_service.dart';
 import '../../data/services/plan_subscription_service.dart';
 
-/// Production-ready Razorpay UPI-Only Checkout Bottom Sheet.
+/// Official Razorpay Checkout Modal for 100% UPI Payments.
+///
+/// Features:
+/// 1. Direct native Razorpay Checkout sheet opening with `Razorpay.open(...)`.
+/// 2. Strictly UPI-only instrument restriction (`method: { upi: true, card: false, ... }`).
+/// 3. Native event listeners: `EVENT_PAYMENT_SUCCESS`, `EVENT_PAYMENT_ERROR`, `EVENT_EXTERNAL_WALLET`.
+/// 4. Instant cryptographic signature verification with backend `/api/subscription/verify-payment`.
+/// 5. Secondary fallback: direct UPI deep-link intent (`upi://pay`) and manual UTR submission.
 class PaymentCheckoutModal extends StatefulWidget {
   final PlanDetails plan;
   final bool isAnnual;
@@ -34,25 +44,40 @@ class PaymentCheckoutModal extends StatefulWidget {
 }
 
 class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
+  late Razorpay _razorpay;
   final TextEditingController _utrController = TextEditingController();
+  final TextEditingController _couponController = TextEditingController();
+
   bool _isLoading = false;
   bool _isSuccess = false;
   String? _errorMessage;
   Map<String, dynamic>? _orderData;
+  bool _showManualFallback = false;
+
+  Map<String, dynamic>? _appliedCoupon;
+  bool _isValidatingCoupon = false;
+  String? _couponError;
 
   @override
   void initState() {
     super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+
     _initOrder();
   }
 
   @override
   void dispose() {
+    _razorpay.clear();
     _utrController.dispose();
+    _couponController.dispose();
     super.dispose();
   }
 
-  Future<void> _initOrder() async {
+  Future<void> _initOrder({String? couponCode}) async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -63,6 +88,7 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
       final order = await service.createOrder(
         widget.plan.tier,
         annual: widget.isAnnual,
+        couponCode: couponCode,
       );
       if (mounted) {
         setState(() {
@@ -74,12 +100,254 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _errorMessage = 'Could not initialize order: ${e.toString()}';
+          _errorMessage = 'Could not create order: ${e.toString()}';
         });
       }
     }
   }
 
+  Future<void> _applyCoupon() async {
+    final code = _couponController.text.trim().toUpperCase();
+    if (code.isEmpty) {
+      setState(() {
+        _appliedCoupon = null;
+        _couponError = null;
+      });
+      _initOrder();
+      return;
+    }
+
+    setState(() {
+      _isValidatingCoupon = true;
+      _couponError = null;
+    });
+
+    try {
+      final service = context.read<PlanSubscriptionService>();
+      final res = await service.validateCoupon(
+        code: code,
+        tier: widget.plan.tier,
+        annual: widget.isAnnual,
+      );
+      if (mounted) {
+        if (res != null && res['valid'] == true) {
+          setState(() {
+            _appliedCoupon = res;
+            _isValidatingCoupon = false;
+            _couponError = null;
+          });
+          _initOrder(couponCode: code);
+        } else {
+          setState(() {
+            _appliedCoupon = null;
+            _isValidatingCoupon = false;
+            _couponError = res?['error']?.toString() ?? 'Coupon invalid';
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _appliedCoupon = null;
+          _isValidatingCoupon = false;
+          _couponError = 'Coupon check failed: $e';
+        });
+      }
+    }
+  }
+
+  /// Claims and activates a 100% free pass coupon without gateway prompt.
+  Future<void> _claimFreePass() async {
+    final orderId = _orderData?['orderId']?.toString();
+    if (orderId == null) {
+      _initOrder(couponCode: _appliedCoupon?['code']?.toString());
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final service = context.read<PlanSubscriptionService>();
+      final res = await service.verifyPayment(
+        orderId: orderId,
+        tier: widget.plan.tier,
+        annual: widget.isAnnual,
+        couponCode: _appliedCoupon?['code']?.toString(),
+        paymentId: 'pay_free_${DateTime.now().millisecondsSinceEpoch}',
+      );
+
+      if (res['success'] == true) {
+        HapticFeedback.heavyImpact();
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _isSuccess = true;
+          });
+          await Future.delayed(const Duration(milliseconds: 1400));
+          if (mounted) Navigator.of(context).pop(true);
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = res['error']?.toString() ?? 'Failed to activate free pass';
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Activation error: $e';
+        });
+      }
+    }
+  }
+
+  /// Launches the official Razorpay Checkout SDK with UPI options.
+  void _openRazorpayCheckout() {
+    if (_orderData == null) {
+      _initOrder();
+      return;
+    }
+
+    setState(() {
+      _errorMessage = null;
+    });
+
+    final keyId = _orderData?['razorpayOptions']?['key']?.toString() ??
+        _orderData?['razorpayKeyId']?.toString() ??
+        'rzp_test_sample_123';
+
+    final orderId = _orderData?['orderId']?.toString() ?? '';
+    int amountInPaise = _orderData?['amountInPaise'] is num
+        ? (_orderData!['amountInPaise'] as num).toInt()
+        : 0;
+    if (amountInPaise == 0) {
+      final rawPrice = widget.isAnnual ? widget.plan.annualPrice : widget.plan.monthlyPrice;
+      final numeric = int.tryParse(rawPrice.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+      amountInPaise = numeric * 100;
+    }
+
+    final auth = context.read<AuthService?>();
+    final userPhone = auth?.phone ?? '';
+    final userEmail = auth?.currentUserEmail ?? '';
+    final userName = auth?.currentUserName ?? '';
+    final userId = auth?.currentUserId ?? '';
+
+    // Compile options strictly restricted to UPI
+    final options = <String, dynamic>{
+      'key': keyId,
+      'amount': amountInPaise,
+      'name': 'CoRoute Motorcycle Safety',
+      'description': '${widget.plan.name} (${widget.isAnnual ? 'Annual' : 'Monthly'})',
+      'order_id': orderId,
+      'prefill': {
+        'contact': userPhone,
+        'email': userEmail,
+        'name': userName,
+      },
+      'notes': {
+        'userId': userId,
+        'planTier': widget.plan.tier.name,
+        'billingCycle': widget.isAnnual ? 'annual' : 'monthly',
+      },
+      'method': {
+        'upi': true,
+        'card': false,
+        'netbanking': false,
+        'wallet': false,
+        'emi': false,
+      },
+      'theme': {
+        'color': '#FF5722',
+      },
+    };
+
+    try {
+      _razorpay.open(options);
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Razorpay SDK error: $e';
+        _showManualFallback = true;
+      });
+    }
+  }
+
+  /// Automated callback upon successful UPI payment in Razorpay SDK.
+  Future<void> _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final orderId = response.orderId ?? _orderData?['orderId']?.toString() ?? '';
+    final paymentId = response.paymentId ?? '';
+    final signature = response.signature ?? '';
+
+    try {
+      final service = context.read<PlanSubscriptionService>();
+      final res = await service.verifyPayment(
+        orderId: orderId,
+        tier: widget.plan.tier,
+        annual: widget.isAnnual,
+        paymentId: paymentId,
+        signature: signature,
+      );
+
+      if (res['success'] == true) {
+        HapticFeedback.heavyImpact();
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _isSuccess = true;
+          });
+          await Future.delayed(const Duration(milliseconds: 1400));
+          if (mounted) Navigator.of(context).pop(true);
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = res['error']?.toString() ?? 'Verification failed';
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Verification error: $e';
+        });
+      }
+    }
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        if (response.code == Razorpay.PAYMENT_CANCELLED) {
+          _errorMessage = 'Payment cancelled by user.';
+        } else {
+          _errorMessage = response.message ?? 'Payment failed (Code ${response.code})';
+        }
+      });
+    }
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    if (mounted) {
+      setState(() {
+        _errorMessage = 'Selected external wallet: ${response.walletName}';
+      });
+    }
+  }
+
+  /// Fallback: Direct native UPI deep-link intent.
   Future<void> _launchUpiIntent() async {
     final upiUri = _orderData?['upiUri']?.toString();
     if (upiUri == null) {
@@ -106,10 +374,17 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
     }
   }
 
-  Future<void> _verifyPayment() async {
+  /// Fallback: Manual UTR verification.
+  Future<void> _verifyManualUtr() async {
     final orderId = _orderData?['orderId']?.toString();
     if (orderId == null) {
       setState(() => _errorMessage = 'Order reference missing.');
+      return;
+    }
+
+    final utrText = _utrController.text.trim();
+    if (utrText.length < 8) {
+      setState(() => _errorMessage = 'Please enter a valid 12-digit UPI UTR reference.');
       return;
     }
 
@@ -124,8 +399,8 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
         orderId: orderId,
         tier: widget.plan.tier,
         annual: widget.isAnnual,
-        utr: _utrController.text.trim(),
-        paymentId: 'pay_upi_${DateTime.now().millisecondsSinceEpoch}',
+        utr: utrText,
+        paymentId: 'pay_manual_${DateTime.now().millisecondsSinceEpoch}',
       );
 
       if (res['success'] == true) {
@@ -159,7 +434,7 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
   @override
   Widget build(BuildContext context) {
     final priceLabel = widget.isAnnual ? widget.plan.annualPrice : widget.plan.monthlyPrice;
-    final vpa = _orderData?['upiVpa']?.toString() ?? 'coroute@upi';
+    final vpa = _orderData?['upiVpa']?.toString() ?? 'coroute.payments@okaxis';
     final amount = _orderData?['amount']?.toString() ??
         (widget.isAnnual ? widget.plan.annualPrice : widget.plan.monthlyPrice);
 
@@ -238,7 +513,7 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
                       Icon(Icons.security_rounded, color: AppTheme.brand, size: 14),
                       const SizedBox(width: 6),
                       Text(
-                        'Razorpay Secure · 100% UPI',
+                        'Razorpay 100% UPI Gateway',
                         style: TextStyle(
                           color: AppTheme.brand,
                           fontWeight: FontWeight.w800,
@@ -298,174 +573,271 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
               const SizedBox(height: 14),
             ],
 
-            // UPI Apps Direct Launcher
+            // Promotional Coupon Code Section
             Container(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: AppTheme.bg,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'PAY DIRECTLY VIA UPI APPS',
-                    style: TextStyle(
-                      color: AppTheme.text2,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.brand,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: _isLoading ? null : () => _launchUpiIntent(),
-                      icon: const Icon(Icons.account_balance_wallet_rounded, size: 20, color: Colors.white),
-                      label: Text(
-                        'Open Google Pay / PhonePe / Paytm (₹$amount)',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // Or Copy UPI ID & Enter Bank UTR
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppTheme.bg,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.border),
+                color: AppTheme.card,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _appliedCoupon != null ? AppTheme.accentText.withValues(alpha: 0.5) : AppTheme.border),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'OR PAY TO OFFICIAL UPI ID',
-                        style: TextStyle(
-                          color: AppTheme.text2,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.6,
+                      Icon(Icons.local_offer_outlined, size: 16, color: AppTheme.accentText),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _couponController,
+                          textCapitalization: TextCapitalization.characters,
+                          style: TextStyle(color: AppTheme.text, fontSize: 13, fontWeight: FontWeight.w700),
+                          decoration: InputDecoration(
+                            hintText: 'COUPON CODE (e.g. WELCOME50, RIDERFREE)',
+                            hintStyle: TextStyle(color: AppTheme.text2, fontSize: 11),
+                            isDense: true,
+                            border: InputBorder.none,
+                          ),
                         ),
                       ),
-                      InkWell(
-                        onTap: () {
-                          Clipboard.setData(ClipboardData(text: vpa));
-                          HapticFeedback.selectionClick();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              duration: Duration(seconds: 2),
-                              content: Text('UPI ID copied to clipboard'),
-                            ),
-                          );
-                        },
-                        child: Row(
-                          children: [
-                            Icon(Icons.copy_rounded, color: AppTheme.accentText, size: 14),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Copy',
-                              style: TextStyle(
-                                color: AppTheme.accentText,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
+                      TextButton(
+                        onPressed: _isValidatingCoupon ? null : _applyCoupon,
+                        child: _isValidatingCoupon
+                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                            : Text(_appliedCoupon != null ? 'Remove' : 'Apply', style: TextStyle(color: AppTheme.brand, fontWeight: FontWeight.w800, fontSize: 12)),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppTheme.card,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.border),
+                  if (_appliedCoupon != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Coupon ${_appliedCoupon!['code']} active: Saved ₹${_appliedCoupon!['discountAmount']}',
+                      style: TextStyle(color: AppTheme.accentText, fontSize: 11, fontWeight: FontWeight.w700),
                     ),
-                    child: Text(
-                      vpa,
-                      style: TextStyle(
-                        color: AppTheme.text,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                        letterSpacing: 0.5,
-                      ),
+                  ],
+                  if (_couponError != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      _couponError!,
+                      style: TextStyle(color: AppTheme.warnText, fontSize: 11),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _utrController,
-                    keyboardType: TextInputType.number,
-                    style: TextStyle(color: AppTheme.text, fontSize: 13),
-                    decoration: InputDecoration(
-                      labelText: '12-Digit Bank UTR / Ref No. (Optional)',
-                      labelStyle: TextStyle(color: AppTheme.text2, fontSize: 12),
-                      hintText: 'e.g. 429810238492',
-                      hintStyle: TextStyle(color: AppTheme.text2.withValues(alpha: 0.5), fontSize: 12),
-                      isDense: true,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
+                  ],
                 ],
               ),
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 14),
 
-            // Confirm & Activate Button
+            // Hero: Primary Razorpay UPI or Free Pass Checkout Button
             SizedBox(
               width: double.infinity,
-              height: 54,
+              height: 56,
               child: FilledButton(
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.accentText,
+                  backgroundColor: (_appliedCoupon != null && _appliedCoupon!['isFree'] == true) ? AppTheme.accentText : AppTheme.brand,
+                  elevation: 2,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
-                onPressed: _isLoading ? null : _verifyPayment,
+                onPressed: _isLoading ? null : () => (_appliedCoupon != null && _appliedCoupon!['isFree'] == true) ? _claimFreePass() : _openRazorpayCheckout(),
                 child: _isLoading
                     ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
                       )
                     : Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.verified_user_rounded, color: Colors.black, size: 20),
+                          Icon((_appliedCoupon != null && _appliedCoupon!['isFree'] == true) ? Icons.card_giftcard_rounded : Icons.flash_on_rounded, size: 22, color: Colors.white),
                           const SizedBox(width: 8),
-                          const Text(
-                            'Verify & Activate Plan Instantly',
-                            style: TextStyle(
-                              color: Colors.black,
+                          Text(
+                            (_appliedCoupon != null && _appliedCoupon!['isFree'] == true)
+                                ? 'Claim Free Pass (${_appliedCoupon!['code']})'
+                                : 'Pay ₹${_appliedCoupon != null ? _appliedCoupon!['finalAmount'] : amount} with Razorpay UPI',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
                               fontWeight: FontWeight.w900,
-                              fontSize: 14,
                               letterSpacing: 0.3,
                             ),
                           ),
                         ],
                       ),
               ),
+            ),
+            const SizedBox(height: 12),
+
+            // Supported UPI Apps Row
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.check_circle_outline_rounded, size: 14, color: AppTheme.accentText),
+                const SizedBox(width: 5),
+                Text(
+                  'Supports Google Pay · PhonePe · Paytm · BHIM · Cred · QR',
+                  style: TextStyle(color: AppTheme.text2, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Secondary: Fallback Direct UPI Intent / VPA
+            InkWell(
+              onTap: () {
+                setState(() {
+                  _showManualFallback = !_showManualFallback;
+                });
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _showManualFallback ? 'Hide direct UPI options' : 'Having trouble? Pay via direct UPI link / VPA',
+                      style: TextStyle(
+                        color: AppTheme.accentText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      _showManualFallback ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                      size: 16,
+                      color: AppTheme.accentText,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            if (_showManualFallback) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppTheme.bg,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'DIRECT UPI INTENT',
+                      style: TextStyle(
+                        color: AppTheme.text2,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 44,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: AppTheme.brand),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: _isLoading ? null : () => _launchUpiIntent(),
+                        icon: Icon(Icons.open_in_new_rounded, size: 16, color: AppTheme.brand),
+                        label: Text(
+                          'Launch Native UPI App (Intent)',
+                          style: TextStyle(color: AppTheme.brand, fontSize: 12, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Divider(height: 1, color: AppTheme.border),
+                    const SizedBox(height: 12),
+                    Text(
+                      'OFFICIAL CO-ROUTE VPA',
+                      style: TextStyle(
+                        color: AppTheme.text2,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: AppTheme.card,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              vpa,
+                              style: TextStyle(
+                                color: AppTheme.text,
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.copy_rounded, size: 18),
+                          color: AppTheme.brand,
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: vpa));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Copied $vpa to clipboard!'),
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _utrController,
+                            keyboardType: TextInputType.number,
+                            decoration: InputDecoration(
+                              hintText: 'Enter 12-digit UPI UTR',
+                              hintStyle: TextStyle(color: AppTheme.muted, fontSize: 11),
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.accentText,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          ),
+                          onPressed: _isLoading ? null : () => _verifyManualUtr(),
+                          child: const Text('Verify', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 16),
+            Text(
+              '256-Bit SSL Encrypted · RBI Regulated UPI Payment Processing',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppTheme.muted, fontSize: 10),
             ),
           ],
         ],

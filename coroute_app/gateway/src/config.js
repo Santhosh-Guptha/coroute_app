@@ -258,7 +258,7 @@ const config = {
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
-  latestAppBuild: int('LATEST_APP_BUILD', 107),
+  latestAppBuild: int('LATEST_APP_BUILD', 112),
   supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
 
   // CORS: comma separated origins or empty for same-origin/mobile only
@@ -282,10 +282,10 @@ const config = {
   whatsappPhoneNumberId: (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim(),
   whatsappApiToken: (process.env.WHATSAPP_API_TOKEN || '').trim(),
 
-  // Razorpay UPI-Only Payment Gateway
-  razorpayKeyId: (process.env.RAZORPAY_KEY_ID || 'rzp_test_coroute_free').trim(),
-  razorpayKeySecret: (process.env.RAZORPAY_KEY_SECRET || 'rzp_secret_coroute_free').trim(),
-  razorpayWebhookSecret: (process.env.RAZORPAY_WEBHOOK_SECRET || 'coroute_rzp_webhook_secret_free').trim(),
+  // Razorpay Payment Gateway Credentials
+  razorpayKeyId: (process.env.RAZORPAY_KEY_ID || 'rzp_test_TstfWWwQUC19Pv').trim(),
+  razorpayKeySecret: (process.env.RAZORPAY_KEY_SECRET || 'JXXsWsUF1z2XX3CREz4k10Ix').trim(),
+  razorpayWebhookSecret: (process.env.RAZORPAY_WEBHOOK_SECRET || 'whsec_coroute_razorpay').trim(),
   razorpayUpiOnly: true,
   upiVpa: (process.env.PAYMENT_UPI_VPA || 'coroute@upi').trim(),
   upiMerchantName: (process.env.PAYMENT_UPI_NAME || 'CoRoute Safety Networks').trim(),

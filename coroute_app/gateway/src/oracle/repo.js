@@ -41,6 +41,8 @@ const C = {
   guardianSubscriptions: 'guardian_subscriptions',
   guardianJobs: 'guardian_jobs',
   guardianPauses: 'guardian_pauses',
+  coupons: 'coupons',
+  subscriptionConfig: 'subscription_config',
 };
 
 /** Alert fields that live in memory only (filled by the safety network) and are never stored. */
@@ -655,6 +657,79 @@ class Repo {
   async listStaleActiveConvoys(cutoffMs, limit = 200) {
     const rows = await this.soda.query(C.convoys, { tripStatus: { $in: ACTIVE_STATUSES }, updatedAt: { $lt: cutoffMs } }, { limit });
     return rows.map((r) => ({ ...r.value, key: r.key }));
+  }
+
+  // ---------- subscription pricing & coupons ----------
+  async getSubscriptionPricing() {
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'pricing' });
+    return r ? r.value.prices : null;
+  }
+  async setSubscriptionPricing(prices, updatedBy = 'system') {
+    return this.soda.upsertBy(C.subscriptionConfig, { k: 'pricing' }, {
+      k: 'pricing',
+      prices,
+      updatedAt: Date.now(),
+      updatedBy,
+    });
+  }
+  async findCoupon(rawCode) {
+    if (!rawCode) return null;
+    const code = String(rawCode).trim().toUpperCase();
+    const r = await this.soda.findOne(C.coupons, { code });
+    return r ? { ...r.value, key: r.key } : null;
+  }
+  async listCoupons(limit = 200) {
+    const rows = await this.soda.query(C.coupons, {}, { limit });
+    return rows.map((r) => ({ ...r.value, key: r.key }));
+  }
+  async saveCoupon(coupon) {
+    const code = String(coupon.code || '').trim().toUpperCase();
+    if (!code) throw new Error('Coupon code is required');
+    const doc = {
+      code,
+      discountType: coupon.discountType || 'percentage', // 'percentage' | 'fixed' | 'free'
+      discountValue: Number(coupon.discountValue) || 0,
+      applicableTiers: Array.isArray(coupon.applicableTiers) && coupon.applicableTiers.length ? coupon.applicableTiers : ['all'],
+      applicableCycles: Array.isArray(coupon.applicableCycles) && coupon.applicableCycles.length ? coupon.applicableCycles : ['all'],
+      maxUsageTotal: Number(coupon.maxUsageTotal) || 100,
+      usageCount: Number(coupon.usageCount) || 0,
+      maxUsagePerUser: Number(coupon.maxUsagePerUser) || 1,
+      validFrom: Number(coupon.validFrom) || Date.now(),
+      expiresAt: Number(coupon.expiresAt) || (Date.now() + 30 * 86400000),
+      isActive: coupon.isActive !== false,
+      minOrderAmount: Number(coupon.minOrderAmount) || 0,
+      description: coupon.description || '',
+      usages: Array.isArray(coupon.usages) ? coupon.usages : [],
+      createdAt: coupon.createdAt || Date.now(),
+      updatedAt: Date.now(),
+    };
+    await this.soda.upsertBy(C.coupons, { code }, doc);
+    return doc;
+  }
+  async deleteCoupon(rawCode) {
+    const code = String(rawCode).trim().toUpperCase();
+    return this.soda.removeWhere(C.coupons, { code });
+  }
+  async recordCouponUsage(rawCode, { userId, orderId, discountAmount }) {
+    const code = String(rawCode).trim().toUpperCase();
+    const coupon = await this.findCoupon(code);
+    if (!coupon) return null;
+    const usages = Array.isArray(coupon.usages) ? [...coupon.usages] : [];
+    usages.push({
+      userId: userId || 'guest',
+      orderId: orderId || '',
+      discountAmount: Number(discountAmount) || 0,
+      usedAt: Date.now(),
+    });
+    const updated = {
+      ...coupon,
+      usageCount: (coupon.usageCount || 0) + 1,
+      usages,
+      updatedAt: Date.now(),
+    };
+    delete updated.key;
+    await this.soda.upsertBy(C.coupons, { code }, updated);
+    return updated;
   }
 }
 

@@ -93,6 +93,29 @@ class MemorySoda extends SodaClient {
     }
     return rows.slice(offset, offset + limit);
   }
+  async findOne(collection, filter, opts = {}) {
+    const rows = await this.query(collection, filter, { ...opts, limit: 1 });
+    return rows[0] || null;
+  }
+  async upsertBy(collection, filter, doc) {
+    const existing = await this.findOne(collection, filter);
+    if (existing) {
+      await this.replace(collection, existing.key, doc);
+      return existing.key;
+    }
+    return this.insert(collection, doc);
+  }
+  async removeWhere(collection, filter, batch = 200) {
+    let total = 0;
+    for (;;) {
+      const rows = await this.query(collection, filter, { limit: batch });
+      if (rows.length === 0) break;
+      for (const r of rows) this.remove(collection, r.key);
+      total += rows.length;
+      if (rows.length < batch) break;
+    }
+    return total;
+  }
 }
 
 module.exports = { MemorySoda, matches };

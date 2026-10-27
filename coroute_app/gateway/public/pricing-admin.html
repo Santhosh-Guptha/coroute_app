@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pricing and Coupons Admin | Coroute</title>
+<meta name="description" content="Administrator management portal for CoRoute membership pricing and promotional coupons.">
+<link rel="canonical" href="__ORIGIN__/pricing-admin">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Coroute">
+<meta property="og:title" content="Pricing and Coupons Admin | Coroute">
+<meta property="og:description" content="Manage plans, custom pricing, and promotional discount coupons.">
+<meta property="og:url" content="__ORIGIN__/pricing-admin">
+<meta property="og:image" content="__ORIGIN__/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Pricing and Coupons Admin | Coroute">
+<meta name="theme-color" content="#0B0D0E">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/pages.css">
+<script>document.documentElement.classList.add('js')</script>
+<script src="/assets/site.js" defer></script>
+
+<style>
+  .admin-container {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 32px 16px 80px;
+  }
+  .admin-card {
+    background: rgba(18, 22, 28, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .admin-card h2 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pricing-table, .coupon-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  .pricing-table th, .coupon-table th {
+    text-align: left;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: #90A4AE;
+    font-weight: 600;
+  }
+  .pricing-table td, .coupon-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    vertical-align: middle;
+  }
+  .pricing-table input[type="number"], .pricing-table input[type="text"] {
+    background: rgba(11, 15, 20, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #FFF;
+    width: 100px;
+  }
+  .form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .form-col label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #B0BEC5;
+    margin-bottom: 4px;
+  }
+  .form-col input, .form-col select {
+    width: 100%;
+    background: rgba(11, 15, 20, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: #FFF;
+    font-size: 14px;
+    box-sizing: border-box;
+  }
+  .btn-admin {
+    background: #FF5722;
+    color: #FFF;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 20px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn-admin:hover {
+    background: #E64A19;
+  }
+  .btn-admin-secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: #FFF;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-admin-secondary:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .btn-danger {
+    background: rgba(244, 67, 54, 0.2);
+    color: #EF5350;
+    border: 1px solid rgba(244, 67, 54, 0.4);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .btn-danger:hover {
+    background: #D32F2F;
+    color: #FFF;
+  }
+  .badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .badge-active { background: rgba(76, 175, 80, 0.2); color: #81C784; }
+  .badge-inactive { background: rgba(244, 67, 54, 0.2); color: #E57373; }
+  .badge-free { background: rgba(156, 39, 176, 0.2); color: #CE93D8; }
+  .notice-banner {
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .notice-banner.success { display: block; background: rgba(76, 175, 80, 0.15); color: #A5D6A7; border: 1px solid rgba(76, 175, 80, 0.3); }
+  .notice-banner.error { display: block; background: rgba(244, 67, 54, 0.15); color: #EF9A9A; border: 1px solid rgba(244, 67, 54, 0.3); }
+  .progress-bar-bg {
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 4px;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: #FF7043;
+  }
+</style>
+</head>
+<body data-page="pricing-admin">
+<!--#include header-->
+<main id="main" class="site-main" tabindex="-1">
+
+  <section class="page-hero topo">
+    <div class="container">
+      <div class="page-hero__inner">
+        <p class="eyebrow">Administration Control Panel</p>
+        <h1>Subscription Pricing and Coupon Manager</h1>
+        <p class="t-lead">Configure base tier pricing, create promotional coupons, enforce redemption limitations, and inspect usage audit ledgers.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="container">
+    <div class="admin-container">
+
+      <!-- Status Notices -->
+      <div id="admin-notice" class="notice-banner"></div>
+
+      <!-- Auth Bar (if not signed in with admin token) -->
+      <div class="admin-card" id="admin-auth-card">
+        <h2>Administrator Session</h2>
+        <p class="t-small t-muted">Enter your Administrator JWT Token or login email below to configure pricing and coupons.</p>
+        <div style="display:flex;gap:8px;max-width:600px">
+          <input type="text" id="admin-token-input" placeholder="Admin Bearer Token or leave blank to use active cookie" style="flex:1;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:8px 12px;color:#FFF">
+          <button type="button" id="save-token-btn" class="btn-admin-secondary">Load Dashboard</button>
+        </div>
+      </div>
+
+      <!-- Section 1: Configurable Plan Pricing -->
+      <div class="admin-card">
+        <h2>1. Plan Pricing Customizer</h2>
+        <p class="t-small t-muted">Adjust base monthly and annual prices in INR. Changes take effect across mobile apps and web checkouts immediately without gateway restarts.</p>
+        
+        <table class="pricing-table">
+          <thead>
+            <tr>
+              <th>Plan Tier</th>
+              <th>Display Label</th>
+              <th>Monthly Price (INR)</th>
+              <th>Annual Price (INR)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>community</code></td>
+              <td>Community Rider</td>
+              <td>0 (Free forever)</td>
+              <td>0 (Free forever)</td>
+              <td><span class="badge badge-active">Default</span></td>
+            </tr>
+            <tr>
+              <td><code>proRider</code></td>
+              <td><input type="text" id="label-pro" value="CoRoute Pro" style="width:140px"></td>
+              <td><input type="number" id="price-pro-monthly" value="149" min="1"></td>
+              <td><input type="number" id="price-pro-annual" value="1199" min="1"></td>
+              <td><span class="badge badge-active">Active</span></td>
+            </tr>
+            <tr>
+              <td><code>roadCaptain</code></td>
+              <td><input type="text" id="label-captain" value="Road Captain Pass" style="width:140px"></td>
+              <td><input type="number" id="price-captain-monthly" value="599" min="1"></td>
+              <td><input type="number" id="price-captain-annual" value="4499" min="1"></td>
+              <td><span class="badge badge-active">Active</span></td>
+            </tr>
+            <tr>
+              <td><code>tourOperator</code></td>
+              <td><input type="text" id="label-operator" value="Tour Operator" style="width:140px"></td>
+              <td><input type="number" id="price-operator-monthly" value="1999" min="1"></td>
+              <td><input type="number" id="price-operator-annual" value="14999" min="1"></td>
+              <td><span class="badge badge-active">Active</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:16px">
+          <button type="button" id="save-pricing-btn" class="btn-admin">Save Updated Pricing</button>
+        </div>
+      </div>
+
+      <!-- Section 2: Promotional Coupons Management -->
+      <div class="admin-card">
+        <h2>2. Active Coupons and Usage Limits</h2>
+        <p class="t-small t-muted">Inspect live redemption counts, maximum usage caps, and expiration dates. Expired or depleted coupons reject checkout automatically.</p>
+
+        <div style="overflow-x:auto">
+          <table class="coupon-table" id="coupon-list-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Discount</th>
+                <th>Applies To</th>
+                <th>Usage Progress</th>
+                <th>Expires</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="coupon-tbody">
+              <tr><td colspan="7" style="text-align:center;color:#90A4AE">Loading coupons...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Section 3: Create New Coupon -->
+      <div class="admin-card">
+        <h2>3. Create New Coupon</h2>
+        <form id="create-coupon-form">
+          <div class="form-row">
+            <div class="form-col">
+              <label for="new-code">Coupon Code (3-20 Alphanumeric)</label>
+              <input type="text" id="new-code" placeholder="e.g. MONSOON50" required style="text-transform:uppercase">
+            </div>
+            <div class="form-col">
+              <label for="new-type">Discount Type</label>
+              <select id="new-type">
+                <option value="percentage">Percentage Off (%)</option>
+                <option value="fixed">Flat Amount Off (INR)</option>
+                <option value="free">100% Free Pass (Full Waiver)</option>
+              </select>
+            </div>
+            <div class="form-col">
+              <label for="new-val">Discount Value</label>
+              <input type="number" id="new-val" value="50" min="1" max="10000" required>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label for="new-tier">Applicable Tier</label>
+              <select id="new-tier">
+                <option value="all">All Plans</option>
+                <option value="proRider">CoRoute Pro Only</option>
+                <option value="roadCaptain">Road Captain Pass Only</option>
+                <option value="tourOperator">Tour Operator Only</option>
+              </select>
+            </div>
+            <div class="form-col">
+              <label for="new-cycle">Billing Cycle</label>
+              <select id="new-cycle">
+                <option value="all">All Cycles (Monthly and Annual)</option>
+                <option value="monthly">Monthly Subscriptions Only</option>
+                <option value="annual">Annual Subscriptions Only</option>
+              </select>
+            </div>
+            <div class="form-col">
+              <label for="new-max-uses">Max Usage Limit (Global Cap)</label>
+              <input type="number" id="new-max-uses" value="100" min="1" max="100000">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-col">
+              <label for="new-per-user">Max Uses Per Rider</label>
+              <input type="number" id="new-per-user" value="1" min="1" max="10">
+            </div>
+            <div class="form-col">
+              <label for="new-expiry">Expiration Date</label>
+              <input type="date" id="new-expiry">
+            </div>
+            <div class="form-col">
+              <label for="new-desc">Description</label>
+              <input type="text" id="new-desc" placeholder="Promotional campaign note">
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;margin-top:16px">
+            <button type="submit" class="btn-admin">Create Coupon</button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+<!--#include footer-->
+
+<script>
+(function() {
+  let adminToken = localStorage.getItem('coroute_admin_token') || '';
+
+  const notice = document.getElementById('admin-notice');
+  const tokenInput = document.getElementById('admin-token-input');
+  const saveTokenBtn = document.getElementById('save-token-btn');
+  const couponTbody = document.getElementById('coupon-tbody');
+  const createForm = document.getElementById('create-coupon-form');
+  const savePricingBtn = document.getElementById('save-pricing-btn');
+
+  // Set default expiry date to 3 months in future
+  const d = new Date();
+  d.setMonth(d.getMonth() + 3);
+  document.getElementById('new-expiry').value = d.toISOString().slice(0, 10);
+
+  if (adminToken) tokenInput.value = adminToken;
+
+  saveTokenBtn.addEventListener('click', function() {
+    adminToken = tokenInput.value.trim();
+    localStorage.setItem('coroute_admin_token', adminToken);
+    showNotice('success', 'Admin credentials updated. Loading configuration...');
+    loadAll();
+  });
+
+  function showNotice(type, msg) {
+    notice.className = 'notice-banner ' + type;
+    notice.textContent = msg;
+    notice.style.display = 'block';
+    setTimeout(() => { notice.style.display = 'none'; }, 6000);
+  }
+
+  function getHeaders() {
+    const h = { 'Content-Type': 'application/json' };
+    if (adminToken) h['Authorization'] = 'Bearer ' + adminToken;
+    return h;
+  }
+
+  async function loadPricing() {
+    try {
+      const res = await fetch('/api/admin/subscription/pricing', { headers: getHeaders() });
+      if (!res.ok) {
+        // Fallback to public config if unauthorized
+        const pubRes = await fetch('/api/subscription/config');
+        const pubData = await pubRes.json();
+        fillPricing(pubData.plans);
+        return;
+      }
+      const data = await res.json();
+      fillPricing(data.plans);
+    } catch (e) {
+      console.warn('Failed to fetch pricing:', e);
+    }
+  }
+
+  function fillPricing(plans) {
+    if (!plans) return;
+    if (plans.proRider) {
+      document.getElementById('label-pro').value = plans.proRider.label || 'CoRoute Pro';
+      document.getElementById('price-pro-monthly').value = plans.proRider.monthly || 149;
+      document.getElementById('price-pro-annual').value = plans.proRider.annual || 1199;
+    }
+    if (plans.roadCaptain) {
+      document.getElementById('label-captain').value = plans.roadCaptain.label || 'Road Captain Pass';
+      document.getElementById('price-captain-monthly').value = plans.roadCaptain.monthly || 599;
+      document.getElementById('price-captain-annual').value = plans.roadCaptain.annual || 4499;
+    }
+    if (plans.tourOperator) {
+      document.getElementById('label-operator').value = plans.tourOperator.label || 'Tour Operator';
+      document.getElementById('price-operator-monthly').value = plans.tourOperator.monthly || 1999;
+      document.getElementById('price-operator-annual').value = plans.tourOperator.annual || 14999;
+    }
+  }
+
+  savePricingBtn.addEventListener('click', async function() {
+    savePricingBtn.disabled = true;
+    savePricingBtn.textContent = 'Saving...';
+
+    const payload = {
+      plans: {
+        proRider: {
+          label: document.getElementById('label-pro').value.trim(),
+          monthly: parseInt(document.getElementById('price-pro-monthly').value, 10),
+          annual: parseInt(document.getElementById('price-pro-annual').value, 10),
+        },
+        roadCaptain: {
+          label: document.getElementById('label-captain').value.trim(),
+          monthly: parseInt(document.getElementById('price-captain-monthly').value, 10),
+          annual: parseInt(document.getElementById('price-captain-annual').value, 10),
+        },
+        tourOperator: {
+          label: document.getElementById('label-operator').value.trim(),
+          monthly: parseInt(document.getElementById('price-operator-monthly').value, 10),
+          annual: parseInt(document.getElementById('price-operator-annual').value, 10),
+        },
+      }
+    };
+
+    try {
+      const res = await fetch('/api/admin/subscription/pricing', {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showNotice('success', '[Success] Plan pricing saved and activated across gateway cluster.');
+      } else {
+        showNotice('error', '[Failed] ' + (data.error || 'Failed to save pricing'));
+      }
+    } catch (e) {
+      showNotice('error', '[Error] ' + e.message);
+    } finally {
+      savePricingBtn.disabled = false;
+      savePricingBtn.textContent = 'Save Updated Pricing';
+    }
+  });
+
+  async function loadCoupons() {
+    try {
+      const res = await fetch('/api/admin/coupons', { headers: getHeaders() });
+      if (!res.ok) {
+        couponTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#EF9A9A">Administrator authorization required to inspect coupons. Enter your token above.</td></tr>';
+        return;
+      }
+
+      const data = await res.json();
+      const coupons = data.coupons || [];
+      if (!coupons.length) {
+        couponTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#90A4AE">No active promotional coupons defined.</td></tr>';
+        return;
+      }
+
+      couponTbody.innerHTML = coupons.map(c => {
+        const uses = c.usageCount || 0;
+        const max = c.maxUsageTotal || 100;
+        const pct = Math.min(100, Math.round((uses / max) * 100));
+        const isExp = c.expiresAt && Date.now() > c.expiresAt;
+        const statusBadge = !c.isActive 
+          ? '<span class="badge badge-inactive">Paused</span>'
+          : (isExp ? '<span class="badge badge-inactive">Expired</span>' : '<span class="badge badge-active">Active</span>');
+
+        const discountText = c.discountType === 'free' 
+          ? '<span class="badge badge-free">100% Free</span>' 
+          : (c.discountType === 'percentage' ? (c.discountValue + '% Off') : ('Rs ' + c.discountValue + ' Off'));
+
+        const applies = (c.applicableTiers || ['all']).join(', ');
+        const expiryStr = c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : 'Never';
+
+        return '<tr>' +
+          '<td><strong><code>' + c.code + '</code></strong><br><small style="color:#8C9BAE">' + (c.description || '') + '</small></td>' +
+          '<td>' + discountText + '</td>' +
+          '<td>' + applies + '</td>' +
+          '<td>' + uses + ' / ' + max + ' (' + pct + '%)' +
+            '<div class="progress-bar-bg"><div class="progress-bar-fill" style="width:' + pct + '%"></div></div>' +
+          '</td>' +
+          '<td>' + expiryStr + '</td>' +
+          '<td>' + statusBadge + '</td>' +
+          '<td>' +
+            '<button type="button" class="btn-admin-secondary" onclick="toggleCoupon(\'' + c.code + '\', ' + (!c.isActive) + ')">' + (c.isActive ? 'Pause' : 'Activate') + '</button> ' +
+            '<button type="button" class="btn-danger" onclick="deleteCoupon(\'' + c.code + '\')">Delete</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+
+    } catch (e) {
+      couponTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#EF9A9A">Failed to load coupons: ' + e.message + '</td></tr>';
+    }
+  }
+
+  window.toggleCoupon = async function(code, newActive) {
+    try {
+      const res = await fetch('/api/admin/coupons/' + encodeURIComponent(code), {
+        method: 'PATCH',
+        headers: getHeaders(),
+        body: JSON.stringify({ isActive: newActive }),
+      });
+      if (res.ok) {
+        showNotice('success', 'Coupon ' + code + ' status updated.');
+        loadCoupons();
+      } else {
+        const d = await res.json();
+        showNotice('error', d.error || 'Failed to update coupon');
+      }
+    } catch (e) {
+      showNotice('error', e.message);
+    }
+  };
+
+  window.deleteCoupon = async function(code) {
+    if (!confirm('Are you sure you want to delete coupon ' + code + '?')) return;
+    try {
+      const res = await fetch('/api/admin/coupons/' + encodeURIComponent(code), {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        showNotice('success', 'Coupon ' + code + ' deleted.');
+        loadCoupons();
+      } else {
+        const d = await res.json();
+        showNotice('error', d.error || 'Failed to delete coupon');
+      }
+    } catch (e) {
+      showNotice('error', e.message);
+    }
+  };
+
+  createForm.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const code = document.getElementById('new-code').value.trim().toUpperCase();
+    const type = document.getElementById('new-type').value;
+    const val = parseInt(document.getElementById('new-val').value, 10);
+    const tier = document.getElementById('new-tier').value;
+    const cycle = document.getElementById('new-cycle').value;
+    const maxUses = parseInt(document.getElementById('new-max-uses').value, 10);
+    const perUser = parseInt(document.getElementById('new-per-user').value, 10);
+    const expiry = new Date(document.getElementById('new-expiry').value).getTime();
+    const desc = document.getElementById('new-desc').value.trim();
+
+    const payload = {
+      code,
+      discountType: type,
+      discountValue: val,
+      applicableTiers: tier === 'all' ? ['all'] : [tier],
+      applicableCycles: cycle === 'all' ? ['all'] : [cycle],
+      maxUsageTotal: maxUses,
+      maxUsagePerUser: perUser,
+      expiresAt: expiry || (Date.now() + 90 * 86400000),
+      description: desc,
+    };
+
+    try {
+      const res = await fetch('/api/admin/coupons', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showNotice('success', '[Success] Coupon ' + code + ' created and active.');
+        createForm.reset();
+        loadCoupons();
+      } else {
+        showNotice('error', '[Failed] ' + (data.error || 'Failed to create coupon'));
+      }
+    } catch (err) {
+      showNotice('error', '[Error] ' + err.message);
+    }
+  });
+
+  function loadAll() {
+    loadPricing();
+    loadCoupons();
+  }
+
+  loadAll();
+})();
+</script>
+</body>
+</html>

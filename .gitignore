@@ -30,4 +30,6 @@ qa_screenshots/
 *.tar.gz
 *.apk
 release/**/*.apk
+.env
+*.env
 
