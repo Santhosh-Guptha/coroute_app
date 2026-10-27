@@ -672,6 +672,34 @@ class Repo {
       updatedBy,
     });
   }
+  // ---------- Razorpay settings & order ledger (subscription_config) ----------
+  /** Admin-saved gateway settings (secrets already encrypted by razorpay_gateway.js). */
+  async getPaymentGatewaySettings() {
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'razorpay' });
+    return r ? r.value.settings : null;
+  }
+  async setPaymentGatewaySettings(settings) {
+    return this.soda.upsertBy(C.subscriptionConfig, { k: 'razorpay' }, { k: 'razorpay', settings, updatedAt: Date.now() });
+  }
+  async saveRazorpayOrder(order) {
+    return this.soda.upsertBy(C.subscriptionConfig, { k: 'rzp_order', orderId: order.orderId }, { ...order, k: 'rzp_order' });
+  }
+  async findRazorpayOrder(orderId) {
+    if (!orderId) return null;
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'rzp_order', orderId: String(orderId) });
+    return r ? r.value : null;
+  }
+  async updateRazorpayOrder(orderId, patch) {
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'rzp_order', orderId: String(orderId) });
+    if (!r) return null;
+    const next = { ...r.value, ...patch, k: 'rzp_order', orderId: r.value.orderId, updatedAt: Date.now() };
+    await this.soda.replace(C.subscriptionConfig, r.key, next);
+    return next;
+  }
+  async listRazorpayOrders(filter = {}, limit = 200) {
+    const rows = await this.soda.query(C.subscriptionConfig, { ...filter, k: 'rzp_order' }, { limit });
+    return rows.map((r) => r.value);
+  }
   async findCoupon(rawCode) {
     if (!rawCode) return null;
     const code = String(rawCode).trim().toUpperCase();

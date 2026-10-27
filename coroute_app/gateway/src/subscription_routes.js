@@ -2,6 +2,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const config = require('./config');
+const { createRazorpayGateway, RazorpayError } = require('./razorpay_gateway');
 
 const PLAN_PRICES_INR = {
   community: { monthly: 0, annual: 0, label: 'Community Rider' },
@@ -164,74 +165,108 @@ function normalizeTier(tier) {
   return 'community';
 }
 
-/**
- * Creates an authentic order with Razorpay Orders API when live/test keys are present,
- * or gracefully generates a valid Razorpay-spec order ID in sandbox test mode.
- */
-async function createRazorpayOrder({ amountInPaise, receipt, notes }) {
-  const isRealKey = config.razorpayKeyId &&
-    !config.razorpayKeyId.startsWith('rzp_test_sample') &&
-    config.razorpayKeySecret &&
-    !config.razorpayKeySecret.startsWith('rzp_secret_coroute_free');
 
-  if (isRealKey) {
-    try {
-      const auth = Buffer.from(`${config.razorpayKeyId}:${config.razorpayKeySecret}`).toString('base64');
-      const res = await fetch('https://api.razorpay.com/v1/orders', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${auth}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          amount: amountInPaise,
-          currency: 'INR',
-          receipt,
-          notes,
-          payment_capture: 1,
-        }),
-      });
+// One gateway (keys + mode + API client) per repository.
+const gateways = new WeakMap();
+function gatewayFor(repo) {
+  const k = repo || gatewayFor;
+  if (!gateways.has(k)) gateways.set(k, createRazorpayGateway({ repo }));
+  return gateways.get(k);
+}
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.id) return data.id;
-      } else {
-        const txt = await res.text();
-        console.warn('[razorpay] orders.create API returned error, falling back:', res.status, txt);
-      }
-    } catch (e) {
-      console.warn('[razorpay] orders.create network error, falling back:', e.message);
-    }
-  }
-
-  // Razorpay-spec order identifier (order_<timestamp>_<nonce>)
-  const orderNonce = crypto.randomBytes(4).toString('hex').toLowerCase();
-  return `order_${Date.now()}_${orderNonce}`;
+function sendRzpError(res, e) {
+  if (e instanceof RazorpayError) return res.status(e.status).json({ error: e.message, code: e.code });
+  throw e;
 }
 
 /**
- * Registers public webhook endpoints (authenticated via HMAC signature, not user JWT).
+ * Order ledger: every order the server issues is recorded with the plan,
+ * amount and mode decided on the server. Verification and the webhook trust
+ * only this record, never plan/amount values sent back by a client.
+ */
+async function saveOrder(repo, order) {
+  await repo.saveRazorpayOrder({ ...order, createdAt: Date.now(), status: order.status || 'CREATED' });
+}
+
+/** Grants the plan to the user once per order (idempotent). */
+async function activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, vpa, method, source }) {
+  const planTier = order.planTier;
+  const billingCycle = order.billingCycle === 'annual' ? 'annual' : 'monthly';
+  const history = Array.isArray(userDoc.paymentHistory) ? [...userDoc.paymentHistory] : [];
+  const prior = history.find((p) => p.orderId === order.orderId);
+  if (prior) {
+    return { tier: userDoc.subscriptionTier, validUntil: userDoc.subscriptionValidUntil, record: prior, already: true };
+  }
+  const currentExpiry = Number(userDoc.subscriptionValidUntil) || 0;
+  const duration = billingCycle === 'annual' ? 365 * 86400000 : 30 * 86400000;
+  // Extend from current expiry when renewing the same tier, so paid days are never lost.
+  const baseTime = (currentExpiry > Date.now() && userDoc.subscriptionTier === planTier) ? currentExpiry : Date.now();
+  const expiry = baseTime + duration;
+  const record = {
+    orderId: order.orderId,
+    paymentId: paymentId || '',
+    utr: utr || '',
+    vpa: vpa || '',
+    amount: (Number(order.amountInPaise) || 0) / 100,
+    currency: 'INR',
+    method,
+    planTier,
+    billingCycle,
+    validFrom: baseTime,
+    validUntil: expiry,
+    paidAt: Date.now(),
+    source,
+    mode: order.mode || null,
+    couponCode: order.couponCode || null,
+    userSnapshot: {
+      userId: userDoc.userId,
+      name: userDoc.name || '',
+      email: userDoc.email || '',
+      phone: userDoc.phone || '',
+      callsign: userDoc.callsign || '',
+    },
+  };
+  history.push(record);
+  await repo.updateUser(userDoc.key, {
+    subscriptionTier: planTier,
+    subscriptionValidUntil: expiry,
+    lastPayment: record,
+    paymentHistory: history,
+  });
+  await repo.updateRazorpayOrder(order.orderId, { status: 'PAID', paymentId: paymentId || '', paidAt: Date.now() });
+  if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
+    await repo.recordCouponUsage(order.couponCode, {
+      userId: userDoc.userId, orderId: order.orderId, discountAmount: order.discountAmount || 0,
+    }).catch(() => {});
+  }
+  if (auth && auth.gate) auth.gate.invalidate(userDoc.userId);
+  if (hub) {
+    hub.sendToUser(userDoc.userId, { type: 'SUBSCRIPTION_ACTIVATED', tier: planTier, validUntil: expiry, orderId: order.orderId, method });
+  }
+  return { tier: planTier, validUntil: expiry, record, already: false };
+}
+
+/**
+ * Registers public endpoints: webhook (HMAC-authenticated), coupon check,
+ * public config, and the generic create-order / verify-payment pair used by
+ * the web checkout page. The generic pair never grants a plan by itself.
  */
 function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
+  const gateway = gatewayFor(repo);
+
   r.post('/subscription/webhook', wrap(async (req, res) => {
     const rawBody = typeof req.body === 'string'
       ? req.body
       : (Buffer.isBuffer(req.body) ? req.body.toString('utf8') : JSON.stringify(req.body || {}));
-    const signature = req.get('x-razorpay-signature') || req.get('x-webhook-signature') || '';
+    const signature = req.get('x-razorpay-signature') || '';
 
-    // If webhook secret is configured, verify HMAC signature
-    if (config.razorpayWebhookSecret && signature) {
-      const expected = crypto.createHmac('sha256', config.razorpayWebhookSecret).update(rawBody).digest('hex');
-      if (signature !== expected) {
-        return res.status(400).json({ error: 'Invalid webhook signature' });
-      }
-    }
+    // Always required: an unsigned or wrongly signed webhook is never trusted.
+    const mode = await gateway.verifyWebhook(rawBody, signature);
+    if (!mode) return res.status(400).json({ error: 'Invalid webhook signature' });
 
-    let event = typeof req.body === 'object' && !Buffer.isBuffer(req.body) ? req.body : {};
+    let event;
     try {
-      if (typeof req.body === 'string' || Buffer.isBuffer(req.body)) {
-        event = JSON.parse(rawBody);
-      }
+      event = typeof req.body === 'object' && !Buffer.isBuffer(req.body) ? req.body : JSON.parse(rawBody);
     } catch {
       return res.status(400).json({ error: 'Invalid JSON payload' });
     }
@@ -239,70 +274,25 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
     const eventType = event.event || '';
     if (eventType === 'payment.captured' || eventType === 'order.paid') {
       const payment = event.payload?.payment?.entity || {};
-      const notes = payment.notes || event.payload?.order?.entity?.notes || {};
-      const userId = notes.userId || notes.user_id;
-      const planTier = normalizeTier(notes.planTier || notes.plan_tier || notes.tier);
-      const billingCycle = notes.billingCycle === 'annual' ? 'annual' : 'monthly';
-
-      if (userId && planTier && planTier !== 'community') {
-        const user = await repo.findUserById(userId);
-        if (user) {
-          const currentExpiry = Number(user.subscriptionValidUntil) || 0;
-          const duration = billingCycle === 'annual' ? 365 * 86400000 : 30 * 86400000;
-          // If already active on the same plan, extend from current expiry rather than cutting existing days short
-          const baseTime = (currentExpiry > Date.now() && user.subscriptionTier === planTier) ? currentExpiry : Date.now();
-          const expiry = baseTime + duration;
-
-          const paymentRecord = {
-            orderId: payment.order_id || event.payload?.order?.entity?.id || '',
+      const orderId = payment.order_id || event.payload?.order?.entity?.id || '';
+      const order = orderId ? await repo.findRazorpayOrder(orderId) : null;
+      if (order && order.userId && order.mode === mode && order.status !== 'PAID') {
+        const userDoc = await repo.findUserById(order.userId);
+        if (userDoc) {
+          await activatePlan({
+            repo, auth, hub, userDoc, order,
             paymentId: payment.id || '',
-            utr: payment.acquirer_data?.rrn || payment.acquirer_data?.upi_transaction_id || notes.utr || '',
+            utr: payment.acquirer_data?.rrn || payment.acquirer_data?.upi_transaction_id || '',
             vpa: payment.vpa || '',
-            amount: (payment.amount || 0) / 100,
-            currency: 'INR',
-            method: 'UPI',
-            planTier,
-            billingCycle,
-            validFrom: baseTime,
-            validUntil: expiry,
-            paidAt: Date.now(),
+            method: String(payment.method || 'upi').toUpperCase(),
             source: 'razorpay_webhook',
-            userSnapshot: {
-              userId,
-              name: user.name || '',
-              email: user.email || '',
-              phone: user.phone || '',
-              callsign: user.callsign || '',
-            },
-          };
-
-          const history = Array.isArray(user.paymentHistory) ? [...user.paymentHistory] : [];
-          if (!history.some(p => p.paymentId && p.paymentId === paymentRecord.paymentId)) {
-            history.push(paymentRecord);
-          }
-
-          await repo.updateUser(user.key, {
-            subscriptionTier: planTier,
-            subscriptionValidUntil: expiry,
-            lastPayment: paymentRecord,
-            paymentHistory: history,
           });
-
-          if (auth.gate) auth.gate.invalidate(userId);
-          if (hub) {
-            hub.sendToUser(userId, {
-              type: 'SUBSCRIPTION_ACTIVATED',
-              tier: planTier,
-              validUntil: expiry,
-              method: 'UPI',
-            });
-          }
         }
       }
     }
-
     res.status(200).json({ status: 'ok' });
   }));
+
 
   // ---------------------------------------------------------------------------
   // COUPON VALIDATION (Public Endpoint)
@@ -336,11 +326,13 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   r.post('/api/subscription/validate-coupon', handleValidateCoupon);
   r.post('/validate-coupon', handleValidateCoupon);
 
-  // Subscription configuration (public: dynamic pricing & Razorpay public key)
+  // Public config: plans + the ACTIVE mode's key id (never a secret).
   const handleGetConfig = wrap(async (req, res) => {
     const plans = await getEffectivePlans(repo);
+    const keys = await gateway.keysFor();
     res.json({
-      razorpayKeyId: config.razorpayKeyId,
+      razorpayKeyId: keys.keyId,
+      mode: keys.mode,
       upiOnly: true,
       allowedMethods: ['upi'],
       upiVpa: config.upiVpa,
@@ -353,208 +345,120 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   r.get('/api/subscription/config', handleGetConfig);
 
   // ---------------------------------------------------------------------------
-  // STEP 1: BACKEND - Create Order
-  // Endpoint: POST /api/create-order (supports optional coupon_code)
+  // STEP 1: BACKEND - Create Order   POST /api/create-order
+  // Body: { amount (paise) | planTier+billingCycle, currency, receipt, coupon_code }
   // ---------------------------------------------------------------------------
   const handleCreateOrder = wrap(async (req, res) => {
     const { amount, currency = 'INR', receipt, notes, coupon_code, couponCode } = req.body || {};
+    const planTier = normalizeTier(req.body?.planTier || notes?.planTier);
+    const billingCycle = (req.body?.billingCycle || notes?.billingCycle) === 'annual' ? 'annual' : 'monthly';
+
+    // A known plan is priced on the server; otherwise the given amount is used.
+    let finalAmountPaise = Number(amount);
+    if (planTier !== 'community') {
+      const plans = await getEffectivePlans(repo);
+      const meta = plans[planTier];
+      if (meta) finalAmountPaise = (billingCycle === 'annual' ? meta.annual : meta.monthly) * 100;
+    }
 
     const rawCoupon = coupon_code || couponCode;
     let couponResult = null;
-    let finalAmountPaise = Number(amount);
-
     if (rawCoupon) {
       const coupon = await resolveCoupon(rawCoupon, repo);
-      if (!coupon) {
-        return res.status(400).json({ error: `Coupon '${rawCoupon}' not found or invalid` });
-      }
+      if (!coupon) return res.status(400).json({ error: `Coupon '${rawCoupon}' not found or invalid` });
       couponResult = evaluateCoupon(coupon, {
         userId: req.user?.userId,
-        planTier: notes?.planTier || req.body?.planTier,
-        billingCycle: notes?.billingCycle || req.body?.billingCycle,
+        planTier,
+        billingCycle,
         amountInInr: finalAmountPaise ? finalAmountPaise / 100 : 0,
       });
-      if (!couponResult.valid) {
-        return res.status(400).json({ error: couponResult.error });
-      }
+      if (!couponResult.valid) return res.status(400).json({ error: couponResult.error });
       finalAmountPaise = couponResult.finalAmountPaise;
     }
 
-    // Free coupon (100% discount): return zero-amount order for immediate activation
-    if (finalAmountPaise === 0 && couponResult && couponResult.isFree) {
-      const freeOrderId = `order_free_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
-      return res.status(200).json({
-        order_id: freeOrderId,
-        amount: 0,
-        currency: 'INR',
-        is_free: true,
-        coupon: couponResult,
+    if (couponResult && couponResult.isFree) {
+      const freeOrderId = `order_free_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      await saveOrder(repo, {
+        orderId: freeOrderId, userId: null, planTier, billingCycle, amountInPaise: 0,
+        couponCode: couponResult.code, discountAmount: couponResult.discountAmount, isFree: true, mode: null, channel: 'public',
       });
+      return res.status(200).json({ order_id: freeOrderId, amount: 0, currency: 'INR', is_free: true, coupon: couponResult });
     }
 
-    const amountNum = Number(finalAmountPaise);
-    // Validate amount >= 100 paise
-    if (!amountNum || isNaN(amountNum) || amountNum < 100) {
+    if (!Number.isFinite(finalAmountPaise) || finalAmountPaise < 100) {
       return res.status(400).json({ error: 'Amount must be at least 100 paise' });
     }
 
-    const orderAmount = Math.round(amountNum);
-    const orderCurrency = String(currency || 'INR').toUpperCase();
-    const orderReceipt = receipt || `rcpt_${Date.now()}`;
-
-    const keyId = config.razorpayKeyId;
-    const keySecret = config.razorpayKeySecret;
-
-    // Call Razorpay API: POST https://api.razorpay.com/v1/orders
-    const authHeader = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+    let order;
     try {
-      const apiRes = await fetch('https://api.razorpay.com/v1/orders', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${authHeader}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          amount: orderAmount,
-          currency: orderCurrency,
-          receipt: orderReceipt,
-          notes: {
-            ...(notes || {}),
-            couponCode: couponResult?.code || '',
-            discountAmount: couponResult?.discountAmount || 0,
-          },
-        }),
+      order = await gateway.createOrder({
+        amountInPaise: finalAmountPaise,
+        currency: String(currency || 'INR').toUpperCase(),
+        receipt: receipt || `rcpt_${Date.now()}`,
+        notes: { ...(notes || {}), planTier, billingCycle, couponCode: couponResult?.code || '' },
       });
-
-      if (apiRes.status === 401) {
-        if (keyId.startsWith('rzp_test_') || req.body?.simulate_test || process.env.ALLOW_TEST_ORDERS === 'true') {
-          const testOrderId = `order_test_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
-          return res.status(200).json({
-            order_id: testOrderId,
-            amount: orderAmount,
-            currency: orderCurrency,
-            mode: 'test',
-            simulated: true,
-            warning: 'Upstream Razorpay returned 401. Generated test order for sandbox verification.',
-          });
-        }
-        // Handle auth failures (return 401)
-        return res.status(401).json({ error: 'Razorpay authentication failed: Invalid Key ID or Key Secret' });
-      }
-
-      if (!apiRes.ok) {
-        // Handle Razorpay API errors (return 500)
-        const errBody = await apiRes.json().catch(() => ({}));
-        return res.status(500).json({
-          error: errBody.error?.description || 'Razorpay order creation failed',
-        });
-      }
-
-      const orderData = await apiRes.json();
-      // Return: { order_id, amount, currency }
-      return res.status(200).json({
-        order_id: orderData.id,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        coupon: couponResult || undefined,
-      });
-    } catch (err) {
-      return res.status(500).json({ error: err.message || 'Failed to connect to Razorpay' });
+    } catch (e) {
+      return sendRzpError(res, e);
     }
+    await saveOrder(repo, {
+      orderId: order.id, userId: null, planTier, billingCycle, amountInPaise: order.amount,
+      couponCode: couponResult?.code || null, discountAmount: couponResult?.discountAmount || 0,
+      isFree: false, mode: order.mode, channel: 'public',
+    });
+    return res.status(200).json({
+      order_id: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      key_id: order.keyId,
+      mode: order.mode,
+      coupon: couponResult || undefined,
+    });
   });
 
   r.post('/create-order', handleCreateOrder);
   r.post('/api/create-order', handleCreateOrder);
 
   // ---------------------------------------------------------------------------
-  // STEP 3: BACKEND - Verify Signature & Record Coupon Usage
-  // Endpoint: POST /api/verify-payment
+  // STEP 3: BACKEND - Verify Signature   POST /api/verify-payment
+  // HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET of the order's mode)
   // ---------------------------------------------------------------------------
   const handleVerifyPayment = wrap(async (req, res) => {
-    const {
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature,
-      order_id,
-      payment_id,
-      signature,
-      coupon_code,
-      couponCode,
-      is_free,
-      userId,
-    } = req.body || {};
+    const b = req.body || {};
+    const orderId = b.razorpay_order_id || b.order_id;
+    const paymentId = b.razorpay_payment_id || b.payment_id;
+    const signature = b.razorpay_signature || b.signature;
 
-    const finalOrderId = razorpay_order_id || order_id;
-    const finalPaymentId = razorpay_payment_id || payment_id;
-    const finalSignature = razorpay_signature || signature;
-    const isFreeOrder = Boolean(is_free || (finalOrderId && finalOrderId.startsWith('order_free_')));
+    if (!orderId) return res.status(400).json({ success: false, error: 'Missing required field: order_id is required' });
+    const order = await repo.findRazorpayOrder(orderId);
+    if (!order) return res.status(400).json({ success: false, error: 'Unknown order' });
 
-    if (isFreeOrder) {
-      if (!finalOrderId) {
-        return res.status(400).json({ error: 'Missing order_id for free order' });
+    if (order.isFree) {
+      if (order.status !== 'PAID') {
+        await repo.updateRazorpayOrder(orderId, { status: 'PAID', paidAt: Date.now() });
+        if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
+          await repo.recordCouponUsage(order.couponCode, { userId: 'guest', orderId, discountAmount: order.discountAmount || 0 }).catch(() => {});
+        }
       }
-      const rawCoupon = coupon_code || couponCode;
-      if (rawCoupon && repo && typeof repo.recordCouponUsage === 'function') {
-        await repo.recordCouponUsage(rawCoupon, {
-          userId: userId || req.user?.userId || 'guest',
-          orderId: finalOrderId,
-          discountAmount: 100,
-        }).catch(() => {});
-      }
-      return res.status(200).json({
-        success: true,
-        message: 'Free subscription coupon verified and activated successfully',
-        order_id: finalOrderId,
-        payment_id: finalPaymentId || `pay_free_${Date.now()}`,
-        is_free: true,
-      });
+      return res.status(200).json({ success: true, message: 'Free coupon order confirmed', order_id: orderId, is_free: true });
     }
 
-    // Missing fields: return 400
-    if (!finalOrderId || !finalPaymentId || (!finalSignature && !req.body?.test_mode)) {
-      return res.status(400).json({
-        error: 'Missing required fields: order_id, payment_id, and signature are required',
-      });
+    // Missing fields: 400
+    if (!paymentId || !signature) {
+      return res.status(400).json({ success: false, error: 'Missing required fields: order_id, payment_id, and signature are required' });
     }
-
-    // Algorithm: HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET)
-    const expectedSignature = crypto
-      .createHmac('sha256', config.razorpayKeySecret)
-      .update(`${finalOrderId}|${finalPaymentId}`)
-      .digest('hex');
-
-    let sigToVerify = finalSignature;
-    if (config.razorpayKeyId.startsWith('rzp_test_') && (req.body?.test_mode || finalOrderId.startsWith('order_test_'))) {
-      if (finalSignature === 'test_verified' || !finalSignature) {
-        sigToVerify = expectedSignature;
+    const ok = await gateway.verifySignature({ orderId, paymentId, signature, mode: order.mode });
+    // Signature mismatch: 400, NOT marked paid
+    if (!ok) {
+      await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
+      return res.status(400).json({ success: false, error: 'Signature verification failed' });
+    }
+    if (order.status !== 'PAID') {
+      await repo.updateRazorpayOrder(orderId, { status: 'PAID', paymentId, paidAt: Date.now() });
+      if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
+        await repo.recordCouponUsage(order.couponCode, { userId: 'guest', orderId, discountAmount: order.discountAmount || 0 }).catch(() => {});
       }
     }
-
-    // Signature mismatch: return 400, do NOT mark as paid
-    if (expectedSignature !== sigToVerify) {
-      return res.status(400).json({
-        success: false,
-        error: 'Signature verification failed',
-      });
-    }
-
-    // Record coupon usage in ledger if a coupon was used
-    const rawCoupon = coupon_code || couponCode;
-    if (rawCoupon && repo && typeof repo.recordCouponUsage === 'function') {
-      await repo.recordCouponUsage(rawCoupon, {
-        userId: userId || req.user?.userId || 'guest',
-        orderId: finalOrderId,
-        discountAmount: Number(req.body?.discountAmount) || 0,
-      }).catch(() => {});
-    }
-
-    // Return success only if signatures match
-    return res.status(200).json({
-      success: true,
-      message: 'Payment verified successfully',
-      order_id: finalOrderId,
-      payment_id: finalPaymentId,
-    });
+    return res.status(200).json({ success: true, message: 'Payment verified successfully', order_id: orderId, payment_id: paymentId, mode: order.mode });
   });
 
   r.post('/verify-payment', handleVerifyPayment);
@@ -563,10 +467,12 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
 
 /**
  * Registers authenticated subscription routes (requires user JWT)
- * and admin pricing / coupon management routes.
+ * and admin pricing / coupon / payment-gateway routes.
  */
 function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin }) {
-  // Create Razorpay UPI Order (with optional coupon discount)
+  const gateway = gatewayFor(repo);
+
+  // Create a Razorpay order for a plan (price decided here, optional coupon).
   r.post('/subscription/create-order', wrap(async (req, res) => {
     const userId = req.user.userId;
     const userDoc = req.dbUser || (await repo.findUserById(userId));
@@ -576,7 +482,6 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     if (planTier === 'community') {
       return res.status(400).json({ error: 'Community tier is free forever and does not require an order.' });
     }
-
     const billingCycle = req.body.billingCycle === 'annual' ? 'annual' : 'monthly';
     const plans = await getEffectivePlans(repo);
     const planMeta = plans[planTier];
@@ -585,110 +490,84 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     let amountInInr = billingCycle === 'annual' ? planMeta.annual : planMeta.monthly;
     let couponResult = null;
     const rawCoupon = req.body.couponCode || req.body.coupon_code;
-
     if (rawCoupon) {
       const coupon = await resolveCoupon(rawCoupon, repo);
-      if (!coupon) {
-        return res.status(400).json({ error: `Coupon '${rawCoupon}' not found` });
-      }
-      couponResult = evaluateCoupon(coupon, {
-        userId,
-        planTier,
-        billingCycle,
-        amountInInr,
-      });
-      if (!couponResult.valid) {
-        return res.status(400).json({ error: couponResult.error });
-      }
+      if (!coupon) return res.status(400).json({ error: `Coupon '${rawCoupon}' not found` });
+      couponResult = evaluateCoupon(coupon, { userId, planTier, billingCycle, amountInInr });
+      if (!couponResult.valid) return res.status(400).json({ error: couponResult.error });
       amountInInr = couponResult.finalAmount;
     }
 
-    // 100% Free coupon: return instant activation order
     if (amountInInr === 0 && couponResult && couponResult.isFree) {
-      const freeOrderId = `order_free_${userId}_${Date.now()}`;
+      const freeOrderId = `order_free_${crypto.randomBytes(8).toString('hex')}`;
+      await saveOrder(repo, {
+        orderId: freeOrderId, userId, planTier, billingCycle, amountInPaise: 0,
+        couponCode: couponResult.code, discountAmount: couponResult.discountAmount, isFree: true, mode: null, channel: 'app',
+      });
       return res.json({
-        orderId: freeOrderId,
-        amount: 0,
-        amountInPaise: 0,
-        currency: 'INR',
-        planTier,
-        billingCycle,
-        planLabel: planMeta.label,
-        isFree: true,
-        coupon: couponResult,
+        orderId: freeOrderId, amount: 0, amountInPaise: 0, currency: 'INR',
+        planTier, billingCycle, planLabel: planMeta.label, isFree: true, coupon: couponResult,
       });
     }
 
-    const amountInPaise = amountInInr * 100;
-    const receipt = `rcpt_${userId}_${Date.now()}`;
-    const orderId = await createRazorpayOrder({
-      amountInPaise,
-      receipt,
-      notes: {
-        userId,
-        planTier,
-        billingCycle,
-        couponCode: couponResult?.code || '',
-        discountAmount: couponResult?.discountAmount || 0,
-        app: 'CoRoute Motorcycle Safety',
-      },
+    const amountInPaise = Math.round(amountInInr * 100);
+    if (amountInPaise < 100) return res.status(400).json({ error: 'Amount must be at least 100 paise' });
+
+    let order;
+    try {
+      order = await gateway.createOrder({
+        amountInPaise,
+        receipt: `rcpt_${userId}_${Date.now()}`,
+        notes: {
+          userId, planTier, billingCycle,
+          couponCode: couponResult?.code || '',
+          discountAmount: couponResult?.discountAmount || 0,
+          app: 'CoRoute Motorcycle Safety',
+        },
+      });
+    } catch (e) {
+      return sendRzpError(res, e);
+    }
+    await saveOrder(repo, {
+      orderId: order.id, userId, planTier, billingCycle, amountInPaise: order.amount,
+      couponCode: couponResult?.code || null, discountAmount: couponResult?.discountAmount || 0,
+      isFree: false, mode: order.mode, channel: 'app',
     });
 
-    // Razorpay UPI Checkout Options (strictly constrained to UPI)
+    // Razorpay Checkout options (UPI only)
     const razorpayOptions = {
-      key: config.razorpayKeyId,
-      amount: amountInPaise,
+      key: order.keyId,
+      amount: order.amount,
       currency: 'INR',
       name: config.upiMerchantName,
       description: `${planMeta.label} (${billingCycle === 'annual' ? 'Annual' : 'Monthly'})`,
-      order_id: orderId,
+      order_id: order.id,
       prefill: {
         name: userDoc.name || req.user.name || '',
         email: userDoc.email || req.user.email || '',
         contact: userDoc.phone || '',
       },
-      notes: {
-        userId,
-        planTier,
-        billingCycle,
-        couponCode: couponResult?.code || '',
-        app: 'CoRoute Motorcycle Safety',
-      },
-      // Strictly restrict methods to UPI only:
-      method: {
-        upi: true,
-        card: false,
-        netbanking: false,
-        wallet: false,
-        emi: false,
-      },
+      notes: { userId, planTier, billingCycle, couponCode: couponResult?.code || '', app: 'CoRoute Motorcycle Safety' },
+      method: { upi: true, card: false, netbanking: false, wallet: false, emi: false },
       config: {
         display: {
-          blocks: {
-            banks: {
-              name: 'Pay via UPI',
-              instruments: [{ method: 'upi' }],
-            },
-          },
+          blocks: { banks: { name: 'Pay via UPI', instruments: [{ method: 'upi' }] } },
           sequence: ['block.banks'],
-          preferences: {
-            show_default_blocks: false,
-          },
+          preferences: { show_default_blocks: false },
         },
       },
-      theme: {
-        color: '#FF5722',
-      },
+      theme: { color: '#FF5722' },
     };
 
-    // Deep link UPI intent URI for native UPI apps (GPay, PhonePe, Paytm, BHIM)
-    const upiUri = `upi://pay?pa=${encodeURIComponent(config.upiVpa)}&pn=${encodeURIComponent(config.upiMerchantName)}&am=${amountInInr}.00&cu=INR&tn=${encodeURIComponent('CoRoute ' + planMeta.label + ' ' + orderId)}&tr=${orderId}`;
+    // Direct UPI intent (paid outside Razorpay; confirmed by an admin from the UTR).
+    const upiUri = `upi://pay?pa=${encodeURIComponent(config.upiVpa)}&pn=${encodeURIComponent(config.upiMerchantName)}&am=${amountInInr}.00&cu=INR&tn=${encodeURIComponent('CoRoute ' + planMeta.label + ' ' + order.id)}&tr=${order.id}`;
 
     res.json({
-      orderId,
+      orderId: order.id,
       amount: amountInInr,
-      amountInPaise,
+      amountInPaise: order.amount,
       currency: 'INR',
+      mode: order.mode,
       planTier,
       billingCycle,
       planLabel: planMeta.label,
@@ -700,112 +579,66 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     });
   }));
 
-  // Verify Payment & Activate Plan (Immediate real-time check)
+  /**
+   * Verify & activate. Plan, cycle and amount come from the order ledger.
+   *  - free coupon order          → activated
+   *  - paymentId + signature      → HMAC checked with the order's mode secret, then activated
+   *  - utr only (direct UPI app)  → recorded as a claim (202); an admin approves it
+   */
   r.post('/subscription/verify-payment', wrap(async (req, res) => {
     const userId = req.user.userId;
     const userDoc = req.dbUser || (await repo.findUserById(userId));
     if (!userDoc) return res.status(404).json({ error: 'User not found' });
 
-    const { orderId, planTier: rawTier, billingCycle: rawCycle, paymentId, utr, signature, couponCode, coupon_code } = req.body || {};
-    const planTier = normalizeTier(rawTier);
-    if (planTier === 'community') {
-      return res.status(400).json({ error: 'Cannot activate community tier with payment' });
-    }
+    const { orderId, paymentId, signature, utr, vpa } = req.body || {};
+    if (!orderId) return res.status(400).json({ error: 'Missing orderId' });
 
-    if (!orderId) {
-      return res.status(400).json({ error: 'Missing orderId' });
-    }
-
-    const isFreeOrder = orderId.startsWith('order_free_');
-
-    // Cryptographic signature check when Razorpay paymentId and signature are passed (unless free order)
-    if (!isFreeOrder && paymentId && signature && config.razorpayKeySecret) {
-      const generated = crypto.createHmac('sha256', config.razorpayKeySecret).update(`${orderId}|${paymentId}`).digest('hex');
-      if (generated !== signature && !config.razorpayKeySecret.startsWith('rzp_secret_coroute_free')) {
-        return res.status(400).json({ error: 'Cryptographic signature verification failed' });
-      }
-    }
-
-    // Record coupon usage in repository if coupon was used
-    const rawCoupon = couponCode || coupon_code;
-    if (rawCoupon && repo && typeof repo.recordCouponUsage === 'function') {
-      await repo.recordCouponUsage(rawCoupon, {
-        userId,
-        orderId,
-        discountAmount: Number(req.body?.discountAmount) || 0,
-      }).catch(() => {});
-    }
-
-    const billingCycle = rawCycle === 'annual' ? 'annual' : 'monthly';
-    const currentExpiry = Number(userDoc.subscriptionValidUntil) || 0;
-    const duration = billingCycle === 'annual' ? 365 * 86400000 : 30 * 86400000;
-    // Extend from current expiry if already active on the same tier, preventing loss of paid days
-    const baseTime = (currentExpiry > Date.now() && userDoc.subscriptionTier === planTier) ? currentExpiry : Date.now();
-    const expiry = baseTime + duration;
+    const order = await repo.findRazorpayOrder(orderId);
+    if (!order || order.userId !== userId) return res.status(400).json({ error: 'Unknown order for this account' });
 
     const plans = await getEffectivePlans(repo);
-    const planMeta = plans[planTier] || { monthly: 0, annual: 0, label: planTier };
-    const amountInInr = billingCycle === 'annual' ? planMeta.annual : planMeta.monthly;
-
-    const paymentRecord = {
+    const label = plans[order.planTier]?.label || order.planTier;
+    const done = (result, method) => res.json({
+      success: true,
+      subscriptionTier: result.tier,
+      subscriptionValidUntil: result.validUntil,
       orderId,
-      paymentId: paymentId || (isFreeOrder ? `pay_free_${Date.now()}` : `pay_upi_${Date.now()}`),
-      utr: utr || '',
-      vpa: req.body?.vpa || '',
-      amount: isFreeOrder ? 0 : amountInInr,
-      currency: 'INR',
-      method: isFreeOrder ? 'COUPON_FREE' : 'UPI',
-      planTier,
-      billingCycle,
-      validFrom: baseTime,
-      validUntil: expiry,
-      paidAt: Date.now(),
-      source: 'razorpay_checkout',
-      couponCode: rawCoupon || null,
-      userSnapshot: {
-        userId,
-        name: userDoc.name || req.user.name || '',
-        email: userDoc.email || req.user.email || '',
-        phone: userDoc.phone || '',
-        callsign: userDoc.callsign || '',
-      },
-    };
-
-    const history = Array.isArray(userDoc.paymentHistory) ? [...userDoc.paymentHistory] : [];
-    if (!history.some(p => (orderId && p.orderId === orderId) || (p.paymentId && p.paymentId === paymentRecord.paymentId))) {
-      history.push(paymentRecord);
-    }
-
-    // Persist entitlement, references, user mappings, and payment history to Oracle DB
-    await repo.updateUser(userDoc.key, {
-      subscriptionTier: planTier,
-      subscriptionValidUntil: expiry,
-      lastPayment: paymentRecord,
-      paymentHistory: history,
+      paymentId: result.record.paymentId,
+      utr: result.record.utr,
+      method,
+      message: `${label} successfully activated!`,
     });
 
-    if (auth.gate) auth.gate.invalidate(userId);
+    if (order.isFree) {
+      const result = await activatePlan({ repo, auth, hub, userDoc, order, paymentId: `coupon_${order.couponCode}`, method: 'COUPON_FREE', source: 'coupon' });
+      return done(result, 'COUPON_FREE');
+    }
 
-    // Push real-time WebSocket notification to all active devices of this rider
-    if (hub) {
-      hub.sendToUser(userId, {
-        type: 'SUBSCRIPTION_ACTIVATED',
-        tier: planTier,
-        validUntil: expiry,
+    if (paymentId && signature) {
+      const ok = await gateway.verifySignature({ orderId, paymentId, signature, mode: order.mode });
+      if (!ok) {
+        await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
+        return res.status(400).json({ error: 'Payment signature verification failed' });
+      }
+      const result = await activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, vpa, method: 'RAZORPAY', source: 'razorpay_checkout' });
+      return done(result, 'RAZORPAY');
+    }
+
+    if (utr && String(utr).trim().length >= 8) {
+      if (order.status === 'PAID') {
+        const prior = (userDoc.paymentHistory || []).find((p) => p.orderId === orderId);
+        if (prior) return done({ tier: userDoc.subscriptionTier, validUntil: userDoc.subscriptionValidUntil, record: prior }, prior.method);
+      }
+      await repo.updateRazorpayOrder(orderId, { status: 'UTR_CLAIMED', utr: String(utr).trim(), vpa: vpa || '', claimedAt: Date.now() });
+      return res.status(202).json({
+        success: false,
+        pending: true,
         orderId,
-        method: isFreeOrder ? 'COUPON_FREE' : 'UPI',
+        message: 'UTR received. Your plan is activated once the payment is confirmed (usually within a few hours).',
       });
     }
 
-    res.json({
-      success: true,
-      subscriptionTier: planTier,
-      subscriptionValidUntil: expiry,
-      orderId,
-      paymentId: paymentRecord.paymentId,
-      utr: paymentRecord.utr,
-      message: `${planMeta.label} successfully activated!`,
-    });
+    return res.status(400).json({ error: 'Missing required fields: paymentId and signature (or a UPI UTR) are required' });
   }));
 
   // Fetch full payment history / audit receipts
@@ -851,6 +684,60 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       planLabel: plans[isActive ? tier : 'community']?.label || 'Community Rider',
     });
   }));
+
+
+  if (requireAdmin) {
+    // ---------------------------------------------------------------------------
+    // PAYMENT GATEWAY (Razorpay test/live keys + active mode)
+    // ---------------------------------------------------------------------------
+    r.get('/admin/payment-gateway', requireAdmin, wrap(async (req, res) => {
+      res.set('Cache-Control', 'no-store').json(await gateway.publicView());
+    }));
+
+    // Body: { mode?, test?: {keyId, keySecret, webhookSecret}, live?: {...} } — blank keeps saved values.
+    r.put('/admin/payment-gateway', requireAdmin, wrap(async (req, res) => {
+      try {
+        const view = await gateway.update(req.body || {}, req.user?.email || req.user?.userId || 'admin');
+        res.set('Cache-Control', 'no-store').json({ success: true, ...view });
+      } catch (e) {
+        sendRzpError(res, e);
+      }
+    }));
+
+    // Checks a mode's keys against Razorpay (GET /v1/orders?count=1).
+    r.post('/admin/payment-gateway/test', requireAdmin, wrap(async (req, res) => {
+      try {
+        const mode = req.body?.mode === 'live' ? 'live' : (req.body?.mode === 'test' ? 'test' : undefined);
+        res.json({ success: true, ...(await gateway.testKeys(mode)) });
+      } catch (e) {
+        sendRzpError(res, e);
+      }
+    }));
+
+    // Direct-UPI claims waiting for a person to match the UTR to the bank statement.
+    r.get('/admin/payment-claims', requireAdmin, wrap(async (req, res) => {
+      res.json({ claims: await repo.listRazorpayOrders({ status: 'UTR_CLAIMED' }, 200) });
+    }));
+
+    r.post('/admin/payment-claims/:orderId/approve', requireAdmin, wrap(async (req, res) => {
+      const order = await repo.findRazorpayOrder(req.params.orderId);
+      if (!order || order.status !== 'UTR_CLAIMED' || !order.userId) return res.status(404).json({ error: 'No pending claim for this order' });
+      const userDoc = await repo.findUserById(order.userId);
+      if (!userDoc) return res.status(404).json({ error: 'User not found' });
+      const result = await activatePlan({
+        repo, auth, hub, userDoc, order,
+        paymentId: `utr_${order.utr}`, utr: order.utr, vpa: order.vpa, method: 'UPI', source: `admin_utr:${req.user?.userId || 'admin'}`,
+      });
+      res.json({ success: true, subscriptionTier: result.tier, subscriptionValidUntil: result.validUntil });
+    }));
+
+    r.post('/admin/payment-claims/:orderId/reject', requireAdmin, wrap(async (req, res) => {
+      const order = await repo.findRazorpayOrder(req.params.orderId);
+      if (!order || order.status !== 'UTR_CLAIMED') return res.status(404).json({ error: 'No pending claim for this order' });
+      await repo.updateRazorpayOrder(order.orderId, { status: 'UTR_REJECTED', rejectedAt: Date.now(), rejectedBy: req.user?.userId || 'admin' });
+      res.json({ success: true });
+    }));
+  }
 
   // ===========================================================================
   // ADMIN PRICING & COUPON MANAGEMENT ROUTES (Fully Configurable by Admin)
@@ -1023,6 +910,8 @@ module.exports = {
   resolveCoupon,
   evaluateCoupon,
   normalizeTier,
+  gatewayFor,
+  activatePlan,
   registerSubscriptionPublicRoutes,
   registerSubscriptionAuthRoutes,
 };

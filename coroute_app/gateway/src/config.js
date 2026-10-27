@@ -282,10 +282,9 @@ const config = {
   whatsappPhoneNumberId: (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim(),
   whatsappApiToken: (process.env.WHATSAPP_API_TOKEN || '').trim(),
 
-  // Razorpay Payment Gateway Credentials
-  razorpayKeyId: (process.env.RAZORPAY_KEY_ID || 'rzp_test_TstfWWwQUC19Pv').trim(),
-  razorpayKeySecret: (process.env.RAZORPAY_KEY_SECRET || 'JXXsWsUF1z2XX3CREz4k10Ix').trim(),
-  razorpayWebhookSecret: (process.env.RAZORPAY_WEBHOOK_SECRET || 'whsec_coroute_razorpay').trim(),
+  // Razorpay: keys, test/live mode and webhook secrets are resolved by
+  // src/razorpay_gateway.js (admin settings in Oracle, else environment).
+  // No credentials are hard-coded.
   razorpayUpiOnly: true,
   upiVpa: (process.env.PAYMENT_UPI_VPA || 'coroute@upi').trim(),
   upiMerchantName: (process.env.PAYMENT_UPI_NAME || 'CoRoute Safety Networks').trim(),
