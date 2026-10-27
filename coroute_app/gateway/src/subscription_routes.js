@@ -246,6 +246,37 @@ async function activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, v
   return { tier: planTier, validUntil: expiry, record, already: false };
 }
 
+/** Short HMAC that lets the web checkout page load one app order without a login. */
+function webCheckoutToken(orderId) {
+  return crypto.createHmac('sha256', config.jwtSecret).update(`web-checkout:${orderId}`).digest('hex').slice(0, 32);
+}
+function webCheckoutTokenValid(orderId, t) {
+  const a = Buffer.from(webCheckoutToken(orderId));
+  const b = Buffer.from(String(t || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function webCheckoutUrl(req, orderId) {
+  const origin = config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+  return `${origin}/checkout.html?order=${encodeURIComponent(orderId)}&t=${webCheckoutToken(orderId)}`;
+}
+
+/** After a verified payment: grants the plan when the order belongs to a rider. */
+async function settleVerifiedOrder({ repo, auth, hub, order, paymentId, source }) {
+  if (order.userId) {
+    const userDoc = await repo.findUserById(order.userId);
+    if (userDoc) {
+      return activatePlan({ repo, auth, hub, userDoc, order, paymentId, method: 'RAZORPAY', source });
+    }
+  }
+  if (order.status !== 'PAID') {
+    await repo.updateRazorpayOrder(order.orderId, { status: 'PAID', paymentId, paidAt: Date.now() });
+    if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
+      await repo.recordCouponUsage(order.couponCode, { userId: 'guest', orderId: order.orderId, discountAmount: order.discountAmount || 0 }).catch(() => {});
+    }
+  }
+  return null;
+}
+
 /**
  * Registers public endpoints: webhook (HMAC-authenticated), coupon check,
  * public config, and the generic create-order / verify-payment pair used by
@@ -343,6 +374,38 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
 
   r.get('/subscription/config', handleGetConfig);
   r.get('/api/subscription/config', handleGetConfig);
+
+  // An order the app created, opened on the website to pay by UPI
+  // (checkout.html?order=…&t=…). The token is the only credential needed;
+  // it reveals plan + amount, never the rider's account.
+  const handleWebOrder = wrap(async (req, res) => {
+    const orderId = String(req.params.orderId || '');
+    if (!webCheckoutTokenValid(orderId, req.query.t)) return res.status(403).json({ error: 'Invalid checkout link' });
+    const order = await repo.findRazorpayOrder(orderId);
+    if (!order) return res.status(404).json({ error: 'Unknown order' });
+    const plans = await getEffectivePlans(repo);
+    const keys = await gateway.keysFor(order.mode);
+    let prefill = {};
+    if (order.userId) {
+      const u = await repo.findUserById(order.userId);
+      if (u) prefill = { name: u.name || '', email: u.email || '', contact: u.phone || '' };
+    }
+    res.set('Cache-Control', 'no-store').json({
+      order_id: order.orderId,
+      amount: order.amountInPaise,
+      currency: order.currency || 'INR',
+      key_id: keys.keyId,
+      mode: order.mode,
+      status: order.status,
+      planTier: order.planTier,
+      planLabel: plans[order.planTier]?.label || order.planTier,
+      billingCycle: order.billingCycle,
+      upiOnly: true,
+      prefill,
+    });
+  });
+  r.get('/checkout/order/:orderId', handleWebOrder);
+  r.get('/api/checkout/order/:orderId', handleWebOrder);
 
   // ---------------------------------------------------------------------------
   // STEP 1: BACKEND - Create Order   POST /api/create-order
@@ -452,13 +515,11 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
       await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
       return res.status(400).json({ success: false, error: 'Signature verification failed' });
     }
-    if (order.status !== 'PAID') {
-      await repo.updateRazorpayOrder(orderId, { status: 'PAID', paymentId, paidAt: Date.now() });
-      if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
-        await repo.recordCouponUsage(order.couponCode, { userId: 'guest', orderId, discountAmount: order.discountAmount || 0 }).catch(() => {});
-      }
-    }
-    return res.status(200).json({ success: true, message: 'Payment verified successfully', order_id: orderId, payment_id: paymentId, mode: order.mode });
+    const settled = await settleVerifiedOrder({ repo, auth, hub, order, paymentId, source: 'razorpay_checkout_web' });
+    return res.status(200).json({
+      success: true, message: 'Payment verified successfully', order_id: orderId, payment_id: paymentId, mode: order.mode,
+      activated: settled ? { tier: settled.tier, validUntil: settled.validUntil } : undefined,
+    });
   });
 
   r.post('/verify-payment', handleVerifyPayment);
@@ -488,13 +549,9 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
       await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
       return back(`failed=${encodeURIComponent('Signature verification failed')}&order=${encodeURIComponent(orderId)}`);
     }
-    if (order.status !== 'PAID') {
-      await repo.updateRazorpayOrder(orderId, { status: 'PAID', paymentId, paidAt: Date.now() });
-      if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
-        await repo.recordCouponUsage(order.couponCode, { userId: 'guest', orderId, discountAmount: order.discountAmount || 0 }).catch(() => {});
-      }
-    }
-    return back(`paid=${encodeURIComponent(orderId)}&payment=${encodeURIComponent(paymentId)}&mode=${encodeURIComponent(order.mode || '')}`);
+    const settled = await settleVerifiedOrder({ repo, auth, hub, order, paymentId, source: 'razorpay_callback' });
+    return back(`paid=${encodeURIComponent(orderId)}&payment=${encodeURIComponent(paymentId)}&mode=${encodeURIComponent(order.mode || '')}` +
+      (settled ? `&app=1&tier=${encodeURIComponent(settled.tier)}` : ''));
   });
   r.post('/razorpay/callback', express.urlencoded({ extended: false }), handleCallback);
   r.post('/api/razorpay/callback', express.urlencoded({ extended: false }), handleCallback);
@@ -603,6 +660,8 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       amountInPaise: order.amount,
       currency: 'INR',
       mode: order.mode,
+      // Same order, paid on the website by UPI when the in-app SDK is not usable.
+      webCheckoutUrl: webCheckoutUrl(req, order.id),
       planTier,
       billingCycle,
       planLabel: planMeta.label,

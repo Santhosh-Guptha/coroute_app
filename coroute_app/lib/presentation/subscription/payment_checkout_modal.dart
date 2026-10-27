@@ -43,8 +43,12 @@ class PaymentCheckoutModal extends StatefulWidget {
   State<PaymentCheckoutModal> createState() => _PaymentCheckoutModalState();
 }
 
-class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
+class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with WidgetsBindingObserver {
   late Razorpay _razorpay;
+
+  /// True after the website checkout was opened; the status is re-read when
+  /// the app comes back to the foreground.
+  bool _waitingForWebPayment = false;
   final TextEditingController _utrController = TextEditingController();
   final TextEditingController _couponController = TextEditingController();
 
@@ -65,12 +69,74 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
     _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    WidgetsBinding.instance.addObserver(this);
 
     _initOrder();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _waitingForWebPayment) {
+      _checkWebPaymentResult();
+    }
+  }
+
+  /// Opens the same order on the website (UPI only). The server activates
+  /// the plan when Razorpay posts the verified result back to it; the app
+  /// picks that up from /subscription/status on resume.
+  Future<void> _payOnWebsite() async {
+    final url = _orderData?['webCheckoutUrl']?.toString();
+    if (url == null || url.isEmpty) {
+      setState(() => _errorMessage = 'Order not initialized.');
+      return;
+    }
+    try {
+      final launched = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      if (!launched) throw Exception('No browser available');
+      setState(() {
+        _waitingForWebPayment = true;
+        _errorMessage = null;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _errorMessage = 'Could not open the website: $e');
+    }
+  }
+
+  Future<void> _checkWebPaymentResult() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      final service = context.read<PlanSubscriptionService>();
+      await service.syncFromServer();
+      if (!mounted) return;
+      if (service.currentTier == widget.plan.tier && service.validUntil > DateTime.now().millisecondsSinceEpoch) {
+        HapticFeedback.heavyImpact();
+        setState(() {
+          _isLoading = false;
+          _isSuccess = true;
+          _waitingForWebPayment = false;
+        });
+        await Future.delayed(const Duration(milliseconds: 1400));
+        if (mounted) Navigator.of(context).pop(true);
+      } else {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Payment not confirmed yet. Finish it on the website, then tap "I have paid".';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Could not check the payment: $e';
+        });
+      }
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _razorpay.clear();
     _utrController.dispose();
     _couponController.dispose();
@@ -741,6 +807,50 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text(
+                      'PAY ON THE WEBSITE (UPI)',
+                      style: TextStyle(
+                        color: AppTheme.text2,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 44,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: AppTheme.brand),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: _isLoading ? null : () => _payOnWebsite(),
+                        icon: Icon(Icons.language_rounded, size: 16, color: AppTheme.brand),
+                        label: Text(
+                          _waitingForWebPayment ? 'Open the website again' : 'Pay on coroute.duckdns.org by UPI',
+                          style: TextStyle(color: AppTheme.brand, fontSize: 12, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                    if (_waitingForWebPayment) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 40,
+                        child: TextButton.icon(
+                          onPressed: _isLoading ? null : () => _checkWebPaymentResult(),
+                          icon: Icon(Icons.refresh_rounded, size: 16, color: AppTheme.accentText),
+                          label: Text(
+                            'I have paid — check now',
+                            style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Divider(height: 1, color: AppTheme.border),
+                    const SizedBox(height: 12),
                     Text(
                       'DIRECT UPI INTENT',
                       style: TextStyle(

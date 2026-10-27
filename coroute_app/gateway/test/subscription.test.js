@@ -237,6 +237,38 @@ test('Subscription Razorpay Payment Suite', async (t) => {
     assert.ok(cancelled.headers.get('location').includes('failed=Payment%20cancelled'));
   });
 
+  await t.test('app order can be paid on the website: tokenised link, UPI-only lookup, callback activates the rider', async () => {
+    const reg = await env.register('WebPayer', 'webpayer@test.com');
+    const created = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly' }, reg.token);
+    assert.equal(created.status, 200);
+    const url = new URL(created.json.webCheckoutUrl);
+    assert.equal(url.pathname, '/checkout.html');
+    const orderId = url.searchParams.get('order');
+    const t = url.searchParams.get('t');
+    assert.equal(orderId, created.json.orderId);
+
+    const bad = await env.api('GET', `/checkout/order/${orderId}?t=wrong`);
+    assert.equal(bad.status, 403);
+    const look = await env.api('GET', `/checkout/order/${orderId}?t=${t}`);
+    assert.equal(look.status, 200, JSON.stringify(look.json));
+    assert.equal(look.json.amount, 14900);
+    assert.equal(look.json.upiOnly, true);
+    assert.equal(look.json.prefill.email, 'webpayer@test.com');
+    assert.ok(!JSON.stringify(look.json).includes('unit_test_secret_456'));
+
+    const cb = await fetch(`${env.origin}/api/razorpay/callback`, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ razorpay_order_id: orderId, razorpay_payment_id: 'pay_web', razorpay_signature: sign('unit_test_secret_456', orderId, 'pay_web') }).toString(),
+    });
+    assert.equal(cb.status, 303);
+    assert.ok(cb.headers.get('location').includes('app=1&tier=proRider'), cb.headers.get('location'));
+    const me = await env.api('GET', '/me', null, reg.token);
+    assert.equal(me.json.subscriptionTier, 'proRider');
+    const again = await env.api('GET', `/checkout/order/${orderId}?t=${t}`);
+    assert.equal(again.json.status, 'PAID');
+  });
+
   await t.test('admin: configure live keys, switch modes, secrets never returned; non-admin refused', async () => {
     const admin = await env.register('Admin', 'admin@coroute.test');
     adminToken = admin.token;

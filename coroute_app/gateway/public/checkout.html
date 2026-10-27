@@ -273,7 +273,14 @@
       </div>
 
       <!-- Plan Selection -->
-      <h2 class="t-h3" style="margin-bottom:8px">1. Select Plan</h2>
+      <!-- An order created in the CoRoute app, paid here by UPI -->
+      <div id="app-order-box" style="display:none;background:rgba(255,87,34,0.08);border:1px solid rgba(255,87,34,0.35);border-radius:10px;padding:16px 18px;margin-bottom:20px">
+        <strong style="color:#FFAB91;font-size:12px;letter-spacing:1px;text-transform:uppercase">Complete your CoRoute payment</strong>
+        <div style="font-size:18px;font-weight:700;margin:6px 0 2px" id="app-order-title">&hellip;</div>
+        <div class="t-small t-muted" id="app-order-sub">Pay by UPI below. Your plan is activated in the app as soon as the payment is verified.</div>
+      </div>
+
+      <h2 class="t-h3" style="margin-bottom:8px" id="select-plan-heading">1. Select Plan</h2>
       <div class="plan-grid" id="plan-grid-container">
         <div class="plan-card active" data-amount="10000" data-tier="testVerification" data-name="Test Transaction (Rs 100)">
           <input type="radio" name="plan" value="10000" checked id="p-test">
@@ -388,6 +395,44 @@
     document.head.appendChild(s);
   }
 
+  // Order handed over by the app (?order=…&t=…): pay that order, UPI only.
+  let appOrder = null;
+  (async function loadAppOrder() {
+    const q = new URLSearchParams(window.location.search);
+    const orderId = q.get('order');
+    const t = q.get('t');
+    if (!orderId || !t) return;
+    try {
+      const res = await fetch('/api/checkout/order/' + encodeURIComponent(orderId) + '?t=' + encodeURIComponent(t));
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'This checkout link is not valid');
+      appOrder = data;
+      RAZORPAY_KEY_ID = data.key_id || RAZORPAY_KEY_ID;
+      document.getElementById('app-order-box').style.display = 'block';
+      document.getElementById('app-order-title').textContent =
+        data.planLabel + ' (' + (data.billingCycle === 'annual' ? 'Annual' : 'Monthly') + ') — Rs ' + (data.amount / 100);
+      ['select-plan-heading', 'plan-grid-container'].forEach(function(id) {
+        const el = document.getElementById(id); if (el) el.style.display = 'none';
+      });
+      const coupon = document.getElementById('coupon-code');
+      if (coupon) coupon.closest('.form-group').style.display = 'none';
+      if (data.prefill) {
+        if (data.prefill.name) document.getElementById('rider-name').value = data.prefill.name;
+        if (data.prefill.email) document.getElementById('rider-email').value = data.prefill.email;
+        if (data.prefill.contact) document.getElementById('rider-phone').value = data.prefill.contact;
+      }
+      if (data.status === 'PAID') {
+        showStatus('success', '<h3 style="margin-top:0;color:#A5D6A7">This order is already paid.</h3><p style="margin:0">Open the CoRoute app: your plan is active.</p>');
+        payBtn.disabled = true;
+        payBtnLabel.textContent = 'Already paid';
+        return;
+      }
+      payBtnLabel.textContent = 'Pay Rs ' + (data.amount / 100) + ' by UPI';
+    } catch (e) {
+      showStatus('error', '[Error] ' + e.message);
+    }
+  })();
+
   // Back from the redirect flow: the server already verified the signature.
   (function showRedirectResult() {
     const q = new URLSearchParams(window.location.search);
@@ -398,7 +443,8 @@
         '<div class="tx-detail-row"><span>Order ID:</span> <strong><code>' + escapeHtml(q.get('paid')) + '</code></strong></div>' +
         '<div class="tx-detail-row"><span>Mode:</span> <strong>' + escapeHtml((q.get('mode') || '').toUpperCase()) + '</strong></div>' +
         '<div class="tx-detail-row"><span>HMAC-SHA256 Signature:</span> <strong>Verified by server</strong></div>' +
-        '<div class="tx-detail-row"><span>Status:</span> <strong style="color:#66BB6A">PAID</strong></div>');
+        '<div class="tx-detail-row"><span>Status:</span> <strong style="color:#66BB6A">PAID</strong></div>' +
+        (q.get('app') ? '<p style="margin:12px 0 0;font-size:14px;font-weight:700">Your ' + escapeHtml(q.get('tier') || '') + ' plan is active. Go back to the CoRoute app — it updates on its own.</p>' : ''));
       statusBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else if (q.get('failed')) {
       showStatus('error', '[Failed] ' + escapeHtml(q.get('failed')) +
@@ -548,6 +594,10 @@
     const couponCode = appliedCoupon ? appliedCoupon.code : '';
 
     try {
+      let orderData;
+      if (appOrder) {
+        orderData = { order_id: appOrder.order_id, amount: appOrder.amount, currency: appOrder.currency, key_id: appOrder.key_id };
+      } else {
       // -------------------------------------------------------------
       // STEP 1: BACKEND - Create Order
       // -------------------------------------------------------------
@@ -566,7 +616,6 @@
         }),
       });
 
-      let orderData;
       if (!createRes.ok) {
         const errJson = await createRes.json().catch(() => ({}));
         if (createRes.status === 401) {
@@ -575,6 +624,7 @@
         throw new Error(errJson.error || ('Order creation failed with status ' + createRes.status));
       } else {
         orderData = await createRes.json();
+      }
       }
 
       // If order is free (100% discount coupon)
@@ -619,17 +669,16 @@
           amount: orderData.amount,
           currency: orderData.currency || 'INR',
           name: 'CoRoute Motorcycle Safety',
-          description: selectedName,
+          description: appOrder ? appOrder.planLabel : selectedName,
           order_id: orderData.order_id,
           prefill: Object.assign({},
             name ? { name: name } : {},
             email ? { email: email } : {},
             phone ? { contact: phone } : {}),
-          method: {
-            upi: true,
-            card: true,
-            netbanking: true,
-          },
+          // An order from the app is paid by UPI only; the public page keeps every method.
+          method: appOrder
+            ? { upi: true, card: false, netbanking: false, wallet: false, emi: false, paylater: false }
+            : { upi: true, card: true, netbanking: true },
           theme: {
             color: '#FF5722',
           },
