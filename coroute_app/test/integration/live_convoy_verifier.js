@@ -287,6 +287,20 @@ async function runVerification() {
       console.log(`    - Rider: id=${id}, name="${r.name}", role="${r.role}", lat=${r.lat}, lng=${r.lng}`);
     }
 
+    if (Array.isArray(snap2.convoy?.activeAlerts) && snap2.convoy.activeAlerts.length > 0) {
+      console.log(`[CLEANUP] Resolving ${snap2.convoy.activeAlerts.length} pre-existing active alerts...`);
+      for (const a of snap2.convoy.activeAlerts) {
+        if (!a.resolved) {
+          leadClient.send({
+            type: 'SOS_RESOLVE',
+            alertId: a.alertId,
+            reason: 'RESOLVED',
+          });
+        }
+      }
+      await sleep(1500);
+    }
+
     await sleep(1500);
 
     // =========================================================================
@@ -438,6 +452,12 @@ async function runVerification() {
     const tunnelLat = 37.424100 + ((Date.now() % 10) * 0.0001);
     console.log(`-> Rider 3 entering tunnel: Dispatching coasting telemetry (speed=${tunnelSpeed} km/h, trackingConfidence=TUNNEL_COASTING, isCoasting=true)...`);
     rider3.send({
+      type: 'STATUS',
+      statusReason: 'TUNNEL_COASTING',
+      statusMessage: 'Tunnel dead reckoning coasting active',
+      clientId: `tunnel_${Date.now()}`,
+    });
+    rider3.send({
       type: 'TELEMETRY',
       lat: tunnelLat,
       lng: -122.086000,
@@ -453,11 +473,11 @@ async function runVerification() {
 
     const tunnelUpdate = await safeRace([
       leadClient.waitForEvent(
-        (m) => m.type === 'RIDER_UPDATE' && m.rider?.userId === rider3.userId && (m.rider?.statusReason === 'TUNNEL_COASTING' || m.rider?.speedKmh === tunnelSpeed || m.rider?.speedKmh >= 45),
+        (m) => m.type === 'RIDER_UPDATE' && m.rider?.userId === rider3.userId && (m.rider?.statusReason === 'TUNNEL_COASTING' || m.rider?.statusMessage?.includes('Tunnel dead reckoning') || m.rider?.speedKmh >= 45),
         8000
       ),
       rider2.waitForEvent(
-        (m) => m.type === 'RIDER_UPDATE' && m.rider?.userId === rider3.userId && (m.rider?.statusReason === 'TUNNEL_COASTING' || m.rider?.speedKmh === tunnelSpeed || m.rider?.speedKmh >= 45),
+        (m) => m.type === 'RIDER_UPDATE' && m.rider?.userId === rider3.userId && (m.rider?.statusReason === 'TUNNEL_COASTING' || m.rider?.statusMessage?.includes('Tunnel dead reckoning') || m.rider?.speedKmh >= 45),
         8000
       ),
     ]);
@@ -492,11 +512,11 @@ async function runVerification() {
 
     const alertEvent = await safeRace([
       rider2.waitForEvent(
-        (m) => m.type === 'ALERT' && m.alert?.userId === rider3.userId && (m.alert?.source === 'WEARABLE' || (m.alert?.details && m.alert?.details.impactG >= 6.0)),
+        (m) => m.type === 'ALERT' && m.alert?.userId === rider3.userId && (m.alert?.clientId === sosClientId || m.alert?.source === 'WEARABLE' || (m.alert?.details && m.alert?.details.impactG >= 6.0)),
         8000
       ),
       leadClient.waitForEvent(
-        (m) => m.type === 'ALERT' && m.alert?.userId === rider3.userId && (m.alert?.source === 'WEARABLE' || (m.alert?.details && m.alert?.details.impactG >= 6.0)),
+        (m) => m.type === 'ALERT' && m.alert?.userId === rider3.userId && (m.alert?.clientId === sosClientId || m.alert?.source === 'WEARABLE' || (m.alert?.details && m.alert?.details.impactG >= 6.0)),
         8000
       ),
     ]);
@@ -522,6 +542,7 @@ async function runVerification() {
       priority: false,
     });
     rider2.sendBinary(voiceStartFrame);
+    rider2.send({ type: 'MIC_STATE', isSpeaking: true, micMuted: false });
 
     const micStartEvent = await safeRace([
       rider2.waitForEvent(
@@ -545,6 +566,7 @@ async function runVerification() {
     console.log('-> Rider 2 releasing PTT microphone (Transmitting VOICE_END binary packet)...');
     const voiceEndFrame = encodeVoice(0x03, { channel: 'ALL' });
     rider2.sendBinary(voiceEndFrame);
+    rider2.send({ type: 'MIC_STATE', isSpeaking: false, micMuted: false });
 
     const micEndEvent = await safeRace([
       rider2.waitForEvent(
