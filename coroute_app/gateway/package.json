@@ -32,6 +32,7 @@
     }
   },
   "devDependencies": {
+    "puppeteer": "^25.16.0",
     "puppeteer-core": "^25.16.0"
   }
 }
