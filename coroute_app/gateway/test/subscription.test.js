@@ -1,18 +1,39 @@
 'use strict';
 process.env.NODE_ENV = 'test';
-process.env.RAZORPAY_KEY_ID = 'rzp_test_sample_123';
-process.env.RAZORPAY_KEY_SECRET = 'rzp_secret_sample_456';
-process.env.RAZORPAY_WEBHOOK_SECRET = 'whsec_sample_789';
+process.env.RAZORPAY_MODE = 'test';
+process.env.RAZORPAY_TEST_KEY_ID = 'rzp_test_unitKey123';
+process.env.RAZORPAY_TEST_KEY_SECRET = 'unit_test_secret_456';
+process.env.RAZORPAY_TEST_WEBHOOK_SECRET = 'whsec_unit_789';
 process.env.BOOTSTRAP_ADMIN_EMAILS = 'admin@coroute.test';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
+const { setRazorpayFetch } = require('../src/razorpay_gateway');
 const { boot } = require('./_helpers');
 
-test('Subscription Razorpay UPI Payment Suite', async (t) => {
+// Fake Razorpay Orders API: records calls, answers like the real one.
+const rzpCalls = [];
+let rzpAuthFails = false;
+setRazorpayFetch(async (url, opts = {}) => {
+  const auth = Buffer.from(String(opts.headers?.Authorization || '').replace('Basic ', ''), 'base64').toString();
+  rzpCalls.push({ url, method: opts.method, auth, body: opts.body ? JSON.parse(opts.body) : null });
+  const reply = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
+  if (rzpAuthFails) return reply(401, { error: { code: 'BAD_REQUEST_ERROR', description: 'Authentication failed' } });
+  if (opts.method === 'POST' && url.endsWith('/orders')) {
+    const b = JSON.parse(opts.body);
+    return reply(200, { id: `order_${crypto.randomBytes(7).toString('hex')}`, amount: b.amount, currency: b.currency, receipt: b.receipt, status: 'created' });
+  }
+  if (opts.method === 'GET' && url.includes('/orders')) return reply(200, { items: [] });
+  return reply(404, {});
+});
+
+const sign = (secret, orderId, paymentId) =>
+  crypto.createHmac('sha256', secret).update(`${orderId}|${paymentId}`).digest('hex');
+
+test('Subscription Razorpay Payment Suite', async (t) => {
   const env = await boot();
-  t.after(() => env.gw.shutdown());
+  t.after(() => { setRazorpayFetch(null); env.gw.shutdown(); });
 
   let riderToken = '';
   let riderUser = null;
@@ -22,190 +43,242 @@ test('Subscription Razorpay UPI Payment Suite', async (t) => {
     riderToken = reg.token;
     riderUser = reg.user;
     assert.equal(reg.user.subscriptionTier, 'community');
-
     const me = await env.api('GET', '/me', null, riderToken);
     assert.equal(me.status, 200);
     assert.equal(me.json.subscriptionTier, 'community');
   });
 
-  await t.test('GET /api/subscription/config returns Razorpay UPI-only configuration', async () => {
+  await t.test('GET /api/subscription/config returns the active mode key id, never a secret', async () => {
     const res = await env.api('GET', '/subscription/config', null, riderToken);
     assert.equal(res.status, 200);
-    assert.equal(res.json.upiOnly, true);
-    assert.deepEqual(res.json.allowedMethods, ['upi']);
-    assert.equal(res.json.razorpayKeyId, 'rzp_test_sample_123');
-    assert.ok(res.json.upiVpa);
-    assert.ok(res.json.plans.roadCaptain);
+    assert.equal(res.json.razorpayKeyId, 'rzp_test_unitKey123');
+    assert.equal(res.json.mode, 'test');
+    assert.ok(!JSON.stringify(res.json).includes('unit_test_secret_456'));
     assert.equal(res.json.plans.roadCaptain.monthly, 599);
   });
 
   let orderData = null;
+  let adminToken = '';
 
-  await t.test('POST /api/subscription/create-order creates UPI order and intent URI', async () => {
+  await t.test('POST /api/subscription/create-order creates a real Razorpay order priced on the server', async () => {
     const res = await env.api('POST', '/subscription/create-order', {
-      planTier: 'roadCaptain',
-      billingCycle: 'monthly',
+      planTier: 'roadCaptain', billingCycle: 'monthly', amount: 1, // client amount is ignored
     }, riderToken);
-
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 200, JSON.stringify(res.json));
     orderData = res.json;
-    assert.ok(orderData.orderId.startsWith('order_') || orderData.orderId.startsWith('ORD_'));
-    assert.equal(orderData.amount, 599);
+    assert.ok(orderData.orderId.startsWith('order_'));
     assert.equal(orderData.amountInPaise, 59900);
-    assert.equal(orderData.planTier, 'roadCaptain');
-    assert.equal(orderData.billingCycle, 'monthly');
-    assert.ok(orderData.upiUri.startsWith('upi://pay?'));
-    assert.equal(orderData.razorpayOptions.method.upi, true);
-    assert.equal(orderData.razorpayOptions.method.card, false);
-    assert.equal(orderData.razorpayOptions.method.netbanking, false);
+    assert.equal(orderData.mode, 'test');
+    assert.equal(orderData.razorpayOptions.key, 'rzp_test_unitKey123');
+    const call = rzpCalls.at(-1);
+    assert.equal(call.body.amount, 59900);
+    assert.equal(call.auth, 'rzp_test_unitKey123:unit_test_secret_456');
   });
 
-  await t.test('POST /api/subscription/verify-payment activates Road Captain tier in DB and notifies via WS', async () => {
+  await t.test('verify-payment without a signature does NOT activate (UTR becomes a pending claim)', async () => {
+    const res = await env.api('POST', '/subscription/verify-payment', {
+      orderId: orderData.orderId, planTier: 'tourOperator', utr: '123456789012',
+    }, riderToken);
+    assert.equal(res.status, 202);
+    assert.equal(res.json.pending, true);
+    const me = await env.api('GET', '/me', null, riderToken);
+    assert.equal(me.json.subscriptionTier, 'community');
+
+    const bare = await env.api('POST', '/subscription/verify-payment', { orderId: orderData.orderId }, riderToken);
+    assert.equal(bare.status, 400);
+  });
+
+  await t.test('verify-payment rejects a wrong signature and an order of another account', async () => {
+    const bad = await env.api('POST', '/subscription/verify-payment', {
+      orderId: orderData.orderId, paymentId: 'pay_x', signature: 'deadbeef',
+    }, riderToken);
+    assert.equal(bad.status, 400);
+
+    const other = await env.register('Other', 'other@test.com');
+    const stolen = await env.api('POST', '/subscription/verify-payment', {
+      orderId: orderData.orderId, paymentId: 'pay_x',
+      signature: sign('unit_test_secret_456', orderData.orderId, 'pay_x'),
+    }, other.token);
+    assert.equal(stolen.status, 400);
+  });
+
+  await t.test('verify-payment with a valid signature activates the ORDERED plan and notifies via WS', async () => {
     const ws = await env.connect(riderToken);
-
     const paymentId = 'pay_test_upi_12345';
-    const sig = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(`${orderData.orderId}|${paymentId}`)
-      .digest('hex');
-
-    // Start waiting for the WebSocket notification before triggering the verify request
     const pActivated = ws.next((m) => m.type === 'SUBSCRIPTION_ACTIVATED', 2000);
 
     const res = await env.api('POST', '/subscription/verify-payment', {
       orderId: orderData.orderId,
-      planTier: 'roadCaptain',
-      billingCycle: 'monthly',
+      planTier: 'tourOperator', // ignored: the ledger says roadCaptain
       paymentId,
-      signature: sig,
-      utr: '123456789012',
+      signature: sign('unit_test_secret_456', orderData.orderId, paymentId),
     }, riderToken);
-
-    assert.equal(res.status, 200);
-    assert.equal(res.json.success, true);
+    assert.equal(res.status, 200, JSON.stringify(res.json));
     assert.equal(res.json.subscriptionTier, 'roadCaptain');
-    assert.ok(res.json.subscriptionValidUntil > Date.now());
 
-    // Verify /me now reflects Road Captain
-    const me = await env.api('GET', '/me', null, riderToken);
-    assert.equal(me.json.subscriptionTier, 'roadCaptain');
-
-    // Verify status endpoint
     const status = await env.api('GET', '/subscription/status', null, riderToken);
-    assert.equal(status.status, 200);
     assert.equal(status.json.tier, 'roadCaptain');
-    assert.equal(status.json.isActive, true);
     assert.ok(status.json.daysRemaining >= 29);
     assert.equal(status.json.paymentHistoryCount, 1);
-    assert.equal(status.json.lastPayment.orderId, orderData.orderId);
-    assert.equal(status.json.lastPayment.utr, '123456789012');
 
-    // Verify /subscription/history endpoint
     const historyRes = await env.api('GET', '/subscription/history', null, riderToken);
-    assert.equal(historyRes.status, 200);
-    assert.equal(historyRes.json.totalPayments, 1);
     assert.equal(historyRes.json.history[0].orderId, orderData.orderId);
-    assert.equal(historyRes.json.history[0].utr, '123456789012');
     assert.equal(historyRes.json.history[0].paymentId, paymentId);
-    assert.equal(historyRes.json.history[0].method, 'UPI');
+    assert.equal(historyRes.json.history[0].amount, 599);
+    assert.equal(historyRes.json.history[0].mode, 'test');
     assert.equal(historyRes.json.history[0].userSnapshot.userId, riderUser.userId);
 
-    // Verify WebSocket event
     const activated = await pActivated;
-    assert.ok(activated);
     assert.equal(activated.tier, 'roadCaptain');
-
     ws.close();
+
+    // Replaying the same order does not add days again.
+    const again = await env.api('POST', '/subscription/verify-payment', {
+      orderId: orderData.orderId, paymentId,
+      signature: sign('unit_test_secret_456', orderData.orderId, paymentId),
+    }, riderToken);
+    assert.equal(again.status, 200);
+    assert.equal(again.json.subscriptionValidUntil, res.json.subscriptionValidUntil);
   });
 
-  await t.test('POST /api/subscription/webhook handles Razorpay server webhook securely with HMAC check', async () => {
+  await t.test('webhook: unsigned or wrongly signed events are rejected; signed payment.captured activates from the ledger', async () => {
     const reg2 = await env.register('ProRider2', 'pro2@test.com');
-    const token2 = reg2.token;
-    const userId2 = reg2.user.userId;
+    const order = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly' }, reg2.token);
+    assert.equal(order.status, 200);
 
     const payloadObj = {
       event: 'payment.captured',
-      payload: {
-        payment: {
-          entity: {
-            id: 'pay_rzp_webhook_999',
-            order_id: 'ORD_WEBHOOK_123',
-            amount: 14900,
-            notes: {
-              userId: userId2,
-              planTier: 'proRider',
-              billingCycle: 'monthly',
-            },
-          },
-        },
-      },
+      payload: { payment: { entity: { id: 'pay_rzp_webhook_999', order_id: order.json.orderId, amount: 14900, method: 'upi', notes: { userId: reg2.user.userId, planTier: 'tourOperator' } } } },
     };
-    const webhookPayload = JSON.stringify(payloadObj);
+    const body = JSON.stringify(payloadObj);
 
-    const signature = crypto.createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
-      .update(webhookPayload)
-      .digest('hex');
+    const unsigned = await env.api('POST', '/subscription/webhook', payloadObj);
+    assert.equal(unsigned.status, 400);
+    const forged = await env.api('POST', '/subscription/webhook', payloadObj, null, { 'x-razorpay-signature': 'abc' });
+    assert.equal(forged.status, 400);
 
-    const hookRes = await env.api('POST', '/subscription/webhook', payloadObj, null, {
-      'x-razorpay-signature': signature,
-    });
-
+    const signature = crypto.createHmac('sha256', 'whsec_unit_789').update(body).digest('hex');
+    const hookRes = await env.api('POST', '/subscription/webhook', body, null, { 'x-razorpay-signature': signature });
     assert.equal(hookRes.status, 200);
 
-    // Verify user2 got upgraded to proRider via webhook
-    const me2 = await env.api('GET', '/me', null, token2);
+    const me2 = await env.api('GET', '/me', null, reg2.token);
     assert.equal(me2.json.subscriptionTier, 'proRider');
     assert.ok(me2.json.subscriptionValidUntil > Date.now());
   });
 
   await t.test('POST /api/create-order validates minimum amount >= 100 paise', async () => {
-    // 0 paise -> 400
     const res0 = await env.api('POST', '/create-order', { amount: 0 });
     assert.equal(res0.status, 400);
     assert.ok(res0.json.error.includes('100 paise'));
-
-    // 99 paise -> 400
     const res99 = await env.api('POST', '/create-order', { amount: 99 });
     assert.equal(res99.status, 400);
   });
 
-  await t.test('POST /api/verify-payment validates missing fields', async () => {
-    // Missing payment_id & signature -> 400
-    const res = await env.api('POST', '/verify-payment', {
-      order_id: 'order_12345',
-    });
+  await t.test('POST /api/create-order returns 401 when Razorpay rejects the keys (no simulated order)', async () => {
+    rzpAuthFails = true;
+    try {
+      const res = await env.api('POST', '/create-order', { amount: 500 });
+      assert.equal(res.status, 401);
+      assert.ok(!res.json.order_id);
+    } finally {
+      rzpAuthFails = false;
+    }
+  });
+
+  await t.test('POST /api/verify-payment validates missing fields and unknown orders', async () => {
+    const created = await env.api('POST', '/create-order', { amount: 500 });
+    assert.equal(created.status, 200);
+    const res = await env.api('POST', '/verify-payment', { order_id: created.json.order_id });
     assert.equal(res.status, 400);
     assert.ok(res.json.error.includes('required'));
+
+    const unknown = await env.api('POST', '/verify-payment', { order_id: 'order_nope', payment_id: 'p', signature: 's' });
+    assert.equal(unknown.status, 400);
+
+    const testMode = await env.api('POST', '/verify-payment', { order_id: created.json.order_id, payment_id: 'p', signature: 'test_verified', test_mode: true });
+    assert.equal(testMode.status, 400, 'no test-mode bypass');
   });
 
-  await t.test('POST /api/verify-payment rejects signature mismatch (returns 400)', async () => {
-    const res = await env.api('POST', '/verify-payment', {
-      order_id: 'order_test_999',
-      payment_id: 'pay_test_888',
-      signature: 'invalid_sha256_hex_signature',
-    });
-    assert.equal(res.status, 400);
-    assert.equal(res.json.success, false);
-    assert.ok(res.json.error.includes('Signature verification failed'));
-  });
+  await t.test('POST /api/verify-payment: mismatch 400, valid HMAC 200', async () => {
+    const created = await env.api('POST', '/create-order', { amount: 500 });
+    const orderId = created.json.order_id;
+    assert.equal(created.json.key_id, 'rzp_test_unitKey123');
 
-  await t.test('POST /api/verify-payment verifies valid HMAC-SHA256 signature and returns success', async () => {
-    const orderId = 'order_test_verified_123';
-    const paymentId = 'pay_test_verified_456';
-    const validSignature = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(`${orderId}|${paymentId}`)
-      .digest('hex');
+    const bad = await env.api('POST', '/verify-payment', { razorpay_order_id: orderId, razorpay_payment_id: 'pay_1', razorpay_signature: 'invalid' });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.json.success, false);
+    assert.ok(bad.json.error.includes('Signature verification failed'));
 
     const res = await env.api('POST', '/verify-payment', {
-      razorpay_order_id: orderId,
-      razorpay_payment_id: paymentId,
-      razorpay_signature: validSignature,
+      razorpay_order_id: orderId, razorpay_payment_id: 'pay_1',
+      razorpay_signature: sign('unit_test_secret_456', orderId, 'pay_1'),
     });
-
     assert.equal(res.status, 200);
     assert.equal(res.json.success, true);
     assert.equal(res.json.message, 'Payment verified successfully');
-    assert.equal(res.json.order_id, orderId);
-    assert.equal(res.json.payment_id, paymentId);
+  });
+
+  await t.test('admin: configure live keys, switch modes, secrets never returned; non-admin refused', async () => {
+    const admin = await env.register('Admin', 'admin@coroute.test');
+    adminToken = admin.token;
+    const rider = await env.api('GET', '/admin/payment-gateway', null, riderToken);
+    assert.equal(rider.status, 403);
+
+    const view = await env.api('GET', '/admin/payment-gateway', null, admin.token);
+    assert.equal(view.status, 200, JSON.stringify(view.json));
+    assert.equal(view.json.mode, 'test');
+    assert.equal(view.json.test.keyId, 'rzp_test_unitKey123');
+    assert.equal(view.json.test.keySecretSet, true);
+    assert.equal(view.json.live.keySecretSet, false);
+
+    const early = await env.api('PUT', '/admin/payment-gateway', { mode: 'live' }, admin.token);
+    assert.equal(early.status, 400, 'cannot go live without live keys');
+
+    const wrongPrefix = await env.api('PUT', '/admin/payment-gateway', { live: { keyId: 'rzp_test_x' } }, admin.token);
+    assert.equal(wrongPrefix.status, 400);
+
+    const saved = await env.api('PUT', '/admin/payment-gateway', {
+      live: { keyId: 'rzp_live_unitLive9', keySecret: 'live_secret_abc', webhookSecret: 'whsec_live' },
+      mode: 'live',
+    }, admin.token);
+    assert.equal(saved.status, 200, JSON.stringify(saved.json));
+    assert.equal(saved.json.mode, 'live');
+    assert.equal(saved.json.live.source, 'admin');
+    assert.ok(!JSON.stringify(saved.json).includes('live_secret_abc'));
+
+    const cfg = await env.api('GET', '/subscription/config');
+    assert.equal(cfg.json.razorpayKeyId, 'rzp_live_unitLive9');
+    assert.equal(cfg.json.mode, 'live');
+
+    // A live order is signed with the live secret; a test-secret signature fails.
+    const order = await env.api('POST', '/create-order', { amount: 500 });
+    assert.equal(order.json.mode, 'live');
+    assert.equal(rzpCalls.at(-1).auth, 'rzp_live_unitLive9:live_secret_abc');
+    const wrong = await env.api('POST', '/verify-payment', { razorpay_order_id: order.json.order_id, razorpay_payment_id: 'p9', razorpay_signature: sign('unit_test_secret_456', order.json.order_id, 'p9') });
+    assert.equal(wrong.status, 400);
+    const right = await env.api('POST', '/verify-payment', { razorpay_order_id: order.json.order_id, razorpay_payment_id: 'p9', razorpay_signature: sign('live_secret_abc', order.json.order_id, 'p9') });
+    assert.equal(right.status, 200);
+
+    const check = await env.api('POST', '/admin/payment-gateway/test', { mode: 'live' }, admin.token);
+    assert.equal(check.status, 200);
+
+    const back = await env.api('PUT', '/admin/payment-gateway', { mode: 'test' }, admin.token);
+    assert.equal(back.json.mode, 'test');
+  });
+
+  await t.test('admin approves a pending UTR claim', async () => {
+    const reg = await env.register('UtrRider', 'utr@test.com');
+    const order = await env.api('POST', '/subscription/create-order', { planTier: 'proRider' }, reg.token);
+    const claim = await env.api('POST', '/subscription/verify-payment', { orderId: order.json.orderId, utr: '998877665544' }, reg.token);
+    assert.equal(claim.status, 202);
+    const adminTok = adminToken;
+    const list = await env.api('GET', '/admin/payment-claims', null, adminTok);
+    assert.equal(list.status, 200, JSON.stringify(list.json));
+    assert.ok(list.json.claims.some((c) => c.orderId === order.json.orderId));
+    const ok = await env.api('POST', `/admin/payment-claims/${order.json.orderId}/approve`, {}, adminTok);
+    assert.equal(ok.status, 200);
+    const me = await env.api('GET', '/me', null, reg.token);
+    assert.equal(me.json.subscriptionTier, 'proRider');
   });
 
   await t.test('POST /api/subscription/validate-coupon evaluates discount rules, limits and expiry', async () => {
@@ -285,8 +358,7 @@ test('Subscription Razorpay UPI Payment Suite', async (t) => {
 
   await t.test('Admin can dynamically configure subscription pricing and coupons with limits', async () => {
     // 1. Register admin
-    const adminReg = await env.register('Site Admin', 'admin@coroute.test');
-    const adminToken = adminReg.token;
+    // Admin registered in the payment-gateway test above (adminToken).
 
     // 2. Non-admin is refused admin endpoints
     const nonAdminRes = await env.api('PUT', '/admin/subscription/pricing', {
