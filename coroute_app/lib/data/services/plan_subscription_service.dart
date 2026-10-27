@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/feature_gates.dart';
+import 'api_client.dart';
 
 /// Information describing a capability or feature of a plan.
 class PlanFeatureItem {
@@ -39,24 +40,27 @@ class PlanDetails {
 }
 
 /// Service managing subscription plan selection, feature entitlements,
-/// and local test-mode plan switching.
-///
-/// In the current test & pre-launch phase, any user can switch between tiers
-/// freely on the Plan Selector Screen to test how CoRoute behaves under each
-/// plan's strict rules or under the global "Force Unlock All" mode.
+/// Razorpay UPI payments, and server-synchronized subscription state.
 class PlanSubscriptionService extends ChangeNotifier {
   static const String keyTier = 'coroute_active_subscription_plan';
+  static const String keyValidUntil = 'coroute_subscription_valid_until';
   static const String keyForceUnlocked = 'coroute_force_all_unlocked';
 
+  final ApiClient? _api;
+
   SubscriptionTier _currentTier = SubscriptionTier.community;
+  int _validUntil = 0;
   bool _forceAllUnlocked = false;
   bool _loaded = false;
 
+  PlanSubscriptionService([this._api]);
+
   SubscriptionTier get currentTier => _currentTier;
+  int get validUntil => _validUntil;
   bool get forceAllUnlocked => _forceAllUnlocked;
   bool get loaded => _loaded;
 
-  /// Loads the persisted plan and unlock state from SharedPreferences.
+  /// Loads the persisted plan and unlock state from SharedPreferences and syncs with server.
   Future<void> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -67,6 +71,7 @@ class PlanSubscriptionService extends ChangeNotifier {
           orElse: () => SubscriptionTier.community,
         );
       }
+      _validUntil = prefs.getInt(keyValidUntil) ?? 0;
       _forceAllUnlocked = prefs.getBool(keyForceUnlocked) ?? false;
       _syncToFeatureGates();
     } catch (_) {
@@ -75,9 +80,97 @@ class PlanSubscriptionService extends ChangeNotifier {
       _loaded = true;
       notifyListeners();
     }
+
+    // Background sync from Gateway API
+    if (_api != null && _api.hasToken) {
+      syncFromServer().ignore();
+    }
   }
 
-  /// Selects and activates a plan for testing or use.
+  /// Refreshes authentic subscription status from the backend.
+  Future<void> syncFromServer() async {
+    if (_api == null || !_api.hasToken) return;
+    try {
+      final res = await _api.get('/subscription/status');
+      if (res is Map) {
+        final tierName = res['tier']?.toString();
+        final until = res['validUntil'] is num ? (res['validUntil'] as num).toInt() : 0;
+        if (tierName != null) {
+          applyServerSubscription(tierName, until);
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Applies a server-confirmed subscription tier and persists it locally.
+  void applyServerSubscription(String tierName, int? validUntilEpochMs) {
+    final matched = SubscriptionTier.values.firstWhere(
+      (t) => t.name.toLowerCase() == tierName.toLowerCase(),
+      orElse: () => SubscriptionTier.community,
+    );
+    _currentTier = matched;
+    _validUntil = validUntilEpochMs ?? 0;
+    _forceAllUnlocked = false;
+    _syncToFeatureGates();
+    notifyListeners();
+
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString(keyTier, matched.name);
+      prefs.setInt(keyValidUntil, _validUntil);
+      prefs.setBool(keyForceUnlocked, false);
+    }).ignore();
+  }
+
+  /// Creates a Razorpay UPI order via Gateway API.
+  Future<Map<String, dynamic>?> createOrder(SubscriptionTier tier, {bool annual = false}) async {
+    if (_api == null) throw Exception('API client unavailable.');
+    final res = await _api.post('/subscription/create-order', {
+      'planTier': tier.name,
+      'billingCycle': annual ? 'annual' : 'monthly',
+    });
+    if (res is Map) {
+      return Map<String, dynamic>.from(res);
+    }
+    return null;
+  }
+
+  /// Verifies a completed Razorpay UPI transaction with the Gateway and unlocks entitlements.
+  Future<Map<String, dynamic>> verifyPayment({
+    required String orderId,
+    required SubscriptionTier tier,
+    bool annual = false,
+    String? paymentId,
+    String? utr,
+    String? signature,
+  }) async {
+    if (_api == null) {
+      return {'success': false, 'error': 'API client unavailable'};
+    }
+    try {
+      final res = await _api.post('/subscription/verify-payment', {
+        'orderId': orderId,
+        'planTier': tier.name,
+        'billingCycle': annual ? 'annual' : 'monthly',
+        'paymentId': ?paymentId,
+        'utr': ?utr,
+        'signature': ?signature,
+      });
+
+      if (res is Map && res['success'] == true) {
+        final newTier = res['subscriptionTier']?.toString() ?? tier.name;
+        final until = res['subscriptionValidUntil'] is num
+            ? (res['subscriptionValidUntil'] as num).toInt()
+            : 0;
+        applyServerSubscription(newTier, until);
+        return {'success': true, 'tier': newTier, 'validUntil': until};
+      }
+      return {'success': false, 'error': res is Map ? res['error']?.toString() : 'Verification failed'};
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Selects and activates a plan directly (used for free Community tier or local fallback).
   Future<void> selectTier(SubscriptionTier tier) async {
     _currentTier = tier;
     _forceAllUnlocked = false;
@@ -108,7 +201,7 @@ class PlanSubscriptionService extends ChangeNotifier {
     FeatureGates.forceAllUnlocked = _forceAllUnlocked;
   }
 
-  /// Checks if a feature is unlocked under the current plan / force setting.
+  /// Checks if a feature is unlocked under the current plan.
   bool isUnlocked(Feature feature) => FeatureGates.isUnlocked(feature, _currentTier);
 
   /// Current max allowable convoy size.
@@ -219,49 +312,45 @@ class PlanSubscriptionService extends ChangeNotifier {
               description: 'Drop regroup or petrol station pins directly onto everyone\'s map.',
             ),
             PlanFeatureItem(
-              title: 'Live Cockpit Fleet Matrix',
-              description: 'Bird\'s-eye view of every member\'s speed, battery %, and status.',
+              title: 'Dynamic Convoy Echelon Matrix',
+              description: 'Visual zig-zag staggered formation audit and straggler radar.',
             ),
             PlanFeatureItem(
-              title: 'Collective Road Hazard AI Mesh Broadcast',
-              description: 'Pothole telemetry broadcast to downstream bikes with 5s lead time.',
-              isHighlight: true,
-            ),
-            PlanFeatureItem(
-              title: 'Includes All CoRoute Pro Features',
-              description: 'Full Guardian links, crash alarms, garage, and GPX exports.',
+              title: 'Smartwatch Biometric Escalation',
+              description: 'Heart-rate crash cross-referencing on paired Wear OS & BLE bands.',
             ),
           ],
         ),
         const PlanDetails(
           tier: SubscriptionTier.tourOperator,
-          name: 'Tour Operator Enterprise',
-          tagline: 'Commercial Fleets, Rallies & Multi-Day Expeditions',
-          monthlyPrice: '₹3,999 / tour (\$79)',
-          annualPrice: '₹39,000 / yr (\$499)',
+          name: 'Tour Operator',
+          tagline: 'Commercial Motorcycle Touring, Marshals & Dispatchers',
+          monthlyPrice: '₹1,999 / mo (\$39.99)',
+          annualPrice: '₹14,999 / yr (\$299.99)',
           maxConvoySize: 100,
           features: [
             PlanFeatureItem(
-              title: 'Up to 100+ Bikes per Convoy',
-              description: 'Massive scale coordination for rallies, clubs, and tours.',
+              title: 'Up to 100+ Riders per Fleet',
+              description: 'Commercial scale for motorcycle clubs, rallies and guided tours.',
               isHighlight: true,
             ),
             PlanFeatureItem(
-              title: 'Web Dispatcher Console (PC / Tablet)',
-              description: 'Live mission-control dashboard for base camp and support trucks.',
+              title: 'Commercial Fleet Analytics Dashboard',
+              description: 'Web dispatcher view for marshals, mechanics & sweep vehicles.',
               isHighlight: true,
             ),
             PlanFeatureItem(
-              title: 'Custom Branded Join Codes',
-              description: 'Personalized vanity codes (e.g. SPITI-2026, ROYAL-EXP-01).',
+              title: 'Multiple Sweepers & Tail-End Marshals',
+              description: 'Coordinate dual sweepers and chase vehicle radios seamlessly.',
+              isHighlight: true,
             ),
             PlanFeatureItem(
-              title: 'Official Incident & SOS Insurance Logs',
-              description: 'Export timestamped compliance manifests and safety logs (PDF/CSV).',
+              title: 'Expedition Satellite Backup',
+              description: 'Iridium Short Burst Data integration for zero-cellular zones.',
             ),
             PlanFeatureItem(
-              title: 'Multi-Role Convoy Hierarchy',
-              description: 'Dedicated Lead, Sweeper, Marshal, and Support Mechanic markers.',
+              title: 'Automated Rider Medical Briefings',
+              description: 'One-click roster PDF export with blood groups & emergency contacts.',
             ),
           ],
         ),

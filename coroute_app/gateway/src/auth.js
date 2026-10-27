@@ -83,6 +83,8 @@ function selfUser(u) {
     assistAsk: u.assistAsk !== false,
     responderMedical: u.responderMedical === true,
     netConsentAt: Number(u.netConsentAt) || 0,
+    subscriptionTier: u.subscriptionTier || 'community',
+    subscriptionValidUntil: Number(u.subscriptionValidUntil) || 0,
   };
 }
 

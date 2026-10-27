@@ -136,6 +136,10 @@
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="upi"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="google.navigation"/>
         </intent>
         <!-- Organic Maps offline turn-by-turn navigation scheme -->

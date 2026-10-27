@@ -4,20 +4,24 @@ import 'package:provider/provider.dart';
 import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/services/plan_subscription_service.dart';
+import 'payment_checkout_modal.dart';
 
-/// Screen allowing riders, captains, and testers to inspect and switch between
-/// subscription plans (Community, Pro, Road Captain, Tour Operator).
-///
-/// In this testing release, payments are bypassed; users can toggle between
-/// plans freely to evaluate the feature sets and test strict entitlement gating.
-class PlanSelectorScreen extends StatelessWidget {
+/// Screen allowing riders, captains, and tour operators to review entitlements
+/// and upgrade their membership via Razorpay UPI.
+class PlanSelectorScreen extends StatefulWidget {
   const PlanSelectorScreen({super.key});
+
+  @override
+  State<PlanSelectorScreen> createState() => _PlanSelectorScreenState();
+}
+
+class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
+  bool _isAnnual = false;
 
   @override
   Widget build(BuildContext context) {
     final planService = context.watch<PlanSubscriptionService>();
     final currentTier = planService.currentTier;
-    final forceUnlocked = planService.forceAllUnlocked;
     final plans = PlanSubscriptionService.allPlans;
 
     return Scaffold(
@@ -63,67 +67,48 @@ class PlanSelectorScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
-              // Developer / Tester Mode Banner
+              // Razorpay Security Trust Banner
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
                   color: AppTheme.card,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: forceUnlocked ? AppTheme.accentText : AppTheme.warnText,
-                    width: 1.5,
-                  ),
+                  border: Border.all(color: AppTheme.border),
                 ),
                 child: Row(
                   children: [
-                    Icon(
-                      forceUnlocked ? Icons.lock_open_rounded : Icons.lock_outline_rounded,
-                      color: forceUnlocked ? AppTheme.accentText : AppTheme.warnText,
-                      size: 24,
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.accentText.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.shield_rounded, color: AppTheme.accentText, size: 22),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            forceUnlocked ? 'TEST MODE: ALL FEATURES UNLOCKED' : 'TEST MODE: STRICT PLAN RULES ENFORCED',
-                            style: TextStyle(
-                              color: forceUnlocked ? AppTheme.accentText : AppTheme.warnText,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 12,
-                              letterSpacing: 0.5,
-                            ),
+                          Row(
+                            children: [
+                              Text(
+                                'Current Plan: ${FeatureGates.tierLabel(currentTier)}',
+                                style: TextStyle(
+                                  color: AppTheme.text,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            forceUnlocked
-                                ? 'All 4 plan features are currently 100% free and active.'
-                                : 'App is strictly constrained by your selected plan below.',
+                            'Instant activation via Razorpay UPI · Zero gateway fees',
                             style: TextStyle(color: AppTheme.text2, fontSize: 11),
                           ),
                         ],
                       ),
-                    ),
-                    Switch.adaptive(
-                      value: forceUnlocked,
-                      activeColor: AppTheme.accentText,
-                      onChanged: (val) {
-                        HapticFeedback.selectionClick();
-                        planService.setForceAllUnlocked(val);
-                        ScaffoldMessenger.of(context)
-                          ..clearSnackBars()
-                          ..showSnackBar(
-                            SnackBar(
-                              duration: const Duration(seconds: 2),
-                              backgroundColor: AppTheme.card,
-                              content: Text(
-                                val ? 'Unlocked all features for global testing' : 'Enforced strict tier rules for ${FeatureGates.tierLabel(currentTier)}',
-                                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                          );
-                      },
                     ),
                   ],
                 ),
@@ -142,8 +127,76 @@ class PlanSelectorScreen extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                'Select a plan to test its specific features, convoy capacities, and cockpit controls.',
-                style: TextStyle(color: AppTheme.text2, fontSize: 13),
+                'Scale up to 40 riders per convoy, enable priority audio ducking, auto crash detection and fleet dispatch.',
+                style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 14),
+
+              // Monthly vs Annual Billing Toggle Switch
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: AppTheme.card,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          setState(() => _isAnnual = false);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: !_isAnnual ? AppTheme.accentText : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Center(
+                            child: Text(
+                              'Monthly Billing',
+                              style: TextStyle(
+                                color: !_isAnnual ? Colors.black : AppTheme.text2,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          setState(() => _isAnnual = true);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: _isAnnual ? AppTheme.accentText : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Annual (Save ~20%)',
+                                style: TextStyle(
+                                  color: _isAnnual ? Colors.black : AppTheme.text2,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 16),
 
@@ -151,13 +204,34 @@ class PlanSelectorScreen extends StatelessWidget {
               for (final plan in plans) ...[
                 _PlanCard(
                   plan: plan,
+                  isAnnual: _isAnnual,
                   isActive: plan.tier == currentTier,
-                  onSelect: () {
-                    HapticFeedback.heavyImpact();
-                    planService.selectTier(plan.tier);
-                    ScaffoldMessenger.of(context)
-                      ..clearSnackBars()
-                      ..showSnackBar(
+                  onSelect: () async {
+                    if (plan.tier == currentTier) return;
+
+                    if (plan.tier == SubscriptionTier.community) {
+                      HapticFeedback.heavyImpact();
+                      await planService.selectTier(SubscriptionTier.community);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            duration: Duration(seconds: 3),
+                            content: Text('Switched to Community Rider Plan (Free Forever).'),
+                          ),
+                        );
+                      }
+                      return;
+                    }
+
+                    // Launch Razorpay UPI Checkout Bottom Sheet
+                    final upgraded = await PaymentCheckoutModal.show(
+                      context,
+                      plan: plan,
+                      isAnnual: _isAnnual,
+                    );
+
+                    if (upgraded == true && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           duration: const Duration(seconds: 3),
                           backgroundColor: AppTheme.card,
@@ -167,14 +241,18 @@ class PlanSelectorScreen extends StatelessWidget {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  'Activated ${plan.name}! Max ${plan.maxConvoySize} riders allowed.',
-                                  style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
+                                  '${plan.name} Activated! Max ${plan.maxConvoySize} riders unlocked.',
+                                  style: TextStyle(
+                                    color: AppTheme.text,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
                       );
+                    }
                   },
                 ),
                 const SizedBox(height: 16),
@@ -192,11 +270,11 @@ class PlanSelectorScreen extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.info_outline_rounded, color: AppTheme.muted, size: 18),
+                    Icon(Icons.lock_rounded, color: AppTheme.accentText, size: 18),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'No payment is required in this build. You can switch between plans freely to test convoy scaling, priority ducking, and emergency systems.',
+                        'All subscriptions are processed securely via Razorpay 100% UPI. Entitlements are verified cryptographically and unlocked automatically in real-time.',
                         style: TextStyle(color: AppTheme.text2, fontSize: 12, height: 1.4),
                       ),
                     ),
@@ -214,18 +292,23 @@ class PlanSelectorScreen extends StatelessWidget {
 
 class _PlanCard extends StatelessWidget {
   final PlanDetails plan;
+  final bool isAnnual;
   final bool isActive;
   final VoidCallback onSelect;
 
   const _PlanCard({
     required this.plan,
+    required this.isAnnual,
     required this.isActive,
     required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = isActive ? AppTheme.accentText : (plan.isPopular ? AppTheme.accentText.withValues(alpha: 0.6) : AppTheme.border2);
+    final borderColor = isActive
+        ? AppTheme.accentText
+        : (plan.isPopular ? AppTheme.accentText.withValues(alpha: 0.6) : AppTheme.border2);
+    final price = isAnnual ? plan.annualPrice : plan.monthlyPrice;
 
     return Container(
       decoration: BoxDecoration(
@@ -238,7 +321,7 @@ class _PlanCard extends StatelessWidget {
                   color: AppTheme.accentText.withValues(alpha: 0.25),
                   blurRadius: 16,
                   offset: const Offset(0, 4),
-                )
+                ),
               ]
             : null,
       ),
@@ -250,111 +333,117 @@ class _PlanCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Top Row: Name & Tag
+                // Header: Name & Max Convoy Pill
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            plan.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: AppTheme.text,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 18,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            plan.tagline,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: AppTheme.text2, fontSize: 12),
-                          ),
-                        ],
+                      child: Text(
+                        plan.name,
+                        style: TextStyle(
+                          color: AppTheme.text,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 18,
+                        ),
                       ),
                     ),
-                    // Max Convoy Badge
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: AppTheme.soft,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: AppTheme.border2),
                       ),
-                      child: Text(
-                        'Up to ${plan.maxConvoySize} Bikes',
-                        style: TextStyle(
-                          color: AppTheme.accentText,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 11,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.two_wheeler_rounded, size: 14, color: AppTheme.accentText),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Max ${plan.maxConvoySize} bikes',
+                            style: TextStyle(
+                              color: AppTheme.text,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
+                const SizedBox(height: 4),
+
+                // Tagline
+                Text(
+                  plan.tagline,
+                  style: TextStyle(color: AppTheme.text2, fontSize: 12),
+                ),
                 const SizedBox(height: 12),
 
-                // Pricing
+                // Price display
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.baseline,
                   textBaseline: TextBaseline.alphabetic,
                   children: [
                     Text(
-                      plan.monthlyPrice,
+                      price,
                       style: TextStyle(
-                        color: AppTheme.text,
+                        color: isActive ? AppTheme.accentText : AppTheme.text,
                         fontWeight: FontWeight.w900,
-                        fontSize: 20,
+                        fontSize: 22,
+                        letterSpacing: 0.2,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        '(${plan.annualPrice})',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: AppTheme.muted, fontSize: 12),
+                    if (plan.tier != SubscriptionTier.community) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        isAnnual ? '/ billed annually' : '/ month',
+                        style: TextStyle(color: AppTheme.text2, fontSize: 11),
                       ),
-                    ),
+                    ],
                   ],
                 ),
-                Divider(height: 24, color: AppTheme.border2),
+                const SizedBox(height: 14),
 
-                // Features Checklist
-                for (final f in plan.features) ...[
+                Divider(height: 1, color: AppTheme.border2),
+                const SizedBox(height: 12),
+
+                // Feature List
+                for (final feat in plan.features) ...[
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.only(bottom: 8),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Icon(
-                          Icons.check_circle_rounded,
+                          feat.isHighlight ? Icons.star_rounded : Icons.check_circle_outline_rounded,
+                          color: feat.isHighlight ? AppTheme.accentText : AppTheme.muted,
                           size: 16,
-                          color: f.isHighlight ? AppTheme.accentText : AppTheme.accentText.withValues(alpha: 0.6),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 8),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                f.title,
-                                style: TextStyle(
-                                  color: f.isHighlight ? AppTheme.accentText : AppTheme.text,
-                                  fontWeight: f.isHighlight ? FontWeight.w800 : FontWeight.w600,
-                                  fontSize: 13,
+                          child: RichText(
+                            text: TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: '${feat.title}: ',
+                                  style: TextStyle(
+                                    color: feat.isHighlight ? AppTheme.accentText : AppTheme.text,
+                                    fontWeight: feat.isHighlight ? FontWeight.w800 : FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
                                 ),
-                              ),
-                              Text(
-                                f.description,
-                                style: TextStyle(color: AppTheme.muted, fontSize: 11, height: 1.2),
-                              ),
-                            ],
+                                TextSpan(
+                                  text: feat.description,
+                                  style: TextStyle(
+                                    color: AppTheme.text2,
+                                    fontSize: 12,
+                                    height: 1.3,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ],
@@ -369,7 +458,7 @@ class _PlanCard extends StatelessWidget {
                   height: 56,
                   child: FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor: isActive ? AppTheme.brand : AppTheme.soft,
+                      backgroundColor: isActive ? AppTheme.soft : AppTheme.brand,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                     onPressed: isActive ? null : onSelect,
@@ -377,15 +466,19 @@ class _PlanCard extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
-                          isActive ? Icons.verified_rounded : Icons.touch_app_rounded,
-                          color: isActive ? Colors.white : AppTheme.accentText,
+                          isActive ? Icons.verified_rounded : Icons.flash_on_rounded,
+                          color: isActive ? AppTheme.accentText : Colors.white,
                           size: 20,
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          isActive ? 'CURRENT PLAN ACTIVE' : 'ACTIVATE THIS PLAN (TEST)',
+                          isActive
+                              ? 'CURRENT PLAN ACTIVE'
+                              : (plan.tier == SubscriptionTier.community
+                                  ? 'SELECT COMMUNITY PLAN'
+                                  : 'UPGRADE VIA RAZORPAY UPI'),
                           style: TextStyle(
-                            color: isActive ? Colors.white : AppTheme.text,
+                            color: isActive ? AppTheme.accentText : Colors.white,
                             fontWeight: FontWeight.w900,
                             fontSize: 13,
                             letterSpacing: 0.5,
@@ -413,12 +506,12 @@ class _PlanCard extends StatelessWidget {
                     BoxShadow(color: AppTheme.accentText.withValues(alpha: 0.4), blurRadius: 8),
                   ],
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.check_circle_rounded, color: Colors.black, size: 12),
-                    SizedBox(width: 4),
-                    Text(
+                    const Icon(Icons.check_circle_rounded, color: Colors.black, size: 12),
+                    const SizedBox(width: 4),
+                    const Text(
                       'ACTIVE PLAN',
                       style: TextStyle(
                         color: Colors.black,
@@ -444,14 +537,21 @@ class _PlanCard extends StatelessWidget {
                     BoxShadow(color: AppTheme.brand.withValues(alpha: 0.4), blurRadius: 8),
                   ],
                 ),
-                child: const Text(
-                  '★ MOST POPULAR FOR CLUBS',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 10,
-                    letterSpacing: 0.5,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.star_rounded, color: Colors.white, size: 12),
+                    const SizedBox(width: 4),
+                    const Text(
+                      'MOST POPULAR',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 10,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

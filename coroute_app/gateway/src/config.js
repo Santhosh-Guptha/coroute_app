@@ -281,6 +281,14 @@ const config = {
   whatsappApiUrl: (process.env.WHATSAPP_API_URL || 'https://graph.facebook.com/v20.0').trim().replace(/\/+$/, ''),
   whatsappPhoneNumberId: (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim(),
   whatsappApiToken: (process.env.WHATSAPP_API_TOKEN || '').trim(),
+
+  // Razorpay UPI-Only Payment Gateway
+  razorpayKeyId: (process.env.RAZORPAY_KEY_ID || 'rzp_test_coroute_free').trim(),
+  razorpayKeySecret: (process.env.RAZORPAY_KEY_SECRET || 'rzp_secret_coroute_free').trim(),
+  razorpayWebhookSecret: (process.env.RAZORPAY_WEBHOOK_SECRET || 'coroute_rzp_webhook_secret_free').trim(),
+  razorpayUpiOnly: true,
+  upiVpa: (process.env.PAYMENT_UPI_VPA || 'coroute@upi').trim(),
+  upiMerchantName: (process.env.PAYMENT_UPI_NAME || 'CoRoute Safety Networks').trim(),
 };
 
 if (!isTest && config.jwtSecret.length < 32) {

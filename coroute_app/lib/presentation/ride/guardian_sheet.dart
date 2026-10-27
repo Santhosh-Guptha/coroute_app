@@ -75,7 +75,7 @@ class GuardianSheet extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Ride Guardian encrypted browser live-share is available on CoRoute Pro and Road Captain Pass.\n\nIn this test build, you can test this instantly by switching your plan to CoRoute Pro (Free).',
+                    'Ride Guardian encrypted browser live-share is available on CoRoute Pro and Road Captain Pass.\n\nUpgrade your plan to unlock encrypted real-time location sharing for family and friends.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.4),
                   ),
@@ -88,7 +88,7 @@ class GuardianSheet extends StatelessWidget {
                       onPressed: () {
                         FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
                       },
-                      child: const Text('SWITCH TO COROUTE PRO TO TEST (FREE)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+                      child: const Text('UPGRADE TO COROUTE PRO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
                     ),
                   ),
                 ],

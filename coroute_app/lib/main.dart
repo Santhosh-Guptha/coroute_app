@@ -108,7 +108,7 @@ class CoRouteApp extends StatelessWidget {
           dispose: (_, binding) => binding.dispose()),
         ChangeNotifierProvider(create: (ctx) => MetaService(ctx.read<ApiClient>())..load()),
         ChangeNotifierProvider(create: (ctx) => AppVersionService(ctx.read<MetaService>())),
-        ChangeNotifierProvider(create: (_) => PlanSubscriptionService()..load()),
+        ChangeNotifierProvider(create: (ctx) => PlanSubscriptionService(ctx.read<ApiClient>())..load()),
         ChangeNotifierProvider(create: (ctx) => TripStorageService(ctx.read<ApiClient>())),
         ChangeNotifierProvider(create: (ctx) => TimelineService(ctx.read<ApiClient>(), ctx.read<RealtimeService>())),
         ChangeNotifierProvider(create: (ctx) {
@@ -125,6 +125,7 @@ class CoRouteApp extends StatelessWidget {
             timeline: ctx.read<TimelineService>(),
             settings: ctx.read<SettingsService>(),
             mesh: ctx.read<P2pMeshService>(),
+            planSubscription: ctx.read<PlanSubscriptionService>(),
           )..addListener(() => _notePosition(ctx)),
         ),
         ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>(), settings: ctx.read<SettingsService>())),

@@ -299,7 +299,7 @@ class AccountScreen extends StatelessWidget {
                       _SettingsRow(
                         icon: Icons.card_membership_rounded,
                         title: 'Active Subscription Plan',
-                        subtitle: '$tierLabel · Tap to switch tier & test entitlements',
+                        subtitle: '$tierLabel · View plan benefits & convoy limits',
                         value: tierLabel.toUpperCase(),
                         divider: true,
                         onTap: () => _push(context, const PlanSelectorScreen()),

@@ -43,6 +43,7 @@ import 'geo_service.dart';
 import 'realtime_service.dart';
 import 'settings_service.dart';
 import 'timeline_service.dart';
+import 'plan_subscription_service.dart';
 import 'track_recorder.dart';
 import 'trip_storage_service.dart';
 
@@ -61,6 +62,7 @@ class ConvoyService extends ChangeNotifier {
     this.timeline,
     this.settings,
     this.mesh,
+    this.planSubscription,
     this._accel,
     DeadReckoningEngine? deadReckoning,
     OutboxStore? outboxStore,
@@ -123,6 +125,7 @@ class ConvoyService extends ChangeNotifier {
   final TripStorageService _trips;
   final TrackRecorder? recorder;
   final TimelineService? timeline;
+  final PlanSubscriptionService? planSubscription;
   final Battery _battery = Battery();
 
   StreamSubscription<Map<String, dynamic>>? _eventSub;
@@ -920,6 +923,14 @@ class ConvoyService extends ChangeNotifier {
         break;
       case 'DISCOVERY':
         if (!_onDiscovery(e)) return;
+        break;
+      case 'SUBSCRIPTION_ACTIVATED':
+        final tierName = e['tier']?.toString();
+        final until = e['validUntil'] is num ? (e['validUntil'] as num).toInt() : 0;
+        if (tierName != null) {
+          planSubscription?.applyServerSubscription(tierName, until);
+          notifyListeners();
+        }
         break;
       case 'WAVED':
         final id = e['encounterId']?.toString();

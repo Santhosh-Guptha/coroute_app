@@ -248,7 +248,7 @@ class _Greeting extends StatelessWidget {
                           const SizedBox(width: 6),
                           Flexible(
                             child: Text(
-                              'PLAN: $tierName',
+                              tierName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -259,11 +259,11 @@ class _Greeting extends StatelessWidget {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 5),
+                          const SizedBox(width: 4),
                           Icon(
-                            Icons.swap_horiz_rounded,
+                            Icons.chevron_right_rounded,
                             size: 14,
-                            color: AppTheme.accentText,
+                            color: AppTheme.accentText.withValues(alpha: 0.7),
                           ),
                         ],
                       ),

@@ -9,6 +9,7 @@ const config = require('./config');
 const { featurePolicy } = require('./feature_policy');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 const { toWire, toGpx, filterPoints, validateChunk, uploadPermission, TrackError } = require('./tracks');
+const { registerSubscriptionPublicRoutes, registerSubscriptionAuthRoutes } = require('./subscription_routes');
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -126,6 +127,9 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     }
     res.json(view);
   });
+
+  // Razorpay webhook endpoint (public, HMAC-signature authenticated)
+  registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap });
 
   // ---- authenticated ----
   r.use(requireAuth(gate), apiLimiter);
@@ -768,6 +772,9 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.patch('/admin/users/:userId/role', requireAdmin, wrap(async (req, res) => res.json(await auth.setRole(req.user, req.params.userId, String(req.body?.role || '')))));
   r.post('/admin/users/:userId/reset-password', requireAdmin, wrap(async (req, res) => res.json(await auth.adminResetPassword(req.user, req.params.userId))));
   r.delete('/admin/convoys/:groupId', requireAdmin, wrap(async (req, res) => { await convoys.adminDissolve(req.params.groupId); res.json({ ok: true, groupId: req.params.groupId }); }));
+
+  // Subscription and Razorpay UPI-only payment routes
+  registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap });
 
   // Errors
   // eslint-disable-next-line no-unused-vars
