@@ -388,6 +388,34 @@
     document.head.appendChild(s);
   }
 
+  // Back from the redirect flow: the server already verified the signature.
+  (function showRedirectResult() {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('paid')) {
+      showStatus('success',
+        '<h3 style="margin-top:0;color:#A5D6A7">[Verified] Payment Verified Successfully!</h3>' +
+        '<div class="tx-detail-row"><span>Payment ID:</span> <strong><code>' + escapeHtml(q.get('payment') || '') + '</code></strong></div>' +
+        '<div class="tx-detail-row"><span>Order ID:</span> <strong><code>' + escapeHtml(q.get('paid')) + '</code></strong></div>' +
+        '<div class="tx-detail-row"><span>Mode:</span> <strong>' + escapeHtml((q.get('mode') || '').toUpperCase()) + '</strong></div>' +
+        '<div class="tx-detail-row"><span>HMAC-SHA256 Signature:</span> <strong>Verified by server</strong></div>' +
+        '<div class="tx-detail-row"><span>Status:</span> <strong style="color:#66BB6A">PAID</strong></div>');
+      statusBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (q.get('failed')) {
+      showStatus('error', '[Failed] ' + escapeHtml(q.get('failed')) +
+        (q.get('order') ? '<br><small>Order ID: <code>' + escapeHtml(q.get('order')) + '</code></small>' : ''));
+      statusBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (q.get('paid') || q.get('failed')) {
+      history.replaceState(null, '', window.location.pathname);
+    }
+  })();
+
+  function escapeHtml(v) {
+    return String(v).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
   // Load latest configured prices from server
   fetch('/api/subscription/config').then(r => r.json()).then(cfg => {
     if (cfg && cfg.razorpayKeyId) RAZORPAY_KEY_ID = cfg.razorpayKeyId;
@@ -605,6 +633,11 @@
           theme: {
             color: '#FF5722',
           },
+          // Bank pages open as a full-page redirect, not a pop-up, so browsers
+          // that block pop-ups still finish; Razorpay then POSTs the result to
+          // the server, which verifies it and sends the user back here.
+          redirect: true,
+          callback_url: window.location.origin + '/api/razorpay/callback',
           handler: async function(response) {
             showStatus('info', 'Payment authorized! Verifying cryptographic signature with backend (POST /api/verify-payment)...');
 

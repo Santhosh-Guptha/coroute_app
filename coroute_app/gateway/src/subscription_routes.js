@@ -463,6 +463,41 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
 
   r.post('/verify-payment', handleVerifyPayment);
   r.post('/api/verify-payment', handleVerifyPayment);
+
+  // ---------------------------------------------------------------------------
+  // Redirect-mode return URL (Checkout `redirect: true` + `callback_url`).
+  // Razorpay POSTs the same three fields as a form after the bank page, so a
+  // browser that blocks pop-ups (in-app browsers, kiosks) still completes.
+  // The signature is checked exactly as above; the user lands back on the
+  // checkout page with ?paid=<order> or ?failed=<reason>.
+  // ---------------------------------------------------------------------------
+  const handleCallback = wrap(async (req, res) => {
+    const b = req.body || {};
+    const back = (q) => res.redirect(303, `/checkout.html?${q}`);
+    const orderId = b.razorpay_order_id || b['error[metadata][order_id]'] || (b.error && b.error.metadata && b.error.metadata.order_id) || '';
+    const paymentId = b.razorpay_payment_id || '';
+    const signature = b.razorpay_signature || '';
+    const errDesc = b['error[description]'] || (b.error && b.error.description) || '';
+    if (!orderId || !paymentId || !signature) {
+      return back(`failed=${encodeURIComponent(errDesc || 'Payment was not completed')}&order=${encodeURIComponent(orderId)}`);
+    }
+    const order = await repo.findRazorpayOrder(orderId);
+    if (!order) return back(`failed=${encodeURIComponent('Unknown order')}`);
+    const ok = await gateway.verifySignature({ orderId, paymentId, signature, mode: order.mode });
+    if (!ok) {
+      await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
+      return back(`failed=${encodeURIComponent('Signature verification failed')}&order=${encodeURIComponent(orderId)}`);
+    }
+    if (order.status !== 'PAID') {
+      await repo.updateRazorpayOrder(orderId, { status: 'PAID', paymentId, paidAt: Date.now() });
+      if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
+        await repo.recordCouponUsage(order.couponCode, { userId: 'guest', orderId, discountAmount: order.discountAmount || 0 }).catch(() => {});
+      }
+    }
+    return back(`paid=${encodeURIComponent(orderId)}&payment=${encodeURIComponent(paymentId)}&mode=${encodeURIComponent(order.mode || '')}`);
+  });
+  r.post('/razorpay/callback', express.urlencoded({ extended: false }), handleCallback);
+  r.post('/api/razorpay/callback', express.urlencoded({ extended: false }), handleCallback);
 }
 
 /**

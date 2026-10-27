@@ -218,6 +218,25 @@ test('Subscription Razorpay Payment Suite', async (t) => {
     assert.equal(res.json.message, 'Payment verified successfully');
   });
 
+  await t.test('POST /api/razorpay/callback (redirect mode) verifies the form post and redirects back', async () => {
+    const created = await env.api('POST', '/create-order', { amount: 500 });
+    const orderId = created.json.order_id;
+    const post = (fields) => fetch(`${env.origin}/api/razorpay/callback`, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(fields).toString(),
+    });
+    const bad = await post({ razorpay_order_id: orderId, razorpay_payment_id: 'pay_cb', razorpay_signature: 'nope' });
+    assert.equal(bad.status, 303);
+    assert.ok(bad.headers.get('location').includes('failed='));
+    const good = await post({ razorpay_order_id: orderId, razorpay_payment_id: 'pay_cb', razorpay_signature: sign('unit_test_secret_456', orderId, 'pay_cb') });
+    assert.equal(good.status, 303);
+    assert.ok(good.headers.get('location').startsWith(`/checkout.html?paid=${orderId}`), good.headers.get('location'));
+    const cancelled = await post({ 'error[description]': 'Payment cancelled', 'error[metadata][order_id]': orderId });
+    assert.equal(cancelled.status, 303);
+    assert.ok(cancelled.headers.get('location').includes('failed=Payment%20cancelled'));
+  });
+
   await t.test('admin: configure live keys, switch modes, secrets never returned; non-admin refused', async () => {
     const admin = await env.register('Admin', 'admin@coroute.test');
     adminToken = admin.token;
