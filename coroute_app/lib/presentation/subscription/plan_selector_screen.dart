@@ -301,6 +301,7 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
 
                     // Above the entitlement: launch Razorpay UPI Checkout Bottom Sheet.
                     // The current plan stays in place until the payment is verified.
+                    if (!context.mounted) return;
                     final upgraded = await PaymentCheckoutModal.show(
                       context,
                       plan: plan,

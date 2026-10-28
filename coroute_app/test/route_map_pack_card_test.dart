@@ -1,3 +1,4 @@
+import 'package:coroute_app/core/config/feature_gates.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -64,6 +65,8 @@ class FakeTilePrefetcher extends TilePrefetcher {
 }
 
 void main() {
+  setUp(() => FeatureGates.forceAllUnlocked = true);
+  tearDown(() => FeatureGates.forceAllUnlocked = false);
   late Directory tmp;
 
   setUp(() async {

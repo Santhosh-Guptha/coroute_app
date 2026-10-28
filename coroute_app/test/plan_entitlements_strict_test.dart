@@ -7,6 +7,10 @@ void main() {
     FeatureGates.forceAllUnlocked = false;
     FeatureGates.activeTier = SubscriptionTier.community;
   });
+  tearDown(() {
+    FeatureGates.forceAllUnlocked = true;
+    FeatureGates.activeTier = SubscriptionTier.roadCaptain;
+  });
 
   group('Strict Plan Entitlements & Feature Gates Verification', () {
     test('Default mode has forceAllUnlocked set to false', () {

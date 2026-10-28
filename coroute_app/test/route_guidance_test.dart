@@ -1,3 +1,4 @@
+import 'package:coroute_app/core/config/feature_gates.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -681,6 +682,8 @@ void main() {
   });
 
   group('Meet here sheet', () {
+    setUp(() => FeatureGates.forceAllUnlocked = true);
+    tearDown(() => FeatureGates.forceAllUnlocked = false);
     Future<MeetHereResult?> open(WidgetTester tester, Future<String?> Function() name, {double scale = 1.0}) async {
       AppTheme.use(AppPalette.dark);
       tester.view.physicalSize = const Size(320, 640);

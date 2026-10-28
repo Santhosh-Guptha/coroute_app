@@ -63,8 +63,8 @@ void main() {
 
       final tour = plans.firstWhere((p) => p.tier == SubscriptionTier.tourOperator);
       expect(tour.maxConvoySize, 100);
-      expect(tour.monthlyPrice, contains('\$79'));
-      expect(tour.annualPrice, contains('\$499'));
+      expect(tour.monthlyPrice, contains('1,999'));
+      expect(tour.annualPrice, contains('14,999'));
     });
 
     test('FeatureGates: when forceAllUnlocked is true, all features unlock regardless of tier', () {

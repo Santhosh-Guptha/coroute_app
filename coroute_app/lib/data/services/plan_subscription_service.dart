@@ -278,18 +278,18 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   }
 
   void _persist() {
-    SharedPreferences.getInstance().then((prefs) async {
-      await prefs.setString(keyTier, _entitledTier.name);
-      await prefs.setInt(keyValidUntil, _validUntil);
-      await prefs.setString(keyPreferredTier, _preferredTier.name);
-      await prefs.setBool(keyForceUnlocked, _forceAllUnlocked);
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString(keyTier, _entitledTier.name);
+      prefs.setInt(keyValidUntil, _validUntil);
+      prefs.setString(keyPreferredTier, _preferredTier.name);
+      prefs.setBool(keyForceUnlocked, _forceAllUnlocked);
       final prev = _previousTier;
       if (prev == null) {
-        await prefs.remove(keyPreviousTier);
-        await prefs.remove(keyExpiredAt);
+        prefs.remove(keyPreviousTier);
+        prefs.remove(keyExpiredAt);
       } else {
-        await prefs.setString(keyPreviousTier, prev.name);
-        await prefs.setInt(keyExpiredAt, _expiredAt);
+        prefs.setString(keyPreviousTier, prev.name);
+        prefs.setInt(keyExpiredAt, _expiredAt);
       }
     }).ignore();
   }
