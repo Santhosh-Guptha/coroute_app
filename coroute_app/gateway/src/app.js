@@ -218,6 +218,22 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
     notFoundPage(req, res);
   });
+  // Centralised error handler: graceful responses for malformed JSON, precondition checks, and unexpected errors.
+  app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+      return res.status(400).json({ error: 'Invalid JSON payload' });
+    }
+    if (err.name === 'PreconditionFailedError' || err.status === 412) {
+      return res.status(412).end();
+    }
+    const isApi = req.path.startsWith('/api/') || req.path === '/api';
+    const status = (typeof err.status === 'number' && err.status >= 400 && err.status < 600) ? err.status : 500;
+    if (isApi) {
+      return res.status(status).json({ error: status === 500 ? 'Internal server error' : err.message });
+    }
+    notFoundPage(req, res);
+  });
 
   const retention = new Retention({ repo, soda, convoys, logger });
   // Subscription expiry warnings (7/3/1 days) and rollback to community, hourly; started with retention.

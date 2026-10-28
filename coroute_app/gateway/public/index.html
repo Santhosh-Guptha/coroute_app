@@ -158,20 +158,20 @@
         </div>
         <div class="hm-plan hm-plan--hot">
           <div><h3 class="hm-plan__name">CoRoute Pro</h3><p class="hm-plan__for">For riders who go far</p></div>
-          <p class="hm-plan__price">&#8377;149 <small>per month</small></p>
-          <p class="hm-plan__year">or &#8377;1,199 per year</p>
+          <p class="hm-plan__price" id="plan-price-pro-monthly">&#8377;50 <small>per month</small></p>
+          <p class="hm-plan__year" id="plan-price-pro-annual">or &#8377;1,199 per year</p>
           <ul class="hm-plan__list" role="list">
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Everything in Community Rider</li>
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Offline P2P mesh between phones</li>
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Live radar telemetry</li>
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Helmet voice alerts</li>
           </ul>
-          <a class="btn btn--primary btn--block" href="/checkout">Choose Pro</a>
+          <a class="btn btn--primary btn--block" href="/checkout?plan=proRider">Choose Pro</a>
         </div>
         <div class="hm-plan">
           <div><h3 class="hm-plan__name">Road Captain Pass</h3><p class="hm-plan__for">For ride leaders</p></div>
-          <p class="hm-plan__price">&#8377;599 <small>per month</small></p>
-          <p class="hm-plan__year">or &#8377;4,499 per year</p>
+          <p class="hm-plan__price" id="plan-price-captain-monthly">&#8377;599 <small>per month</small></p>
+          <p class="hm-plan__year" id="plan-price-captain-annual">or &#8377;4,499 per year</p>
           <ul class="hm-plan__list" role="list">
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Everything in CoRoute Pro</li>
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Convoys up to __MAX_RIDERS__ riders</li>
@@ -179,18 +179,18 @@
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Emergency gateway SMS</li>
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Group audit logs</li>
           </ul>
-          <a class="btn btn--secondary btn--block" href="/checkout">Choose Road Captain</a>
+          <a class="btn btn--secondary btn--block" href="/checkout?plan=roadCaptain">Choose Road Captain</a>
         </div>
         <div class="hm-plan">
           <div><h3 class="hm-plan__name">Tour Operator</h3><p class="hm-plan__for">For tour companies and clubs</p></div>
-          <p class="hm-plan__price">&#8377;1,999 <small>per month</small></p>
-          <p class="hm-plan__year">or &#8377;14,999 per year</p>
+          <p class="hm-plan__price" id="plan-price-operator-monthly">&#8377;1,999 <small>per month</small></p>
+          <p class="hm-plan__year" id="plan-price-operator-annual">or &#8377;14,999 per year</p>
           <ul class="hm-plan__list" role="list">
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Everything in Road Captain Pass</li>
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>For operators running rides for customers</li>
             <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Billed monthly or yearly by UPI</li>
           </ul>
-          <a class="btn btn--secondary btn--block" href="/checkout">Choose Tour Operator</a>
+          <a class="btn btn--secondary btn--block" href="/checkout?plan=tourOperator">Choose Tour Operator</a>
         </div>
       </div>
       <div class="hm-plans__pay">
@@ -256,6 +256,37 @@
       </div>
     </div>
   </section>
+
+  <script>
+  (function() {
+    function fmt(n) { return (Number(n) || 0).toLocaleString('en-IN'); }
+    fetch('/api/subscription/config')
+      .then(function(r) { return r.json(); })
+      .then(function(cfg) {
+        if (!cfg || !cfg.plans) return;
+        var p = cfg.plans;
+        if (p.proRider) {
+          var elM = document.getElementById('plan-price-pro-monthly');
+          var elA = document.getElementById('plan-price-pro-annual');
+          if (elM && p.proRider.monthly != null) elM.innerHTML = '&#8377;' + fmt(p.proRider.monthly) + ' <small>per month</small>';
+          if (elA && p.proRider.annual != null) elA.innerHTML = 'or &#8377;' + fmt(p.proRider.annual) + ' per year';
+        }
+        if (p.roadCaptain) {
+          var elM = document.getElementById('plan-price-captain-monthly');
+          var elA = document.getElementById('plan-price-captain-annual');
+          if (elM && p.roadCaptain.monthly != null) elM.innerHTML = '&#8377;' + fmt(p.roadCaptain.monthly) + ' <small>per month</small>';
+          if (elA && p.roadCaptain.annual != null) elA.innerHTML = 'or &#8377;' + fmt(p.roadCaptain.annual) + ' per year';
+        }
+        if (p.tourOperator) {
+          var elM = document.getElementById('plan-price-operator-monthly');
+          var elA = document.getElementById('plan-price-operator-annual');
+          if (elM && p.tourOperator.monthly != null) elM.innerHTML = '&#8377;' + fmt(p.tourOperator.monthly) + ' <small>per month</small>';
+          if (elA && p.tourOperator.annual != null) elA.innerHTML = 'or &#8377;' + fmt(p.tourOperator.annual) + ' per year';
+        }
+      })
+      .catch(function() {});
+  })();
+  </script>
 
 </main>
 <!--#include footer-->

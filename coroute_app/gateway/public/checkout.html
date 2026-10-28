@@ -264,14 +264,6 @@
   <div class="container">
     <div class="checkout-container">
 
-      <!-- Test Credentials Helper Callout -->
-      <div class="test-creds-callout" id="test-creds-callout" style="display:none">
-        <strong>Razorpay TEST mode &mdash; no real money is charged. Test credentials:</strong><br>
-        - <strong>Test Card:</strong> <code>4100 2800 0000 1007</code> | <strong>CVV:</strong> <code>123</code> | <strong>Expiry:</strong> <code>12/26</code><br>
-        - <strong>Test UPI:</strong> <code>test@razorpay</code><br>
-        - <strong>Available Coupons:</strong> <code>WELCOME50</code> (50% off), <code>CAPTAIN100</code> (Flat 100 off), <code>RIDERFREE</code> (100% Free Pass)
-      </div>
-
       <!-- Plan Selection -->
       <!-- An order created in the CoRoute app, paid here by UPI -->
       <div id="app-order-box" style="display:none;background:rgba(255,87,34,0.08);border:1px solid rgba(255,87,34,0.35);border-radius:10px;padding:16px 18px;margin-bottom:20px">
@@ -283,28 +275,28 @@
       <div id="offer-banner" style="display:none;background:rgba(76,175,80,0.12);border:1px solid rgba(76,175,80,0.4);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:14px"></div>
       <h2 class="t-h3" style="margin-bottom:8px" id="select-plan-heading">1. Select Plan</h2>
       <div class="plan-grid" id="plan-grid-container">
-        <div class="plan-card active" data-amount="10000" data-tier="testVerification" data-name="Test Transaction (Rs 100)">
-          <input type="radio" name="plan" value="10000" checked id="p-test">
-          <span class="plan-badge">Verification</span>
-          <h3 class="t-h4" style="margin:4px 0">Test Verification</h3>
-          <div class="plan-price" id="price-display-test">Rs 100 <small>/ one-time</small></div>
-          <p class="t-small t-muted" style="margin:4px 0 0">10,000 paise test transaction to verify payment gateway and signature.</p>
-        </div>
-
-        <div class="plan-card" data-amount="14900" data-tier="proRider" data-name="CoRoute Pro (Rs 149)">
-          <input type="radio" name="plan" value="14900" id="p-pro">
+        <div class="plan-card active" data-amount="5000" data-tier="proRider" data-name="CoRoute Pro">
+          <input type="radio" name="plan" value="5000" checked id="p-pro">
           <span class="plan-badge">Most Popular</span>
           <h3 class="t-h4" style="margin:4px 0">CoRoute Pro</h3>
-          <div class="plan-price" id="price-display-pro">Rs 149 <small>/ month</small></div>
+          <div class="plan-price" id="price-display-pro">Rs 50 <small>/ month</small></div>
           <p class="t-small t-muted" style="margin:4px 0 0">Offline mesh clustering, live radar telemetry and helmet voice alerts.</p>
         </div>
 
-        <div class="plan-card" data-amount="59900" data-tier="roadCaptain" data-name="Road Captain Pass (Rs 599)">
+        <div class="plan-card" data-amount="59900" data-tier="roadCaptain" data-name="Road Captain Pass">
           <input type="radio" name="plan" value="59900" id="p-captain">
           <span class="plan-badge">Full Fleet</span>
           <h3 class="t-h4" style="margin:4px 0">Road Captain Pass</h3>
           <div class="plan-price" id="price-display-captain">Rs 599 <small>/ month</small></div>
-          <p class="t-small t-muted" style="margin:4px 0 0">Up to 50 convoy members, emergency gateway SMS and group audit logs.</p>
+          <p class="t-small t-muted" style="margin:4px 0 0">Up to 40 convoy members, emergency gateway SMS and group audit logs.</p>
+        </div>
+
+        <div class="plan-card" data-amount="199900" data-tier="tourOperator" data-name="Tour Operator">
+          <input type="radio" name="plan" value="199900" id="p-operator">
+          <span class="plan-badge">Commercial</span>
+          <h3 class="t-h4" style="margin:4px 0">Tour Operator</h3>
+          <div class="plan-price" id="price-display-operator">Rs 1,999 <small>/ month</small></div>
+          <p class="t-small t-muted" style="margin:4px 0 0">Commercial scale up to 100+ riders, web fleet dispatcher and satellite backup.</p>
         </div>
       </div>
 
@@ -349,10 +341,6 @@
 
         <!-- Live Status Box -->
         <div id="status-box" class="status-box" role="alert"></div>
-
-        <div class="admin-bar-link">
-          Administrator? <a href="/pricing-admin">Open Pricing and Coupon Configuration Screen</a>
-        </div>
       </div>
 
     </div>
@@ -366,10 +354,10 @@
   // Key id of the ACTIVE mode comes from the server (never hard-coded here).
   let RAZORPAY_KEY_ID = '';
 
-  let baseAmountPaise = 10000;
-  let payableAmountPaise = 10000;
-  let selectedTier = 'testVerification';
-  let selectedName = 'Test Transaction (Rs 100)';
+  let baseAmountPaise = 5000;
+  let payableAmountPaise = 5000;
+  let selectedTier = 'proRider';
+  let selectedName = 'CoRoute Pro';
   let appliedCoupon = null;
 
   const planCards = document.querySelectorAll('.plan-card');
@@ -386,6 +374,24 @@
   const summaryDiscLabel = document.getElementById('summary-discount-label');
   const offerBanner = document.getElementById('offer-banner');
   let liveOffers = [];
+
+  // Handle URL plan selection (e.g. /checkout?plan=roadCaptain or ?plan=tourOperator)
+  (function initPlanFromUrl() {
+    const q = new URLSearchParams(window.location.search);
+    const planParam = q.get('plan');
+    if (planParam) {
+      const targetCard = document.querySelector('.plan-card[data-tier="' + planParam + '"]');
+      if (targetCard) {
+        planCards.forEach(c => c.classList.remove('active'));
+        targetCard.classList.add('active');
+        const radio = targetCard.querySelector('input[type="radio"]');
+        if (radio) radio.checked = true;
+        baseAmountPaise = parseInt(targetCard.getAttribute('data-amount'), 10) || baseAmountPaise;
+        selectedTier = targetCard.getAttribute('data-tier') || selectedTier;
+        selectedName = targetCard.getAttribute('data-name') || selectedName;
+      }
+    }
+  })();
 
   // Dynamically load Razorpay Checkout Script to comply with zero external static tag requirements
   function ensureRazorpayScript(callback) {
@@ -469,19 +475,32 @@
   // Load latest configured prices from server
   fetch('/api/subscription/config').then(r => r.json()).then(cfg => {
     if (cfg && cfg.razorpayKeyId) RAZORPAY_KEY_ID = cfg.razorpayKeyId;
-    const callout = document.getElementById('test-creds-callout');
-    if (callout) callout.style.display = (cfg && cfg.mode === 'test') ? 'block' : 'none';
     if (cfg && cfg.plans) {
-      if (cfg.plans.proRider) {
-        document.getElementById('price-display-pro').innerHTML = 'Rs ' + cfg.plans.proRider.monthly + ' <small>/ month</small>';
+      if (cfg.plans.proRider && cfg.plans.proRider.monthly != null) {
+        const el = document.getElementById('price-display-pro');
+        if (el) el.innerHTML = 'Rs ' + cfg.plans.proRider.monthly + ' <small>/ month</small>';
         const proCard = document.querySelector('[data-tier="proRider"]');
         if (proCard) proCard.setAttribute('data-amount', cfg.plans.proRider.monthly * 100);
       }
-      if (cfg.plans.roadCaptain) {
-        document.getElementById('price-display-captain').innerHTML = 'Rs ' + cfg.plans.roadCaptain.monthly + ' <small>/ month</small>';
+      if (cfg.plans.roadCaptain && cfg.plans.roadCaptain.monthly != null) {
+        const el = document.getElementById('price-display-captain');
+        if (el) el.innerHTML = 'Rs ' + cfg.plans.roadCaptain.monthly + ' <small>/ month</small>';
         const capCard = document.querySelector('[data-tier="roadCaptain"]');
         if (capCard) capCard.setAttribute('data-amount', cfg.plans.roadCaptain.monthly * 100);
       }
+      if (cfg.plans.tourOperator && cfg.plans.tourOperator.monthly != null) {
+        const el = document.getElementById('price-display-operator');
+        if (el) el.innerHTML = 'Rs ' + (cfg.plans.tourOperator.monthly).toLocaleString('en-IN') + ' <small>/ month</small>';
+        const opCard = document.querySelector('[data-tier="tourOperator"]');
+        if (opCard) opCard.setAttribute('data-amount', cfg.plans.tourOperator.monthly * 100);
+      }
+      const activeCard = document.querySelector('.plan-card.active');
+      if (activeCard) {
+        baseAmountPaise = parseInt(activeCard.getAttribute('data-amount'), 10) || baseAmountPaise;
+        selectedTier = activeCard.getAttribute('data-tier') || selectedTier;
+        selectedName = activeCard.getAttribute('data-name') || selectedName;
+      }
+      updatePricingDisplay();
     }
   }).catch(() => {});
 
@@ -547,7 +566,7 @@
         payBtnLabel.textContent = 'Pay with Razorpay (Rs ' + appliedCoupon.finalAmount + ')';
       }
     } else {
-      const offer = (!appOrder && selectedTier !== 'testVerification') ? previewOffer(selectedTier, 'monthly', baseInr) : null;
+      const offer = !appOrder ? previewOffer(selectedTier, 'monthly', baseInr) : null;
       if (offer) {
         showOfferSummary(baseInr, offer);
         payableAmountPaise = offer.finalAmount * 100;

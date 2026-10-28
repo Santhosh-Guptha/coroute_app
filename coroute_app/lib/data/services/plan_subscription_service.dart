@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -64,6 +65,28 @@ class PlanDetails {
     required this.features,
     this.isPopular = false,
   });
+
+  PlanDetails copyWith({
+    SubscriptionTier? tier,
+    String? name,
+    String? tagline,
+    String? monthlyPrice,
+    String? annualPrice,
+    int? maxConvoySize,
+    List<PlanFeatureItem>? features,
+    bool? isPopular,
+  }) {
+    return PlanDetails(
+      tier: tier ?? this.tier,
+      name: name ?? this.name,
+      tagline: tagline ?? this.tagline,
+      monthlyPrice: monthlyPrice ?? this.monthlyPrice,
+      annualPrice: annualPrice ?? this.annualPrice,
+      maxConvoySize: maxConvoySize ?? this.maxConvoySize,
+      features: features ?? this.features,
+      isPopular: isPopular ?? this.isPopular,
+    );
+  }
 }
 
 /// Service managing subscription plan selection, feature entitlements,
@@ -78,6 +101,12 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   static const String keyForceUnlocked = 'coroute_force_all_unlocked';
   static const String keyPreviousTier = 'coroute_subscription_previous_tier';
   static const String keyExpiredAt = 'coroute_subscription_expired_at';
+  static const String keyConfiguredPlans = 'coroute_subscription_configured_plans';
+
+  static Map<String, dynamic>? _configuredPlans;
+
+  /// Exposes reactive plan details list with dynamically configured prices.
+  List<PlanDetails> get plans => allPlans;
 
   /// Prefix of the per-step "expiring" warning marker (value: the validUntil it was shown for).
   static const String keyExpiringNoticePrefix = 'coroute_subscription_expiring_notice_';
@@ -384,6 +413,15 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
       _forceAllUnlocked = prefs.getBool(keyForceUnlocked) ?? false;
       _previousTier = _tierNamed(prefs.getString(keyPreviousTier));
       _expiredAt = prefs.getInt(keyExpiredAt) ?? 0;
+      final cachedPlans = prefs.getString(keyConfiguredPlans);
+      if (cachedPlans != null && cachedPlans.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(cachedPlans);
+          if (decoded is Map) {
+            _configuredPlans = Map<String, dynamic>.from(decoded);
+          }
+        } catch (_) {}
+      }
       _syncToFeatureGates();
     } catch (_) {
       // Fallback defaults
@@ -393,14 +431,42 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     }
     checkExpiry();
 
-    // Background sync from Gateway API
-    if (_api != null && _api.hasToken) {
-      syncFromServer().ignore();
+    // Background sync pricing & subscription from Gateway API
+    if (_api != null) {
+      refreshPricingConfig().ignore();
+      if (_api.hasToken) {
+        syncFromServer().ignore();
+      }
     }
+  }
+
+  /// Applies live configured plan pricing and persists to local cache.
+  void applyConfiguredPlans(Map<String, dynamic> plans) {
+    _configuredPlans = Map<String, dynamic>.from(plans);
+    _persistPlans(plans);
+    notifyListeners();
+  }
+
+  void _persistPlans(Map<String, dynamic> plans) {
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setString(keyConfiguredPlans, jsonEncode(plans));
+    }).ignore();
+  }
+
+  /// Fetches latest public subscription config (plans, prices, gateway mode) from server.
+  Future<void> refreshPricingConfig() async {
+    if (_api == null) return;
+    try {
+      final res = await _api.get('/subscription/config');
+      if (res is Map && res['plans'] is Map) {
+        applyConfiguredPlans(Map<String, dynamic>.from(res['plans']));
+      }
+    } catch (_) {}
   }
 
   /// Refreshes authentic subscription status from the backend.
   Future<void> syncFromServer() async {
+    refreshPricingConfig().ignore();
     if (_api == null || !_api.hasToken) return;
     try {
       final res = await _api.get('/subscription/status');
@@ -618,9 +684,48 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   /// Current max allowable convoy size.
   int get maxConvoyMembers => FeatureGates.maxConvoyMembers(effectiveTier);
 
-  /// Returns full plan specifications for all available tiers.
-  static List<PlanDetails> get allPlans => [
-        const PlanDetails(
+  /// Formats an INR price cleanly (e.g. 50 -> "₹50 / mo", 1199 -> "₹1,199 / yr").
+  static String formatPlanPrice(num amount, {required bool isAnnual}) {
+    final intVal = amount.toInt();
+    final formatted = intVal >= 1000
+        ? '₹${intVal ~/ 1000},${(intVal % 1000).toString().padLeft(3, '0')}'
+        : '₹$intVal';
+    return isAnnual ? '$formatted / yr' : '$formatted / mo';
+  }
+
+  /// Sets or updates the dynamically configured plan amounts in memory.
+  static void setConfiguredPlans(Map<String, dynamic>? plans) {
+    _configuredPlans = plans != null ? Map<String, dynamic>.from(plans) : null;
+  }
+
+  /// Returns full plan specifications for all available tiers, with live configured prices if available.
+  static List<PlanDetails> get allPlans {
+    final base = _basePlans;
+    if (_configuredPlans == null || _configuredPlans!.isEmpty) return base;
+    return base.map((p) {
+      final key = p.tier.name;
+      final cfg = _configuredPlans![key];
+      if (cfg is Map) {
+        final monthly = cfg['monthly'];
+        final annual = cfg['annual'];
+        final label = cfg['label']?.toString();
+        return p.copyWith(
+          name: (label != null && label.isNotEmpty) ? label : p.name,
+          monthlyPrice: (monthly is num && monthly > 0)
+              ? formatPlanPrice(monthly, isAnnual: false)
+              : p.monthlyPrice,
+          annualPrice: (annual is num && annual > 0)
+              ? formatPlanPrice(annual, isAnnual: true)
+              : p.annualPrice,
+        );
+      }
+      return p;
+    }).toList();
+  }
+
+  /// Static baseline plan specifications for all available tiers.
+  static List<PlanDetails> get _basePlans => const [
+        PlanDetails(
           tier: SubscriptionTier.community,
           name: 'Community Rider',
           tagline: 'Essential Safety & Small Group Rides',
@@ -654,7 +759,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
             ),
           ],
         ),
-        const PlanDetails(
+        PlanDetails(
           tier: SubscriptionTier.proRider,
           name: 'CoRoute Pro',
           tagline: 'Solo Exploration, Family Tracking & Deep Telemetry',
@@ -694,7 +799,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
             ),
           ],
         ),
-        const PlanDetails(
+        PlanDetails(
           tier: SubscriptionTier.roadCaptain,
           name: 'Road Captain Pass',
           tagline: 'Host the Pack — One Pass Unlocks the Entire Convoy',
@@ -732,7 +837,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
             ),
           ],
         ),
-        const PlanDetails(
+        PlanDetails(
           tier: SubscriptionTier.tourOperator,
           name: 'Tour Operator',
           tagline: 'Commercial Motorcycle Touring, Marshals & Dispatchers',

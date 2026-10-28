@@ -217,5 +217,27 @@ void main() {
       expect(operator.maxConvoySize, equals(100));
       expect(operator.monthlyPrice, contains('₹1,999'));
     });
+
+    test('applyConfiguredPlans dynamically updates plan pricing in allPlans and plans', () {
+      final service = PlanSubscriptionService();
+      addTearDown(() => PlanSubscriptionService.setConfiguredPlans(null));
+
+      var notified = false;
+      service.addListener(() => notified = true);
+
+      service.applyConfiguredPlans({
+        'proRider': {'monthly': 50, 'annual': 1199, 'label': 'CoRoute Pro'},
+        'roadCaptain': {'monthly': 499, 'annual': 3999, 'label': 'Road Captain Pass'},
+      });
+
+      expect(notified, isTrue);
+      final pro = service.plans.firstWhere((p) => p.tier == SubscriptionTier.proRider);
+      expect(pro.monthlyPrice, equals('₹50 / mo'));
+      expect(pro.annualPrice, equals('₹1,199 / yr'));
+
+      final captain = service.plans.firstWhere((p) => p.tier == SubscriptionTier.roadCaptain);
+      expect(captain.monthlyPrice, equals('₹499 / mo'));
+      expect(captain.annualPrice, equals('₹3,999 / yr'));
+    });
   });
 }

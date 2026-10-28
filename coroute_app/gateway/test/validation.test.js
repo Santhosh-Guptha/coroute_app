@@ -151,3 +151,15 @@ test('tripRecord keeps a trip from a phone usable', () => {
   assert.equal(r.riderCount, 0);
   assert.equal(r.breadcrumbTrail.length, 1);
 });
+
+test('malformed JSON payload returns 400 with clean error JSON', async () => {
+  const port = t.gw.server.address().port;
+  const res = await fetch(`http://127.0.0.1:${port}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{ malformed json',
+  });
+  assert.equal(res.status, 400);
+  const data = await res.json();
+  assert.equal(data.error, 'Invalid JSON payload');
+});

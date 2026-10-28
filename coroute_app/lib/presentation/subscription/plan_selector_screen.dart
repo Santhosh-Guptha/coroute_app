@@ -36,6 +36,11 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<PlanSubscriptionService>().refreshPricingConfig().ignore();
+      }
+    });
     final pre = widget.preselectTier;
     if (pre != null && pre != SubscriptionTier.community) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -56,7 +61,7 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
     final entitledTier = planService.entitledTier;
     final heldPlanActive = planService.isEntitledTo(entitledTier);
     final activeUntil = heldPlanActive ? formatValidUntil(planService.validUntil) : '';
-    final plans = PlanSubscriptionService.allPlans;
+    final plans = planService.plans;
     // Expired or ending: the plan to renew (never the free tier).
     final renewTier = widget.preselectTier ??
         ((planService.isExpired || planService.expiringSoon) ? planService.renewTier : null);
