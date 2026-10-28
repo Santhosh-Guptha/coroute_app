@@ -422,15 +422,9 @@ class Repo {
         await this.soda.remove(C.guardianGrants, key);
       }
     }
-    await Promise.all([
-      this.soda.removeWhere(C.riders, { groupId }),
-      this.soda.removeWhere(C.messages, { groupId }),
-      this.soda.removeWhere(C.alerts, { groupId }),
-      this.soda.removeWhere(C.voiceLog, { groupId }),
-      this.soda.removeWhere(C.trackChunks, { groupId }),
-      this.soda.removeWhere(C.events, { groupId }),
-      this.soda.removeWhere(C.trips, { groupId }),
-    ]);
+    for (const coll of [C.riders, C.messages, C.alerts, C.voiceLog, C.trackChunks, C.events, C.trips]) {
+      await this.soda.removeWhere(coll, { groupId });
+    }
     await this.soda.removeWhere(C.convoys, { groupId });
   }
 

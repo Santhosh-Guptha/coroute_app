@@ -27,7 +27,7 @@ class SodaClient {
     this.fetch = opts.fetchImpl || globalThis.fetch;
   }
 
-  async _request(method, path, body, { retries = 1, contentType = 'application/json' } = {}) {
+  async _request(method, path, body, { retries = 2, contentType = 'application/json' } = {}) {
     const url = `${this.baseUrl}${path}`;
     let lastErr;
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -47,8 +47,11 @@ class SodaClient {
         if (text) {
           try { json = JSON.parse(text); } catch { json = { raw: text }; }
         }
-        if (res.status >= 500 && attempt < retries) {
+        const retryable = (res.status >= 500 || res.status === 429);
+        if (retryable && attempt < retries) {
           lastErr = new SodaError(`SODA ${method} ${path} -> ${res.status}`, res.status, json);
+          const backoffMs = Math.min(1000, 100 * Math.pow(2, attempt) + Math.floor(Math.random() * 50));
+          await new Promise((r) => setTimeout(r, backoffMs));
           continue;
         }
         if (!res.ok) throw new SodaError(`SODA ${method} ${path} -> ${res.status}`, res.status, json);
@@ -57,6 +60,8 @@ class SodaClient {
         lastErr = err;
         const transient = err.name === 'TimeoutError' || err.name === 'AbortError' || err.code === 'ECONNRESET' || err.code === 'UND_ERR_SOCKET';
         if (!transient || attempt >= retries) throw err;
+        const backoffMs = Math.min(1000, 100 * Math.pow(2, attempt) + Math.floor(Math.random() * 50));
+        await new Promise((r) => setTimeout(r, backoffMs));
       }
     }
     throw lastErr;
@@ -183,13 +188,17 @@ class SodaClient {
     return this.insert(collection, doc);
   }
 
-  /** Deletes every document matching filter (batched). Returns count. */
-  async removeWhere(collection, filter, batch = 200) {
+  /** Deletes every document matching filter (batched with concurrency limit). Returns count. */
+  async removeWhere(collection, filter, batch = 100) {
     let total = 0;
+    const concurrency = 6;
     for (;;) {
       const rows = await this.query(collection, filter, { limit: batch });
       if (rows.length === 0) break;
-      await Promise.all(rows.map((r) => this.remove(collection, r.key)));
+      for (let i = 0; i < rows.length; i += concurrency) {
+        const chunk = rows.slice(i, i + concurrency);
+        await Promise.all(chunk.map((r) => this.remove(collection, r.key)));
+      }
       total += rows.length;
       if (rows.length < batch) break;
     }
