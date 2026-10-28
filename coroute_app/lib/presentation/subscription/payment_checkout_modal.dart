@@ -123,6 +123,11 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
   String? get _couponCode => _appliedCoupon?['code']?.toString();
 
   bool get _orderLinkExpired {
+    // The server says when the website link stops working; otherwise 30 minutes from creation.
+    final serverExpiry = _orderData?['webCheckoutExpiresAt'];
+    if (serverExpiry is num && serverExpiry > 0) {
+      return DateTime.now().millisecondsSinceEpoch > serverExpiry.toInt() - const Duration(minutes: 1).inMilliseconds;
+    }
     final at = _orderCreatedAt;
     if (at == null) return true;
     // A minute of margin: the rider still has to finish on the site.
@@ -166,6 +171,15 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
       // A queued cheaper plan shows up as pendingTier instead.
       if (_service.isEntitledTo(widget.plan.tier) || _service.pendingTier == widget.plan.tier) {
         await _succeed();
+      } else if (_waitingForWebPayment && _orderLinkExpired) {
+        // The website refuses a link older than 30 minutes ("This link has expired"): make a new order.
+        setState(() {
+          _isLoading = false;
+          _waitingForWebPayment = false;
+          _errorMessage = null;
+          _infoMessage = 'The website link expired before the payment was confirmed. A new order has been created; pay again.';
+        });
+        await _initOrder(couponCode: _couponCode);
       } else {
         setState(() {
           _isLoading = false;

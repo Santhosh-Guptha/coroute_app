@@ -143,8 +143,8 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
   static num? _numOf(dynamic v) => v is num ? v : num.tryParse('${v ?? ''}');
 
   /// Refund of a payment or order: (rupees refunded, whole amount?), null when none.
-  /// Reads `refundStatus` / `status` and `refundedAmount` (rupees) or
-  /// `refundedAmountInPaise`.
+  /// Reads `refundedAmount` (rupees) or `refundedAmountInPaise`, `fullyRefunded`,
+  /// and `refundStatus` (PROCESSED / PENDING) or a REFUNDED `status`.
   static (num, bool)? _refundOf(Map<String, dynamic> m, num? amount) {
     final status = (m['refundStatus'] ?? m['status'] ?? '').toString().toUpperCase();
     final paise = _numOf(m['refundedAmountInPaise']) ?? _numOf(m['refundAmountInPaise']);
@@ -152,7 +152,8 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
     final flagged = status.contains('REFUND') || m['refunded'] == true;
     if ((rupees == null || rupees <= 0) && !flagged) return null;
     final partial = status.contains('PARTIAL');
-    final full = !partial && (status == 'REFUNDED' || status == 'FULL' || rupees == null || (amount != null && rupees >= amount));
+    final full = m['fullyRefunded'] == true ||
+        (!partial && (status == 'REFUNDED' || status == 'FULL' || rupees == null || (amount != null && amount > 0 && rupees >= amount)));
     return (rupees ?? amount ?? 0, full);
   }
 

@@ -452,9 +452,13 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     final prev = _tierNamed(status['previousTier']?.toString());
     final expired = status['isExpired'] == true;
     final days = status['daysRemaining'] is num ? (status['daysRemaining'] as num).toInt() : null;
-    final pending = _tierNamed(status['pendingTier']?.toString());
+    // `pendingTier` is a tier name (with `pendingStartsAt`) or an object `{tier, startsAt}`.
+    final rawPending = status['pendingTier'];
+    final pendingName = rawPending is Map ? rawPending['tier']?.toString() : rawPending?.toString();
+    final pendingAt = rawPending is Map ? rawPending['startsAt'] : status['pendingStartsAt'];
+    final pending = _tierNamed(pendingName);
     _pendingTier = pending == SubscriptionTier.community ? null : pending;
-    _pendingStartsAt = _pendingTier != null && status['pendingStartsAt'] is num ? (status['pendingStartsAt'] as num).toInt() : 0;
+    _pendingStartsAt = _pendingTier != null && pendingAt is num ? pendingAt.toInt() : 0;
     applyServerSubscription(tierName, until, previousTier: expired ? (prev ?? _previousTier) : prev, serverDaysRemaining: days);
     if (status['expiringSoon'] == true && _isPaid && days != null) {
       _noteExpiring(days, _entitledTier, _validUntil);

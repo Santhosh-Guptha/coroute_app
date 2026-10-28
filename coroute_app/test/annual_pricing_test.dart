@@ -106,6 +106,15 @@ void main() {
 
       service.applySubscriptionStatus({'tier': 'roadCaptain', 'validUntil': until});
       expect(service.pendingTier, isNull);
+
+      // Object form from the gateway: {tier, startsAt}.
+      service.applySubscriptionStatus({
+        'tier': 'roadCaptain',
+        'validUntil': until,
+        'pendingTier': {'tier': 'proRider', 'startsAt': until},
+      });
+      expect(service.pendingTier, SubscriptionTier.proRider);
+      expect(service.pendingStartsAt, until);
     });
   });
 
