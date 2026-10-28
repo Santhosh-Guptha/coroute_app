@@ -366,6 +366,7 @@ class _OfferEditorState extends State<_OfferEditor> {
                     final v = await _pickDay(context, _startsAt);
                     if (v != null && mounted) setState(() => _startsAt = v);
                   },
+                  onClear: () => setState(() => _startsAt = 0),
                 ),
               ),
               const SizedBox(width: 12),
@@ -377,6 +378,7 @@ class _OfferEditorState extends State<_OfferEditor> {
                     final v = await _pickDay(context, _endsAt, endOfDay: true);
                     if (v != null && mounted) setState(() => _endsAt = v);
                   },
+                  onClear: () => setState(() => _endsAt = 0),
                 ),
               ),
             ],
@@ -786,6 +788,7 @@ class _CouponEditorState extends State<_CouponEditor> {
                     final v = await _pickDay(context, _validFrom);
                     if (v != null && mounted) setState(() => _validFrom = v);
                   },
+                  onClear: () => setState(() => _validFrom = 0),
                 ),
               ),
               const SizedBox(width: 12),
@@ -797,6 +800,7 @@ class _CouponEditorState extends State<_CouponEditor> {
                     final v = await _pickDay(context, _expiresAt, endOfDay: true);
                     if (v != null && mounted) setState(() => _expiresAt = v);
                   },
+                  onClear: () => setState(() => _expiresAt = 0),
                 ),
               ),
             ],
