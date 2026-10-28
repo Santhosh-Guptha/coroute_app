@@ -3,9 +3,9 @@
  * Razorpay gateway settings + API client.
  *
  * Two key pairs are kept, TEST and LIVE, and one active MODE picks which pair
- * every new order uses. The platform admin edits them from
- * /pricing-admin.html (or PUT /api/admin/payment-gateway); switching from test
- * to production is a single mode change, no redeploy.
+ * every new order uses. The platform admin edits them from the admin console
+ * in the CoRoute app (PUT /api/admin/payment-gateway); switching from test to
+ * production is a single mode change, no redeploy.
  *
  * Where values come from (first match wins):
  *   1. Admin-saved settings in Oracle (`subscription_config`, k = 'razorpay').
@@ -219,6 +219,23 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
     return { id: data.id, amount: data.amount, currency: data.currency, mode: keys.mode, keyId: keys.keyId };
   }
 
+  /**
+   * Refunds all or part of a captured payment with the keys of [mode] (the order's mode,
+   * never the active one: a test payment is refunded with test keys).
+   * Returns { id, amount, status, mode }. status is Razorpay's: 'pending' | 'processed' | 'failed'.
+   */
+  async function refundPayment(paymentId, amountInPaise, notes, mode) {
+    if (!paymentId) throw new RazorpayError(400, 'A payment id is required for a refund', 'NO_PAYMENT');
+    if (!MODES.includes(mode)) throw new RazorpayError(400, 'Only test or live Razorpay payments can be refunded', 'BAD_MODE');
+    const keys = await keysFor(mode);
+    const body = { speed: 'normal', notes: notes || {} };
+    const amount = Math.round(Number(amountInPaise));
+    if (Number.isFinite(amount) && amount > 0) body.amount = amount;
+    const data = await call(keys, 'POST', `/payments/${encodeURIComponent(paymentId)}/refund`, body);
+    if (!data.id) throw new RazorpayError(500, 'Razorpay returned no refund id', 'RAZORPAY_ERROR');
+    return { id: data.id, amount: Number(data.amount) || amount, status: String(data.status || 'pending').toLowerCase(), mode: keys.mode };
+  }
+
   /** Checks the [mode] pair against Razorpay. */
   async function testKeys(mode) {
     const keys = await keysFor(mode);
@@ -257,6 +274,7 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
     publicView,
     update,
     createOrder,
+    refundPayment,
     testKeys,
     verifySignature,
     verifyWebhook,

@@ -3,6 +3,7 @@ import 'dart:isolate';
 import 'dart:ui' show IsolateNameServer;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/timezone.dart' as tz;
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/ui/ride_alert.dart';
@@ -22,7 +23,8 @@ void alarmNotificationBackground(NotificationResponse response) {
 /// only the callbacks of the last initialize call), plus the safety
 /// notifications: the crash alarm, the rider prompts and the admin alarm.
 ///
-/// Payload prefixes: 'CRASH' (crash alarm), 'PROMPT' (`PROMPT:<key>`), 'ADMIN'.
+/// Payload prefixes: 'CRASH' (crash alarm), 'PROMPT' (`PROMPT:<key>`), 'ADMIN',
+/// 'PLAN' (`PLAN:<tier>`, plan expiry reminders).
 /// Button ids: 'crash_ok', 'crash_send', 'prompt_ok', 'prompt_secondary' (3.16:
 /// "Filled up", "Need help").
 class AlarmNotifier {
@@ -32,6 +34,8 @@ class AlarmNotifier {
   static const String payloadCrash = 'CRASH';
   static const String payloadPrompt = 'PROMPT';
   static const String payloadAdmin = 'ADMIN';
+  static const String payloadPlan = 'PLAN';
+  static const String channelPlan = 'coroute_plan_reminders';
   static const String actionCrashOk = 'crash_ok';
   static const String actionCrashSend = 'crash_send';
   static const String actionPromptOk = 'prompt_ok';
@@ -89,6 +93,12 @@ class AlarmNotifier {
         enableVibration: true,
         vibrationPattern: _alarmVibration,
         audioAttributesUsage: AudioAttributesUsage.alarm,
+      ));
+      await android?.createNotificationChannel(const AndroidNotificationChannel(
+        channelPlan,
+        'Plan reminders',
+        description: 'Tells you a few days before your CoRoute plan ends.',
+        importance: Importance.defaultImportance,
       ));
       return ok ?? false;
     } catch (e) {
@@ -240,6 +250,78 @@ class AlarmNotifier {
   }
 
   static Future<void> stopAdminAlarm() => _cancel(SafetyConstants.adminAlarmId);
+
+  /// A plan reminder at the absolute instant [at]. Inexact (no exact-alarm
+  /// permission); a few minutes late is fine for a renewal nudge. Instants in
+  /// the past are skipped (the plugin refuses them).
+  static Future<void> schedulePlanReminder({
+    required int id,
+    required DateTime at,
+    required String title,
+    required String body,
+    required String payload,
+  }) async {
+    if (!await ensureInitialized()) return;
+    if (!at.isAfter(DateTime.now())) return;
+    final details = AndroidNotificationDetails(
+      channelPlan,
+      'Plan reminders',
+      channelDescription: 'Tells you a few days before your CoRoute plan ends.',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+      category: AndroidNotificationCategory.reminder,
+      autoCancel: true,
+      styleInformation: BigTextStyleInformation(body),
+    );
+    try {
+      await _plugin?.zonedSchedule(
+        id,
+        title,
+        body,
+        tz.TZDateTime.from(at.toUtc(), tz.UTC),
+        NotificationDetails(android: details),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('plan reminder note: $e');
+    }
+  }
+
+  /// Cancels scheduled plan reminders. Initialises first: the reminders outlive
+  /// the process, so they must be cancellable before anything else ran.
+  static Future<void> cancelPlanReminders(Iterable<int> ids) async {
+    if (!await ensureInitialized()) return;
+    for (final id in ids) {
+      try {
+        await _plugin?.cancel(id);
+      } catch (_) {}
+    }
+  }
+
+  /// Asks for the Android 13+ notification permission. True when granted (or
+  /// not needed on this Android version).
+  static Future<bool> requestNotificationPermission() async {
+    if (!await ensureInitialized()) return false;
+    try {
+      final android = _plugin?.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      return await android?.requestNotificationsPermission() ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The payload of the notification that launched the app from a cold start, if any.
+  static Future<String?> launchPayload() async {
+    if (!await ensureInitialized()) return null;
+    try {
+      final d = await _plugin?.getNotificationAppLaunchDetails();
+      if (d == null || !d.didNotificationLaunchApp) return null;
+      return d.notificationResponse?.payload;
+    } catch (_) {
+      return null;
+    }
+  }
 
   static Future<void> _cancel(int id) async {
     if (!_supported || _init == null) return;

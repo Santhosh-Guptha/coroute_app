@@ -144,6 +144,91 @@ You can then remove `BOOTSTRAP_ADMIN_EMAILS` from the env file; roles live in th
 
 Health: `GET /api/health` → `{"status":"HEALTHY","db":"UP",…}` (503 if the DB is unreachable). Point any free uptime monitor (e.g. UptimeRobot free tier) at it if you want a ping when it's down.
 
+## 6b. Payments data: backup & restore
+
+Everything money-related lives in two SODA collections:
+
+| Collection | What | Keyed by |
+|---|---|---|
+| `subscription_config` | order ledger (`k='rzp_order'`), refunds and webhook ids on each order, pricing (`k='pricing'`), offers (`k='offer'`), admin audit trail (`k='audit'`), encrypted Razorpay settings (`k='razorpay'`), sweeper status (`k='sweep'`) | `k` + `orderId` / `id` |
+| `users` | each rider's `subscriptionTier`, `subscriptionValidUntil`, `pendingTier`, `paymentHistory`, `subscriptionHistory` | `userId` |
+
+Razorpay also keeps every order, payment and refund (Dashboard → Transactions), so the ledger can always be
+re-checked against it. The Razorpay settings document holds secrets encrypted with `JWT_SECRET`: a restore onto
+a gateway with a different `JWT_SECRET` keeps the key ids but the secrets must be re-entered in the admin console.
+
+**Nightly export (on the VM, as root).** Pages through the SODA REST API with the schema user from
+`/etc/coroute/gateway.env` and keeps 30 days of gzipped JSON in `/var/backups/coroute`:
+
+```bash
+sudo tee /usr/local/bin/coroute-backup >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+set -a; . /etc/coroute/gateway.env; set +a
+out=/var/backups/coroute/$(date -u +%F); mkdir -p "$out"; chmod 700 /var/backups/coroute
+for coll in subscription_config users; do
+  offset=0; : > "$out/$coll.jsonl"
+  while :; do
+    page=$(curl -fsS -u "$ORACLE_USER:$ORACLE_PASSWORD" "$ORACLE_SODA_URL/$coll?fields=value&limit=500&offset=$offset")
+    echo "$page" | jq -c '.items[].value' >> "$out/$coll.jsonl"
+    [ "$(echo "$page" | jq -r '.hasMore')" = "true" ] || break
+    offset=$((offset + 500))
+  done
+  gzip -f "$out/$coll.jsonl"
+done
+find /var/backups/coroute -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf {} +
+EOF
+sudo chmod 700 /usr/local/bin/coroute-backup && sudo apt-get install -y jq
+echo '17 2 * * * root /usr/local/bin/coroute-backup >> /var/log/coroute-backup.log 2>&1' | sudo tee /etc/cron.d/coroute-backup
+sudo /usr/local/bin/coroute-backup && ls -l /var/backups/coroute/$(date -u +%F)
+```
+
+Copy the folder off the VM now and then (`scp -r ubuntu@<vm>:/var/backups/coroute ./`). For a spreadsheet copy of
+the ledger, an admin can download `GET /api/admin/payments/export.csv?from=&to=` from the admin console.
+
+**Restore** (only into an empty or damaged collection; the gateway upserts by `orderId` / `userId`, so never
+import twice into a live one):
+
+1. `sudo systemctl stop coroute-gateway` so the sweeper and webhooks do not write in between.
+2. In Database Actions → SODA (or `soda drop`/`soda create`), empty the damaged collection.
+3. Import, 500 documents per request:
+   ```bash
+   set -a; . /etc/coroute/gateway.env; set +a
+   d=/var/backups/coroute/2026-10-27   # the day to restore
+   for coll in subscription_config users; do
+     zcat "$d/$coll.jsonl.gz" | split -l 500 - /tmp/restore_${coll}_
+     for f in /tmp/restore_${coll}_*; do
+       jq -s '.' "$f" | curl -fsS -u "$ORACLE_USER:$ORACLE_PASSWORD" -H 'Content-Type: application/json' \
+         -X POST --data-binary @- "$ORACLE_SODA_URL/$coll?action=insert" >/dev/null
+     done
+     rm -f /tmp/restore_${coll}_*
+   done
+   ```
+4. `sudo systemctl start coroute-gateway` (collections and indexes are checked at boot), then compare
+   `GET /api/admin/subscription/overview` and the CSV export with Razorpay Dashboard → Transactions for the days
+   since the backup. A payment Razorpay captured after the backup is re-applied when its webhook is re-sent
+   (Dashboard → Webhooks → the event → Resend), because orders are activated once per `orderId`.
+
+## 6c. Going live with Razorpay
+
+1. **KYC.** Razorpay Dashboard → Account & Settings → complete business KYC (PAN, bank account, website
+   `https://coroute.duckdns.org` with the privacy, terms and contact pages). Live keys appear only after activation.
+2. **Live keys.** Dashboard (Live mode) → Account & Settings → API Keys → generate. In the CoRoute app open the
+   admin console → Payment gateway, paste the live key id (`rzp_live_…`) and secret, press **Test** (checks them
+   against Razorpay), then switch the mode to **live**. No redeploy; the secret is stored encrypted and never shown
+   again. Test-mode orders already in the ledger keep their test keys for verification and refunds.
+3. **Webhook.** Dashboard (Live mode) → Account & Settings → Webhooks → Add:
+   * URL: `https://coroute.duckdns.org/api/subscription/webhook`
+   * Events: `payment.captured`, `order.paid`, `payment.failed`, `refund.processed`
+   * Secret: a new random value (`openssl rand -hex 24`); paste the same value as the live webhook secret in the
+     admin console. Unsigned or wrongly signed calls are refused (400); bodies over 1 MB are refused (413);
+     repeated deliveries are recognised by `x-razorpay-event-id`.
+   Do the same in Test mode with the test webhook secret so test payments are confirmed too.
+4. **Smoke test** with a real ₹1 offer or the cheapest plan: pay in the app, check the plan activates, then refund it
+   from the admin console (Payments → Refund) and confirm `refund.processed` arrives (the refund shows PROCESSED).
+5. Everything an admin changes (prices, offers, coupons, keys, grants, revokes, refunds) is listed in the admin
+   console's audit trail (`GET /api/admin/audit`).
+
 ## 7. Upgrading the gateway
 
 ```bash

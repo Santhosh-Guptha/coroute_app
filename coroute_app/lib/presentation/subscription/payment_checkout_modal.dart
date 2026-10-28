@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -7,15 +8,19 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/plan_subscription_service.dart';
+import '../../data/services/subscription_reminders.dart';
 
-/// Official Razorpay Checkout Modal for 100% UPI Payments.
+/// Checkout for a paid plan. Razorpay is the only way to pay, by UPI:
 ///
-/// Features:
-/// 1. Direct native Razorpay Checkout sheet opening with `Razorpay.open(...)`.
-/// 2. Strictly UPI-only instrument restriction (`method: { upi: true, card: false, ... }`).
-/// 3. Native event listeners: `EVENT_PAYMENT_SUCCESS`, `EVENT_PAYMENT_ERROR`, `EVENT_EXTERNAL_WALLET`.
-/// 4. Instant cryptographic signature verification with backend `/api/subscription/verify-payment`.
-/// 5. Secondary fallback: direct UPI deep-link intent (`upi://pay`) and manual UTR submission.
+/// 1. In the app: the Razorpay Checkout SDK, restricted to UPI. The signed
+///    result is verified by `/subscription/verify-payment`.
+/// 2. On the website: the order's `webCheckoutUrl` (valid 30 minutes). The
+///    server activates the plan from Razorpay's webhook; the app re-reads the
+///    status when the site sends the rider back (`coroute://subscription`) or
+///    when the app returns to the foreground.
+///
+/// The summary shows the server's price, any automatic `offer` and any
+/// `coupon` discount, and what happens to the plan the rider already holds.
 class PaymentCheckoutModal extends StatefulWidget {
   final PlanDetails plan;
   final bool isAnnual;
@@ -39,39 +44,57 @@ class PaymentCheckoutModal extends StatefulWidget {
     );
   }
 
+  /// How long the website payment link of an order stays valid.
+  static const Duration webLinkLifetime = Duration(minutes: 30);
+
   @override
   State<PaymentCheckoutModal> createState() => _PaymentCheckoutModalState();
 }
 
 class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with WidgetsBindingObserver {
   late Razorpay _razorpay;
+  late final PlanSubscriptionService _service;
+  final TextEditingController _couponController = TextEditingController();
 
   /// True after the website checkout was opened; the status is re-read when
-  /// the app comes back to the foreground.
+  /// the app comes back (deep link or foreground).
   bool _waitingForWebPayment = false;
-  final TextEditingController _utrController = TextEditingController();
-  final TextEditingController _couponController = TextEditingController();
+  bool _checkingWeb = false;
 
   bool _isLoading = false;
   bool _isSuccess = false;
   String? _errorMessage;
+  String? _infoMessage;
   Map<String, dynamic>? _orderData;
-  bool _showManualFallback = false;
+  DateTime? _orderCreatedAt;
 
   Map<String, dynamic>? _appliedCoupon;
   bool _isValidatingCoupon = false;
   String? _couponError;
 
+  static final NumberFormat _inrFmt = NumberFormat.decimalPattern('en_IN');
+
   @override
   void initState() {
     super.initState();
+    _service = context.read<PlanSubscriptionService>();
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
     _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
     WidgetsBinding.instance.addObserver(this);
+    _service.checkoutReturns.addListener(_onCheckoutReturn);
 
     _initOrder();
+  }
+
+  @override
+  void dispose() {
+    _service.checkoutReturns.removeListener(_onCheckoutReturn);
+    WidgetsBinding.instance.removeObserver(this);
+    _razorpay.clear();
+    _couponController.dispose();
+    super.dispose();
   }
 
   @override
@@ -81,44 +104,68 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
     }
   }
 
-  /// Opens the same order on the website (UPI only). The server activates
-  /// the plan when Razorpay posts the verified result back to it; the app
-  /// picks that up from /subscription/status on resume.
+  /// `coroute://subscription` opened the app: the service already re-read the
+  /// plan. An expired link gets a fresh order; otherwise look at the result.
+  void _onCheckoutReturn() {
+    if (!mounted || _isSuccess) return;
+    final status = (_service.lastCheckoutReturn?.queryParameters['status'] ?? '').toLowerCase();
+    if (status.contains('expired')) {
+      setState(() {
+        _waitingForWebPayment = false;
+        _infoMessage = 'That payment link expired. A new order has been created; pay again in the app or on the website.';
+      });
+      _initOrder(couponCode: _couponCode);
+      return;
+    }
+    _checkWebPaymentResult(sync: false);
+  }
+
+  String? get _couponCode => _appliedCoupon?['code']?.toString();
+
+  bool get _orderLinkExpired {
+    final at = _orderCreatedAt;
+    if (at == null) return true;
+    // A minute of margin: the rider still has to finish on the site.
+    return DateTime.now().difference(at) > PaymentCheckoutModal.webLinkLifetime - const Duration(minutes: 1);
+  }
+
+  /// Opens the order on the website (UPI only). A link older than 30 minutes
+  /// would be refused there, so a new order is created first.
   Future<void> _payOnWebsite() async {
+    if (_orderData == null || _orderLinkExpired) {
+      await _initOrder(couponCode: _couponCode);
+      if (!mounted || _orderData == null) return;
+    }
     final url = _orderData?['webCheckoutUrl']?.toString();
     if (url == null || url.isEmpty) {
-      setState(() => _errorMessage = 'Order not initialized.');
+      setState(() => _errorMessage = 'Website payment is not available for this order. Pay in the app instead.');
       return;
     }
     try {
       final launched = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       if (!launched) throw Exception('No browser available');
+      if (!mounted) return;
       setState(() {
         _waitingForWebPayment = true;
         _errorMessage = null;
+        _infoMessage = 'Finish the UPI payment on the website. You will come back here automatically.';
       });
     } catch (e) {
       if (mounted) setState(() => _errorMessage = 'Could not open the website: $e');
     }
   }
 
-  Future<void> _checkWebPaymentResult() async {
-    if (!mounted) return;
+  Future<void> _checkWebPaymentResult({bool sync = true}) async {
+    if (!mounted || _checkingWeb || _isSuccess) return;
+    _checkingWeb = true;
     setState(() => _isLoading = true);
     try {
-      final service = context.read<PlanSubscriptionService>();
-      await service.syncFromServer();
+      if (sync) await _service.syncFromServer();
       if (!mounted) return;
       // The server's entitlement is what counts, not the rider's local preference.
-      if (service.isEntitledTo(widget.plan.tier)) {
-        HapticFeedback.heavyImpact();
-        setState(() {
-          _isLoading = false;
-          _isSuccess = true;
-          _waitingForWebPayment = false;
-        });
-        await Future.delayed(const Duration(milliseconds: 1400));
-        if (mounted) Navigator.of(context).pop(true);
+      // A queued cheaper plan shows up as pendingTier instead.
+      if (_service.isEntitledTo(widget.plan.tier) || _service.pendingTier == widget.plan.tier) {
+        await _succeed();
       } else {
         setState(() {
           _isLoading = false;
@@ -132,16 +179,24 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
           _errorMessage = 'Could not check the payment: $e';
         });
       }
+    } finally {
+      _checkingWeb = false;
     }
   }
 
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _razorpay.clear();
-    _utrController.dispose();
-    _couponController.dispose();
-    super.dispose();
+  Future<void> _succeed() async {
+    HapticFeedback.heavyImpact();
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      _isSuccess = true;
+      _waitingForWebPayment = false;
+      _errorMessage = null;
+    });
+    // A good moment to ask for the reminder notifications (once per install).
+    PlanReminderScheduler.requestPermissionOnce().ignore();
+    await Future.delayed(const Duration(milliseconds: 1400));
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   Future<void> _initOrder({String? couponCode}) async {
@@ -151,8 +206,7 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
     });
 
     try {
-      final service = context.read<PlanSubscriptionService>();
-      final order = await service.createOrder(
+      final order = await _service.createOrder(
         widget.plan.tier,
         annual: widget.isAnnual,
         couponCode: couponCode,
@@ -160,6 +214,7 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
       if (mounted) {
         setState(() {
           _orderData = order;
+          _orderCreatedAt = DateTime.now();
           _isLoading = false;
         });
       }
@@ -167,20 +222,32 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _errorMessage = 'Could not create order: ${e.toString()}';
+          _errorMessage = 'Could not create order: ${_messageOf(e)}';
         });
       }
     }
   }
 
+  static String _messageOf(Object e) {
+    final s = e.toString();
+    final i = s.indexOf('): ');
+    return s.startsWith('ApiException(') && i > 0 ? s.substring(i + 3) : s;
+  }
+
   Future<void> _applyCoupon() async {
-    final code = _couponController.text.trim().toUpperCase();
-    if (code.isEmpty) {
+    // "Remove" when a coupon is on: back to the plain order.
+    if (_appliedCoupon != null) {
+      _couponController.clear();
       setState(() {
         _appliedCoupon = null;
         _couponError = null;
       });
       _initOrder();
+      return;
+    }
+    final code = _couponController.text.trim().toUpperCase();
+    if (code.isEmpty) {
+      setState(() => _couponError = null);
       return;
     }
 
@@ -190,44 +257,53 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
     });
 
     try {
-      final service = context.read<PlanSubscriptionService>();
-      final res = await service.validateCoupon(
+      final res = await _service.validateCoupon(
         code: code,
         tier: widget.plan.tier,
         annual: widget.isAnnual,
       );
-      if (mounted) {
-        if (res != null && res['valid'] == true) {
-          setState(() {
-            _appliedCoupon = res;
-            _isValidatingCoupon = false;
-            _couponError = null;
-          });
-          _initOrder(couponCode: code);
-        } else {
-          setState(() {
-            _appliedCoupon = null;
-            _isValidatingCoupon = false;
-            _couponError = res?['error']?.toString() ?? 'Coupon invalid';
-          });
-        }
+      if (!mounted) return;
+      if (res != null && res['valid'] == true) {
+        setState(() {
+          _appliedCoupon = {...res, 'code': res['code'] ?? code};
+          _isValidatingCoupon = false;
+          _couponError = null;
+        });
+        _initOrder(couponCode: code);
+      } else {
+        setState(() {
+          _appliedCoupon = null;
+          _isValidatingCoupon = false;
+          _couponError = res?['error']?.toString() ?? 'Coupon invalid';
+        });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _appliedCoupon = null;
           _isValidatingCoupon = false;
-          _couponError = 'Coupon check failed: $e';
+          _couponError = _messageOf(e);
         });
       }
     }
   }
 
-  /// Claims and activates a 100% free pass coupon without gateway prompt.
+  /// Amount to pay in paise, from the server's order (never computed locally).
+  int get _payablePaise {
+    final v = _orderData?['amountInPaise'];
+    if (v is num) return v.toInt();
+    final rupees = _orderData?['amount'];
+    if (rupees is num) return (rupees * 100).round();
+    return -1; // unknown until the order exists
+  }
+
+  bool get _isFreeOrder => _orderData != null && (_payablePaise == 0 || _appliedCoupon?['isFree'] == true);
+
+  /// Activates a 100 % coupon order: nothing to pay, the server verifies the coupon.
   Future<void> _claimFreePass() async {
     final orderId = _orderData?['orderId']?.toString();
     if (orderId == null) {
-      _initOrder(couponCode: _appliedCoupon?['code']?.toString());
+      _initOrder(couponCode: _couponCode);
       return;
     }
 
@@ -236,79 +312,50 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
       _errorMessage = null;
     });
 
-    try {
-      final service = context.read<PlanSubscriptionService>();
-      final res = await service.verifyPayment(
-        orderId: orderId,
-        tier: widget.plan.tier,
-        annual: widget.isAnnual,
-        couponCode: _appliedCoupon?['code']?.toString(),
-      );
-
-      if (res['success'] == true) {
-        HapticFeedback.heavyImpact();
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _isSuccess = true;
-          });
-          await Future.delayed(const Duration(milliseconds: 1400));
-          if (mounted) Navigator.of(context).pop(true);
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = res['error']?.toString() ?? 'Failed to activate free pass';
-          });
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Activation error: $e';
-        });
-      }
+    final res = await _service.verifyPayment(
+      orderId: orderId,
+      tier: widget.plan.tier,
+      annual: widget.isAnnual,
+      couponCode: _couponCode,
+    );
+    if (!mounted) return;
+    if (res['success'] == true) {
+      await _succeed();
+    } else {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = res['error']?.toString() ?? 'Failed to activate free pass';
+      });
     }
   }
 
-  /// Launches the official Razorpay Checkout SDK with UPI options.
+  /// Launches the Razorpay Checkout SDK, UPI only.
   void _openRazorpayCheckout() {
     if (_orderData == null) {
-      _initOrder();
+      _initOrder(couponCode: _couponCode);
       return;
     }
 
     setState(() {
       _errorMessage = null;
+      _infoMessage = null;
     });
 
     // The server sends the key id of the active mode (test or live).
-    final keyId = _orderData?['razorpayOptions']?['key']?.toString() ??
-        _orderData?['razorpayKeyId']?.toString();
+    final keyId = _orderData?['razorpayOptions']?['key']?.toString() ?? _orderData?['razorpayKeyId']?.toString();
     if (keyId == null || keyId.isEmpty) {
       setState(() => _errorMessage = 'Online payment is not configured. Please try again later.');
       return;
     }
-
-    final orderId = _orderData?['orderId']?.toString() ?? '';
-    int amountInPaise = _orderData?['amountInPaise'] is num
-        ? (_orderData!['amountInPaise'] as num).toInt()
-        : 0;
-    if (amountInPaise == 0) {
-      final rawPrice = widget.isAnnual ? widget.plan.annualPrice : widget.plan.monthlyPrice;
-      final numeric = int.tryParse(rawPrice.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-      amountInPaise = numeric * 100;
+    final amountInPaise = _payablePaise;
+    if (amountInPaise <= 0) {
+      setState(() => _errorMessage = 'The order has no amount to pay. Close and try again.');
+      return;
     }
 
+    final orderId = _orderData?['orderId']?.toString() ?? '';
     final auth = context.read<AuthService?>();
-    final userPhone = auth?.phone ?? '';
-    final userEmail = auth?.currentUserEmail ?? '';
-    final userName = auth?.currentUserName ?? '';
-    final userId = auth?.currentUserId ?? '';
 
-    // Compile options strictly restricted to UPI
     final options = <String, dynamic>{
       'key': keyId,
       'amount': amountInPaise,
@@ -316,12 +363,12 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
       'description': '${widget.plan.name} (${widget.isAnnual ? 'Annual' : 'Monthly'})',
       'order_id': orderId,
       'prefill': {
-        'contact': userPhone,
-        'email': userEmail,
-        'name': userName,
+        'contact': auth?.phone ?? '',
+        'email': auth?.currentUserEmail ?? '',
+        'name': auth?.currentUserName ?? '',
       },
       'notes': {
-        'userId': userId,
+        'userId': auth?.currentUserId ?? '',
         'planTier': widget.plan.tier.name,
         'billingCycle': widget.isAnnual ? 'annual' : 'monthly',
       },
@@ -331,641 +378,407 @@ class _PaymentCheckoutModalState extends State<PaymentCheckoutModal> with Widget
         'netbanking': false,
         'wallet': false,
         'emi': false,
+        'paylater': false,
       },
-      'theme': {
-        'color': '#FF5722',
-      },
+      'theme': {'color': '#FF5722'},
     };
 
     try {
       _razorpay.open(options);
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Razorpay SDK error: $e';
-        _showManualFallback = true;
-      });
+      setState(() => _errorMessage = 'Could not open Razorpay: $e. You can pay on the website instead.');
     }
   }
 
-  /// Automated callback upon successful UPI payment in Razorpay SDK.
+  /// Razorpay SDK success: verify the signature on the server, which activates the plan.
   Future<void> _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    final orderId = response.orderId ?? _orderData?['orderId']?.toString() ?? '';
-    final paymentId = response.paymentId ?? '';
-    final signature = response.signature ?? '';
-
-    try {
-      final service = context.read<PlanSubscriptionService>();
-      final res = await service.verifyPayment(
-        orderId: orderId,
-        tier: widget.plan.tier,
-        annual: widget.isAnnual,
-        paymentId: paymentId,
-        signature: signature,
-      );
-
-      if (res['success'] == true) {
-        HapticFeedback.heavyImpact();
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _isSuccess = true;
-          });
-          await Future.delayed(const Duration(milliseconds: 1400));
-          if (mounted) Navigator.of(context).pop(true);
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = res['error']?.toString() ?? 'Verification failed';
-          });
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Verification error: $e';
-        });
-      }
+    final res = await _service.verifyPayment(
+      orderId: response.orderId ?? _orderData?['orderId']?.toString() ?? '',
+      tier: widget.plan.tier,
+      annual: widget.isAnnual,
+      paymentId: response.paymentId ?? '',
+      signature: response.signature ?? '',
+      couponCode: _couponCode,
+    );
+    if (!mounted) return;
+    if (res['success'] == true) {
+      await _succeed();
+    } else {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = res['error']?.toString() ??
+            'We could not confirm the payment yet. If money left your account, the plan activates within a few minutes.';
+      });
     }
   }
 
   void _handlePaymentError(PaymentFailureResponse response) {
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-        if (response.code == Razorpay.PAYMENT_CANCELLED) {
-          _errorMessage = 'Payment cancelled by user.';
-        } else {
-          _errorMessage = response.message ?? 'Payment failed (Code ${response.code})';
-        }
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      _errorMessage = response.code == Razorpay.PAYMENT_CANCELLED
+          ? 'Payment cancelled.'
+          : (response.message ?? 'Payment failed (code ${response.code}).');
+    });
   }
 
   void _handleExternalWallet(ExternalWalletResponse response) {
-    if (mounted) {
-      setState(() {
-        _errorMessage = 'Selected external wallet: ${response.walletName}';
-      });
-    }
+    if (!mounted) return;
+    setState(() => _errorMessage = 'Wallets are not supported. Please pay by UPI.');
   }
 
-  /// Fallback: Direct native UPI deep-link intent.
-  Future<void> _launchUpiIntent() async {
-    final upiUri = _orderData?['upiUri']?.toString();
-    if (upiUri == null) {
-      setState(() => _errorMessage = 'Order not initialized.');
-      return;
-    }
+  // ---------------------------------------------------------------- summary
 
-    try {
-      final uri = Uri.parse(upiUri);
-      final launched = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
-      if (!launched && mounted) {
-        setState(() {
-          _errorMessage =
-              'No native UPI app found. Please copy the UPI ID below to pay from any banking app.';
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _errorMessage = 'Error launching UPI app: $e');
-      }
-    }
+  static num? _num(Object? v) => v is num ? v : num.tryParse('${v ?? ''}');
+
+  /// Rupees of a discount object (`discountAmount` in rupees or `discountInPaise`).
+  static num _discountOf(Object? m) {
+    if (m is! Map) return 0;
+    final rupees = _num(m['discountAmount']) ?? _num(m['discount']);
+    if (rupees != null) return rupees;
+    final paise = _num(m['discountInPaise']) ?? _num(m['discountAmountInPaise']);
+    return paise == null ? 0 : paise / 100;
   }
 
-  /// Fallback: Manual UTR verification.
-  Future<void> _verifyManualUtr() async {
-    final orderId = _orderData?['orderId']?.toString();
-    if (orderId == null) {
-      setState(() => _errorMessage = 'Order reference missing.');
-      return;
+  String _inr(num v) {
+    final whole = v == v.roundToDouble();
+    return '₹${whole ? _inrFmt.format(v.toInt()) : v.toStringAsFixed(2)}';
+  }
+
+  /// Rows: plan price, offer, coupon, total (from the server's order).
+  List<(String, String, bool)> _summaryRows() {
+    final o = _orderData;
+    final list = PlanSubscriptionService.priceOf(widget.plan.tier, annual: widget.isAnnual);
+    final base = _num(o?['baseAmount']) ?? _num(o?['originalAmount']) ?? _num(o?['listPrice']) ?? list;
+    final rows = <(String, String, bool)>[
+      ('${widget.plan.name} · ${widget.isAnnual ? 'Annual' : 'Monthly'}', _inr(base), false),
+    ];
+    final offer = o?['offer'];
+    final offerOff = _discountOf(offer);
+    if (offer is Map && offerOff > 0) {
+      final title = offer['title']?.toString() ?? 'Offer';
+      rows.add((title, '− ${_inr(offerOff)}', true));
     }
-
-    final utrText = _utrController.text.trim();
-    if (utrText.length < 8) {
-      setState(() => _errorMessage = 'Please enter a valid 12-digit UPI UTR reference.');
-      return;
+    final coupon = o?['coupon'] ?? _appliedCoupon;
+    final couponOff = _discountOf(coupon);
+    if (coupon is Map && couponOff > 0) {
+      rows.add(('Coupon ${coupon['code'] ?? ''}'.trim(), '− ${_inr(couponOff)}', true));
     }
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final service = context.read<PlanSubscriptionService>();
-      final res = await service.verifyPayment(
-        orderId: orderId,
-        tier: widget.plan.tier,
-        annual: widget.isAnnual,
-        utr: utrText,
-      );
-
-      // A UTR is only a claim: the plan is activated once the payment is
-      // confirmed by the CoRoute team (server answers 202 / pending).
-      if (res['pending'] == true) {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = res['message']?.toString() ??
-                'UTR received. Your plan is activated once the payment is confirmed.';
-          });
-        }
-        return;
-      }
-
-      if (res['success'] == true) {
-        HapticFeedback.heavyImpact();
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _isSuccess = true;
-          });
-          await Future.delayed(const Duration(milliseconds: 1400));
-          if (mounted) Navigator.of(context).pop(true);
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = res['error']?.toString() ?? 'Verification failed';
-          });
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = e.toString();
-        });
-      }
-    }
+    final paise = _payablePaise;
+    rows.add(('Total', paise >= 0 ? _inr(paise / 100) : '…', false));
+    return rows;
   }
 
   @override
   Widget build(BuildContext context) {
-    final priceLabel = widget.isAnnual ? widget.plan.annualPrice : widget.plan.monthlyPrice;
-    final vpa = _orderData?['upiVpa']?.toString() ?? 'coroute.payments@okaxis';
-    final amount = _orderData?['amount']?.toString() ??
-        (widget.isAnnual ? widget.plan.annualPrice : widget.plan.monthlyPrice);
+    final changeNote = _service.planChangeNote(widget.plan.tier);
+    final rows = _summaryRows();
+    final free = _isFreeOrder;
+    final total = rows.last.$2;
 
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 14,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Drag handle
-          Center(
-            child: Container(
-              width: 44,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.border,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          if (_isSuccess) ...[
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppTheme.accentText.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.check_circle_rounded,
-                color: AppTheme.accentText,
-                size: 64,
+      padding: EdgeInsets.only(left: 20, right: 20, top: 14, bottom: MediaQuery.of(context).viewInsets.bottom + 24),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(color: AppTheme.border, borderRadius: BorderRadius.circular(2)),
               ),
             ),
             const SizedBox(height: 16),
-            Text(
-              '${widget.plan.name} Activated!',
-              style: TextStyle(
-                color: AppTheme.text,
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
+            if (_isSuccess) ..._successContent() else ...[
+              Text(
+                'Get ${widget.plan.name}',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.text, fontSize: 20, fontWeight: FontWeight.w900),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Entitlements unlocked instantly across all devices.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.text2, fontSize: 13),
-            ),
-            const SizedBox(height: 32),
-          ] else ...[
-            // Razorpay Security Trust Badge
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.brand.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppTheme.brand.withValues(alpha: 0.3)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.security_rounded, color: AppTheme.brand, size: 14),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Razorpay 100% UPI Gateway',
-                        style: TextStyle(
-                          color: AppTheme.brand,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 11,
-                          letterSpacing: 0.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
+              const SizedBox(height: 4),
+              Text(
+                'Secure UPI payment by Razorpay',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.text2, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 16),
 
-            // Plan Title & Price
-            Text(
-              'Upgrade to ${widget.plan.name}',
-              style: TextStyle(
-                color: AppTheme.text,
-                fontSize: 20,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              priceLabel,
-              style: TextStyle(
-                color: AppTheme.accentText,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // Error Message (if any)
-            if (_errorMessage != null) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppTheme.sos.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.warnText.withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline_rounded, color: AppTheme.warnText, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _errorMessage!,
-                        style: TextStyle(color: AppTheme.warnText, fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-            ],
-
-            // Promotional Coupon Code Section
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppTheme.card,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _appliedCoupon != null ? AppTheme.accentText.withValues(alpha: 0.5) : AppTheme.border),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.local_offer_outlined, size: 16, color: AppTheme.accentText),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _couponController,
-                          textCapitalization: TextCapitalization.characters,
-                          style: TextStyle(color: AppTheme.text, fontSize: 13, fontWeight: FontWeight.w700),
-                          decoration: InputDecoration(
-                            hintText: 'COUPON CODE (e.g. WELCOME50, RIDERFREE)',
-                            hintStyle: TextStyle(color: AppTheme.text2, fontSize: 11),
-                            isDense: true,
-                            border: InputBorder.none,
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: _isValidatingCoupon ? null : _applyCoupon,
-                        child: _isValidatingCoupon
-                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                            : Text(_appliedCoupon != null ? 'Remove' : 'Apply', style: TextStyle(color: AppTheme.brand, fontWeight: FontWeight.w800, fontSize: 12)),
-                      ),
-                    ],
-                  ),
-                  if (_appliedCoupon != null) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      'Coupon ${_appliedCoupon!['code']} active: Saved ₹${_appliedCoupon!['discountAmount']}',
-                      style: TextStyle(color: AppTheme.accentText, fontSize: 11, fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                  if (_couponError != null) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      _couponError!,
-                      style: TextStyle(color: AppTheme.warnText, fontSize: 11),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // Hero: Primary Razorpay UPI or Free Pass Checkout Button
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: (_appliedCoupon != null && _appliedCoupon!['isFree'] == true) ? AppTheme.accentText : AppTheme.brand,
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                onPressed: _isLoading ? null : () => (_appliedCoupon != null && _appliedCoupon!['isFree'] == true) ? _claimFreePass() : _openRazorpayCheckout(),
-                child: _isLoading
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                      )
-                    : Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon((_appliedCoupon != null && _appliedCoupon!['isFree'] == true) ? Icons.card_giftcard_rounded : Icons.flash_on_rounded, size: 22, color: Colors.white),
-                          const SizedBox(width: 8),
-                          Text(
-                            (_appliedCoupon != null && _appliedCoupon!['isFree'] == true)
-                                ? 'Claim Free Pass (${_appliedCoupon!['code']})'
-                                : 'Pay ₹${_appliedCoupon != null ? _appliedCoupon!['finalAmount'] : amount} with Razorpay UPI',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.3,
-                            ),
-                          ),
-                        ],
-                      ),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Supported UPI Apps Row
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.check_circle_outline_rounded, size: 14, color: AppTheme.accentText),
-                const SizedBox(width: 5),
-                Text(
-                  'Supports Google Pay · PhonePe · Paytm · BHIM · Cred · QR',
-                  style: TextStyle(color: AppTheme.text2, fontSize: 11, fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Secondary: Fallback Direct UPI Intent / VPA
-            InkWell(
-              onTap: () {
-                setState(() {
-                  _showManualFallback = !_showManualFallback;
-                });
-              },
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _showManualFallback ? 'Hide direct UPI options' : 'Having trouble? Pay via direct UPI link / VPA',
-                      style: TextStyle(
-                        color: AppTheme.accentText,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      _showManualFallback ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
-                      size: 16,
-                      color: AppTheme.accentText,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            if (_showManualFallback) ...[
-              const SizedBox(height: 12),
+              // Order summary
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: AppTheme.bg,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: AppTheme.border),
+                ),
+                child: Column(
+                  children: [
+                    for (var i = 0; i < rows.length; i++) ...[
+                      if (i == rows.length - 1) Divider(height: 18, color: AppTheme.border),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              rows[i].$1,
+                              style: TextStyle(
+                                color: rows[i].$3 ? AppTheme.accentText : AppTheme.text,
+                                fontSize: i == rows.length - 1 ? 15 : 13,
+                                fontWeight: i == rows.length - 1 ? FontWeight.w900 : FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            rows[i].$2,
+                            style: TextStyle(
+                              color: rows[i].$3 ? AppTheme.accentText : AppTheme.text,
+                              fontSize: i == rows.length - 1 ? 17 : 13,
+                              fontWeight: i == rows.length - 1 ? FontWeight.w900 : FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (i < rows.length - 1) const SizedBox(height: 6),
+                    ],
+                    if (changeNote != null) ...[
+                      const SizedBox(height: 10),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            _service.isQueuedDowngrade(widget.plan.tier) ? Icons.schedule_rounded : Icons.swap_vert_circle_outlined,
+                            size: 16,
+                            color: AppTheme.accentText,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              changeNote,
+                              style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w700, height: 1.3),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              if (_errorMessage != null) ...[
+                _Banner(text: _errorMessage!, icon: Icons.info_outline_rounded, color: AppTheme.warnText),
+                const SizedBox(height: 12),
+              ] else if (_infoMessage != null) ...[
+                _Banner(text: _infoMessage!, icon: Icons.schedule_rounded, color: AppTheme.accentText),
+                const SizedBox(height: 12),
+              ],
+
+              // Coupon
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppTheme.card,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _appliedCoupon != null ? AppTheme.accentText.withValues(alpha: 0.5) : AppTheme.border),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'PAY ON THE WEBSITE (UPI)',
-                      style: TextStyle(
-                        color: AppTheme.text2,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 44,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: AppTheme.brand),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                        onPressed: _isLoading ? null : () => _payOnWebsite(),
-                        icon: Icon(Icons.language_rounded, size: 16, color: AppTheme.brand),
-                        label: Text(
-                          _waitingForWebPayment ? 'Open the website again' : 'Pay on coroute.duckdns.org by UPI',
-                          style: TextStyle(color: AppTheme.brand, fontSize: 12, fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                    ),
-                    if (_waitingForWebPayment) ...[
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 40,
-                        child: TextButton.icon(
-                          onPressed: _isLoading ? null : () => _checkWebPaymentResult(),
-                          icon: Icon(Icons.refresh_rounded, size: 16, color: AppTheme.accentText),
-                          label: Text(
-                            'I have paid — check now',
-                            style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Divider(height: 1, color: AppTheme.border),
-                    const SizedBox(height: 12),
-                    Text(
-                      'DIRECT UPI INTENT',
-                      style: TextStyle(
-                        color: AppTheme.text2,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 44,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: AppTheme.brand),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                        onPressed: _isLoading ? null : () => _launchUpiIntent(),
-                        icon: Icon(Icons.open_in_new_rounded, size: 16, color: AppTheme.brand),
-                        label: Text(
-                          'Launch Native UPI App (Intent)',
-                          style: TextStyle(color: AppTheme.brand, fontSize: 12, fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Divider(height: 1, color: AppTheme.border),
-                    const SizedBox(height: 12),
-                    Text(
-                      'OFFICIAL CO-ROUTE VPA',
-                      style: TextStyle(
-                        color: AppTheme.text2,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
                     Row(
                       children: [
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: AppTheme.card,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              vpa,
-                              style: TextStyle(
-                                color: AppTheme.text,
-                                fontFamily: 'monospace',
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
+                        Icon(Icons.local_offer_outlined, size: 16, color: AppTheme.accentText),
                         const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(Icons.copy_rounded, size: 18),
-                          color: AppTheme.brand,
-                          onPressed: () {
-                            Clipboard.setData(ClipboardData(text: vpa));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Copied $vpa to clipboard!'),
-                                duration: const Duration(seconds: 2),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
                         Expanded(
                           child: TextField(
-                            controller: _utrController,
-                            keyboardType: TextInputType.number,
+                            controller: _couponController,
+                            enabled: _appliedCoupon == null,
+                            textCapitalization: TextCapitalization.characters,
+                            style: TextStyle(color: AppTheme.text, fontSize: 13, fontWeight: FontWeight.w700),
                             decoration: InputDecoration(
-                              hintText: 'Enter 12-digit UPI UTR',
-                              hintStyle: TextStyle(color: AppTheme.muted, fontSize: 11),
+                              hintText: 'Coupon code',
+                              hintStyle: TextStyle(color: AppTheme.text2, fontSize: 12),
                               isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              border: InputBorder.none,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.accentText,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          ),
-                          onPressed: _isLoading ? null : () => _verifyManualUtr(),
-                          child: const Text('Verify', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                        TextButton(
+                          onPressed: _isValidatingCoupon || _isLoading ? null : _applyCoupon,
+                          child: _isValidatingCoupon
+                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                              : Text(
+                                  _appliedCoupon != null ? 'Remove' : 'Apply',
+                                  style: TextStyle(color: AppTheme.brand, fontWeight: FontWeight.w800, fontSize: 12),
+                                ),
                         ),
                       ],
                     ),
+                    if (_couponError != null) ...[
+                      const SizedBox(height: 2),
+                      Text(_couponError!, style: TextStyle(color: AppTheme.warnText, fontSize: 11)),
+                    ],
                   ],
                 ),
               ),
-            ],
+              const SizedBox(height: 14),
 
-            const SizedBox(height: 16),
-            Text(
-              '256-Bit SSL Encrypted · RBI Regulated UPI Payment Processing',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.muted, fontSize: 10),
-            ),
+              // 1. In the app: Razorpay SDK (UPI only), or a free pass.
+              SizedBox(
+                height: 56,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: free ? AppTheme.accentText : AppTheme.brand,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: _isLoading || _orderData == null ? null : (free ? _claimFreePass : _openRazorpayCheckout),
+                  child: _isLoading
+                      ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(free ? Icons.card_giftcard_rounded : Icons.flash_on_rounded, size: 22, color: Colors.white),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                free ? 'Activate free pass' : 'Pay $total by UPI',
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Google Pay · PhonePe · Paytm · BHIM · any UPI app',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.text2, fontSize: 11, fontWeight: FontWeight.w600),
+              ),
+
+              // 2. On the website, by UPI.
+              if (!free) ...[
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(child: Divider(color: AppTheme.border)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Text('or', style: TextStyle(color: AppTheme.text2, fontSize: 12)),
+                    ),
+                    Expanded(child: Divider(color: AppTheme.border)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 48,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: AppTheme.brand),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: _isLoading ? null : _payOnWebsite,
+                    icon: Icon(Icons.language_rounded, size: 18, color: AppTheme.brand),
+                    label: Text(
+                      _waitingForWebPayment ? 'Open the website again' : 'Pay on the website by UPI',
+                      style: TextStyle(color: AppTheme.brand, fontSize: 13, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'The website link is valid for 30 minutes; a new one is made when needed.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppTheme.muted, fontSize: 10.5),
+                ),
+                if (_waitingForWebPayment) ...[
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 44,
+                    child: TextButton.icon(
+                      onPressed: _isLoading ? null : () => _checkWebPaymentResult(),
+                      icon: Icon(Icons.refresh_rounded, size: 16, color: AppTheme.accentText),
+                      label: Text(
+                        'I have paid — check now',
+                        style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+              const SizedBox(height: 14),
+              Text(
+                'Payments are processed by Razorpay. CoRoute never sees your UPI PIN.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.muted, fontSize: 10),
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _successContent() {
+    final queued = _service.pendingTier == widget.plan.tier && !_service.isEntitledTo(widget.plan.tier);
+    return [
+      const SizedBox(height: 20),
+      Center(
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: AppTheme.accentText.withValues(alpha: 0.15), shape: BoxShape.circle),
+          child: Icon(Icons.check_circle_rounded, color: AppTheme.accentText, size: 64),
+        ),
+      ),
+      const SizedBox(height: 16),
+      Text(
+        queued ? '${widget.plan.name} booked' : '${widget.plan.name} activated',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: AppTheme.text, fontSize: 22, fontWeight: FontWeight.w900),
+      ),
+      const SizedBox(height: 8),
+      Text(
+        queued ? (_service.pendingPlanSummary ?? 'It starts when your current plan ends.') : 'Your features are unlocked on all your devices.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: AppTheme.text2, fontSize: 13),
+      ),
+      const SizedBox(height: 32),
+    ];
+  }
+}
+
+class _Banner extends StatelessWidget {
+  final String text;
+  final IconData icon;
+  final Color color;
+
+  const _Banner({required this.text, required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: TextStyle(color: color, fontSize: 12, height: 1.3))),
         ],
       ),
     );

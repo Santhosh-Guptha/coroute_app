@@ -21,8 +21,7 @@ const SITE_PAGES = {
   '/how-it-works': 'how-it-works.html',
   '/about': 'about.html',
   '/get': 'get.html',
-  '/checkout': 'checkout.html',
-  '/pricing-admin': 'pricing-admin.html',
+  '/checkout': 'checkout.html', // payment page for an order made in the app (not listed in the sitemap)
   '/privacy': 'privacy.html',
   '/terms': 'terms.html',
 };
@@ -31,7 +30,7 @@ const SPECIAL_PAGES = ['404.html', 'join.html', 'live.html', 'live_expired.html'
 /** Special pages a deployment may still lack (the server then answers with a built-in plain page). */
 const OPTIONAL_PAGES = new Set(['live.html', 'live_expired.html']);
 /** Sitemap entries: path and priority. */
-const SITEMAP = [['/', '1.0'], ['/features', '0.8'], ['/safety', '0.8'], ['/checkout', '0.9'], ['/pricing-admin', '0.4'], ['/how-it-works', '0.7'], ['/get', '0.8'], ['/about', '0.5'], ['/privacy', '0.3'], ['/terms', '0.3']];
+const SITEMAP = [['/', '1.0'], ['/features', '0.8'], ['/safety', '0.8'], ['/how-it-works', '0.7'], ['/get', '0.8'], ['/about', '0.5'], ['/privacy', '0.3'], ['/terms', '0.3']];
 
 const INCLUDE = /<!--#include ([a-z0-9-]+)-->/g;
 /** An /assets/ file reference in a page (attribute, inline style or url()), with an optional old ?v= query. */

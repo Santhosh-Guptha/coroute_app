@@ -131,6 +131,9 @@ class ApiClient extends ChangeNotifier {
   Future<dynamic> post(String path, [Object? body, Duration timeout = const Duration(seconds: 12), bool auth = true]) =>
       _send(() => _http.post(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers(auth: auth), body: jsonEncode(body ?? {})), timeout);
 
+  Future<dynamic> put(String path, [Object? body, Duration timeout = const Duration(seconds: 12)]) =>
+      _send(() => _http.put(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers(), body: jsonEncode(body ?? {})), timeout);
+
   Future<dynamic> patch(String path, Object? body) =>
       _send(() => _http.patch(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers(), body: jsonEncode(body ?? {})), const Duration(seconds: 12));
 

@@ -304,7 +304,9 @@ class AccountScreen extends StatelessWidget {
                       _SettingsRow(
                         icon: Icons.card_membership_rounded,
                         title: 'Active Subscription Plan',
-                        subtitle: '$tierLabel · View plan benefits & convoy limits',
+                        subtitle: planService?.pendingPlanSummary != null
+                            ? '$tierLabel · Next: ${planService!.pendingPlanSummary}'
+                            : '$tierLabel · View plan benefits & convoy limits',
                         value: tierLabel.toUpperCase(),
                         color: planService != null && (planService.isExpired || planService.expiringSoon) ? AppTheme.warnText : null,
                         divider: true,

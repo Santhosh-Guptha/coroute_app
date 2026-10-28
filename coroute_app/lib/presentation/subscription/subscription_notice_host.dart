@@ -3,13 +3,18 @@ import 'package:provider/provider.dart';
 import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../data/services/alarm_notifier.dart';
+import '../../data/services/auth_service.dart';
 import '../../data/services/plan_subscription_service.dart';
+import '../../data/services/subscription_reminders.dart';
 import 'plan_selector_screen.dart';
 
 /// Sits above the navigator (MaterialApp.builder) and turns pending plan
 /// notices from [PlanSubscriptionService] into UI: a snackbar when the plan
 /// is about to end (once per 7/3/1-day step) and a dialog with a Renew button
-/// when it has ended. Shows nothing itself; does nothing without the service.
+/// when it has ended (expired, ended by support, or refunded). It also opens
+/// the plan selector when the rider taps a local plan reminder notification.
+/// Shows nothing itself; does nothing without the service.
 class SubscriptionNoticeHost extends StatefulWidget {
   final Widget child;
 
@@ -27,6 +32,36 @@ class _SubscriptionNoticeHostState extends State<SubscriptionNoticeHost> {
   bool _dialogOpen = false;
 
   @override
+  void initState() {
+    super.initState();
+    // Tap on a plan reminder while the app runs (foreground or background).
+    AlarmNotifier.onAction(AlarmNotifier.payloadPlan, (_, payload) => _openFromReminder(payload));
+    // Tap on a plan reminder that started the app: wait for the splash to route first.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openFromLaunchReminder());
+  }
+
+  Future<void> _openFromLaunchReminder() async {
+    final payload = await AlarmNotifier.launchPayload();
+    if (!mounted || tierFromPlanReminderPayload(payload) == null) return;
+    final auth = Provider.of<AuthService?>(context, listen: false);
+    for (var i = 0; i < 40 && auth != null && auth.isLoading; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    // The splash replaces itself with the home screen right after auth is ready.
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    if (auth != null && !auth.isAuthenticated) return;
+    _openFromReminder(payload);
+  }
+
+  void _openFromReminder(String? payload) {
+    final tier = tierFromPlanReminderPayload(payload);
+    final nav = widget.navigatorKey?.currentState;
+    if (tier == null || nav == null || !mounted) return;
+    _openPlanSelector(nav, tier);
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final plan = Provider.of<PlanSubscriptionService?>(context, listen: false);
@@ -41,6 +76,7 @@ class _SubscriptionNoticeHostState extends State<SubscriptionNoticeHost> {
   @override
   void dispose() {
     _plan?.removeListener(_sync);
+    AlarmNotifier.removeAction(AlarmNotifier.payloadPlan);
     super.dispose();
   }
 
@@ -115,6 +151,19 @@ class _SubscriptionNoticeHostState extends State<SubscriptionNoticeHost> {
     _dialogOpen = true;
     final name = FeatureGates.tierLabel(n.previousTier);
     final features = PlanSubscriptionService.keyFeatureSummary(n.previousTier);
+    final String title;
+    final String body;
+    switch (n.reason) {
+      case PlanEndReason.revoked:
+        title = 'Your $name was ended by CoRoute support';
+        body = 'You\'re on Community now.${n.note.isEmpty ? '' : ' Reason: ${n.note}.'} Contact support if this looks wrong, or renew to keep $features.';
+      case PlanEndReason.refunded:
+        title = 'Your $name was refunded';
+        body = 'The payment was refunded, so the plan has ended and you\'re on Community now. Renew any time to get $features back.';
+      case PlanEndReason.expired:
+        title = 'Your $name has ended';
+        body = 'You\'re on Community now. Renew to keep $features.';
+    }
     try {
       final renew = await showDialog<bool>(
         context: ctx,
@@ -128,11 +177,11 @@ class _SubscriptionNoticeHostState extends State<SubscriptionNoticeHost> {
                 children: [
                   Icon(Icons.lock_clock_rounded, color: AppTheme.warnText),
                   const SizedBox(width: 10),
-                  Expanded(child: Text('Your $name has ended', style: AppText.title.copyWith(color: AppTheme.text))),
+                  Expanded(child: Text(title, style: AppText.title.copyWith(color: AppTheme.text))),
                 ],
               ),
               content: Text(
-                'You\'re on Community now. Renew to keep $features.',
+                body,
                 style: AppText.body.copyWith(color: AppTheme.text2),
               ),
               actionsPadding: const EdgeInsets.fromLTRB(Space.s16, 0, Space.s16, Space.s16),

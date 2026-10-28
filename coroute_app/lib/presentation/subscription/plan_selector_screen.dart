@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/services/plan_subscription_service.dart';
+import '../../data/services/subscription_reminders.dart';
 import 'payment_checkout_modal.dart';
 import 'subscription_expiry_banner.dart';
 
@@ -38,7 +39,10 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        context.read<PlanSubscriptionService>().refreshPricingConfig().ignore();
+        final service = context.read<PlanSubscriptionService>();
+        service.refreshPricingConfig().ignore();
+        // Expiry reminders are local notifications: ask once, here (never at app start).
+        if (service.isEntitledTo(service.entitledTier)) PlanReminderScheduler.requestPermissionOnce().ignore();
       }
     });
     final pre = widget.preselectTier;
@@ -65,6 +69,8 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
     // Expired or ending: the plan to renew (never the free tier).
     final renewTier = widget.preselectTier ??
         ((planService.isExpired || planService.expiringSoon) ? planService.renewTier : null);
+    final bestSaving = PlanSubscriptionService.bestAnnualSavingPercent();
+    final pendingSummary = planService.pendingPlanSummary;
 
     return Scaffold(
       backgroundColor: AppTheme.bg,
@@ -152,6 +158,21 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
                             'Instant activation via Razorpay UPI · Zero gateway fees',
                             style: TextStyle(color: AppTheme.text2, fontSize: 11),
                           ),
+                          if (pendingSummary != null) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(Icons.schedule_rounded, size: 13, color: AppTheme.accentText),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    'Next: $pendingSummary',
+                                    style: TextStyle(color: AppTheme.accentText, fontSize: 11, fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -228,7 +249,7 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Text(
-                                'Annual (Save ~20%)',
+                                bestSaving > 0 ? 'Annual (save up to $bestSaving%)' : 'Annual Billing',
                                 style: TextStyle(
                                   color: _isAnnual ? Colors.black : AppTheme.text2,
                                   fontWeight: FontWeight.w800,
@@ -252,6 +273,10 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
                   plan: plan,
                   isAnnual: _isAnnual,
                   isActive: plan.tier == currentTier,
+                  monthlyAmount: PlanSubscriptionService.priceOf(plan.tier, annual: false),
+                  annualAmount: PlanSubscriptionService.priceOf(plan.tier, annual: true),
+                  changeNote: plan.tier == currentTier ? null : planService.planChangeNote(plan.tier),
+                  isPending: planService.pendingTier == plan.tier,
                   // The paid plan the rider holds (shown with its end date; free to switch back to).
                   isHeld: heldPlanActive && plan.tier == entitledTier,
                   activeUntil: heldPlanActive && plan.tier == entitledTier ? activeUntil : '',
@@ -290,8 +315,22 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
                       return;
                     }
 
+                    // A cheaper paid plan under a higher one that is still active: use it now
+                    // for free (it is included), or buy it to start when the current plan ends.
+                    var buyQueued = false;
+                    if (planService.isQueuedDowngrade(plan.tier) && planService.pendingTier != plan.tier) {
+                      final choice = await _askDowngrade(
+                        context,
+                        target: plan.name,
+                        held: FeatureGates.tierLabel(entitledTier),
+                        until: activeUntil,
+                      );
+                      if (choice == null || !context.mounted) return;
+                      buyQueued = choice;
+                    }
+
                     // A paid plan the rider already holds: just switch back to it, no payment.
-                    if (await planService.selectTier(plan.tier)) {
+                    if (!buyQueued && await planService.selectTier(plan.tier)) {
                       HapticFeedback.heavyImpact();
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -330,7 +369,9 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  '${plan.name} Activated! Max ${plan.maxConvoySize} riders unlocked.',
+                                  planService.pendingTier == plan.tier && !planService.isEntitledTo(plan.tier)
+                                      ? '${plan.name} booked. ${planService.pendingPlanSummary ?? ''}'.trim()
+                                      : '${plan.name} Activated! Max ${plan.maxConvoySize} riders unlocked.',
                                   style: TextStyle(
                                     color: AppTheme.text,
                                     fontWeight: FontWeight.w700,
@@ -374,6 +415,41 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// A cheaper paid plan while a higher one is active. Resolves false to use it
+  /// now (included, no payment), true to buy it to start when [held] ends,
+  /// null when dismissed.
+  Future<bool?> _askDowngrade(
+    BuildContext context, {
+    required String target,
+    required String held,
+    required String until,
+  }) {
+    final when = until.isEmpty ? 'it ends' : 'it ends on $until';
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.card,
+        title: Text('Switch to $target?', style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w800)),
+        content: Text(
+          '$target is included in your $held, so you can use it right now for free. '
+          'To move to $target for good, buy it now: it starts when your $held ends${until.isEmpty ? '' : ' on $until'}.',
+          style: TextStyle(color: AppTheme.text2, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Use it now (free)', style: TextStyle(color: AppTheme.text2)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.brand),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('Buy, starts when $when', style: const TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
     );
   }
@@ -428,6 +504,16 @@ class _PlanCard extends StatelessWidget {
   final bool isRenewal;
   final VoidCallback onSelect;
 
+  /// Server prices (INR) used for the annual saving line.
+  final num monthlyAmount;
+  final num annualAmount;
+
+  /// Upgrade credit or "starts when … ends" copy while another paid plan is held.
+  final String? changeNote;
+
+  /// Bought already and queued behind the current plan.
+  final bool isPending;
+
   const _PlanCard({
     super.key,
     required this.plan,
@@ -437,6 +523,10 @@ class _PlanCard extends StatelessWidget {
     this.activeUntil = '',
     this.isRenewal = false,
     required this.onSelect,
+    this.monthlyAmount = 0,
+    this.annualAmount = 0,
+    this.changeNote,
+    this.isPending = false,
   });
 
   @override
@@ -447,6 +537,9 @@ class _PlanCard extends StatelessWidget {
             ? AppTheme.warnText
             : (plan.isPopular ? AppTheme.accentText.withValues(alpha: 0.6) : AppTheme.border2);
     final price = isAnnual ? plan.annualPrice : plan.monthlyPrice;
+    final saving = PlanSubscriptionService.annualSaving(monthlyAmount, annualAmount);
+    final savingPct = PlanSubscriptionService.annualSavingPercent(monthlyAmount, annualAmount);
+    final note = changeNote;
 
     return Container(
       decoration: BoxDecoration(
@@ -542,6 +635,54 @@ class _PlanCard extends StatelessWidget {
                     ],
                   ],
                 ),
+                if (plan.tier != SubscriptionTier.community && saving > 0) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.savings_outlined, size: 14, color: isAnnual ? AppTheme.accentText : AppTheme.text2),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          isAnnual
+                              ? 'Save ${PlanSubscriptionService.formatInr(saving)} a year ($savingPct% off 12 monthly payments)'
+                              : 'Pay yearly and save $savingPct% (${PlanSubscriptionService.formatPlanPrice(annualAmount, isAnnual: true)})',
+                          style: TextStyle(
+                            color: isAnnual ? AppTheme.accentText : AppTheme.text2,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                if (isPending) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.schedule_rounded, size: 14, color: AppTheme.accentText),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Booked: starts when your current plan ends',
+                          style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else if (note != null && !isHeld) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline_rounded, size: 14, color: AppTheme.text2),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(note, style: TextStyle(color: AppTheme.text2, fontSize: 12, height: 1.3)),
+                      ),
+                    ],
+                  ),
+                ],
                 if (isHeld && activeUntil.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Row(

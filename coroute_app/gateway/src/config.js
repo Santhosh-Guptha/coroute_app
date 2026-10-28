@@ -285,9 +285,10 @@ const config = {
   // Razorpay: keys, test/live mode and webhook secrets are resolved by
   // src/razorpay_gateway.js (admin settings in Oracle, else environment).
   // No credentials are hard-coded.
+  // Payments go through Razorpay only (no direct VPA / UTR path). The name below is
+  // only the display name shown in Razorpay Checkout.
   razorpayUpiOnly: true,
-  upiVpa: (process.env.PAYMENT_UPI_VPA || 'coroute@upi').trim(),
-  upiMerchantName: (process.env.PAYMENT_UPI_NAME || 'CoRoute Safety Networks').trim(),
+  upiMerchantName: 'CoRoute',
 };
 
 if (!isTest && config.jwtSecret.length < 32) {

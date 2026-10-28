@@ -779,7 +779,10 @@ class ConvoyService extends ChangeNotifier {
     }
 
     // Plan events concern the account, not a convoy: handled whether or not a ride is active.
-    if (type == 'SUBSCRIPTION_ACTIVATED' || type == 'SUBSCRIPTION_EXPIRING' || type == 'SUBSCRIPTION_EXPIRED') {
+    if (type == 'SUBSCRIPTION_ACTIVATED' ||
+        type == 'SUBSCRIPTION_EXPIRING' ||
+        type == 'SUBSCRIPTION_EXPIRED' ||
+        type == 'SUBSCRIPTION_REVOKED') {
       _onSubscriptionEvent(type!, e);
       return;
     }
@@ -1034,6 +1037,10 @@ class ConvoyService extends ChangeNotifier {
         break;
       case 'SUBSCRIPTION_EXPIRED':
         plan.handleExpiredEvent(e);
+        break;
+      case 'SUBSCRIPTION_REVOKED':
+        // {previousTier, revokedAt, reason}: ended by support or refunded; handled like an expiry.
+        plan.handleRevokedEvent(e);
         break;
       default:
         return;

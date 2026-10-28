@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const { createRazorpayGateway, RazorpayError } = require('./razorpay_gateway');
 const { effectiveSubscription, isPaidTier } = require('./subscription_lifecycle');
@@ -304,32 +305,104 @@ function orderView(o) {
     mode: o.mode || null, paymentId: o.paymentId || '', utr: o.utr || '', planTier: o.planTier || null, billingCycle: o.billingCycle || null,
     couponCode: o.couponCode || null, offerId: o.offerId || null, offerTitle: o.offerTitle || null, discountAmount: Number(o.discountAmount) || 0,
     channel: o.channel || null, isFree: Boolean(o.isFree), isTest: o.mode === 'test',
-    createdAt: Number(o.createdAt) || 0, paidAt: Number(o.paidAt) || 0, updatedAt: Number(o.updatedAt) || 0,
+    failureReason: o.failureReason || null,
+    refundStatus: o.refundStatus || null, refundId: o.refundId || null,
+    refundedAmount: (Number(o.refundedAmountInPaise) || 0) / 100, refundedAmountInPaise: Number(o.refundedAmountInPaise) || 0,
+    fullyRefunded: Boolean(o.fullyRefunded), refundReason: o.refundReason || null, refundedBy: o.refundedBy || null,
+    prorationCreditDays: Number(o.prorationCreditDays) || 0, scheduledStartsAt: Number(o.scheduledStartsAt) || 0,
+    createdAt: Number(o.createdAt) || 0, paidAt: Number(o.paidAt) || 0, expiredAt: Number(o.expiredAt) || 0, updatedAt: Number(o.updatedAt) || 0,
   };
 }
-/** The rider's ledger orders, newest first. */
+/** The rider's ledger orders, newest first (who refunded is for admins only). */
 async function riderOrders(repo, userId) {
   const rows = await repo.listRazorpayOrders({ userId }, 100);
-  return rows.map(orderView).sort((a, b) => b.createdAt - a.createdAt);
+  return rows.map((o) => { const v = orderView(o); delete v.refundedBy; return v; }).sort((a, b) => b.createdAt - a.createdAt);
 }
 /** Tier periods (expired / revoked / granted entries), oldest first. */
 function periodsOf(userDoc) { return Array.isArray(userDoc?.subscriptionHistory) ? [...userDoc.subscriptionHistory] : []; }
 
-/** Grants the plan to the user once per order (idempotent). */
+const DAY_MS = 86400000;
+const MAX_PRORATION_MS = 365 * DAY_MS;
+/** A web checkout link handed out by the app works for this long after the order was created. */
+const WEB_CHECKOUT_TTL_MS = 30 * 60 * 1000;
+
+function cyclePeriodMs(cycle) { return cycle === 'annual' ? 365 * DAY_MS : 30 * DAY_MS; }
+function cyclePrice(plans, tier, cycle) {
+  const m = plans && plans[tier];
+  return m ? Number(cycle === 'annual' ? m.annual : m.monthly) || 0 : 0;
+}
+/** INR per millisecond of [tier] bought on [cycle]. */
+function tierRate(plans, tier, cycle) {
+  const c = cycle === 'annual' ? 'annual' : 'monthly';
+  const p = cyclePrice(plans, tier, c);
+  return p > 0 ? p / cyclePeriodMs(c) : 0;
+}
+/** The cycle the rider last paid [tier] on (monthly when unknown). */
+function lastCycleOf(userDoc, tier) {
+  const h = Array.isArray(userDoc.paymentHistory) ? userDoc.paymentHistory : [];
+  for (let i = h.length - 1; i >= 0; i--) {
+    if (h[i].planTier === tier && !h[i].scheduled) return h[i].billingCycle === 'annual' ? 'annual' : 'monthly';
+  }
+  return 'monthly';
+}
+
+/**
+ * Grants the plan to the user once per order (idempotent).
+ *  - same tier as the running one  -> extends from the current expiry
+ *  - dearer tier while one runs    -> the unused value of the running tier becomes extra days on the new one:
+ *                                     credit = remainingMs x oldPrice/oldPeriodMs; extraMs = credit / (newPrice/newPeriodMs), max 365 days
+ *  - cheaper tier while one runs   -> scheduled: stored as `pendingTier`, starts when the running tier ends (sweeper)
+ *  - manual grants never prorate or schedule
+ * Prices come from getEffectivePlans (admin pricing).
+ */
 async function activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, vpa, method, source }) {
   const planTier = order.planTier;
   const billingCycle = order.billingCycle === 'annual' ? 'annual' : (order.billingCycle === 'manual' ? 'manual' : 'monthly');
   const history = Array.isArray(userDoc.paymentHistory) ? [...userDoc.paymentHistory] : [];
   const prior = history.find((p) => p.orderId === order.orderId);
   if (prior) {
-    return { tier: userDoc.subscriptionTier, validUntil: userDoc.subscriptionValidUntil, record: prior, already: true };
+    return {
+      tier: userDoc.subscriptionTier, validUntil: userDoc.subscriptionValidUntil, record: prior, already: true,
+      scheduled: prior.scheduled ? { tier: prior.planTier, startsAt: prior.validFrom, validUntil: prior.validUntil } : null,
+      prorationCreditDays: Number(prior.prorationCreditDays) || 0,
+    };
+  }
+  const now = Date.now();
+  if (order.status === 'EXPIRED') {
+    // The money was taken and the signature is valid: honour it, but leave a trace.
+    console.warn(`[payments] order ${order.orderId} had EXPIRED; signed payment ${paymentId || '-'} accepted via ${source}`);
   }
   const currentExpiry = Number(userDoc.subscriptionValidUntil) || 0;
   const manualDays = billingCycle === 'manual' && Number.isInteger(order.durationDays) && order.durationDays > 0 ? order.durationDays : 0;
-  const duration = billingCycle === 'annual' ? 365 * 86400000 : (manualDays || 30) * 86400000;
-  // Extend from current expiry when renewing the same tier, so paid days are never lost.
-  const baseTime = (currentExpiry > Date.now() && userDoc.subscriptionTier === planTier) ? currentExpiry : Date.now();
-  const expiry = baseTime + duration;
+  const duration = billingCycle === 'annual' ? 365 * DAY_MS : (manualDays || 30) * DAY_MS;
+  const currentTier = isPaidTier(userDoc.subscriptionTier) && currentExpiry > now ? userDoc.subscriptionTier : null;
+  const pending = userDoc.pendingTier && isPaidTier(userDoc.pendingTier.tier) ? { ...userDoc.pendingTier } : null;
+  let baseTime = now;
+  let extraMs = 0;
+  let scheduled = null;
+  if (currentTier && currentTier === planTier) {
+    // Renewing the same tier: paid days are never lost.
+    baseTime = currentExpiry;
+  } else if (currentTier && billingCycle !== 'manual') {
+    const plans = await getEffectivePlans(repo);
+    const newRate = tierRate(plans, planTier, billingCycle);
+    if (cyclePrice(plans, planTier, 'monthly') < cyclePrice(plans, currentTier, 'monthly')) {
+      // Downgrade: the dearer tier keeps running; this one starts when it ends.
+      let durationMs = duration;
+      if (pending && pending.tier === planTier) {
+        durationMs += Number(pending.durationMs) || 0;
+      } else if (pending) {
+        const pendingRate = tierRate(plans, pending.tier, pending.billingCycle);
+        if (pendingRate > 0 && newRate > 0) durationMs += Math.min(MAX_PRORATION_MS, Math.round(((Number(pending.durationMs) || 0) * pendingRate) / newRate));
+      }
+      scheduled = { tier: planTier, billingCycle, durationMs, startsAt: currentExpiry, orderId: order.orderId, scheduledAt: now };
+    } else {
+      const oldRate = tierRate(plans, currentTier, lastCycleOf(userDoc, currentTier));
+      if (oldRate > 0 && newRate > 0) extraMs = Math.min(MAX_PRORATION_MS, Math.round(((currentExpiry - now) * oldRate) / newRate));
+    }
+  }
+  const prorationCreditDays = Math.round((extraMs / DAY_MS) * 100) / 100;
+  const expiry = scheduled ? currentExpiry : baseTime + duration + extraMs;
   const record = {
     orderId: order.orderId,
     paymentId: paymentId || '',
@@ -340,14 +413,16 @@ async function activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, v
     method,
     planTier,
     billingCycle,
-    validFrom: baseTime,
-    validUntil: expiry,
-    paidAt: Date.now(),
+    validFrom: scheduled ? scheduled.startsAt : baseTime,
+    validUntil: scheduled ? scheduled.startsAt + scheduled.durationMs : expiry,
+    paidAt: now,
     source,
     mode: order.mode || null,
     couponCode: order.couponCode || null,
     offerId: order.offerId || null,
     discountAmount: Number(order.discountAmount) || 0,
+    prorationCreditDays,
+    scheduled: Boolean(scheduled),
     userSnapshot: {
       userId: userDoc.userId,
       name: userDoc.name || '',
@@ -357,14 +432,27 @@ async function activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, v
     },
   };
   history.push(record);
-  await repo.updateUser(userDoc.key, {
-    subscriptionTier: planTier,
-    subscriptionValidUntil: expiry,
-    lastPayment: record,
-    paymentHistory: history,
-    subscriptionWarnedAt: {}, // a fresh period gets fresh 7/3/1-day warnings
+  let patch;
+  if (scheduled) {
+    patch = { lastPayment: record, paymentHistory: history, pendingTier: scheduled };
+  } else {
+    // A downgrade already queued now starts when the new period ends.
+    if (pending) pending.startsAt = expiry;
+    patch = {
+      subscriptionTier: planTier,
+      subscriptionValidUntil: expiry,
+      lastPayment: record,
+      paymentHistory: history,
+      subscriptionWarnedAt: {}, // a fresh period gets fresh 7/3/1-day warnings
+      pendingTier: pending || null,
+    };
+  }
+  await repo.updateUser(userDoc.key, patch);
+  await repo.updateRazorpayOrder(order.orderId, {
+    status: 'PAID', paymentId: paymentId || '', paidAt: now, prorationCreditDays,
+    ...(scheduled ? { scheduledStartsAt: scheduled.startsAt } : {}),
+    ...(order.status === 'EXPIRED' ? { paidAfterExpiry: true } : {}),
   });
-  await repo.updateRazorpayOrder(order.orderId, { status: 'PAID', paymentId: paymentId || '', paidAt: Date.now() });
   if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
     await repo.recordCouponUsage(order.couponCode, {
       userId: userDoc.userId, orderId: order.orderId, discountAmount: order.discountAmount || 0,
@@ -375,57 +463,167 @@ async function activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, v
   }
   if (auth && auth.gate) auth.gate.invalidate(userDoc.userId);
   if (hub) {
-    hub.sendToUser(userDoc.userId, { type: 'SUBSCRIPTION_ACTIVATED', tier: planTier, validUntil: expiry, orderId: order.orderId, method });
-  }
-  return { tier: planTier, validUntil: expiry, record, already: false };
-}
-
-/** Short HMAC that lets the web checkout page load one app order without a login. */
-function webCheckoutToken(orderId) {
-  return crypto.createHmac('sha256', config.jwtSecret).update(`web-checkout:${orderId}`).digest('hex').slice(0, 32);
-}
-function webCheckoutTokenValid(orderId, t) {
-  const a = Buffer.from(webCheckoutToken(orderId));
-  const b = Buffer.from(String(t || ''));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-function webCheckoutUrl(req, orderId) {
-  const origin = config.publicOrigin || `${req.protocol}://${req.get('host')}`;
-  return `${origin}/checkout.html?order=${encodeURIComponent(orderId)}&t=${webCheckoutToken(orderId)}`;
-}
-
-/** After a verified payment: grants the plan when the order belongs to a rider. */
-async function settleVerifiedOrder({ repo, auth, hub, order, paymentId, source }) {
-  if (order.userId) {
-    const userDoc = await repo.findUserById(order.userId);
-    if (userDoc) {
-      return activatePlan({ repo, auth, hub, userDoc, order, paymentId, method: 'RAZORPAY', source });
+    if (scheduled) {
+      hub.sendToUser(userDoc.userId, { type: 'SUBSCRIPTION_SCHEDULED', tier: planTier, startsAt: scheduled.startsAt, validUntil: record.validUntil, orderId: order.orderId, method });
+    } else {
+      hub.sendToUser(userDoc.userId, { type: 'SUBSCRIPTION_ACTIVATED', tier: planTier, validUntil: expiry, orderId: order.orderId, method, prorationCreditDays });
     }
   }
-  if (order.status !== 'PAID') {
-    await repo.updateRazorpayOrder(order.orderId, { status: 'PAID', paymentId, paidAt: Date.now() });
-    if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
-      await repo.recordCouponUsage(order.couponCode, { userId: 'guest', orderId: order.orderId, discountAmount: order.discountAmount || 0 }).catch(() => {});
-    }
-    if (order.offerId && typeof repo.recordOfferRedemption === 'function') {
-      await repo.recordOfferRedemption(order.offerId).catch(() => {});
-    }
-  }
-  return null;
+  return {
+    tier: scheduled ? currentTier : planTier, validUntil: expiry, record, already: false,
+    scheduled: scheduled ? { tier: planTier, startsAt: scheduled.startsAt, validUntil: record.validUntil } : null,
+    prorationCreditDays,
+  };
 }
 
 /**
- * Registers public endpoints: webhook (HMAC-authenticated), coupon check,
- * public config, and the generic create-order / verify-payment pair used by
- * the web checkout page. The generic pair never grants a plan by itself.
+ * Community from now, with a history entry. Used by the admin revoke and by a full refund
+ * (reason 'refunded'). keepPending: a scheduled tier the rider paid for separately starts now.
+ */
+async function revokePlan({ repo, auth, hub, userDoc, by, reason = 'revoked', note = '', keepPending = false }) {
+  const now = Date.now();
+  const current = effectiveSubscription(userDoc, now);
+  const periods = periodsOf(userDoc);
+  periods.push({ tier: current.rawTier, validFrom: Number(userDoc.lastPayment?.validFrom) || 0, validUntil: Number(userDoc.subscriptionValidUntil) || 0, endedAt: now, reason, note, by });
+  const p = userDoc.pendingTier;
+  await repo.updateUser(userDoc.key, {
+    subscriptionTier: 'community', subscriptionValidUntil: 0,
+    subscriptionExpiredAt: now, previousTier: current.rawTier !== 'community' ? current.rawTier : (userDoc.previousTier || null),
+    subscriptionWarnedAt: {}, subscriptionHistory: periods,
+    pendingTier: keepPending && p && isPaidTier(p.tier) ? { ...p, startsAt: now } : null,
+  });
+  if (auth?.gate) auth.gate.invalidate(userDoc.userId);
+  if (hub && current.rawTier !== 'community') {
+    hub.sendToUser(userDoc.userId, { type: 'SUBSCRIPTION_REVOKED', previousTier: current.rawTier, revokedAt: now, reason: note || reason });
+  }
+  return current;
+}
+
+const REFUND_STATES = { processed: 'PROCESSED', pending: 'PENDING', created: 'PENDING', failed: 'FAILED' };
+
+/**
+ * Records one Razorpay refund on the ledger order (idempotent per refund id; a PROCESSED refund
+ * never goes back to PENDING). When the order becomes fully refunded the plan it bought is
+ * revoked once (history reason 'refunded'); a partial refund keeps the plan.
+ * The rider's own payment record gets the refund fields too.
+ */
+async function recordRefund({ repo, auth, hub, order, refundId, amountInPaise, status, by, reason }) {
+  const fresh = (await repo.findRazorpayOrder(order.orderId)) || order;
+  const refunds = Array.isArray(fresh.refunds) ? fresh.refunds.map((x) => ({ ...x })) : [];
+  let st = REFUND_STATES[String(status || '').toLowerCase()] || 'PENDING';
+  let i = refunds.findIndex((x) => x.id === refundId);
+  if (i >= 0) {
+    if (refunds[i].status === 'PROCESSED' && st === 'PENDING') st = 'PROCESSED';
+    refunds[i] = { ...refunds[i], status: st, amountInPaise: Number(amountInPaise) || refunds[i].amountInPaise, updatedAt: Date.now() };
+  } else {
+    refunds.push({ id: refundId, amountInPaise: Number(amountInPaise) || 0, status: st, at: Date.now(), by: by || null, reason: reason || '' });
+    i = refunds.length - 1;
+  }
+  const counted = refunds.filter((x) => x.status !== 'FAILED');
+  const refundedAmountInPaise = counted.reduce((sum, x) => sum + (Number(x.amountInPaise) || 0), 0);
+  const fullyRefunded = refundedAmountInPaise > 0 && refundedAmountInPaise >= (Number(fresh.amountInPaise) || 0);
+  const refundStatus = refunds.some((x) => x.status === 'PENDING') ? 'PENDING' : (counted.length ? 'PROCESSED' : 'FAILED');
+  const latest = refunds[i];
+  const patch = {
+    refunds, refundId: latest.id, refundStatus, refundedAmountInPaise, refundedAmount: refundedAmountInPaise / 100, fullyRefunded,
+    refundedBy: latest.by || fresh.refundedBy || null, refundReason: latest.reason || fresh.refundReason || '',
+  };
+  let planRevoked = Boolean(fresh.planRevoked);
+  if (fullyRefunded && !fresh.refundRevokedAt && fresh.userId) {
+    const userDoc = await repo.findUserById(fresh.userId);
+    if (userDoc) {
+      if (userDoc.pendingTier && userDoc.pendingTier.orderId === fresh.orderId) {
+        await repo.updateUser(userDoc.key, { pendingTier: null }); // the scheduled tier never starts
+        planRevoked = true;
+      } else if (isPaidTier(userDoc.subscriptionTier) && userDoc.subscriptionTier === fresh.planTier) {
+        await revokePlan({ repo, auth, hub, userDoc, by: patch.refundedBy || 'razorpay', reason: 'refunded', note: patch.refundReason, keepPending: true });
+        planRevoked = true;
+      }
+    }
+    patch.refundRevokedAt = Date.now();
+    patch.planRevoked = planRevoked;
+  }
+  if (fresh.userId) {
+    const u = await repo.findUserById(fresh.userId);
+    if (u && Array.isArray(u.paymentHistory)) {
+      const mirror = { refundStatus, refundId: patch.refundId, refundedAmount: patch.refundedAmount, refundReason: patch.refundReason, fullyRefunded };
+      const up = { paymentHistory: u.paymentHistory.map((x) => (x.orderId === fresh.orderId ? { ...x, ...mirror } : x)) };
+      if (u.lastPayment && u.lastPayment.orderId === fresh.orderId) up.lastPayment = { ...u.lastPayment, ...mirror };
+      await repo.updateUser(u.key, up);
+    }
+  }
+  const updated = await repo.updateRazorpayOrder(fresh.orderId, patch);
+  return { ...(updated || { ...fresh, ...patch }), planRevoked };
+}
+
+/** Short HMAC that lets the web checkout page load one app order without a login, until expiresAt. */
+function webCheckoutToken(orderId, expiresAt) {
+  return crypto.createHmac('sha256', config.jwtSecret).update(`web-checkout:${orderId}:${expiresAt}`).digest('hex').slice(0, 32);
+}
+function webCheckoutTokenValid(orderId, expiresAt, t) {
+  const a = Buffer.from(webCheckoutToken(orderId, expiresAt));
+  const b = Buffer.from(String(t || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function webCheckoutUrl(req, orderId, expiresAt) {
+  const origin = config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+  return `${origin}/checkout.html?order=${encodeURIComponent(orderId)}&t=${webCheckoutToken(orderId, expiresAt)}&e=${expiresAt}`;
+}
+
+/** After a verified payment: grants the plan to the rider who created the order. */
+async function settleVerifiedOrder({ repo, auth, hub, order, paymentId, source }) {
+  const userDoc = order.userId ? await repo.findUserById(order.userId) : null;
+  if (userDoc) return activatePlan({ repo, auth, hub, userDoc, order, paymentId, method: 'RAZORPAY', source });
+  // The account is gone but the money was taken: the ledger still says PAID.
+  if (order.status !== 'PAID') await repo.updateRazorpayOrder(order.orderId, { status: 'PAID', paymentId, paidAt: Date.now(), orphaned: true });
+  return null;
+}
+
+/** One admin write in the audit trail (subscription_config k='audit'). Never throws, never stores a secret. */
+async function addAudit(repo, req, action, target, details = {}) {
+  if (!repo || typeof repo.addAuditEntry !== 'function') return;
+  try {
+    await repo.addAuditEntry({
+      at: Date.now(), by: req.user?.email || req.user?.userId || 'admin', byUserId: req.user?.userId || null,
+      action, target: target == null ? null : String(target), details,
+    });
+  } catch (e) {
+    console.warn('[audit] write failed:', e.message);
+  }
+}
+
+/**
+ * Registers public endpoints: the Razorpay webhook (HMAC-authenticated, deduplicated), coupon
+ * check, public config (prices + the active key id, never a secret), the tokenised lookup of an
+ * order the app created (web checkout), and the verify / redirect-callback pair that page uses.
+ * Orders are only ever created by a signed-in rider (POST /subscription/create-order); the
+ * endpoints here accept only those ledger orders (order.userId present).
  */
 function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   const gateway = gatewayFor(repo);
+  const perIp = (limit) => rateLimit({ windowMs: 60 * 1000, limit, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests. Try again in a minute.', code: 'RATE_LIMITED' } });
+  const checkoutLimiter = perIp(30);
+  const callbackLimiter = perIp(30);
+  const verifyLimiter = perIp(30);
+
+  // Webhook event ids already handled: the last 1000 in memory, and per ledger order in `webhookEvents`.
+  const WEBHOOK_MAX_BYTES = 1024 * 1024;
+  const seenIds = new Set();
+  const seenQueue = [];
+  const remember = (id) => {
+    if (!id || seenIds.has(id)) return;
+    seenIds.add(id);
+    seenQueue.push(id);
+    while (seenQueue.length > 1000) seenIds.delete(seenQueue.shift());
+  };
 
   r.post('/subscription/webhook', wrap(async (req, res) => {
-    const rawBody = typeof req.body === 'string'
+    // app.js hands this route the raw bytes (1 MB cap); the signature is over exactly those bytes.
+    const rawBuf = Buffer.isBuffer(req.body)
       ? req.body
-      : (Buffer.isBuffer(req.body) ? req.body.toString('utf8') : JSON.stringify(req.body || {}));
+      : Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {}), 'utf8');
+    if (rawBuf.length > WEBHOOK_MAX_BYTES) return res.status(413).json({ error: 'Payload too large' });
+    const rawBody = rawBuf.toString('utf8');
     const signature = req.get('x-razorpay-signature') || '';
 
     // Always required: an unsigned or wrongly signed webhook is never trusted.
@@ -434,31 +632,72 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
 
     let event;
     try {
-      event = typeof req.body === 'object' && !Buffer.isBuffer(req.body) ? req.body : JSON.parse(rawBody);
+      event = JSON.parse(rawBody);
     } catch {
       return res.status(400).json({ error: 'Invalid JSON payload' });
     }
+    const eventId = String(req.get('x-razorpay-event-id') || '').trim().slice(0, 100);
+    if (eventId && seenIds.has(eventId)) return res.status(200).json({ status: 'duplicate' });
 
-    const eventType = event.event || '';
-    if (eventType === 'payment.captured' || eventType === 'order.paid') {
-      const payment = event.payload?.payment?.entity || {};
-      const orderId = payment.order_id || event.payload?.order?.entity?.id || '';
-      const order = orderId ? await repo.findRazorpayOrder(orderId) : null;
-      if (order && order.userId && order.mode === mode && order.status !== 'PAID') {
-        const userDoc = await repo.findUserById(order.userId);
-        if (userDoc) {
-          await activatePlan({
-            repo, auth, hub, userDoc, order,
-            paymentId: payment.id || '',
-            utr: payment.acquirer_data?.rrn || payment.acquirer_data?.upi_transaction_id || '',
-            vpa: payment.vpa || '',
-            method: String(payment.method || 'upi').toUpperCase(),
-            source: 'razorpay_webhook',
+    const eventType = String(event.event || '');
+    const payment = event.payload?.payment?.entity || {};
+    const refund = event.payload?.refund?.entity || null;
+    const orderId = payment.order_id || event.payload?.order?.entity?.id || '';
+    let order = orderId ? await repo.findRazorpayOrder(orderId) : null;
+    const refundPaymentId = refund?.payment_id || payment.id || '';
+    if (!order && refund && refundPaymentId && typeof repo.findRazorpayOrderByPaymentId === 'function') {
+      order = await repo.findRazorpayOrderByPaymentId(refundPaymentId);
+    }
+    if (order && eventId && Array.isArray(order.webhookEvents) && order.webhookEvents.includes(eventId)) {
+      remember(eventId);
+      return res.status(200).json({ status: 'duplicate' });
+    }
+
+    let handled = false;
+    if (order && order.userId && order.mode === mode) {
+      if (eventType === 'payment.captured' || eventType === 'order.paid') {
+        if (order.status !== 'PAID') {
+          const userDoc = await repo.findUserById(order.userId);
+          if (userDoc) {
+            await activatePlan({
+              repo, auth, hub, userDoc, order,
+              paymentId: payment.id || '',
+              utr: payment.acquirer_data?.rrn || payment.acquirer_data?.upi_transaction_id || '',
+              vpa: payment.vpa || '',
+              method: String(payment.method || 'upi').toUpperCase(),
+              source: 'razorpay_webhook',
+            });
+          }
+        }
+        handled = true;
+      } else if (eventType === 'payment.failed') {
+        // One failed attempt never overrides a payment that went through.
+        if (order.status !== 'PAID') {
+          await repo.updateRazorpayOrder(order.orderId, {
+            status: 'FAILED',
+            failureReason: String(payment.error_description || payment.error_reason || 'Payment failed').slice(0, 300),
+            failureCode: String(payment.error_code || '').slice(0, 60),
+            lastPaymentId: payment.id || '',
+            failedAt: Date.now(),
           });
         }
+        handled = true;
+      } else if ((eventType === 'refund.processed' || eventType === 'refund.created') && refund && refund.id) {
+        await recordRefund({
+          repo, auth, hub, order, refundId: refund.id, amountInPaise: Number(refund.amount) || 0,
+          status: eventType === 'refund.processed' ? 'processed' : (refund.status || 'pending'),
+          by: 'razorpay', reason: String(refund.notes?.reason || '').slice(0, 500),
+        });
+        handled = true;
       }
     }
-    res.status(200).json({ status: 'ok' });
+    if (order && eventId) {
+      const fresh = (await repo.findRazorpayOrder(order.orderId)) || order;
+      const events = [...(Array.isArray(fresh.webhookEvents) ? fresh.webhookEvents : []), eventId].slice(-50);
+      await repo.updateRazorpayOrder(order.orderId, { webhookEvents: events });
+    }
+    remember(eventId);
+    res.status(200).json({ status: 'ok', handled });
   }));
 
 
@@ -494,7 +733,7 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   r.post('/api/subscription/validate-coupon', handleValidateCoupon);
   r.post('/validate-coupon', handleValidateCoupon);
 
-  // Public config: plans + the ACTIVE mode's key id (never a secret).
+  // Public config: plans + the ACTIVE mode's key id (never a secret, no payee details).
   const handleGetConfig = wrap(async (req, res) => {
     const plans = await getEffectivePlans(repo);
     const keys = await gateway.keysFor();
@@ -503,8 +742,6 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
       mode: keys.mode,
       upiOnly: true,
       allowedMethods: ['upi'],
-      upiVpa: config.upiVpa,
-      merchantName: config.upiMerchantName,
       plans,
     });
   });
@@ -512,31 +749,26 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   r.get('/subscription/config', handleGetConfig);
   r.get('/api/subscription/config', handleGetConfig);
 
-  // Public offers: active, inside their dates, flagged for the checkout page.
-  const handlePublicOffers = wrap(async (req, res) => {
-    const now = Date.now();
-    const offers = (await liveOffers(repo, now)).filter((o) => o.showOnCheckout !== false).map(publicOfferView);
-    res.set('Cache-Control', 'no-store').json({ offers, serverTime: now });
-  });
-  r.get('/subscription/offers', handlePublicOffers);
-  r.get('/api/subscription/offers', handlePublicOffers);
-
   // An order the app created, opened on the website to pay by UPI
-  // (checkout.html?order=…&t=…). The token is the only credential needed;
-  // it reveals plan + amount, never the rider's account.
+  // (checkout.html?order=…&t=…&e=…). The token is the only credential: it is bound to the
+  // order and to its expiry (30 minutes after the order was created), and reveals plan,
+  // amount and the rider's own prefill, never anything else about the account.
   const handleWebOrder = wrap(async (req, res) => {
     const orderId = String(req.params.orderId || '');
-    if (!webCheckoutTokenValid(orderId, req.query.t)) return res.status(403).json({ error: 'Invalid checkout link' });
+    const rawE = String(req.query.e || '');
+    const expiresAt = /^\d{10,16}$/.test(rawE) ? Number(rawE) : NaN;
+    if (!Number.isFinite(expiresAt) || !webCheckoutTokenValid(orderId, expiresAt, req.query.t)) {
+      return res.status(403).json({ error: 'Invalid checkout link' });
+    }
+    if (Date.now() > expiresAt) return res.status(410).json({ error: 'Link expired — start again in the app' });
     const order = await repo.findRazorpayOrder(orderId);
-    if (!order) return res.status(404).json({ error: 'Unknown order' });
+    if (!order || !order.userId) return res.status(404).json({ error: 'Unknown order' });
     const plans = await getEffectivePlans(repo);
     const keys = await gateway.keysFor(order.mode);
     let prefill = {};
-    if (order.userId) {
-      const u = await repo.findUserById(order.userId);
-      if (u) prefill = { name: u.name || '', email: u.email || '', contact: u.phone || '' };
-    }
-    res.set('Cache-Control', 'no-store').json({
+    const u = await repo.findUserById(order.userId);
+    if (u) prefill = { name: u.name || '', email: u.email || '', contact: u.phone || '' };
+    res.set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer').json({
       order_id: order.orderId,
       amount: order.amountInPaise,
       currency: order.currency || 'INR',
@@ -546,98 +778,19 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
       planTier: order.planTier,
       planLabel: plans[order.planTier]?.label || order.planTier,
       billingCycle: order.billingCycle,
+      merchantName: config.upiMerchantName,
       upiOnly: true,
+      expiresAt,
       prefill,
     });
   });
-  r.get('/checkout/order/:orderId', handleWebOrder);
-  r.get('/api/checkout/order/:orderId', handleWebOrder);
+  r.get('/checkout/order/:orderId', checkoutLimiter, handleWebOrder);
+  r.get('/api/checkout/order/:orderId', checkoutLimiter, handleWebOrder);
 
   // ---------------------------------------------------------------------------
-  // STEP 1: BACKEND - Create Order   POST /api/create-order
-  // Body: { amount (paise) | planTier+billingCycle, currency, receipt, coupon_code }
-  // ---------------------------------------------------------------------------
-  const handleCreateOrder = wrap(async (req, res) => {
-    const { amount, currency = 'INR', receipt, notes, coupon_code, couponCode } = req.body || {};
-    const planTier = normalizeTier(req.body?.planTier || notes?.planTier);
-    const billingCycle = (req.body?.billingCycle || notes?.billingCycle) === 'annual' ? 'annual' : 'monthly';
-
-    // A known plan is priced on the server; otherwise the given amount is used.
-    let finalAmountPaise = Number(amount);
-    if (planTier !== 'community') {
-      const plans = await getEffectivePlans(repo);
-      const meta = plans[planTier];
-      if (meta) finalAmountPaise = (billingCycle === 'annual' ? meta.annual : meta.monthly) * 100;
-    }
-
-    const rawCoupon = coupon_code || couponCode;
-    let couponResult = null;
-    if (rawCoupon) {
-      const coupon = await resolveCoupon(rawCoupon, repo);
-      if (!coupon) return res.status(400).json({ error: `Coupon '${rawCoupon}' not found or invalid` });
-      couponResult = evaluateCoupon(coupon, {
-        userId: req.user?.userId,
-        planTier,
-        billingCycle,
-        amountInInr: finalAmountPaise ? finalAmountPaise / 100 : 0,
-      });
-      if (!couponResult.valid) return res.status(400).json({ error: couponResult.error });
-      finalAmountPaise = couponResult.finalAmountPaise;
-    }
-    // No coupon: the best live offer for this plan is applied automatically.
-    let appliedOffer = null;
-    if (!couponResult && planTier !== 'community' && Number.isFinite(finalAmountPaise)) {
-      appliedOffer = await bestOffer(repo, { planTier, billingCycle, amountInInr: finalAmountPaise / 100 });
-      if (appliedOffer) finalAmountPaise = Math.round(appliedOffer.finalAmount * 100);
-    }
-
-    if (couponResult && couponResult.isFree) {
-      const freeOrderId = `order_free_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-      await saveOrder(repo, {
-        orderId: freeOrderId, userId: null, planTier, billingCycle, amountInPaise: 0,
-        couponCode: couponResult.code, discountAmount: couponResult.discountAmount, isFree: true, mode: null, channel: 'public',
-      });
-      return res.status(200).json({ order_id: freeOrderId, amount: 0, currency: 'INR', is_free: true, coupon: couponResult });
-    }
-
-    if (!Number.isFinite(finalAmountPaise) || finalAmountPaise < 100) {
-      return res.status(400).json({ error: 'Amount must be at least 100 paise' });
-    }
-
-    let order;
-    try {
-      order = await gateway.createOrder({
-        amountInPaise: finalAmountPaise,
-        currency: String(currency || 'INR').toUpperCase(),
-        receipt: receipt || `rcpt_${Date.now()}`,
-        notes: { ...(notes || {}), planTier, billingCycle, couponCode: couponResult?.code || '', offerId: appliedOffer?.id || '' },
-      });
-    } catch (e) {
-      return sendRzpError(res, e);
-    }
-    await saveOrder(repo, {
-      orderId: order.id, userId: null, planTier, billingCycle, amountInPaise: order.amount,
-      couponCode: couponResult?.code || null, discountAmount: couponResult?.discountAmount || appliedOffer?.discountAmount || 0,
-      offerId: appliedOffer?.id || null, offerTitle: appliedOffer?.title || null,
-      isFree: false, mode: order.mode, channel: 'public',
-    });
-    return res.status(200).json({
-      order_id: order.id,
-      amount: order.amount,
-      currency: order.currency,
-      key_id: order.keyId,
-      mode: order.mode,
-      coupon: couponResult || undefined,
-      offer: offerResponse(appliedOffer),
-    });
-  });
-
-  r.post('/create-order', handleCreateOrder);
-  r.post('/api/create-order', handleCreateOrder);
-
-  // ---------------------------------------------------------------------------
-  // STEP 3: BACKEND - Verify Signature   POST /api/verify-payment
-  // HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET of the order's mode)
+  // Verify Signature   POST /api/verify-payment   (web checkout, Razorpay handler)
+  // HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET of the order's mode).
+  // Only ledger orders created by a signed-in rider; anything else is a 400.
   // ---------------------------------------------------------------------------
   const handleVerifyPayment = wrap(async (req, res) => {
     const b = req.body || {};
@@ -647,37 +800,27 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
 
     if (!orderId) return res.status(400).json({ success: false, error: 'Missing required field: order_id is required' });
     const order = await repo.findRazorpayOrder(orderId);
-    if (!order) return res.status(400).json({ success: false, error: 'Unknown order' });
+    if (!order || !order.userId) return res.status(400).json({ success: false, error: 'Unknown order' });
+    if (order.isFree) return res.status(400).json({ success: false, error: 'Free orders are confirmed in the CoRoute app' });
 
-    if (order.isFree) {
-      if (order.status !== 'PAID') {
-        await repo.updateRazorpayOrder(orderId, { status: 'PAID', paidAt: Date.now() });
-        if (order.couponCode && typeof repo.recordCouponUsage === 'function') {
-          await repo.recordCouponUsage(order.couponCode, { userId: 'guest', orderId, discountAmount: order.discountAmount || 0 }).catch(() => {});
-        }
-      }
-      return res.status(200).json({ success: true, message: 'Free coupon order confirmed', order_id: orderId, is_free: true });
-    }
-
-    // Missing fields: 400
     if (!paymentId || !signature) {
       return res.status(400).json({ success: false, error: 'Missing required fields: order_id, payment_id, and signature are required' });
     }
     const ok = await gateway.verifySignature({ orderId, paymentId, signature, mode: order.mode });
     // Signature mismatch: 400, NOT marked paid
     if (!ok) {
-      await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
+      if (order.status !== 'PAID') await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
       return res.status(400).json({ success: false, error: 'Signature verification failed' });
     }
     const settled = await settleVerifiedOrder({ repo, auth, hub, order, paymentId, source: 'razorpay_checkout_web' });
     return res.status(200).json({
       success: true, message: 'Payment verified successfully', order_id: orderId, payment_id: paymentId, mode: order.mode,
-      activated: settled ? { tier: settled.tier, validUntil: settled.validUntil } : undefined,
+      activated: settled ? { tier: settled.tier, validUntil: settled.validUntil, scheduled: settled.scheduled || undefined } : undefined,
     });
   });
 
-  r.post('/verify-payment', handleVerifyPayment);
-  r.post('/api/verify-payment', handleVerifyPayment);
+  r.post('/verify-payment', verifyLimiter, handleVerifyPayment);
+  r.post('/api/verify-payment', verifyLimiter, handleVerifyPayment);
 
   // ---------------------------------------------------------------------------
   // Redirect-mode return URL (Checkout `redirect: true` + `callback_url`).
@@ -694,21 +837,22 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
     const signature = b.razorpay_signature || '';
     const errDesc = b['error[description]'] || (b.error && b.error.description) || '';
     if (!orderId || !paymentId || !signature) {
-      return back(`failed=${encodeURIComponent(errDesc || 'Payment was not completed')}&order=${encodeURIComponent(orderId)}`);
+      return back(`failed=${encodeURIComponent(String(errDesc || 'Payment was not completed').slice(0, 200))}&order=${encodeURIComponent(String(orderId).slice(0, 60))}`);
     }
     const order = await repo.findRazorpayOrder(orderId);
-    if (!order) return back(`failed=${encodeURIComponent('Unknown order')}`);
+    if (!order || !order.userId) return res.status(400).json({ error: 'Unknown order' });
     const ok = await gateway.verifySignature({ orderId, paymentId, signature, mode: order.mode });
     if (!ok) {
-      await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
+      if (order.status !== 'PAID') await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
       return back(`failed=${encodeURIComponent('Signature verification failed')}&order=${encodeURIComponent(orderId)}`);
     }
     const settled = await settleVerifiedOrder({ repo, auth, hub, order, paymentId, source: 'razorpay_callback' });
     return back(`paid=${encodeURIComponent(orderId)}&payment=${encodeURIComponent(paymentId)}&mode=${encodeURIComponent(order.mode || '')}` +
-      (settled ? `&app=1&tier=${encodeURIComponent(settled.tier)}` : ''));
+      (settled ? `&app=1&tier=${encodeURIComponent(settled.scheduled ? settled.scheduled.tier : settled.tier)}` : '') +
+      (settled && settled.scheduled ? `&starts=${settled.scheduled.startsAt}` : ''));
   });
-  r.post('/razorpay/callback', express.urlencoded({ extended: false }), handleCallback);
-  r.post('/api/razorpay/callback', express.urlencoded({ extended: false }), handleCallback);
+  r.post('/razorpay/callback', callbackLimiter, express.urlencoded({ extended: false, limit: '20kb' }), handleCallback);
+  r.post('/api/razorpay/callback', callbackLimiter, express.urlencoded({ extended: false, limit: '20kb' }), handleCallback);
 }
 
 /**
@@ -718,8 +862,12 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
 function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin }) {
   const gateway = gatewayFor(repo);
 
-  // Create a Razorpay order for a plan (price decided here, optional coupon).
-  r.post('/subscription/create-order', wrap(async (req, res) => {
+  // Create a Razorpay order for a plan (price decided here, optional coupon). 10 per minute per rider.
+  const createOrderLimiter = rateLimit({
+    windowMs: 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `co:${req.user.userId}`, message: { error: 'Too many orders. Try again in a minute.', code: 'RATE_LIMITED' },
+  });
+  r.post('/subscription/create-order', createOrderLimiter, wrap(async (req, res) => {
     const userId = req.user.userId;
     const userDoc = req.dbUser || (await repo.findUserById(userId));
     if (!userDoc) return res.status(404).json({ error: 'User not found' });
@@ -781,11 +929,12 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     } catch (e) {
       return sendRzpError(res, e);
     }
+    const checkoutExpiresAt = Date.now() + WEB_CHECKOUT_TTL_MS;
     await saveOrder(repo, {
       orderId: order.id, userId, planTier, billingCycle, amountInPaise: order.amount,
       couponCode: couponResult?.code || null, discountAmount: couponResult?.discountAmount || appliedOffer?.discountAmount || 0,
       offerId: appliedOffer?.id || null, offerTitle: appliedOffer?.title || null,
-      isFree: false, mode: order.mode, channel: 'app',
+      isFree: false, mode: order.mode, channel: 'app', webCheckoutExpiresAt: checkoutExpiresAt,
     });
 
     // Razorpay Checkout options (UPI only)
@@ -813,23 +962,18 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       theme: { color: '#FF5722' },
     };
 
-    // Direct UPI intent (paid outside Razorpay; confirmed by an admin from the UTR).
-    const upiUri = `upi://pay?pa=${encodeURIComponent(config.upiVpa)}&pn=${encodeURIComponent(config.upiMerchantName)}&am=${amountInInr}.00&cu=INR&tn=${encodeURIComponent('CoRoute ' + planMeta.label + ' ' + order.id)}&tr=${order.id}`;
-
     res.json({
       orderId: order.id,
       amount: amountInInr,
       amountInPaise: order.amount,
       currency: 'INR',
       mode: order.mode,
-      // Same order, paid on the website by UPI when the in-app SDK is not usable.
-      webCheckoutUrl: webCheckoutUrl(req, order.id),
+      // Same order, paid on the website by UPI when the in-app SDK is not usable (link valid 30 minutes).
+      webCheckoutUrl: webCheckoutUrl(req, order.id, checkoutExpiresAt),
+      webCheckoutExpiresAt: checkoutExpiresAt,
       planTier,
       billingCycle,
       planLabel: planMeta.label,
-      upiVpa: config.upiVpa,
-      merchantName: config.upiMerchantName,
-      upiUri,
       razorpayOptions,
       coupon: couponResult || undefined,
       offer: offerResponse(appliedOffer),
@@ -840,14 +984,15 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
    * Verify & activate. Plan, cycle and amount come from the order ledger.
    *  - free coupon order          → activated
    *  - paymentId + signature      → HMAC checked with the order's mode secret, then activated
-   *  - utr only (direct UPI app)  → recorded as a claim (202); an admin approves it
+   *                                 (an upgrade is prorated, a downgrade is scheduled; see activatePlan)
+   *  - utr only (direct UPI app)  → 410: that path was removed, pay through Razorpay
    */
   r.post('/subscription/verify-payment', wrap(async (req, res) => {
     const userId = req.user.userId;
     const userDoc = req.dbUser || (await repo.findUserById(userId));
     if (!userDoc) return res.status(404).json({ error: 'User not found' });
 
-    const { orderId, paymentId, signature, utr, vpa } = req.body || {};
+    const { orderId, paymentId, signature, utr } = req.body || {};
     if (!orderId) return res.status(400).json({ error: 'Missing orderId' });
 
     const order = await repo.findRazorpayOrder(orderId);
@@ -863,7 +1008,13 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       paymentId: result.record.paymentId,
       utr: result.record.utr,
       method,
-      message: `${label} successfully activated!`,
+      prorationCreditDays: Number(result.prorationCreditDays) || 0,
+      scheduledTier: result.scheduled ? result.scheduled.tier : undefined,
+      scheduledStartsAt: result.scheduled ? result.scheduled.startsAt : undefined,
+      scheduledValidUntil: result.scheduled ? result.scheduled.validUntil : undefined,
+      message: result.scheduled
+        ? `${label} starts when your current plan ends.`
+        : `${label} successfully activated!`,
     });
 
     if (order.isFree) {
@@ -874,28 +1025,16 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     if (paymentId && signature) {
       const ok = await gateway.verifySignature({ orderId, paymentId, signature, mode: order.mode });
       if (!ok) {
-        await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
+        if (order.status !== 'PAID') await repo.updateRazorpayOrder(orderId, { status: 'SIGNATURE_MISMATCH', lastPaymentId: paymentId });
         return res.status(400).json({ error: 'Payment signature verification failed' });
       }
-      const result = await activatePlan({ repo, auth, hub, userDoc, order, paymentId, utr, vpa, method: 'RAZORPAY', source: 'razorpay_checkout' });
+      const result = await activatePlan({ repo, auth, hub, userDoc, order, paymentId, method: 'RAZORPAY', source: 'razorpay_checkout' });
       return done(result, 'RAZORPAY');
     }
 
-    if (utr && String(utr).trim().length >= 8) {
-      if (order.status === 'PAID') {
-        const prior = (userDoc.paymentHistory || []).find((p) => p.orderId === orderId);
-        if (prior) return done({ tier: userDoc.subscriptionTier, validUntil: userDoc.subscriptionValidUntil, record: prior }, prior.method);
-      }
-      await repo.updateRazorpayOrder(orderId, { status: 'UTR_CLAIMED', utr: String(utr).trim(), vpa: vpa || '', claimedAt: Date.now() });
-      return res.status(202).json({
-        success: false,
-        pending: true,
-        orderId,
-        message: 'UTR received. Your plan is activated once the payment is confirmed (usually within a few hours).',
-      });
-    }
+    if (utr) return res.status(410).json({ error: 'Pay with UPI through Razorpay in the app or on the website' });
 
-    return res.status(400).json({ error: 'Missing required fields: paymentId and signature (or a UPI UTR) are required' });
+    return res.status(400).json({ error: 'Missing required fields: paymentId and signature are required' });
   }));
 
   // Fetch full payment history / audit receipts, tier periods and the rider's orders from the ledger
@@ -962,7 +1101,16 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     // Body: { mode?, test?: {keyId, keySecret, webhookSecret}, live?: {...} } — blank keeps saved values.
     r.put('/admin/payment-gateway', requireAdmin, wrap(async (req, res) => {
       try {
+        const before = await gateway.publicView();
         const view = await gateway.update(req.body || {}, req.user?.email || req.user?.userId || 'admin');
+        const b = req.body || {};
+        // The audit trail records WHAT changed, never a secret value.
+        const changed = (m) => (b[m] && typeof b[m] === 'object' ? {
+          keyId: String(b[m].keyId || '').trim() || undefined,
+          keySecretChanged: Boolean(String(b[m].keySecret || '').trim()),
+          webhookSecretChanged: Boolean(String(b[m].webhookSecret || '').trim()),
+        } : undefined);
+        await addAudit(repo, req, 'gateway.update', 'razorpay', { modeBefore: before.mode, mode: view.mode, test: changed('test'), live: changed('live') });
         res.set('Cache-Control', 'no-store').json({ success: true, ...view });
       } catch (e) {
         sendRzpError(res, e);
@@ -977,30 +1125,6 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       } catch (e) {
         sendRzpError(res, e);
       }
-    }));
-
-    // Direct-UPI claims waiting for a person to match the UTR to the bank statement.
-    r.get('/admin/payment-claims', requireAdmin, wrap(async (req, res) => {
-      res.json({ claims: await repo.listRazorpayOrders({ status: 'UTR_CLAIMED' }, 200) });
-    }));
-
-    r.post('/admin/payment-claims/:orderId/approve', requireAdmin, wrap(async (req, res) => {
-      const order = await repo.findRazorpayOrder(req.params.orderId);
-      if (!order || order.status !== 'UTR_CLAIMED' || !order.userId) return res.status(404).json({ error: 'No pending claim for this order' });
-      const userDoc = await repo.findUserById(order.userId);
-      if (!userDoc) return res.status(404).json({ error: 'User not found' });
-      const result = await activatePlan({
-        repo, auth, hub, userDoc, order,
-        paymentId: `utr_${order.utr}`, utr: order.utr, vpa: order.vpa, method: 'UPI', source: `admin_utr:${req.user?.userId || 'admin'}`,
-      });
-      res.json({ success: true, subscriptionTier: result.tier, subscriptionValidUntil: result.validUntil });
-    }));
-
-    r.post('/admin/payment-claims/:orderId/reject', requireAdmin, wrap(async (req, res) => {
-      const order = await repo.findRazorpayOrder(req.params.orderId);
-      if (!order || order.status !== 'UTR_CLAIMED') return res.status(404).json({ error: 'No pending claim for this order' });
-      await repo.updateRazorpayOrder(order.orderId, { status: 'UTR_REJECTED', rejectedAt: Date.now(), rejectedBy: req.user?.userId || 'admin' });
-      res.json({ success: true });
     }));
   }
 
@@ -1070,6 +1194,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       periods.push({ tier: planTier, validFrom: result.record.validFrom, validUntil: result.validUntil, startedAt: Date.now(), reason: 'granted', days, note: reason, by: adminId, orderId: order.orderId });
       await repo.updateUser(after.key, { subscriptionHistory: periods, subscriptionExpiredAt: 0 });
       if (auth?.gate) auth.gate.invalidate(userDoc.userId);
+      await addAudit(repo, req, 'subscription.grant', userDoc.userId, { planTier, days, reason, orderId: order.orderId, validUntil: result.validUntil });
       res.json({ success: true, userId: userDoc.userId, orderId: order.orderId, subscriptionTier: result.tier, subscriptionValidUntil: result.validUntil,
         subscriptionStatus: effectiveSubscription({ ...after, subscriptionTier: result.tier, subscriptionValidUntil: result.validUntil }) });
     }));
@@ -1080,18 +1205,104 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       const userDoc = await repo.findUserById(req.params.userId);
       if (!userDoc) return res.status(404).json({ error: 'User not found' });
       const adminId = req.user?.userId || 'admin';
-      const now = Date.now();
-      const current = effectiveSubscription(userDoc, now);
-      const periods = periodsOf(userDoc);
-      periods.push({ tier: current.rawTier, validFrom: Number(userDoc.lastPayment?.validFrom) || 0, validUntil: Number(userDoc.subscriptionValidUntil) || 0, endedAt: now, reason: 'revoked', note: reason, by: adminId });
-      await repo.updateUser(userDoc.key, {
-        subscriptionTier: 'community', subscriptionValidUntil: 0,
-        subscriptionExpiredAt: now, previousTier: current.rawTier !== 'community' ? current.rawTier : (userDoc.previousTier || null),
-        subscriptionWarnedAt: {}, subscriptionHistory: periods,
-      });
-      if (auth?.gate) auth.gate.invalidate(userDoc.userId);
-      if (hub && current.rawTier !== 'community') hub.sendToUser(userDoc.userId, { type: 'SUBSCRIPTION_REVOKED', previousTier: current.rawTier, revokedAt: now, reason });
+      const current = await revokePlan({ repo, auth, hub, userDoc, by: adminId, reason: 'revoked', note: reason });
+      await addAudit(repo, req, 'subscription.revoke', userDoc.userId, { previousTier: current.rawTier, reason });
       res.json({ success: true, userId: userDoc.userId, subscriptionTier: 'community', previousTier: current.rawTier, subscriptionStatus: effectiveSubscription(await repo.findUserById(userDoc.userId)) });
+    }));
+
+    // POST /api/admin/payments/:orderId/refund { amountInPaise?, reason } -> Razorpay refund of the order's payment.
+    // Default amount: everything not yet refunded. A FULL refund revokes the plan the order bought; a partial one keeps it.
+    r.post('/admin/payments/:orderId/refund', requireAdmin, wrap(async (req, res) => {
+      const order = await repo.findRazorpayOrder(req.params.orderId);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      if (order.status !== 'PAID' || !order.paymentId || !['test', 'live'].includes(order.mode) || !(Number(order.amountInPaise) > 0)) {
+        return res.status(400).json({ error: 'Only a paid Razorpay order can be refunded' });
+      }
+      const already = Number(order.refundedAmountInPaise) || 0;
+      const remaining = (Number(order.amountInPaise) || 0) - already;
+      if (order.fullyRefunded || remaining <= 0) return res.status(400).json({ error: 'This order is already fully refunded' });
+      const body = req.body || {};
+      const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
+      const raw = body.amountInPaise;
+      const amount = raw === undefined || raw === null || raw === '' ? remaining : Number(raw);
+      if (!Number.isInteger(amount) || amount < 100 || amount > remaining) {
+        return res.status(400).json({ error: `amountInPaise must be a whole number between 100 and ${remaining}` });
+      }
+      const by = req.user?.email || req.user?.userId || 'admin';
+      let refund;
+      try {
+        refund = await gateway.refundPayment(order.paymentId, amount, { orderId: order.orderId, reason: reason.slice(0, 250), by }, order.mode);
+      } catch (e) {
+        return sendRzpError(res, e);
+      }
+      const updated = await recordRefund({ repo, auth, hub, order, refundId: refund.id, amountInPaise: refund.amount || amount, status: refund.status, by, reason });
+      await addAudit(repo, req, 'payment.refund', order.orderId, {
+        userId: order.userId || null, amountInPaise: amount, refundId: refund.id, refundStatus: updated.refundStatus,
+        full: Boolean(updated.fullyRefunded), planRevoked: Boolean(updated.planRevoked), reason,
+      });
+      res.set('Cache-Control', 'no-store').json({
+        success: true, orderId: order.orderId, refundId: refund.id, refundStatus: updated.refundStatus,
+        refundedAmount: (Number(updated.refundedAmountInPaise) || 0) / 100, refundedAmountInPaise: Number(updated.refundedAmountInPaise) || 0,
+        fullyRefunded: Boolean(updated.fullyRefunded), planRevoked: Boolean(updated.planRevoked), payment: orderView(updated),
+      });
+    }));
+
+    // GET /api/admin/payments/export.csv?from=&to= (epoch ms or ISO date, on createdAt) -> the ledger as CSV, oldest first.
+    r.get('/admin/payments/export.csv', requireAdmin, wrap(async (req, res) => {
+      const parseTime = (v) => {
+        if (v === undefined || v === '') return null;
+        const s = String(v).trim();
+        if (/^\d+$/.test(s)) return Number(s);
+        const t = Date.parse(s);
+        return Number.isFinite(t) ? t : NaN;
+      };
+      const from = parseTime(req.query.from);
+      const to = parseTime(req.query.to);
+      if (Number.isNaN(from) || Number.isNaN(to)) return res.status(400).json({ error: 'from and to must be epoch milliseconds or ISO dates' });
+      const rows = (await repo.listRazorpayOrders({}, 100000))
+        .filter((o) => (from === null || (Number(o.createdAt) || 0) >= from) && (to === null || (Number(o.createdAt) || 0) <= to))
+        .sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0));
+      const cols = ['orderId', 'userId', 'email', 'planTier', 'billingCycle', 'amount', 'mode', 'status', 'paymentId', 'refundStatus', 'refundedAmount', 'offerId', 'couponCode', 'createdAt', 'paidAt'];
+      // Quote every text cell; a leading = + - @ is neutralised so spreadsheets never run it as a formula.
+      const cell = (v) => {
+        if (v === null || v === undefined) return '';
+        if (typeof v === 'number') return String(v);
+        let s = String(v);
+        if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+        return `"${s.replace(/"/g, '""')}"`;
+      };
+      const iso = (ms) => (Number(ms) > 0 ? new Date(Number(ms)).toISOString() : '');
+      const emails = new Map();
+      res.status(200).set({
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="coroute-payments-${new Date().toISOString().slice(0, 10)}.csv"`,
+        'Cache-Control': 'no-store',
+      });
+      res.write(cols.join(',') + '\r\n');
+      for (const o of rows) {
+        if (o.userId && !emails.has(o.userId)) {
+          const u = await repo.findUserById(o.userId).catch(() => null);
+          emails.set(o.userId, u ? u.email || '' : '');
+        }
+        const v = orderView(o);
+        res.write([
+          cell(v.orderId), cell(v.userId), cell(emails.get(o.userId) || ''), cell(v.planTier), cell(v.billingCycle), v.amount, cell(v.mode),
+          cell(v.status), cell(v.paymentId), cell(v.refundStatus), v.refundedAmount, cell(v.offerId), cell(v.couponCode), cell(iso(v.createdAt)), cell(iso(v.paidAt)),
+        ].join(',') + '\r\n');
+      }
+      res.end();
+    }));
+
+    // GET /api/admin/audit?limit=&action= -> admin writes, newest first.
+    r.get('/admin/audit', requireAdmin, wrap(async (req, res) => {
+      const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit, 10) || 100));
+      const action = typeof req.query.action === 'string' ? req.query.action.trim() : '';
+      let entries = typeof repo.listAuditEntries === 'function' ? await repo.listAuditEntries(action ? 5000 : limit) : [];
+      if (action) entries = entries.filter((e) => e.action === action || String(e.action || '').startsWith(`${action}.`));
+      entries = entries.slice(0, limit).map((e) => ({
+        id: e.id, at: Number(e.at) || 0, by: e.by || null, byUserId: e.byUserId || null, action: e.action, target: e.target ?? null, details: e.details || {},
+      }));
+      res.set('Cache-Control', 'no-store').json({ entries, total: entries.length, limit });
     }));
   }
 
@@ -1151,6 +1362,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       }
 
       await repo.setSubscriptionPricing(updated, req.user?.email || req.user?.userId || 'admin');
+      await addAudit(repo, req, 'pricing.update', 'pricing', { plans: updated });
       res.json({
         success: true,
         message: 'Subscription pricing successfully updated by administrator',
@@ -1228,6 +1440,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       };
 
       const saved = await repo.saveCoupon(couponDoc);
+      await addAudit(repo, req, 'coupon.create', cleanCode, { discountType: couponDoc.discountType, discountValue: couponDoc.discountValue, maxUsageTotal: couponDoc.maxUsageTotal, expiresAt: couponDoc.expiresAt });
       res.status(201).json({
         success: true,
         message: `Coupon ${cleanCode} created successfully`,
@@ -1258,6 +1471,9 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
 
       delete updated.key;
       const saved = await repo.saveCoupon(updated);
+      const changes = { ...patch };
+      delete changes.usages; delete changes.key;
+      await addAudit(repo, req, 'coupon.update', code, { changes });
       res.json({
         success: true,
         message: `Coupon ${code} updated successfully`,
@@ -1269,6 +1485,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     r.delete('/admin/coupons/:code', requireAdmin, wrap(async (req, res) => {
       const code = String(req.params.code || '').trim().toUpperCase();
       await repo.deleteCoupon(code);
+      await addAudit(repo, req, 'coupon.delete', code, {});
       res.json({
         success: true,
         message: `Coupon ${code} deleted successfully`,
@@ -1320,20 +1537,29 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       }
       const orders = await repo.listRazorpayOrders({}, 10000);
       const revenue = emptyRevenue(); const testRevenue = emptyRevenue();
-      let pendingClaims = 0; let failedSignatures = 0; let paidOrders = 0;
+      const pendingClaims = 0; // the direct UPI / UTR path was removed; kept at 0 for older app builds
+      let failedSignatures = 0; let paidOrders = 0; let failedPayments = 0; let expiredOrders = 0; let refundedOrders = 0;
+      const refunds = { allTime: 0, testAllTime: 0 };
       for (const o of orders) {
-        if (o.status === 'UTR_CLAIMED') pendingClaims++;
         if (o.status === 'SIGNATURE_MISMATCH') failedSignatures++;
+        if (o.status === 'FAILED') failedPayments++;
+        if (o.status === 'EXPIRED') expiredOrders++;
         if (o.status !== 'PAID') continue;
         const amountInr = (Number(o.amountInPaise) || 0) / 100;
         if (amountInr <= 0) continue;
         paidOrders++;
-        addRevenue(o.mode === 'test' ? testRevenue : revenue, amountInr, Number(o.paidAt) || Number(o.createdAt) || 0, now);
+        const refundedInr = (Number(o.refundedAmountInPaise) || 0) / 100;
+        if (refundedInr > 0) {
+          refundedOrders++;
+          if (o.mode === 'test') refunds.testAllTime += refundedInr; else refunds.allTime += refundedInr;
+        }
+        // Revenue is net of refunds.
+        addRevenue(o.mode === 'test' ? testRevenue : revenue, amountInr - refundedInr, Number(o.paidAt) || Number(o.createdAt) || 0, now);
       }
       const sweep = typeof repo.getSubscriptionSweepStatus === 'function' ? await repo.getSubscriptionSweepStatus().catch(() => null) : null;
       res.set('Cache-Control', 'no-store').json({
         subscribers, totalUsers: users.length, active, expiringIn7Days, expiredLast30Days,
-        revenue, testRevenue, paidOrders, pendingClaims, failedSignatures,
+        revenue, testRevenue, paidOrders, pendingClaims, failedSignatures, failedPayments, expiredOrders, refundedOrders, refunds,
         lastSweepAt: Number(sweep?.lastSweepAt) || 0, lastSweep: sweep ? { scanned: sweep.scanned || 0, expired: sweep.expired || 0, warned: sweep.warned || 0 } : null,
         generatedAt: now,
       });
@@ -1380,6 +1606,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
         redemptions: 0, createdAt: Date.now(), createdBy: req.user?.email || req.user?.userId || 'admin',
       };
       const saved = await repo.saveOffer(offer);
+      await addAudit(repo, req, 'offer.create', offer.id, { title: input.title, planTier: input.planTier, billingCycle: input.billingCycle, discountType: input.discountType, discountValue: input.discountValue });
       res.status(201).json({ success: true, message: `Offer "${input.title}" created`, offer: { ...offerView(saved), isLive: offerIsLive(saved) } });
     }));
 
@@ -1389,6 +1616,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       let input;
       try { input = normalizeOfferInput(req.body, existing); } catch (e) { if (e.status === 400) return res.status(400).json({ error: e.message }); throw e; }
       const saved = await repo.saveOffer({ ...existing, ...input, id: existing.id, updatedBy: req.user?.email || req.user?.userId || 'admin' });
+      await addAudit(repo, req, 'offer.update', existing.id, { changes: req.body || {} });
       res.json({ success: true, message: 'Offer updated', offer: { ...offerView(saved), isLive: offerIsLive(saved) } });
     }));
 
@@ -1396,6 +1624,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       const existing = await repo.findOffer(req.params.id);
       if (!existing) return res.status(404).json({ error: 'Offer not found' });
       await repo.deleteOffer(existing.id);
+      await addAudit(repo, req, 'offer.delete', existing.id, { title: existing.title || '' });
       res.json({ success: true, message: 'Offer deleted', id: existing.id });
     }));
   }
@@ -1410,6 +1639,9 @@ module.exports = {
   normalizeTier,
   gatewayFor,
   activatePlan,
+  revokePlan,
+  recordRefund,
+  webCheckoutToken,
   orderView,
   offerView,
   offerIsLive,

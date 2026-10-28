@@ -758,6 +758,26 @@ class Repo {
     const rows = await this.soda.query(C.subscriptionConfig, { ...filter, k: 'rzp_order' }, { limit });
     return rows.map((r) => r.value);
   }
+  async findRazorpayOrderByPaymentId(paymentId) {
+    if (!paymentId) return null;
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'rzp_order', paymentId: String(paymentId) });
+    return r ? r.value : null;
+  }
+  // ---------- admin audit trail (subscription_config k='audit') ----------
+  /** Appends one admin action: { at, by, action, target, details }. */
+  async addAuditEntry(entry) {
+    const at = Number(entry?.at) || Date.now();
+    const id = `aud_${at.toString(36)}_${require('crypto').randomBytes(4).toString('hex')}`;
+    const doc = { ...entry, k: 'audit', id, at };
+    delete doc.key;
+    await this.soda.upsertBy(C.subscriptionConfig, { k: 'audit', id }, doc);
+    return doc;
+  }
+  /** Newest first. */
+  async listAuditEntries(limit = 100) {
+    const rows = await this.soda.query(C.subscriptionConfig, { k: 'audit' }, { orderBy: [{ path: 'at', datatype: 'number', order: 'desc' }], limit });
+    return rows.map((r) => r.value).sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+  }
   async findCoupon(rawCode) {
     if (!rawCode) return null;
     const code = String(rawCode).trim().toUpperCase();

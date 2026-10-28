@@ -57,6 +57,13 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="coroute" android:host="cockpit"/>
             </intent-filter>
+            <!-- Return from the website checkout: coroute://subscription (re-reads the plan) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="coroute" android:host="subscription"/>
+            </intent-filter>
             <!-- Invite links: https://coroute.duckdns.org/join/CODE (verified via /.well-known/assetlinks.json) -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW"/>
@@ -107,6 +114,10 @@
              lock screen without unlocking. Not exported: only the system notification can call it. -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
+            android:exported="false"/>
+        <!-- flutter_local_notifications: delivers the scheduled plan expiry reminders (7/3/1 days, expiry). -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
             android:exported="false"/>
         <meta-data
             android:name="flutterEmbedding"

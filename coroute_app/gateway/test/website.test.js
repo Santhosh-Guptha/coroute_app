@@ -323,3 +323,38 @@ test('terms agree with the privacy policy on who an SOS reaches; iOS wording is 
     assert.ok(!/iOS version is planned|One is planned/.test(html), `${p}: no iOS promise`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Website = information + payment handover. No plans, prices, coupons or admin UI on public pages;
+// /checkout only pays an order the app created.
+// ---------------------------------------------------------------------------
+test('public pages carry no plans, prices, coupons or admin UI; the admin page is gone', async () => {
+  for (const p of ['/pricing-admin', '/pricing-admin.html']) assert.equal((await fetch(base + p, { redirect: 'manual' })).status, 404, p);
+  const sm = await (await fetch(base + '/sitemap.xml')).text();
+  assert.ok(!sm.includes('/checkout<') && !sm.includes('/pricing-admin'), 'checkout and admin pages are not listed');
+  for (const p of ['/', '/features', '/how-it-works', '/safety', '/about', '/get', '/privacy', '/terms', '/no-such-page']) {
+    const html = await (await fetch(base + p)).text();
+    assert.ok(!/href="\/checkout|href="\/pricing-admin/.test(html), `${p}: links to checkout or admin`);
+    assert.ok(!/See plans|Plans &amp; Pay|Compare plans|Choose Pro|id="plans"|hm-plan\b/.test(html), `${p}: plan section or CTA`);
+    assert.ok(!/coupon/i.test(html), `${p}: coupon UI`);
+    assert.ok(!html.includes('/api/subscription/config') && !html.includes('/api/create-order'), `${p}: pricing / order calls`);
+    if (p !== '/terms' && p !== '/privacy') assert.ok(!/&#8377;\s?\d|Rs\.? ?\d/.test(html), `${p}: shows a price`);
+  }
+  const home = await (await fetch(base + '/')).text();
+  assert.ok(home.includes('href="/get"') && home.includes('Get the app'));
+});
+
+test('checkout page: app-order payment only, noindex, return link to the app', async () => {
+  const r = await fetch(base + '/checkout');
+  assert.equal(r.status, 200);
+  const html = await r.text();
+  assert.ok(html.includes('<meta name="robots" content="noindex, nofollow">'));
+  assert.ok(html.includes('Choose a plan in the CoRoute app') && html.includes('href="/get"'), 'fallback without an order');
+  assert.ok(html.includes('href="coroute://subscription"') && html.includes('Return to the CoRoute app'));
+  assert.ok(html.includes("'/api/checkout/order/'") && html.includes("'&e='"), 'loads the app order with its signed expiry');
+  assert.ok(html.includes('upi: true, card: false'), 'UPI only');
+  for (const gone of ['plan-card', 'rider-name', 'coupon', 'test-creds', 'offer-banner', '/api/create-order', '/api/subscription/offers', '/api/subscription/config', 'pricing-admin', 'Test Card']) {
+    assert.ok(!html.toLowerCase().includes(gone.toLowerCase()), `checkout still has ${gone}`);
+  }
+  assert.equal((await fetch(base + '/checkout.html?order=x&t=y&e=1')).status, 200);
+});

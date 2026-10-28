@@ -140,6 +140,22 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
 
   static bool _isTest(dynamic mode) => mode?.toString().toLowerCase() == 'test';
 
+  static num? _numOf(dynamic v) => v is num ? v : num.tryParse('${v ?? ''}');
+
+  /// Refund of a payment or order: (rupees refunded, whole amount?), null when none.
+  /// Reads `refundStatus` / `status` and `refundedAmount` (rupees) or
+  /// `refundedAmountInPaise`.
+  static (num, bool)? _refundOf(Map<String, dynamic> m, num? amount) {
+    final status = (m['refundStatus'] ?? m['status'] ?? '').toString().toUpperCase();
+    final paise = _numOf(m['refundedAmountInPaise']) ?? _numOf(m['refundAmountInPaise']);
+    final rupees = _numOf(m['refundedAmount']) ?? _numOf(m['refundAmount']) ?? (paise == null ? null : paise / 100);
+    final flagged = status.contains('REFUND') || m['refunded'] == true;
+    if ((rupees == null || rupees <= 0) && !flagged) return null;
+    final partial = status.contains('PARTIAL');
+    final full = !partial && (status == 'REFUNDED' || status == 'FULL' || rupees == null || (amount != null && rupees >= amount));
+    return (rupees ?? amount ?? 0, full);
+  }
+
   static bool _isPendingOrder(String status) =>
       status == 'CREATED' || status == 'UTR_CLAIMED' || status == 'PENDING' || status == 'ATTEMPTED';
 
@@ -433,7 +449,7 @@ class _PeriodRow extends StatelessWidget {
               ),
               if (reason.isNotEmpty) ...[
                 const SizedBox(width: 8),
-                DsChip(_reasonLabel(reason), warning: reason.toLowerCase().contains('expir')),
+                DsChip(_reasonLabel(reason), warning: RegExp('expir|refund|revok').hasMatch(reason.toLowerCase())),
               ],
             ],
           ),
@@ -446,6 +462,8 @@ class _PeriodRow extends StatelessWidget {
   static String _reasonLabel(String reason) {
     final r = reason.toLowerCase();
     if (r.contains('expir')) return 'Expired';
+    if (r.contains('refund')) return 'Refunded';
+    if (r.contains('revok')) return 'Ended by support';
     if (r.contains('upgrade')) return 'Upgraded';
     if (r.contains('renew')) return 'Renewed';
     if (r.contains('cancel')) return 'Cancelled';
@@ -471,6 +489,7 @@ class _PaymentCard extends StatelessWidget {
     final test = _PaymentHistoryScreenState._isTest(p['mode']);
     final validFrom = _PaymentHistoryScreenState._epoch(p['validFrom']);
     final validUntil = _PaymentHistoryScreenState._epoch(p['validUntil']);
+    final refund = _PaymentHistoryScreenState._refundOf(p, amount);
 
     return DsCard(
       padding: const EdgeInsets.all(14),
@@ -484,9 +503,17 @@ class _PaymentCard extends StatelessWidget {
               ),
               if (test) const DsChip('Test', warning: true),
               if (test) const SizedBox(width: 6),
+              if (refund != null) ...[
+                DsChip(refund.$2 ? 'Refunded' : 'Partly refunded', color: AppTheme.warnText, background: AppTheme.warnTint),
+                const SizedBox(width: 6),
+              ],
               Text(
                 _PaymentHistoryScreenState._rupees(amount),
-                style: AppText.title.copyWith(fontSize: 18, color: AppTheme.accentText),
+                style: AppText.title.copyWith(
+                  fontSize: 18,
+                  color: refund != null && refund.$2 ? AppTheme.muted : AppTheme.accentText,
+                  decoration: refund != null && refund.$2 ? TextDecoration.lineThrough : null,
+                ),
               ),
             ],
           ),
@@ -500,6 +527,17 @@ class _PaymentCard extends StatelessWidget {
             Text(
               'Covers ${_PaymentHistoryScreenState._when(validFrom, time: false)} → ${_PaymentHistoryScreenState._when(validUntil, time: false)}',
               style: AppText.caption,
+            ),
+          ],
+          if (refund != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              [
+                'Refunded ${_PaymentHistoryScreenState._rupees(refund.$1)}',
+                if (_PaymentHistoryScreenState._epoch(p['refundedAt']) > 0) 'on ${_PaymentHistoryScreenState._when(p['refundedAt'], time: false)}',
+                if (refund.$2) '· plan ended',
+              ].join(' '),
+              style: AppText.caption.copyWith(color: AppTheme.warnText, fontWeight: FontWeight.w700),
             ),
           ],
           if (paymentId.isNotEmpty) ...[
@@ -575,6 +613,13 @@ class _OrderCard extends StatelessWidget {
               Text(_PaymentHistoryScreenState._rupees(amount), style: AppText.title.copyWith(fontSize: 16)),
             ],
           ),
+          if (_PaymentHistoryScreenState._refundOf(o, amount) case final r?) ...[
+            const SizedBox(height: 2),
+            Text(
+              '${r.$2 ? 'Refunded' : 'Partly refunded'}: ${_PaymentHistoryScreenState._rupees(r.$1)}',
+              style: AppText.caption.copyWith(color: AppTheme.warnText, fontWeight: FontWeight.w700),
+            ),
+          ],
           if (paid && _PaymentHistoryScreenState._epoch(o['paidAt']) > 0) ...[
             const SizedBox(height: 2),
             Text('Paid ${_PaymentHistoryScreenState._when(o['paidAt'])}', style: AppText.caption),
@@ -623,6 +668,10 @@ class _OrderCard extends StatelessWidget {
       case 'VERIFIED':
       case 'SUCCESS':
         return 'Paid';
+      case 'REFUNDED':
+        return 'Refunded';
+      case 'PARTIALLY_REFUNDED':
+        return 'Partly refunded';
       case '':
         return 'Unknown';
       default:

@@ -375,7 +375,8 @@ class _SessionBinderState extends State<_SessionBinder> {
   Widget build(BuildContext context) => widget.child;
 }
 
-/// Handles `coroute://join/CODE` and `https://<host>/join/CODE` links.
+/// Handles `coroute://join/CODE` and `https://<host>/join/CODE` links, and
+/// `coroute://subscription` (return from the website checkout).
 class _DeepLinkListener extends StatefulWidget {
   final Widget child;
   const _DeepLinkListener({required this.child});
@@ -400,6 +401,11 @@ class _DeepLinkListenerState extends State<_DeepLinkListener> {
   void _handle(Uri uri) {
     if (uri.scheme == 'coroute' && uri.host == 'cockpit') {
       // Return link from external navigation; activity is brought to foreground.
+      return;
+    }
+    if (uri.scheme == 'coroute' && uri.host == 'subscription') {
+      // Back from the website checkout: re-read the plan; an open checkout closes itself on success.
+      context.read<PlanSubscriptionService>().handleCheckoutReturn(uri).ignore();
       return;
     }
     final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();

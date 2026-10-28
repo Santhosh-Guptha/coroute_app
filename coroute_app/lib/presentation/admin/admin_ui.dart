@@ -805,15 +805,25 @@ class AdminShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final int badge = nav.fold<int>(0, (max, n) => n.badge > max ? n.badge : max);
     return Scaffold(
       primary: primary,
       backgroundColor: AppTheme.bg,
+      drawer: nav.isNotEmpty ? _AdminDrawer(nav: nav, footer: railFooter) : null,
       body: SafeArea(
         top: primary,
         bottom: false,
         child: LayoutBuilder(builder: (context, c) {
           final wide = c.maxWidth >= adminWideBreakpoint && nav.isNotEmpty;
-          final header = _Header(title: title, subtitle: subtitle, actions: actions, onBack: onBack, showMark: !wide && onBack == null);
+          final header = _Header(
+            title: title,
+            subtitle: subtitle,
+            actions: actions,
+            onBack: onBack,
+            showMark: !wide && onBack == null,
+            hasNav: nav.isNotEmpty && !wide && onBack == null,
+            badge: badge,
+          );
           if (wide) {
             return Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -834,8 +844,7 @@ class AdminShell extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 4), child: header),
-              if (nav.isNotEmpty) _NavRow(nav: nav),
+              Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 10), child: header),
               Expanded(child: body),
             ],
           );
@@ -885,8 +894,18 @@ class _Header extends StatelessWidget {
   final List<Widget> actions;
   final VoidCallback? onBack;
   final bool showMark;
+  final bool hasNav;
+  final int badge;
 
-  const _Header({required this.title, this.subtitle, required this.actions, this.onBack, required this.showMark});
+  const _Header({
+    required this.title,
+    this.subtitle,
+    required this.actions,
+    this.onBack,
+    required this.showMark,
+    this.hasNav = false,
+    this.badge = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -896,6 +915,36 @@ class _Header extends StatelessWidget {
       children: [
         if (back != null) ...[
           DsRoundButton(icon: Icons.chevron_left_rounded, label: 'Back', onTap: back),
+          const SizedBox(width: 12),
+        ] else if (hasNav) ...[
+          Builder(builder: (ctx) {
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                DsRoundButton(
+                  icon: Icons.menu_rounded,
+                  label: 'Console Menu',
+                  onTap: () => Scaffold.of(ctx).openDrawer(),
+                ),
+                if (badge > 0)
+                  Positioned(
+                    top: -2,
+                    right: -2,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppTheme.sos,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '$badge',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          }),
           const SizedBox(width: 12),
         ] else if (showMark) ...[
           const AdminBrandMark(),
@@ -919,6 +968,97 @@ class _Header extends StatelessWidget {
           actions[i],
         ],
       ],
+    );
+  }
+}
+
+class _AdminDrawer extends StatelessWidget {
+  final List<AdminNavItem> nav;
+  final Widget? footer;
+
+  const _AdminDrawer({required this.nav, this.footer});
+
+  @override
+  Widget build(BuildContext context) {
+    final f = footer;
+    return Drawer(
+      backgroundColor: AppTheme.card,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 16, 16),
+              child: Row(
+                children: [
+                  const AdminBrandMark(size: 40),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('CoRoute Ops', style: AppText.title.copyWith(fontSize: 18, color: AppTheme.text)),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Operations & Config Console',
+                          style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, color: AppTheme.muted),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            Divider(color: AppTheme.border, height: 1),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              child: Text(
+                'CONSOLE MODULES',
+                style: AppText.overline.copyWith(color: AppTheme.muted, letterSpacing: 1.2),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: [
+                  for (final n in nav)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: _NavTile(
+                        item: n,
+                        onDrawerTap: () {
+                          Navigator.pop(context);
+                          if (!n.selected && n.onTap != null) {
+                            n.onTap!();
+                          }
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (f != null)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.soft,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.border),
+                  ),
+                  child: f,
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -978,7 +1118,8 @@ class _Rail extends StatelessWidget {
 
 class _NavTile extends StatelessWidget {
   final AdminNavItem item;
-  const _NavTile({required this.item});
+  final VoidCallback? onDrawerTap;
+  const _NavTile({required this.item, this.onDrawerTap});
 
   @override
   Widget build(BuildContext context) {
@@ -989,7 +1130,7 @@ class _NavTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: n.onTap,
+        onTap: onDrawerTap ?? n.onTap,
         child: Container(
           height: 44,
           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1006,62 +1147,6 @@ class _NavTile extends StatelessWidget {
                 ),
               ),
               if (n.badge > 0) _Badge(n.badge),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _NavRow extends StatelessWidget {
-  final List<AdminNavItem> nav;
-  const _NavRow({required this.nav});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 56,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-        children: [
-          for (var i = 0; i < nav.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            _NavChip(item: nav[i]),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _NavChip extends StatelessWidget {
-  final AdminNavItem item;
-  const _NavChip({required this.item});
-
-  @override
-  Widget build(BuildContext context) {
-    final n = item;
-    final fg = n.selected ? Colors.white : (n.danger ? AppTheme.sos : AppTheme.text);
-    return Material(
-      color: n.selected ? AppTheme.brand : AppTheme.card,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: n.selected ? AppTheme.brand : AppTheme.border, width: 2),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: n.onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(n.icon, size: 18, color: fg),
-              const SizedBox(width: 6),
-              Text(n.label, style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w800)),
-              if (n.badge > 0) ...[const SizedBox(width: 6), _Badge(n.badge)],
             ],
           ),
         ),

@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/feature_gates.dart';
 import 'api_client.dart';
+import 'subscription_reminders.dart';
 
 /// A `SUBSCRIPTION_EXPIRING` warning from the gateway, kept until the UI shows it once.
 class SubscriptionExpiringNotice {
@@ -23,12 +25,34 @@ class SubscriptionExpiringNotice {
   });
 }
 
-/// A `SUBSCRIPTION_EXPIRED` event from the gateway, kept until the UI shows it once.
+/// Why a paid plan ended before (or at) its end date.
+enum PlanEndReason {
+  /// It ran out (validUntil passed).
+  expired,
+
+  /// CoRoute support ended it (`SUBSCRIPTION_REVOKED`).
+  revoked,
+
+  /// The payment was refunded, which ends the plan (`SUBSCRIPTION_REVOKED`, reason refund).
+  refunded,
+}
+
+/// A `SUBSCRIPTION_EXPIRED` or `SUBSCRIPTION_REVOKED` event from the gateway,
+/// kept until the UI shows it once.
 class SubscriptionExpiredNotice {
   final SubscriptionTier previousTier;
   final int expiredAt;
+  final PlanEndReason reason;
 
-  const SubscriptionExpiredNotice({required this.previousTier, required this.expiredAt});
+  /// Free text from support (revocations only), may be empty.
+  final String note;
+
+  const SubscriptionExpiredNotice({
+    required this.previousTier,
+    required this.expiredAt,
+    this.reason = PlanEndReason.expired,
+    this.note = '',
+  });
 }
 
 /// Information describing a capability or feature of a plan.
@@ -115,6 +139,23 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   static const List<int> warningThresholds = [7, 3, 1];
 
   final ApiClient? _api;
+  final PlanReminderScheduler _reminders;
+
+  /// Signature (`tier:validUntil`) of the reminders now scheduled; '' when none.
+  /// Null until the first evaluation, so a cold start always reschedules.
+  String? _reminderSignature;
+
+  /// A cheaper paid plan the rider bought while a higher one is active: it
+  /// starts when the current one ends (server `pendingTier` / `pendingStartsAt`).
+  SubscriptionTier? _pendingTier;
+  int _pendingStartsAt = 0;
+
+  /// Bumped after the app came back from the website checkout
+  /// (`coroute://subscription`) and the status was re-read.
+  final ValueNotifier<int> checkoutReturns = ValueNotifier<int>(0);
+
+  /// The last `coroute://subscription` link (its query may say `status=expired`).
+  Uri? lastCheckoutReturn;
 
   /// Server truth: the tier the rider has paid for (Community when none), with [_validUntil].
   SubscriptionTier _entitledTier = SubscriptionTier.community;
@@ -138,7 +179,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   Timer? _expiryTimer;
   bool _observing = false;
 
-  PlanSubscriptionService([this._api]) {
+  PlanSubscriptionService([this._api, PlanReminderScheduler? reminders]) : _reminders = reminders ?? PlanReminderScheduler() {
     _expiryTimer = Timer.periodic(const Duration(minutes: 1), (_) => checkExpiry());
     try {
       WidgetsBinding.instance.addObserver(this);
@@ -156,6 +197,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
       WidgetsBinding.instance.removeObserver(this);
       _observing = false;
     }
+    checkoutReturns.dispose();
     super.dispose();
   }
 
@@ -205,6 +247,43 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
       _validUntil <= DateTime.now().millisecondsSinceEpoch;
   bool get forceAllUnlocked => _forceAllUnlocked;
   bool get loaded => _loaded;
+
+  /// A cheaper paid plan queued to start when the current one ends (null when none).
+  SubscriptionTier? get pendingTier => _pendingTier;
+
+  /// When [pendingTier] starts (epoch ms; falls back to [validUntil]).
+  int get pendingStartsAt => _pendingStartsAt > 0 ? _pendingStartsAt : _validUntil;
+
+  static final DateFormat _dateFmt = DateFormat('d MMM yyyy');
+
+  /// "27 Nov 2026" for an epoch-ms instant ('' for none).
+  static String formatDate(int epochMs) =>
+      epochMs > 0 ? _dateFmt.format(DateTime.fromMillisecondsSinceEpoch(epochMs)) : '';
+
+  /// "CoRoute Pro starts 27 Nov 2026" for a queued downgrade, null when none.
+  String? get pendingPlanSummary {
+    final p = _pendingTier;
+    if (p == null) return null;
+    final when = formatDate(pendingStartsAt);
+    return when.isEmpty ? '${FeatureGates.tierLabel(p)} starts next' : '${FeatureGates.tierLabel(p)} starts $when';
+  }
+
+  /// Checkout copy for buying [target] while a paid plan is held: upgrades
+  /// carry the unused days over (the server prorates), a cheaper tier waits
+  /// for the current plan to end. Null when nothing special applies.
+  String? planChangeNote(SubscriptionTier target) {
+    if (!_isPaid || _entitlementLapsed || target == SubscriptionTier.community || target == _entitledTier) return null;
+    final held = FeatureGates.tierLabel(_entitledTier);
+    if (target.index > _entitledTier.index) {
+      return 'Your remaining $held days are credited to ${FeatureGates.tierLabel(target)}.';
+    }
+    final when = formatDate(_validUntil);
+    return when.isEmpty ? 'Starts when your $held ends.' : 'Starts when your $held ends on $when.';
+  }
+
+  /// True when buying [target] would queue it behind a higher plan that is still active.
+  bool isQueuedDowngrade(SubscriptionTier target) =>
+      _isPaid && !_entitlementLapsed && target != SubscriptionTier.community && target.index < _entitledTier.index;
 
   /// The paid tier that ran out, until the rider renews or picks Community on purpose.
   SubscriptionTier? get previousTier => _previousTier;
@@ -288,7 +367,13 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     return true;
   }
 
-  void _expire({required SubscriptionTier previousTier, required int expiredAt, required bool notice}) {
+  void _expire({
+    required SubscriptionTier previousTier,
+    required int expiredAt,
+    required bool notice,
+    PlanEndReason reason = PlanEndReason.expired,
+    String note = '',
+  }) {
     _previousTier = previousTier == SubscriptionTier.community ? _previousTier : previousTier;
     _expiredAt = expiredAt;
     // Only the entitlement ends; the preference is left as it is and effectiveTier
@@ -298,12 +383,37 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     _serverDaysRemaining = null;
     _expiringNotice = null;
     _forceAllUnlocked = false;
+    if (reason != PlanEndReason.expired) _pendingTier = null; // a revocation ends everything queued too
+    if (_pendingTier == null) _pendingStartsAt = 0;
     if (notice && _previousTier != null) {
-      _expiredNotice = SubscriptionExpiredNotice(previousTier: _previousTier!, expiredAt: expiredAt);
+      _expiredNotice = SubscriptionExpiredNotice(previousTier: _previousTier!, expiredAt: expiredAt, reason: reason, note: note);
     }
     _syncToFeatureGates();
     notifyListeners();
     _persist();
+    _refreshReminders();
+  }
+
+  /// Schedules (or cancels) the local 7/3/1-day and end-of-plan reminders when
+  /// the entitlement changed. No server push is needed for these.
+  void _refreshReminders() {
+    final now = DateTime.now();
+    final active = _isPaid && _validUntil > now.millisecondsSinceEpoch;
+    // A queued cheaper plan takes over at the end: "your plan ends" would be wrong.
+    final sig = active && _pendingTier == null ? '${_entitledTier.name}:$_validUntil' : '';
+    if (sig == _reminderSignature) return;
+    _reminderSignature = sig;
+    if (sig.isEmpty) {
+      _reminders.cancelAll().ignore();
+      return;
+    }
+    final list = computePlanReminders(
+      tier: _entitledTier,
+      validUntilMs: _validUntil,
+      now: now,
+      featureSummary: keyFeatureSummary(_entitledTier),
+    );
+    _reminders.schedule(list, _entitledTier).ignore();
   }
 
   void _persist() {
@@ -342,6 +452,9 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     final prev = _tierNamed(status['previousTier']?.toString());
     final expired = status['isExpired'] == true;
     final days = status['daysRemaining'] is num ? (status['daysRemaining'] as num).toInt() : null;
+    final pending = _tierNamed(status['pendingTier']?.toString());
+    _pendingTier = pending == SubscriptionTier.community ? null : pending;
+    _pendingStartsAt = _pendingTier != null && status['pendingStartsAt'] is num ? (status['pendingStartsAt'] as num).toInt() : 0;
     applyServerSubscription(tierName, until, previousTier: expired ? (prev ?? _previousTier) : prev, serverDaysRemaining: days);
     if (status['expiringSoon'] == true && _isPaid && days != null) {
       _noteExpiring(days, _entitledTier, _validUntil);
@@ -388,6 +501,32 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     _expire(previousTier: prev, expiredAt: at, notice: true);
   }
 
+  /// Gateway `SUBSCRIPTION_REVOKED` `{previousTier, revokedAt, reason}`: support
+  /// ended the plan or the payment was refunded. Rolls back like an expiry and
+  /// queues the "ended" dialog with the right wording.
+  void handleRevokedEvent(Map<String, dynamic> e) {
+    final prev = _tierNamed(e['previousTier']?.toString()) ?? (_isPaid ? _entitledTier : _previousTier);
+    final at = e['revokedAt'] is num ? (e['revokedAt'] as num).toInt() : DateTime.now().millisecondsSinceEpoch;
+    if (prev == null || prev == SubscriptionTier.community) return;
+    final note = e['reason']?.toString() ?? '';
+    final refunded = note.toLowerCase().contains('refund');
+    _expire(
+      previousTier: prev,
+      expiredAt: at,
+      notice: true,
+      reason: refunded ? PlanEndReason.refunded : PlanEndReason.revoked,
+      note: note,
+    );
+  }
+
+  /// The app was opened by `coroute://subscription` (the website checkout sends
+  /// the rider back): re-read the plan, then tell an open checkout to look.
+  Future<void> handleCheckoutReturn(Uri uri) async {
+    lastCheckoutReturn = uri;
+    await syncFromServer();
+    checkoutReturns.value = checkoutReturns.value + 1;
+  }
+
   /// `GET /subscription/history`: `{ history: [...], subscriptionHistory: [...], orders: [...] }`.
   Future<Map<String, dynamic>> fetchHistory() async {
     if (_api == null) throw const ApiException(0, 'API client unavailable.');
@@ -429,7 +568,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
       _loaded = true;
       notifyListeners();
     }
-    checkExpiry();
+    if (!checkExpiry()) _refreshReminders(); // cold start: put the reminders back (reboots clear them)
 
     // Background sync pricing & subscription from Gateway API
     if (_api != null) {
@@ -521,6 +660,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     _syncToFeatureGates();
     notifyListeners();
     _persist();
+    _refreshReminders();
   }
 
   /// Validates a promotional discount coupon code with the Gateway.
@@ -544,6 +684,8 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   }
 
   /// Creates a Razorpay UPI order via Gateway API with optional promotional coupon.
+  /// The reply carries `orderId`, `amountInPaise`, `razorpayOptions`,
+  /// `webCheckoutUrl` (valid 30 minutes) and, when one applies, `offer` / `coupon`.
   Future<Map<String, dynamic>?> createOrder(
     SubscriptionTier tier, {
     bool annual = false,
@@ -561,13 +703,13 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     return null;
   }
 
-  /// Verifies a completed Razorpay UPI transaction with the Gateway and unlocks entitlements.
+  /// Verifies a completed Razorpay payment (or a free-pass coupon order) with
+  /// the Gateway and unlocks entitlements. Razorpay is the only way to pay.
   Future<Map<String, dynamic>> verifyPayment({
     required String orderId,
     required SubscriptionTier tier,
     bool annual = false,
     String? paymentId,
-    String? utr,
     String? signature,
     String? couponCode,
   }) async {
@@ -580,7 +722,6 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
         'planTier': tier.name,
         'billingCycle': annual ? 'annual' : 'monthly',
         'paymentId': ?paymentId,
-        'utr': ?utr,
         'signature': ?signature,
         'couponCode': ?couponCode,
       });
@@ -648,8 +789,11 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     _expiringNotice = null;
     _expiredNotice = null;
     _forceAllUnlocked = false;
+    _pendingTier = null;
+    _pendingStartsAt = 0;
     _syncToFeatureGates();
     notifyListeners();
+    _refreshReminders(); // signed out: no reminders for someone else's plan
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(keyTier);
@@ -684,6 +828,13 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   /// Current max allowable convoy size.
   int get maxConvoyMembers => FeatureGates.maxConvoyMembers(effectiveTier);
 
+  /// "₹1,199" for whole rupees, "₹49.50" otherwise (no period suffix).
+  static String formatInr(num amount) {
+    if (amount != amount.roundToDouble()) return '₹${amount.toStringAsFixed(2)}';
+    final intVal = amount.toInt();
+    return intVal >= 1000 ? '₹${intVal ~/ 1000},${(intVal % 1000).toString().padLeft(3, '0')}' : '₹$intVal';
+  }
+
   /// Formats an INR price cleanly (e.g. 50 -> "₹50 / mo", 1199 -> "₹1,199 / yr").
   static String formatPlanPrice(num amount, {required bool isAnnual}) {
     final intVal = amount.toInt();
@@ -691,6 +842,52 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
         ? '₹${intVal ~/ 1000},${(intVal % 1000).toString().padLeft(3, '0')}'
         : '₹$intVal';
     return isAnnual ? '$formatted / yr' : '$formatted / mo';
+  }
+
+  /// Built-in INR prices used until `/subscription/config` has answered.
+  static const Map<SubscriptionTier, (int, int)> _basePrices = {
+    SubscriptionTier.proRider: (149, 1199),
+    SubscriptionTier.roadCaptain: (599, 4499),
+    SubscriptionTier.tourOperator: (1999, 14999),
+  };
+
+  /// The INR price of [tier] for a month or a year, from the server's
+  /// `/subscription/config` plans when known (0 for Community).
+  static num priceOf(SubscriptionTier tier, {required bool annual}) {
+    if (tier == SubscriptionTier.community) return 0;
+    final cfg = _configuredPlans?[tier.name];
+    if (cfg is Map) {
+      final v = cfg[annual ? 'annual' : 'monthly'];
+      if (v is num && v > 0) return v;
+    }
+    final base = _basePrices[tier];
+    if (base == null) return 0;
+    return annual ? base.$2 : base.$1;
+  }
+
+  /// Rupees saved a year by paying [annual] once instead of [monthly] x 12 (never negative).
+  static num annualSaving(num monthly, num annual) {
+    if (monthly <= 0 || annual <= 0) return 0;
+    final saving = monthly * 12 - annual;
+    return saving > 0 ? saving : 0;
+  }
+
+  /// [annualSaving] as a whole percentage of twelve monthly payments (0 when none).
+  static int annualSavingPercent(num monthly, num annual) {
+    final saving = annualSaving(monthly, annual);
+    if (saving <= 0) return 0;
+    return (saving * 100 / (monthly * 12)).round();
+  }
+
+  /// The best annual saving across the paid tiers, as a percentage (for the toggle label).
+  static int bestAnnualSavingPercent() {
+    var best = 0;
+    for (final t in SubscriptionTier.values) {
+      if (t == SubscriptionTier.community) continue;
+      final p = annualSavingPercent(priceOf(t, annual: false), priceOf(t, annual: true));
+      if (p > best) best = p;
+    }
+    return best;
   }
 
   /// Sets or updates the dynamically configured plan amounts in memory.

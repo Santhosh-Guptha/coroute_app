@@ -18,12 +18,14 @@ import '../timeline/member_colors.dart';
 import 'admin_convoy_inspector.dart';
 import 'admin_emergencies_panel.dart';
 import 'admin_insights_screen.dart';
+import 'admin_plans_pricing_screen.dart';
 import 'admin_ride_history_screen.dart';
 import 'admin_ui.dart';
 import 'admin_users_screen.dart';
+import '../subscription/plan_selector_screen.dart';
 
 /// The sections of the admin console nav (rail on wide screens, chip row on phones).
-enum AdminSection { dashboard, users, rides, insights }
+enum AdminSection { dashboard, users, plans, rides, insights }
 
 /// The nav items for an admin screen that shows [current]. From the
 /// dashboard a section is pushed; from another section it replaces that
@@ -52,6 +54,12 @@ List<AdminNavItem> adminNavItems(BuildContext context, AdminSection current, {in
       label: 'Users',
       selected: current == AdminSection.users,
       onTap: () => go(AdminSection.users, () => const AdminUsersScreen()),
+    ),
+    AdminNavItem(
+      icon: Icons.payments_outlined,
+      label: 'Payments & Plans',
+      selected: current == AdminSection.plans,
+      onTap: () => go(AdminSection.plans, () => const AdminPlansPricingScreen()),
     ),
     AdminNavItem(
       icon: Icons.history_rounded,
@@ -261,8 +269,126 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
         ),
     ];
     final stats = <Widget>[
-      const AdminSectionLabel('Overview'),
+      const AdminSectionLabel('Real-time Overview'),
       AdminKpiGrid(tiles: kpis),
+    ];
+
+    final statusCard = DsCard(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: AppTheme.accentText,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.accentText.withValues(alpha: 0.5),
+                  blurRadius: 6,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'OPERATIONS & CONFIGURATION CLUSTER',
+                  style: AppText.overline.copyWith(color: AppTheme.accentText, letterSpacing: 1.1),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  'Dual Oracle Nodes Active · Live Razorpay Gateway · coroute.duckdns.org',
+                  style: AppText.caption.copyWith(color: AppTheme.text2),
+                ),
+              ],
+            ),
+          ),
+          DsRoundButton(
+            icon: Icons.refresh_rounded,
+            label: 'Refresh',
+            onTap: _refresh,
+          ),
+        ],
+      ),
+    );
+
+    final configModulesSection = <Widget>[
+      const AdminSectionLabel('Configuration & Operations Modules'),
+      _AdminConfigModuleCard(
+        icon: Icons.payments_rounded,
+        title: 'Subscription Plans & Tier Pricing',
+        subtitle: 'Configure dynamic monthly & annual INR amounts for Community, Pro, Captain & Tour Operator tiers. Instant sync to web and apps.',
+        badge: 'LIVE PRICING',
+        badgeColor: AppTheme.accentText,
+        actionLabel: 'Configure Plans',
+        onTap: () => _push(const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.pricing)),
+      ),
+      const SizedBox(height: 12),
+      _AdminConfigModuleCard(
+        icon: Icons.account_balance_wallet_rounded,
+        title: 'Payment Gateway Engine (Razorpay)',
+        subtitle: 'Switch between TEST (sandbox) and LIVE PRODUCTION modes, verify API key credentials, and test live webhook callbacks.',
+        badge: 'GATEWAY CONTROL',
+        badgeColor: AppTheme.brand,
+        actionLabel: 'Manage Gateway',
+        onTap: () => _push(const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.gateway)),
+      ),
+      const SizedBox(height: 12),
+      _AdminConfigModuleCard(
+        icon: Icons.discount_rounded,
+        title: 'Promotional Coupons & Discounts',
+        subtitle: 'Manage promo discount codes (WELCOME50, CAPTAIN100, RIDERFREE), toggle active status, and define custom promotions.',
+        badge: 'PROMOTIONS',
+        badgeColor: AppTheme.brand,
+        actionLabel: 'Manage Coupons',
+        onTap: () => _push(const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.coupons)),
+      ),
+      const SizedBox(height: 12),
+      _AdminConfigModuleCard(
+        icon: Icons.people_alt_rounded,
+        title: 'Users & Entitlements Directory',
+        subtitle: 'Browse all accounts, inspect active plans, review subscription history, toggle account holds, and grant/revoke manual access.',
+        badge: 'ACCOUNTS',
+        badgeColor: AppTheme.accentText,
+        actionLabel: 'Manage Users',
+        onTap: () => _push(const AdminUsersScreen()),
+      ),
+      const SizedBox(height: 12),
+      _AdminConfigModuleCard(
+        icon: Icons.alt_route_rounded,
+        title: 'Ride Operations & Convoy History',
+        subtitle: 'Review finished rides, rider GPS trails, distance spreads, speed distributions, and emergency incident chronologies.',
+        badge: 'OPERATIONS',
+        badgeColor: AppTheme.accentText,
+        actionLabel: 'Ride History',
+        onTap: () => _push(const AdminRideHistoryScreen()),
+      ),
+      const SizedBox(height: 12),
+      _AdminConfigModuleCard(
+        icon: Icons.insights_rounded,
+        title: 'System Insights & Telemetry',
+        subtitle: 'Active mobile client versions, battery & GPS accuracy distributions, feature flags analytics, and error diagnostics.',
+        badge: 'TELEMETRY',
+        badgeColor: AppTheme.brand,
+        actionLabel: 'System Insights',
+        onTap: () => _push(const AdminInsightsScreen()),
+      ),
+      const SizedBox(height: 12),
+      _AdminConfigModuleCard(
+        icon: Icons.two_wheeler_rounded,
+        title: 'Rider View & Checkout Simulator',
+        subtitle: 'Experience the rider-facing membership selector, review entitlements, test coupon redemptions, and inspect native Razorpay sheets.',
+        badge: 'SIMULATOR',
+        badgeColor: AppTheme.accentText,
+        actionLabel: 'Preview Rider View',
+        onTap: () => _push(const PlanSelectorScreen()),
+      ),
     ];
 
     // Fleet map, only when someone is out riding.
@@ -279,9 +405,19 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
     ];
 
     return AdminShell(
-      title: 'Admin',
-      subtitle: 'CoRoute operations console',
+      title: 'CoRoute Ops',
+      subtitle: 'Operations & Configuration Console',
       actions: [
+        AdminIconAction(
+          icon: Icons.payments_outlined,
+          label: 'Payments & Plans',
+          onTap: () => _push(const AdminPlansPricingScreen()),
+        ),
+        AdminIconAction(
+          icon: Icons.two_wheeler_rounded,
+          label: 'Rider View',
+          onTap: () => _push(const PlanSelectorScreen()),
+        ),
         AdminIconAction(icon: Icons.campaign_rounded, label: 'Safety broadcast', onTap: () => _showBroadcastSheet(convoyService)),
       ],
       // The badge is the open SOS count of the live fleet.
@@ -308,43 +444,50 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             final wide = c.maxWidth >= adminWideBreakpoint;
             final Widget body;
             if (wide) {
-              // Canvas order: numbers on top, then what needs attention beside the map.
+              // Canvas order: numbers on top, then configuration beside operations and map.
               body = Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  statusCard,
+                  const SizedBox(height: 16),
                   ...stats,
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 16),
                   AdminTwoUp(
                     left: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [...sosSection, ...ridesSection, ...holdSection],
+                      children: [...configModulesSection, ...holdSection],
                     ),
                     right: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: mapSection.isEmpty
-                          ? [
-                              const AdminSectionLabel('Fleet map'),
-                              DsCard(
-                                padding: const EdgeInsets.all(24),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.map_outlined, color: AppTheme.accentText, size: 24),
-                                    const SizedBox(width: 12),
-                                    Expanded(child: Text('The fleet map shows here as soon as a rider is out with a GPS fix.', style: AppText.label)),
-                                  ],
-                                ),
-                              ),
-                            ]
-                          : mapSection,
+                      children: [
+                        ...sosSection,
+                        ...ridesSection,
+                        if (mapSection.isNotEmpty) ...mapSection,
+                      ],
                     ),
                   ),
                 ],
               );
             } else {
-              // Phone: what needs attention first, then the numbers and the map.
+              // Phone: status bar, SOS emergencies (if any), stats, config modules, rides, and map.
               body = Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [...sosSection, ...ridesSection, ...holdSection, ...stats, ...mapSection],
+                children: [
+                  statusCard,
+                  const SizedBox(height: 16),
+                  if (sos.isNotEmpty) ...[
+                    ...sosSection,
+                    const SizedBox(height: 16),
+                  ],
+                  ...stats,
+                  const SizedBox(height: 20),
+                  ...configModulesSection,
+                  const SizedBox(height: 20),
+                  if (sos.isEmpty) ...sosSection,
+                  ...ridesSection,
+                  ...holdSection,
+                  ...mapSection,
+                ],
               );
             }
             return SingleChildScrollView(
@@ -516,6 +659,101 @@ class _BroadcastSheetState extends State<_BroadcastSheet> {
             onPressed: ready ? _send : null,
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A rich dashboard configuration module card representing a core system area
+/// (e.g. Plan Pricing, Payment Gateway, Promo Coupons, Users, Telemetry).
+class _AdminConfigModuleCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final Color? badgeColor;
+  final String actionLabel;
+  final VoidCallback onTap;
+
+  const _AdminConfigModuleCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.badge,
+    this.badgeColor,
+    required this.actionLabel,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DsCard(
+      padding: const EdgeInsets.all(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: AppTheme.tint,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppTheme.border),
+                  ),
+                  child: Icon(icon, color: AppTheme.accentText, size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: AppText.title.copyWith(fontSize: 16)),
+                      if (badge != null) ...[
+                        const SizedBox(height: 2),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: (badgeColor ?? AppTheme.brand).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            badge!.toUpperCase(),
+                            style: TextStyle(
+                              color: badgeColor ?? AppTheme.accentText,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.muted, size: 14),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(subtitle, style: AppText.body.copyWith(fontSize: 13, color: AppTheme.text2)),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text(
+                  actionLabel,
+                  style: TextStyle(color: AppTheme.accentText, fontSize: 13, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right_rounded, color: AppTheme.accentText, size: 18),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
