@@ -131,16 +131,24 @@ class CoRouteApp extends StatelessWidget {
         }),
         ChangeNotifierProvider<P2pMeshService>(create: (_) => P2pMeshService()),
         ChangeNotifierProvider(
-          create: (ctx) => ConvoyService(
-            ctx.read<ApiClient>(),
-            ctx.read<RealtimeService>(),
-            ctx.read<TripStorageService>(),
-            recorder: ctx.read<TrackRecorder>(),
-            timeline: ctx.read<TimelineService>(),
-            settings: ctx.read<SettingsService>(),
-            mesh: ctx.read<P2pMeshService>(),
-            planSubscription: ctx.read<PlanSubscriptionService>(),
-          )..addListener(() => _notePosition(ctx)),
+          create: (ctx) {
+            final convoys = ConvoyService(
+              ctx.read<ApiClient>(),
+              ctx.read<RealtimeService>(),
+              ctx.read<TripStorageService>(),
+              recorder: ctx.read<TrackRecorder>(),
+              timeline: ctx.read<TimelineService>(),
+              settings: ctx.read<SettingsService>(),
+              mesh: ctx.read<P2pMeshService>(),
+              planSubscription: ctx.read<PlanSubscriptionService>(),
+            );
+            final theme = ctx.read<ThemeController>();
+            convoys.addListener(() {
+              final me = convoys.myUserId == null ? null : convoys.activeConvoy?.riders[convoys.myUserId];
+              if (me != null) theme.notePosition(me.lat, me.lng);
+            });
+            return convoys;
+          },
         ),
         ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>(), settings: ctx.read<SettingsService>())),
         // Spoken alerts (phone text-to-speech). The engine starts with the first alert of a
@@ -240,14 +248,6 @@ class CoRouteApp extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Keeps automatic light/dark accurate as the rider travels, using the
-/// position the convoy already shares (no extra GPS work).
-void _notePosition(BuildContext ctx) {
-  final convoys = ctx.read<ConvoyService>();
-  final me = convoys.myUserId == null ? null : convoys.activeConvoy?.riders[convoys.myUserId];
-  if (me != null) ctx.read<ThemeController>().notePosition(me.lat, me.lng);
 }
 
 class _App extends StatelessWidget {
@@ -355,7 +355,7 @@ class _SessionBinderState extends State<_SessionBinder> {
     if (auth.isAuthenticated && auth.currentUserId != _boundUserId) {
       _boundUserId = auth.currentUserId;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        convoys.startSession(token: auth.token!, userId: auth.currentUserId!, admin: auth.isMasterAdmin);
+        convoys.startSession(token: auth.token ?? '', userId: auth.currentUserId!, admin: auth.isMasterAdmin);
         trips.syncWithCloud(userId: auth.currentUserId);
       });
     } else if (!auth.isAuthenticated && _boundUserId != null) {

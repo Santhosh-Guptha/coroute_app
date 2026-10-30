@@ -127,7 +127,7 @@ class AuthService extends ChangeNotifier {
   /// Until then the form only sends the medical fields the rider actually changed.
   bool get medicalLoaded => _medicalLoaded;
   bool get isLoading => _isLoading;
-  bool get isAuthenticated => _api.hasToken && _userId != null;
+  bool get isAuthenticated => (_api.hasToken || isGuest) && _userId != null;
   bool get isMasterAdmin => roleIsAdmin(_role);
 
   /// True if the user is registered or designated as a pillion passenger.

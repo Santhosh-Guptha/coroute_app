@@ -258,7 +258,7 @@ const config = {
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
-  latestAppBuild: int('LATEST_APP_BUILD', 4120),
+  latestAppBuild: int('LATEST_APP_BUILD', 10001),
   supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
 
   // CORS: comma separated origins or empty for same-origin/mobile only
