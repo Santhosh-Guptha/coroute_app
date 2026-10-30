@@ -36,18 +36,26 @@ class TileCache {
 
   /// Opens (creates) the folder, indexes what is there and prunes. Null when the
   /// folder cannot be used; the caller then leaves [instance] null.
-  static Future<TileCache?> open(String dir, {int Function()? clock}) async {
+  static Future<TileCache?> open(String dir, {int Function()? clock, bool syncScan = false}) async {
     try {
       final d = Directory(dir);
       await d.create(recursive: true);
       final c = TileCache._(d, clock ?? _wallClock);
-      await c._scan();
-      await c.prune();
+      if (syncScan) {
+        await c._scan();
+        await c.prune();
+      } else {
+        c._scanAndPruneBackground();
+      }
       return c;
     } catch (e) {
       debugPrint('tile cache note: ${e.runtimeType}');
       return null;
     }
+  }
+
+  void _scanAndPruneBackground() {
+    _scan().then((_) => prune()).catchError((_) {});
   }
 
   Future<void> _scan() async {
@@ -85,7 +93,10 @@ class TileCache {
   File? lookup(int z, int x, int y, {int maxAgeDays = SafetyConstants.tileMaxAgeDays}) {
     final name = nameOf(z, x, y);
     final e = _index[name];
-    if (e == null) return null;
+    if (e == null) {
+      final f = File(_path(name));
+      return f.existsSync() ? f : null;
+    }
     final now = _clock();
     if (now - e.storedAt > maxAgeDays * 86400000) return null;
     e.usedAt = now;

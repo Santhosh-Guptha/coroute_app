@@ -250,7 +250,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final groupId = context.select<ConvoyService, HomeConvoyFacts>((s) => homeConvoyFacts(s.activeConvoy)).groupId;
+    final groupId = context.select<ConvoyService, String?>((s) => s.activeGroupId);
     // Android back: from another tab it returns to Ride; during a ride it sends the app to the
     // background instead of closing it (the ride, GPS and intercom keep running). Only on the
     // Ride tab with no ride does back leave the app as usual.

@@ -7,6 +7,7 @@ import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:url_launcher/url_launcher.dart';
 import 'core/constants/app_constants.dart';
 import 'core/l10n/l10n.dart';
@@ -51,6 +52,7 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  tz_data.initializeTimeZones();
   BackgroundService.initCommunicationPort();
   // Portrait + landscape are both supported; layouts adapt to width.
   await SystemChrome.setPreferredOrientations(DeviceOrientation.values);

@@ -8,12 +8,24 @@ import 'app_theme.dart';
 /// screen (easier on the eyes, and an OLED screen draws less power).
 Widget Function(BuildContext, Widget, TileImage)? get mapTileBuilder => AppTheme.isLight ? null : darkModeTileBuilder;
 
+CachedTileProvider? _sharedCachedTileProvider;
+NetworkTileProvider? _sharedNetworkTileProvider;
+TileCache? _lastCacheInstance;
+
 /// The tile source every map uses (3.16): tiles saved on the phone first, the
 /// network after, both with the app's User-Agent. Plain network when the cache
-/// could not be opened.
-TileProvider appTileProvider() => TileCache.instance == null
-    ? NetworkTileProvider(headers: {'User-Agent': AppConstants.osmUserAgent})
-    : CachedTileProvider(cache: TileCache.instance);
+/// could not be opened. Shared instance avoids connection pool churn and lag.
+TileProvider appTileProvider() {
+  final cache = TileCache.instance;
+  if (cache == null) {
+    return _sharedNetworkTileProvider ??= NetworkTileProvider(headers: {'User-Agent': AppConstants.osmUserAgent});
+  }
+  if (_sharedCachedTileProvider == null || _lastCacheInstance != cache) {
+    _lastCacheInstance = cache;
+    _sharedCachedTileProvider = CachedTileProvider(cache: cache);
+  }
+  return _sharedCachedTileProvider!;
+}
 
 /// The OSM tile layer for every map: theme-aware tiles through [appTileProvider].
 /// [panBuffer] 0 under data saver (no extra ring of tiles around the screen).

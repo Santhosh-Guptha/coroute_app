@@ -3,6 +3,7 @@ import 'dart:isolate';
 import 'dart:ui' show IsolateNameServer;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
@@ -63,6 +64,7 @@ class AlarmNotifier {
   static Future<bool> _doInit() async {
     final plugin = _plugin!;
     try {
+      tz_data.initializeTimeZones();
       _listenForBackgroundPresses();
       final ok = await plugin.initialize(
         const InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher')),
@@ -261,19 +263,19 @@ class AlarmNotifier {
     required String body,
     required String payload,
   }) async {
-    if (!await ensureInitialized()) return;
-    if (!at.isAfter(DateTime.now())) return;
-    final details = AndroidNotificationDetails(
-      channelPlan,
-      'Plan reminders',
-      channelDescription: 'Tells you a few days before your CoRoute plan ends.',
-      importance: Importance.defaultImportance,
-      priority: Priority.defaultPriority,
-      category: AndroidNotificationCategory.reminder,
-      autoCancel: true,
-      styleInformation: BigTextStyleInformation(body),
-    );
     try {
+      if (!await ensureInitialized()) return;
+      if (!at.isAfter(DateTime.now())) return;
+      final details = AndroidNotificationDetails(
+        channelPlan,
+        'Plan reminders',
+        channelDescription: 'Tells you a few days before your CoRoute plan ends.',
+        importance: Importance.defaultImportance,
+        priority: Priority.defaultPriority,
+        category: AndroidNotificationCategory.reminder,
+        autoCancel: true,
+        styleInformation: BigTextStyleInformation(body),
+      );
       await _plugin?.zonedSchedule(
         id,
         title,

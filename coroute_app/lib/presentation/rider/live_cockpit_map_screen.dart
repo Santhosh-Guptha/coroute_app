@@ -882,7 +882,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   /// more than 15 m (no constant redraws, which would cost battery).
   void _follow(RiderModel me) {
     if (!_autoFollow && me.speedKmh >= 15) {
-      setState(() => _autoFollow = true);
+      _autoFollow = true;
     }
     if (!_autoFollow || (me.lat == 0 && me.lng == 0)) return;
     final here = LatLng(me.lat, me.lng);
@@ -2204,8 +2204,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     List<IncidentView> incidents = const [],
   }) {
     final navLine = [for (final (lat, lng) in guidance?.remainingLine ?? const <(double, double)>[]) LatLng(lat, lng)];
-    return FlutterMap(
-      mapController: _mapController,
+    return RepaintBoundary(
+      child: FlutterMap(
+        mapController: _mapController,
       options: MapOptions(
         initialCenter: _initialCenter(me, convoy),
         initialZoom: (me.lat != 0 || me.lng != 0) ? 15.5 : 12,
@@ -2294,8 +2295,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         ]),
         MarkerLayer(markers: _safetyMarkers(convoy, service, me, now, guidance: guidance, incidents: incidents)),
       ],
-    );
-  }
+    ),
+  );
+}
 
   /// Small safety markers: accidents reported ahead (amber), the point of an
   /// emergency (red, the last known position, never dropped while open), and
