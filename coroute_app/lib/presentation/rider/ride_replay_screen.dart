@@ -7,7 +7,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/theme/map_tiles.dart';
 import '../../data/services/gpx_service.dart';
 import '../../domain/garage/bike_profile.dart';
-import 'widgets/ride_share_card.dart';
+import 'widgets/tactical_ride_share_card.dart';
 
 /// Interactive 2D post-ride trail replay screen with timeline scrubbing,
 /// momentary speedometer HUD, elevation tracking, and GPX export.
@@ -137,7 +137,7 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
             padding: const EdgeInsets.all(16),
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
-              child: RideShareCard(
+              child: TacticalRideShareCard(
                 rideTitle: widget.rideTitle,
                 convoyCode: widget.convoyCode,
                 startTime: first.timestamp,

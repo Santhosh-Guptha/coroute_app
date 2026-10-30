@@ -3,7 +3,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../domain/garage/bike_profile.dart';
 
 /// A high-impact, tactical ride summary share card designed for motorcyclists.
-class RideShareCard extends StatelessWidget {
+class TacticalRideShareCard extends StatelessWidget {
   final String rideTitle;
   final String? convoyCode;
   final DateTime startTime;
@@ -16,7 +16,7 @@ class RideShareCard extends StatelessWidget {
   final VoidCallback? onShareCard;
   final VoidCallback? onExportGpx;
 
-  const RideShareCard({
+  const TacticalRideShareCard({
     super.key,
     required this.rideTitle,
     this.convoyCode,
@@ -282,6 +282,10 @@ class RideShareCard extends StatelessWidget {
   }
 }
 
+/// Backward compatibility alias for [TacticalRideShareCard].
+typedef RideShareCard = TacticalRideShareCard;
+
+
 class _StatTile extends StatelessWidget {
   final String label;
   final String value;
@@ -362,3 +366,5 @@ class _StatTile extends StatelessWidget {
     );
   }
 }
+
+/// Backward compatibility alias for [TacticalRideShareCard].

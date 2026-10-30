@@ -938,7 +938,7 @@ class _Header extends StatelessWidget {
                       ),
                       child: Text(
                         '$badge',
-                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800),
                       ),
                     ),
                   ),

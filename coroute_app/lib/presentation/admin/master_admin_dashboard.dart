@@ -269,7 +269,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
         ),
     ];
     final stats = <Widget>[
-      const AdminSectionLabel('Real-time Overview'),
+      const AdminSectionLabel('Overview'),
       AdminKpiGrid(tiles: kpis),
     ];
 
@@ -405,7 +405,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
     ];
 
     return AdminShell(
-      title: 'CoRoute Ops',
+      title: 'Admin',
       subtitle: 'Operations & Configuration Console',
       actions: [
         AdminIconAction(
@@ -475,17 +475,14 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
                 children: [
                   statusCard,
                   const SizedBox(height: 16),
-                  if (sos.isNotEmpty) ...[
-                    ...sosSection,
-                    const SizedBox(height: 16),
-                  ],
+                  ...sosSection,
+                  ...ridesSection,
+                  ...holdSection,
+                  const SizedBox(height: 16),
                   ...stats,
                   const SizedBox(height: 20),
                   ...configModulesSection,
-                  const SizedBox(height: 20),
-                  if (sos.isEmpty) ...sosSection,
-                  ...ridesSection,
-                  ...holdSection,
+                  const SizedBox(height: 16),
                   ...mapSection,
                 ],
               );
@@ -725,7 +722,7 @@ class _AdminConfigModuleCard extends StatelessWidget {
                             badge!.toUpperCase(),
                             style: TextStyle(
                               color: badgeColor ?? AppTheme.accentText,
-                              fontSize: 10,
+                              fontSize: 12,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 0.5,
                             ),
@@ -741,16 +738,23 @@ class _AdminConfigModuleCard extends StatelessWidget {
             const SizedBox(height: 10),
             Text(subtitle, style: AppText.body.copyWith(fontSize: 13, color: AppTheme.text2)),
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text(
-                  actionLabel,
-                  style: TextStyle(color: AppTheme.accentText, fontSize: 13, fontWeight: FontWeight.w800),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      actionLabel,
+                      style: TextStyle(color: AppTheme.accentText, fontSize: 13, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right_rounded, color: AppTheme.accentText, size: 18),
+                  ],
                 ),
-                const SizedBox(width: 4),
-                Icon(Icons.chevron_right_rounded, color: AppTheme.accentText, size: 18),
-              ],
+              ),
             ),
           ],
         ),

@@ -36,7 +36,7 @@ class TileCache {
 
   /// Opens (creates) the folder, indexes what is there and prunes. Null when the
   /// folder cannot be used; the caller then leaves [instance] null.
-  static Future<TileCache?> open(String dir, {int Function()? clock, bool syncScan = false}) async {
+  static Future<TileCache?> open(String dir, {int Function()? clock, bool syncScan = true}) async {
     try {
       final d = Directory(dir);
       await d.create(recursive: true);

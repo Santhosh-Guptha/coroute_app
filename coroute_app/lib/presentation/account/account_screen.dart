@@ -18,7 +18,7 @@ import '../auth/access_gate_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../rider/rider_home_screen.dart';
 import '../rider/trip_history_screen.dart';
-import '../safety/safety_settings_sheet.dart';
+import '../safety/safety_settings_screen.dart';
 import '../widgets/data_saver_tile.dart';
 import 'appearance_sheet.dart';
 import 'change_password_screen.dart';
@@ -349,10 +349,10 @@ class AccountScreen extends StatelessWidget {
                       if (settings != null)
                         _SettingsRow(
                           icon: Icons.health_and_safety_rounded,
-                          title: 'Ride preferences & safety',
-                          subtitle: SafetySettingsSheet.summary(settings),
+                          title: 'Ride cockpit & safety settings',
+                          subtitle: 'Crash detection, tunnel coasting, BLE remote & audio alerts',
                           value: 'ARMED',
-                          onTap: () => SafetySettingsSheet.show(context),
+                          onTap: () => _push(context, const SafetySettingsScreen()),
                         ),
                       _SettingsRow(
                         icon: Icons.verified_user_rounded,
