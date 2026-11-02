@@ -51,7 +51,7 @@ class SubscriptionExpiryBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final plan = context.watch<PlanSubscriptionService?>();
-    if (plan == null) return const SizedBox.shrink();
+    if (plan == null || !plan.paymentsEnabled) return const SizedBox.shrink();
     final message = messageFor(plan);
     if (message == null) return const SizedBox.shrink();
     final expired = plan.isExpired;

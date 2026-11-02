@@ -59,6 +59,61 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
   @override
   Widget build(BuildContext context) {
     final planService = context.watch<PlanSubscriptionService>();
+    if (!planService.paymentsEnabled) {
+      return Scaffold(
+        backgroundColor: AppTheme.bg,
+        appBar: AppBar(
+          backgroundColor: AppTheme.card,
+          elevation: 0,
+          title: const Text(
+            'Membership & Plans',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+          ),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentText.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.lock_open_rounded, size: 48, color: AppTheme.accentText),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Plans & Payment Screen Disabled',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'The administrator has disabled payments and plan paywalls.\nAll features across all tiers are unlocked freely for all riders.',
+                  style: TextStyle(color: AppTheme.muted, fontSize: 14, height: 1.4),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.card,
+                    foregroundColor: Colors.white,
+                    side: BorderSide(color: AppTheme.border),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                  child: const Text('Return to CoRoute'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     // What is unlocked now (the rider's choice, at or below what they hold).
     final currentTier = planService.effectiveTier;
     // What the server says they paid for (Community when nothing is active).

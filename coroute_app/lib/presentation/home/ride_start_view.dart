@@ -215,6 +215,7 @@ class _Greeting extends StatelessWidget {
               Builder(
                 builder: (ctx) {
                   final planService = ctx.watch<PlanSubscriptionService?>();
+                  if (planService?.paymentsEnabled == false) return const SizedBox.shrink();
                   final tier =
                       planService?.currentTier ?? FeatureGates.activeTier;
                   final tierName = FeatureGates.tierLabel(tier).toUpperCase();
@@ -372,7 +373,9 @@ class _NoRideHero extends StatelessWidget {
               return Padding(
                 padding: const EdgeInsets.only(top: 10),
                 child: GestureDetector(
-                  onTap: () => Navigator.of(ctx).push(
+                  onTap: planService?.paymentsEnabled == false
+                      ? null
+                      : () => Navigator.of(ctx).push(
                     MaterialPageRoute(
                       builder: (_) => const PlanSelectorScreen(),
                     ),

@@ -64,10 +64,7 @@ import 'widgets/siren_hud_pill.dart';
 import 'widgets/ble_remote_hud_pill.dart';
 import 'widgets/biometric_pulse_hud_pill.dart';
 import 'widgets/smart_airbag_hud_pill.dart';
-import 'widgets/voice_assistant_hud_pill.dart';
-import '../../data/services/voice/voice_assistant_controller.dart';
-import '../../data/services/voice/voice_action_executor.dart';
-import '../../data/services/voice/speech_recognition_adapter.dart';
+
 import '../../data/services/voice_service.dart';
 import '../../data/services/helmet_voice_service.dart';
 import '../../data/services/siren_acoustic_detector.dart';
@@ -257,8 +254,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   bool _ownsSirenDetector = false;
   BleRemoteService? _bleRemote;
   bool _ownsBleRemote = false;
-  VoiceAssistantController? _voiceAssistant;
-  bool _ownsVoiceAssistant = false;
   HelmetVoiceService? _helmetVoice;
 
   // The active line as map points, rebuilt only when the line is replaced or my matched point moves.
@@ -432,44 +427,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
       final helmetVoice = context.read<HelmetVoiceService?>();
       _helmetVoice = helmetVoice;
-      if (settings?.helmetVoiceHotwords == true && FeatureGates.isUnlocked(Feature.voiceSafetyHotwords)) {
-        _helmetVoice?.startListening();
-      }
-
-      final existingVoice = context.read<VoiceAssistantController?>();
-      if (existingVoice != null) {
-        _voiceAssistant = existingVoice;
-        _ownsVoiceAssistant = false;
-      } else {
-        final intercom = context.read<IntercomService?>();
-        final safety = context.read<SafetyService?>();
-        final convoys = context.read<ConvoyService?>();
-        final voiceService = context.read<VoiceService?>();
-        _voiceAssistant = VoiceAssistantController(
-          speechAdapter: SpeechRecognitionAdapter(),
-          actionExecutor: VoiceActionExecutor(
-            convoyService: convoys,
-            intercomService: intercom,
-            safetyService: safety,
-          ),
-          convoyService: convoys,
-          intercomService: intercom,
-          safetyService: safety,
-          voiceService: voiceService,
-          helmetVoiceService: helmetVoice,
-          enforcePhase1Scope: false,
-          allowMessaging: true,
-          allowStopsAndAlerts: true,
-          allowIntercom: true,
-        );
-        _ownsVoiceAssistant = true;
-      }
-      _voiceAssistant?.addListener(_onVoiceAssistantUpdate);
+      // Default microphone capture disabled on cockpit mount
+      _helmetVoice?.stopListening();
     });
-  }
-
-  void _onVoiceAssistantUpdate() {
-    if (mounted) setState(() {});
   }
 
   void _onRemoteStatus() {
@@ -652,10 +612,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     SmartAirbagBridgeService().telemetryNotifier.removeListener(_onAirbagUpdate);
     if (_ownsBleRemote) {
       _bleRemote?.dispose();
-    }
-    _voiceAssistant?.removeListener(_onVoiceAssistantUpdate);
-    if (_ownsVoiceAssistant) {
-      _voiceAssistant?.dispose();
     }
     _helmetVoice?.stopListening();
     if (_keepScreenOn) WakelockPlus.disable();
@@ -1497,22 +1453,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         ),
       ));
     }
-    // FEAT-VA: Multilingual Voice Assistant HUD Pill (0.8s glance budget, AMOLED high contrast)
-    final va = _voiceAssistant;
-    if (va != null && (va.state != VoiceSessionState.idle || va.statusFeedback.isNotEmpty)) {
-      const key = 'VOICE_ASSISTANT_STATUS';
-      out.add(_Slot(
-        key: key,
-        tier: va.statusFeedback.contains('🚨') ? AlertTier.critical : AlertTier.normal,
-        title: 'VOICE ASSISTANT',
-        priority: va.statusFeedback.contains('🚨') ? AlertPriority.sos : AlertPriority.hazard,
-        dismissible: false,
-        child: VoiceAssistantHudPill(
-          controller: va,
-          onPttPressed: () => va.startListening(),
-        ),
-      ));
-    }
+
     // "Another nearby rider is responding": neutral, hides by itself.
     for (final n in service.assistNotices) {
       if (n.reason != AssistClosedReason.taken) continue;
@@ -2186,34 +2127,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
               },
             ),
 
-            // 7b. Voice Assistant Glove PTT Action Trigger (bottom-right)
-            ValueListenableBuilder<double>(
-              valueListenable: _sheetTop,
-              builder: (context, top, _) {
-                final isExpanded = !side && top > h * 0.5;
-                if (side) {
-                  return Positioned(
-                    right: Space.s12,
-                    bottom: Space.s12,
-                    child: VoicePttButton(controller: _voiceAssistant),
-                  );
-                }
-                final maxBottom = (h - 220).clamp(Space.s8, double.infinity).toDouble();
-                final bottom = (top + Space.s8).clamp(Space.s8, maxBottom).toDouble();
-                return Positioned(
-                  right: Space.s12,
-                  bottom: bottom,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 200),
-                    opacity: isExpanded ? 0.0 : 1.0,
-                    child: IgnorePointer(
-                      ignoring: isExpanded,
-                      child: VoicePttButton(controller: _voiceAssistant),
-                    ),
-                  ),
-                );
-              },
-            ),
+
 
             // 8. Draggable CoRoute Orbit Control FAB & In-Cockpit Quick Access HUD Popup
             CorouteOrbitControl(

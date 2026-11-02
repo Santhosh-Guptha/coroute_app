@@ -57,7 +57,7 @@ class _SubscriptionNoticeHostState extends State<SubscriptionNoticeHost> {
   void _openFromReminder(String? payload) {
     final tier = tierFromPlanReminderPayload(payload);
     final nav = widget.navigatorKey?.currentState;
-    if (tier == null || nav == null || !mounted) return;
+    if (tier == null || nav == null || !mounted || _plan?.paymentsEnabled == false) return;
     _openPlanSelector(nav, tier);
   }
 
@@ -83,7 +83,7 @@ class _SubscriptionNoticeHostState extends State<SubscriptionNoticeHost> {
   void _sync() {
     if (!mounted) return;
     final plan = _plan;
-    if (plan == null) return;
+    if (plan == null || !plan.paymentsEnabled) return;
     final nav = widget.navigatorKey?.currentState;
     final navContext = widget.navigatorKey?.currentContext;
     if (nav == null || navContext == null) {

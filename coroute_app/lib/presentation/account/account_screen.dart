@@ -294,53 +294,69 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(height: 20),
-                const DsSectionHeader('Membership & Plans'),
-                const SizedBox(height: 10),
-                DsCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: Column(
-                    children: [
-                      _SettingsRow(
-                        icon: Icons.card_membership_rounded,
-                        title: 'Active Subscription Plan',
-                        subtitle: planService?.paymentsEnabled != true
-                            ? 'All features unlocked freely (Payment Screen is OFF)'
-                            : (planService?.pendingPlanSummary != null
-                                ? '$tierLabel · Next: ${planService!.pendingPlanSummary}'
-                                : '$tierLabel · View plan benefits & convoy limits'),
-                        value: planService?.paymentsEnabled != true ? 'FREE UNLOCKED' : tierLabel.toUpperCase(),
-                        color: planService?.paymentsEnabled != true ? AppTheme.accentText : (planService != null && (planService.isExpired || planService.expiringSoon) ? AppTheme.warnText : null),
-                        divider: true,
-                        onTap: () => _push(context, const PlanSelectorScreen()),
-                      ),
-                      _SettingsRow(
-                        icon: Icons.receipt_long_rounded,
-                        title: 'Payments & plan history',
-                        subtitle: 'Past plans, UPI payments and order status',
-                        divider: true,
-                        onTap: () => _push(context, const PaymentHistoryScreen()),
-                      ),
-                      _SettingsRow(
-                        icon: Icons.dashboard_customize_rounded,
-                        title: 'Fleet & Tour Dispatcher Matrix',
-                        subtitle: FeatureGates.isUnlocked(Feature.fleetAnalytics)
-                            ? 'Commercial live fleet map, emergency dispatch & analytics'
-                            : 'Tour Operator Pass · Fleet analytics & dispatcher overview',
-                        value: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? 'ACTIVE' : 'TOUR OPERATOR',
-                        color: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? AppTheme.accentText : null,
-                        divider: false,
-                        onTap: () {
-                          if (!FeatureGates.isUnlocked(Feature.fleetAnalytics)) {
-                            FeatureGates.showUpgradeModal(context, Feature.fleetAnalytics);
-                            return;
-                          }
-                          _push(context, const MasterAdminDashboard());
-                        },
-                      ),
-                    ],
+                if (planService?.paymentsEnabled == true) ...[
+                  const SizedBox(height: 20),
+                  const DsSectionHeader('Membership & Plans'),
+                  const SizedBox(height: 10),
+                  DsCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Column(
+                      children: [
+                        _SettingsRow(
+                          icon: Icons.card_membership_rounded,
+                          title: 'Active Subscription Plan',
+                          subtitle: planService?.pendingPlanSummary != null
+                              ? '$tierLabel · Next: ${planService!.pendingPlanSummary}'
+                              : '$tierLabel · View plan benefits & convoy limits',
+                          value: tierLabel.toUpperCase(),
+                          color: (planService != null && (planService.isExpired || planService.expiringSoon) ? AppTheme.warnText : null),
+                          divider: true,
+                          onTap: () => _push(context, const PlanSelectorScreen()),
+                        ),
+                        _SettingsRow(
+                          icon: Icons.receipt_long_rounded,
+                          title: 'Payments & plan history',
+                          subtitle: 'Past plans, UPI payments and order status',
+                          divider: true,
+                          onTap: () => _push(context, const PaymentHistoryScreen()),
+                        ),
+                        _SettingsRow(
+                          icon: Icons.dashboard_customize_rounded,
+                          title: 'Fleet & Tour Dispatcher Matrix',
+                          subtitle: FeatureGates.isUnlocked(Feature.fleetAnalytics)
+                              ? 'Commercial live fleet map, emergency dispatch & analytics'
+                              : 'Tour Operator Pass · Fleet analytics & dispatcher overview',
+                          value: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? 'ACTIVE' : 'TOUR OPERATOR',
+                          color: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? AppTheme.accentText : null,
+                          divider: false,
+                          onTap: () {
+                            if (!FeatureGates.isUnlocked(Feature.fleetAnalytics)) {
+                              FeatureGates.showUpgradeModal(context, Feature.fleetAnalytics);
+                              return;
+                            }
+                            _push(context, const MasterAdminDashboard());
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                ] else if (FeatureGates.isUnlocked(Feature.fleetAnalytics) || auth.isMasterAdmin) ...[
+                  const SizedBox(height: 20),
+                  const DsSectionHeader('Fleet Management'),
+                  const SizedBox(height: 10),
+                  DsCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: _SettingsRow(
+                      icon: Icons.dashboard_customize_rounded,
+                      title: 'Fleet & Tour Dispatcher Matrix',
+                      subtitle: 'Commercial live fleet map, emergency dispatch & analytics',
+                      value: 'ACTIVE',
+                      color: AppTheme.accentText,
+                      divider: false,
+                      onTap: () => _push(context, const MasterAdminDashboard()),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 20),
                 const DsSectionHeader('Riding'),
                 const SizedBox(height: 10),
