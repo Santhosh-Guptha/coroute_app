@@ -99,7 +99,7 @@ class IntercomService extends ChangeNotifier {
   StreamSubscription<Uint8List>? _micSub;
 
   // ---- transmit state ----
-  bool _micMuted = false;
+  bool _micMuted = true;
   bool _deafened = false;
   bool _transmitting = false; // a stream is open to the gateway
   bool _micOpen = false; // recorder is running (VOX keeps it open)

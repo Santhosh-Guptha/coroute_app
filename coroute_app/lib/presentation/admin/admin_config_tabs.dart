@@ -448,12 +448,13 @@ class _AdminGatewayTabState extends State<AdminGatewayTab> with AutomaticKeepAli
                         setState(() => _busy = 'payments');
                         try {
                           final res = await api.put('/admin/payment-gateway', {'paymentsEnabled': val});
-                          if (!mounted) return;
+                          if (!context.mounted) return;
                           if (res is Map) _data = Map<String, dynamic>.from(res)..remove('success');
                           planSub.setPaymentsEnabled(val).ignore();
                           adminSnack(context, val ? 'Payment screen and plan gating enabled.' : 'Payment screen turned OFF (All features unlocked).');
                         } catch (e) {
-                          if (mounted) adminSnack(context, adminErrorOf(e), error: true);
+                          if (!context.mounted) return;
+                          adminSnack(context, adminErrorOf(e), error: true);
                         }
                         if (mounted) setState(() => _busy = null);
                       },

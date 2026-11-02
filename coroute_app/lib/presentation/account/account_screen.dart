@@ -302,23 +302,6 @@ class AccountScreen extends StatelessWidget {
                   child: Column(
                     children: [
                       _SettingsRow(
-                        icon: Icons.payments_rounded,
-                        title: 'Payment Screen & Plan Gating',
-                        subtitle: planService?.paymentsEnabled == true
-                            ? 'ON · Plan-based features & payment checkout active'
-                            : 'OFF · Free mode, no payment screens, all features unlocked',
-                        value: planService?.paymentsEnabled == true ? 'ON' : 'OFF',
-                        color: planService?.paymentsEnabled == true ? AppTheme.accentText : AppTheme.warnText,
-                        divider: true,
-                        trailing: Switch.adaptive(
-                          value: planService?.paymentsEnabled ?? true,
-                          activeColor: AppTheme.accentText,
-                          onChanged: (val) async {
-                            await planService?.setPaymentsEnabled(val);
-                          },
-                        ),
-                      ),
-                      _SettingsRow(
                         icon: Icons.card_membership_rounded,
                         title: 'Active Subscription Plan',
                         subtitle: planService?.paymentsEnabled != true
@@ -561,7 +544,6 @@ class _SettingsRow extends StatelessWidget {
   final Color? color;
   final bool chevron;
   final bool divider;
-  final Widget? trailing;
 
   const _SettingsRow({
     required this.icon,
@@ -572,7 +554,6 @@ class _SettingsRow extends StatelessWidget {
     this.color,
     this.chevron = true,
     this.divider = true,
-    this.trailing,
   });
 
   @override
@@ -597,18 +578,13 @@ class _SettingsRow extends StatelessWidget {
               ],
             ),
           ),
-          if (trailing != null) ...[
+          if (v != null && v.isNotEmpty) ...[
             const SizedBox(width: 8),
-            trailing!,
-          ] else ...[
-            if (v != null && v.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(v, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.end, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
-              ),
-            ],
-            if (chevron && onTap != null) Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
+            Flexible(
+              child: Text(v, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.end, style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
+            ),
           ],
+          if (chevron && onTap != null) Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
         ],
       ),
     );

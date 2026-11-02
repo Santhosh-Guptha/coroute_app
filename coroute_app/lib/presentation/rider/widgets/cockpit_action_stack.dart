@@ -125,48 +125,9 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
         : null;
     final fuelAheadKm = (fuelAheadM != null && fuelAheadM > 0) ? fuelAheadM / 1000 : null;
 
-    // Strict rule: Show fuel alert capsule when alert is raised (<= 60 km or range risk)
+    // Strict rule: Fuel alert is represented exclusively by the dedicated small red popup
+    // (_SideFuelButton) on the right handlebar stack. No upper duplicate card is added to items.
     final isLowFuel = usableKm != null && (usableKm <= 60.0 || (fuelAheadKm != null && fuelAheadKm > usableKm));
-
-    if (isLowFuel) {
-      final isCritical = usableKm <= 10.0;
-      final isUrgent = usableKm <= 20.0;
-      final isRangeRisk = fuelAheadKm != null && fuelAheadKm > usableKm;
-
-      final title = isRangeRisk
-          ? 'RANGE RISK · Next station beyond range'
-          : isCritical
-              ? 'CRITICAL FUEL · ${usableKm.round()} km left'
-              : isUrgent
-                  ? 'URGENT FUEL · ${usableKm.round()} km left'
-                  : 'LOW FUEL · ${usableKm.round()} km left';
-
-      items.add(
-        _ActionPill(
-          icon: Icons.local_gas_station_rounded,
-          iconColor: Colors.white,
-          accentColor: (isCritical || isRangeRisk) ? AppTheme.sos : AppTheme.warnText,
-          title: title,
-          subtitle: nearestStation != null && fuelAheadM != null
-              ? 'Auto-route: ${nearestStation.name} in ${formatDistanceRounded(fuelAheadM)} · Tap'
-              : 'Tap to find nearest reachable bunk',
-          onTap: () {
-            HapticFeedback.mediumImpact();
-            _showFuelQuickSheet(
-              context,
-              usableKm: usableKm,
-              stations: allFuel.take(8).toList(),
-              progressM: progressM,
-              riderLat: widget.me.lat,
-              riderLng: widget.me.lng,
-              essentialsService: widget.essentialsService,
-              onAddStationStop: widget.onAddStationStop,
-              onOpenFuelSheet: widget.onOpenFuelSheet,
-            );
-          },
-        ),
-      );
-    }
 
     // 1b. Remaining Convoy Members Alert: Display when a teammate is diverting for fuel
     for (final rider in widget.convoy.riders.values) {
@@ -369,15 +330,18 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
     final fuelButton = _SideFuelButton(
       isLowFuel: isLowFuel,
       usableKm: usableKm,
+      nearestStationName: nearestStation?.name,
+      nearestStationDistM: fuelAheadM,
       onTap: () {
         HapticFeedback.lightImpact();
         _showFuelQuickSheet(
           context,
           usableKm: usableKm,
-          stations: upcomingFuel.take(4).toList(),
+          stations: allFuel.take(8).toList(),
           progressM: progressM,
           riderLat: widget.me.lat,
           riderLng: widget.me.lng,
+          essentialsService: widget.essentialsService,
           onAddStationStop: widget.onAddStationStop,
           onOpenFuelSheet: widget.onOpenFuelSheet,
         );
@@ -849,11 +813,15 @@ class _StationRow extends StatelessWidget {
 class _SideFuelButton extends StatelessWidget {
   final bool isLowFuel;
   final double? usableKm;
+  final String? nearestStationName;
+  final double? nearestStationDistM;
   final VoidCallback onTap;
 
   const _SideFuelButton({
     required this.isLowFuel,
     required this.usableKm,
+    this.nearestStationName,
+    this.nearestStationDistM,
     required this.onTap,
   });
 
@@ -871,36 +839,120 @@ class _SideFuelButton extends StatelessWidget {
         ? Colors.white
         : (usableKm != null && usableKm! <= 100 ? AppTheme.warnText : AppTheme.brand);
 
+    if (!isLowFuel) {
+      return Material(
+        color: bgColor,
+        elevation: 3,
+        borderRadius: BorderRadius.circular(28),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(28),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: borderColor, width: isSunlightHud ? 2.5 : 2),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.local_gas_station_rounded,
+                  size: 20,
+                  color: iconColor,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  rangeText,
+                  style: AppText.caption.copyWith(
+                    color: AppText.body.color,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Unified single small red-colored popup only (Handlebar cockpit ergonomic pill)
+    final distText = (nearestStationDistM != null && nearestStationDistM! > 0)
+        ? formatDistanceRounded(nearestStationDistM!)
+        : null;
+    final bunkSubtitle = nearestStationName != null
+        ? (distText != null ? '$nearestStationName · $distText' : nearestStationName!)
+        : 'Tap for bunks';
+
     return Material(
       color: bgColor,
-      elevation: isLowFuel ? 6 : 3,
-      borderRadius: BorderRadius.circular(28),
+      elevation: 6,
+      borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
-          constraints: const BoxConstraints(minHeight: 56, minWidth: 56),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          constraints: const BoxConstraints(minHeight: 48, maxWidth: 220, minWidth: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: borderColor, width: isSunlightHud ? 2.5 : 2),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withOpacity(0.35), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.sos.withOpacity(0.4),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.local_gas_station_rounded,
-                size: 22,
-                color: isLowFuel ? Colors.white : iconColor,
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.local_gas_station_rounded,
+                  size: 18,
+                  color: Colors.white,
+                ),
               ),
               const SizedBox(width: 8),
-              Text(
-                isLowFuel ? 'LOW ($rangeText)' : rangeText,
-                style: AppText.caption.copyWith(
-                  color: isLowFuel ? Colors.white : AppText.body.color,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                  letterSpacing: 0.3,
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'LOW FUEL · $rangeText',
+                      style: AppText.caption.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        letterSpacing: 0.3,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      bunkSubtitle,
+                      style: AppText.caption.copyWith(
+                        color: Colors.white.withOpacity(0.85),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 10,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
             ],

@@ -91,7 +91,7 @@ void main() {
       expect(find.textContaining('600 km'), findsOneWidget);
     });
 
-    testWidgets('Low fuel (<= 60km) displays urgent LOW FUEL card and indicates LOW on button', (tester) async {
+    testWidgets('Low fuel (<= 60km) displays single unified red LOW FUEL pill with nearest station info', (tester) async {
       final client = MockClient((request) async => http.Response('{}', 200));
       final api = ApiClient(httpClient: client);
       final essentialsService = RouteEssentialsService(api);
@@ -150,12 +150,9 @@ void main() {
 
       await tester.pump();
 
-      // Verify urgent low fuel alert card is displayed
-      expect(find.textContaining('LOW FUEL · 42 km left'), findsOneWidget);
+      // Verify single unified red popup displays LOW FUEL with range and nearest bunk
+      expect(find.textContaining('LOW FUEL · 42 km'), findsOneWidget);
       expect(find.textContaining('IndianOil'), findsOneWidget);
-
-      // Verify side button indicates LOW
-      expect(find.textContaining('LOW (42 km)'), findsOneWidget);
     });
 
     testWidgets('Multiple stop suggestions constrain to 1 primary action capsule with swipe/tap to view next', (tester) async {

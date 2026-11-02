@@ -100,9 +100,9 @@ class SettingsService extends ChangeNotifier {
   int _speedLimitWarningKmh = 0;
   bool _airbagVestBridge = true;
   bool _smartwatchVitals = true;
-  bool _emergencySirenAlert = true;
+  bool _emergencySirenAlert = false;
   bool _tunnelDeadReckoning = true;
-  bool _helmetVoiceHotwords = true;
+  bool _helmetVoiceHotwords = false;
   bool _intercomAudioDucking = true;
   bool _emergencyWhatsApp = true;
 
@@ -228,9 +228,9 @@ class SettingsService extends ChangeNotifier {
       _speedLimitWarningKmh = prefs.getInt(SafetyConstants.keySpeedLimitWarningKmh) ?? 0;
       _airbagVestBridge = prefs.getBool('airbag_vest_bridge_v1') ?? true;
       _smartwatchVitals = prefs.getBool('smartwatch_vitals_v1') ?? true;
-      _emergencySirenAlert = prefs.getBool('emergency_siren_alert_v1') ?? true;
+      _emergencySirenAlert = prefs.getBool('emergency_siren_alert_v2') ?? false;
       _tunnelDeadReckoning = prefs.getBool('tunnel_dead_reckoning_v1') ?? true;
-      _helmetVoiceHotwords = prefs.getBool('helmet_voice_hotwords_v1') ?? true;
+      _helmetVoiceHotwords = prefs.getBool('helmet_voice_hotwords_v2') ?? false;
       _intercomAudioDucking = prefs.getBool('intercom_audio_ducking_v1') ?? true;
       _emergencyWhatsApp = prefs.getBool('emergency_whatsapp_v1') ?? true;
     } catch (e) {
@@ -499,7 +499,7 @@ class SettingsService extends ChangeNotifier {
     if (value == _emergencySirenAlert) return;
     _emergencySirenAlert = value;
     notifyListeners();
-    await _save('emergency_siren_alert_v1', value);
+    await _save('emergency_siren_alert_v2', value);
   }
 
   Future<void> setTunnelDeadReckoning(bool value) async {
@@ -513,7 +513,7 @@ class SettingsService extends ChangeNotifier {
     if (value == _helmetVoiceHotwords) return;
     _helmetVoiceHotwords = value;
     notifyListeners();
-    await _save('helmet_voice_hotwords_v1', value);
+    await _save('helmet_voice_hotwords_v2', value);
   }
 
   Future<void> setIntercomAudioDucking(bool value) async {

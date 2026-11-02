@@ -404,8 +404,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         _sirenDetector = SirenAcousticDetector(intercomService: intercom);
         _ownsSirenDetector = true;
       }
+      final settings = context.read<SettingsService?>();
       _sirenDetector?.activeSirenNotifier.addListener(_onSirenAlert);
-      _sirenDetector?.start().ignore();
+      if (settings?.emergencySirenAlert == true && FeatureGates.isUnlocked(Feature.sirenAcousticDetector)) {
+        _sirenDetector?.start().ignore();
+      }
 
       final existingRemote = context.read<BleRemoteService?>();
       if (existingRemote != null) {
@@ -429,7 +432,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
 
       final helmetVoice = context.read<HelmetVoiceService?>();
       _helmetVoice = helmetVoice;
-      if (FeatureGates.isUnlocked(Feature.voiceSafetyHotwords)) {
+      if (settings?.helmetVoiceHotwords == true && FeatureGates.isUnlocked(Feature.voiceSafetyHotwords)) {
         _helmetVoice?.startListening();
       }
 
@@ -1664,6 +1667,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         ));
       }
     }
+    // DEDUPLICATION: Suppress any fuel or petrol bunk alert from the top HUD slot.
+    // The cockpit displays a single dedicated small red popup on the right handlebar stack instead.
+    out.removeWhere((s) =>
+        s.key == SafetyConstants.promptFuel ||
+        s.key.toLowerCase().contains('fuel') ||
+        s.title.toLowerCase().contains('fuel') ||
+        (s.message?.toLowerCase().contains('fuel') ?? false) ||
+        (s.message?.toLowerCase().contains('bunk') ?? false));
     _activeAlertCount = out.length;
     final visible = out.where((s) => !_dismissed.contains(s.key)).toList();
     // Priority first (SOS, assistance, hazard, group safety, route, social), then
