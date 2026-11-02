@@ -150,8 +150,18 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   }
   // One download link that never breaks: Play Store when configured, otherwise the APK this server hosts
   // (public/coroute.apk, 64-bit ARM). Older 32-bit phones use /download/32bit.
-  app.get('/download', (req, res) => res.redirect(302, config.playStoreUrl || config.apkUrl || `${originOf(req)}${config.apkPath}`));
-  app.get('/download/32bit', (req, res) => res.redirect(302, config.apkArm32Url || `${originOf(req)}${config.apkArm32Path}`));
+  app.get('/download', (req, res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.redirect(302, config.playStoreUrl || config.apkUrl || `${originOf(req)}${config.apkPath}`);
+  });
+  app.get('/download/32bit', (req, res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.redirect(302, config.apkArm32Url || `${originOf(req)}${config.apkArm32Path}`);
+  });
   app.get('/robots.txt', (req, res) => res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${originOf(req)}/sitemap.xml\n`));
   app.get('/sitemap.xml', (req, res) => {
     const o = originOf(req);

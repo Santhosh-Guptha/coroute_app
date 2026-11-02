@@ -408,6 +408,61 @@ class _AdminGatewayTabState extends State<AdminGatewayTab> with AutomaticKeepAli
       children: [
         const SizedBox(height: 4),
         AdminCard(
+          warning: _data?['paymentsEnabled'] == false,
+          child: Row(
+            children: [
+              AdminRowIcon(
+                _data?['paymentsEnabled'] != false ? Icons.payments_rounded : Icons.lock_open_rounded,
+                color: _data?['paymentsEnabled'] != false ? AppTheme.accentText : AppTheme.warnText,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _data?['paymentsEnabled'] != false
+                          ? 'Payment Screen: ON (Plan-Based)'
+                          : 'Payment Screen: OFF (Free Mode)',
+                      style: AppText.title,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _data?['paymentsEnabled'] != false
+                          ? 'Features are gated by plan tiers. Payment screens and checkout are active.'
+                          : 'Payment screen is OFF. All features across all tiers are unlocked freely for all riders.',
+                      style: AppText.caption,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Switch.adaptive(
+                value: _data?['paymentsEnabled'] != false,
+                activeColor: AppTheme.accentText,
+                onChanged: _busy != null
+                    ? null
+                    : (val) async {
+                        final api = context.read<ApiClient>();
+                        final planSub = context.read<PlanSubscriptionService>();
+                        setState(() => _busy = 'payments');
+                        try {
+                          final res = await api.put('/admin/payment-gateway', {'paymentsEnabled': val});
+                          if (!mounted) return;
+                          if (res is Map) _data = Map<String, dynamic>.from(res)..remove('success');
+                          planSub.setPaymentsEnabled(val).ignore();
+                          adminSnack(context, val ? 'Payment screen and plan gating enabled.' : 'Payment screen turned OFF (All features unlocked).');
+                        } catch (e) {
+                          if (mounted) adminSnack(context, adminErrorOf(e), error: true);
+                        }
+                        if (mounted) setState(() => _busy = null);
+                      },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        AdminCard(
           warning: !live,
           child: Row(
             children: [

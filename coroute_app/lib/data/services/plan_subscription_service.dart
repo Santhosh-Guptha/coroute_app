@@ -120,6 +120,9 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   static const String keyTier = 'coroute_active_subscription_plan';
   static const String keyValidUntil = 'coroute_subscription_valid_until';
 
+  /// Key for whether the payment screen and plan gating are enabled (true by default).
+  static const String keyPaymentsEnabled = 'coroute_payment_screen_enabled';
+
   /// The tier the rider chose to ride with (`preferredTier`, never above the entitlement).
   static const String keyPreferredTier = 'coroute_preferred_subscription_plan';
   static const String keyForceUnlocked = 'coroute_force_all_unlocked';
@@ -164,8 +167,14 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   /// Local choice: the tier the rider wants to use right now. Kept at or below the entitlement
   /// by [effectiveTier]; a paid rider may pick Community without giving the paid plan up.
   SubscriptionTier _preferredTier = SubscriptionTier.community;
+  bool _paymentsEnabled = true;
   bool _forceAllUnlocked = false;
   bool _loaded = false;
+
+  /// Whether the payment screen, subscription plans, and feature gating are active.
+  /// When true (default): plan-based features and subscription payment screens are active.
+  /// When false: payment screens are OFF, feature gating is disabled, and all features are unlocked.
+  bool get paymentsEnabled => _paymentsEnabled;
 
   /// The paid tier the rider had before it ran out (null while a plan is active or never had one).
   SubscriptionTier? _previousTier;
@@ -220,19 +229,27 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
 
   /// The tier whose features are unlocked right now: the preference while it is covered by the
   /// entitlement, otherwise Community (an expired paid plan reads as community).
+  /// When payment screens/plan gating are toggled off, features adhere to the rider's preference freely.
   SubscriptionTier get effectiveTier =>
-      _withinEntitlement(_preferredTier) ? _preferredTier : SubscriptionTier.community;
+      !_paymentsEnabled || _withinEntitlement(_preferredTier) ? _preferredTier : SubscriptionTier.community;
 
   /// Alias of [effectiveTier] for existing call sites.
   SubscriptionTier get currentTier => effectiveTier;
   int get validUntil => _validUntil;
 
-  /// True when [tier] can be used without paying: Community, or at/below the entitlement.
-  bool canSelect(SubscriptionTier tier) => _withinEntitlement(tier);
+  /// True when [tier] can be used without paying: Community, at/below the entitlement,
+  /// or any tier when payment screens/plan gating are toggled off.
+  bool canSelect(SubscriptionTier tier) {
+    if (!_paymentsEnabled) return true;
+    return _withinEntitlement(tier);
+  }
 
-  /// True when [tier] is the paid plan the rider currently holds (valid, not expired).
-  bool isEntitledTo(SubscriptionTier tier) =>
-      tier != SubscriptionTier.community && tier == _entitledTier && !_entitlementLapsed;
+  /// True when [tier] is the paid plan the rider currently holds (valid, not expired),
+  /// or any tier when payment screens/plan gating are toggled off.
+  bool isEntitledTo(SubscriptionTier tier) {
+    if (!_paymentsEnabled) return true;
+    return tier != SubscriptionTier.community && tier == _entitledTier && !_entitlementLapsed;
+  }
 
   bool _withinEntitlement(SubscriptionTier tier) {
     if (tier == SubscriptionTier.community) return true;
@@ -421,6 +438,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
       prefs.setString(keyTier, _entitledTier.name);
       prefs.setInt(keyValidUntil, _validUntil);
       prefs.setString(keyPreferredTier, _preferredTier.name);
+      prefs.setBool(keyPaymentsEnabled, _paymentsEnabled);
       prefs.setBool(keyForceUnlocked, _forceAllUnlocked);
       final prev = _previousTier;
       if (prev == null) {
@@ -553,6 +571,7 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
       _validUntil = prefs.getInt(keyValidUntil) ?? 0;
       // Older builds stored only one tier: the rider was using what they held.
       _preferredTier = _tierNamed(prefs.getString(keyPreferredTier)) ?? _entitledTier;
+      _paymentsEnabled = prefs.getBool(keyPaymentsEnabled) ?? true;
       _forceAllUnlocked = prefs.getBool(keyForceUnlocked) ?? false;
       _previousTier = _tierNamed(prefs.getString(keyPreviousTier));
       _expiredAt = prefs.getInt(keyExpiredAt) ?? 0;
@@ -601,8 +620,18 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     if (_api == null) return;
     try {
       final res = await _api.get('/subscription/config');
-      if (res is Map && res['plans'] is Map) {
-        applyConfiguredPlans(Map<String, dynamic>.from(res['plans']));
+      if (res is Map) {
+        if (res['paymentsEnabled'] is bool) {
+          final serverPayments = res['paymentsEnabled'] as bool;
+          if (_paymentsEnabled != serverPayments) {
+            _paymentsEnabled = serverPayments;
+            _syncToFeatureGates();
+            notifyListeners();
+          }
+        }
+        if (res['plans'] is Map) {
+          applyConfiguredPlans(Map<String, dynamic>.from(res['plans']));
+        }
       }
     } catch (_) {}
   }
@@ -757,6 +786,16 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   /// valid. Returns false, changing nothing, when [tier] is above the
   /// entitlement: the caller then has to open checkout.
   Future<bool> selectTier(SubscriptionTier tier) async {
+    if (!_paymentsEnabled) {
+      _preferredTier = tier;
+      _syncToFeatureGates();
+      notifyListeners();
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(keyPreferredTier, tier.name);
+      } catch (_) {}
+      return true;
+    }
     if (!_withinEntitlement(tier)) return false;
     _preferredTier = tier;
     _forceAllUnlocked = false;
@@ -809,6 +848,27 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
     } catch (_) {}
   }
 
+  /// Sets whether the payment screen and plan-based gating are active or disabled.
+  /// When false: payment screen is OFF, plan-based restrictions are bypassed, and all features are unlocked freely.
+  /// When true: plan-based subscription rules and payment screens are active.
+  Future<void> setPaymentsEnabled(bool enabled) async {
+    _paymentsEnabled = enabled;
+    _syncToFeatureGates();
+    notifyListeners();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(keyPaymentsEnabled, enabled);
+    } catch (_) {}
+
+    // Synchronize to backend if an admin is authenticated
+    if (_api != null && _api.hasToken) {
+      try {
+        await _api.put('/admin/payment-gateway', {'paymentsEnabled': enabled});
+      } catch (_) {}
+    }
+  }
+
   /// Toggles whether strict tier rules are enforced or all features forced unlocked.
   Future<void> setForceAllUnlocked(bool unlocked) async {
     _forceAllUnlocked = unlocked;
@@ -822,8 +882,9 @@ class PlanSubscriptionService extends ChangeNotifier with WidgetsBindingObserver
   }
 
   void _syncToFeatureGates() {
+    FeatureGates.paymentsEnabled = _paymentsEnabled;
     FeatureGates.activeTier = effectiveTier;
-    FeatureGates.forceAllUnlocked = _forceAllUnlocked;
+    FeatureGates.forceAllUnlocked = !_paymentsEnabled || _forceAllUnlocked;
   }
 
   /// Checks if a feature is unlocked under the current plan.

@@ -48,7 +48,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // App metadata: version gate + links. Public, cacheable.
   r.get('/meta', (req, res) => {
     const origin = config.publicOrigin || `${req.protocol}://${req.get('host')}`;
-    res.set('Cache-Control', 'public, max-age=300').json({
+    res.set('Cache-Control', 'no-cache').json({
       minBuild: config.minAppBuild,
       latestBuild: config.latestAppBuild,
       downloadUrl: `${origin}/download`,
@@ -57,6 +57,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       supportEmail: config.supportEmail,
       googleSignIn: config.googleClientIds.length > 0,
       guardianPersonal: process.env.GUARDIAN_ENABLED === 'true',
+      paymentsEnabled: config.paymentsEnabled,
     });
   });
 

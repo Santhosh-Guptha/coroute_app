@@ -115,6 +115,43 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
+              if (!planService.paymentsEnabled)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentText.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.accentText, width: 1.2),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.lock_open_rounded, color: AppTheme.accentText, size: 24),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Payment Screen & Plan Gating: OFF',
+                              style: TextStyle(
+                                color: AppTheme.text,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'All features across all tiers are unlocked freely. You can select any plan without payment.',
+                              style: TextStyle(color: AppTheme.text2, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
               // Ending soon / ended: a tap only scrolls here, so no navigation.
               const SubscriptionExpiryBanner(opensPlanSelector: false),
 
@@ -271,6 +308,7 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
                 _PlanCard(
                   key: _cardKeys[plan.tier],
                   plan: plan,
+                  paymentsEnabled: planService.paymentsEnabled,
                   isAnnual: _isAnnual,
                   isActive: plan.tier == currentTier,
                   monthlyAmount: PlanSubscriptionService.priceOf(plan.tier, annual: false),
@@ -286,6 +324,20 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
                       !(heldPlanActive && plan.tier == entitledTier),
                   onSelect: () async {
                     if (plan.tier == currentTier) return;
+
+                    if (!planService.paymentsEnabled) {
+                      HapticFeedback.heavyImpact();
+                      await planService.selectTier(plan.tier);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            duration: const Duration(seconds: 3),
+                            content: Text('${plan.name} selected (Payment Screen OFF · All Features Unlocked).'),
+                          ),
+                        );
+                      }
+                      return;
+                    }
 
                     if (plan.tier == SubscriptionTier.community) {
                       // Dropping to Community never gives a paid plan up: the entitlement
@@ -514,9 +566,13 @@ class _PlanCard extends StatelessWidget {
   /// Bought already and queued behind the current plan.
   final bool isPending;
 
+  /// Whether payment checkout and feature gating are active.
+  final bool paymentsEnabled;
+
   const _PlanCard({
     super.key,
     required this.plan,
+    this.paymentsEnabled = true,
     required this.isAnnual,
     required this.isActive,
     this.isHeld = false,
@@ -536,7 +592,7 @@ class _PlanCard extends StatelessWidget {
         : isRenewal
             ? AppTheme.warnText
             : (plan.isPopular ? AppTheme.accentText.withValues(alpha: 0.6) : AppTheme.border2);
-    final price = isAnnual ? plan.annualPrice : plan.monthlyPrice;
+    final price = !paymentsEnabled ? 'FREE' : (isAnnual ? plan.annualPrice : plan.monthlyPrice);
     final saving = PlanSubscriptionService.annualSaving(monthlyAmount, annualAmount);
     final savingPct = PlanSubscriptionService.annualSavingPercent(monthlyAmount, annualAmount);
     final note = changeNote;
@@ -626,7 +682,7 @@ class _PlanCard extends StatelessWidget {
                         letterSpacing: 0.2,
                       ),
                     ),
-                    if (plan.tier != SubscriptionTier.community) ...[
+                    if (paymentsEnabled && plan.tier != SubscriptionTier.community) ...[
                       const SizedBox(width: 6),
                       Text(
                         isAnnual ? '/ billed annually' : '/ month',
@@ -635,7 +691,7 @@ class _PlanCard extends StatelessWidget {
                     ],
                   ],
                 ),
-                if (plan.tier != SubscriptionTier.community && saving > 0) ...[
+                if (paymentsEnabled && plan.tier != SubscriptionTier.community && saving > 0) ...[
                   const SizedBox(height: 6),
                   Row(
                     children: [
@@ -774,13 +830,15 @@ class _PlanCard extends StatelessWidget {
                         Text(
                           isActive
                               ? 'CURRENT PLAN ACTIVE'
-                              : isHeld
-                                  ? 'SWITCH BACK (NO PAYMENT)'
-                                  : isRenewal
-                                      ? 'RENEW VIA RAZORPAY UPI'
-                                      : (plan.tier == SubscriptionTier.community
-                                          ? 'SELECT COMMUNITY PLAN'
-                                          : 'UPGRADE VIA RAZORPAY UPI'),
+                              : !paymentsEnabled
+                                  ? 'SELECT ${plan.name.toUpperCase()} (FREE)'
+                                  : isHeld
+                                      ? 'SWITCH BACK (NO PAYMENT)'
+                                      : isRenewal
+                                          ? 'RENEW VIA RAZORPAY UPI'
+                                          : (plan.tier == SubscriptionTier.community
+                                              ? 'SELECT COMMUNITY PLAN'
+                                              : 'UPGRADE VIA RAZORPAY UPI'),
                           style: TextStyle(
                             color: isActive ? AppTheme.accentText : Colors.white,
                             fontWeight: FontWeight.w900,

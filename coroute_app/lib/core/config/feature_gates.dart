@@ -86,6 +86,11 @@ enum Feature {
 class FeatureGates {
   FeatureGates._();
 
+  /// Whether the payment screen, subscription plans, and feature gating are active.
+  /// When true (default): features adhere to the user's active subscription tier and payment screens are enabled.
+  /// When false: payment screens are OFF, feature gating is disabled, and all features are unlocked freely.
+  static bool paymentsEnabled = true;
+
   /// CURRENT MASTER OVERRIDE:
   /// When true, all features across all tiers are unlocked.
   /// When false (default), features strictly adhere to [activeTier] for testing plan rules.
@@ -96,7 +101,7 @@ class FeatureGates {
 
   /// Checks whether a given [feature] is unlocked for the user.
   static bool isUnlocked(Feature feature, [SubscriptionTier? tier]) {
-    if (forceAllUnlocked) return true;
+    if (!paymentsEnabled || forceAllUnlocked) return true;
 
     final effectiveTier = tier ?? activeTier;
     switch (feature) {
@@ -132,6 +137,7 @@ class FeatureGates {
 
   /// Returns which tier is required to unlock the given feature.
   static SubscriptionTier requiredTier(Feature feature) {
+    if (!paymentsEnabled) return SubscriptionTier.community;
     switch (feature) {
       case Feature.fleetAnalytics:
         return SubscriptionTier.tourOperator;
@@ -250,6 +256,7 @@ class FeatureGates {
   /// Displays a plan-gate modal: a one-tap switch when the rider already holds
   /// the needed tier (e.g. after dropping to Community), otherwise a way to upgrade.
   static void showUpgradeModal(BuildContext context, Feature feature) {
+    if (!paymentsEnabled || forceAllUnlocked) return;
     final neededTier = requiredTier(feature);
     final neededLabel = tierLabel(neededTier);
     final planService = context.read<PlanSubscriptionService>();
@@ -373,7 +380,7 @@ class FeatureGates {
 
   /// Returns the maximum allowable convoy size for the given tier.
   static int maxConvoyMembers([SubscriptionTier? tier]) {
-    if (forceAllUnlocked) return 100;
+    if (!paymentsEnabled || forceAllUnlocked) return 100;
 
     final effectiveTier = tier ?? activeTier;
     switch (effectiveTier) {

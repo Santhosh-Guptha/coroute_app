@@ -109,6 +109,7 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
       };
     };
     cache = {
+      paymentsEnabled: s.paymentsEnabled !== undefined ? s.paymentsEnabled : (process.env.PAYMENTS_ENABLED !== 'false'),
       mode: MODES.includes(s.mode) ? s.mode : env.mode,
       test: pick('test'),
       live: pick('live'),
@@ -134,7 +135,14 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
       webhookSecretSet: Boolean(p.webhookSecret),
       source: p.source,
     });
-    return { mode: s.mode, test: view(s.test), live: view(s.live), updatedAt: s.updatedAt, updatedBy: s.updatedBy };
+    return {
+      paymentsEnabled: s.paymentsEnabled !== undefined ? s.paymentsEnabled : true,
+      mode: s.mode,
+      test: view(s.test),
+      live: view(s.live),
+      updatedAt: s.updatedAt,
+      updatedBy: s.updatedBy,
+    };
   }
 
   /**
@@ -143,7 +151,15 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
    */
   async function update(body, updatedBy) {
     const cur = (await stored()) || {};
-    const next = { mode: cur.mode, test: { ...(cur.test || {}) }, live: { ...(cur.live || {}) } };
+    const next = {
+      paymentsEnabled: cur.paymentsEnabled !== undefined ? cur.paymentsEnabled : true,
+      mode: cur.mode,
+      test: { ...(cur.test || {}) },
+      live: { ...(cur.live || {}) },
+    };
+    if (body && body.paymentsEnabled !== undefined) {
+      next.paymentsEnabled = Boolean(body.paymentsEnabled);
+    }
     for (const m of MODES) {
       const p = (body && body[m]) || {};
       const id = String(p.keyId || '').trim();

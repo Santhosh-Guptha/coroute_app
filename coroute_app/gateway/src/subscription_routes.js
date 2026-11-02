@@ -737,7 +737,9 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   const handleGetConfig = wrap(async (req, res) => {
     const plans = await getEffectivePlans(repo);
     const keys = await gateway.keysFor();
+    const gView = await gateway.publicView();
     res.json({
+      paymentsEnabled: gView.paymentsEnabled !== undefined ? gView.paymentsEnabled : config.paymentsEnabled,
       razorpayKeyId: keys.keyId,
       mode: keys.mode,
       upiOnly: true,
@@ -1110,7 +1112,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
           keySecretChanged: Boolean(String(b[m].keySecret || '').trim()),
           webhookSecretChanged: Boolean(String(b[m].webhookSecret || '').trim()),
         } : undefined);
-        await addAudit(repo, req, 'gateway.update', 'razorpay', { modeBefore: before.mode, mode: view.mode, test: changed('test'), live: changed('live') });
+        await addAudit(repo, req, 'gateway.update', 'razorpay', { paymentsEnabled: view.paymentsEnabled, modeBefore: before.mode, mode: view.mode, test: changed('test'), live: changed('live') });
         res.set('Cache-Control', 'no-store').json({ success: true, ...view });
       } catch (e) {
         sendRzpError(res, e);

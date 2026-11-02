@@ -258,8 +258,13 @@ const config = {
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
-  latestAppBuild: int('LATEST_APP_BUILD', 10003),
+  latestAppBuild: int('LATEST_APP_BUILD', 10004),
   supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
+
+  // Payment Screen & Subscription Gating Toggle
+  // When false: disables payment screens and unlocks plan-based features for all users.
+  // When true (default): enables subscription plans, payment screens, and tier-based feature gating.
+  paymentsEnabled: process.env.PAYMENTS_ENABLED !== 'false',
 
   // CORS: comma separated origins or empty for same-origin/mobile only
   corsOrigins: list('CORS_ORIGINS'),

@@ -134,6 +134,57 @@ void main() {
       expect(reloadedService.currentTier, SubscriptionTier.community);
       expect(reloadedService.forceAllUnlocked, isFalse);
     });
+
+    test('Payment Screen on/off toggle controls plan-based restrictions & feature unlocks', () async {
+      final service = PlanSubscriptionService();
+      await service.load();
+
+      // By default payments are ON
+      expect(service.paymentsEnabled, isTrue);
+
+      // 1. Turn Payment Screen OFF -> don't go with plan-based user & features (all features unlocked)
+      await service.setPaymentsEnabled(false);
+      expect(service.paymentsEnabled, isFalse);
+      expect(FeatureGates.paymentsEnabled, isFalse);
+
+      // Verify all features across all tiers are unlocked freely
+      for (final tier in SubscriptionTier.values) {
+        for (final feature in Feature.values) {
+          expect(
+            FeatureGates.isUnlocked(feature, tier),
+            isTrue,
+            reason: 'When payment screen is OFF, feature ${feature.name} must be unlocked for tier ${tier.name}',
+          );
+        }
+      }
+      expect(FeatureGates.maxConvoyMembers(), 100);
+      expect(service.maxConvoyMembers, 100);
+
+      // Rider can select ANY tier freely without payment or entitlement check
+      expect(service.canSelect(SubscriptionTier.tourOperator), isTrue);
+      final switched = await service.selectTier(SubscriptionTier.tourOperator);
+      expect(switched, isTrue);
+      expect(service.effectiveTier, SubscriptionTier.tourOperator);
+      expect(service.isUnlocked(Feature.fleetAnalytics), isTrue);
+
+      // Persistence check: reloaded service preserves payment toggle OFF
+      final reloaded = PlanSubscriptionService();
+      await reloaded.load();
+      expect(reloaded.paymentsEnabled, isFalse);
+      expect(FeatureGates.paymentsEnabled, isFalse);
+      expect(reloaded.isUnlocked(Feature.fleetAnalytics), isTrue);
+
+      // 2. Turn Payment Screen ON -> go with plan payment subscription and features based
+      await reloaded.setPaymentsEnabled(true);
+      expect(reloaded.paymentsEnabled, isTrue);
+      expect(FeatureGates.paymentsEnabled, isTrue);
+
+      // Dropping to community strictly gates features
+      await reloaded.selectTier(SubscriptionTier.community);
+      expect(FeatureGates.isUnlocked(Feature.fleetAnalytics, SubscriptionTier.community), isFalse);
+      expect(FeatureGates.isUnlocked(Feature.priorityIntercomDucking, SubscriptionTier.community), isFalse);
+      expect(FeatureGates.maxConvoyMembers(SubscriptionTier.community), 4);
+    });
   });
 
   group('AppVersionService & Force Update Tests', () {
