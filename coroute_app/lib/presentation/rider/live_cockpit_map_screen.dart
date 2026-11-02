@@ -24,6 +24,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/theme/map_tiles.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
+import '../../data/models/route_essential.dart';
 
 import '../../data/models/network_models.dart';
 import '../../data/models/network_wire.dart';
@@ -537,6 +538,20 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       lowData: s.settings?.lowData ?? false,
     );
     _syncEssentials();
+
+    // Auto-detect stop reason when stationary near a fuel bunk (minimal rider input)
+    if (me.speedKmh < 3 && me.statusReason.isEmpty) {
+      final nearestFuel = _essentials?.upcoming.where((e) => e.category == 'FUEL').firstOrNull;
+      if (nearestFuel != null && me.lat != 0 && me.lng != 0) {
+        final distM = GeoMath.haversine(me.lat, me.lng, nearestFuel.lat, nearestFuel.lng);
+        if (distM <= 250) {
+          s.updateStatusReason(userId: me.userId, reason: 'FUELING', message: 'At ${nearestFuel.name}');
+        }
+      }
+    } else if (me.speedKmh > 15 && me.statusReason == 'FUELING') {
+      // Auto-clear fueling status after rider resumes riding on the road
+      s.updateStatusReason(userId: me.userId, reason: '', message: '');
+    }
   }
 
   /// "Show on map" from the Alerts tab: centre on the rider and open their card.
@@ -804,6 +819,117 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     try {
       _mapController.move(LatLng(lat, lng), 16.5);
     } catch (_) {}
+  }
+
+  void _handleFuelPromptAction(ConvoyService service, RiderModel? me) {
+    if (me == null) return;
+    final safety = context.read<SafetyService?>();
+    final upcomingFuel = _essentials?.upcoming
+        .where((e) => e.category == 'FUEL' && !(safety?.isStationClosed(e.placeId) ?? false))
+        .toList() ?? [];
+    final station = upcomingFuel.isNotEmpty ? upcomingFuel.first : null;
+    if (station != null) {
+      _focus(station.lat, station.lng);
+      final picked = PickedPlace(
+        name: station.name.isEmpty ? 'Petrol Pump' : station.name,
+        lat: station.lat,
+        lng: station.lng,
+        category: 'FUEL',
+      );
+      final lead = service.canEditRoute;
+      if (lead) {
+        service.addStop(picked);
+      } else {
+        service.suggestStop(picked);
+      }
+      final usable = safety?.estimatedUsableKm?.round() ?? 30;
+      service.updateStatusReason(
+        userId: me.userId,
+        reason: 'FUELING',
+        message: 'Diverting to ${station.name} ($usable km left)',
+      );
+      safety?.answerPrompt(SafetyConstants.promptFuel);
+      final voice = context.read<VoiceService?>();
+      voice?.speak('Auto-routing to ${station.name}. Team notified.');
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Auto-routing to ${station.name} · Team alerted'),
+        backgroundColor: AppTheme.brand,
+      ));
+    } else {
+      showFuelSheet(context);
+    }
+  }
+
+  void _handleStationClosed(RouteEssential station, ConvoyService service, RiderModel? me) {
+    if (me == null) return;
+    final safety = context.read<SafetyService?>();
+    safety?.markStationClosed(station.placeId);
+
+    final upcomingFuel = _essentials?.upcoming
+        .where((e) => e.category == 'FUEL' && !(safety?.isStationClosed(e.placeId) ?? false))
+        .toList() ?? [];
+    final nextStation = upcomingFuel.isNotEmpty ? upcomingFuel.first : null;
+    final usableKm = safety?.estimatedUsableKm ?? 30.0;
+    final voice = context.read<VoiceService?>();
+
+    if (nextStation != null) {
+      final distKm = nextStation.aheadM(_essentials?.progressM ?? 0) / 1000;
+      if (distKm <= usableKm) {
+        voice?.speak('Station marked closed. Re-routing to next bunk: ${nextStation.name} in ${distKm.toStringAsFixed(1)} kilometers.');
+        final picked = PickedPlace(
+          name: nextStation.name.isEmpty ? 'Petrol Pump' : nextStation.name,
+          lat: nextStation.lat,
+          lng: nextStation.lng,
+          category: 'FUEL',
+        );
+        final lead = service.canEditRoute;
+        if (lead) {
+          service.addStop(picked);
+        } else {
+          service.suggestStop(picked);
+        }
+        _focus(nextStation.lat, nextStation.lng);
+        service.updateStatusReason(
+          userId: me.userId,
+          reason: 'FUELING',
+          message: 'Rerouting to ${nextStation.name} (${distKm.toStringAsFixed(1)} km)',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${station.name} closed · Rerouting to ${nextStation.name}'),
+          backgroundColor: AppTheme.warnText,
+        ));
+        return;
+      }
+    }
+
+    voice?.speak('Warning: No reachable station ahead within ${usableKm.round()} kilometers. Advise turning back or requesting roadside assistance.');
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.card,
+        title: Text('No Reachable Station Ahead', style: TextStyle(color: AppTheme.sos, fontWeight: FontWeight.bold)),
+        content: Text(
+          'All remaining mapped stations ahead exceed your estimated usable range (${usableKm.round()} km).\n\nPlease turn back to the last confirmed fuel station or call roadside emergency assist.',
+          style: AppText.body,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Dismiss', style: TextStyle(color: AppTheme.muted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.sos),
+            onPressed: () {
+              Navigator.pop(ctx);
+              final auth = context.read<AuthService>();
+              _openSosHold(service, auth);
+            },
+            child: const Text('Emergency Assist', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _openRider(RiderModel r) {
@@ -1185,10 +1311,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         onAction: () => _imOk(service),
       ));
     }
-    // Ride safety prompts on this phone only ("Are you OK?", "Time for a break", "Overspeed").
+    // Ride safety prompts on this phone only ("Are you OK?", "Time for a break", "Overspeed", "Fuel").
     for (final p in prompts) {
       final second = p.secondaryLabel;
       final isOverspeed = p.kind == SafetyPromptKind.overspeed;
+      final isFuel = p.kind == SafetyPromptKind.fuel;
       out.add(_Slot(
         key: p.key,
         tier: p.tier,
@@ -1197,7 +1324,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         title: p.title,
         message: p.message,
         actionLabel: p.primaryLabel,
-        onAction: () => context.read<SafetyService>().answerPrompt(p.key),
+        onAction: () {
+          if (isFuel) {
+            _handleFuelPromptAction(service, me);
+          } else {
+            context.read<SafetyService>().answerPrompt(p.key);
+          }
+        },
         onDismiss: second == null ? null : () => context.read<SafetyService>().answerPrompt(p.key, primary: false),
         dismissible: !isOverspeed,
       ));
@@ -1753,10 +1886,26 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                             return;
                           }
                           final picked = PickedPlace(name: station.name.isEmpty ? 'Petrol Pump' : station.name, lat: station.lat, lng: station.lng, category: 'FUEL');
-                          final ok = lead ? service.addStop(picked) : service.suggestStop(picked);
+                          if (lead) {
+                            service.addStop(picked);
+                          } else {
+                            service.suggestStop(picked);
+                          }
+                          _focus(station.lat, station.lng);
+                          final usable = safety?.estimatedUsableKm?.round() ?? 30;
+                          service.updateStatusReason(
+                            userId: me.userId,
+                            reason: 'FUELING',
+                            message: 'Diverting to ${station.name} ($usable km left)',
+                          );
+                          final voice = context.read<VoiceService?>();
+                          voice?.speak('Auto-routing to ${station.name}. Team alerted.');
                           if (mounted) {
                             ScaffoldMessenger.of(context).clearSnackBars();
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Fuel stop added to route plan.' : 'Could not add stop. Check connection.')));
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text('Auto-routing to ${station.name} · Team alerted'),
+                              backgroundColor: AppTheme.brand,
+                            ));
                           }
                         },
                         onFocusLocation: (lat, lng) => _focus(lat, lng),
@@ -2095,6 +2244,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             fuelUncertain: safety?.fuelEstimateUncertain ?? false,
             riddenSinceFillM: safety?.riddenSinceFillM ?? 0,
             onOpenFuel: () => showFuelSheet(ctx),
+            onMarkStationClosed: nearestFuel != null ? () => _handleStationClosed(nearestFuel, service, me) : null,
             onOpenGuardian: () {
               if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
                 FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);

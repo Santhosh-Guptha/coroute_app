@@ -4,9 +4,18 @@ import '../tracking/geo_math.dart';
 import '../tracking/track_point.dart';
 import 'fuel_profile.dart';
 
+/// Progressive alert tiers for motorcycle fuel monitoring.
+enum FuelAlertTier {
+  none,
+  warning, // <= 30 km remaining
+  urgent, // <= 20 km remaining
+  critical, // <= 10 km remaining
+  rangeRisk, // Next station ahead exceeds remaining usable range
+}
+
 /// Distance ridden since the last fuel fill, from the fixes the ride already
-/// records (no extra GPS work). Warns once per fill when
-/// [warnAtFraction] of the tank range was ridden. Pure: no timers, no I/O;
+/// records (no extra GPS work). Warns progressively at 30km, 20km, and 10km
+/// remaining range. Pure: no timers, no I/O;
 /// [toJson] / [fromJson] let the service keep it across an app restart.
 class FuelRangeTracker {
   FuelRangeTracker({this.warnAtFraction = SafetyConstants.fuelWarnFraction});
@@ -23,6 +32,52 @@ class FuelRangeTracker {
   String? profileStamp;
   bool uncertain = false;
   int? _pristineMotionStartTs;
+
+  FuelAlertTier _lastAlertTier = FuelAlertTier.none;
+  final Set<String> _closedStationIds = <String>{};
+
+  FuelAlertTier get lastAlertTier => _lastAlertTier;
+
+  void markStationClosed(String stationId) {
+    if (stationId.isNotEmpty) {
+      _closedStationIds.add(stationId);
+    }
+  }
+
+  bool isStationClosed(String stationId) => _closedStationIds.contains(stationId);
+
+  void clearClosedStations() => _closedStationIds.clear();
+
+  /// Evaluates the progressive alert tier for current fuel state.
+  /// Deduplicates alerts: returns true from [shouldTriggerAlert] only when
+  /// transitioning into a new or higher-severity alert tier.
+  FuelAlertTier evaluateAlertTier({
+    required double? usableKm,
+    double? nextStationDistanceKm,
+  }) {
+    if (nextStationDistanceKm != null && usableKm != null && nextStationDistanceKm > usableKm) {
+      return FuelAlertTier.rangeRisk;
+    }
+    if (usableKm == null || !usableKm.isFinite) return FuelAlertTier.none;
+    if (usableKm <= 10.0) return FuelAlertTier.critical;
+    if (usableKm <= 20.0) return FuelAlertTier.urgent;
+    if (usableKm <= 30.0) return FuelAlertTier.warning;
+    return FuelAlertTier.none;
+  }
+
+  /// Returns true only when a new alert tier should be raised to avoid duplicate popups.
+  bool shouldTriggerAlert(FuelAlertTier newTier) {
+    if (newTier == FuelAlertTier.none) {
+      _lastAlertTier = FuelAlertTier.none;
+      return false;
+    }
+    if (newTier != _lastAlertTier) {
+      _lastAlertTier = newTier;
+      _warned = true;
+      return true;
+    }
+    return false;
+  }
 
   double? usableKm(FuelProfile p) => p.valid && baselineKm != null && profileStamp == p.toJson().toString()
       ? p.usableKm(baselineKm!, _riddenM) : null;
@@ -120,6 +175,7 @@ class FuelRangeTracker {
     baselineKm = null;
     profileStamp = null;
     _warned = false;
+    _lastAlertTier = FuelAlertTier.none;
     _pristineMotionStartTs = null;
     if (atMs > _lastFillAt) _lastFillAt = atMs;
   }
@@ -154,6 +210,8 @@ class FuelRangeTracker {
     _lastTs = 0;
     _lastFillAt = 0;
     _warned = false;
+    _lastAlertTier = FuelAlertTier.none;
+    _closedStationIds.clear();
     _pristineMotionStartTs = null;
   }
 

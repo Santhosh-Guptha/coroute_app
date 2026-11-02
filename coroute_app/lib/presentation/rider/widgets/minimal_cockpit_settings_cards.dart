@@ -130,6 +130,7 @@ class SafetyFuelCard extends StatelessWidget {
   final VoidCallback onOpenFuel;
   final VoidCallback onOpenGuardian;
   final VoidCallback onTellWhy;
+  final VoidCallback? onMarkStationClosed;
   final String? stopReasonText;
   final String? queuedStopReason;
 
@@ -144,6 +145,7 @@ class SafetyFuelCard extends StatelessWidget {
     required this.onOpenFuel,
     required this.onOpenGuardian,
     required this.onTellWhy,
+    this.onMarkStationClosed,
     this.stopReasonText,
     this.queuedStopReason,
   });
@@ -157,14 +159,24 @@ class SafetyFuelCard extends StatelessWidget {
 
     if (estimate != null) {
       fuelTitle = 'Fuel range: ${estimate.floor()} km remaining';
-      if (estimate <= 60) {
+      if (estimate <= 10) {
         fuelColor = AppTheme.sos;
         fuelSubtitle = nearestFuelAheadM != null
-            ? 'LOW FUEL: Next station in ${formatDistanceRounded(nearestFuelAheadM!)}'
-            : 'LOW FUEL: Please plan a refuel stop';
+            ? 'CRITICAL (10 km left): Next station in ${formatDistanceRounded(nearestFuelAheadM!)}'
+            : 'CRITICAL (10 km left): Stop at nearest bunk immediately';
+      } else if (estimate <= 20) {
+        fuelColor = AppTheme.warnText;
+        fuelSubtitle = nearestFuelAheadM != null
+            ? 'URGENT (20 km left): Approaching ${nearestFuelName ?? "Station"} in ${formatDistanceRounded(nearestFuelAheadM!)}'
+            : 'URGENT (20 km left): Refuel stop recommended';
+      } else if (estimate <= 30) {
+        fuelColor = AppTheme.warnText;
+        fuelSubtitle = nearestFuelAheadM != null
+            ? 'LOW FUEL (30 km left): Routing to ${nearestFuelName ?? "Station"} in ${formatDistanceRounded(nearestFuelAheadM!)}'
+            : 'LOW FUEL (30 km left): Plan a fuel stop';
       } else if (nearestFuelAheadM != null) {
         final name = nearestFuelName ?? 'Station';
-        fuelSubtitle = '$name in ${formatDistanceRounded(nearestFuelAheadM!)} ahead';
+        fuelSubtitle = '$name in ${formatDistanceRounded(nearestFuelAheadM!)} ahead · Range healthy';
       } else {
         fuelSubtitle = 'Ridden ${(riddenSinceFillM / 1000).toStringAsFixed(1)} km · Range healthy';
       }
@@ -199,16 +211,40 @@ class SafetyFuelCard extends StatelessWidget {
             title: fuelTitle,
             subtitle: fuelSubtitle,
             onTap: onOpenFuel,
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: fuelColor.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                'REFUEL',
-                style: TextStyle(color: fuelColor, fontSize: 11, fontWeight: FontWeight.w800),
-              ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (onMarkStationClosed != null && nearestFuelAheadM != null && estimate != null && estimate <= 30)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: InkWell(
+                      onTap: onMarkStationClosed,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.sos.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppTheme.sos.withOpacity(0.3)),
+                        ),
+                        child: Text(
+                          'CLOSED?',
+                          style: TextStyle(color: AppTheme.sos, fontSize: 10, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: fuelColor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'REFUEL',
+                    style: TextStyle(color: fuelColor, fontSize: 11, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
             ),
           ),
           const Divider(height: 1),

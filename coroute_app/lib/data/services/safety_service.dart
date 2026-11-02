@@ -514,12 +514,18 @@ class SafetyService extends ChangeNotifier {
   /// Metres ridden since the last fill (item 2), for the ride sheet line.
   bool get fuelTrackingActive => _rideActive;
   double get riddenSinceFillM => _fuel.riddenM;
+  FuelAlertTier get currentFuelAlertTier => _fuel.lastAlertTier;
+  void markStationClosed(String stationId) => _fuel.markStationClosed(stationId);
+  bool isStationClosed(String stationId) => _fuel.isStationClosed(stationId);
+
   double? get estimatedUsableKm {
     final p = _settings.fuelProfile;
     final explicit = _fuel.usableKm(p);
     if (explicit != null) return explicit;
     if (p.valid) return p.usableKm(p.rangeKm, _fuel.riddenM);
-    return null;
+    // Smart default: riders with 120 km standard range or setting
+    final defaultRange = _settings.fuelRangeKm > 0 ? _settings.fuelRangeKm.toDouble() : 120.0;
+    return math.max(0.0, defaultRange - (_fuel.riddenM / 1000.0) - 20.0);
   }
   bool get fuelEstimateUncertain => _fuel.uncertain;
   int get fuelConfirmedAt => _fuel.lastFillAt;
@@ -1186,18 +1192,50 @@ class SafetyService extends ChangeNotifier {
   // ------------------------------------------------------------------ fuel range (item 2)
   void _onFuelFix(TrackPoint p) {
     _fuel.onFix(p);
-    final range = _settings.fuelRangeKm;
-    final profile = _settings.fuelProfile;
-    final useProfile = _settings.hasFuelProfile;
-    if (useProfile ? _fuel.shouldWarnForProfile(profile) : range > 0 && _fuel.shouldWarn(range)) {
-      final km = (_fuel.riddenM / 1000).round();
+    final usableKm = estimatedUsableKm;
+    final tier = _fuel.evaluateAlertTier(usableKm: usableKm);
+
+    if (_fuel.shouldTriggerAlert(tier)) {
+      final kmLeft = usableKm != null ? usableKm.floor() : 0;
+      final String alertTitle;
+      final String alertMessage;
+
+      switch (tier) {
+        case FuelAlertTier.critical:
+          alertTitle = 'CRITICAL FUEL';
+          alertMessage = 'Only $kmLeft km range left! Stop at nearest bunk immediately.';
+          _voice?.speak('Critical warning: Only $kmLeft kilometers range left! Stop at nearest station immediately.');
+          HapticFeedback.vibrate();
+          break;
+        case FuelAlertTier.urgent:
+          alertTitle = 'URGENT FUEL';
+          alertMessage = 'Only $kmLeft km remaining. Approaching fuel stop.';
+          _voice?.speak('Urgent: $kmLeft kilometers fuel range remaining. Approach fuel stop.');
+          HapticFeedback.heavyImpact();
+          break;
+        case FuelAlertTier.warning:
+          alertTitle = 'LOW FUEL';
+          alertMessage = 'About $kmLeft km range remaining. Routing to nearest bunk.';
+          _voice?.speak('Warning: Fuel low, $kmLeft kilometers remaining. Auto-routing to nearest bunk.');
+          HapticFeedback.heavyImpact();
+          break;
+        case FuelAlertTier.rangeRisk:
+          alertTitle = 'RANGE RISK';
+          alertMessage = 'Next fuel station exceeds estimated range. Consider turning back.';
+          _voice?.speak('Warning: Next fuel station exceeds estimated range. Consider turning back.');
+          HapticFeedback.heavyImpact();
+          break;
+        case FuelAlertTier.none:
+          return;
+      }
+
       _showPrompt(
         SafetyPrompt(
           key: SafetyConstants.promptFuel,
           kind: SafetyPromptKind.fuel,
-          title: L10n.t('fuel.title'),
-          message: useProfile ? 'About ${estimatedUsableKm!.floor()} km before refuelling. Plan a fuel stop.' : L10n.t('fuel.body', {'km': '$km km', 'range': range}),
-          primaryLabel: L10n.t('prompt.ok'),
+          title: alertTitle,
+          message: alertMessage,
+          primaryLabel: 'Route to Bunk',
           secondaryLabel: L10n.t('fuel.filled'),
         ),
         notifyAlways: true,

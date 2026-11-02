@@ -107,7 +107,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
       break; // Display top critical alert first
     }
 
-    // 1. Fuel Alert / Nearest Station Check
+    // 1. Fuel Alert / Nearest Station Check (Alert-Raised Only, No Duplicate Popups)
     final usableKm = widget.estimatedUsableKm;
     final essentials = widget.essentialsService;
     final progressM = essentials?.progressM ?? 0;
@@ -123,46 +123,36 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
         : null;
     final fuelAheadKm = (fuelAheadM != null && fuelAheadM > 0) ? fuelAheadM / 1000 : null;
 
-    final isLowFuel = usableKm != null && (usableKm <= 60 || (fuelAheadKm != null && fuelAheadKm > usableKm));
+    // Strict rule: Show fuel alert capsule ONLY when alert is raised (<= 30 km or range risk)
+    final isLowFuel = usableKm != null && (usableKm <= 30.0 || (fuelAheadKm != null && fuelAheadKm > usableKm));
 
     if (isLowFuel) {
+      final isCritical = usableKm <= 10.0;
+      final isUrgent = usableKm <= 20.0;
+      final isRangeRisk = fuelAheadKm != null && fuelAheadKm > usableKm;
+
+      final title = isRangeRisk
+          ? 'RANGE RISK · Next station beyond range'
+          : isCritical
+              ? 'CRITICAL FUEL · ${usableKm.round()} km left'
+              : isUrgent
+                  ? 'URGENT FUEL · ${usableKm.round()} km left'
+                  : 'LOW FUEL · ${usableKm.round()} km left';
+
       items.add(
         _ActionPill(
           icon: Icons.local_gas_station_rounded,
           iconColor: Colors.white,
-          accentColor: AppTheme.sos,
-          title: 'LOW FUEL · ${usableKm.round()} km left',
+          accentColor: (isCritical || isRangeRisk) ? AppTheme.sos : AppTheme.warnText,
+          title: title,
           subtitle: nearestStation != null && fuelAheadM != null
-              ? '${nearestStation.name} in ${formatDistanceRounded(fuelAheadM)} · Tap to route'
-              : 'Tap to find fuel stations',
+              ? 'Auto-route: ${nearestStation.name} in ${formatDistanceRounded(fuelAheadM)} · Tap'
+              : 'Tap to find nearest reachable bunk',
           onTap: () {
             HapticFeedback.mediumImpact();
-            _showFuelQuickSheet(
-              context,
-              usableKm: usableKm,
-              stations: upcomingFuel.take(4).toList(),
-              progressM: progressM,
-              riderLat: widget.me.lat,
-              riderLng: widget.me.lng,
-              onAddStationStop: widget.onAddStationStop,
-              onOpenFuelSheet: widget.onOpenFuelSheet,
-            );
-          },
-        ),
-      );
-    } else if (usableKm != null && usableKm <= 100) {
-      // Only show proactive fuel recommendation when tank is actually in reserve (<= 100 km)
-      if (nearestStation != null && fuelAheadM != null) {
-        final rangeText = ' · ${usableKm.round()} km left';
-        items.add(
-          _ActionPill(
-            icon: Icons.local_gas_station_rounded,
-            iconColor: Colors.white,
-            accentColor: AppTheme.warnText,
-            title: 'NEXT FUEL · in ${formatDistanceRounded(fuelAheadM)}$rangeText',
-            subtitle: '${nearestStation.name} · Tap to route',
-            onTap: () {
-              HapticFeedback.lightImpact();
+            if (nearestStation != null && widget.onAddStationStop != null) {
+              widget.onAddStationStop!(nearestStation);
+            } else {
               _showFuelQuickSheet(
                 context,
                 usableKm: usableKm,
@@ -173,34 +163,74 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
                 onAddStationStop: widget.onAddStationStop,
                 onOpenFuelSheet: widget.onOpenFuelSheet,
               );
-            },
-          ),
-        );
-      } else {
+            }
+          },
+        ),
+      );
+    }
+
+    // 1b. Remaining Convoy Members Alert: Display when a teammate is diverting for fuel
+    for (final rider in widget.convoy.riders.values) {
+      if (rider.userId == widget.me.userId) continue;
+      final isDivertingFuel = rider.statusReason == 'FUELING' ||
+          (rider.fuelUsableKm != null && rider.fuelUsableKm! > 0 && rider.fuelUsableKm! <= 30.0);
+      if (isDivertingFuel) {
+        final who = rider.name.split(' ').first;
+        final rangeNote = rider.fuelUsableKm != null ? ' (${rider.fuelUsableKm!.round()} km left)' : '';
         items.add(
           _ActionPill(
             icon: Icons.local_gas_station_rounded,
             iconColor: Colors.white,
             accentColor: AppTheme.warnText,
-            title: 'FUEL · ${usableKm.round()} km range',
-            subtitle: 'Tap to view petrol stations',
+            title: '$who DIVERTING FOR FUEL',
+            subtitle: rider.statusMessage.isNotEmpty
+                ? '${rider.statusMessage} · Tap to locate'
+                : 'Refueling$rangeNote · Tap to locate or regroup',
             onTap: () {
               HapticFeedback.lightImpact();
-              widget.onOpenFuelSheet?.call();
+              if (widget.onFocusLocation != null && rider.lat != 0 && rider.lng != 0) {
+                widget.onFocusLocation!(rider.lat, rider.lng);
+              }
             },
           ),
         );
+        break; // Display top diverting rider
       }
     }
 
-    // 1b. Group Fuel Consensus (Tracks lowest-range motorcycle in the convoy pack)
+    // 1c. Group Separation Alert: Moving away from group range (> 1.0 km separation)
+    if (widget.me.role != 'LEAD') {
+      final leadRider = widget.convoy.riders.values.where((r) => r.role == 'LEAD').firstOrNull;
+      if (leadRider != null && leadRider.lat != 0 && widget.me.lat != 0) {
+        final gapM = GeoMath.haversine(widget.me.lat, widget.me.lng, leadRider.lat, leadRider.lng);
+        if (gapM > 1000) {
+          items.add(
+            _ActionPill(
+              icon: Icons.groups_rounded,
+              iconColor: Colors.white,
+              accentColor: AppTheme.warnText,
+              title: 'GROUP SEPARATION · ${formatDistanceRounded(gapM)}',
+              subtitle: 'Convoy pack is ahead · Tap to locate lead',
+              onTap: () {
+                HapticFeedback.lightImpact();
+                if (widget.onFocusLocation != null) {
+                  widget.onFocusLocation!(leadRider.lat, leadRider.lng);
+                }
+              },
+            ),
+          );
+        }
+      }
+    }
+
+    // 1d. Group Fuel Consensus (Tracks bottleneck motorcycle in the pack when <= 30 km)
     final consensus = GroupFuelConsensus.evaluate(
       convoy: widget.convoy,
       upcomingStations: upcomingFuel,
       progressM: progressM,
     );
 
-    if (consensus != null && consensus.alertLead && consensus.bottleneckUserId != widget.me.userId) {
+    if (consensus != null && consensus.lowestRangeKm <= 30.0 && consensus.bottleneckUserId != widget.me.userId) {
       final who = consensus.bottleneckRiderName.split(' ').first;
       final st = consensus.recommendedStation;
       final distStr = consensus.distanceToStationKm != null ? ' in ${consensus.distanceToStationKm!.toStringAsFixed(1)} km' : '';

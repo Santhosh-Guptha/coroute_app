@@ -21,7 +21,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.use((req, res, next) => {
     const feature = req.path.startsWith('/geo/essentials') ? 'essentials' : req.path.startsWith('/geo/weather') ? 'weather'
       : req.path.startsWith('/geo/route') ? 'route' : req.path.startsWith('/geo/') ? 'places'
-      : req.path.startsWith('/trips') ? 'trips' : null;
+        : req.path.startsWith('/trips') ? 'trips' : null;
     const started = Date.now();
     if (feature) res.once('finish', () => convoys.featureAnalytics?.record(feature, res.statusCode < 400, Date.now() - started));
     next();
@@ -63,6 +63,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.post('/auth/register', authLimiter, wrap(async (req, res) => res.status(201).json(await auth.register(req.body || {}))));
   r.post('/auth/login', authLimiter, wrap(async (req, res) => res.json(await auth.login(req.body || {}))));
   r.post('/auth/google', authLimiter, wrap(async (req, res) => res.json(await auth.loginWithGoogle(req.body || {}))));
+  r.post('/auth/guest', authLimiter, wrap(async (req, res) => res.json(await auth.loginAsGuest(req.body || {}))));
 
   // ---- website endpoints (public, rate-limited, no cookies, no personal data stored for analytics) ----
   const siteLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false });
@@ -77,7 +78,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     let refHost = '';
     try { if (body.ref) refHost = new URL(String(body.ref)).hostname.slice(0, 80); } catch { /* ignore */ }
     const day = new Date().toISOString().slice(0, 10);
-    repo.countPageview(day, path, refHost, config.pvMaxReferrers).catch(() => {});
+    repo.countPageview(day, path, refHost, config.pvMaxReferrers).catch(() => { });
     res.status(204).end();
   }));
 
@@ -172,6 +173,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // Every rider (not only new app builds) needs the safety profile before riding in a group.
   const ensureProfileComplete = async (req) => {
     if (req.user?.role === 'MASTER_ADMIN') return;
+    if (req.user?.provider === 'guest' || (req.user?.userId || '').startsWith('guest_')) return;
     const u = req.dbUser || await repo.findUserById(req.user.userId);
     if (!u) return;
     const isPillion = (u.vehicleType || '').trim().toLowerCase() === 'pillion rider' || (u.vehicleNo || '').trim().toUpperCase() === 'PILLION';
@@ -531,7 +533,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       const count30d = falseAlarmCount(u, t);
       return { userId: u.userId, name: u.name || '', count30d, throttled: count30d >= config.abuseFalseAlarms, lastAt: Math.max(0, ...u.falseAlarmAt.filter(Number.isFinite)) };
     }).filter((x) => x.count30d > 0).sort((a, b) => (b.count30d - a.count30d) || (b.lastAt - a.lastAt)).slice(0, 50);
-    if (audit) await audit.flush().catch(() => {});
+    if (audit) await audit.flush().catch(() => { });
     res.set('Cache-Control', 'no-store').json({
       serverTime: t,
       incidents: network ? network.adminView() : [],

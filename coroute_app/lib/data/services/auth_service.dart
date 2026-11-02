@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
 import 'api_client.dart';
@@ -61,7 +62,9 @@ class AuthService extends ChangeNotifier {
   final ApiClient _api;
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: const ['email', 'profile'],
-    serverClientId: AppConfig.googleWebClientId.isEmpty ? null : AppConfig.googleWebClientId,
+    serverClientId: AppConfig.googleWebClientId.isEmpty
+        ? null
+        : AppConfig.googleWebClientId,
   );
 
   String? _userId;
@@ -165,7 +168,8 @@ class AuthService extends ChangeNotifier {
     _vehicleType = prefs.getString(AppConstants.keyVehicleType) ?? 'Motorcycle';
     _phone = prefs.getString(AppConstants.keyPhone) ?? '';
     _emergencyContact = prefs.getString(AppConstants.keyEmergencyContact) ?? '';
-    _emergencyContactName = prefs.getString(AppConstants.keyEmergencyName) ?? '';
+    _emergencyContactName =
+        prefs.getString(AppConstants.keyEmergencyName) ?? '';
     _vehicleNo = prefs.getString(AppConstants.keyVehicleNo) ?? '';
     _isLoading = false;
     notifyListeners();
@@ -212,17 +216,25 @@ class AuthService extends ChangeNotifier {
     _emergencyContactName = u['emergencyContactName']?.toString() ?? '';
     _mustChangePassword = u['mustChangePassword'] == true;
     // Older gateways do not send these: keep what is known instead of clearing it.
-    if (u.containsKey('bloodGroup')) _bloodGroup = u['bloodGroup']?.toString() ?? '';
-    if (u.containsKey('allergies')) _allergies = u['allergies']?.toString() ?? '';
-    if (u.containsKey('medicalNotes')) _medicalNotes = u['medicalNotes']?.toString() ?? '';
+    if (u.containsKey('bloodGroup'))
+      _bloodGroup = u['bloodGroup']?.toString() ?? '';
+    if (u.containsKey('allergies'))
+      _allergies = u['allergies']?.toString() ?? '';
+    if (u.containsKey('medicalNotes'))
+      _medicalNotes = u['medicalNotes']?.toString() ?? '';
     if (u.containsKey('smsOptOut')) _smsOptOut = u['smsOptOut'] == true;
-    if (u.containsKey('bloodGroup') || u.containsKey('smsOptOut')) _medicalLoaded = true;
+    if (u.containsKey('bloodGroup') || u.containsKey('smsOptOut'))
+      _medicalLoaded = true;
     if (u.containsKey('assistHelp')) _assistHelp = u['assistHelp'] != false;
     if (u.containsKey('assistAsk')) _assistAsk = u['assistAsk'] != false;
-    if (u.containsKey('responderMedical')) _responderMedical = u['responderMedical'] == true;
+    if (u.containsKey('responderMedical'))
+      _responderMedical = u['responderMedical'] == true;
     final consent = u['netConsentAt'];
     if (consent is num) _netConsentAt = consent.toInt();
-    if (u.containsKey('assistHelp') || u.containsKey('assistAsk') || u.containsKey('responderMedical')) _netLoaded = true;
+    if (u.containsKey('assistHelp') ||
+        u.containsKey('assistAsk') ||
+        u.containsKey('responderMedical'))
+      _netLoaded = true;
     // Plan state travels with the profile; an expired paid tier arrives as community.
     _noteSubscriptionStatus(u['subscriptionStatus']);
 
@@ -234,16 +246,32 @@ class AuthService extends ChangeNotifier {
     await prefs.setString(AppConstants.keyVehicleType, _vehicleType ?? '');
     await prefs.setString(AppConstants.keyPhone, _phone ?? '');
     await prefs.setString(AppConstants.keyVehicleNo, _vehicleNo ?? '');
-    await prefs.setString(AppConstants.keyEmergencyContact, _emergencyContact ?? '');
-    await prefs.setString(AppConstants.keyEmergencyName, _emergencyContactName ?? '');
+    await prefs.setString(
+      AppConstants.keyEmergencyContact,
+      _emergencyContact ?? '',
+    );
+    await prefs.setString(
+      AppConstants.keyEmergencyName,
+      _emergencyContactName ?? '',
+    );
     notifyListeners();
   }
 
   bool get mustChangePassword => _mustChangePassword;
 
-  Map<String, dynamic> _ok() => {'success': true, 'isAdmin': isMasterAdmin, 'userId': _userId, 'name': _name, 'mustChangePassword': _mustChangePassword};
-  Map<String, dynamic> _fail(Object e) =>
-      {'success': false, 'error': e is ApiException ? e.message : 'Something went wrong. Please try again.'};
+  Map<String, dynamic> _ok() => {
+    'success': true,
+    'isAdmin': isMasterAdmin,
+    'userId': _userId,
+    'name': _name,
+    'mustChangePassword': _mustChangePassword,
+  };
+  Map<String, dynamic> _fail(Object e) => {
+    'success': false,
+    'error': e is ApiException
+        ? e.message
+        : 'Something went wrong. Please try again.',
+  };
 
   Future<Map<String, dynamic>> _consume(dynamic res) async {
     if (res is! Map || res['token'] == null || res['user'] is! Map) {
@@ -253,7 +281,8 @@ class AuthService extends ChangeNotifier {
     await _api.setToken(res['token'].toString());
     await _applyUser(Map<String, dynamic>.from(res['user'] as Map));
     // Login replies may carry the plan beside the user rather than inside it.
-    if ((res['user'] as Map)['subscriptionStatus'] is! Map) _noteSubscriptionStatus(res['subscriptionStatus']);
+    if ((res['user'] as Map)['subscriptionStatus'] is! Map)
+      _noteSubscriptionStatus(res['subscriptionStatus']);
     return _ok();
   }
 
@@ -269,16 +298,21 @@ class AuthService extends ChangeNotifier {
     String emergencyContactName = '',
   }) async {
     try {
-      final res = await _api.post('/auth/register', {
-        'name': name.trim(),
-        'email': email.trim(),
-        'password': password,
-        'phone': phone.trim(),
-        'vehicleType': vehicleType.trim(),
-        'vehicleNo': vehicleNo.trim(),
-        'emergencyContact': emergencyContact.trim(),
-        'emergencyContactName': emergencyContactName.trim(),
-      }, const Duration(seconds: 15), false);
+      final res = await _api.post(
+        '/auth/register',
+        {
+          'name': name.trim(),
+          'email': email.trim(),
+          'password': password,
+          'phone': phone.trim(),
+          'vehicleType': vehicleType.trim(),
+          'vehicleNo': vehicleNo.trim(),
+          'emergencyContact': emergencyContact.trim(),
+          'emergencyContactName': emergencyContactName.trim(),
+        },
+        const Duration(seconds: 15),
+        false,
+      );
       return await _consume(res);
     } catch (e) {
       return _fail(e);
@@ -286,9 +320,17 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Sign in with email or callsign + password.
-  Future<Map<String, dynamic>> loginRiderWithPassword({required String identifier, required String password}) async {
+  Future<Map<String, dynamic>> loginRiderWithPassword({
+    required String identifier,
+    required String password,
+  }) async {
     try {
-      final res = await _api.post('/auth/login', {'identifier': identifier.trim(), 'password': password}, const Duration(seconds: 15), false);
+      final res = await _api.post(
+        '/auth/login',
+        {'identifier': identifier.trim(), 'password': password},
+        const Duration(seconds: 15),
+        false,
+      );
       return await _consume(res);
     } catch (e) {
       return _fail(e);
@@ -302,13 +344,22 @@ class AuthService extends ChangeNotifier {
         await _googleSignIn.signOut();
       } catch (_) {}
       final account = await _googleSignIn.signIn();
-      if (account == null) return {'success': false, 'error': 'Google Sign-In cancelled.'};
+      if (account == null)
+        return {'success': false, 'error': 'Google Sign-In cancelled.'};
       final gAuth = await account.authentication;
       final idToken = gAuth.idToken;
       if (idToken == null || idToken.isEmpty) {
-        return {'success': false, 'error': 'Google did not return an ID token. Check the OAuth client configuration.'};
+        return {
+          'success': false,
+          'error': 'Google did not return an ID token. Check the OAuth client configuration.',
+        };
       }
-      final res = await _api.post('/auth/google', {'idToken': idToken}, const Duration(seconds: 15), false);
+      final res = await _api.post(
+        '/auth/google',
+        {'idToken': idToken},
+        const Duration(seconds: 15),
+        false,
+      );
       return await _consume(res);
     } catch (e) {
       debugPrint('Google Sign-In note: $e');
@@ -318,8 +369,56 @@ class AuthService extends ChangeNotifier {
 
   /// Direct guest / quick ride mode for riders hopping on immediately without an account.
   Future<Map<String, dynamic>> continueAsGuest({String? callsign}) async {
+    _isLoading = true;
+    notifyListeners();
+
+    final guestName = callsign?.trim().isNotEmpty == true
+        ? callsign!.trim()
+        : 'Guest Rider';
+    try {
+      final res = await _api.post(
+        '/auth/guest',
+        {'name': guestName},
+        const Duration(seconds: 12),
+        false,
+      );
+      if (res is Map && res['token'] != null) {
+        await _api.setToken(res['token'] as String);
+        final u = res['user'] as Map<String, dynamic>? ?? {};
+        _userId =
+            u['userId'] as String? ??
+            'guest_${DateTime.now().millisecondsSinceEpoch}';
+        _name = u['name'] as String? ?? guestName;
+        _email = u['email'] as String? ?? '$_userId@guest.coroute.local';
+        _role = u['role'] as String? ?? AppConstants.riderRole;
+        _vehicleType = u['vehicleType'] as String? ?? 'Motorcycle (Guest)';
+        _vehicleNo = u['vehicleNo'] as String? ?? 'GUEST';
+        _phone = u['phone'] as String? ?? '9999999999';
+        _emergencyContact = u['emergencyContact'] as String? ?? '112112112';
+        _emergencyContactName =
+            u['emergencyContactName'] as String? ?? 'Emergency Services';
+        _isLoading = false;
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(AppConstants.keyUserId, _userId!);
+        await prefs.setString(AppConstants.keyUserName, _name!);
+        await prefs.setString(AppConstants.keyUserRole, _role!);
+        await prefs.setString(AppConstants.keyUserEmail, _email!);
+        await prefs.setString(AppConstants.keyVehicleType, _vehicleType!);
+        await prefs.setString(AppConstants.keyVehicleNo, _vehicleNo!);
+        notifyListeners();
+        return {
+          'success': true,
+          'isAdmin': false,
+          'userId': _userId,
+          'name': _name,
+        };
+      }
+    } catch (e) {
+      debugPrint('Guest API login fallback: $e');
+    }
+
     final guestId = 'guest_${DateTime.now().millisecondsSinceEpoch}';
-    final guestName = callsign?.trim().isNotEmpty == true ? callsign!.trim() : 'Guest Rider';
     _userId = guestId;
     _role = AppConstants.riderRole;
     _name = guestName;
@@ -339,7 +438,12 @@ class AuthService extends ChangeNotifier {
     await prefs.setString(AppConstants.keyVehicleType, _vehicleType!);
     await prefs.setString(AppConstants.keyVehicleNo, _vehicleNo!);
     notifyListeners();
-    return {'success': true, 'isAdmin': false, 'userId': _userId, 'name': _name};
+    return {
+      'success': true,
+      'isAdmin': false,
+      'userId': _userId,
+      'name': _name,
+    };
   }
 
   String? _lastProfileError;
@@ -384,7 +488,8 @@ class AuthService extends ChangeNotifier {
       if (smsOptOut != null) payload['smsOptOut'] = smsOptOut;
       if (assistHelp != null) payload['assistHelp'] = assistHelp;
       if (assistAsk != null) payload['assistAsk'] = assistAsk;
-      if (responderMedical != null) payload['responderMedical'] = responderMedical;
+      if (responderMedical != null)
+        payload['responderMedical'] = responderMedical;
       if (netConsent == true) payload['netConsent'] = true;
       _lastProfileError = null;
       final res = await _api.patch('/me', payload);
@@ -393,7 +498,10 @@ class AuthService extends ChangeNotifier {
     } on ApiException catch (e) {
       debugPrint('updateProfile note: $e');
       // Validation answers (422 / 409) carry a message for the rider; outages do not.
-      _lastProfileError = (e.statusCode >= 400 && e.statusCode < 500 && !e.isUnauthorized) ? e.message : null;
+      _lastProfileError =
+          (e.statusCode >= 400 && e.statusCode < 500 && !e.isUnauthorized)
+          ? e.message
+          : null;
       return false;
     } catch (e) {
       debugPrint('updateProfile note: $e');
@@ -405,8 +513,15 @@ class AuthService extends ChangeNotifier {
   /// Saves only the nearby riders switches (and the consent) without the rest
   /// of the profile. Shown at once; put back when the server refuses or
   /// cannot be reached. True when saved.
-  Future<bool> updateNetworkPrefs({bool? assistHelp, bool? assistAsk, bool? responderMedical, bool netConsent = false}) async {
-    final helpBefore = _assistHelp, askBefore = _assistAsk, medicalBefore = _responderMedical;
+  Future<bool> updateNetworkPrefs({
+    bool? assistHelp,
+    bool? assistAsk,
+    bool? responderMedical,
+    bool netConsent = false,
+  }) async {
+    final helpBefore = _assistHelp,
+        askBefore = _assistAsk,
+        medicalBefore = _responderMedical;
     final payload = <String, dynamic>{
       'assistHelp': ?assistHelp,
       'assistAsk': ?assistAsk,
@@ -439,9 +554,15 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Change password. [currentPassword] may be empty when the server issued a temporary one.
-  Future<Map<String, dynamic>> changePassword({required String currentPassword, required String newPassword}) async {
+  Future<Map<String, dynamic>> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
     try {
-      final res = await _api.post('/me/password', {'currentPassword': currentPassword, 'newPassword': newPassword});
+      final res = await _api.post('/me/password', {
+        'currentPassword': currentPassword,
+        'newPassword': newPassword,
+      });
       // The server ends every other session and hands this phone a fresh token.
       final fresh = res is Map ? res['token']?.toString() : null;
       if (fresh != null && fresh.isNotEmpty) await _api.setToken(fresh);
@@ -501,9 +622,16 @@ class AuthService extends ChangeNotifier {
     onSessionCleared?.call();
     final prefs = await SharedPreferences.getInstance();
     for (final k in [
-      AppConstants.keyUserId, AppConstants.keyUserRole, AppConstants.keyUserEmail, AppConstants.keyUserName,
-      AppConstants.keyVehicleType, AppConstants.keyActiveGroupId, AppConstants.keyPhone, AppConstants.keyVehicleNo,
-      AppConstants.keyEmergencyContact, AppConstants.keyEmergencyName,
+      AppConstants.keyUserId,
+      AppConstants.keyUserRole,
+      AppConstants.keyUserEmail,
+      AppConstants.keyUserName,
+      AppConstants.keyVehicleType,
+      AppConstants.keyActiveGroupId,
+      AppConstants.keyPhone,
+      AppConstants.keyVehicleNo,
+      AppConstants.keyEmergencyContact,
+      AppConstants.keyEmergencyName,
     ]) {
       await prefs.remove(k);
     }

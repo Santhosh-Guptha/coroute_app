@@ -34,6 +34,7 @@ function isPillionUser(u) {
 }
 
 function checkProfileComplete(u) {
+  if (u.provider === 'guest' || (u.userId || '').startsWith('guest_')) return true;
   const hasName = Boolean((u.name || '').trim().length >= 2);
   const hasEmail = Boolean((u.email || '').trim().includes('@'));
   const hasPhone = Boolean((u.phone || '').trim().length >= 7);
@@ -307,6 +308,27 @@ class AuthService {
       if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
       user = await this._seen(await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role: bootstrapRoleFor(email, user.role), googleSub: payload.sub }) || user);
     }
+    return { token: signToken(user), user: selfUser(user) };
+  }
+
+  async loginAsGuest({ name, vehicleNo } = {}) {
+    const guestNum = Math.floor(1000 + Math.random() * 9000);
+    const cleanName = (name || `Guest_${guestNum}`).trim().slice(0, 24);
+    const email = `guest_${Date.now()}_${guestNum}@guest.coroute.local`;
+    const user = await this.repo.createUser({
+      userId: await this._uniqueUserId(cleanName),
+      name: cleanName,
+      email,
+      role: ROLE_RIDER,
+      provider: 'guest',
+      phone: '9999999999',
+      vehicleType: 'Motorcycle (Guest)',
+      vehicleNo: vehicleNo || 'GUEST',
+      emergencyContact: '112112112',
+      emergencyContactName: 'Emergency Services',
+      createdAt: Date.now(),
+      lastLoginAt: Date.now(),
+    });
     return { token: signToken(user), user: selfUser(user) };
   }
 
