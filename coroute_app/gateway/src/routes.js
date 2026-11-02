@@ -465,6 +465,16 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     const lat = Number(req.query.lat), lng = Number(req.query.lng);
     res.json({ results: await geo.search(req.query.q, { lat, lng }) });
   }));
+  r.get('/geo/nearby-fuel', geoLimiter, wrap(async (req, res) => {
+    const lat = Number(req.query.lat), lng = Number(req.query.lng);
+    const radiusKm = Number(req.query.radiusKm) || 25;
+    if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180) || (lat === 0 && lng === 0)) {
+      return res.status(400).json({ error: 'Valid latitude and longitude required.' });
+    }
+    res.set('Cache-Control', 'private, max-age=300').json({
+      results: await geo.nearbyFuel(lat, lng, radiusKm),
+    });
+  }));
   r.get('/geo/reverse', geoLimiter, wrap(async (req, res) => {
     const lat = Number(req.query.lat), lng = Number(req.query.lng);
     if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) return res.status(400).json({ error: 'Invalid coordinates.' });

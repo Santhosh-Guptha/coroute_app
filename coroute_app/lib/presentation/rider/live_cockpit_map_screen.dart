@@ -282,6 +282,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
     await _essentials!.update(routeToUse,
       fromM: active?.matched?.alongM ?? 0, online: s?.isOnline ?? false,
       lowData: s?.settings?.lowData ?? false, selectedCategory: category ?? _essentials!.category, force: force);
+
+    // If no route or corridor essentials are empty, fetch petrol bunks near current coordinates
+    final me = c?.riders[s?.myUserId];
+    if (me != null && me.lat != 0 && me.lng != 0 && (_essentials!.upcoming.isEmpty || routeToUse == null)) {
+      await _essentials!.fetchNearbyFuel(lat: me.lat, lng: me.lng, force: force);
+    }
   }
   void _essentialsChanged() { if (mounted) setState(() {}); }
   void _openEssentials() {
@@ -838,7 +844,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       );
       final lead = service.canEditRoute;
       if (lead) {
-        service.addStop(picked);
+        if (service.activeConvoy?.route?.points.isEmpty ?? true) {
+          service.setDestination(picked);
+        } else {
+          service.addStop(picked);
+        }
       } else {
         service.suggestStop(picked);
       }
@@ -857,8 +867,223 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
         backgroundColor: AppTheme.brand,
       ));
     } else {
-      showFuelSheet(context);
+      if (me.lat != 0 && me.lng != 0) {
+        _essentials?.fetchNearbyFuel(lat: me.lat, lng: me.lng, force: true);
+      }
+      _openNearbyFuelSheet(service, me);
     }
+  }
+
+  void _openNearbyFuelSheet(ConvoyService service, RiderModel me) {
+    final safety = context.read<SafetyService?>();
+    final usableKm = safety?.estimatedUsableKm;
+    final essentials = _essentials;
+    final upcomingFuel = essentials?.upcoming.where((e) => e.category == 'FUEL').toList() ?? [];
+    final nearbyFuel = essentials?.nearbyFuelStations ?? [];
+    final allStations = upcomingFuel.isNotEmpty ? upcomingFuel : nearbyFuel;
+
+    if (allStations.isEmpty && me.lat != 0 && me.lng != 0) {
+      essentials?.fetchNearbyFuel(lat: me.lat, lng: me.lng, force: true);
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      constraints: BoxConstraints(maxWidth: 600, maxHeight: MediaQuery.sizeOf(context).height * 0.88),
+      backgroundColor: AppTheme.card,
+      shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),
+      builder: (ctx) {
+        List<RouteEssential> currentList = List.from(allStations);
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            bool isScanning = essentials?.loading ?? false;
+            return SafeArea(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(Space.s24, Space.s16, Space.s24, Space.s24),
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Center(
+                            child: Container(
+                              width: 36,
+                              height: 4,
+                              decoration: BoxDecoration(color: AppTheme.border, borderRadius: BorderRadius.circular(2)),
+                            ),
+                          ),
+                          const SizedBox(height: Space.s16),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(Space.s8),
+                                decoration: BoxDecoration(color: AppTheme.brand.withOpacity(0.15), shape: BoxShape.circle),
+                                child: Icon(Icons.local_gas_station_rounded, color: AppTheme.brand, size: 28),
+                              ),
+                              const SizedBox(width: Space.s12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Petrol Bunks Near You', style: AppText.title),
+                                    Text(
+                                      usableKm != null
+                                          ? 'Usable range ~${usableKm.round()} km · Select a station to navigate'
+                                          : 'Verified fuel stations near current position',
+                                      style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: Space.s16),
+                          const Divider(),
+                          const SizedBox(height: Space.s8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('NEARBY PETROL STATIONS', style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.muted)),
+                              if (me.lat != 0 && me.lng != 0)
+                                TextButton.icon(
+                                  onPressed: isScanning ? null : () async {
+                                    setSheetState(() { isScanning = true; });
+                                    final res = await essentials?.fetchNearbyFuel(lat: me.lat, lng: me.lng, force: true);
+                                    if (ctx.mounted && res != null) {
+                                      setSheetState(() {
+                                        currentList = List.from(res);
+                                        isScanning = false;
+                                      });
+                                    }
+                                  },
+                                  icon: isScanning ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh_rounded, size: 14),
+                                  label: Text(isScanning ? 'Scanning...' : 'Scan Nearby', style: const TextStyle(fontSize: 12)),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: Space.s8),
+                          if (currentList.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: Space.s24),
+                              child: Column(
+                                children: [
+                                  Icon(Icons.location_searching_rounded, size: 40, color: AppTheme.muted),
+                                  const SizedBox(height: Space.s12),
+                                  Text(
+                                    isScanning ? 'Finding petrol stations near you...' : 'No petrol bunks found within 25 km.',
+                                    textAlign: TextAlign.center,
+                                    style: AppText.body.copyWith(color: AppTheme.muted),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            for (final st in currentList) ...[
+                              Builder(builder: (_) {
+                                final distM = GeoMath.haversine(me.lat, me.lng, st.lat, st.lng);
+                                final distStr = formatDistanceRounded(distM);
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: Space.s8),
+                                  padding: const EdgeInsets.all(Space.s12),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.bg,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: AppTheme.border),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.local_gas_station_rounded, color: AppTheme.brand, size: 22),
+                                      const SizedBox(width: Space.s8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(st.name.isEmpty ? 'Petrol Pump' : st.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 14)),
+                                            Text(
+                                              st.isCoco ? 'COCO · $distStr away' : (st.operatorName != null ? '${st.operatorName} · $distStr away' : '$distStr away'),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.bold),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: Space.s8),
+                                      ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: AppTheme.brand,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                          minimumSize: const Size(0, 44),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        onPressed: () {
+                                          if (ctx.mounted) Navigator.pop(ctx);
+                                          final picked = PickedPlace(name: st.name.isEmpty ? 'Petrol Pump' : st.name, lat: st.lat, lng: st.lng, category: 'FUEL');
+                                          final lead = service.canEditRoute;
+                                          if (lead) {
+                                            if (service.activeConvoy?.route?.points.isEmpty ?? true) {
+                                              service.setDestination(picked);
+                                            } else {
+                                              service.addStop(picked);
+                                            }
+                                          } else {
+                                            service.suggestStop(picked);
+                                          }
+                                          _focus(st.lat, st.lng);
+                                          safety?.answerPrompt(SafetyConstants.promptFuel);
+                                          service.updateStatusReason(userId: me.userId, reason: 'FUELING', message: 'Diverting to ${st.name}');
+                                          ScaffoldMessenger.of(context).clearSnackBars();
+                                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                            content: Text('Auto-routing to ${st.name}'),
+                                            backgroundColor: AppTheme.brand,
+                                          ));
+                                        },
+                                        icon: const Icon(Icons.navigation_rounded, size: 16),
+                                        label: const Text('Route', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ],
+                          const SizedBox(height: Space.s12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppTheme.text,
+                                    side: BorderSide(color: AppTheme.border, width: 1.5),
+                                    padding: const EdgeInsets.symmetric(vertical: Space.s12, horizontal: Space.s16),
+                                    minimumSize: const Size(0, 48),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  onPressed: () {
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                    showFuelSheet(context);
+                                  },
+                                  icon: const Icon(Icons.tune_rounded, size: 18),
+                                  label: const Text('Configure Tank Range & Mileage'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _handleStationClosed(RouteEssential station, ConvoyService service, RiderModel? me) {
@@ -1316,6 +1541,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
       final second = p.secondaryLabel;
       final isOverspeed = p.kind == SafetyPromptKind.overspeed;
       final isFuel = p.kind == SafetyPromptKind.fuel;
+      // DEDUPLICATION: CockpitActionStack provides the dedicated interactive handlebar capsule for fuel alerts.
+      // Suppress the redundant top HUD toast banner for fuel to eliminate duplicate popups.
+      if (isFuel) continue;
       out.add(_Slot(
         key: p.key,
         tier: p.tier,
@@ -2243,7 +2471,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
             nearestFuelName: nearestFuel?.name,
             fuelUncertain: safety?.fuelEstimateUncertain ?? false,
             riddenSinceFillM: safety?.riddenSinceFillM ?? 0,
-            onOpenFuel: () => showFuelSheet(ctx),
+            onOpenFuel: () => _openNearbyFuelSheet(service, me),
             onMarkStationClosed: nearestFuel != null ? () => _handleStationClosed(nearestFuel, service, me) : null,
             onOpenGuardian: () {
               if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {

@@ -112,7 +112,9 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
     final essentials = widget.essentialsService;
     final progressM = essentials?.progressM ?? 0;
     final upcomingFuel = essentials?.upcoming.where((e) => e.category == 'FUEL').toList() ?? [];
-    final nearestStation = upcomingFuel.isNotEmpty ? upcomingFuel.first : null;
+    final nearbyFuel = essentials?.nearbyFuelStations ?? [];
+    final allFuel = upcomingFuel.isNotEmpty ? upcomingFuel : nearbyFuel;
+    final nearestStation = allFuel.isNotEmpty ? allFuel.first : null;
     final rawAheadM = nearestStation?.aheadM(progressM);
     final fuelAheadM = nearestStation != null
         ? ((rawAheadM != null && rawAheadM > 0)
@@ -123,8 +125,8 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
         : null;
     final fuelAheadKm = (fuelAheadM != null && fuelAheadM > 0) ? fuelAheadM / 1000 : null;
 
-    // Strict rule: Show fuel alert capsule ONLY when alert is raised (<= 30 km or range risk)
-    final isLowFuel = usableKm != null && (usableKm <= 30.0 || (fuelAheadKm != null && fuelAheadKm > usableKm));
+    // Strict rule: Show fuel alert capsule when alert is raised (<= 60 km or range risk)
+    final isLowFuel = usableKm != null && (usableKm <= 60.0 || (fuelAheadKm != null && fuelAheadKm > usableKm));
 
     if (isLowFuel) {
       final isCritical = usableKm <= 10.0;
@@ -150,20 +152,17 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
               : 'Tap to find nearest reachable bunk',
           onTap: () {
             HapticFeedback.mediumImpact();
-            if (nearestStation != null && widget.onAddStationStop != null) {
-              widget.onAddStationStop!(nearestStation);
-            } else {
-              _showFuelQuickSheet(
-                context,
-                usableKm: usableKm,
-                stations: upcomingFuel.take(4).toList(),
-                progressM: progressM,
-                riderLat: widget.me.lat,
-                riderLng: widget.me.lng,
-                onAddStationStop: widget.onAddStationStop,
-                onOpenFuelSheet: widget.onOpenFuelSheet,
-              );
-            }
+            _showFuelQuickSheet(
+              context,
+              usableKm: usableKm,
+              stations: allFuel.take(8).toList(),
+              progressM: progressM,
+              riderLat: widget.me.lat,
+              riderLng: widget.me.lng,
+              essentialsService: widget.essentialsService,
+              onAddStationStop: widget.onAddStationStop,
+              onOpenFuelSheet: widget.onOpenFuelSheet,
+            );
           },
         ),
       );
@@ -470,6 +469,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
     required double progressM,
     double? riderLat,
     double? riderLng,
+    RouteEssentialsService? essentialsService,
     Function(RouteEssential station)? onAddStationStop,
     VoidCallback? onOpenFuelSheet,
   }) {
@@ -479,6 +479,8 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
     final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
     final isLow = usableKm != null && usableKm <= 60;
     final screenSize = MediaQuery.sizeOf(context);
+
+    List<RouteEssential> currentStations = List.from(stations);
 
     showModalBottomSheet(
       context: context,
@@ -490,131 +492,184 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
       backgroundColor: AppTheme.card,
       shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),
       builder: (ctx) {
-        return SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 600),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(Space.s24, Space.s16, Space.s24, Space.s24),
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 36,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: AppTheme.border,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: Space.s16),
-                      Row(
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            bool isFetchingNearby = essentialsService?.loading ?? false;
+
+            if (currentStations.isEmpty && essentialsService != null && riderLat != null && riderLng != null && riderLat != 0 && riderLng != 0 && !isFetchingNearby) {
+              Future.microtask(() async {
+                final fetched = await essentialsService.fetchNearbyFuel(lat: riderLat, lng: riderLng);
+                if (ctx.mounted && fetched.isNotEmpty) {
+                  setSheetState(() {
+                    currentStations = List.from(fetched);
+                  });
+                }
+              });
+            }
+
+            return SafeArea(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(Space.s24, Space.s16, Space.s24, Space.s24),
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.all(Space.s8),
-                            decoration: BoxDecoration(
-                              color: (isLow ? AppTheme.sos : AppTheme.brand).withOpacity(0.15),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.local_gas_station_rounded,
-                              color: isLow ? AppTheme.sos : AppTheme.brand,
-                              size: 28,
+                          Center(
+                            child: Container(
+                              width: 36,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: AppTheme.border,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
                             ),
                           ),
-                          const SizedBox(width: Space.s12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  isLow ? 'Low Fuel Warning' : 'Corridor Fuel Stations',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppText.title,
+                          const SizedBox(height: Space.s16),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(Space.s8),
+                                decoration: BoxDecoration(
+                                  color: (isLow ? AppTheme.sos : AppTheme.brand).withOpacity(0.15),
+                                  shape: BoxShape.circle,
                                 ),
-                                Text(
-                                  usableKm != null
-                                      ? 'Estimated ~${usableKm.round()} km usable range left'
-                                      : 'Upcoming petrol bunks along active route',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppText.caption.copyWith(
-                                    color: isLow ? AppTheme.sos : AppTheme.accentText,
-                                    fontWeight: FontWeight.bold,
+                                child: Icon(
+                                  Icons.local_gas_station_rounded,
+                                  color: isLow ? AppTheme.sos : AppTheme.brand,
+                                  size: 28,
+                                ),
+                              ),
+                              const SizedBox(width: Space.s12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      isLow ? 'Low Fuel Alert' : 'Petrol Bunks Near You',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: AppText.title,
+                                    ),
+                                    Text(
+                                      usableKm != null
+                                          ? 'Estimated ~${usableKm.round()} km usable range left'
+                                          : 'Upcoming petrol bunks along route or nearby',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: AppText.caption.copyWith(
+                                        color: isLow ? AppTheme.sos : AppTheme.accentText,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: Space.s16),
+                          const Divider(),
+                          const SizedBox(height: Space.s8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'PETROL BUNKS NEAR YOU',
+                                style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.muted),
+                              ),
+                              if (riderLat != null && riderLng != null && riderLat != 0 && riderLng != 0)
+                                TextButton.icon(
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                   ),
+                                  onPressed: isFetchingNearby ? null : () async {
+                                    setSheetState(() { isFetchingNearby = true; });
+                                    final res = await essentialsService?.fetchNearbyFuel(lat: riderLat, lng: riderLng, force: true);
+                                    if (ctx.mounted && res != null) {
+                                      setSheetState(() {
+                                        currentStations = List.from(res);
+                                        isFetchingNearby = false;
+                                      });
+                                    }
+                                  },
+                                  icon: isFetchingNearby
+                                      ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                                      : const Icon(Icons.refresh_rounded, size: 14),
+                                  label: Text(isFetchingNearby ? 'Scanning...' : 'Scan Nearby', style: const TextStyle(fontSize: 12)),
                                 ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: Space.s16),
-                      const Divider(),
-                      const SizedBox(height: Space.s8),
-                      Text(
-                        'UPCOMING CORRIDOR STATIONS',
-                        style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.muted),
-                      ),
-                      const SizedBox(height: Space.s8),
-                      if (stations.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: Space.s12),
-                          child: Text(
-                            'No fuel stations found in current offline window. Open full map or fuel manager.',
-                            style: AppText.body.copyWith(color: AppTheme.muted),
-                          ),
-                        )
-                      else
-                        for (final st in stations) ...[
-                          _StationRow(
-                            station: st,
-                            progressM: progressM,
-                            riderLat: riderLat,
-                            riderLng: riderLng,
-                            onAdd: () {
-                              if (ctx.mounted) Navigator.pop(ctx);
-                              onAddStationStop?.call(st);
-                            },
+                            ],
                           ),
                           const SizedBox(height: Space.s8),
-                        ],
-                      const SizedBox(height: Space.s12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: AppTheme.text,
-                                side: BorderSide(
-                                  color: isSunlightHud ? AppTheme.border.withOpacity(0.9) : AppTheme.border,
-                                  width: isSunlightHud ? 2 : 1.5,
-                                ),
-                                padding: const EdgeInsets.symmetric(vertical: Space.s12, horizontal: Space.s16),
-                                minimumSize: const Size(0, 48),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          if (currentStations.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: Space.s16),
+                              child: Column(
+                                children: [
+                                  Icon(Icons.location_searching_rounded, size: 36, color: AppTheme.muted),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    isFetchingNearby
+                                        ? 'Locating verified petrol stations near your position...'
+                                        : 'No petrol stations found within 25 km. Tap "Scan Nearby" or configure fuel profile.',
+                                    textAlign: TextAlign.center,
+                                    style: AppText.body.copyWith(color: AppTheme.muted),
+                                  ),
+                                ],
                               ),
-                              onPressed: () {
-                                if (ctx.mounted) Navigator.pop(ctx);
-                                onOpenFuelSheet?.call();
-                              },
-                              icon: const Icon(Icons.tune_rounded, size: 18),
-                              label: const Text('Manage Fuel'),
-                            ),
+                            )
+                          else
+                            for (final st in currentStations) ...[
+                              _StationRow(
+                                station: st,
+                                progressM: progressM,
+                                riderLat: riderLat,
+                                riderLng: riderLng,
+                                onAdd: () {
+                                  if (ctx.mounted) Navigator.pop(ctx);
+                                  onAddStationStop?.call(st);
+                                },
+                              ),
+                              const SizedBox(height: Space.s8),
+                            ],
+                          const SizedBox(height: Space.s12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppTheme.text,
+                                    side: BorderSide(
+                                      color: isSunlightHud ? AppTheme.border.withOpacity(0.9) : AppTheme.border,
+                                      width: isSunlightHud ? 2 : 1.5,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(vertical: Space.s12, horizontal: Space.s16),
+                                    minimumSize: const Size(0, 48),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  onPressed: () {
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                    onOpenFuelSheet?.call();
+                                  },
+                                  icon: const Icon(Icons.tune_rounded, size: 18),
+                                  label: const Text('Manage Fuel Profile'),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     ).whenComplete(() {
@@ -760,7 +815,11 @@ class _StationRow extends StatelessWidget {
                   style: AppText.title.copyWith(fontSize: 14),
                 ),
                 Text(
-                  '$distStr ahead on corridor',
+                  station.isCoco
+                      ? 'COCO · $distStr away'
+                      : (station.operatorName != null
+                          ? '${station.operatorName} · $distStr away'
+                          : (rawAheadM > 0 ? '$distStr ahead on route' : '$distStr near you')),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.bold),
@@ -779,7 +838,7 @@ class _StationRow extends StatelessWidget {
             ),
             onPressed: onAdd,
             icon: const Icon(Icons.add_location_alt_rounded, size: 18),
-            label: const Text('Add Stop', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            label: Text(rawAheadM > 0 ? 'Add Stop' : 'Route', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
           ),
         ],
       ),

@@ -55,7 +55,12 @@ class RouteEssentialsService extends ChangeNotifier {
   double progressM = 0;
   String category = 'FUEL';
   String? groupId;
-  List<RouteEssential> get upcoming => snapshot?.places.where((p) => p.routePositionM >= progressM).toList() ?? const [];
+  List<RouteEssential> nearbyFuelStations = [];
+  List<RouteEssential> get upcoming {
+    final list = snapshot?.places.where((p) => p.routePositionM >= progressM).toList() ?? const [];
+    if (list.isNotEmpty) return list;
+    return nearbyFuelStations;
+  }
   bool get reliable => !offline && error == null && snapshot?.complete == true && snapshot!.freshAt(_clock());
 
   Future<void> _restoreCache() async {
@@ -133,6 +138,66 @@ class RouteEssentialsService extends ChangeNotifier {
       if (!_disposed && generation == _generation) { loading = false; notifyListeners(); }
     }
   }
+  /// Fetches real nearby petrol stations from the gateway within [radiusKm] (default 25 km)
+  /// around the rider's coordinates. Works with or without a calculated road route.
+  Future<List<RouteEssential>> fetchNearbyFuel({
+    required double lat,
+    required double lng,
+    double radiusKm = 25,
+    bool force = false,
+  }) async {
+    if (_disposed || !lat.isFinite || !lng.isFinite || (lat == 0 && lng == 0)) return nearbyFuelStations;
+    if (!force && nearbyFuelStations.isNotEmpty && (_clock() < _retryAt)) return nearbyFuelStations;
+    loading = true;
+    notifyListeners();
+    try {
+      final raw = await api.get(
+        '/geo/nearby-fuel?lat=${lat.toStringAsFixed(4)}&lng=${lng.toStringAsFixed(4)}&radiusKm=${radiusKm.toStringAsFixed(0)}',
+        timeout: const Duration(seconds: 12),
+      );
+      if (raw is Map && raw['results'] is List) {
+        final list = <RouteEssential>[];
+        for (final item in raw['results']) {
+          if (item is! Map) continue;
+          final pLat = (item['lat'] as num?)?.toDouble();
+          final pLng = (item['lng'] as num?)?.toDouble();
+          if (pLat == null || pLng == null) continue;
+          final distM = (item['distanceM'] as num?)?.toDouble() ?? 0;
+          list.add(RouteEssential(
+            placeId: item['placeId']?.toString() ?? 'osm:$pLat,$pLng',
+            visitId: item['placeId']?.toString() ?? 'osm:$pLat,$pLng',
+            name: item['name']?.toString() ?? 'Petrol Pump',
+            category: 'FUEL',
+            source: 'OpenStreetMap',
+            lat: pLat,
+            lng: pLng,
+            routePositionM: distM,
+            entryM: 0,
+            exitM: 0,
+            accessDistanceM: distM,
+            detourDistanceM: 0,
+            detourDurationS: 0,
+            isCoco: item['isCoco'] == true,
+            operatorName: item['brand']?.toString(),
+            priority: item['isCoco'] == true ? 1 : 2,
+          ));
+        }
+        if (list.isNotEmpty) {
+          nearbyFuelStations = list;
+          _retryAt = _clock() + const Duration(minutes: 5).inMilliseconds;
+        }
+      }
+    } catch (_) {
+      // In case of error or offline, preserve existing nearby stations
+    } finally {
+      if (!_disposed) {
+        loading = false;
+        notifyListeners();
+      }
+    }
+    return nearbyFuelStations;
+  }
+
   @override
   void dispose() { _disposed = true; _generation++; super.dispose(); }
 }

@@ -360,7 +360,73 @@ class GeoProxy {
     this.hospitalInflight.set(k, p);
     return p;
   }
+
+  /**
+   * Verified petrol pumps / fuel stations near the rider (lat, lng).
+   * Upstream query bounded in viewbox, cached 7 days. Returns array of
+   * { placeId, name, lat, lng, category: 'FUEL', distanceM, brand, isCoco, address } sorted nearest first.
+   */
+  async nearbyFuel(lat, lng, radiusKm = 25) {
+    if (!this.searchEnabled || !(Math.abs(Number(lat)) <= 90 && Math.abs(Number(lng)) <= 180) || !(lat || lng)) return [];
+    const rad = Math.max(5, Math.min(50, Number(radiusKm) || 25));
+    const la = round(lat, 2), ln = round(lng, 2);
+    const k = `fuel:${la},${ln}:${rad}`;
+    const now = Date.now();
+    const hit = await this.repo.geoCacheGet(k).catch(() => null);
+    if (hit && Array.isArray(hit.value)) {
+      const age = now - (hit.createdAt || 0);
+      if (age < config.geoCacheDays * 86400000) return hit.value;
+    }
+    this.fuelInflight = this.fuelInflight || new Map();
+    if (this.fuelInflight.has(k)) return this.fuelInflight.get(k);
+
+    const p = (async () => {
+      try {
+        const delta = Math.max(0.08, Math.min(0.45, rad / 111));
+        const box = `${round(ln - delta, 3)},${round(la + delta, 3)},${round(ln + delta, 3)},${round(la - delta, 3)}`;
+        let rows = await this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&q=petrol+pump&limit=15&bounded=1&viewbox=${box}`)).catch(() => []);
+        if (!Array.isArray(rows) || rows.length === 0) {
+          rows = await this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&q=fuel+station&limit=15&bounded=1&viewbox=${box}`)).catch(() => []);
+        }
+
+        const out = [];
+        for (const r of (Array.isArray(rows) ? rows : [])) {
+          const y = Number(r.lat), x = Number(r.lon);
+          if (!Number.isFinite(y) || !Number.isFinite(x)) continue;
+          const d = haversine(la, ln, y, x);
+          if (d > rad * 1000) continue;
+          const rawName = String(r.name || shortName(r) || r.display_name || 'Petrol Station').split(',')[0].trim();
+          const disp = String(r.display_name || '');
+          const isCoco = /\bcoco\b/i.test(disp) || /\bcoco\b/i.test(rawName);
+          const brandMatch = /(iocl|indian\s*oil|bpcl|bharat\s*petroleum|hpcl|\bhp\b|hindustan\s*petroleum|shell|reliance|nayara|jio-bp)/i.exec(`${rawName} ${disp}`);
+          const brand = brandMatch ? brandMatch[0].toUpperCase() : null;
+
+          out.push({
+            placeId: `osm:${r.osm_type || 'node'}:${r.osm_id || r.place_id || out.length}`,
+            name: rawName.length > 3 ? rawName : (brand ? `${brand} Petrol Pump` : 'Petrol Station'),
+            lat: round(y, 5),
+            lng: round(x, 5),
+            category: 'FUEL',
+            distanceM: Math.round(d),
+            brand: brand || undefined,
+            isCoco: isCoco || undefined,
+            address: disp.length > 0 ? disp.slice(0, 150) : undefined,
+          });
+        }
+        out.sort((a, b) => a.distanceM - b.distanceM);
+        await this.repo.geoCachePut(k, out).catch(() => {});
+        return out;
+      } catch (e) {
+        this.log.warn('[geo] nearby fuel lookup failed', e.message);
+        return [];
+      }
+    })().finally(() => this.fuelInflight.delete(k));
+
+    this.fuelInflight.set(k, p);
+    return p;
+  }
 }
+
 
 /** One Open-Meteo location result reduced to what is stored: { hourlyFrom (epoch s), probs[], mm[], codes[], temps[] }. */
 function weatherCell(r) {

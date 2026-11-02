@@ -18,6 +18,15 @@ function fakeFetch(log) {
       return { ok: true, json: async () => ({ name: 'HP Petrol Pump', address: { road: 'NH44', suburb: 'Shamshabad' } }) };
     }
     if (url.startsWith('http://geo.test/search')) {
+      if (url.includes('q=petrol+pump') || url.includes('q=fuel+station')) {
+        return {
+          ok: true,
+          json: async () => ([
+            { name: 'Indian Oil Petrol Bunk', display_name: 'Indian Oil Petrol Bunk, NH44, Shamshabad, Telangana', lat: '17.25', lon: '78.43', osm_id: 101, osm_type: 'node' },
+            { name: 'HP Petrol Pump', display_name: 'HP Petrol Pump, COCO, Airport Road, Telangana', lat: '17.26', lon: '78.44', osm_id: 102, osm_type: 'node' }
+          ])
+        };
+      }
       return { ok: true, json: async () => ([{ display_name: 'Kurnool, Andhra Pradesh, India', lat: '15.83', lon: '78.04', address: { city: 'Kurnool' } }]) };
     }
     if (url.startsWith('http://route.test/route/v1/driving/')) {
@@ -61,4 +70,20 @@ test('short place names', () => {
   assert.equal(shortName({ address: { amenity: 'Cafe Niloufer', suburb: 'Lakdikapul', city: 'Hyderabad' } }), 'Cafe Niloufer, Lakdikapul');
   assert.equal(shortName({ display_name: 'Somewhere far' }), 'Somewhere far');
   assert.equal(shortName(null), null);
+});
+
+test('nearbyFuel finds and sorts petrol stations by distance with brand recognition', async () => {
+  const repo = new Repo(new MemorySoda());
+  await repo.migrate();
+  const log = [];
+  const geo = new GeoProxy({ repo, fetchImpl: fakeFetch(log), logger: { warn() {} } });
+
+  const stations = await geo.nearbyFuel(17.24, 78.42, 25);
+  assert.equal(stations.length, 2);
+  assert.equal(stations[0].name, 'Indian Oil Petrol Bunk');
+  assert.equal(stations[0].brand, 'INDIAN OIL');
+  assert.equal(stations[1].name, 'HP Petrol Pump');
+  assert.equal(stations[1].brand, 'HP');
+  assert.equal(stations[1].isCoco, true);
+  assert.ok(stations[0].distanceM < stations[1].distanceM);
 });
