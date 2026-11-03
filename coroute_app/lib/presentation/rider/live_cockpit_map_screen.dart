@@ -789,40 +789,35 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
   void _handleFuelPromptAction(ConvoyService service, RiderModel? me) {
     if (me == null) return;
     final safety = context.read<SafetyService?>();
-    final upcomingFuel = _essentials?.upcoming
-        .where((e) => e.category == 'FUEL' && !(safety?.isStationClosed(e.placeId) ?? false))
-        .toList() ?? [];
-    final station = upcomingFuel.isNotEmpty ? upcomingFuel.first : null;
+    final station = _essentials?.onRouteFuelAhead.firstOrNull ??
+        _essentials?.upcoming
+            .where((e) => e.category == 'FUEL' && !(safety?.isStationClosed(e.placeId) ?? false))
+            .firstOrNull;
     if (station != null) {
-      _focus(station.lat, station.lng);
-      final picked = PickedPlace(
-        name: station.name.isEmpty ? 'Petrol Pump' : station.name,
+      final stationName = station.name.isEmpty ? 'Petrol Pump' : station.name;
+      _guide.addPersonalFuelStop(
         lat: station.lat,
         lng: station.lng,
-        category: 'FUEL',
-      );
-      final lead = service.canEditRoute;
-      if (lead) {
-        if (service.activeConvoy?.route?.points.isEmpty ?? true) {
-          service.setDestination(picked);
-        } else {
-          service.addStop(picked);
-        }
-      } else {
-        service.suggestStop(picked);
-      }
+        name: stationName,
+      ).ignore();
+      _focus(station.lat, station.lng);
       final usable = safety?.estimatedUsableKm?.round() ?? 30;
+      final distM = (station.routePositionM > (_essentials?.progressM ?? 0))
+          ? (station.routePositionM - (_essentials?.progressM ?? 0))
+          : station.accessDistanceM;
+      final distText = (distM > 0) ? ' ${(distM / 1000).toStringAsFixed(1)} km ahead' : '';
+
       service.updateStatusReason(
         userId: me.userId,
         reason: 'FUELING',
-        message: 'Diverting to ${station.name} ($usable km left)',
+        message: 'Refueling at $stationName$distText ($usable km left)',
       );
       safety?.answerPrompt(SafetyConstants.promptFuel);
       final voice = context.read<VoiceService?>();
-      voice?.speak('Auto-routing to ${station.name}. Team notified.');
+      voice?.speak('Auto-routing to $stationName$distText on your route. Stop added for you.', priority: VoicePriority.critical);
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Auto-routing to ${station.name} · Team alerted'),
+        content: Text('Auto-routed to $stationName$distText · Stop added for you'),
         backgroundColor: AppTheme.brand,
       ));
     } else {
@@ -2061,32 +2056,37 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen> {
                         estimatedUsableKm: safety?.estimatedUsableKm,
                         isLead: lead,
                         onAddStationStop: (station) async {
-                          if (lead && !FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
-                            FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
-                            return;
-                          }
-                          final picked = PickedPlace(name: station.name.isEmpty ? 'Petrol Pump' : station.name, lat: station.lat, lng: station.lng, category: 'FUEL');
-                          if (lead) {
-                            service.addStop(picked);
-                          } else {
-                            service.suggestStop(picked);
-                          }
+                          final stationName = station.name.isEmpty ? 'Petrol Pump' : station.name;
+                          final voice = context.mounted ? context.read<VoiceService?>() : null;
+                          final messenger = context.mounted ? ScaffoldMessenger.maybeOf(context) : null;
+
+                          // Hands-free personal fuel detour stop for THIS user only:
+                          await _guide.addPersonalFuelStop(
+                            lat: station.lat,
+                            lng: station.lng,
+                            name: stationName,
+                          );
+                          if (!mounted) return;
                           _focus(station.lat, station.lng);
                           final usable = safety?.estimatedUsableKm?.round() ?? 30;
+                          final distM = (station.routePositionM > (_essentials?.progressM ?? 0))
+                              ? (station.routePositionM - (_essentials?.progressM ?? 0))
+                              : station.accessDistanceM;
+                          final distText = (distM > 0) ? ' ${(distM / 1000).toStringAsFixed(1)} km ahead' : '';
+
+                          // Alert convoy that this rider is refueling, without forcing everyone else's route to change!
                           service.updateStatusReason(
                             userId: me.userId,
                             reason: 'FUELING',
-                            message: 'Diverting to ${station.name} ($usable km left)',
+                            message: 'Refueling at $stationName$distText ($usable km left)',
                           );
-                          final voice = context.read<VoiceService?>();
-                          voice?.speak('Auto-routing to ${station.name}. Team alerted.');
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).clearSnackBars();
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                              content: Text('Auto-routing to ${station.name} · Team alerted'),
-                              backgroundColor: AppTheme.brand,
-                            ));
-                          }
+
+                          voice?.speak('Auto-routing to $stationName$distText on your route. Stop added for you.', priority: VoicePriority.critical);
+                          messenger?.clearSnackBars();
+                          messenger?.showSnackBar(SnackBar(
+                            content: Text('Auto-routed to $stationName$distText · Stop added for you'),
+                            backgroundColor: AppTheme.brand,
+                          ));
                         },
                         onFocusLocation: (lat, lng) => _focus(lat, lng),
                         onOpenFuelSheet: () => showFuelSheet(context),

@@ -17,6 +17,7 @@ class MainActivity : FlutterActivity() {
     private var smsChannel: SmsChannel? = null
     private var rideNotification: RideNotification? = null
     private var ttsChannel: TtsChannel? = null
+    private var phoneCallChannel: PhoneCallChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -44,6 +45,11 @@ class MainActivity : FlutterActivity() {
         val tts = TtsChannel(applicationContext)
         ttsChannel = tts
         MethodChannel(messenger, "coroute/tts").setMethodCallHandler(tts)
+
+        val phoneCall = PhoneCallChannel(applicationContext)
+        phoneCallChannel = phoneCall
+        MethodChannel(messenger, "coroute/phone_call").setMethodCallHandler(phoneCall)
+        EventChannel(messenger, "coroute/phone_call_events").setStreamHandler(phoneCall)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,6 +80,10 @@ class MainActivity : FlutterActivity() {
         ttsChannel?.release()
         ttsChannel = null
         MethodChannel(messenger, "coroute/tts").setMethodCallHandler(null)
+        phoneCallChannel?.dispose()
+        phoneCallChannel = null
+        MethodChannel(messenger, "coroute/phone_call").setMethodCallHandler(null)
+        EventChannel(messenger, "coroute/phone_call_events").setStreamHandler(null)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

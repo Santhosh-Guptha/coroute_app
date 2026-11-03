@@ -70,14 +70,15 @@ class OverpassPlacesProvider {
   }
 
   async corridor(r) {
-    // Preserve every bend. Bounded query size; sample corridor anchors every ~1500m to prevent Overpass 504 timeouts.
+    // Preserve every bend. Bounded query size; sample corridor anchors every ~2500m up to 50km ahead to prevent Overpass 504 timeouts.
     const pts = [];
-    const stepM = 1500;
-    for (let m = r.fromM; m <= r.toM; m += stepM) {
+    const stepM = 2500;
+    const endM = Math.min(r.toM, r.fromM + 50000);
+    for (let m = r.fromM; m <= endM; m += stepM) {
       pts.push(pointAt(r, m));
     }
-    if (pts.length === 0 || (r.toM - r.fromM) % stepM !== 0) {
-      pts.push(pointAt(r, r.toM));
+    if (pts.length === 0 || (endM - r.fromM) % stepM !== 0) {
+      pts.push(pointAt(r, endM));
     }
     const coords = pts.map(p => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join(",");
     const filter = FILTERS[r.category];
@@ -213,7 +214,7 @@ class EssentialsService {
           complete = false; routingFailures++; continue;
         }
         const detourDistanceM = Math.max(0, via.distanceM - base.distanceM);
-        if (detourDistanceM > 20000) continue;
+        if (detourDistanceM > 25000) continue;
         places.push({
           ...p,
           entryM,

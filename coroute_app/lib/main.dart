@@ -2,6 +2,7 @@ import 'data/services/ride_essentials_coordinator.dart';
 import 'data/services/route_essentials_service.dart';
 import 'data/services/fuel_sharing_binding.dart';
 import 'data/services/fuel_settings_binding.dart';
+import 'data/services/phone_call_service.dart';
 import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
@@ -150,11 +151,20 @@ class CoRouteApp extends StatelessWidget {
             return convoys;
           },
         ),
-        ChangeNotifierProvider(create: (ctx) => IntercomService(ctx.read<RealtimeService>(), settings: ctx.read<SettingsService>())),
+        ChangeNotifierProvider<PhoneCallService>(
+          create: (_) => PhoneCallService(),
+        ),
+        ChangeNotifierProvider(create: (ctx) {
+          final intercom = IntercomService(ctx.read<RealtimeService>(), settings: ctx.read<SettingsService>());
+          final phoneCall = ctx.read<PhoneCallService>();
+          phoneCall.addListener(() => intercom.setPhoneCallActive(phoneCall.isCallActive));
+          return intercom;
+        }),
         // Spoken alerts (phone text-to-speech). The engine starts with the first alert of a
         // ride and is released when the ride ends (nothing runs at idle).
         ChangeNotifierProvider<VoiceService>(create: (ctx) {
           final voice = VoiceService(ctx.read<SettingsService>());
+          voice.attachPhoneCallService(ctx.read<PhoneCallService>());
           final convoys = ctx.read<ConvoyService>();
           convoys.addListener(() {
             final c = convoys.activeConvoy;

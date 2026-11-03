@@ -1286,6 +1286,13 @@ class ConvoyService extends ChangeNotifier {
     _subscribeGps();
     _isRealGpsActive = true;
     _lastGpsFixTime = DateTime.now().millisecondsSinceEpoch;
+
+    // Ensure the persistent foreground service keeps GPS alive in the background
+    final cName = activeConvoy?.name ?? 'Active Ride';
+    final count = activeConvoy?.riders.length ?? 1;
+    BackgroundService.start(convoyName: cName, riderCount: count).ignore();
+    BackgroundService.requestIgnoreBatteryOptimization().ignore();
+
     _deadReckoningTimer?.cancel();
     _deadReckoningTimer = Timer.periodic(const Duration(seconds: 1), (t) => _onDeadReckoningTick(t));
 

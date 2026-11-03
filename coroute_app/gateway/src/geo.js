@@ -373,9 +373,9 @@ class GeoProxy {
     const k = `fuel:${la},${ln}:${rad}`;
     const now = Date.now();
     const hit = await this.repo.geoCacheGet(k).catch(() => null);
-    if (hit && Array.isArray(hit.value)) {
+    if (hit && Array.isArray(hit.value) && hit.value.length > 0) {
       const age = now - (hit.createdAt || 0);
-      if (age < config.geoCacheDays * 86400000) return hit.value;
+      if (age < 86400000) return hit.value;
     }
     this.fuelInflight = this.fuelInflight || new Map();
     if (this.fuelInflight.has(k)) return this.fuelInflight.get(k);
@@ -384,9 +384,13 @@ class GeoProxy {
       try {
         const delta = Math.max(0.08, Math.min(0.45, rad / 111));
         const box = `${round(ln - delta, 3)},${round(la + delta, 3)},${round(ln + delta, 3)},${round(la - delta, 3)}`;
-        let rows = await this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&q=petrol+pump&limit=15&bounded=1&viewbox=${box}`)).catch(() => []);
+        // Query petrol pumps and fuel stations in viewbox
+        let rows = await this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&q=petrol+pump&amenity=fuel&limit=30&bounded=1&viewbox=${box}`)).catch(() => []);
         if (!Array.isArray(rows) || rows.length === 0) {
-          rows = await this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&q=fuel+station&limit=15&bounded=1&viewbox=${box}`)).catch(() => []);
+          rows = await this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&amenity=fuel&limit=30&bounded=1&viewbox=${box}`)).catch(() => []);
+        }
+        if (!Array.isArray(rows) || rows.length === 0) {
+          rows = await this._queued(() => this._getJson(`${config.geoSearchUrl}/search?format=jsonv2&q=fuel+station&limit=25&bounded=1&viewbox=${box}`)).catch(() => []);
         }
 
         const out = [];
@@ -414,7 +418,9 @@ class GeoProxy {
           });
         }
         out.sort((a, b) => a.distanceM - b.distanceM);
-        await this.repo.geoCachePut(k, out).catch(() => {});
+        if (out.length > 0) {
+          await this.repo.geoCachePut(k, out).catch(() => {});
+        }
         return out;
       } catch (e) {
         this.log.warn('[geo] nearby fuel lookup failed', e.message);

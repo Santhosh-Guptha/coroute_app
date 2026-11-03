@@ -65,7 +65,7 @@ class RoutePlan {
 
   /// True when [s] lies on the plan but not on the part from [fromAlongM]
   /// onward. A stop away from the line (or with no plan) is never "behind".
-  static bool _behind(StopPointModel s, RouteProgress? plan, double? fromAlongM) {
+  static bool isBehind(StopPointModel s, RouteProgress? plan, double? fromAlongM) {
     if (plan == null || fromAlongM == null || !plan.isUsable) return false;
     const tol = RouteConstants.offRouteM;
     final anywhere = plan.locateAhead(s.lat, s.lng);
@@ -73,6 +73,9 @@ class RoutePlan {
     final ahead = plan.locateAhead(s.lat, s.lng, fromAlongM: fromAlongM);
     return ahead == null || ahead.offM > tol;
   }
+
+  static bool _behind(StopPointModel s, RouteProgress? plan, double? fromAlongM) =>
+      isBehind(s, plan, fromAlongM);
 
   /// Where a meeting point at (lat, lng) belongs: before the first stop
   /// still ahead that lies farther along the planned route, so the group

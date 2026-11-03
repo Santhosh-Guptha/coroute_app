@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import '../../../core/config/feature_gates.dart';
 import '../../../core/theme/app_theme.dart';
@@ -8,6 +9,7 @@ import '../../../data/models/convoy_model.dart';
 import '../../../data/models/rider_model.dart';
 import '../../../data/models/route_essential.dart';
 import '../../../data/models/stop_point_model.dart';
+import '../../../data/services/phone_call_service.dart';
 import '../../../data/services/route_essentials_service.dart';
 import '../../../domain/fuel/group_fuel_consensus.dart';
 import '../../../domain/ride/ride_facts.dart';
@@ -107,21 +109,43 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
       break; // Display top critical alert first
     }
 
-    // 1. Fuel Alert / Nearest Station Check (Alert-Raised Only, No Duplicate Popups)
+    // 0b. Phone Call in Progress (Safely pauses intercom mic & warns rider)
+    final phoneCall = context.watch<PhoneCallService?>();
+    if (phoneCall?.isCallActive == true) {
+      items.add(
+        _ActionPill(
+          icon: Icons.phone_in_talk_rounded,
+          iconColor: Colors.white,
+          accentColor: AppTheme.brand,
+          title: 'CALL IN PROGRESS',
+          subtitle: 'Intercom mic paused · Audio alerts safe',
+          onTap: () {
+            HapticFeedback.lightImpact();
+          },
+        ),
+      );
+    }
+
+    // 1. Fuel Alert / Nearest Station Check (Forward On-Route Stations Only)
     final usableKm = widget.estimatedUsableKm;
     final essentials = widget.essentialsService;
     final progressM = essentials?.progressM ?? 0;
-    final upcomingFuel = essentials?.upcoming.where((e) => e.category == 'FUEL').toList() ?? [];
-    final nearbyFuel = essentials?.nearbyFuelStations ?? [];
-    final allFuel = upcomingFuel.isNotEmpty ? upcomingFuel : nearbyFuel;
+
+    // Update essentials with active route line and rider telemetry for forward projection
+    essentials?.setRiderTelemetry(
+      routeLine: widget.convoy.routeLine,
+      headingDeg: widget.me.heading,
+      lat: widget.me.lat,
+      lng: widget.me.lng,
+    );
+    final allFuel = essentials?.onRouteFuelAhead ?? essentials?.upcoming.where((e) => e.category == 'FUEL').toList() ?? [];
     final nearestStation = allFuel.isNotEmpty ? allFuel.first : null;
-    final rawAheadM = nearestStation?.aheadM(progressM);
     final fuelAheadM = nearestStation != null
-        ? ((rawAheadM != null && rawAheadM > 0)
-            ? rawAheadM
+        ? ((nearestStation.routePositionM > progressM)
+            ? (nearestStation.routePositionM - progressM)
             : (widget.me.lat != 0 && widget.me.lng != 0
                 ? GeoMath.haversine(widget.me.lat, widget.me.lng, nearestStation.lat, nearestStation.lng)
-                : null))
+                : nearestStation.accessDistanceM))
         : null;
     final fuelAheadKm = (fuelAheadM != null && fuelAheadM > 0) ? fuelAheadM / 1000 : null;
 
@@ -186,7 +210,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
     // 1d. Group Fuel Consensus (Tracks bottleneck motorcycle in the pack when <= 30 km)
     final consensus = GroupFuelConsensus.evaluate(
       convoy: widget.convoy,
-      upcomingStations: upcomingFuel,
+      upcomingStations: allFuel,
       progressM: progressM,
     );
 
@@ -208,7 +232,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
             _showFuelQuickSheet(
               context,
               usableKm: consensus.lowestRangeKm,
-              stations: upcomingFuel.take(4).toList(),
+              stations: allFuel.take(4).toList(),
               progressM: progressM,
               riderLat: widget.me.lat,
               riderLng: widget.me.lng,
@@ -333,18 +357,23 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
       nearestStationName: nearestStation?.name,
       nearestStationDistM: fuelAheadM,
       onTap: () {
-        HapticFeedback.lightImpact();
-        _showFuelQuickSheet(
-          context,
-          usableKm: usableKm,
-          stations: allFuel.take(8).toList(),
-          progressM: progressM,
-          riderLat: widget.me.lat,
-          riderLng: widget.me.lng,
-          essentialsService: widget.essentialsService,
-          onAddStationStop: widget.onAddStationStop,
-          onOpenFuelSheet: widget.onOpenFuelSheet,
-        );
+        HapticFeedback.mediumImpact();
+        if (nearestStation != null && widget.onAddStationStop != null) {
+          // Autonomous hands-free: 1-tap immediately auto-adds the on-route forward station as stop!
+          widget.onAddStationStop!(nearestStation);
+        } else {
+          _showFuelQuickSheet(
+            context,
+            usableKm: usableKm,
+            stations: allFuel.take(8).toList(),
+            progressM: progressM,
+            riderLat: widget.me.lat,
+            riderLng: widget.me.lng,
+            essentialsService: widget.essentialsService,
+            onAddStationStop: widget.onAddStationStop,
+            onOpenFuelSheet: widget.onOpenFuelSheet,
+          );
+        }
       },
     );
 

@@ -18,6 +18,37 @@ class GeoMath {
     return 2 * earthRadiusM * math.asin(math.min(1.0, math.sqrt(a.toDouble())));
   }
 
+  /// Initial bearing from (lat1, lng1) to (lat2, lng2) in degrees [0, 360).
+  static double bearing(double lat1, double lng1, double lat2, double lng2) {
+    final dLng = _rad(lng2 - lng1);
+    final y = math.sin(dLng) * math.cos(_rad(lat2));
+    final x = math.cos(_rad(lat1)) * math.sin(_rad(lat2)) -
+        math.sin(_rad(lat1)) * math.cos(_rad(lat2)) * math.cos(dLng);
+    final brng = math.atan2(y, x) * 180.0 / math.pi;
+    return (brng + 360.0) % 360.0;
+  }
+
+  /// Smallest difference between two bearings in degrees [0, 180].
+  static double bearingDiff(double b1, double b2) {
+    var diff = (b1 - b2).abs() % 360.0;
+    return diff > 180.0 ? 360.0 - diff : diff;
+  }
+
+  /// Returns true if the target point (tLat, tLng) is forward relative to the rider's
+  /// current position and heading direction (within maxDiffDeg cone, default 80 degrees).
+  static bool isForward({
+    required double riderLat,
+    required double riderLng,
+    required double riderHeadingDeg,
+    required double targetLat,
+    required double targetLng,
+    double maxDiffDeg = 80.0,
+  }) {
+    if (riderLat == 0 && riderLng == 0) return true;
+    final b = bearing(riderLat, riderLng, targetLat, targetLng);
+    return bearingDiff(riderHeadingDeg, b) <= maxDiffDeg;
+  }
+
   /// Distance in metres from the first vertex of [line] to the point on it
   /// closest to (lat, lng), plus how far the point is from the line.
   /// Returns null for a line with fewer than two vertices.

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../domain/tracking/geo_math.dart';
 import '../models/route_model.dart';
 import '../models/route_essential.dart';
 import 'api_client.dart';
@@ -56,8 +57,115 @@ class RouteEssentialsService extends ChangeNotifier {
   String category = 'FUEL';
   String? groupId;
   List<RouteEssential> nearbyFuelStations = [];
+
+  List<(double, double)>? _activeRouteLine;
+  double? _riderHeadingDeg;
+  double? _riderLat;
+  double? _riderLng;
+
+  void setRiderTelemetry({
+    List<(double, double)>? routeLine,
+    double? headingDeg,
+    double? lat,
+    double? lng,
+  }) {
+    _activeRouteLine = routeLine;
+    _riderHeadingDeg = headingDeg;
+    _riderLat = lat;
+    _riderLng = lng;
+  }
+
+  /// Returns exclusively fuel stations that lie FORWARD along the rider's route or travel path.
+  /// Backward / behind stations (e.g. 7km away in opposite direction) or stations on unrelated
+  /// roads are strictly excluded.
+  List<RouteEssential> get onRouteFuelAhead {
+    final route = _activeRouteLine;
+    final allSources = <RouteEssential>[
+      if (snapshot != null) ...snapshot!.places.where((p) => p.category == 'FUEL'),
+      ...nearbyFuelStations.where((p) => p.category == 'FUEL'),
+    ];
+
+    final unique = <String, RouteEssential>{};
+    for (final s in allSources) {
+      final key = '${s.lat.toStringAsFixed(4)},${s.lng.toStringAsFixed(4)}';
+      unique.putIfAbsent(key, () => s);
+    }
+
+    final out = <RouteEssential>[];
+    if (route != null && route.length >= 2) {
+      for (final st in unique.values) {
+        final match = GeoMath.alongRoute(st.lat, st.lng, route);
+        if (match == null) continue;
+        // Strictly exclude stations behind the rider or lateral offset > 1200m
+        if (match.along < progressM - 100 || match.offRoute > 1200) continue;
+
+        out.add(RouteEssential(
+          placeId: st.placeId,
+          visitId: st.visitId,
+          name: st.name,
+          category: 'FUEL',
+          source: st.source,
+          lat: st.lat,
+          lng: st.lng,
+          routePositionM: match.along,
+          entryM: match.along,
+          exitM: match.along + match.offRoute,
+          accessDistanceM: match.offRoute,
+          detourDistanceM: match.offRoute * 2,
+          detourDurationS: (match.offRoute * 2 / 8.33).round(),
+          isCoco: st.isCoco,
+          operatorName: st.operatorName,
+          priority: st.priority,
+        ));
+      }
+      out.sort((a, b) => (a.routePositionM - progressM).compareTo(b.routePositionM - progressM));
+    } else {
+      // Free ride with no planned route: filter using rider heading if moving
+      final rLat = _riderLat ?? 0.0;
+      final rLng = _riderLng ?? 0.0;
+      final heading = _riderHeadingDeg;
+      for (final st in unique.values) {
+        if (rLat != 0 && rLng != 0 && heading != null && heading >= 0) {
+          final isAhead = GeoMath.isForward(
+            riderLat: rLat,
+            riderLng: rLng,
+            riderHeadingDeg: heading,
+            targetLat: st.lat,
+            targetLng: st.lng,
+            maxDiffDeg: 75.0, // Strict forward cone
+          );
+          if (!isAhead) continue; // Skip backwards station!
+        }
+        final dM = (rLat != 0 && rLng != 0) ? GeoMath.haversine(rLat, rLng, st.lat, st.lng) : st.accessDistanceM;
+        out.add(RouteEssential(
+          placeId: st.placeId,
+          visitId: st.visitId,
+          name: st.name,
+          category: 'FUEL',
+          source: st.source,
+          lat: st.lat,
+          lng: st.lng,
+          routePositionM: progressM + dM,
+          entryM: progressM,
+          exitM: progressM + dM,
+          accessDistanceM: dM,
+          detourDistanceM: 0,
+          detourDurationS: 0,
+          isCoco: st.isCoco,
+          operatorName: st.operatorName,
+          priority: st.priority,
+        ));
+      }
+      out.sort((a, b) => a.accessDistanceM.compareTo(b.accessDistanceM));
+    }
+
+    return out;
+  }
+
   List<RouteEssential> get upcoming {
-    final list = snapshot?.places.where((p) => p.routePositionM >= progressM).toList() ?? const [];
+    final onRoute = onRouteFuelAhead;
+    if (onRoute.isNotEmpty) return onRoute;
+    final list = snapshot?.places.where((p) => p.routePositionM >= progressM - 100).toList() ?? const [];
     if (list.isNotEmpty) return list;
     return nearbyFuelStations;
   }

@@ -89,13 +89,13 @@ class BackgroundService {
     }
   }
 
-  /// Service types for this phone. Location always; microphone only when granted.
+  /// Service types for this phone. Location always; microphone only when explicitly active.
   /// (dataSync is not used: location already keeps the connection alive, and Android 15
   /// limits dataSync services to 6 hours a day.)
   @visibleForTesting
-  static List<ForegroundServiceTypes> serviceTypesFor({required bool micGranted}) => [
+  static List<ForegroundServiceTypes> serviceTypesFor({bool micActive = false}) => [
         ForegroundServiceTypes.location,
-        if (micGranted) ForegroundServiceTypes.microphone,
+        if (micActive) ForegroundServiceTypes.microphone,
       ];
 
   static Future<bool> _micGranted() async {
@@ -129,8 +129,8 @@ class BackgroundService {
       ),
       iosNotificationOptions: const IOSNotificationOptions(showNotification: false, playSound: false),
       foregroundTaskOptions: ForegroundTaskOptions(
-        // A light tick keeps the service classed as active; the app's own timers do the real work.
-        eventAction: ForegroundTaskEventAction.repeat(60000),
+        // A periodic tick keeps the service classed as active and prevents OS throttling.
+        eventAction: ForegroundTaskEventAction.repeat(10000),
         autoRunOnBoot: false,
         autoRunOnMyPackageReplaced: true,
         allowWakeLock: true,
@@ -141,12 +141,12 @@ class BackgroundService {
   }
 
   /// Starts (or updates) the persistent service for the given convoy.
-  static Future<bool> start({required String convoyName, required int riderCount}) async {
+  static Future<bool> start({required String convoyName, required int riderCount, bool micActive = false}) async {
     if (!_isAndroidOrIos) return false;
     _ensureInit();
     _convoyName = convoyName;
     _riderCount = riderCount;
-    final text = '$riderCount rider${riderCount == 1 ? '' : 's'} connected. Position sharing and intercom are on.';
+    final text = '$riderCount rider${riderCount == 1 ? '' : 's'} connected. Position sharing is active.';
     _plainTitle = 'Convoy: $convoyName';
     _plainText = text;
     try {
@@ -156,10 +156,9 @@ class BackgroundService {
         final r = await FlutterForegroundTask.updateService(notificationTitle: 'Convoy: $convoyName', notificationText: text);
         return r is ServiceRequestSuccess;
       }
-      final mic = Platform.isAndroid && await _micGranted();
       final r = await FlutterForegroundTask.startService(
         serviceId: _serviceId,
-        serviceTypes: Platform.isAndroid ? serviceTypesFor(micGranted: mic) : null,
+        serviceTypes: Platform.isAndroid ? serviceTypesFor(micActive: micActive) : null,
         notificationTitle: 'Convoy: $convoyName',
         notificationText: text,
         notificationButtons: const [
@@ -170,7 +169,7 @@ class BackgroundService {
       );
       if (r is ServiceRequestFailure) debugPrint('Foreground service start failed: ${r.error}');
       if (r is ServiceRequestSuccess) {
-        _runningWithMic = mic;
+        _runningWithMic = micActive;
         // The plugin posted its plain notification: the big one goes back up at once.
         _notifyStarted();
       }
@@ -190,7 +189,7 @@ class BackgroundService {
       if (!await FlutterForegroundTask.isRunningService) return;
       if (!await _micGranted()) return;
       await FlutterForegroundTask.stopService();
-      await start(convoyName: _convoyName, riderCount: _riderCount);
+      await start(convoyName: _convoyName, riderCount: _riderCount, micActive: true);
     } catch (e) {
       debugPrint('Foreground service mic note: $e');
     }
@@ -263,6 +262,8 @@ class BackgroundService {
       return false;
     }
   }
+
+  static Future<bool> requestIgnoreBatteryOptimization() => requestIgnoreBatteryOptimizations();
 }
 
 /// Entry point for the service isolate. Keep it tiny: it only relays button taps.

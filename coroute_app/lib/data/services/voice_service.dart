@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/ride_notification_constants.dart';
 import '../../core/l10n/l10n.dart';
+import 'phone_call_service.dart';
 import 'settings_service.dart';
 
 /// How urgent a spoken alert is. Critical (emergencies) interrupts whatever is
@@ -110,6 +111,25 @@ class VoiceService extends ChangeNotifier {
   final SettingsService _settings;
   final VoiceEngine _engine;
   final int Function() _clock;
+  PhoneCallService? _phoneCall;
+
+  PhoneCallService? get phoneCallService => _phoneCall;
+
+  void attachPhoneCallService(PhoneCallService? service) {
+    if (_phoneCall == service) return;
+    _phoneCall?.removeListener(_onPhoneCallChanged);
+    _phoneCall = service;
+    _phoneCall?.addListener(_onPhoneCallChanged);
+  }
+
+  void _onPhoneCallChanged() {
+    if (_phoneCall?.isCallActive == false) {
+      final pending = _phoneCall?.flushPostCallAlerts() ?? [];
+      for (final alert in pending) {
+        speak('Safety alert during your call: $alert', priority: VoicePriority.critical);
+      }
+    }
+  }
 
   Future<bool>? _init;
   bool _available = false;
@@ -160,10 +180,21 @@ class VoiceService extends ChangeNotifier {
   static int estimateMs(String text) => 600 + text.length * 70;
 
   /// Speaks [text] once. False when it was not spoken (setting off, duplicate key,
-  /// queue full, no engine).
+  /// queue full, no engine, or phone call in progress).
   Future<bool> speak(String text, {VoicePriority priority = VoicePriority.warning, String? key}) async {
     final t = text.trim();
     if (t.isEmpty || !_allowed(priority) || _failed) return false;
+
+    // Check if phone call is active: never talk over rider's phone conversation
+    if (_phoneCall?.isCallActive ?? false) {
+      if (priority == VoicePriority.critical) {
+        // Vibrate urgently via device haptics and queue for replay when call ends
+        HapticFeedback.heavyImpact();
+        _phoneCall?.queuePostCallAlert(t);
+      }
+      return false;
+    }
+
     final now = _clock();
     _spoken.removeWhere((_, at) => now - at >= NotifConstants.voiceDedupe.inMilliseconds);
     final k = key ?? t;

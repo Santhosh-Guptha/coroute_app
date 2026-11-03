@@ -103,6 +103,7 @@ class IntercomService extends ChangeNotifier {
   bool _deafened = false;
   bool _transmitting = false; // a stream is open to the gateway
   bool _micOpen = false; // recorder is running (VOX keeps it open)
+  bool _pausedByPhoneCall = false; // automatically paused when rider receives/makes a phone call
   IntercomMode _mode = IntercomMode.ptt;
   IntercomChannel _channel = IntercomChannel.all;
   String? _talkTargetUserId; // null == everyone
@@ -143,6 +144,7 @@ class IntercomService extends ChangeNotifier {
   bool get isMicMuted => _micMuted;
   bool get isDeafened => _deafened;
   bool get isTransmitting => _transmitting;
+  bool get isPausedByPhoneCall => _pausedByPhoneCall;
   bool get isVoxArmed => _mode == IntercomMode.vox && _micOpen;
   IntercomMode get mode => _mode;
   IntercomChannel get channel => _channel;
@@ -240,9 +242,25 @@ class IntercomService extends ChangeNotifier {
     }
   }
 
+  /// Pauses or resumes the intercom transmission when a cellular or VoIP phone call occurs.
+  void setPhoneCallActive(bool inCall) {
+    if (_pausedByPhoneCall == inCall) return;
+    _pausedByPhoneCall = inCall;
+    if (inCall) {
+      if (_transmitting) _endStream();
+      if (_micOpen) _closeMic();
+      if (_playerReady) {
+        FlutterPcmSound.release().catchError((_) {});
+        _playerReady = false;
+        _playerRate = null;
+      }
+    }
+    notifyListeners();
+  }
+
   /// PTT: call on press. Opens the mic and a stream to the chosen target.
   Future<bool> beginTransmission() async {
-    if (_micMuted || _transmitting || !_rt.isConnected) return false;
+    if (_micMuted || _transmitting || !_rt.isConnected || _pausedByPhoneCall) return false;
     if (!await _ensurePermission()) return false;
     if (!await _openMic()) return false;
     _startStream();
@@ -257,7 +275,7 @@ class IntercomService extends ChangeNotifier {
 
   /// VOX: arm the open mic. Transmits only while sound exceeds the threshold.
   Future<bool> startVox() async {
-    if (_micMuted || !_rt.isConnected) return false;
+    if (_micMuted || !_rt.isConnected || _pausedByPhoneCall) return false;
     if (!await _ensurePermission()) return false;
     _mode = IntercomMode.vox;
     final ok = await _openMic();
@@ -693,6 +711,12 @@ class IntercomService extends ChangeNotifier {
       _activeIsLead = false;
       _activeChannel = IntercomChannel.all;
       activeSpeakerNotifier.value = null;
+      // Release PCM sound playback track when idle so other audio/music apps (Spotify, etc.) are unblocked
+      if (_playerReady) {
+        FlutterPcmSound.release().catchError((_) {});
+        _playerReady = false;
+        _playerRate = null;
+      }
       notifyListeners();
     }
   }

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/constants/route_constants.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/route_model.dart';
+import '../../data/models/stop_point_model.dart';
 import '../ride/ride_facts.dart';
 import 'off_route_detector.dart';
 import 'reroute_policy.dart';
@@ -54,6 +55,69 @@ class RouteGuide extends ChangeNotifier {
 
   RouteModel? _personal;
   RouteProgress? _personalProgress;
+  StopPointModel? _personalFuelStop;
+
+  StopPointModel? get personalFuelStop => _personalFuelStop;
+
+  /// Hands-free personal fuel detour stop for THIS rider only.
+  /// Computes a personal detour without altering the group convoy plan for other riders.
+  Future<bool> addPersonalFuelStop({
+    required double lat,
+    required double lng,
+    required String name,
+  }) async {
+    if (_disposed) return false;
+    final convoy = _convoy;
+    final start = _lastFix ?? (convoy != null && convoy.destinationLat != 0 ? (convoy.destinationLat, convoy.destinationLng) : null);
+    if (start == null || (start.$1 == 0 && start.$2 == 0)) return false;
+
+    (double, double)? dest;
+    if (convoy != null && (convoy.destinationLat != 0 || convoy.destinationLng != 0)) {
+      dest = (convoy.destinationLat, convoy.destinationLng);
+    } else {
+      final line = convoy?.routeLine ?? const [];
+      if (line.length >= 2) dest = line.last;
+    }
+    if (dest == null) return false;
+
+    final myAlongM = _plan?.matched?.alongM;
+    final stops = <(double, double)>[
+      (lat, lng), // Detour to fuel station first
+      if (convoy != null)
+        for (final s in convoy.plannedStops)
+          if (RoutePlan.stillAhead(s, _uid) && !RoutePlan.isBehind(s, _plan, myAlongM))
+            (s.lat, s.lng),
+    ];
+    final room = RouteConstants.maxWaypoints - 2;
+    final waypoints = [start, ...stops.take(room < 0 ? 0 : room), dest];
+
+    try {
+      final route = await fetchRoute(waypoints);
+      if (_disposed || route == null || route.points.length < 2) return false;
+      _personal = route;
+      _personalProgress = RouteProgress(route.points);
+      _personalFuelStop = StopPointModel(
+        stopId: 'personal_fuel_${DateTime.now().millisecondsSinceEpoch}',
+        lat: lat,
+        lng: lng,
+        name: name,
+        category: 'FUEL',
+        suggestedByName: 'Me',
+      );
+      _routeVersion++;
+      _setStatus('Auto-routed to $name: ${TimelineText.distance(route.distanceM)}', force: true);
+      _notify();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void clearPersonalFuelStop() {
+    _personalFuelStop = null;
+    _clearPersonal();
+    _notify();
+  }
 
   int _generation = 0;
   bool _disposed = false;
