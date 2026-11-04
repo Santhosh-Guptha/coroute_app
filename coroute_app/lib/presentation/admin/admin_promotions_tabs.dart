@@ -469,17 +469,7 @@ class _AdminCouponsTabState extends State<AdminCouponsTab> with AutomaticKeepAli
     if (mounted) setState(() => _loading = false);
   }
 
-  Future<void> _toggle(Map<String, dynamic> c, bool on) async {
-    final code = c['code']?.toString() ?? '';
-    try {
-      await context.read<ApiClient>().patch('/admin/coupons/${Uri.encodeComponent(code)}', {'isActive': on});
-      if (!mounted) return;
-      adminSnack(context, 'Coupon $code ${on ? 'switched on' : 'switched off'}.');
-      _load();
-    } catch (e) {
-      if (mounted) adminSnack(context, adminErrorOf(e), error: true);
-    }
-  }
+
 
   Future<void> _edit([Map<String, dynamic>? coupon]) async {
     final saved = await showAppSheet<bool>(
@@ -518,40 +508,101 @@ class _AdminCouponsTabState extends State<AdminCouponsTab> with AutomaticKeepAli
     );
   }
 
+  Future<void> _quickPauseResume(Map<String, dynamic> c) async {
+    final code = c['code']?.toString() ?? '';
+    final isPaused = (c['status']?.toString() ?? '').toUpperCase() == 'PAUSED' || c['isActive'] == false;
+    final action = isPaused ? 'resume' : 'pause';
+    try {
+      await context.read<ApiClient>().post('/admin/coupons/${Uri.encodeComponent(code)}/$action', {});
+      if (!mounted) return;
+      adminSnack(context, 'Coupon $code ${isPaused ? 'resumed' : 'paused'}.');
+      _load();
+    } catch (e) {
+      if (mounted) adminSnack(context, adminErrorOf(e), error: true);
+    }
+  }
+
   Widget _couponRow(Map<String, dynamic> c, bool last) {
-    final active = c['isActive'] != false;
+    final status = (c['status']?.toString() ?? 'ACTIVE').toUpperCase();
     final used = adminNumOrNull(c['usageCount'])?.toInt() ?? 0;
     final max = adminNumOrNull(c['maxUsageTotal'])?.toInt() ?? 0;
     final perUser = adminNumOrNull(c['maxUsagePerUser'])?.toInt() ?? 1;
     final tiers = _stringList(c['applicableTiers']);
-    final cycles = _stringList(c['applicableCycles']);
     final minOrder = adminNumOrNull(c['minOrderAmount']) ?? 0;
+    final cap = adminNumOrNull(c['maxDiscountCap']);
+    final name = (c['name']?.toString() ?? '').isNotEmpty ? c['name'].toString() : (c['code']?.toString() ?? '');
+    final campaign = c['campaignName']?.toString() ?? '';
+
     return AdminRow(
       key: ValueKey(c['code']),
-      leading: AdminRowIcon(Icons.discount_outlined, color: active ? null : AppTheme.text2),
-      title: c['code']?.toString() ?? '',
+      leading: AdminRowIcon(Icons.discount_outlined, color: _couponStatusColor(status)),
+      title: '${c['code']} · $name',
       subtitle: [
+        if (campaign.isNotEmpty) campaign,
         adminDiscountLabel(c['discountType'], c['discountValue']),
+        if (cap != null && cap > 0) 'max ${adminInr(cap)} off',
         if ((c['description']?.toString() ?? '').isNotEmpty) c['description'].toString(),
       ].join(' · '),
       detail: [
         tiers.isEmpty || tiers.contains('all') ? 'All plans' : tiers.map(adminTierLabel).join(', '),
-        cycles.isEmpty || cycles.contains('all') ? 'any cycle' : cycles.map(adminCycleLabel).join(', '),
         max > 0 ? '$used / $max used' : '$used used',
         '$perUser per rider',
+        if (c['newMembersOnly'] == true) 'new members only',
         if (minOrder > 0) 'min ${adminInr(minOrder)}',
         'until ${adminDate(c['expiresAt'])}',
       ].join(' · '),
-      status: _windowChip(
-        active: active,
-        startsAt: adminEpoch(c['validFrom']),
-        endsAt: adminEpoch(c['expiresAt']),
-        soldOut: max > 0 && used >= max,
+      status: _couponStatusChip(status, c),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: status == 'PAUSED' ? 'Resume coupon' : 'Pause coupon',
+            icon: Icon(status == 'PAUSED' ? Icons.play_arrow_rounded : Icons.pause_rounded, size: 20),
+            onPressed: () => _quickPauseResume(c),
+          ),
+          Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppTheme.text2),
+        ],
       ),
-      trailing: Switch.adaptive(value: active, onChanged: (v) => _toggle(c, v)),
       divider: !last,
       onTap: () => _edit(c),
     );
+  }
+
+  Color _couponStatusColor(String status) {
+    switch (status) {
+      case 'ACTIVE':
+        return AppTheme.accentText;
+      case 'PAUSED':
+        return AppTheme.warnText;
+      case 'SCHEDULED':
+        return AppTheme.brand;
+      case 'USAGE_LIMIT_REACHED':
+        return AppTheme.sos;
+      case 'EXPIRED':
+      case 'ARCHIVED':
+      default:
+        return AppTheme.text2;
+    }
+  }
+
+  Widget _couponStatusChip(String status, Map<String, dynamic> c) {
+    final startsAt = adminEpoch(c['validFrom']);
+    switch (status) {
+      case 'ACTIVE':
+        return StatusTextChip(icon: Icons.check_circle_rounded, text: 'Active', color: AppTheme.accentText);
+      case 'PAUSED':
+        return StatusTextChip(icon: Icons.pause_circle_rounded, text: 'Paused', color: AppTheme.warnText);
+      case 'SCHEDULED':
+        return StatusTextChip(icon: Icons.schedule_rounded, text: 'Starts ${adminDate(startsAt)}', color: AppTheme.brand);
+      case 'USAGE_LIMIT_REACHED':
+        return StatusTextChip(icon: Icons.block_rounded, text: 'Limit Reached', color: AppTheme.sos);
+      case 'EXPIRED':
+        return StatusTextChip(icon: Icons.history_rounded, text: 'Expired', color: AppTheme.text2);
+      case 'ARCHIVED':
+        return StatusTextChip(icon: Icons.archive_outlined, text: 'Archived', color: AppTheme.text2);
+      default:
+        return StatusTextChip(icon: Icons.circle_outlined, text: adminCapitalize(status.toLowerCase()), color: AppTheme.muted);
+    }
   }
 }
 
@@ -566,23 +617,26 @@ class _CouponEditor extends StatefulWidget {
 class _CouponEditorState extends State<_CouponEditor> {
   late final Map<String, dynamic> _c = widget.coupon ?? const {};
   late final _code = TextEditingController(text: _c['code']?.toString() ?? '');
+  late final _name = TextEditingController(text: _c['name']?.toString() ?? '');
+  late final _campaignName = TextEditingController(text: _c['campaignName']?.toString() ?? '');
   late final _description = TextEditingController(text: _c['description']?.toString() ?? '');
+  late final _internalNotes = TextEditingController(text: _c['internalNotes']?.toString() ?? '');
   late final _value = TextEditingController(text: adminNumOrNull(_c['discountValue'])?.toString() ?? '');
+  late final _maxDiscountCap = TextEditingController(text: adminNumOrNull(_c['maxDiscountCap'])?.toString() ?? '');
   late final _maxTotal = TextEditingController(text: '${adminNumOrNull(_c['maxUsageTotal'])?.toInt() ?? 100}');
   late final _maxPerUser = TextEditingController(text: '${adminNumOrNull(_c['maxUsagePerUser'])?.toInt() ?? 1}');
   late final _minOrder = TextEditingController(text: '${adminNumOrNull(_c['minOrderAmount']) ?? 0}');
   late String _type = _c['discountType']?.toString() ?? 'percentage';
+  late String _status = _c['status']?.toString() ?? (_c['isActive'] == false ? 'PAUSED' : 'ACTIVE');
+  late bool _newMembersOnly = _c['newMembersOnly'] == true;
+  late bool _firstPaymentOnly = _c['firstPaymentOnly'] == true;
+
   late final Set<String> _tiers = {
     for (final t in _stringList(_c['applicableTiers']))
       if (t != 'all') t,
   };
-  late String _cycle = () {
-    final cycles = _stringList(_c['applicableCycles']);
-    return cycles.length == 1 && cycles.first != 'all' ? cycles.first : 'all';
-  }();
   late int _validFrom = adminEpoch(_c['validFrom']) > 0 ? adminEpoch(_c['validFrom']) : DateTime.now().millisecondsSinceEpoch;
   late int _expiresAt = adminEpoch(_c['expiresAt']) > 0 ? adminEpoch(_c['expiresAt']) : DateTime.now().millisecondsSinceEpoch + 30 * _day;
-  late bool _active = _c['isActive'] != false;
   bool _busy = false;
   String? _problem;
 
@@ -592,20 +646,76 @@ class _CouponEditorState extends State<_CouponEditor> {
   @override
   void dispose() {
     _code.dispose();
+    _name.dispose();
+    _campaignName.dispose();
     _description.dispose();
+    _internalNotes.dispose();
     _value.dispose();
+    _maxDiscountCap.dispose();
     _maxTotal.dispose();
     _maxPerUser.dispose();
     _minOrder.dispose();
     super.dispose();
   }
 
+  Widget _buildLivePreview() {
+    final val = _type == 'free' ? 100 : num.tryParse(_value.text.trim());
+    final cap = num.tryParse(_maxDiscountCap.text.trim());
+    if (val == null || val <= 0) return const SizedBox.shrink();
+
+    num calcDiscount(num price) {
+      if (_type == 'free') return price;
+      if (_type == 'percentage') {
+        num d = (price * val) / 100;
+        if (cap != null && cap > 0 && d > cap) d = cap;
+        return d;
+      }
+      num d = val;
+      if (cap != null && cap > 0 && d > cap) d = cap;
+      return d > price ? price : d;
+    }
+
+    final dSolo = calcDiscount(9);
+    final dSmall = calcDiscount(49);
+    final dLarge = calcDiscount(99);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.accentText.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.calculate_outlined, size: 16, color: AppTheme.accentText),
+              const SizedBox(width: 6),
+              Text('LIVE SAVINGS PREVIEW', style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.accentText)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text('• Solo ₹9/mo: saves ₹${dSolo.toStringAsFixed(1)} → rider pays ₹${(9 - dSolo).toStringAsFixed(1)}', style: AppText.caption),
+          Text('• Group 2–6 (₹49/mo): saves ₹${dSmall.toStringAsFixed(1)} → rider pays ₹${(49 - dSmall).toStringAsFixed(1)}', style: AppText.caption),
+          Text('• Group 7–12 (₹99/mo): saves ₹${dLarge.toStringAsFixed(1)} → rider pays ₹${(99 - dLarge).toStringAsFixed(1)}', style: AppText.caption),
+        ],
+      ),
+    );
+  }
+
   Future<void> _save() async {
     final code = _code.text.trim().toUpperCase();
+    final name = _name.text.trim();
+    final campaign = _campaignName.text.trim();
     final value = _type == 'free' ? 100 : num.tryParse(_value.text.trim());
+    final cap = num.tryParse(_maxDiscountCap.text.trim());
     final maxTotal = int.tryParse(_maxTotal.text.trim());
     final maxPerUser = int.tryParse(_maxPerUser.text.trim());
     final minOrder = num.tryParse(_minOrder.text.trim().isEmpty ? '0' : _minOrder.text.trim());
+
     String? problem;
     if (_isNew && !RegExp(r'^[A-Z0-9_-]{3,32}$').hasMatch(code)) {
       problem = 'The code needs 3 to 32 letters, digits, - or _.';
@@ -616,28 +726,39 @@ class _CouponEditorState extends State<_CouponEditor> {
     problem ??= (maxPerUser == null || maxPerUser < 1) ? 'Uses per rider must be 1 or more.' : null;
     problem ??= (minOrder == null || minOrder < 0) ? 'The minimum order must be ₹0 or more.' : null;
     problem ??= _expiresAt <= _validFrom ? 'The expiry must be after the start date.' : null;
+
     if (problem != null) {
       setState(() => _problem = problem);
       return;
     }
+
     setState(() {
       _busy = true;
       _problem = null;
     });
+
     final body = <String, dynamic>{
       if (_isNew) 'code': code,
+      'name': name.isNotEmpty ? name : code,
+      'campaignName': campaign,
       'description': _description.text.trim(),
+      'internalNotes': _internalNotes.text.trim(),
+      'status': _status,
       'discountType': _type,
       'discountValue': value,
+      'maxDiscountCap': cap,
       'applicableTiers': _tiers.isEmpty ? ['all'] : _tiers.toList(),
-      'applicableCycles': [_cycle],
       'maxUsageTotal': maxTotal,
       'maxUsagePerUser': maxPerUser,
       'validFrom': _validFrom,
       'expiresAt': _expiresAt,
-      'isActive': _active,
+      'timezone': 'Asia/Kolkata',
       'minOrderAmount': minOrder,
+      'newMembersOnly': _newMembersOnly,
+      'firstPaymentOnly': _firstPaymentOnly,
+      'isActive': (_status == 'ACTIVE' || _status == 'SCHEDULED'),
     };
+
     try {
       final api = context.read<ApiClient>();
       if (_isNew) {
@@ -662,9 +783,9 @@ class _CouponEditorState extends State<_CouponEditor> {
     final code = _c['code']?.toString() ?? '';
     final ok = await confirmAction(
       context,
-      title: 'Delete coupon $code?',
-      message: 'Riders can no longer use it. Orders that already used it keep their price.',
-      confirmLabel: 'Delete',
+      title: 'Archive coupon $code?',
+      message: 'Riders can no longer use it. Orders that already used it retain their discount.',
+      confirmLabel: 'Archive',
       destructive: true,
     );
     if (!ok || !mounted) return;
@@ -672,7 +793,7 @@ class _CouponEditorState extends State<_CouponEditor> {
     try {
       await context.read<ApiClient>().delete('/admin/coupons/$_codePath');
       if (!mounted) return;
-      adminSnack(context, 'Coupon $code deleted.');
+      adminSnack(context, 'Coupon $code archived.');
       Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
@@ -688,6 +809,7 @@ class _CouponEditorState extends State<_CouponEditor> {
   Widget build(BuildContext context) {
     final p = _problem;
     final used = adminNumOrNull(_c['usageCount'])?.toInt() ?? 0;
+
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       child: Column(
@@ -698,21 +820,28 @@ class _CouponEditorState extends State<_CouponEditor> {
             controller: _code,
             enabled: _isNew,
             textCapitalization: TextCapitalization.characters,
-            decoration: adminInput('Code', hint: 'MONSOON25', helper: _isNew ? null : 'The code cannot be changed. Used $used times.'),
+            decoration: adminInput('Coupon Code', hint: 'DIWALI50', helper: _isNew ? null : 'Code is immutable. Used $used times.'),
           ),
           const SizedBox(height: 12),
-          TextField(controller: _description, decoration: adminInput('Description')),
+          TextField(controller: _name, decoration: adminInput('Display Name', hint: 'Diwali Rider Fest 50% Off')),
           const SizedBox(height: 12),
+          TextField(controller: _campaignName, decoration: adminInput('Campaign Name', hint: 'Diwali 2026 Promotional Blitz')),
+          const SizedBox(height: 12),
+          TextField(controller: _description, decoration: adminInput('Rider-Facing Description')),
+          const SizedBox(height: 12),
+          TextField(controller: _internalNotes, decoration: adminInput('Internal Admin Notes')),
+          const SizedBox(height: 12),
+
           Row(
             children: [
               Expanded(
                 child: DropdownButtonFormField<String>(
                   initialValue: _type,
-                  decoration: adminInput('Discount'),
+                  decoration: adminInput('Discount Type'),
                   items: const [
-                    DropdownMenuItem(value: 'percentage', child: Text('% off')),
-                    DropdownMenuItem(value: 'fixed', child: Text('₹ off')),
-                    DropdownMenuItem(value: 'free', child: Text('Free pass')),
+                    DropdownMenuItem(value: 'percentage', child: Text('% Percentage off')),
+                    DropdownMenuItem(value: 'fixed', child: Text('₹ Fixed amount off')),
+                    DropdownMenuItem(value: 'free', child: Text('100% Free pass')),
                   ],
                   onChanged: (v) => setState(() => _type = v ?? 'percentage'),
                 ),
@@ -733,7 +862,19 @@ class _CouponEditorState extends State<_CouponEditor> {
             ],
           ),
           const SizedBox(height: 12),
-          Text('Plans', style: AppText.label.copyWith(fontWeight: FontWeight.w800)),
+
+          if (_type == 'percentage') ...[
+            TextField(
+              controller: _maxDiscountCap,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: adminInput('Maximum Discount Cap (optional)', prefix: '₹ ', helper: 'e.g. ₹30 max discount on 50% off'),
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          _buildLivePreview(),
+
+          Text('Applicable Plans', style: AppText.label.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 8,
@@ -744,45 +885,46 @@ class _CouponEditorState extends State<_CouponEditor> {
                 selected: _tiers.isEmpty,
                 onSelected: (_) => setState(_tiers.clear),
               ),
-              for (final t in adminPaidTierNames)
-                FilterChip(
-                  label: Text(adminTierLabel(t)),
-                  selected: _tiers.contains(t),
-                  onSelected: (on) => setState(() => on ? _tiers.add(t) : _tiers.remove(t)),
-                ),
+              FilterChip(
+                label: const Text('Individual (₹9)'),
+                selected: _tiers.contains('individual'),
+                onSelected: (on) => setState(() => on ? _tiers.add('individual') : _tiers.remove('individual')),
+              ),
+              FilterChip(
+                label: const Text('Small Group (₹49)'),
+                selected: _tiers.contains('group_small'),
+                onSelected: (on) => setState(() => on ? _tiers.add('group_small') : _tiers.remove('group_small')),
+              ),
+              FilterChip(
+                label: const Text('Large Group (₹99)'),
+                selected: _tiers.contains('group_large'),
+                onSelected: (on) => setState(() => on ? _tiers.add('group_large') : _tiers.remove('group_large')),
+              ),
             ],
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _cycle,
-            decoration: adminInput('Billing'),
-            items: const [
-              DropdownMenuItem(value: 'all', child: Text('Monthly and annual')),
-              DropdownMenuItem(value: 'monthly', child: Text('Monthly only')),
-              DropdownMenuItem(value: 'annual', child: Text('Annual only')),
-            ],
-            onChanged: (v) => setState(() => _cycle = v ?? 'all'),
-          ),
-          const SizedBox(height: 12),
+
           Row(
             children: [
-              Expanded(child: TextField(controller: _maxTotal, keyboardType: TextInputType.number, decoration: adminInput('Total uses'))),
+              Expanded(child: TextField(controller: _maxTotal, keyboardType: TextInputType.number, decoration: adminInput('Total Usage Limit'))),
               const SizedBox(width: 12),
-              Expanded(child: TextField(controller: _maxPerUser, keyboardType: TextInputType.number, decoration: adminInput('Per rider'))),
+              Expanded(child: TextField(controller: _maxPerUser, keyboardType: TextInputType.number, decoration: adminInput('Max Uses Per Rider'))),
             ],
           ),
           const SizedBox(height: 12),
+
           TextField(
             controller: _minOrder,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: adminInput('Minimum order', prefix: '₹ ', helper: 'Plan price before the discount; 0 = any.'),
+            decoration: adminInput('Minimum Order Amount', prefix: '₹ ', helper: '0 = no minimum required'),
           ),
           const SizedBox(height: 12),
+
           Row(
             children: [
               Expanded(
                 child: _DateField(
-                  label: 'Valid from',
+                  label: 'Valid From (Asia/Kolkata)',
                   value: _validFrom,
                   onTap: () async {
                     final v = await _pickDay(context, _validFrom);
@@ -794,7 +936,7 @@ class _CouponEditorState extends State<_CouponEditor> {
               const SizedBox(width: 12),
               Expanded(
                 child: _DateField(
-                  label: 'Expires',
+                  label: 'Expiry Date (Asia/Kolkata)',
                   value: _expiresAt,
                   onTap: () async {
                     final v = await _pickDay(context, _expiresAt, endOfDay: true);
@@ -805,23 +947,53 @@ class _CouponEditorState extends State<_CouponEditor> {
               ),
             ],
           ),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            value: _active,
-            onChanged: (v) => setState(() => _active = v),
-            title: const Text('Active'),
+          const SizedBox(height: 12),
+
+          DropdownButtonFormField<String>(
+            initialValue: _status,
+            decoration: adminInput('Status'),
+            items: const [
+              DropdownMenuItem(value: 'ACTIVE', child: Text('Active (Live)')),
+              DropdownMenuItem(value: 'PAUSED', child: Text('Paused')),
+              DropdownMenuItem(value: 'DRAFT', child: Text('Draft')),
+            ],
+            onChanged: (v) => setState(() => _status = v ?? 'ACTIVE'),
           ),
+          const SizedBox(height: 8),
+
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('New members only (riders without previous paid memberships)'),
+            value: _newMembersOnly,
+            onChanged: (v) => setState(() => _newMembersOnly = v ?? false),
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('First payment only (first transaction per account)'),
+            value: _firstPaymentOnly,
+            onChanged: (v) => setState(() => _firstPaymentOnly = v ?? false),
+          ),
+
           if (p != null) ...[
             const SizedBox(height: 4),
             Text(p, style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w700)),
           ],
-          const SizedBox(height: 12),
-          DsButton(label: _busy ? 'Saving…' : (_isNew ? 'Create coupon' : 'Save coupon'), icon: Icons.save_rounded, onPressed: _busy ? null : _save),
+          const SizedBox(height: 16),
+          DsButton(
+            label: _busy ? 'Saving…' : (_isNew ? 'Create Coupon' : 'Save Coupon Changes'),
+            icon: Icons.save_rounded,
+            onPressed: _busy ? null : _save,
+          ),
           if (!_isNew) ...[
             const SizedBox(height: 8),
-            DsButton(label: 'Delete coupon', icon: Icons.delete_outline_rounded, tone: DsButtonTone.outline, onPressed: _busy ? null : _delete),
+            DsButton(
+              label: 'Archive Coupon',
+              icon: Icons.archive_outlined,
+              tone: DsButtonTone.outline,
+              onPressed: _busy ? null : _delete,
+            ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
         ],
       ),
     );

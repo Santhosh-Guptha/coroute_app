@@ -18,6 +18,20 @@ function getRazorpayGateway(repo) {
   return gwInstance;
 }
 
+const activeUserTransactions = new Map(); // userId -> { timestamp, op }
+function acquireUserTransactionLock(userId, op = 'tx') {
+  const now = Date.now();
+  const existing = activeUserTransactions.get(userId);
+  if (existing && (now - existing.timestamp < 10000)) {
+    return false;
+  }
+  activeUserTransactions.set(userId, { timestamp: now, op });
+  return true;
+}
+function releaseUserTransactionLock(userId) {
+  activeUserTransactions.delete(userId);
+}
+
 /**
  * Activates or extends a membership from a verified or free order.
  * Records the transaction in the user's payment history and updates the ledger order.
@@ -34,15 +48,42 @@ async function activateMembershipFromOrder({ repo, order, paymentId, method = 'R
   const members = existing ? (existing.members || {}) : {};
 
   const durationDays = plan.billingPeriodDays || 30;
-  const validUntil = existing && existing.validUntil > now
-    ? existing.validUntil + durationDays * 86400000
-    : now + durationDays * 86400000;
+  const isRenewal = existing && existing.status === 'ACTIVE' && existing.category === category;
+  const isUpgrade = existing && existing.status === 'ACTIVE' && existing.category !== category;
+
+  let validUntil;
+  if (isRenewal) {
+    // Paid renewal adds duration, capped at 1 year from now
+    validUntil = order.isFree
+      ? Math.max(existing.validUntil, now + durationDays * 86400000)
+      : Math.min(existing.validUntil + durationDays * 86400000, now + 365 * 86400000);
+  } else if (isUpgrade) {
+    // Upgrade takes effect immediately, preserving remaining time or setting 30 days
+    validUntil = order.isFree
+      ? now + durationDays * 86400000
+      : Math.max(existing.validUntil, now + durationDays * 86400000);
+  } else {
+    validUntil = now + durationDays * 86400000;
+  }
 
   const user = userDoc || (await repo.findUserById(uid));
+  const transactionType = isUpgrade ? 'UPGRADE' : (isRenewal ? 'RENEWAL' : (order.isFree ? 'COUPON_ACTIVATION' : 'NEW'));
+
+  const upgradeHistory = Array.isArray(existing?.upgradeHistory) ? [...existing.upgradeHistory] : [];
+  if (isUpgrade) {
+    upgradeHistory.push({
+      fromCategory: existing.category,
+      toCategory: category,
+      upgradedAt: now,
+      orderId: order.orderId,
+      paymentId: paymentId || order.paymentId || '',
+      method,
+    });
+  }
 
   const membershipDoc = {
     membershipId,
-    ownerUserId: uid, // Permanent non-transferable owner
+    ownerUserId: uid,
     ownerName: user?.name || existing?.ownerName || 'Rider',
     ownerEmail: user?.email || existing?.ownerEmail || '',
     category,
@@ -52,12 +93,13 @@ async function activateMembershipFromOrder({ repo, order, paymentId, method = 'R
     maxCapacity: plan.maxCapacity || plan.capacity,
     priceInr: plan.monthlyPriceInr,
     status: 'ACTIVE',
-    validFrom: existing ? existing.validFrom : now,
+    validFrom: isUpgrade ? now : (existing ? existing.validFrom : now),
     validUntil,
     members,
     offerApplied: order.offerCode || null,
     paymentId: paymentId || order.paymentId || null,
     orderId: order.orderId,
+    upgradeHistory,
     createdAt: existing ? existing.createdAt : now,
     updatedAt: now,
   };
@@ -70,10 +112,12 @@ async function activateMembershipFromOrder({ repo, order, paymentId, method = 'R
     paymentId: paymentId || order.paymentId,
     paidAt: now,
     method,
+    transactionType,
+    activatedAt: now,
     updatedAt: now,
   });
 
-  // Mirror to user paymentHistory
+  // Mirror to user paymentHistory with deduplication by orderId
   if (user) {
     const history = Array.isArray(user.paymentHistory) ? [...user.paymentHistory] : [];
     const entry = {
@@ -87,8 +131,15 @@ async function activateMembershipFromOrder({ repo, order, paymentId, method = 'R
       paidAt: now,
       validUntil,
       source,
+      isFree: Boolean(order.isFree),
+      transactionType,
     };
-    history.push(entry);
+    const existingIdx = history.findIndex((h) => h.orderId === order.orderId);
+    if (existingIdx >= 0) {
+      history[existingIdx] = entry;
+    } else {
+      history.push(entry);
+    }
     await repo.updateUser(user.key, {
       lastPayment: entry,
       paymentHistory: history,
@@ -293,6 +344,303 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
   }));
 
   /**
+   * POST /api/membership/validate-coupon
+   * Validates a promotional coupon code against a specific category for the authenticated user.
+   * Returns calculated discount and final payable amount without creating orders.
+   */
+  r.post('/membership/validate-coupon', wrap(async (req, res) => {
+    const uid = req.user.userId;
+    const { code, category } = req.body || {};
+    if (!code || !category) {
+      return res.status(400).json({ valid: false, error: 'code and category are required', reason: 'BAD_REQUEST' });
+    }
+
+    const cleanCode = String(code).trim().toUpperCase();
+    const catalog = await repo.getMembershipCatalog();
+    const plan = catalog[category];
+    if (!plan) {
+      return res.status(400).json({ valid: false, error: 'Invalid membership category', reason: 'INVALID_CATEGORY' });
+    }
+
+    if (cleanCode === 'RIDERFREE') {
+      return res.json({
+        valid: true,
+        code: 'RIDERFREE',
+        name: 'Rider Free Introductory Offer',
+        campaignName: 'Introductory Launch',
+        discountType: 'free',
+        discountValue: 100,
+        discountAmount: plan.monthlyPriceInr,
+        originalPrice: plan.monthlyPriceInr,
+        finalAmount: 0,
+        isFree: true,
+        message: 'Introductory 100% discount applied (₹0 payable)',
+      });
+    }
+
+    const coupon = await repo.findCoupon(cleanCode);
+    if (!coupon) {
+      return res.status(404).json({ valid: false, error: `Coupon ${cleanCode} does not exist`, reason: 'COUPON_NOT_FOUND' });
+    }
+
+    // Dynamic status check
+    if (coupon.status === 'USAGE_LIMIT_REACHED') {
+      return res.status(400).json({ valid: false, error: 'This coupon has reached its maximum total redemptions', reason: 'COUPON_LIMIT_REACHED' });
+    }
+    if (coupon.status === 'EXPIRED') {
+      return res.status(400).json({ valid: false, error: 'This coupon has expired', reason: 'COUPON_EXPIRED' });
+    }
+    if (coupon.status === 'SCHEDULED') {
+      return res.status(400).json({ valid: false, error: 'This coupon is scheduled for a future campaign and is not active yet', reason: 'COUPON_SCHEDULED' });
+    }
+    if (coupon.status === 'PAUSED' || coupon.isActive === false) {
+      return res.status(400).json({ valid: false, error: 'This coupon is currently paused by administrator', reason: 'COUPON_PAUSED' });
+    }
+    if (coupon.status === 'ARCHIVED') {
+      return res.status(400).json({ valid: false, error: 'This coupon is archived and no longer valid', reason: 'COUPON_ARCHIVED' });
+    }
+
+    // Tier matching
+    const tiers = Array.isArray(coupon.applicableTiers) ? coupon.applicableTiers : ['all'];
+    if (!tiers.includes('all') && !tiers.includes(category)) {
+      return res.status(400).json({ valid: false, error: `Coupon ${cleanCode} is only applicable to ${tiers.join(', ')}`, reason: 'TIER_MISMATCH' });
+    }
+
+    // Min order amount check
+    const minAmt = Number(coupon.minOrderAmount) || 0;
+    if (minAmt > 0 && plan.monthlyPriceInr < minAmt) {
+      return res.status(400).json({ valid: false, error: `Minimum order amount of ₹${minAmt} required to apply ${cleanCode}`, reason: 'MIN_ORDER_NOT_MET' });
+    }
+
+    // User eligibility restrictions
+    if (coupon.newMembersOnly && req.dbUser) {
+      const hist = Array.isArray(req.dbUser.paymentHistory) ? req.dbUser.paymentHistory : [];
+      if (hist.some((p) => p.status === 'PAID')) {
+        return res.status(400).json({ valid: false, error: 'This coupon is valid for new riders only', reason: 'NEW_MEMBERS_ONLY' });
+      }
+    }
+    if (coupon.firstPaymentOnly && req.dbUser) {
+      const hist = Array.isArray(req.dbUser.paymentHistory) ? req.dbUser.paymentHistory : [];
+      if (hist.length > 0) {
+        return res.status(400).json({ valid: false, error: 'This coupon is valid on first payment only', reason: 'FIRST_PAYMENT_ONLY' });
+      }
+    }
+    if (Array.isArray(coupon.allowedUserIds) && coupon.allowedUserIds.length > 0) {
+      if (!coupon.allowedUserIds.includes(uid)) {
+        return res.status(400).json({ valid: false, error: 'This coupon is restricted to select members', reason: 'NOT_ELIGIBLE' });
+      }
+    }
+
+    // Per user usage limit
+    const maxPerUser = Number(coupon.maxUsagePerUser) || 1;
+    const userRedemptions = (coupon.usages || []).filter((u) => u.userId === uid).length;
+    if (userRedemptions >= maxPerUser) {
+      return res.status(400).json({ valid: false, error: `You have reached the redemption limit (${maxPerUser}) for coupon ${cleanCode}`, reason: 'PER_USER_LIMIT_REACHED' });
+    }
+
+    // Calculate discount
+    let discountAmount = 0;
+    if (coupon.discountType === 'free' || Number(coupon.discountValue) === 100) {
+      discountAmount = plan.monthlyPriceInr;
+    } else if (coupon.discountType === 'percentage') {
+      let raw = (plan.monthlyPriceInr * Number(coupon.discountValue)) / 100;
+      if (coupon.maxDiscountCap && raw > coupon.maxDiscountCap) raw = coupon.maxDiscountCap;
+      discountAmount = Math.round(raw);
+    } else if (coupon.discountType === 'fixed') {
+      let raw = Math.min(plan.monthlyPriceInr, Number(coupon.discountValue) || 0);
+      if (coupon.maxDiscountCap && raw > coupon.maxDiscountCap) raw = coupon.maxDiscountCap;
+      discountAmount = Math.round(raw);
+    }
+
+    const finalAmount = Math.max(0, plan.monthlyPriceInr - discountAmount);
+    return res.json({
+      valid: true,
+      code: coupon.code,
+      name: coupon.name || coupon.code,
+      campaignName: coupon.campaignName || '',
+      discountType: coupon.discountType,
+      discountValue: coupon.discountValue,
+      maxDiscountCap: coupon.maxDiscountCap,
+      discountAmount,
+      originalPrice: plan.monthlyPriceInr,
+      finalAmount,
+      isFree: finalAmount === 0,
+      message: `Discount of ₹${discountAmount} applied. Final payable: ₹${finalAmount}`,
+    });
+  }));
+
+  /**
+   * POST /api/membership/activate-free
+   * Dedicated, secure zero-payment activation for verified 100% coupons (e.g. RIDERFREE).
+   * Does NOT create a Razorpay order or invoke gateway checkout.
+   */
+  r.post('/membership/activate-free', actionLimiter, wrap(async (req, res) => {
+    const uid = req.user.userId;
+    const { category, couponCode } = req.body || {};
+
+    if (!category) {
+      return res.status(400).json({ error: 'category is required', reason: 'BAD_REQUEST' });
+    }
+
+    const catalog = await repo.getMembershipCatalog();
+    const plan = catalog[category];
+    if (!plan) {
+      return res.status(400).json({ error: 'Invalid membership category', reason: 'INVALID_CATEGORY' });
+    }
+
+    if (!acquireUserTransactionLock(uid, 'activate_free')) {
+      return res.status(409).json({ error: 'A membership transaction is already in progress. Please wait.', reason: 'CONCURRENT_TRANSACTION' });
+    }
+
+    try {
+      const now = Date.now();
+      const cleanCoupon = String(couponCode || 'RIDERFREE').trim().toUpperCase();
+
+      let matchedCoupon = null;
+      if (cleanCoupon === 'RIDERFREE') {
+        // Valid default introductory coupon
+      } else {
+        matchedCoupon = await repo.findCoupon(cleanCoupon);
+        if (!matchedCoupon) {
+          return res.status(404).json({ error: `Coupon ${cleanCoupon} not found`, reason: 'COUPON_NOT_FOUND' });
+        }
+        if (matchedCoupon.status !== 'ACTIVE') {
+          return res.status(400).json({ error: `Coupon is ${matchedCoupon.status.toLowerCase()}`, reason: `COUPON_${matchedCoupon.status}` });
+        }
+        if (matchedCoupon.discountType !== 'free' && Number(matchedCoupon.discountValue) !== 100) {
+          return res.status(400).json({ error: `Coupon ${cleanCoupon} does not provide a 100% discount. Payment required.`, reason: 'PARTIAL_COUPON' });
+        }
+        const tiers = Array.isArray(matchedCoupon.applicableTiers) ? matchedCoupon.applicableTiers : ['all'];
+        if (!tiers.includes('all') && !tiers.includes(category)) {
+          return res.status(400).json({ error: `Coupon ${cleanCoupon} is not valid for ${plan.name}`, reason: 'TIER_MISMATCH' });
+        }
+      }
+
+      const existing = await repo.findMembershipByOwner(uid);
+      if (existing && existing.members && Object.keys(existing.members).length + 1 > plan.capacity) {
+        return res.status(409).json({
+          error: `Cannot switch to ${plan.name}: current group has ${Object.keys(existing.members).length + 1} members which exceeds new capacity of ${plan.capacity}. Please remove members first.`,
+          reason: 'CAPACITY_CONFLICT',
+        });
+      }
+
+      // Idempotency: If user already has this exact tier active, do not stack months
+      if (existing && existing.status === 'ACTIVE' && existing.category === category && existing.validUntil > now) {
+        return res.json({
+          success: true,
+          message: `You already have an active ${existing.categoryName} membership.`,
+          membership: existing,
+          isAlreadyActive: true,
+        });
+      }
+
+      const isUpgrade = existing && existing.status === 'ACTIVE' && existing.category !== category;
+      const orderId = `mem_free_${now}_${crypto.randomBytes(4).toString('hex')}`;
+      const durationDays = plan.billingPeriodDays || 30;
+      const validUntil = now + durationDays * 86400000;
+
+      const orderDoc = {
+        orderId,
+        userId: uid,
+        category,
+        amountInPaise: 0,
+        amount: 0,
+        currency: 'INR',
+        status: 'PAID',
+        mode: 'free',
+        isFree: true,
+        offerCode: cleanCoupon,
+        method: 'COUPON',
+        transactionType: isUpgrade ? 'UPGRADE' : 'COUPON_ACTIVATION',
+        createdAt: now,
+        paidAt: now,
+      };
+      await repo.saveRazorpayOrder(orderDoc);
+
+      const membershipId = existing ? existing.membershipId : `mem_${crypto.randomUUID()}`;
+      const upgradeHistory = Array.isArray(existing?.upgradeHistory) ? [...existing.upgradeHistory] : [];
+      if (isUpgrade) {
+        upgradeHistory.push({
+          fromCategory: existing.category,
+          toCategory: category,
+          upgradedAt: now,
+          orderId,
+          method: 'COUPON',
+          couponCode: cleanCoupon,
+        });
+      }
+
+      const membershipDoc = {
+        membershipId,
+        ownerUserId: uid,
+        ownerName: req.dbUser?.name || existing?.ownerName || 'Rider',
+        ownerEmail: req.dbUser?.email || existing?.ownerEmail || '',
+        category,
+        categoryName: plan.name,
+        capacity: plan.capacity,
+        minCapacity: plan.minCapacity || 1,
+        maxCapacity: plan.maxCapacity || plan.capacity,
+        priceInr: plan.monthlyPriceInr,
+        status: 'ACTIVE',
+        validFrom: now,
+        validUntil,
+        members: existing ? (existing.members || {}) : {},
+        offerApplied: cleanCoupon,
+        paymentId: `free_${orderId}`,
+        orderId,
+        upgradeHistory,
+        createdAt: existing ? existing.createdAt : now,
+        updatedAt: now,
+      };
+      await repo.saveMembership(membershipDoc);
+
+      if (req.dbUser) {
+        const history = Array.isArray(req.dbUser.paymentHistory) ? [...req.dbUser.paymentHistory] : [];
+        const entry = {
+          orderId,
+          paymentId: `free_${orderId}`,
+          amountInr: 0,
+          category,
+          categoryName: plan.name,
+          method: 'COUPON',
+          status: 'PAID',
+          paidAt: now,
+          validUntil,
+          isFree: true,
+          transactionType: isUpgrade ? 'UPGRADE' : 'COUPON_ACTIVATION',
+          source: 'zero_amount_activation',
+        };
+        history.push(entry);
+        await repo.updateUser(req.dbUser.key, {
+          lastPayment: entry,
+          paymentHistory: history,
+        });
+      }
+
+      if (matchedCoupon && typeof repo.confirmCouponRedemption === 'function') {
+        await repo.confirmCouponRedemption(orderId, {
+          paymentId: `free_${orderId}`,
+          method: 'COUPON',
+          paidAt: now,
+          userDoc: req.dbUser,
+        });
+      } else if (typeof repo.recordCouponUsage === 'function') {
+        await repo.recordCouponUsage(cleanCoupon, { userId: uid, orderId, discountAmount: plan.monthlyPriceInr });
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: 'Membership activated successfully',
+        membership: membershipDoc,
+        orderId,
+        transactionType: isUpgrade ? 'UPGRADE' : 'NEW',
+      });
+    } finally {
+      releaseUserTransactionLock(uid);
+    }
+  }));
+
+  /**
    * POST /api/membership/order
    * Initiates payment order creation on backend. Free orders (e.g. RIDERFREE) are activated immediately.
    */
@@ -321,38 +669,93 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     let discountPercent = 0;
     let discountAmountInr = 0;
 
+    let matchedCoupon = null;
     if (offerCode) {
       const cleanOffer = String(offerCode).trim().toUpperCase();
-      if (typeof repo.findOffer === 'function') {
-        const off = await repo.findOffer(cleanOffer);
-        if (off && off.isActive !== false && (!off.expiresAt || off.expiresAt > now)) {
-          if (off.discountPercent === 100 || off.discountType === 'free') {
-            isFreeActivation = true;
-            appliedOffer = off.id;
-          } else if (off.discountPercent) {
-            discountPercent = off.discountPercent;
-            appliedOffer = off.id;
-          }
-        }
-      }
-      if (!isFreeActivation && typeof repo.findCoupon === 'function') {
-        const coup = await repo.findCoupon(cleanOffer);
-        if (coup && coup.isActive !== false && (!coup.expiresAt || coup.expiresAt > now)) {
-          if (coup.discountType === 'free' || coup.discountValue === 100) {
-            isFreeActivation = true;
-            appliedOffer = coup.code;
-          } else if (coup.discountType === 'percentage') {
-            discountPercent = coup.discountValue;
-            appliedOffer = coup.code;
-          } else if (coup.discountType === 'fixed') {
-            discountAmountInr = coup.discountValue;
-            appliedOffer = coup.code;
-          }
-        }
-      }
-      if (!isFreeActivation && cleanOffer === 'RIDERFREE') {
+
+      if (cleanOffer === 'RIDERFREE') {
         isFreeActivation = true;
         appliedOffer = 'RIDERFREE';
+      } else {
+        if (typeof repo.findCoupon === 'function') {
+          const coup = await repo.findCoupon(cleanOffer);
+          if (coup) {
+            matchedCoupon = coup;
+            // Validate status
+            if (coup.status === 'USAGE_LIMIT_REACHED') {
+              return res.status(400).json({ error: 'This coupon has reached its total usage limit', reason: 'COUPON_LIMIT_REACHED' });
+            }
+            if (coup.status === 'EXPIRED') {
+              return res.status(400).json({ error: 'This coupon has expired', reason: 'COUPON_EXPIRED' });
+            }
+            if (coup.status === 'SCHEDULED') {
+              return res.status(400).json({ error: 'This coupon is not active yet', reason: 'COUPON_SCHEDULED' });
+            }
+            if (coup.status === 'ARCHIVED') {
+              return res.status(400).json({ error: 'This coupon is no longer available', reason: 'COUPON_ARCHIVED' });
+            }
+            if (coup.status === 'PAUSED' || coup.isActive === false) {
+              return res.status(400).json({ error: 'This coupon is currently paused', reason: 'COUPON_PAUSED' });
+            }
+
+            // Plan tier validation
+            const tiers = Array.isArray(coup.applicableTiers) ? coup.applicableTiers : ['all'];
+            if (!tiers.includes('all') && !tiers.includes(category)) {
+              return res.status(400).json({ error: `Coupon ${cleanOffer} is not valid for ${plan.name}`, reason: 'TIER_MISMATCH' });
+            }
+
+            // Min order amount
+            const minAmt = Number(coup.minOrderAmount) || 0;
+            if (minAmt > 0 && plan.monthlyPriceInr < minAmt) {
+              return res.status(400).json({ error: `Minimum order amount of ₹${minAmt} required for coupon ${cleanOffer}`, reason: 'MIN_ORDER_NOT_MET' });
+            }
+
+            // New members only
+            if (coup.newMembersOnly && req.dbUser) {
+              const hist = Array.isArray(req.dbUser.paymentHistory) ? req.dbUser.paymentHistory : [];
+              if (hist.some((p) => p.status === 'PAID')) {
+                return res.status(400).json({ error: 'This coupon is valid for new members only', reason: 'NEW_MEMBERS_ONLY' });
+              }
+            }
+
+            // First payment only
+            if (coup.firstPaymentOnly && req.dbUser) {
+              const hist = Array.isArray(req.dbUser.paymentHistory) ? req.dbUser.paymentHistory : [];
+              if (hist.length > 0) {
+                return res.status(400).json({ error: 'This coupon is valid for your first payment only', reason: 'FIRST_PAYMENT_ONLY' });
+              }
+            }
+
+            // Allowed users restriction
+            if (Array.isArray(coup.allowedUserIds) && coup.allowedUserIds.length > 0) {
+              if (!coup.allowedUserIds.includes(uid)) {
+                return res.status(400).json({ error: 'This coupon is restricted to select members', reason: 'NOT_ELIGIBLE' });
+              }
+            }
+
+            appliedOffer = coup.code;
+            if (coup.discountType === 'free' || Number(coup.discountValue) === 100) {
+              isFreeActivation = true;
+            } else if (coup.discountType === 'percentage') {
+              discountPercent = Number(coup.discountValue) || 0;
+            } else if (coup.discountType === 'fixed') {
+              discountAmountInr = Number(coup.discountValue) || 0;
+            }
+          }
+        }
+
+        if (!appliedOffer && typeof repo.findOffer === 'function') {
+          const off = await repo.findOffer(cleanOffer);
+          if (off && off.isActive !== false && (!off.expiresAt || off.expiresAt > now)) {
+            if (off.discountPercent === 100 || off.discountType === 'free') {
+              isFreeActivation = true;
+              appliedOffer = off.id;
+            } else if (off.discountPercent) {
+              discountPercent = off.discountPercent;
+              appliedOffer = off.id;
+            }
+          }
+        }
       }
     }
 
@@ -361,18 +764,61 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     }
 
     let finalAmountInr = plan.monthlyPriceInr;
+    let actualDiscountInr = 0;
+
     if (isFreeActivation) {
       finalAmountInr = 0;
+      actualDiscountInr = plan.monthlyPriceInr;
     } else if (discountPercent > 0) {
-      finalAmountInr = Math.max(0, Math.round(plan.monthlyPriceInr * (1 - discountPercent / 100)));
+      let rawDiscount = (plan.monthlyPriceInr * discountPercent) / 100;
+      if (matchedCoupon && matchedCoupon.maxDiscountCap && rawDiscount > matchedCoupon.maxDiscountCap) {
+        rawDiscount = matchedCoupon.maxDiscountCap;
+      }
+      actualDiscountInr = Math.round(rawDiscount);
+      finalAmountInr = Math.max(0, plan.monthlyPriceInr - actualDiscountInr);
     } else if (discountAmountInr > 0) {
-      finalAmountInr = Math.max(0, plan.monthlyPriceInr - discountAmountInr);
+      let rawDiscount = Math.min(plan.monthlyPriceInr, discountAmountInr);
+      if (matchedCoupon && matchedCoupon.maxDiscountCap && rawDiscount > matchedCoupon.maxDiscountCap) {
+        rawDiscount = matchedCoupon.maxDiscountCap;
+      }
+      actualDiscountInr = Math.round(rawDiscount);
+      finalAmountInr = Math.max(0, plan.monthlyPriceInr - actualDiscountInr);
     }
 
     const orderId = `mem_ord_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const amountInPaise = finalAmountInr * 100;
 
+    // Concurrency-safe coupon reservation for free orders
+    if (finalAmountInr === 0 && appliedOffer && matchedCoupon && typeof repo.reserveCouponSlot === 'function') {
+      const resv = await repo.reserveCouponSlot(matchedCoupon.code, {
+        userId: uid,
+        orderId,
+        category,
+        categoryName: plan.name,
+        originalPrice: plan.monthlyPriceInr,
+        discountAmount: actualDiscountInr,
+        finalAmount: 0,
+        userDoc: req.dbUser,
+      });
+      if (!resv.reserved) {
+        return res.status(400).json({ error: resv.error || 'Failed to apply coupon', reason: 'COUPON_RESERVATION_FAILED' });
+      }
+    }
+
     if (finalAmountInr === 0) {
+      // Check if user already has an active membership of the SAME tier
+      if (existing && existing.status === 'ACTIVE' && existing.category === category && existing.validUntil > now) {
+        return res.json({
+          orderId: `mem_free_active`,
+          isFree: true,
+          amountInr: 0,
+          currency: 'INR',
+          membership: existing,
+          isAlreadyActive: true,
+          message: `You already have an active ${existing.categoryName} membership.`,
+        });
+      }
+
       const orderDoc = {
         orderId,
         userId: uid,
@@ -384,6 +830,8 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         mode: 'free',
         isFree: true,
         offerCode: appliedOffer,
+        method: 'COUPON',
+        transactionType: existing && existing.status === 'ACTIVE' && existing.category !== category ? 'UPGRADE' : 'COUPON_ACTIVATION',
         createdAt: now,
         paidAt: now,
       };
@@ -393,7 +841,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         repo,
         order: orderDoc,
         paymentId: `free_${orderId}`,
-        method: 'OFFER',
+        method: 'COUPON',
         source: 'free_offer',
         userDoc: req.dbUser,
       });
@@ -422,6 +870,23 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       });
     } catch (e) {
       return res.status(e.status || 500).json({ error: e.message, code: e.code || 'GATEWAY_ERROR' });
+    }
+
+    // Concurrency-safe coupon reservation for paid orders using rzpOrder.id
+    if (appliedOffer && matchedCoupon && typeof repo.reserveCouponSlot === 'function') {
+      const resv = await repo.reserveCouponSlot(matchedCoupon.code, {
+        userId: uid,
+        orderId: rzpOrder.id,
+        category,
+        categoryName: plan.name,
+        originalPrice: plan.monthlyPriceInr,
+        discountAmount: actualDiscountInr,
+        finalAmount: finalAmountInr,
+        userDoc: req.dbUser,
+      });
+      if (!resv.reserved) {
+        return res.status(400).json({ error: resv.error || 'Failed to apply coupon', reason: 'COUPON_RESERVATION_FAILED' });
+      }
     }
 
     const orderDoc = {
@@ -513,6 +978,9 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         lastPaymentId: paymentId,
         updatedAt: Date.now(),
       });
+      if (order.offerCode && typeof repo.releaseCouponReservation === 'function') {
+        await repo.releaseCouponReservation(order.orderId);
+      }
       return res.status(400).json({
         error: 'Invalid payment signature. Verification failed.',
         reason: 'INVALID_PAYMENT_SIGNATURE',
@@ -528,12 +996,21 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       userDoc: req.dbUser,
     });
 
-    if (order.offerCode && typeof repo.recordCouponUsage === 'function') {
-      await repo.recordCouponUsage(order.offerCode, {
-        userId: uid,
-        orderId,
-        discountAmount: order.discountAmount || 0,
-      });
+    if (order.offerCode) {
+      if (typeof repo.confirmCouponRedemption === 'function') {
+        await repo.confirmCouponRedemption(orderId, {
+          paymentId,
+          method: 'RAZORPAY',
+          paidAt: Date.now(),
+          userDoc: req.dbUser,
+        });
+      } else if (typeof repo.recordCouponUsage === 'function') {
+        await repo.recordCouponUsage(order.offerCode, {
+          userId: uid,
+          orderId,
+          discountAmount: order.discountAmount || 0,
+        });
+      }
     }
 
     res.json({
@@ -612,15 +1089,21 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       });
     }
 
-    // If payment verification signature was provided, run cryptographic verification
-    if (orderId && paymentId && signature) {
+    // Paid membership activation strictly requires Razorpay cryptographic signature verification
+    if (!isFreeActivation && plan.monthlyPriceInr > 0) {
+      if (!signature || !orderId || !paymentId) {
+        return res.status(400).json({
+          error: 'Paid membership activation requires verified Razorpay orderId, paymentId and signature',
+          reason: 'PAYMENT_SIGNATURE_REQUIRED',
+        });
+      }
       const gateway = getRazorpayGateway(repo);
       const order = await repo.findRazorpayOrder(orderId);
       const isValid = await gateway.verifySignature({
         orderId,
         paymentId,
         signature,
-        mode: order?.mode || 'test',
+        mode: order?.mode || 'live',
       });
       if (!isValid) {
         return res.status(400).json({
@@ -885,6 +1368,36 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
   // PLATFORM ADMIN ENDPOINTS
   // =========================================================================
 
+  const auditAdmin = async (action, target, details = {}) => {
+    try {
+      if (typeof repo.addAuditEntry === 'function') {
+        await repo.addAuditEntry({
+          by: req.user?.email || req.user?.userId || 'admin',
+          action,
+          target,
+          details,
+          at: Date.now(),
+        });
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  r.post('/admin/membership/reconcile', requireAdmin, wrap(async (req, res) => {
+    const result = await repo.reconcileDuplicateMembershipsAndOrders();
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({
+        by: req.user?.email || req.user?.userId || 'admin',
+        action: 'membership.reconcile',
+        target: 'all',
+        details: result,
+        at: Date.now(),
+      });
+    }
+    res.json(result);
+  }));
+
   r.get('/admin/membership/catalog', requireAdmin, wrap(async (req, res) => {
     const catalog = await repo.getMembershipCatalog();
     res.json({ catalog });
@@ -896,6 +1409,9 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       return res.status(400).json({ error: 'Valid catalog object required.', reason: 'INVALID_CATALOG' });
     }
     await repo.setMembershipCatalog(catalog, req.user.email || req.user.userId);
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({ by: req.user?.email || req.user?.userId || 'admin', action: 'membership.catalog_update', target: 'catalog', details: { catalog }, at: Date.now() });
+    }
     res.json({ message: 'Membership catalog updated successfully.', catalog });
   }));
 
@@ -908,12 +1424,182 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     res.json({ memberships, total: all.length });
   }));
 
-  r.get('/admin/membership/payments', requireAdmin, wrap(async (req, res) => {
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
-    const orders = await repo.listRazorpayOrders({}, 5000);
-    const sorted = orders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, limit);
-    res.json({ payments: sorted, total: orders.length });
+  // ---------- COUPON MANAGEMENT (CRUD, PAUSE, RESUME, STATS) ----------
+
+  r.get('/admin/coupons', requireAdmin, wrap(async (req, res) => {
+    const coupons = await repo.listCoupons(500);
+    res.json({ coupons, total: coupons.length });
   }));
+
+  r.post('/admin/coupons', requireAdmin, wrap(async (req, res) => {
+    const body = req.body || {};
+    const code = String(body.code || '').trim().toUpperCase();
+    if (!code || !/^[A-Z0-9_-]{3,32}$/.test(code)) {
+      return res.status(400).json({ error: 'Coupon code must be 3-32 alphanumeric characters, - or _', reason: 'INVALID_CODE' });
+    }
+    const val = Number(body.discountValue);
+    if (body.discountType !== 'free' && (isNaN(val) || val <= 0)) {
+      return res.status(400).json({ error: 'A valid positive discount value is required', reason: 'INVALID_DISCOUNT' });
+    }
+    if (body.discountType === 'percentage' && val > 100) {
+      return res.status(400).json({ error: 'Percentage discount cannot exceed 100%', reason: 'PERCENT_EXCEEDED' });
+    }
+
+    const saved = await repo.saveCoupon({
+      ...body,
+      code,
+      createdBy: req.user?.email || req.user?.userId || 'admin',
+    });
+
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({
+        by: req.user?.email || req.user?.userId || 'admin',
+        action: 'coupon.create',
+        target: code,
+        details: { name: saved.name, discountType: saved.discountType, discountValue: saved.discountValue, maxUsageTotal: saved.maxUsageTotal },
+        at: Date.now(),
+      });
+    }
+
+    res.status(201).json({ success: true, message: `Coupon ${code} created successfully`, coupon: saved });
+  }));
+
+  r.patch('/admin/coupons/:code', requireAdmin, wrap(async (req, res) => {
+    const code = String(req.params.code || '').trim().toUpperCase();
+    const existing = await repo.findCoupon(code);
+    if (!existing) return res.status(404).json({ error: 'Coupon not found' });
+
+    const patch = req.body || {};
+    const updated = await repo.saveCoupon({
+      ...existing,
+      ...patch,
+      code,
+      updatedBy: req.user?.email || req.user?.userId || 'admin',
+    });
+
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({
+        by: req.user?.email || req.user?.userId || 'admin',
+        action: 'coupon.update',
+        target: code,
+        details: { changes: patch },
+        at: Date.now(),
+      });
+    }
+
+    res.json({ success: true, message: `Coupon ${code} updated successfully`, coupon: updated });
+  }));
+
+  r.post('/admin/coupons/:code/pause', requireAdmin, wrap(async (req, res) => {
+    const code = String(req.params.code || '').trim().toUpperCase();
+    const paused = await repo.pauseCoupon(code, req.user?.email || req.user?.userId || 'admin');
+    if (!paused) return res.status(404).json({ error: 'Coupon not found' });
+
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({ by: req.user?.email || req.user?.userId || 'admin', action: 'coupon.pause', target: code, at: Date.now() });
+    }
+    res.json({ success: true, message: `Coupon ${code} paused`, coupon: paused });
+  }));
+
+  r.post('/admin/coupons/:code/resume', requireAdmin, wrap(async (req, res) => {
+    const code = String(req.params.code || '').trim().toUpperCase();
+    const resumed = await repo.resumeCoupon(code, req.user?.email || req.user?.userId || 'admin');
+    if (!resumed) return res.status(404).json({ error: 'Coupon not found' });
+
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({ by: req.user?.email || req.user?.userId || 'admin', action: 'coupon.resume', target: code, at: Date.now() });
+    }
+    res.json({ success: true, message: `Coupon ${code} resumed`, coupon: resumed });
+  }));
+
+  r.delete('/admin/coupons/:code', requireAdmin, wrap(async (req, res) => {
+    const code = String(req.params.code || '').trim().toUpperCase();
+    await repo.deleteCoupon(code);
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({ by: req.user?.email || req.user?.userId || 'admin', action: 'coupon.archive', target: code, at: Date.now() });
+    }
+    res.json({ success: true, message: `Coupon ${code} archived` });
+  }));
+
+  // ---------- COUPON USAGE & REDEMPTION TRACKING ----------
+
+  r.get('/admin/coupons/usage', requireAdmin, wrap(async (req, res) => {
+    const filter = {
+      couponCode: req.query.code || req.query.couponCode,
+      userId: req.query.userId,
+      orderId: req.query.orderId,
+      category: req.query.category,
+      status: req.query.status,
+      from: req.query.from,
+      to: req.query.to,
+    };
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const allCoupons = await repo.listCoupons(500);
+    const redemptions = await repo.listCouponRedemptions(filter, limit);
+
+    // Calculate aggregated metrics
+    const allRedemptions = await repo.listCouponRedemptions({}, 5000);
+    const successful = allRedemptions.filter((r) => r.status === 'SUCCESS');
+    const totalDiscount = successful.reduce((sum, r) => sum + (Number(r.discountAmount) || 0), 0);
+    const totalRevenue = successful.reduce((sum, r) => sum + (Number(r.finalAmount) || 0), 0);
+    const uniqueUsers = new Set(successful.map((r) => r.userId)).size;
+
+    res.json({
+      summary: {
+        totalCoupons: allCoupons.length,
+        activeCoupons: allCoupons.filter((c) => c.status === 'ACTIVE').length,
+        totalRedemptions: successful.length,
+        totalDiscountGivenInr: Math.round(totalDiscount * 100) / 100,
+        revenueGeneratedInr: Math.round(totalRevenue * 100) / 100,
+        uniqueUsersCount: uniqueUsers,
+      },
+      redemptions,
+      total: redemptions.length,
+    });
+  }));
+
+  // ---------- PAYMENT ANALYTICS DASHBOARD ----------
+
+  const handleAnalytics = wrap(async (req, res) => {
+    const range = String(req.query.range || '30d');
+    const analytics = await repo.getMembershipPaymentAnalytics({
+      range,
+      from: req.query.from,
+      to: req.query.to,
+    });
+    res.json(analytics);
+  });
+  r.get('/admin/payments/analytics', requireAdmin, handleAnalytics);
+  r.get('/admin/membership/analytics', requireAdmin, handleAnalytics);
+
+  // ---------- SEARCHABLE TRANSACTION HISTORY ----------
+
+  const handleTransactions = wrap(async (req, res) => {
+    const search = String(req.query.q || req.query.search || '');
+    const status = String(req.query.status || 'ALL');
+    const category = String(req.query.category || '');
+    const from = req.query.from;
+    const to = req.query.to;
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const cursor = Math.max(0, parseInt(req.query.cursor, 10) || 0);
+
+    const result = await repo.listTransactions({
+      search,
+      status,
+      category,
+      from,
+      to,
+      limit,
+      cursor,
+    });
+    // For backwards compatibility with older admin tests that expect { payments: [...] }
+    res.json({
+      ...result,
+      payments: result.transactions,
+    });
+  });
+  r.get('/admin/payments/history', requireAdmin, handleTransactions);
+  r.get('/admin/membership/payments', requireAdmin, handleTransactions);
 
   r.post('/admin/membership/payments/:orderId/refund', requireAdmin, wrap(async (req, res) => {
     const order = await repo.findRazorpayOrder(req.params.orderId);
@@ -958,70 +1644,22 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       }
     }
 
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({
+        by: req.user?.email || req.user?.userId || 'admin',
+        action: 'payment.refund',
+        target: order.orderId,
+        details: { refundId: refund.id, amountInPaise, fullyRefunded, reason },
+        at: Date.now(),
+      });
+    }
+
     res.json({
       ok: true,
       refundId: refund.id,
       refundStatus: refund.status || 'PROCESSED',
       fullyRefunded,
       orderId: order.orderId,
-    });
-  }));
-
-  r.get('/admin/membership/analytics', requireAdmin, wrap(async (req, res) => {
-    const allMemberships = await repo.soda.query(repo.soda.collections?.memberships || 'memberships', {}, { limit: 10000 });
-    const now = Date.now();
-
-    let individualActive = 0;
-    let groupSmallActive = 0;
-    let groupLargeActive = 0;
-    let totalMRR = 0;
-    let totalSeatsAllocated = 0;
-    let totalSeatsOccupied = 0;
-
-    for (const r of allMemberships) {
-      const m = r.value;
-      if (m.status === 'ACTIVE' && m.validUntil > now) {
-        if (m.category === 'individual') {
-          individualActive++;
-          totalMRR += (m.priceInr || 9);
-          totalSeatsAllocated += 1;
-          totalSeatsOccupied += 1;
-        } else if (m.category === 'group_small') {
-          groupSmallActive++;
-          totalMRR += (m.priceInr || 49);
-          totalSeatsAllocated += (m.capacity || 6);
-          totalSeatsOccupied += (1 + Object.keys(m.members || {}).length);
-        } else if (m.category === 'group_large') {
-          groupLargeActive++;
-          totalMRR += (m.priceInr || 99);
-          totalSeatsAllocated += (m.capacity || 12);
-          totalSeatsOccupied += (1 + Object.keys(m.members || {}).length);
-        }
-      }
-    }
-
-    const activeTripsCount = await repo.soda.query(repo.soda.collections?.activeTrips || 'active_trips', {}, { limit: 10000 });
-
-    res.json({
-      activeMemberships: {
-        individual: individualActive,
-        groupSmall: groupSmallActive,
-        groupLarge: groupLargeActive,
-        total: individualActive + groupSmallActive + groupLargeActive,
-      },
-      seatUtilization: {
-        totalAllocated: totalSeatsAllocated,
-        totalOccupied: totalSeatsOccupied,
-        utilizationRate: totalSeatsAllocated > 0 ? (totalSeatsOccupied / totalSeatsAllocated).toFixed(2) : 0,
-      },
-      financialMetrics: {
-        estimatedMRR: totalMRR,
-        currency: 'INR',
-      },
-      concurrency: {
-        currentActiveTrips: activeTripsCount.length,
-      },
-      timestamp: now,
     });
   }));
 }

@@ -1390,62 +1390,41 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       });
     }));
 
-    // POST /api/admin/coupons - Create a new coupon with usage limits & expiry
+    // POST /api/admin/coupons - Create a new coupon with full options
     r.post('/admin/coupons', requireAdmin, wrap(async (req, res) => {
-      const {
-        code,
-        description,
-        discountType,
-        discountValue,
-        applicableTiers,
-        applicableCycles,
-        maxUsageTotal,
-        maxUsagePerUser,
-        validFrom,
-        expiresAt,
-        isActive,
-        minOrderAmount,
-      } = req.body || {};
+      const body = req.body || {};
+      const code = String(body.code || '').trim().toUpperCase();
 
-      if (!code || !String(code).trim()) {
+      if (!code) {
         return res.status(400).json({ error: 'Coupon code is required' });
       }
-
-      const cleanCode = String(code).trim().toUpperCase();
-      if (!/^[A-Z0-9_-]{3,20}$/.test(cleanCode)) {
-        return res.status(400).json({ error: 'Coupon code must be 3-20 alphanumeric characters' });
+      if (!/^[A-Z0-9_-]{3,32}$/.test(code)) {
+        return res.status(400).json({ error: 'Coupon code must be 3-32 alphanumeric characters' });
       }
 
-      const numVal = Number(discountValue);
-      if (discountType !== 'free' && (isNaN(numVal) || numVal <= 0)) {
+      const numVal = Number(body.discountValue);
+      if (body.discountType !== 'free' && (isNaN(numVal) || numVal <= 0)) {
         return res.status(400).json({ error: 'Valid positive discount value is required' });
       }
-      if (discountType === 'percentage' && numVal > 100) {
+      if (body.discountType === 'percentage' && numVal > 100) {
         return res.status(400).json({ error: 'Percentage discount cannot exceed 100%' });
       }
 
-      const couponDoc = {
-        code: cleanCode,
-        description: description ? String(description).trim() : '',
-        discountType: discountType || 'percentage',
-        discountValue: discountType === 'free' ? 100 : numVal,
-        applicableTiers: Array.isArray(applicableTiers) && applicableTiers.length ? applicableTiers : ['all'],
-        applicableCycles: Array.isArray(applicableCycles) && applicableCycles.length ? applicableCycles : ['all'],
-        maxUsageTotal: Math.max(1, Number(maxUsageTotal) || 100),
-        usageCount: 0,
-        maxUsagePerUser: Math.max(1, Number(maxUsagePerUser) || 1),
-        validFrom: Number(validFrom) || Date.now(),
-        expiresAt: Number(expiresAt) || (Date.now() + 30 * 86400000),
-        isActive: isActive !== false,
-        minOrderAmount: Math.max(0, Number(minOrderAmount) || 0),
-        createdBy: req.user?.userId || 'admin',
-      };
-
-      const saved = await repo.saveCoupon(couponDoc);
-      await addAudit(repo, req, 'coupon.create', cleanCode, { discountType: couponDoc.discountType, discountValue: couponDoc.discountValue, maxUsageTotal: couponDoc.maxUsageTotal, expiresAt: couponDoc.expiresAt });
+      const saved = await repo.saveCoupon({
+        ...body,
+        code,
+        createdBy: req.user?.email || req.user?.userId || 'admin',
+      });
+      await addAudit(repo, req, 'coupon.create', code, {
+        name: saved.name,
+        discountType: saved.discountType,
+        discountValue: saved.discountValue,
+        maxUsageTotal: saved.maxUsageTotal,
+        maxDiscountCap: saved.maxDiscountCap,
+      });
       res.status(201).json({
         success: true,
-        message: `Coupon ${cleanCode} created successfully`,
+        message: `Coupon ${code} created successfully`,
         coupon: saved,
       });
     }));

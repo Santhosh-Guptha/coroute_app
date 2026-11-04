@@ -155,6 +155,69 @@ class MembershipService extends ChangeNotifier {
     return _paymentHistory;
   }
 
+  /// Validate coupon against a membership category on backend.
+  /// Returns coupon discount data, or null with lastError populated on rejection.
+  Future<Map<String, dynamic>?> validateCoupon({
+    required String code,
+    required String categoryId,
+  }) async {
+    _lastError = null;
+    try {
+      final body = {
+        'code': code.trim().toUpperCase(),
+        'category': categoryId,
+      };
+      final res = await _api.post('/membership/validate-coupon', body);
+      if (res is Map) {
+        return Map<String, dynamic>.from(res);
+      }
+    } catch (e) {
+      debugPrint('[MembershipService] validateCoupon error: $e');
+      if (e is ApiException) {
+        _lastError = e.message;
+      } else {
+        _lastError = 'Coupon validation failed.';
+      }
+    }
+    return null;
+  }
+
+  /// Activate zero-amount membership directly through backend authorization.
+  /// No Razorpay order or checkout is created.
+  Future<UserMembership?> activateFreeMembership({
+    required String categoryId,
+    required String couponCode,
+  }) async {
+    _isLoading = true;
+    _lastError = null;
+    notifyListeners();
+    try {
+      final body = {
+        'category': categoryId,
+        'couponCode': couponCode.trim().toUpperCase(),
+      };
+      final res = await _api.post('/membership/activate-free', body);
+      if (res is Map && res['membership'] is Map) {
+        final mem = UserMembership.fromJson(Map<String, dynamic>.from(res['membership'] as Map));
+        await fetchMyMembership();
+        await fetchPaymentHistory();
+        return mem;
+      }
+    } catch (e) {
+      debugPrint('[MembershipService] activateFreeMembership error: $e');
+      if (e is ApiException) {
+        _lastError = e.message;
+      } else {
+        _lastError = 'Membership activation failed. Please try again.';
+      }
+      notifyListeners();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+    return null;
+  }
+
   /// Purchase or claim an introductory offer for a membership category (legacy or direct wrapper).
   Future<UserMembership?> purchaseMembership({
     required String categoryId,

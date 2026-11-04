@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
@@ -9,10 +8,16 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/membership_service.dart';
 import 'payment_success_screen.dart';
 
-/// Stage 2: Redesigned CoRoute Payment Screen.
+/// Stage 2: CoRoute Membership Payment Screen.
 ///
-/// Handles Razorpay UPI checkout, introductory promo discounts (RIDERFREE),
-/// server-side cryptographic signature verification, and instant activation.
+/// Features:
+/// 1. Zero-Amount Activation: When net payable is ₹0, payment methods are completely hidden,
+///    and membership activates directly via backend authorization without Razorpay orders.
+/// 2. Razorpay Only: Real Razorpay payment methods only (Instant UPI, Cards & Net Banking).
+///    All sandbox activation shortcuts have been completely eliminated.
+/// 3. Dynamic Coupon Recalculation: Instant recalculation when applying/removing coupons
+///    or when switching membership tier tabs.
+/// 4. Duplicate Submit Protection & Idempotent Verification.
 class MembershipPaymentScreen extends StatefulWidget {
   final MembershipCategory category;
   final bool isTripCreationFlow;
@@ -50,11 +55,16 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
 
   late MembershipCategory _selectedCategory;
   final TextEditingController _offerCtrl = TextEditingController(text: 'RIDERFREE');
-  final TextEditingController _upiVpaCtrl = TextEditingController();
 
-  String _paymentMethod = 'upi_instant'; // 'upi_instant', 'upi_custom', 'card_netbanking', 'sandbox_instant'
+  // Supported Razorpay payment methods only (no sandbox)
+  String _paymentMethod = 'razorpay_upi'; // 'razorpay_upi', 'razorpay_card_netbanking'
+
   bool _isProcessing = false;
-  int _discountPercent = 100; // Default introductory offer applies 100% off
+  bool _isValidatingCoupon = false;
+
+  // Coupon state
+  String? _appliedCouponCode = 'RIDERFREE';
+  int _discountAmountRupees = 0;
   String? _promoMessage = 'Introductory promo applied: 100% OFF (₹0)';
   String? _errorMessage;
   String? _pendingOrderId;
@@ -63,6 +73,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
   void initState() {
     super.initState();
     _selectedCategory = widget.category;
+    _discountAmountRupees = widget.category.priceRupees; // RIDERFREE 100% default
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
@@ -73,25 +84,96 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
   void dispose() {
     _razorpay.clear();
     _offerCtrl.dispose();
-    _upiVpaCtrl.dispose();
     super.dispose();
   }
 
-  void _applyPromoCode() {
-    final code = _offerCtrl.text.trim().toUpperCase();
+  /// When user switches membership tier tab (Solo, 6 Bikes, 12 Bikes)
+  void _onCategoryChanged(MembershipCategory newCat) {
+    if (_selectedCategory.id == newCat.id) return;
     setState(() {
+      _selectedCategory = newCat;
       _errorMessage = null;
-      if (code == 'RIDERFREE') {
-        _discountPercent = 100;
-        _promoMessage = 'Introductory promo applied: 100% OFF (₹0)';
-      } else if (code.isEmpty) {
-        _discountPercent = 0;
-        _promoMessage = null;
+    });
+
+    if (_appliedCouponCode != null) {
+      if (_appliedCouponCode == 'RIDERFREE') {
+        setState(() {
+          _discountAmountRupees = newCat.priceRupees;
+          _promoMessage = 'Introductory promo applied: 100% OFF (₹0)';
+        });
       } else {
-        _discountPercent = 0;
-        _promoMessage = null;
-        _errorMessage = 'Invalid promo code. Use RIDERFREE or proceed with standard payment.';
+        _revalidateCouponForCategory(newCat);
       }
+    }
+  }
+
+  /// Automatically re-validates current coupon when switching tiers
+  Future<void> _revalidateCouponForCategory(MembershipCategory cat) async {
+    final code = _appliedCouponCode;
+    if (code == null) return;
+
+    setState(() => _isValidatingCoupon = true);
+    final ms = context.read<MembershipService>();
+    final res = await ms.validateCoupon(code: code, categoryId: cat.id);
+    if (!mounted) return;
+
+    setState(() {
+      _isValidatingCoupon = false;
+      if (res != null && res['valid'] == true) {
+        _discountAmountRupees = (res['discountAmount'] as num?)?.toInt() ?? 0;
+        _promoMessage = res['message']?.toString() ?? 'Coupon $code applied: -₹$_discountAmountRupees';
+      } else {
+        // Coupon not applicable to new tier
+        _appliedCouponCode = null;
+        _discountAmountRupees = 0;
+        _promoMessage = null;
+        _errorMessage = ms.lastError ?? 'Coupon $code is not applicable to ${cat.name}. Reverted to original price.';
+      }
+    });
+  }
+
+  /// Applies coupon via server validation
+  Future<void> _applyPromoCode() async {
+    final code = _offerCtrl.text.trim().toUpperCase();
+    if (code.isEmpty) {
+      _removeCoupon();
+      return;
+    }
+
+    setState(() {
+      _isValidatingCoupon = true;
+      _errorMessage = null;
+    });
+
+    final ms = context.read<MembershipService>();
+    final res = await ms.validateCoupon(code: code, categoryId: _selectedCategory.id);
+    if (!mounted) return;
+
+    setState(() {
+      _isValidatingCoupon = false;
+      if (res != null && res['valid'] == true) {
+        _appliedCouponCode = code;
+        final rawDisc = res['discountAmount'] ?? res['discountInr'];
+        _discountAmountRupees = (rawDisc as num?)?.toInt() ?? 0;
+        _promoMessage = res['message']?.toString() ?? 'Coupon $code applied: -₹$_discountAmountRupees';
+        _errorMessage = null;
+      } else {
+        _appliedCouponCode = null;
+        _discountAmountRupees = 0;
+        _promoMessage = null;
+        _errorMessage = ms.lastError ?? 'Invalid or inapplicable coupon code.';
+      }
+    });
+  }
+
+  /// Removes applied coupon and immediately restores original price
+  void _removeCoupon() {
+    setState(() {
+      _offerCtrl.clear();
+      _appliedCouponCode = null;
+      _discountAmountRupees = 0;
+      _promoMessage = null;
+      _errorMessage = null;
     });
   }
 
@@ -175,12 +257,11 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
   }
 
   Future<void> _submitPayment() async {
-    if (_isProcessing) return; // Prevent duplicate payment submissions
+    if (_isProcessing || _isValidatingCoupon) return; // Prevent duplicate payment submissions
 
     final ms = context.read<MembershipService>();
     final basePrice = _selectedCategory.priceRupees;
-    final discountAmount = (basePrice * (_discountPercent / 100)).round();
-    final netPayable = (basePrice - discountAmount).clamp(0, 999999);
+    final netPayable = (basePrice - _discountAmountRupees).clamp(0, 999999);
 
     setState(() {
       _isProcessing = true;
@@ -188,9 +269,30 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
     });
 
     try {
+      // 1. Zero-Amount Membership Activation Flow (No Razorpay Order Created)
+      if (netPayable == 0) {
+        final couponCode = _appliedCouponCode ?? _offerCtrl.text.trim();
+        final mem = await ms.activateFreeMembership(
+          categoryId: _selectedCategory.id,
+          couponCode: couponCode.isNotEmpty ? couponCode : 'RIDERFREE',
+        );
+
+        if (!mounted) return;
+        if (mem != null) {
+          _navigateToSuccess(mem, 'FREE-PROMO');
+        } else {
+          setState(() {
+            _isProcessing = false;
+            _errorMessage = ms.lastError ?? 'Zero-amount membership activation failed.';
+          });
+        }
+        return;
+      }
+
+      // 2. Paid Razorpay Checkout Flow
       final orderRes = await ms.createOrder(
         categoryId: _selectedCategory.id,
-        offerCode: _discountPercent > 0 ? _offerCtrl.text.trim().toUpperCase() : null,
+        offerCode: _appliedCouponCode,
       );
 
       if (orderRes == null) {
@@ -202,45 +304,12 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
         return;
       }
 
-      if (orderRes['isFree'] == true) {
-        final mem = ms.ownedMembership;
-        if (!mounted) return;
-        if (mem != null) {
-          _navigateToSuccess(mem, orderRes['orderId']?.toString() ?? 'FREE-INTRO');
-        } else {
-          setState(() {
-            _isProcessing = false;
-            _errorMessage = ms.lastError ?? 'Membership activation completed, refreshing status...';
-          });
-        }
-        return;
-      }
-
       final orderId = orderRes['orderId']?.toString() ?? '';
       final keyId = orderRes['keyId']?.toString() ?? '';
       final amountInPaise = orderRes['amountInPaise'] as int? ?? (netPayable * 100);
 
       _lastCreatedOrderId = orderId;
       _pendingOrderId = orderId;
-
-      if (_paymentMethod == 'sandbox_instant' || keyId.isEmpty || kIsWeb) {
-        final mem = await ms.purchaseMembership(
-          categoryId: _selectedCategory.id,
-          offerCode: _discountPercent > 0 ? _offerCtrl.text.trim().toUpperCase() : null,
-          orderId: orderId,
-          paymentId: 'pay_test_${DateTime.now().millisecondsSinceEpoch}',
-        );
-        if (!mounted) return;
-        if (mem != null) {
-          _navigateToSuccess(mem, orderId);
-        } else {
-          setState(() {
-            _isProcessing = false;
-            _errorMessage = ms.lastError ?? 'Instant sandbox activation failed.';
-          });
-        }
-        return;
-      }
 
       _openRazorpayCheckout(orderId: orderId, keyId: keyId, amountInPaise: amountInPaise);
     } catch (e) {
@@ -254,8 +323,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
 
   void _navigateToSuccess(UserMembership mem, String ref) async {
     final basePrice = _selectedCategory.priceRupees;
-    final discountAmount = (basePrice * (_discountPercent / 100)).round();
-    final netPayable = (basePrice - discountAmount).clamp(0, 999999);
+    final netPayable = (basePrice - _discountAmountRupees).clamp(0, 999999);
 
     final res = await Navigator.push<bool>(
       context,
@@ -294,8 +362,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
     final ms = context.watch<MembershipService>();
     final catalog = ms.catalog;
     final basePrice = _selectedCategory.priceRupees;
-    final discountAmount = (basePrice * (_discountPercent / 100)).round();
-    final netPayable = (basePrice - discountAmount).clamp(0, 999999);
+    final netPayable = (basePrice - _discountAmountRupees).clamp(0, 999999);
 
     return Scaffold(
       backgroundColor: AppTheme.bg,
@@ -322,7 +389,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                       for (final c in catalog.categories)
                         Expanded(
                           child: GestureDetector(
-                            onTap: () => setState(() => _selectedCategory = c),
+                            onTap: () => _onCategoryChanged(c),
                             child: Container(
                               margin: const EdgeInsets.symmetric(horizontal: 4),
                               padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
@@ -426,7 +493,20 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('PROMOTIONAL COUPON', style: AppText.overline),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('PROMOTIONAL COUPON', style: AppText.overline),
+                          if (_appliedCouponCode != null)
+                            GestureDetector(
+                              onTap: _removeCoupon,
+                              child: Text(
+                                'Remove Coupon',
+                                style: TextStyle(color: Colors.redAccent.shade100, fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                        ],
+                      ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
@@ -442,6 +522,12 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                                 fillColor: AppTheme.card,
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: AppTheme.border)),
+                                suffixIcon: _appliedCouponCode != null
+                                    ? IconButton(
+                                        icon: const Icon(Icons.cancel_rounded, size: 18),
+                                        onPressed: _removeCoupon,
+                                      )
+                                    : null,
                               ),
                             ),
                           ),
@@ -452,16 +538,26 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             ),
-                            onPressed: _applyPromoCode,
-                            child: const Text('Apply', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w800)),
+                            onPressed: _isValidatingCoupon ? null : _applyPromoCode,
+                            child: _isValidatingCoupon
+                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                                : const Text('Apply', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w800)),
                           ),
                         ],
                       ),
                       if (_promoMessage != null) ...[
                         const SizedBox(height: 6),
-                        Text(
-                          _promoMessage!,
-                          style: TextStyle(color: Colors.lightGreenAccent.shade400, fontSize: 12, fontWeight: FontWeight.w700),
+                        Row(
+                          children: [
+                            Icon(Icons.check_circle_rounded, size: 14, color: Colors.lightGreenAccent.shade400),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                _promoMessage!,
+                                style: TextStyle(color: Colors.lightGreenAccent.shade400, fontSize: 12, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ],
@@ -469,12 +565,16 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                 ),
                 const SizedBox(height: 18),
 
-                // Payment Method Selector
-                Text('PAYMENT METHOD', style: AppText.overline),
-                const SizedBox(height: 8),
-                _paymentMethodRadio('upi_instant', 'Instant UPI Apps', 'Google Pay, PhonePe, Paytm, BHIM', Icons.bolt_rounded),
-                _paymentMethodRadio('card_netbanking', 'Cards & Net Banking', 'Visa, Mastercard, RuPay, All Indian Banks', Icons.credit_card_rounded),
-                _paymentMethodRadio('sandbox_instant', 'Instant Fast Checkout', 'Verified Sandbox Activation for CoRoute', Icons.flash_on_rounded),
+                // CRITICAL REQUIREMENT 1: When netPayable is ₹0, NEVER show payment methods.
+                // When netPayable > 0, show ONLY verified Razorpay payment methods.
+                if (netPayable == 0) ...[
+                  _buildZeroPaymentInfoCard(),
+                ] else ...[
+                  Text('PAYMENT METHOD', style: AppText.overline),
+                  const SizedBox(height: 8),
+                  _paymentMethodRadio('razorpay_upi', 'Instant UPI Apps', 'Google Pay, PhonePe, Paytm, BHIM UPI', Icons.bolt_rounded),
+                  _paymentMethodRadio('razorpay_card_netbanking', 'Cards & Net Banking', 'Visa, Mastercard, RuPay, All Indian Banks', Icons.credit_card_rounded),
+                ],
                 const SizedBox(height: 16),
 
                 // Pricing Summary
@@ -488,9 +588,9 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                   child: Column(
                     children: [
                       _priceRow('Monthly Plan', '₹$basePrice.00'),
-                      if (discountAmount > 0) ...[
+                      if (_discountAmountRupees > 0) ...[
                         const SizedBox(height: 6),
-                        _priceRow('Promotional Discount', '-₹$discountAmount.00', isDiscount: true),
+                        _priceRow('Promotional Discount', '-₹$_discountAmountRupees.00', isDiscount: true),
                       ],
                       const SizedBox(height: 8),
                       const Divider(height: 1),
@@ -544,7 +644,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                     minimumSize: const Size.fromHeight(54),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  onPressed: _isProcessing ? null : _submitPayment,
+                  onPressed: (_isProcessing || _isValidatingCoupon) ? null : _submitPayment,
                   child: _isProcessing
                       ? const SizedBox(
                           width: 22,
@@ -552,7 +652,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
                         )
                       : Text(
-                          netPayable > 0 ? 'Pay ₹$netPayable & Activate Membership' : 'Activate Free Introductory Offer (₹0)',
+                          netPayable > 0 ? 'Pay ₹$netPayable & Activate Membership' : 'Activate Free Membership (₹0)',
                           style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 15),
                         ),
                 ),
@@ -561,6 +661,40 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildZeroPaymentInfoCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.brand.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.brand.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.verified_rounded, color: AppTheme.brand, size: 26),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '100% Free Activation',
+                  style: AppText.title.copyWith(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Your coupon covers the entire membership fee. No payment method, card or UPI details are required. Tap below to activate instantly.',
+                  style: AppText.caption.copyWith(color: AppTheme.text2, height: 1.3),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

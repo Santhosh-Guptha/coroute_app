@@ -72,26 +72,6 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
     );
   }
 
-  Future<void> _confirmDelete(TripHistoryModel trip, TripStorageService storage) async {
-    final ok = await confirmAction(
-      context,
-      title: 'Delete trip?',
-      message: '"${trip.tripName}" is removed from your history on all your devices. The other riders keep their own copy.',
-      confirmLabel: 'Delete',
-      destructive: true,
-    );
-    if (!mounted) return;
-    if (ok) {
-      await storage.deleteTrip(trip.tripId);
-      if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Trip deleted')),
-        );
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final tripStorage = context.watch<TripStorageService>();
@@ -133,7 +113,6 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
               key: ValueKey(trip.tripId),
               trip: trip,
               onTap: () => _open(trip),
-              onDelete: () => _confirmDelete(trip, tripStorage),
             ),
           );
         },
@@ -228,13 +207,12 @@ class _TotalsHeader extends StatelessWidget {
 }
 
 /// One trip in the list: a small route glyph, name, date, "142 km · 3 h 10 min
-/// riding", and a menu with Delete. The same card for every trip.
+/// riding", and a view navigation affordance. View-only; trip deletion is not available.
 class _TripRow extends StatelessWidget {
   final TripHistoryModel trip;
   final VoidCallback onTap;
-  final VoidCallback onDelete;
 
-  const _TripRow({super.key, required this.trip, required this.onTap, required this.onDelete});
+  const _TripRow({super.key, required this.trip, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -245,7 +223,7 @@ class _TripRow extends StatelessWidget {
         : formatDuration(Duration(minutes: trip.durationMinutes));
     final facts = '${formatDistance(trip.totalDistanceKm * 1000)} · $riding';
     return DsCard(
-      padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
       onTap: onTap,
       child: Row(children: [
         _RouteGlyph(trip: trip),
@@ -275,22 +253,9 @@ class _TripRow extends StatelessWidget {
             ],
           ),
         ),
-        PopupMenuButton<String>(
-          tooltip: 'More options',
-          icon: Icon(Icons.more_vert_rounded, color: AppTheme.muted),
-          onSelected: (v) {
-            if (v == 'delete') onDelete();
-          },
-          itemBuilder: (_) => [
-            PopupMenuItem<String>(
-              value: 'delete',
-              child: Row(children: [
-                Icon(Icons.delete_outline_rounded, color: AppTheme.sos),
-                const SizedBox(width: Space.s12),
-                const Flexible(child: Text('Delete trip', maxLines: 1, overflow: TextOverflow.ellipsis)),
-              ]),
-            ),
-          ],
+        Padding(
+          padding: const EdgeInsets.only(left: 8, right: 4),
+          child: Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppTheme.muted),
         ),
       ]),
     );

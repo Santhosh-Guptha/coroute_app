@@ -3,6 +3,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../subscription/plan_selector_screen.dart';
 import 'admin_config_tabs.dart';
+import 'admin_coupon_usage_tab.dart';
+import 'admin_payment_analytics_tab.dart';
 import 'admin_payments_tabs.dart';
 import 'admin_promotions_tabs.dart';
 import 'admin_ui.dart';
@@ -22,51 +24,63 @@ enum AdminPaymentsCategory {
 /// The modules of the "Payments & Plans" configuration console.
 enum AdminPaymentsTab {
   overview(
-    'Overview',
+    'Dashboard',
     Icons.space_dashboard_outlined,
     'Live subscription metrics & revenue KPI pulse',
     AdminPaymentsCategory.operations,
   ),
   subscribers(
-    'Subscribers',
+    'Membership Management',
     Icons.card_membership_rounded,
-    'Entitlements, manual grant & plan revocation',
+    'Entitlements, subscribers, seat utilization & catalog',
+    AdminPaymentsCategory.operations,
+  ),
+  coupons(
+    'Coupon Management',
+    Icons.discount_outlined,
+    'Create promotional campaigns, discount codes & limits',
+    AdminPaymentsCategory.promotions,
+  ),
+  couponUsage(
+    'Coupon Usage',
+    Icons.fact_check_outlined,
+    'Live redemption monitoring, member audit & transaction trace',
+    AdminPaymentsCategory.promotions,
+  ),
+  analytics(
+    'Payment Analytics',
+    Icons.analytics_outlined,
+    'Financial KPIs, plan breakdown, coupon ROI & revenue trends',
     AdminPaymentsCategory.operations,
   ),
   payments(
-    'Payments',
+    'Transaction History',
     Icons.receipt_long_rounded,
-    'Ledger, settlements, refund dispatch & CSV export',
+    'Searchable ledger, payment states & safe refund trace',
     AdminPaymentsCategory.operations,
   ),
-  offers(
-    'Offers',
-    Icons.campaign_outlined,
-    'Public promotional banners, discounts & trial codes',
-    AdminPaymentsCategory.promotions,
+  audit(
+    'Audit Logs',
+    Icons.security_rounded,
+    'Immutable administrative audit trail of all changes',
+    AdminPaymentsCategory.system,
   ),
-  coupons(
-    'Coupons',
-    Icons.discount_outlined,
-    'Single-use discount codes & redemption limits',
+  offers(
+    'Promotional Offers',
+    Icons.campaign_outlined,
+    'Public promotional banners & introductory discount codes',
     AdminPaymentsCategory.promotions,
   ),
   pricing(
-    'Pricing',
+    'Pricing Catalog',
     Icons.sell_outlined,
-    'Configure dynamic monthly & annual tier INR amounts',
+    'Configure dynamic tier INR amounts & seat limits',
     AdminPaymentsCategory.promotions,
   ),
   gateway(
-    'Gateway',
+    'Gateway Settings',
     Icons.account_balance_wallet_outlined,
     'Razorpay Test / Live mode switch & API credentials',
-    AdminPaymentsCategory.system,
-  ),
-  audit(
-    'Audit',
-    Icons.fact_check_outlined,
-    'Immutable administrative audit trail of all changes',
     AdminPaymentsCategory.system,
   );
 
@@ -266,12 +280,14 @@ class _AdminPlansPricingScreenState extends State<AdminPlansPricingScreen> {
                           children: [
                             AdminOverviewTab(onOpen: _goTo),
                             const AdminSubscribersTab(),
-                            const AdminPaymentsListTab(),
-                            const AdminOffersTab(),
                             const AdminCouponsTab(),
+                            const AdminCouponUsageTab(),
+                            const AdminPaymentAnalyticsTab(),
+                            const AdminPaymentsListTab(),
+                            const AdminAuditTab(),
+                            const AdminOffersTab(),
                             const AdminPricingTab(),
                             const AdminGatewayTab(),
-                            const AdminAuditTab(),
                           ],
                         ),
                       ),

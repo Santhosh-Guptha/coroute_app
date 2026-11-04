@@ -781,44 +781,361 @@ class Repo {
     const rows = await this.soda.query(C.subscriptionConfig, { k: 'audit' }, { orderBy: [{ path: 'at', datatype: 'number', order: 'desc' }], limit });
     return rows.map((r) => r.value).sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
   }
+  // ---------- dynamic coupons & safe redemption tracking ----------
+
+  computeCouponStatus(c, now = Date.now()) {
+    if (!c) return 'ARCHIVED';
+    if (c.status === 'ARCHIVED' || c.isArchived) return 'ARCHIVED';
+    if (c.status === 'DRAFT') return 'DRAFT';
+    const maxTotal = Number(c.maxUsageTotal) || 0;
+    const used = Number(c.usageCount) || 0;
+    if (c.status === 'USAGE_LIMIT_REACHED' || (maxTotal > 0 && used >= maxTotal)) return 'USAGE_LIMIT_REACHED';
+    if (c.status === 'EXPIRED' || (c.expiresAt && c.expiresAt < now)) return 'EXPIRED';
+    if (c.status === 'PAUSED' || c.isActive === false) return 'PAUSED';
+    if (c.validFrom && c.validFrom > now) return 'SCHEDULED';
+    return 'ACTIVE';
+  }
+
   async findCoupon(rawCode) {
     if (!rawCode) return null;
     const code = String(rawCode).trim().toUpperCase();
     const r = await this.soda.findOne(C.coupons, { code });
-    return r ? { ...r.value, key: r.key } : null;
+    if (!r) return null;
+    const c = { ...r.value, key: r.key };
+    c.status = this.computeCouponStatus(c);
+    c.isActive = (c.status === 'ACTIVE' || c.status === 'SCHEDULED');
+    return c;
   }
-  async listCoupons(limit = 200) {
+
+  async listCoupons(limit = 500) {
     const rows = await this.soda.query(C.coupons, {}, { limit });
-    return rows.map((r) => ({ ...r.value, key: r.key }));
+    const now = Date.now();
+    return rows.map((r) => {
+      const c = { ...r.value, key: r.key };
+      c.status = this.computeCouponStatus(c, now);
+      c.isActive = (c.status === 'ACTIVE' || c.status === 'SCHEDULED');
+      return c;
+    }).sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
   }
+
   async saveCoupon(coupon) {
     const code = String(coupon.code || '').trim().toUpperCase();
     if (!code) throw new Error('Coupon code is required');
+    const now = Date.now();
+    const explicitStatus = String(coupon.status || '').trim().toUpperCase();
+    const validFrom = Number(coupon.validFrom) || now;
+    const expiresAt = Number(coupon.expiresAt) || (now + 30 * 86400000);
+    const maxUsageTotal = Number(coupon.maxUsageTotal) > 0 ? Number(coupon.maxUsageTotal) : 100;
+    const usageCount = Number(coupon.usageCount) || 0;
+
+    let status = explicitStatus;
+    if (coupon.isActive === false) {
+      status = 'PAUSED';
+    } else if (coupon.isActive === true && status === 'PAUSED') {
+      status = validFrom > now ? 'SCHEDULED' : (expiresAt < now ? 'EXPIRED' : 'ACTIVE');
+    } else if (!status || !['DRAFT', 'SCHEDULED', 'ACTIVE', 'PAUSED', 'EXPIRED', 'USAGE_LIMIT_REACHED', 'ARCHIVED'].includes(status)) {
+      if (validFrom > now) status = 'SCHEDULED';
+      else if (expiresAt < now) status = 'EXPIRED';
+      else if (maxUsageTotal > 0 && usageCount >= maxUsageTotal) status = 'USAGE_LIMIT_REACHED';
+      else status = 'ACTIVE';
+    }
+
     const doc = {
       code,
+      name: coupon.name ? String(coupon.name).trim() : code,
+      description: coupon.description ? String(coupon.description).trim() : '',
+      internalNotes: coupon.internalNotes ? String(coupon.internalNotes).trim() : '',
+      campaignName: coupon.campaignName ? String(coupon.campaignName).trim() : '',
+      status,
       discountType: coupon.discountType || 'percentage', // 'percentage' | 'fixed' | 'free'
       discountValue: Number(coupon.discountValue) || 0,
+      maxDiscountCap: coupon.maxDiscountCap !== undefined && coupon.maxDiscountCap !== null ? Number(coupon.maxDiscountCap) : null,
+      minOrderAmount: Number(coupon.minOrderAmount) || 0,
+      validFrom,
+      expiresAt,
+      timezone: coupon.timezone || 'Asia/Kolkata',
+      maxUsageTotal,
+      usageCount,
+      maxUsagePerUser: Number(coupon.maxUsagePerUser) > 0 ? Number(coupon.maxUsagePerUser) : 1,
       applicableTiers: Array.isArray(coupon.applicableTiers) && coupon.applicableTiers.length ? coupon.applicableTiers : ['all'],
       applicableCycles: Array.isArray(coupon.applicableCycles) && coupon.applicableCycles.length ? coupon.applicableCycles : ['all'],
-      maxUsageTotal: Number(coupon.maxUsageTotal) || 100,
-      usageCount: Number(coupon.usageCount) || 0,
-      maxUsagePerUser: Number(coupon.maxUsagePerUser) || 1,
-      validFrom: Number(coupon.validFrom) || Date.now(),
-      expiresAt: Number(coupon.expiresAt) || (Date.now() + 30 * 86400000),
-      isActive: coupon.isActive !== false,
-      minOrderAmount: Number(coupon.minOrderAmount) || 0,
-      description: coupon.description || '',
+      newMembersOnly: Boolean(coupon.newMembersOnly),
+      firstPaymentOnly: Boolean(coupon.firstPaymentOnly),
+      allowedUserIds: Array.isArray(coupon.allowedUserIds) ? coupon.allowedUserIds : [],
+      isActive: (status === 'ACTIVE' || status === 'SCHEDULED'),
       usages: Array.isArray(coupon.usages) ? coupon.usages : [],
-      createdAt: coupon.createdAt || Date.now(),
-      updatedAt: Date.now(),
+      createdAt: coupon.createdAt || now,
+      updatedAt: now,
+      createdBy: coupon.createdBy || 'admin',
     };
+
     await this.soda.upsertBy(C.coupons, { code }, doc);
     return doc;
   }
+
   async deleteCoupon(rawCode) {
     const code = String(rawCode).trim().toUpperCase();
-    return this.soda.removeWhere(C.coupons, { code });
+    const existing = await this.findCoupon(code);
+    if (!existing) return false;
+    if (existing.status === 'DRAFT' && (!existing.usages || existing.usages.length === 0)) {
+      return this.soda.removeWhere(C.coupons, { code });
+    }
+    // Soft-archive to preserve immutable audit trail and historical redemptions
+    const archived = {
+      ...existing,
+      status: 'ARCHIVED',
+      isActive: false,
+      updatedAt: Date.now(),
+    };
+    delete archived.key;
+    await this.soda.upsertBy(C.coupons, { code }, archived);
+    return true;
   }
+
+  async pauseCoupon(rawCode, updatedBy = 'admin') {
+    const code = String(rawCode).trim().toUpperCase();
+    const existing = await this.findCoupon(code);
+    if (!existing) return null;
+    const paused = {
+      ...existing,
+      status: 'PAUSED',
+      isActive: false,
+      updatedBy,
+      updatedAt: Date.now(),
+    };
+    delete paused.key;
+    await this.soda.upsertBy(C.coupons, { code }, paused);
+    return paused;
+  }
+
+  async resumeCoupon(rawCode, updatedBy = 'admin') {
+    const code = String(rawCode).trim().toUpperCase();
+    const existing = await this.findCoupon(code);
+    if (!existing) return null;
+    const now = Date.now();
+    let status = 'ACTIVE';
+    if (existing.validFrom && existing.validFrom > now) status = 'SCHEDULED';
+    else if (existing.expiresAt && existing.expiresAt < now) status = 'EXPIRED';
+    else if (existing.maxUsageTotal > 0 && (existing.usageCount || 0) >= existing.maxUsageTotal) status = 'USAGE_LIMIT_REACHED';
+
+    const resumed = {
+      ...existing,
+      status,
+      isActive: (status === 'ACTIVE' || status === 'SCHEDULED'),
+      updatedBy,
+      updatedAt: now,
+    };
+    delete resumed.key;
+    await this.soda.upsertBy(C.coupons, { code }, resumed);
+    return resumed;
+  }
+
+  // ---------- coupon redemptions & reservations (k='coupon_redemption') ----------
+
+  async saveCouponRedemption(redemptionDoc) {
+    const doc = {
+      ...redemptionDoc,
+      k: 'coupon_redemption',
+      updatedAt: Date.now(),
+    };
+    delete doc.key;
+    await this.soda.upsertBy(C.subscriptionConfig, { k: 'coupon_redemption', redemptionId: doc.redemptionId }, doc);
+    return doc;
+  }
+
+  async findCouponRedemptionByOrderId(orderId) {
+    if (!orderId) return null;
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'coupon_redemption', orderId: String(orderId) });
+    return r ? r.value : null;
+  }
+
+  async listCouponRedemptions(filter = {}, limit = 500) {
+    const rows = await this.soda.query(C.subscriptionConfig, { k: 'coupon_redemption' }, { limit: 2000 });
+    let list = rows.map((r) => r.value);
+
+    if (filter.couponCode) {
+      const code = String(filter.couponCode).trim().toUpperCase();
+      list = list.filter((r) => (r.couponCode || '').toUpperCase() === code);
+    }
+    if (filter.userId) {
+      list = list.filter((r) => r.userId === filter.userId);
+    }
+    if (filter.orderId) {
+      list = list.filter((r) => r.orderId === filter.orderId);
+    }
+    if (filter.category) {
+      list = list.filter((r) => r.category === filter.category);
+    }
+    if (filter.status) {
+      list = list.filter((r) => (r.status || '').toUpperCase() === filter.status.toUpperCase());
+    }
+    if (filter.from) {
+      const fromTs = Number(filter.from);
+      list = list.filter((r) => (r.redeemedAt || r.reservedAt || r.createdAt) >= fromTs);
+    }
+    if (filter.to) {
+      const toTs = Number(filter.to);
+      list = list.filter((r) => (r.redeemedAt || r.reservedAt || r.createdAt) <= toTs);
+    }
+
+    return list
+      .sort((a, b) => (Number(b.redeemedAt || b.reservedAt || b.createdAt) || 0) - (Number(a.redeemedAt || a.reservedAt || a.createdAt) || 0))
+      .slice(0, limit);
+  }
+
+  /**
+   * Safe transaction reservation of a coupon slot (15 min TTL).
+   * Prevents concurrency race conditions without permanently consuming slot on payment abandonment.
+   */
+  async reserveCouponSlot(rawCode, { userId, orderId, category, categoryName, originalPrice, discountAmount, finalAmount, userDoc = null }) {
+    const coupon = await this.findCoupon(rawCode);
+    if (!coupon) return { reserved: false, error: 'Coupon not found' };
+
+    const now = Date.now();
+    const ttlMs = 15 * 60 * 1000;
+
+    // Fetch active reservations for this coupon
+    const allRedemptions = await this.listCouponRedemptions({ couponCode: coupon.code }, 1000);
+    const activeReservations = allRedemptions.filter((r) => r.status === 'RESERVED' && r.expiresAt > now && r.orderId !== orderId);
+
+    const totalInFlightOrUsed = (coupon.usageCount || 0) + activeReservations.length;
+    if (coupon.maxUsageTotal > 0 && totalInFlightOrUsed >= coupon.maxUsageTotal) {
+      return { reserved: false, error: 'This coupon has reached its maximum total redemptions limit' };
+    }
+
+    if (userId) {
+      const userRedemptions = allRedemptions.filter((r) => r.userId === userId && (r.status === 'SUCCESS' || (r.status === 'RESERVED' && r.expiresAt > now && r.orderId !== orderId)));
+      const maxPerUser = Number(coupon.maxUsagePerUser) || 1;
+      if (userRedemptions.length >= maxPerUser) {
+        return { reserved: false, error: `You have already redeemed this coupon (limit ${maxPerUser} per rider)` };
+      }
+    }
+
+    const redemptionId = `red_${now.toString(36)}_${require('crypto').randomBytes(4).toString('hex')}`;
+    const redemptionDoc = {
+      redemptionId,
+      couponCode: coupon.code,
+      campaignName: coupon.campaignName || coupon.name || coupon.code,
+      userId: userId || 'guest',
+      userName: userDoc?.name || 'Rider',
+      userEmail: userDoc?.email || '',
+      userPhone: userDoc?.phone || '',
+      category: category || 'individual',
+      categoryName: categoryName || (category === 'group_large' ? 'Group (7–12)' : category === 'group_small' ? 'Group (2–6)' : 'Individual'),
+      originalPrice: Number(originalPrice) || 0,
+      discountAmount: Number(discountAmount) || 0,
+      finalAmount: Number(finalAmount) || 0,
+      orderId: orderId || '',
+      paymentId: null,
+      status: finalAmount === 0 ? 'SUCCESS' : 'RESERVED',
+      isFree: finalAmount === 0,
+      reservedAt: now,
+      expiresAt: now + ttlMs,
+      redeemedAt: finalAmount === 0 ? now : null,
+      activatedAt: finalAmount === 0 ? now : null,
+      createdAt: now,
+    };
+
+    await this.saveCouponRedemption(redemptionDoc);
+
+    if (finalAmount === 0) {
+      // Free activation completes immediately
+      await this.recordCouponUsage(coupon.code, { userId, orderId, discountAmount });
+    }
+
+    return { reserved: true, redemption: redemptionDoc };
+  }
+
+  /**
+   * Finalizes coupon redemption when payment succeeds.
+   */
+  async confirmCouponRedemption(orderId, { paymentId, method = 'RAZORPAY', paidAt = Date.now(), userDoc = null }) {
+    if (!orderId) return null;
+    let existing = await this.findCouponRedemptionByOrderId(orderId);
+    if (!existing) {
+      const rzp = await this.findRazorpayOrder(orderId);
+      if (rzp?.internalOrderId) {
+        existing = await this.findCouponRedemptionByOrderId(rzp.internalOrderId);
+      }
+      if (!existing && rzp?.offerCode) {
+        const coupon = await this.findCoupon(rzp.offerCode);
+        if (coupon) {
+          const discountAmt = Number(rzp.discountAmount) || 0;
+          existing = {
+            redemptionId: `red_${Date.now().toString(36)}_${require('crypto').randomBytes(4).toString('hex')}`,
+            couponCode: coupon.code,
+            campaignName: coupon.campaignName || coupon.name || coupon.code,
+            userId: rzp.userId || 'guest',
+            userName: userDoc?.name || 'Rider',
+            userEmail: userDoc?.email || '',
+            userPhone: userDoc?.phone || '',
+            category: rzp.category || 'individual',
+            categoryName: rzp.category === 'group_large' ? 'Group (7–12)' : rzp.category === 'group_small' ? 'Group (2–6)' : 'Individual',
+            originalPrice: rzp.category === 'group_large' ? 99 : rzp.category === 'group_small' ? 49 : 9,
+            discountAmount: discountAmt,
+            finalAmount: (Number(rzp.amountInPaise) || 0) / 100,
+            orderId,
+            status: 'SUCCESS',
+            isFree: Boolean(rzp.isFree),
+            reservedAt: paidAt,
+            expiresAt: paidAt + 15 * 60 * 1000,
+            redeemedAt: paidAt,
+            activatedAt: paidAt,
+            createdAt: Date.now(),
+          };
+          await this.saveCouponRedemption(existing);
+          await this.recordCouponUsage(coupon.code, { userId: rzp.userId, orderId, discountAmount: discountAmt });
+          return existing;
+        }
+      }
+    }
+    if (!existing) return null;
+
+    const updated = {
+      ...existing,
+      status: 'SUCCESS',
+      paymentId: paymentId || existing.paymentId || '',
+      method,
+      paidAt,
+      redeemedAt: paidAt,
+      activatedAt: paidAt,
+      updatedAt: Date.now(),
+    };
+    if (userDoc) {
+      if (userDoc.name) updated.userName = userDoc.name;
+      if (userDoc.email) updated.userEmail = userDoc.email;
+      if (userDoc.phone) updated.userPhone = userDoc.phone;
+    }
+    await this.saveCouponRedemption(updated);
+
+    // Increment coupon usage count
+    await this.recordCouponUsage(existing.couponCode, {
+      userId: existing.userId,
+      orderId: existing.orderId,
+      discountAmount: existing.discountAmount,
+    });
+
+    return updated;
+  }
+
+  /**
+   * Releases reserved slot if user cancels or order fails.
+   */
+  async releaseCouponReservation(orderId) {
+    if (!orderId) return false;
+    const existing = await this.findCouponRedemptionByOrderId(orderId);
+    if (existing && existing.status === 'RESERVED') {
+      await this.saveCouponRedemption({
+        ...existing,
+        status: 'CANCELLED',
+        cancelledAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      return true;
+    }
+    return false;
+  }
+
   async recordCouponUsage(rawCode, { userId, orderId, discountAmount }) {
     const code = String(rawCode).trim().toUpperCase();
     const coupon = await this.findCoupon(code);
@@ -830,15 +1147,350 @@ class Repo {
       discountAmount: Number(discountAmount) || 0,
       usedAt: Date.now(),
     });
+    const nextUsageCount = (coupon.usageCount || 0) + 1;
+    let nextStatus = coupon.status;
+    if (coupon.maxUsageTotal > 0 && nextUsageCount >= coupon.maxUsageTotal) {
+      nextStatus = 'USAGE_LIMIT_REACHED';
+    }
     const updated = {
       ...coupon,
-      usageCount: (coupon.usageCount || 0) + 1,
+      usageCount: nextUsageCount,
+      status: nextStatus,
       usages,
       updatedAt: Date.now(),
     };
     delete updated.key;
     await this.soda.upsertBy(C.coupons, { code }, updated);
     return updated;
+  }
+
+  // ---------- payments analytics & searchable transaction history ----------
+
+  async getMembershipPaymentAnalytics({ range = '30d', from, to } = {}) {
+    const now = Date.now();
+    let startTime = now - 30 * 86400000;
+    let endTime = now;
+
+    if (range === 'today') {
+      // Asia/Kolkata day start: UTC+5:30 = 19800000 ms
+      const kolkataOffset = 5.5 * 3600000;
+      const localNow = new Date(now + kolkataOffset);
+      localNow.setUTCHours(0, 0, 0, 0);
+      startTime = localNow.getTime() - kolkataOffset;
+    } else if (range === '7d') {
+      startTime = now - 7 * 86400000;
+    } else if (range === '30d') {
+      startTime = now - 30 * 86400000;
+    } else if (range === 'this_month') {
+      const d = new Date(now);
+      d.setDate(1); d.setHours(0, 0, 0, 0);
+      startTime = d.getTime();
+    } else if (range === 'last_month') {
+      const d = new Date(now);
+      d.setDate(1); d.setHours(0, 0, 0, 0);
+      endTime = d.getTime();
+      d.setMonth(d.getMonth() - 1);
+      startTime = d.getTime();
+    } else if (range === 'custom') {
+      if (from) startTime = Number(from);
+      if (to) endTime = Number(to);
+    }
+
+    const allOrders = await this.listRazorpayOrders({}, 5000);
+    const allMemberships = await this.soda.query(C.memberships, {}, { limit: 5000 }).then((r) => r.map((x) => x.value)).catch(() => []);
+    const redemptions = await this.listCouponRedemptions({}, 5000);
+
+    const rangeOrders = allOrders.filter((o) => {
+      const ts = Number(o.paidAt || o.createdAt) || 0;
+      return ts >= startTime && ts <= endTime;
+    });
+
+    let grossSalesInr = 0;
+    let discountsInr = 0;
+    let netRevenueInr = 0;
+    let paidOrdersCount = 0;
+    let failedOrdersCount = 0;
+    let refundedAmountInr = 0;
+    let refundedOrdersCount = 0;
+
+    const byPlan = {
+      individual: { id: 'individual', name: 'Individual Membership', priceInr: 9, units: 0, grossInr: 0, discountsInr: 0, netInr: 0, activeMembers: 0 },
+      group_small: { id: 'group_small', name: 'Group Membership (2–6)', priceInr: 49, units: 0, grossInr: 0, discountsInr: 0, netInr: 0, activeMembers: 0 },
+      group_large: { id: 'group_large', name: 'Group Membership (7–12)', priceInr: 99, units: 0, grossInr: 0, discountsInr: 0, netInr: 0, activeMembers: 0 },
+    };
+
+    // Calculate active members per plan, seat utilization, and MRR
+    let totalMRR = 0;
+    let totalSeatsAllocated = 0;
+    let totalSeatsOccupied = 0;
+
+    for (const m of allMemberships) {
+      if (m.status === 'ACTIVE' && (m.validUntil || 0) > now) {
+        const cat = m.category || 'individual';
+        if (byPlan[cat]) {
+          byPlan[cat].activeMembers++;
+        }
+        if (cat === 'individual') {
+          totalMRR += (m.priceInr || 9);
+          totalSeatsAllocated += 1;
+          totalSeatsOccupied += 1;
+        } else if (cat === 'group_small') {
+          totalMRR += (m.priceInr || 49);
+          totalSeatsAllocated += (m.capacity || 6);
+          totalSeatsOccupied += (1 + Object.keys(m.members || {}).length);
+        } else if (cat === 'group_large') {
+          totalMRR += (m.priceInr || 99);
+          totalSeatsAllocated += (m.capacity || 12);
+          totalSeatsOccupied += (1 + Object.keys(m.members || {}).length);
+        }
+      }
+    }
+
+    const activeTripsList = await this.soda.query(C.activeTrips, {}, { limit: 5000 }).catch(() => []);
+
+    const dayBuckets = new Map();
+    // Pre-populate daily timeline points
+    for (let t = startTime; t <= endTime; t += 86400000) {
+      const dayStr = new Date(t).toISOString().slice(0, 10);
+      dayBuckets.set(dayStr, { date: dayStr, grossInr: 0, discountsInr: 0, netInr: 0, orders: 0 });
+    }
+
+    let freeActivationsCount = 0;
+    for (const o of rangeOrders) {
+      const status = (o.status || '').toUpperCase();
+      const amountPaise = Number(o.amountInPaise) || 0;
+      const orderAmountInr = amountPaise / 100;
+      const isFreeOrder = Boolean(o.isFree) || orderAmountInr === 0;
+      const cat = o.category || 'individual';
+      const planMeta = byPlan[cat] || byPlan.individual;
+      const catalogPrice = planMeta.priceInr;
+      const discount = Number(o.discountAmount) || Math.max(0, catalogPrice - orderAmountInr);
+
+      if (status === 'FAILED' || status === 'SIGNATURE_MISMATCH') {
+        failedOrdersCount++;
+      } else if (status === 'PAID') {
+        if (isFreeOrder) {
+          freeActivationsCount++;
+          // Free activations are recorded separately and do not inflate gross or net monetary revenue
+        } else {
+          paidOrdersCount++;
+          grossSalesInr += catalogPrice;
+          discountsInr += discount;
+          const netOrder = Math.max(0, orderAmountInr);
+          netRevenueInr += netOrder;
+
+        if (byPlan[cat]) {
+          byPlan[cat].units++;
+          byPlan[cat].grossInr += catalogPrice;
+          byPlan[cat].discountsInr += discount;
+          byPlan[cat].netInr += netOrder;
+        }
+
+        const refundPaise = Number(o.refundedAmountInPaise) || (Number(o.refundedAmount) * 100) || 0;
+        if (refundPaise > 0) {
+          refundedOrdersCount++;
+          const refundInr = refundPaise / 100;
+          refundedAmountInr += refundInr;
+          netRevenueInr -= refundInr;
+          if (byPlan[cat]) byPlan[cat].netInr -= refundInr;
+        }
+
+        const dayStr = new Date(Number(o.paidAt || o.createdAt)).toISOString().slice(0, 10);
+        const b = dayBuckets.get(dayStr) || { date: dayStr, grossInr: 0, discountsInr: 0, netInr: 0, orders: 0 };
+        b.grossInr += catalogPrice;
+        b.discountsInr += discount;
+        b.netInr += netOrder;
+        b.orders++;
+        dayBuckets.set(dayStr, b);
+        }
+      }
+    }
+
+    // Coupon ROI analytics
+    const couponStats = new Map();
+    const rangeRedemptions = redemptions.filter((r) => {
+      const ts = Number(r.redeemedAt || r.reservedAt || r.createdAt) || 0;
+      return ts >= startTime && ts <= endTime && r.status === 'SUCCESS';
+    });
+
+    let totalCouponDiscount = 0;
+    let totalCouponNetRevenue = 0;
+
+    for (const r of rangeRedemptions) {
+      const cCode = r.couponCode || 'UNKNOWN';
+      const cStat = couponStats.get(cCode) || {
+        code: cCode,
+        campaignName: r.campaignName || cCode,
+        redemptions: 0,
+        discountAmount: 0,
+        netRevenue: 0,
+        users: new Set(),
+      };
+      cStat.redemptions++;
+      cStat.discountAmount += (Number(r.discountAmount) || 0);
+      cStat.netRevenue += (Number(r.finalAmount) || 0);
+      if (r.userId) cStat.users.add(r.userId);
+      couponStats.set(cCode, cStat);
+
+      totalCouponDiscount += (Number(r.discountAmount) || 0);
+      totalCouponNetRevenue += (Number(r.finalAmount) || 0);
+    }
+
+    const topCoupons = Array.from(couponStats.values()).map((c) => ({
+      code: c.code,
+      campaignName: c.campaignName,
+      redemptions: c.redemptions,
+      uniqueUsers: c.users.size,
+      discountAmount: Math.round(c.discountAmount * 100) / 100,
+      netRevenue: Math.round(c.netRevenue * 100) / 100,
+    })).sort((a, b) => b.redemptions - a.redemptions);
+
+    // New memberships created in this window
+    const newMembershipsCount = allMemberships.filter((m) => {
+      const ts = Number(m.createdAt || m.validFrom) || 0;
+      return ts >= startTime && ts <= endTime;
+    }).length;
+
+    const averageOrderValue = paidOrdersCount > 0 ? Math.round((netRevenueInr / paidOrdersCount) * 100) / 100 : 0;
+
+    const totalActiveMembers = byPlan.individual.activeMembers + byPlan.group_small.activeMembers + byPlan.group_large.activeMembers;
+    return {
+      range,
+      startTime,
+      endTime,
+      summary: {
+        grossSalesInr: Math.round(grossSalesInr * 100) / 100,
+        discountsInr: Math.round(discountsInr * 100) / 100,
+        netRevenueInr: Math.round(netRevenueInr * 100) / 100,
+        totalTransactions: rangeOrders.length,
+        paidOrders: paidOrdersCount,
+        freeActivations: freeActivationsCount,
+        failedOrders: failedOrdersCount,
+        refundedAmountInr: Math.round(refundedAmountInr * 100) / 100,
+        refundedOrders: refundedOrdersCount,
+        activeMemberships: totalActiveMembers,
+        newMemberships: newMembershipsCount,
+        averageOrderValueInr: averageOrderValue,
+      },
+      activeMemberships: {
+        individual: byPlan.individual.activeMembers,
+        groupSmall: byPlan.group_small.activeMembers,
+        groupLarge: byPlan.group_large.activeMembers,
+        total: totalActiveMembers,
+      },
+      seatUtilization: {
+        totalAllocated: totalSeatsAllocated,
+        totalOccupied: totalSeatsOccupied,
+        utilizationRate: totalSeatsAllocated > 0 ? (totalSeatsOccupied / totalSeatsAllocated).toFixed(2) : 0,
+      },
+      financialMetrics: {
+        estimatedMRR: totalMRR,
+        grossSales: Math.round(grossSalesInr * 100) / 100,
+        netRevenue: Math.round(netRevenueInr * 100) / 100,
+        currency: 'INR',
+      },
+      concurrency: {
+        currentActiveTrips: activeTripsList.length,
+      },
+      byPlan,
+      couponAnalytics: {
+        totalRedemptions: rangeRedemptions.length,
+        totalDiscountGivenInr: Math.round(totalCouponDiscount * 100) / 100,
+        netRevenueFromCouponsInr: Math.round(totalCouponNetRevenue * 100) / 100,
+        topCoupons,
+      },
+      timeline: Array.from(dayBuckets.values()).sort((a, b) => a.date.localeCompare(b.date)),
+      timestamp: now,
+    };
+  }
+
+  /**
+   * Searchable and filterable payment transaction history.
+   * Strips payment gateway secrets, CVVs, and private keys.
+   */
+  async listTransactions({ search = '', status = 'ALL', category = '', from, to, limit = 100, cursor = 0 } = {}) {
+    const orders = await this.listRazorpayOrders({}, 5000);
+    const users = await this.soda.query(C.users, {}, { limit: 5000 }).then((r) => r.map((x) => x.value)).catch(() => []);
+    const userMap = new Map(users.map((u) => [u.userId, u]));
+
+    let list = orders.map((o) => {
+      const u = userMap.get(o.userId) || {};
+      const amountInr = (Number(o.amountInPaise) || 0) / 100;
+      const refundedInr = (Number(o.refundedAmountInPaise) || 0) / 100 || (Number(o.refundedAmount) || 0);
+      return {
+        orderId: o.orderId || '',
+        internalOrderId: o.internalOrderId || '',
+        paymentId: o.paymentId || '',
+        userId: o.userId || '',
+        userName: u.name || o.userName || 'Rider',
+        userEmail: u.email || o.userEmail || '',
+        userPhone: u.phone || o.userPhone || '',
+        category: o.category || 'individual',
+        categoryName: o.category === 'group_large' ? 'Group (7–12)' : o.category === 'group_small' ? 'Group (2–6)' : 'Individual',
+        amountInr,
+        originalPrice: o.originalPrice || (o.category === 'group_large' ? 99 : o.category === 'group_small' ? 49 : 9),
+        discountAmount: Number(o.discountAmount) || 0,
+        offerCode: o.offerCode || null,
+        status: String(o.status || 'CREATED').toUpperCase(),
+        transactionType: o.transactionType || (o.isFree || amountInr === 0 ? 'COUPON_ACTIVATION' : 'NEW'),
+        mode: o.mode || (o.isFree || amountInr === 0 ? 'free' : 'live'),
+        isFree: Boolean(o.isFree) || amountInr === 0,
+        method: o.method || (o.isFree || amountInr === 0 ? 'COUPON' : 'RAZORPAY'),
+        createdAt: Number(o.createdAt) || 0,
+        paidAt: Number(o.paidAt) || 0,
+        refundStatus: o.refundStatus || null,
+        refundedAmount: refundedInr,
+        refundReason: o.refundReason || null,
+        failureReason: o.failureReason || null,
+        failureCode: o.failureCode || null,
+      };
+    });
+
+    if (status && status !== 'ALL') {
+      const matchStatus = status.toUpperCase();
+      list = list.filter((t) => t.status === matchStatus);
+    }
+
+    if (category) {
+      list = list.filter((t) => t.category === category);
+    }
+
+    if (from) {
+      const fromTs = Number(from);
+      list = list.filter((t) => (t.paidAt || t.createdAt) >= fromTs);
+    }
+
+    if (to) {
+      const toTs = Number(to);
+      list = list.filter((t) => (t.paidAt || t.createdAt) <= toTs);
+    }
+
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter((t) =>
+        t.orderId.toLowerCase().includes(q) ||
+        t.paymentId.toLowerCase().includes(q) ||
+        t.userId.toLowerCase().includes(q) ||
+        t.userName.toLowerCase().includes(q) ||
+        t.userEmail.toLowerCase().includes(q) ||
+        t.userPhone.toLowerCase().includes(q) ||
+        (t.offerCode && t.offerCode.toLowerCase().includes(q))
+      );
+    }
+
+    list.sort((a, b) => (b.paidAt || b.createdAt) - (a.paidAt || a.createdAt));
+
+    const offset = Math.max(0, parseInt(cursor, 10) || 0);
+    const take = Math.min(200, Math.max(1, parseInt(limit, 10) || 100));
+    const items = list.slice(offset, offset + take);
+
+    return {
+      transactions: items,
+      total: list.length,
+      limit: take,
+      cursor: offset,
+      nextCursor: offset + items.length < list.length ? offset + items.length : null,
+    };
   }
 
   // ---------- memberships & commercial entities ----------
@@ -920,10 +1572,84 @@ class Repo {
 
   async saveMembership(m) {
     if (!m?.membershipId) throw new Error('membershipId required');
-    const doc = { ...m, membershipId: String(m.membershipId), updatedAt: Date.now() };
+    const doc = {
+      ...m,
+      membershipId: String(m.membershipId),
+      upgradeHistory: Array.isArray(m.upgradeHistory) ? m.upgradeHistory : [],
+      updatedAt: Date.now(),
+    };
     delete doc.key;
     await this.soda.upsertBy(C.memberships, { membershipId: doc.membershipId }, doc);
     return doc;
+  }
+
+  async reconcileDuplicateMembershipsAndOrders() {
+    const now = Date.now();
+    const memberships = await this.soda.query(C.memberships, {}, { limit: 5000 }).catch(() => []);
+    let membershipsAdjusted = 0;
+    let paymentHistoryDeduplicated = 0;
+
+    for (const row of memberships) {
+      const m = row.value;
+      if (m.status === 'ACTIVE') {
+        if (m.validUntil > now + 35 * 86400000 && (m.offerApplied === 'RIDERFREE' || m.priceInr === 0)) {
+          const correctedValidUntil = now + 30 * 86400000;
+          await this.saveMembership({
+            ...m,
+            validUntil: correctedValidUntil,
+            reconciledAt: now,
+            reconcileNote: 'Corrected duplicate free coupon validity stacking',
+          });
+          membershipsAdjusted++;
+        }
+      }
+    }
+
+    const users = await this.soda.query(C.users, {}, { limit: 5000 }).catch(() => []);
+    for (const uRow of users) {
+      const u = uRow.value;
+      let userUpdated = false;
+      const updates = {};
+
+      if (u.ownedMembership && u.ownedMembership.validUntil > now + 35 * 86400000 && (u.ownedMembership.offerApplied === 'RIDERFREE' || u.ownedMembership.priceInr === 0)) {
+        updates.ownedMembership = {
+          ...u.ownedMembership,
+          validUntil: now + 30 * 86400000,
+          reconciledAt: now,
+          reconcileNote: 'Corrected duplicate free coupon validity stacking',
+        };
+        userUpdated = true;
+      }
+
+      if (Array.isArray(u.paymentHistory) && u.paymentHistory.length > 1) {
+        const seenOrders = new Set();
+        const deduplicated = [];
+        for (const entry of u.paymentHistory) {
+          const ordId = entry.orderId || `${entry.paidAt}_${entry.amountInr}`;
+          if (!seenOrders.has(ordId)) {
+            seenOrders.add(ordId);
+            deduplicated.push(entry);
+          }
+        }
+        if (deduplicated.length !== u.paymentHistory.length) {
+          updates.paymentHistory = deduplicated;
+          updates.lastPayment = deduplicated[deduplicated.length - 1];
+          paymentHistoryDeduplicated += (u.paymentHistory.length - deduplicated.length);
+          userUpdated = true;
+        }
+      }
+
+      if (userUpdated) {
+        await this.updateUser(uRow.key, updates);
+      }
+    }
+
+    return {
+      success: true,
+      membershipsAdjusted,
+      paymentHistoryDeduplicated,
+      timestamp: now,
+    };
   }
 
   async deleteMembership(membershipId) {

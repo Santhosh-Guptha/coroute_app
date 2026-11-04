@@ -47,6 +47,42 @@ class _FakeApiClient extends ApiClient {
         'isFree': true,
       };
     }
+    if (path == '/membership/validate-coupon') {
+      final m = body is Map ? body : {};
+      final code = m['code']?.toString() ?? '';
+      if (code == 'RIDERFREE') {
+        return {
+          'valid': true,
+          'discountPercent': 100,
+          'discountAmount': 9,
+          'discountInr': 9,
+          'finalAmount': 0,
+          'finalAmountInr': 0,
+          'message': 'Introductory promo applied: 100% OFF (₹0)',
+        };
+      }
+      return {
+        'valid': false,
+        'message': 'Invalid coupon code',
+      };
+    }
+    if (path == '/membership/activate-free') {
+      return {
+        'success': true,
+        'isFree': true,
+        'orderId': 'FREE-ACTIVATION-TEST',
+        'membership': {
+          'id': 'mem_free_123',
+          'userId': 'user_tester',
+          'categoryId': 'individual',
+          'categoryName': 'Individual Membership',
+          'capacity': 1,
+          'priceRupees': 9,
+          'status': 'ACTIVE',
+          'validUntil': DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch,
+        },
+      };
+    }
     return {};
   }
 }
@@ -163,7 +199,7 @@ void main() {
   });
 
   group('Stage 2: Membership Payment Screen', () {
-    testWidgets('renders payment methods, benefits, price summary and handles free promo checkout', (tester) async {
+    testWidgets('hides payment methods at ₹0, restores them when coupon removed, and handles free activation', (tester) async {
       tester.view.physicalSize = const Size(600, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -180,26 +216,33 @@ void main() {
       expect(find.text('Individual Membership'), findsOneWidget);
       expect(find.text('1 Rider Capacity · Monthly Subscription'), findsOneWidget);
       expect(find.text('PROMOTIONAL COUPON'), findsOneWidget);
-      expect(find.text('Instant UPI Apps'), findsOneWidget);
-      expect(find.text('Cards & Net Banking'), findsOneWidget);
       expect(find.text('Total Payable'), findsOneWidget);
-      expect(find.text('Activate Free Introductory Offer (₹0)'), findsOneWidget);
 
-      // Verify promo coupon modification
-      await tester.enterText(find.byType(TextField).first, '');
-      await tester.tap(find.text('Apply'));
+      // At ₹0: Payment methods (UPI, Cards) MUST be hidden
+      expect(find.text('Instant UPI Apps'), findsNothing);
+      expect(find.text('Cards & Net Banking'), findsNothing);
+      expect(find.text('Activate Free Membership (₹0)'), findsOneWidget);
+
+      // Remove coupon via "Remove Coupon" button
+      await tester.tap(find.text('Remove Coupon'));
       await tester.pumpAndSettle();
 
-      // Should show base price ₹9.00
+      // Should show base price ₹9.00 and payment methods now visible!
       expect(find.text('₹9.00'), findsWidgets);
+      expect(find.text('Instant UPI Apps'), findsOneWidget);
+      expect(find.text('Cards & Net Banking'), findsOneWidget);
+      expect(find.text('Pay ₹9 & Activate Membership'), findsOneWidget);
 
       // Re-apply RIDERFREE
       await tester.enterText(find.byType(TextField).first, 'RIDERFREE');
       await tester.tap(find.text('Apply'));
       await tester.pumpAndSettle();
 
+      // At ₹0 again: Payment methods hidden, Free activation CTA visible
+      expect(find.text('Instant UPI Apps'), findsNothing);
+      expect(find.text('Cards & Net Banking'), findsNothing);
       expect(find.text('Introductory promo applied: 100% OFF (₹0)'), findsOneWidget);
-      expect(find.text('Activate Free Introductory Offer (₹0)'), findsOneWidget);
+      expect(find.text('Activate Free Membership (₹0)'), findsOneWidget);
     });
   });
 

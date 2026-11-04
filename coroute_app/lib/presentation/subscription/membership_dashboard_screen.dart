@@ -1,5 +1,4 @@
 import 'membership_payment_screen.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:flutter/services.dart';
@@ -750,7 +749,7 @@ class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
   final TextEditingController _offerCtrl = TextEditingController(text: 'RIDERFREE');
   final TextEditingController _upiVpaCtrl = TextEditingController();
 
-  String _paymentMethod = 'upi_instant'; // 'upi_instant', 'upi_custom', 'card_netbanking', 'sandbox_instant'
+  String _paymentMethod = 'upi_instant'; // 'upi_instant', 'upi_custom', 'card_netbanking'
   bool _isProcessing = false;
   int _discountPercent = 100; // Default introductory offer applies 100% off
   String? _promoMessage = 'Introductory promo applied: 100% OFF (₹0)';
@@ -848,20 +847,39 @@ class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
     // External wallet handler
   }
 
-  void _applyPromoCode() {
+  Future<void> _applyPromoCode() async {
     final code = _offerCtrl.text.trim().toUpperCase();
-    setState(() {
-      _checkoutError = null;
-      if (code == 'RIDERFREE') {
-        _discountPercent = 100;
-        _promoMessage = 'Introductory promo applied: 100% OFF (₹0)';
-      } else if (code.isEmpty) {
+    if (code.isEmpty) {
+      setState(() {
         _discountPercent = 0;
         _promoMessage = null;
+        _checkoutError = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+      _checkoutError = null;
+    });
+
+    final ms = context.read<MembershipService>();
+    final val = await ms.validateCoupon(code: code, categoryId: widget.category.id);
+    if (!mounted) return;
+
+    setState(() {
+      _isProcessing = false;
+      if (val != null && val['valid'] == true) {
+        _discountPercent = (val['discountPercent'] as num?)?.toInt() ??
+            (val['discountInr'] != null && widget.category.priceRupees > 0
+                ? ((val['discountInr'] as num) / widget.category.priceRupees * 100).round()
+                : 100);
+        _promoMessage = val['message'] as String? ?? 'Coupon applied: $_discountPercent% OFF';
+        _checkoutError = null;
       } else {
         _discountPercent = 0;
         _promoMessage = null;
-        _checkoutError = 'Invalid promo code. Use RIDERFREE or proceed with standard payment.';
+        _checkoutError = val?['message'] as String? ?? ms.lastError ?? 'Invalid or inapplicable coupon.';
       }
     });
   }
@@ -878,6 +896,26 @@ class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
     });
 
     try {
+      // 1. Zero-amount activation (₹0): Direct activation without Razorpay orders or SDK
+      if (netPayable == 0) {
+        final couponCode = _discountPercent > 0 ? _offerCtrl.text.trim().toUpperCase() : 'RIDERFREE';
+        final mem = await ms.activateFreeMembership(
+          categoryId: widget.category.id,
+          couponCode: couponCode,
+        );
+        if (!mounted) return;
+        if (mem != null) {
+          widget.onSuccess(mem, 'FREE-${DateTime.now().millisecondsSinceEpoch}');
+        } else {
+          setState(() {
+            _isProcessing = false;
+            _checkoutError = ms.lastError ?? 'Free membership activation failed.';
+          });
+        }
+        return;
+      }
+
+      // 2. Monetary payment: Official Razorpay order creation and checkout
       final orderRes = await ms.createOrder(
         categoryId: widget.category.id,
         offerCode: _discountPercent > 0 ? _offerCtrl.text.trim().toUpperCase() : null,
@@ -892,42 +930,18 @@ class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
         return;
       }
 
-      if (orderRes['isFree'] == true) {
-        final mem = ms.ownedMembership;
-        if (!mounted) return;
-        if (mem != null) {
-          widget.onSuccess(mem, orderRes['orderId']?.toString() ?? 'FREE-INTRO');
-        } else {
-          setState(() {
-            _isProcessing = false;
-            _checkoutError = ms.lastError ?? 'Membership activation completed.';
-          });
-        }
-        return;
-      }
-
       final orderId = orderRes['orderId']?.toString() ?? '';
       final keyId = orderRes['keyId']?.toString() ?? '';
       final amountInPaise = orderRes['amountInPaise'] as int? ?? (netPayable * 100);
 
       _lastCreatedOrderId = orderId;
 
-      if (_paymentMethod == 'sandbox_instant' || keyId.isEmpty || kIsWeb) {
-        final mem = await ms.purchaseMembership(
-          categoryId: widget.category.id,
-          offerCode: _discountPercent > 0 ? _offerCtrl.text.trim().toUpperCase() : null,
-          orderId: orderId,
-          paymentId: 'pay_test_',
-        );
+      if (keyId.isEmpty) {
         if (!mounted) return;
-        if (mem != null) {
-          widget.onSuccess(mem, orderId);
-        } else {
-          setState(() {
-            _isProcessing = false;
-            _checkoutError = ms.lastError ?? 'Sandbox activation failed.';
-          });
-        }
+        setState(() {
+          _isProcessing = false;
+          _checkoutError = 'Payment gateway key configuration missing. Please contact support.';
+        });
         return;
       }
 
@@ -936,7 +950,7 @@ class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
       if (!mounted) return;
       setState(() {
         _isProcessing = false;
-        _checkoutError = 'Payment checkout error: ';
+        _checkoutError = 'Payment checkout error: $e';
       });
     }
   }
@@ -1053,16 +1067,37 @@ class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white12,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  onPressed: _applyPromoCode,
+                  onPressed: _isProcessing ? null : _applyPromoCode,
                   child: const Text('Apply', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
+                if (_discountPercent > 0) ...[
+                  const SizedBox(width: 6),
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.white24),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: _isProcessing
+                        ? null
+                        : () {
+                            setState(() {
+                              _offerCtrl.clear();
+                              _discountPercent = 0;
+                              _promoMessage = null;
+                              _checkoutError = null;
+                            });
+                          },
+                    child: const Text('Remove', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  ),
+                ],
               ],
             ),
             if (_promoMessage != null) ...[
@@ -1107,7 +1142,7 @@ class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
             ),
             const SizedBox(height: 16),
 
-            // Mandatory Payment Methods (Active if netPayable > 0)
+            // Mandatory Payment Methods (Only shown when netPayable > 0)
             if (netPayable > 0) ...[
               const Text('Select Payment Method (Mandatory)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
               const SizedBox(height: 10),
@@ -1131,8 +1166,29 @@ class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
                 ),
               ],
               _buildPaymentRadio('card_netbanking', 'Cards & Net Banking', 'Visa, Mastercard, RuPay, All Banks', Icons.credit_card_rounded),
-              _buildPaymentRadio('sandbox_instant', 'Instant Fast Checkout', 'Verified Sandbox Payment for CoRoute', Icons.bolt_rounded),
               const SizedBox(height: 8),
+            ] else ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.teal.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.tealAccent.withValues(alpha: 0.3)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.verified_rounded, color: Colors.tealAccent, size: 20),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '100% Promo Applied. Direct zero-payment membership activation — no card or UPI required.',
+                        style: TextStyle(color: Colors.tealAccent, fontSize: 12, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
             ],
 
             if (_checkoutError != null) ...[
