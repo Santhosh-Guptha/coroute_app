@@ -43,6 +43,9 @@ const C = {
   guardianPauses: 'guardian_pauses',
   coupons: 'coupons',
   subscriptionConfig: 'subscription_config',
+  memberships: 'memberships',
+  activeTrips: 'active_trips',
+  organizations: 'organizations',
 };
 
 /** Alert fields that live in memory only (filled by the safety network) and are never stored. */
@@ -118,6 +121,12 @@ class Repo {
     await idx(C.geoCache, 'geo_created_ix', [{ path: 'createdAt', datatype: 'number' }]);
     await idx(C.audit, 'audit_at_ix', [{ path: 'at', datatype: 'number' }]);
     await idx(C.audit, 'audit_actor_ix', ['actorId']);
+    await idx(C.memberships, 'memberships_id_ux', ['membershipId'], true);
+    await idx(C.memberships, 'memberships_owner_ix', ['ownerUserId']);
+    await idx(C.memberships, 'memberships_status_ix', ['status', { path: 'validUntil', datatype: 'number' }]);
+    await idx(C.activeTrips, 'active_trips_user_ux', ['userId'], true);
+    await idx(C.activeTrips, 'active_trips_group_ix', ['groupId']);
+    await idx(C.organizations, 'organizations_id_ux', ['organizationId'], true);
   }
 
   // ---------- users ----------
@@ -830,6 +839,146 @@ class Repo {
     delete updated.key;
     await this.soda.upsertBy(C.coupons, { code }, updated);
     return updated;
+  }
+
+  // ---------- memberships & commercial entities ----------
+  async getMembershipCatalog() {
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'membership_catalog' });
+    if (r?.value?.catalog) return r.value.catalog;
+    return {
+      individual: {
+        id: 'individual',
+        name: 'Individual Membership',
+        monthlyPriceInr: 9,
+        capacity: 1,
+        minCapacity: 1,
+        maxCapacity: 1,
+        billingPeriodDays: 30,
+        features: ['essential_safety', 'basic_nav', 'personal_tracking', 'profile_settings'],
+        entitlements: { ptt: false, convoy: false, groupSafety: false, personalTracking: true, basicNav: true },
+        description: 'Personal safety-oriented capabilities for solo riders.',
+      },
+      group_small: {
+        id: 'group_small',
+        name: 'Group Membership (2–6)',
+        monthlyPriceInr: 49,
+        capacity: 6,
+        minCapacity: 2,
+        maxCapacity: 6,
+        billingPeriodDays: 30,
+        features: ['convoy_tracking', 'group_trips', 'ptt_intercom', 'group_safety', 'shared_trips'],
+        entitlements: { ptt: true, convoy: true, groupSafety: true, personalTracking: true, basicNav: true, sharedTrip: true },
+        description: 'For small riding groups and clubs with up to 6 members.',
+      },
+      group_large: {
+        id: 'group_large',
+        name: 'Group Membership (7–12)',
+        monthlyPriceInr: 99,
+        capacity: 12,
+        minCapacity: 7,
+        maxCapacity: 12,
+        billingPeriodDays: 30,
+        features: ['convoy_tracking', 'group_trips', 'ptt_intercom', 'group_safety', 'shared_trips'],
+        entitlements: { ptt: true, convoy: true, groupSafety: true, personalTracking: true, basicNav: true, sharedTrip: true },
+        description: 'For larger convoys and weekend expeditions with up to 12 members.',
+      },
+    };
+  }
+
+  async setMembershipCatalog(catalog, updatedBy = 'system') {
+    return this.soda.upsertBy(C.subscriptionConfig, { k: 'membership_catalog' }, {
+      k: 'membership_catalog',
+      catalog,
+      updatedAt: Date.now(),
+      updatedBy,
+    });
+  }
+
+  async findMembershipById(membershipId) {
+    if (!membershipId) return null;
+    const r = await this.soda.findOne(C.memberships, { membershipId: String(membershipId) });
+    return r ? { ...r.value, key: r.key } : null;
+  }
+
+  async findMembershipByOwner(ownerUserId) {
+    if (!ownerUserId) return null;
+    const rows = await this.soda.query(C.memberships, { ownerUserId: String(ownerUserId), status: 'ACTIVE' }, { limit: 1 });
+    return rows.length ? { ...rows[0].value, key: rows[0].key } : null;
+  }
+
+  async findMembershipsForUser(userId) {
+    if (!userId) return [];
+    const uid = String(userId);
+    const owned = await this.soda.query(C.memberships, { ownerUserId: uid }, { limit: 10 });
+    const participant = await this.soda.query(C.memberships, { [`members.${uid}.status`]: 'ACCEPTED' }, { limit: 20 });
+    const map = new Map();
+    for (const r of [...owned, ...participant]) {
+      map.set(r.value.membershipId, { ...r.value, key: r.key });
+    }
+    return Array.from(map.values());
+  }
+
+  async saveMembership(m) {
+    if (!m?.membershipId) throw new Error('membershipId required');
+    const doc = { ...m, membershipId: String(m.membershipId), updatedAt: Date.now() };
+    delete doc.key;
+    await this.soda.upsertBy(C.memberships, { membershipId: doc.membershipId }, doc);
+    return doc;
+  }
+
+  async deleteMembership(membershipId) {
+    if (!membershipId) return false;
+    return this.soda.removeWhere(C.memberships, { membershipId: String(membershipId) });
+  }
+
+  // ---------- single active trip lock registry ----------
+  async getActiveTrip(userId) {
+    if (!userId) return null;
+    const r = await this.soda.findOne(C.activeTrips, { userId: String(userId) });
+    return r ? { ...r.value, key: r.key } : null;
+  }
+
+  async setActiveTrip(userId, { groupId, role, status = 'ACTIVE' }) {
+    if (!userId || !groupId) throw new Error('userId and groupId required');
+    const doc = {
+      userId: String(userId),
+      groupId: String(groupId),
+      role: role || 'PARTICIPANT',
+      status,
+      lockedAt: Date.now(),
+    };
+    await this.soda.upsertBy(C.activeTrips, { userId: doc.userId }, doc);
+    return doc;
+  }
+
+  async releaseActiveTrip(userId) {
+    if (!userId) return false;
+    return this.soda.removeWhere(C.activeTrips, { userId: String(userId) });
+  }
+
+  async releaseAllActiveTripsForGroup(groupId) {
+    if (!groupId) return 0;
+    return this.soda.removeWhere(C.activeTrips, { groupId: String(groupId) });
+  }
+
+  // ---------- B2B organizations ----------
+  async findOrganizationById(organizationId) {
+    if (!organizationId) return null;
+    const r = await this.soda.findOne(C.organizations, { organizationId: String(organizationId) });
+    return r ? { ...r.value, key: r.key } : null;
+  }
+
+  async listOrganizations(limit = 100) {
+    const rows = await this.soda.query(C.organizations, {}, { limit });
+    return rows.map((r) => ({ ...r.value, key: r.key }));
+  }
+
+  async saveOrganization(org) {
+    if (!org?.organizationId) throw new Error('organizationId required');
+    const doc = { ...org, organizationId: String(org.organizationId), updatedAt: Date.now() };
+    delete doc.key;
+    await this.soda.upsertBy(C.organizations, { organizationId: doc.organizationId }, doc);
+    return doc;
   }
 }
 

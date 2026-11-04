@@ -12,6 +12,11 @@ class ConvoyModel {
   final String joinCode;
   final String createdByUserId;
   final String createdByUserName;
+  final String? tripOwnerUserId;
+  final String? tripHeadUserId;
+
+  bool isTripOwner(String uid) => (tripOwnerUserId ?? createdByUserId) == uid;
+  bool isTripHead(String uid) => (tripHeadUserId ?? tripOwnerUserId ?? createdByUserId) == uid;
   final String startLocationName;
   final String destinationName;
   final double destinationLat;
@@ -77,6 +82,8 @@ class ConvoyModel {
     required this.joinCode,
     required this.createdByUserId,
     required this.createdByUserName,
+    this.tripOwnerUserId,
+    this.tripHeadUserId,
     this.startLocationName = '',
     this.destinationName = '',
     this.destinationLat = 0.0,
@@ -112,6 +119,8 @@ class ConvoyModel {
     String? joinCode,
     String? createdByUserId,
     String? createdByUserName,
+    String? tripOwnerUserId,
+    String? tripHeadUserId,
     String? startLocationName,
     String? destinationName,
     double? destinationLat,
@@ -147,6 +156,8 @@ class ConvoyModel {
       joinCode: joinCode ?? this.joinCode,
       createdByUserId: createdByUserId ?? this.createdByUserId,
       createdByUserName: createdByUserName ?? this.createdByUserName,
+      tripOwnerUserId: tripOwnerUserId ?? this.tripOwnerUserId,
+      tripHeadUserId: tripHeadUserId ?? this.tripHeadUserId,
       startLocationName: startLocationName ?? this.startLocationName,
       destinationName: destinationName ?? this.destinationName,
       destinationLat: destinationLat ?? this.destinationLat,
@@ -184,6 +195,8 @@ class ConvoyModel {
       'joinCode': joinCode,
       'createdByUserId': createdByUserId,
       'createdByUserName': createdByUserName,
+      if (tripOwnerUserId != null) 'tripOwnerUserId': tripOwnerUserId,
+      if (tripHeadUserId != null) 'tripHeadUserId': tripHeadUserId,
       'startLocationName': startLocationName,
       'destinationName': destinationName,
       'destinationLat': destinationLat,
@@ -263,6 +276,8 @@ class ConvoyModel {
       joinCode: json['joinCode'] ?? '',
       createdByUserId: json['createdByUserId'] ?? '',
       createdByUserName: json['createdByUserName'] ?? '',
+      tripOwnerUserId: json['tripOwnerUserId']?.toString(),
+      tripHeadUserId: json['tripHeadUserId']?.toString(),
       startLocationName: json['startLocationName'] ?? '',
       destinationName: json['destinationName'] ?? '',
       destinationLat: (json['destinationLat'] as num?)?.toDouble() ?? 0.0,

@@ -45,6 +45,18 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
   String? _problem;
   int _updatedAt = 0;
   String _updatedBy = '';
+  final Map<String, TextEditingController> _memPrices = {
+    'individual': TextEditingController(),
+    'group_small': TextEditingController(),
+    'group_large': TextEditingController(),
+  };
+  final Map<String, TextEditingController> _memCapacities = {
+    'individual': TextEditingController(),
+    'group_small': TextEditingController(),
+    'group_large': TextEditingController(),
+  };
+  Map<String, dynamic>? _membershipAnalytics;
+  bool _savingMembership = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -58,6 +70,12 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
   @override
   void dispose() {
     for (final c in _form.values) {
+      c.dispose();
+    }
+    for (final c in _memPrices.values) {
+      c.dispose();
+    }
+    for (final c in _memCapacities.values) {
       c.dispose();
     }
     super.dispose();
@@ -82,6 +100,27 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
         _history = adminMapList(res['history']);
         _updatedAt = adminEpoch(res['updatedAt']);
         _updatedBy = res['updatedBy']?.toString() ?? '';
+      }
+      try {
+        final api = context.read<ApiClient>();
+        final memRes = await api.get('/admin/membership/catalog');
+        if (memRes is Map && memRes['categories'] is List) {
+          for (final cat in memRes['categories']) {
+            if (cat is Map) {
+              final id = cat['id']?.toString();
+              if (id != null) {
+                _memPrices[id]?.text = (cat['priceRupees'] as num?)?.toInt().toString() ?? '';
+                _memCapacities[id]?.text = (cat['capacity'] as num?)?.toInt().toString() ?? '';
+              }
+            }
+          }
+        }
+        final analyticsRes = await api.get('/admin/membership/analytics');
+        if (analyticsRes is Map) {
+          _membershipAnalytics = Map<String, dynamic>.from(analyticsRes);
+        }
+      } catch (e) {
+        debugPrint('[AdminPricingTab] membership load error: $e');
       }
       _loaded = true;
       _problem = null;
@@ -176,6 +215,12 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
             ],
           ),
         ),
+        const SizedBox(height: 20),
+        _buildMembershipSection(),
+        if (_membershipAnalytics != null) ...[
+          const SizedBox(height: 20),
+          _buildMembershipAnalytics(),
+        ],
         if (_history.isNotEmpty) ...[
           const SizedBox(height: 16),
           AdminTable(
@@ -194,6 +239,168 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
         ],
         const SizedBox(height: 24),
       ],
+    );
+  }
+
+  Future<void> _saveMembership() async {
+    setState(() => _savingMembership = true);
+    try {
+      final categories = [
+        {
+          'id': 'individual',
+          'name': 'Individual',
+          'priceRupees': int.tryParse(_memPrices['individual']?.text ?? '9') ?? 9,
+          'capacity': int.tryParse(_memCapacities['individual']?.text ?? '1') ?? 1,
+          'description': 'Solo rider safety, personal navigation, tracking & profile',
+          'features': ['Solo Ride Tracking', 'Essential Safety', 'Basic Navigation', 'Emergency Alert Routing'],
+        },
+        {
+          'id': 'group_small',
+          'name': 'Small Group',
+          'priceRupees': int.tryParse(_memPrices['group_small']?.text ?? '49') ?? 49,
+          'capacity': int.tryParse(_memCapacities['group_small']?.text ?? '6') ?? 6,
+          'description': 'Convoy tracking, live group safety coordination & PTT for up to 6 riders',
+          'features': ['Convoy & Group Tracking', 'Up to 6 Group Members', 'Shared Trip Coordination', 'PTT & Intercom Access', 'Safety Escalations'],
+        },
+        {
+          'id': 'group_large',
+          'name': 'Large Group',
+          'priceRupees': int.tryParse(_memPrices['group_large']?.text ?? '99') ?? 99,
+          'capacity': int.tryParse(_memCapacities['group_large']?.text ?? '12') ?? 12,
+          'description': 'Convoy tracking, live group safety coordination & PTT for up to 12 riders',
+          'features': ['Convoy & Group Tracking', 'Up to 12 Group Members', 'Shared Trip Coordination', 'PTT & Intercom Access', 'Safety Escalations'],
+        },
+      ];
+      await context.read<ApiClient>().put('/admin/membership/catalog', {'categories': categories});
+      if (mounted) adminSnack(context, 'Membership catalog updated successfully.');
+      _load();
+    } catch (e) {
+      if (mounted) adminSnack(context, 'Failed to update membership catalog.', error: true);
+    } finally {
+      if (mounted) setState(() => _savingMembership = false);
+    }
+  }
+
+  Widget _buildMembershipSection() {
+    return AdminTitledCard(
+      title: 'CoRoute Membership & Group Seat Capacities',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Configurable pricing and capacities for Individual and Group memberships. The owner purchases the capacity, not individual seats.',
+            style: AppText.caption,
+          ),
+          const SizedBox(height: 16),
+          _memCategoryRow('individual', 'Individual (Solo Rider)', _memPrices['individual']!, _memCapacities['individual']!, fixedCapacity: 1),
+          const SizedBox(height: 16),
+          _memCategoryRow('group_small', 'Small Group', _memPrices['group_small']!, _memCapacities['group_small']!),
+          const SizedBox(height: 16),
+          _memCategoryRow('group_large', 'Large Group', _memPrices['group_large']!, _memCapacities['group_large']!),
+          const SizedBox(height: 16),
+          DsButton(
+            label: _savingMembership ? 'Saving...' : 'Save Membership Catalog',
+            icon: Icons.save_rounded,
+            onPressed: _savingMembership ? null : _saveMembership,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _memCategoryRow(String id, String title, TextEditingController priceCtrl, TextEditingController capCtrl, {int? fixedCapacity}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(title, style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: priceCtrl,
+                keyboardType: TextInputType.number,
+                decoration: adminInput('Price INR', prefix: 'INR '),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: capCtrl,
+                readOnly: fixedCapacity != null,
+                keyboardType: TextInputType.number,
+                decoration: adminInput(fixedCapacity != null ? 'Capacity (Fixed)' : 'Max Capacity', prefix: 'Riders: '),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMembershipAnalytics() {
+    final a = _membershipAnalytics;
+    if (a == null) return const SizedBox.shrink();
+    return AdminTitledCard(
+      title: 'Privacy-Safe Membership & Trip Analytics',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Zero raw GPS coordinates or location breadcrumbs are stored or exposed. Aggregate figures only.',
+            style: AppText.caption.copyWith(color: AppTheme.accentText),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _analyticsTile('Active Memberships', '${a['activeMemberships'] ?? 0}', Icons.card_membership_rounded),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _analyticsTile('Total Capacity', '${a['totalCapacity'] ?? 0}', Icons.groups_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _analyticsTile('Occupied Seats', '${a['occupiedSeats'] ?? 0}', Icons.person_pin_rounded),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _analyticsTile('Active Convoys', '${a['activeConvoys'] ?? 0}', Icons.two_wheeler_rounded),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _analyticsTile(String label, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: AppTheme.accentText),
+              const SizedBox(width: 6),
+              Expanded(child: Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11), overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+        ],
+      ),
     );
   }
 

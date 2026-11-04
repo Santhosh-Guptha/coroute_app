@@ -218,7 +218,19 @@ class ConvoyManager extends EventEmitter {
     const name = String(p.name || '').trim();
     if (name.length < 2) throw new ConvoyError('Convoy name is required.');
 
-    // One active convoy per rider: leave any other first (prevents cross-group leakage).
+    // Concurrency-safe single active trip enforcement when monetization/membership is active
+    if (config.paymentsEnabled !== false) {
+      const active = await this.repo.getActiveTrip(user.userId);
+      if (active && ['PLANNING', 'STARTED', 'PAUSED'].includes(active.status)) {
+        throw new ConvoyError('You already have an active trip. End or leave it first.', 409, 'ACTIVE_TRIP_CONFLICT');
+      }
+      const membership = await this.repo.findMembershipByOwner(user.userId);
+      if (!membership || membership.status !== 'ACTIVE' || membership.validUntil <= now()) {
+        throw new ConvoyError('Active membership required to create a trip.', 402, 'MEMBERSHIP_EXPIRED');
+      }
+    }
+
+    // Leave any other non-active residues
     await this.leaveAll(user.userId);
     // Phone, vehicle and emergency contact come from the account, never from the request.
     const riderInput = { ...clientRiderInput(p.rider), ...profileOf(await this.repo.findUserById(user.userId)) };
@@ -233,6 +245,8 @@ class ConvoyManager extends EventEmitter {
       name,
       joinCode,
       createdByUserId: user.userId,
+      tripOwnerUserId: user.userId,
+      tripHeadUserId: user.userId,
       createdByUserName: user.name,
       startLocationName: String(p.startPoint || p.startLocationName || p.start?.name || '').slice(0, 120),
       start: sanitizePlace(p.start),
@@ -258,6 +272,7 @@ class ConvoyManager extends EventEmitter {
       dirty: new Set(), lastPersist: new Map(), persistTimer: null, regroup: null,
     };
     this.rooms.set(groupId, room);
+    await this.repo.setActiveTrip(user.userId, { groupId, role: 'OWNER', status: 'STARTED' });
     this.emit('fleet');
     const at = meta.start || (rider.lat || rider.lng ? { lat: rider.lat, lng: rider.lng, name: '' } : null);
     this.emit('activity', groupId, { type: 'TRIP_STARTED', user, name, lat: at?.lat, lng: at?.lng, placeName: at?.name || meta.startLocationName || '' });
@@ -273,9 +288,32 @@ class ConvoyManager extends EventEmitter {
     if (!meta) throw new ConvoyError('No active convoy found for that code.', 404);
 
     const room = await this.getRoom(meta.groupId);
-    // Size cap for new riders only; someone already in the convoy can always re-join.
-    if (!room.riders.has(user.userId) && room.riders.size >= config.maxConvoyRiders) {
-      throw new ConvoyError(`This convoy is full (${config.maxConvoyRiders} riders).`, 409, 'CONVOY_FULL');
+    // Concurrency-safe single active trip check: cannot participate in multiple active trips simultaneously
+    if (!room.riders.has(user.userId)) {
+      if (config.paymentsEnabled !== false) {
+        const existingTrip = await this.repo.getActiveTrip(user.userId);
+        if (existingTrip && existingTrip.groupId !== meta.groupId && ['PLANNING', 'STARTED', 'PAUSED'].includes(existingTrip.status)) {
+          throw new ConvoyError('You are already participating in another active trip. Leave or end it first.', 409, 'ACTIVE_TRIP_CONFLICT');
+        }
+      }
+    }
+
+    // Capacity cap based on the Trip Owner's membership category
+    const ownerId = meta.tripOwnerUserId || meta.createdByUserId;
+    let allowedCapacity = config.maxConvoyRiders;
+    if (config.paymentsEnabled !== false) {
+      const ownerMem = await this.repo.findMembershipByOwner(ownerId);
+      if (ownerMem && ownerMem.status === 'ACTIVE') {
+        if (ownerMem.category === 'individual' || ownerMem.capacity <= 1) {
+          if (!room.riders.has(user.userId) && user.userId !== ownerId) {
+            throw new ConvoyError('This is a solo trip under an Individual Membership. Additional riders cannot join.', 409, 'SOLO_TRIP_ONLY');
+          }
+        }
+        allowedCapacity = ownerMem.capacity;
+      }
+    }
+    if (!room.riders.has(user.userId) && room.riders.size >= allowedCapacity) {
+      throw new ConvoyError(`This convoy is full (${allowedCapacity} riders).`, 409, 'CONVOY_FULL');
     }
     if (!room.riders.has(user.userId)) await this.leaveAll(user.userId, { except: meta.groupId });
 
@@ -290,6 +328,11 @@ class ConvoyManager extends EventEmitter {
     await this.repo.upsertRider(room.groupId, rider);
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
+    await this.repo.setActiveTrip(user.userId, {
+      groupId: room.groupId,
+      role: user.userId === (room.meta.tripOwnerUserId || room.meta.createdByUserId) ? 'OWNER' : (user.userId === room.meta.tripHeadUserId ? 'HEAD' : 'PARTICIPANT'),
+      status: room.meta.tripStatus || 'STARTED',
+    });
     this._emit(room.groupId, 'RIDER_UPDATE', { rider: publicRider(rider), joined: !existing });
     this.emit('fleet');
     return this.snapshot(room);
@@ -312,6 +355,7 @@ class ConvoyManager extends EventEmitter {
     room.dirty.delete(userId);
     if (room.meta.members?.[userId]) room.meta.members[userId].leftAt = now();
     await this.repo.removeRider(groupId, userId);
+    await this.repo.releaseActiveTrip(userId);
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
     if (rider) this._emit(groupId, 'RIDER_LEFT', { userId, name: rider.name });
@@ -340,6 +384,7 @@ class ConvoyManager extends EventEmitter {
     }
     this.emit('fleet');
     if (status === 'ENDED') {
+      await this.repo.releaseAllActiveTripsForGroup(groupId);
       clearTimeout(room.persistTimer);
       this.rooms.delete(groupId);
       // 3.15: the safety network and discovery close everything of this room (no DB change).
@@ -1119,7 +1164,9 @@ class ConvoyManager extends EventEmitter {
 
   isLead(room, user) {
     const rider = room.riders.get(user.userId);
-    return user.role === 'MASTER_ADMIN' || room.meta.createdByUserId === user.userId || rider?.role === 'LEAD';
+    const isOwner = room.meta.tripOwnerUserId === user.userId || room.meta.createdByUserId === user.userId;
+    const isHead = room.meta.tripHeadUserId === user.userId;
+    return user.role === 'MASTER_ADMIN' || isOwner || isHead || rider?.role === 'LEAD';
   }
 
   _requireMember(room, user) {
@@ -1489,6 +1536,65 @@ class ConvoyManager extends EventEmitter {
   }
 
   // ------------------------------------------------------- housekeeping
+  async setTripHead(groupId, user, targetUserId) {
+    const room = await this.getRoom(groupId);
+    const isOwner = (room.meta.tripOwnerUserId || room.meta.createdByUserId) === user.userId || user.role === 'ADMIN' || user.role === 'MASTER_ADMIN';
+    if (!isOwner) throw new ConvoyError('Only the Trip Owner can assign the Trip Head.', 403, 'OWNER_ONLY');
+
+    if (!targetUserId || !room.riders.has(targetUserId)) {
+      throw new ConvoyError('Target rider is not in this convoy.', 404, 'NOT_MEMBER');
+    }
+
+    const currentHeadId = room.meta.tripHeadUserId;
+    if (currentHeadId && currentHeadId !== targetUserId && room.riders.has(currentHeadId)) {
+      const oldHead = room.riders.get(currentHeadId);
+      if (oldHead && oldHead.role === 'LEAD') {
+        oldHead.role = 'PACK';
+        await this.repo.upsertRider(groupId, oldHead);
+        this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(oldHead) });
+      }
+    }
+
+    room.meta.tripHeadUserId = targetUserId;
+    const newHead = room.riders.get(targetUserId);
+    newHead.role = 'LEAD';
+    await this.repo.upsertRider(groupId, newHead);
+    this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(newHead) });
+
+    await this.repo.setActiveTrip(targetUserId, { groupId, role: 'HEAD', status: room.meta.tripStatus || 'STARTED' });
+    this._touch(room);
+    await this.repo.saveConvoyMeta(room.meta);
+    this._emit(groupId, 'TRIP_HEAD_CHANGED', { tripHeadUserId: targetUserId, name: newHead.name });
+    return { ok: true, tripHeadUserId: targetUserId };
+  }
+
+  async removeRider(groupId, user, targetUserId) {
+    const room = await this.getRoom(groupId);
+    const isOwner = (room.meta.tripOwnerUserId || room.meta.createdByUserId) === user.userId || user.role === 'ADMIN' || user.role === 'MASTER_ADMIN';
+    if (!isOwner) throw new ConvoyError('Only the Trip Owner can remove riders.', 403, 'OWNER_ONLY');
+
+    const ownerId = room.meta.tripOwnerUserId || room.meta.createdByUserId;
+    if (targetUserId === ownerId) {
+      throw new ConvoyError('Trip Owner cannot be removed. End the trip instead.', 400, 'CANNOT_REMOVE_OWNER');
+    }
+
+    if (!room.riders.has(targetUserId)) {
+      throw new ConvoyError('Rider is not in this convoy.', 404, 'NOT_MEMBER');
+    }
+
+    if (room.meta.tripHeadUserId === targetUserId) {
+      room.meta.tripHeadUserId = ownerId;
+      if (room.riders.has(ownerId)) {
+        const ownerRider = room.riders.get(ownerId);
+        ownerRider.role = 'LEAD';
+        await this.repo.upsertRider(groupId, ownerRider);
+      }
+    }
+
+    await this.leave(groupId, targetUserId);
+    return { ok: true, removedUserId: targetUserId };
+  }
+
   async autoEndStaleConvoys(cutoffMs) {
     const stale = await this.repo.listStaleActiveConvoys(cutoffMs);
     for (const m of stale) {

@@ -1199,7 +1199,15 @@ class ConvoyService extends ChangeNotifier {
       _activate(convoy);
       return convoy;
     } on ApiException catch (e) {
-      _lastError = e.message;
+      if (e.code == 'ACTIVE_TRIP_CONFLICT') {
+        _lastError = 'You are already in an active trip. Please end or leave your current trip first.';
+      } else if (e.code == 'MEMBERSHIP_EXPIRED') {
+        _lastError = 'Active membership required. Please renew your membership.';
+      } else if (e.code == 'SOLO_TRIP_ONLY') {
+        _lastError = 'This is an Individual Membership trip. Additional riders cannot join.';
+      } else {
+        _lastError = e.message;
+      }
       notifyListeners();
       return null;
     } catch (e) {
@@ -1237,6 +1245,51 @@ class ConvoyService extends ChangeNotifier {
       await _api.post('/convoys/$gid/leave');
     } catch (e) {
       debugPrint('leave note: $e');
+    }
+  }
+
+  /// Two-Role Trip Governance: Trip Owner assigns Trip Head.
+  Future<bool> setTripHead(String targetUserId) async {
+    final gid = _activeGroupId;
+    if (gid == null) return false;
+    try {
+      await _api.post('/convoys/$gid/trip-head', {'targetUserId': targetUserId});
+      return true;
+    } catch (e) {
+      debugPrint('[convoy_service] setTripHead error: $e');
+      if (e is ApiException) _lastError = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Two-Role Trip Governance: Trip Owner removes a participant from the active trip.
+  Future<bool> removeParticipant(String targetUserId) async {
+    final gid = _activeGroupId;
+    if (gid == null) return false;
+    try {
+      await _api.delete('/convoys/$gid/riders/$targetUserId');
+      return true;
+    } catch (e) {
+      debugPrint('[convoy_service] removeParticipant error: $e');
+      if (e is ApiException) _lastError = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Update trip status ('PAUSED', 'STARTED', 'ENDED')
+  Future<bool> updateTripStatus(String status) async {
+    final gid = _activeGroupId;
+    if (gid == null) return false;
+    try {
+      await _api.post('/convoys/$gid/status', {'status': status});
+      return true;
+    } catch (e) {
+      debugPrint('[convoy_service] updateTripStatus error: $e');
+      if (e is ApiException) _lastError = e.message;
+      notifyListeners();
+      return false;
     }
   }
 

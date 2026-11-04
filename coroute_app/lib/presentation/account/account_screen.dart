@@ -26,6 +26,7 @@ import 'edit_profile_screen.dart';
 import '../trip_planner/offline_map_manager_screen.dart';
 import '../subscription/payment_history_screen.dart';
 import '../subscription/plan_selector_screen.dart';
+import '../subscription/membership_dashboard_screen.dart';
 import '../subscription/subscription_expiry_banner.dart';
 import '../../core/config/feature_gates.dart';
 import '../../data/services/plan_subscription_service.dart';
@@ -312,6 +313,13 @@ class AccountScreen extends StatelessWidget {
                           color: (planService != null && (planService.isExpired || planService.expiringSoon) ? AppTheme.warnText : null),
                           divider: true,
                           onTap: () => _push(context, const PlanSelectorScreen()),
+                        ),
+                        _SettingsRow(
+                          icon: Icons.group_work_rounded,
+                          title: 'Group Membership & Seats',
+                          subtitle: 'Capacity management, rider invites & active trip status',
+                          divider: true,
+                          onTap: () => _push(context, const MembershipDashboardScreen()),
                         ),
                         _SettingsRow(
                           icon: Icons.receipt_long_rounded,

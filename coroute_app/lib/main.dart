@@ -27,6 +27,7 @@ import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
 import 'data/services/app_version_service.dart';
 import 'data/services/plan_subscription_service.dart';
+import 'data/services/membership_service.dart';
 import 'data/local/ride_stats_store.dart';
 import 'data/local/sqflite_track_queue.dart';
 import 'data/services/realtime_service.dart';
@@ -124,6 +125,7 @@ class CoRouteApp extends StatelessWidget {
           }).ignore();
           return plan;
         }),
+        ChangeNotifierProvider(create: (ctx) => MembershipService(ctx.read<ApiClient>())..fetchMyMembership()..fetchCatalog()),
         ChangeNotifierProvider(create: (ctx) => TripStorageService(ctx.read<ApiClient>())),
         ChangeNotifierProvider(create: (ctx) => TimelineService(ctx.read<ApiClient>(), ctx.read<RealtimeService>())),
         ChangeNotifierProvider(create: (ctx) {

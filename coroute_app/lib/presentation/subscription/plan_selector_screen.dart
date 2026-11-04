@@ -8,6 +8,7 @@ import '../../data/services/plan_subscription_service.dart';
 import '../../data/services/subscription_reminders.dart';
 import 'payment_checkout_modal.dart';
 import 'subscription_expiry_banner.dart';
+import 'membership_dashboard_screen.dart';
 
 /// Screen allowing riders, captains, and tour operators to review entitlements
 /// and upgrade their membership via Razorpay UPI.
@@ -209,6 +210,75 @@ class _PlanSelectorScreenState extends State<PlanSelectorScreen> {
 
               // Ending soon / ended: a tap only scrolls here, so no navigation.
               const SubscriptionExpiryBanner(opensPlanSelector: false),
+
+              // CoRoute Configurable Membership Model Banner
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.brand.withValues(alpha: 0.2),
+                      AppTheme.card,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.brand.withValues(alpha: 0.6)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.group_work_rounded, color: AppTheme.brand, size: 22),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Individual & Group Memberships',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                            ),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.brand,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Text('NEW', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '₹9/mo Individual Solo • ₹49/mo Group (2–6 riders) • ₹99/mo Group (7–12 riders)\nOwner pays once; invited riders join your convoys at zero cost with single-active-trip concurrency safety.',
+                      style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.brand,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(Icons.dashboard_customize_rounded, size: 16),
+                        label: const Text('Manage Membership & Group Seats', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        onPressed: () {
+                          HapticFeedback.lightImpact();
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const MembershipDashboardScreen()));
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
 
               // Razorpay Security Trust Banner
               Container(

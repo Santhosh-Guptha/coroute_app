@@ -10,6 +10,7 @@ const { featurePolicy } = require('./feature_policy');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 const { toWire, toGpx, filterPoints, validateChunk, uploadPermission, TrackError } = require('./tracks');
 const { registerSubscriptionPublicRoutes, registerSubscriptionAuthRoutes } = require('./subscription_routes');
+const { registerMembershipPublicRoutes, registerMembershipAuthRoutes } = require('./membership_routes');
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -132,6 +133,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
 
   // Razorpay webhook endpoint (public, HMAC-signature authenticated)
   registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap });
+  registerMembershipPublicRoutes({ r, repo, wrap });
 
   // ---- authenticated ----
   r.use(requireAuth(gate), apiLimiter);
@@ -296,13 +298,27 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.post('/sos/dispatch-external', dispatchExternalHandler);
 
   r.post('/convoys/:groupId/leave', wrap(async (req, res) => { await convoys.leave(req.params.groupId, req.user.userId); res.json({ ok: true }); }));
+
+  // Two-Role Trip Governance: Trip Owner assigns Trip Head
+  r.post('/convoys/:groupId/trip-head', wrap(async (req, res) => {
+    const { targetUserId } = req.body || {};
+    if (!targetUserId) throw new ConvoyError('targetUserId is required.');
+    res.json(await convoys.setTripHead(req.params.groupId, req.user, String(targetUserId)));
+  }));
+
+  // Two-Role Trip Governance: Trip Owner removes a participant
+  r.delete('/convoys/:groupId/riders/:targetUserId', wrap(async (req, res) => {
+    res.json(await convoys.removeRider(req.params.groupId, req.user, req.params.targetUserId));
+  }));
   r.post('/convoys/:groupId/status', wrap(async (req, res) => {
     const room = await convoys.getRoom(req.params.groupId);
     const rider = room.riders.get(req.user.userId);
     const isLead = rider && rider.role === 'LEAD';
     const isCreator = room.meta.createdByUserId === req.user.userId;
+    const isOwner = room.meta.tripOwnerUserId === req.user.userId;
+    const isHead = room.meta.tripHeadUserId === req.user.userId;
     const isAdmin = req.user.role === 'ADMIN' || req.user.role === 'MASTER_ADMIN';
-    if (!isLead && !isCreator && !isAdmin) {
+    if (!isLead && !isCreator && !isOwner && !isHead && !isAdmin) {
       return res.status(403).json({ error: 'Only the convoy lead or admin can change the trip state.' });
     }
     res.json({ tripStatus: await convoys.setTripStatus(req.params.groupId, String(req.body?.status || '')) });
@@ -788,13 +804,14 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
 
   // Subscription and Razorpay UPI-only payment routes (including admin pricing & coupon management)
   registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin });
+  registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin });
 
   // Errors
   // eslint-disable-next-line no-unused-vars
   r.use((err, req, res, next) => {
     if (err instanceof AuthError) return res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
     if (err instanceof ValidationError) return res.status(err.status).json({ error: err.message, code: err.code, fields: err.fields });
-    if (err instanceof ConvoyError) return res.status(err.status).json({ error: err.message, ...(err.reason ? { code: err.reason } : {}) });
+    if (err instanceof ConvoyError) return res.status(err.status).json({ error: err.message, ...(err.reason ? { code: err.reason, reason: err.reason } : {}) });
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Malformed JSON' });
     console.error('[api]', err);
     res.status(500).json({ error: 'Internal error' });
