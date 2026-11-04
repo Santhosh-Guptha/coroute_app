@@ -19,6 +19,10 @@ import '../onboarding/permissions_screen.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
 import 'trip_review_sheet.dart';
 import 'widgets/route_map_pack_card.dart';
+import '../../data/models/membership_model.dart';
+import '../../data/services/membership_service.dart';
+import '../subscription/membership_payment_screen.dart';
+import 'trip_creation_payment_alert_sheet.dart';
 
 /// Plan a ride on one screen, map first: name, start, destination, stops
 /// (picked on the map or by long-pressing it), then Review and Start Ride.
@@ -55,6 +59,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   String? _nameError;
   int _speedLimit = 0;
   int _routeRequest = 0;
+  bool _membershipJustActivated = false;
 
   @override
   void initState() {
@@ -263,6 +268,76 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     _isReviewing = true;
     FocusScope.of(context).unfocus();
     try {
+      // Stage 1: Check membership status with the backend before review
+      final ms = context.read<MembershipService?>();
+      if (ms != null && ms.paymentsEnabled) {
+        await ms.fetchMyMembership();
+        final owned = ms.ownedMembership;
+        final needsPayment = owned == null || !owned.isActive || owned.capacity < 1;
+
+        if (needsPayment && mounted) {
+          // Resolve applicable category
+          MembershipCategory category = const MembershipCategory(
+            id: 'individual',
+            name: 'Individual Membership',
+            priceRupees: 9,
+            capacity: 1,
+          );
+          if (ms.catalog != null && ms.catalog!.categories.isNotEmpty) {
+            for (final c in ms.catalog!.categories) {
+              if (c.id == 'individual') {
+                category = c;
+                break;
+              }
+            }
+          } else {
+            final catRes = await ms.fetchCatalog();
+            if (catRes != null && catRes.categories.isNotEmpty) {
+              for (final c in catRes.categories) {
+                if (c.id == 'individual') {
+                  category = c;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (!mounted) return;
+
+          // Stage 1: Show Trip Creation Payment Alert Bottom Sheet
+          final proceed = await TripCreationPaymentAlertSheet.show(
+            context,
+            category: category,
+            activeOfferCode: 'RIDERFREE',
+            discountPercent: 100,
+          );
+
+          if (proceed != true || !mounted) {
+            // User chose "Maybe Later" or dismissed: retain trip configuration and stay on planner
+            return;
+          }
+
+          // Stage 2 & 3: Navigate to Payment Screen and Success Confirmation
+          final activated = await MembershipPaymentScreen.push(
+            context,
+            category: category,
+            isTripCreationFlow: true,
+          );
+
+          if (activated != true || !mounted) {
+            // Payment cancelled or incomplete: retain trip configuration
+            return;
+          }
+
+          // Stage 4: Refresh membership eligibility from backend
+          await ms.fetchMyMembership();
+          _membershipJustActivated = true;
+        }
+      }
+
+      if (!mounted) return;
+
+      // Stage 4: Return to exact trip creation review stage with all details restored
       final limit = await TripReviewSheet.show(
         context,
         name: name,
@@ -276,9 +351,15 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         startLng: _start?.lng,
         destinationLat: _destination?.lat,
         destinationLng: _destination?.lng,
+        membershipActivated: _membershipJustActivated,
+        confirmLabel: 'Confirm and Create Trip',
       );
+
+      _membershipJustActivated = false;
       if (limit == null || !mounted) return;
       setState(() => _speedLimit = limit);
+
+      // Final step: explicit user confirmation launches trip
       await _launch(name);
     } finally {
       _isReviewing = false;

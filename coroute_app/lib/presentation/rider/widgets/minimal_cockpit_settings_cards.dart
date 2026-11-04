@@ -86,7 +86,7 @@ class NavigationToolsCard extends StatelessWidget {
               },
               trailing: canPushWaypoint
                   ? null
-                  : Icon(Icons.lock_rounded, size: 20, color: AppTheme.warnText),
+                  : Icon(Icons.share_rounded, size: 20, color: AppTheme.accentText),
             ),
           ],
           const Divider(height: 1),
@@ -255,7 +255,7 @@ class SafetyFuelCard extends StatelessWidget {
             title: 'Share Ride Guardian link',
             subtitle: isGuardianUnlocked
                 ? 'Live encrypted web tracking link for family or friends'
-                : 'Requires Pro Rider plan · Tap to unlock',
+                : 'Live encrypted web tracking link for family or friends',
             onTap: () {
               if (!isGuardianUnlocked) {
                 FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
@@ -265,7 +265,7 @@ class SafetyFuelCard extends StatelessWidget {
             },
             trailing: isGuardianUnlocked
                 ? Icon(Icons.share_rounded, size: 20, color: AppTheme.accentText)
-                : Icon(Icons.lock_rounded, size: 20, color: AppTheme.warnText),
+                : Icon(Icons.share_rounded, size: 20, color: AppTheme.accentText),
           ),
           const Divider(height: 1),
           _CardTile(

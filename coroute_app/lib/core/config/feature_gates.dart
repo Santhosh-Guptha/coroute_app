@@ -1,8 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../theme/app_theme.dart';
-import '../../data/services/plan_subscription_service.dart';
-import '../../presentation/subscription/plan_selector_screen.dart';
 
 /// Subscription tiers and feature entitlements for CoRoute.
 ///
@@ -94,75 +90,20 @@ class FeatureGates {
   /// CURRENT MASTER OVERRIDE:
   /// When true, all features across all tiers are unlocked.
   /// When false (default), features strictly adhere to [activeTier] for testing plan rules.
-  static bool forceAllUnlocked = false;
+  static bool forceAllUnlocked = true;
 
   /// Active subscription tier for this session.
-  static SubscriptionTier activeTier = SubscriptionTier.community;
+  static SubscriptionTier activeTier = SubscriptionTier.tourOperator;
 
   /// Checks whether a given [feature] is unlocked for the user.
+  /// All features are included for all riders. Seat capacity is the only distinction.
   static bool isUnlocked(Feature feature, [SubscriptionTier? tier]) {
-    if (!paymentsEnabled || forceAllUnlocked) return true;
-
-    final effectiveTier = tier ?? activeTier;
-    switch (feature) {
-      case Feature.fleetAnalytics:
-        return effectiveTier == SubscriptionTier.tourOperator;
-
-      case Feature.priorityIntercomDucking:
-      case Feature.unlimitedConvoyCapacity:
-      case Feature.dynamicWaypointPush:
-      case Feature.totalConvoySpreadAlert:
-      case Feature.roadHazardBroadcast:
-        return effectiveTier == SubscriptionTier.roadCaptain ||
-            effectiveTier == SubscriptionTier.tourOperator;
-
-      case Feature.roadHazardReceive:
-      case Feature.sirenAcousticDetector:
-      case Feature.bleHandlebarRemote:
-      case Feature.voiceSafetyHotwords:
-      case Feature.smartAirbagVest:
-        return true;
-
-      case Feature.guardianLiveShare:
-      case Feature.unlimitedOfflinePacks:
-      case Feature.advancedTelemetryReplay:
-      case Feature.multiBikeGarage:
-      case Feature.sunlightHudMode:
-      case Feature.biometricTraumaPulse:
-      case Feature.satelliteSosRelay:
-      case Feature.p2pOfflineMesh:
-        return effectiveTier != SubscriptionTier.community;
-    }
+    return true;
   }
 
   /// Returns which tier is required to unlock the given feature.
   static SubscriptionTier requiredTier(Feature feature) {
-    if (!paymentsEnabled) return SubscriptionTier.community;
-    switch (feature) {
-      case Feature.fleetAnalytics:
-        return SubscriptionTier.tourOperator;
-      case Feature.priorityIntercomDucking:
-      case Feature.unlimitedConvoyCapacity:
-      case Feature.dynamicWaypointPush:
-      case Feature.totalConvoySpreadAlert:
-      case Feature.roadHazardBroadcast:
-        return SubscriptionTier.roadCaptain;
-      case Feature.roadHazardReceive:
-      case Feature.sirenAcousticDetector:
-      case Feature.bleHandlebarRemote:
-      case Feature.voiceSafetyHotwords:
-      case Feature.smartAirbagVest:
-        return SubscriptionTier.community;
-      case Feature.guardianLiveShare:
-      case Feature.unlimitedOfflinePacks:
-      case Feature.advancedTelemetryReplay:
-      case Feature.multiBikeGarage:
-      case Feature.sunlightHudMode:
-      case Feature.biometricTraumaPulse:
-      case Feature.satelliteSosRelay:
-      case Feature.p2pOfflineMesh:
-        return SubscriptionTier.proRider;
-    }
+    return SubscriptionTier.community;
   }
 
   /// Human-friendly feature display name.
@@ -256,143 +197,13 @@ class FeatureGates {
   /// Displays a plan-gate modal: a one-tap switch when the rider already holds
   /// the needed tier (e.g. after dropping to Community), otherwise a way to upgrade.
   static void showUpgradeModal(BuildContext context, Feature feature) {
-    if (!paymentsEnabled || forceAllUnlocked) return;
-    final neededTier = requiredTier(feature);
-    final neededLabel = tierLabel(neededTier);
-    final planService = context.read<PlanSubscriptionService>();
-    final heldAlready = planService.canSelect(neededTier);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppTheme.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 44,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.border2,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppTheme.warnTint,
-                border: Border.all(color: AppTheme.warnBorder, width: 2),
-              ),
-              child: Icon(Icons.lock_rounded, color: AppTheme.warnText, size: 30),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              featureName(feature),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppTheme.text,
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.3,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.accentText.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppTheme.accentText, width: 1),
-              ),
-              child: Text(
-                'REQUIRES $neededLabel'.toUpperCase(),
-                style: TextStyle(
-                  color: AppTheme.accentText,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 11,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              featureDescription(feature),
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.45),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.brand,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                onPressed: () async {
-                  Navigator.pop(ctx);
-                  // Only switches within what the rider holds; a higher tier needs checkout.
-                  final switched = await planService.selectTier(neededTier);
-                  if (!context.mounted) return;
-                  if (switched) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        duration: const Duration(seconds: 2),
-                        backgroundColor: AppTheme.card,
-                        content: Text(
-                          'Activated $neededLabel! Feature is now unlocked.',
-                          style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    );
-                  } else {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => PlanSelectorScreen(preselectTier: neededTier),
-                      ),
-                    );
-                  }
-                },
-                child: Text(
-                  (heldAlready ? 'SWITCH TO $neededLabel (FREE)' : 'UPGRADE TO $neededLabel').toUpperCase(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 13,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    // All features are unlocked by default across all tiers.
+    return;
   }
 
   /// Returns the maximum allowable convoy size for the given tier.
   static int maxConvoyMembers([SubscriptionTier? tier]) {
-    if (!paymentsEnabled || forceAllUnlocked) return 100;
-
-    final effectiveTier = tier ?? activeTier;
-    switch (effectiveTier) {
-      case SubscriptionTier.community:
-        return 4;
-      case SubscriptionTier.proRider:
-        return 4;
-      case SubscriptionTier.roadCaptain:
-        return 40;
-      case SubscriptionTier.tourOperator:
-        return 100;
-    }
+    return 100;
   }
 
   /// Label for displaying the tier in settings or profile.

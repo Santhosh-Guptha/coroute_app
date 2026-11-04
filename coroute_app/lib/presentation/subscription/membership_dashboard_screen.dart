@@ -1,3 +1,4 @@
+import 'membership_payment_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
@@ -151,97 +152,12 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
   }
 
   /// Opens the Mandatory Payment Checkout Sheet for a specific membership category.
-  void _openPaymentCheckoutSheet(MembershipCategory cat) {
+  void _openPaymentCheckoutSheet(MembershipCategory cat) async {
     HapticFeedback.mediumImpact();
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => _PaymentCheckoutSheet(
-        category: cat,
-        onSuccess: (mem, paymentId) {
-          Navigator.of(sheetCtx).pop();
-          _showPaymentSuccessReceipt(mem, paymentId);
-        },
-      ),
-    );
-  }
-
-  void _showPaymentSuccessReceipt(UserMembership mem, String paymentId) {
-    final expiryStr = mem.validUntil > 0 ? _dateFmt.format(DateTime.fromMillisecondsSinceEpoch(mem.validUntil)) : 'Permanent';
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.greenAccent.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 54),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Membership Confirmed!',
-              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              mem.name,
-              style: TextStyle(color: AppTheme.brand, fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.black26,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: Column(
-                children: [
-                  _receiptRow('Seats Confirmed', '${mem.capacity} Riders'),
-                  const SizedBox(height: 8),
-                  _receiptRow('Ownership', 'Permanent & Non-transferable'),
-                  const SizedBox(height: 8),
-                  _receiptRow('Valid Until', expiryStr),
-                  const SizedBox(height: 8),
-                  _receiptRow('Transaction ID', paymentId.length > 20 ? '${paymentId.substring(0, 18)}...' : paymentId),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.brand,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Back to Dashboard', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _receiptRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white60, fontSize: 12)),
-        Text(value, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-      ],
-    );
+    final ok = await MembershipPaymentScreen.push(context, category: cat);
+    if (ok == true && mounted) {
+      final ms = context.read<MembershipService>(); await ms.fetchMyMembership();
+    }
   }
 
   @override

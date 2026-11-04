@@ -86,7 +86,7 @@ class AccountScreen extends StatelessWidget {
       if (!auth.isPillion && plate.isNotEmpty) plate,
       if (auth.isPillion) 'No bike registration needed',
       if (settings != null && settings.fuelRangeKm > 0) '${settings.fuelRangeKm} km range',
-      FeatureGates.isUnlocked(Feature.multiBikeGarage) ? 'Multi-bike garage (Pro)' : '1 bike profile (Community)',
+      'Multi-bike motorcycle garage',
     ];
 
     return Scaffold(
@@ -329,8 +329,8 @@ class AccountScreen extends StatelessWidget {
                           title: 'Fleet & Tour Dispatcher Matrix',
                           subtitle: FeatureGates.isUnlocked(Feature.fleetAnalytics)
                               ? 'Commercial live fleet map, emergency dispatch & analytics'
-                              : 'Tour Operator Pass · Fleet analytics & dispatcher overview',
-                          value: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? 'ACTIVE' : 'TOUR OPERATOR',
+                              : 'Commercial live fleet map, emergency dispatch & analytics',
+                          value: 'ACTIVE',
                           color: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? AppTheme.accentText : null,
                           divider: false,
                           onTap: () {

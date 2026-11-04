@@ -150,11 +150,6 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
   }
 
   void _onDownloadNewPack() {
-    final isUnlimited = FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks);
-    if (!isUnlimited && _packs.length >= SafetyConstants.freeOfflinePacksLimit) {
-      FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks);
-      return;
-    }
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const TripPlannerScreen()),
     );
@@ -180,12 +175,8 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
         actions: [
           IconButton(
             icon: Icon(
-              !FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks) && _packs.length >= SafetyConstants.freeOfflinePacksLimit
-                  ? Icons.lock_outline_rounded
-                  : Icons.add_circle_outline_rounded,
-              color: !FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks) && _packs.length >= SafetyConstants.freeOfflinePacksLimit
-                  ? AppTheme.warnText
-                  : AppTheme.accentText,
+              Icons.add_circle_outline_rounded,
+              color: AppTheme.accentText,
             ),
             tooltip: 'Download Corridor Pack',
             onPressed: _onDownloadNewPack,
@@ -209,50 +200,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
                   keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                   children: [
                     // Plan Entitlement Status Banner
-                    if (!FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks))
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 14),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppTheme.warnTint,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppTheme.warnBorder, width: 1.5),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.lock_outline_rounded, color: AppTheme.warnText, size: 22),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'COMMUNITY PLAN · 1 PACK LIMIT',
-                                    style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w800, fontSize: 12),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '${_packs.length} of 1 offline route pack used. Upgrade to CoRoute Pro for unlimited corridor downloads.',
-                                    style: TextStyle(color: AppTheme.text2, fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            FilledButton(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: AppTheme.brand,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                minimumSize: const Size(64, 48),
-                              ),
-                              onPressed: () => FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks),
-                              child: const Text('Upgrade', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-                            ),
-                          ],
-                        ),
-                      )
-                else
-                  Container(
+                    Container(
                     margin: const EdgeInsets.only(bottom: 14),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(

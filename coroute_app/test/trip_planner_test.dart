@@ -123,7 +123,7 @@ void main() {
       await tester.tap(find.text('60'));
       await tester.pump();
       expect(find.text('60 km/h'), findsOneWidget);
-      await tester.tap(find.text('Start Ride'));
+      await tester.tap(find.text('Confirm and Create Trip'));
       await tester.pumpAndSettle();
       expect(result, 60);
     });
@@ -151,8 +151,8 @@ void main() {
         await tester.tap(find.text('open'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(find.text('Start Ride'), findsOneWidget);
-        final button = find.ancestor(of: find.text('Start Ride'), matching: find.byWidgetPredicate((w) => w is FilledButton));
+        expect(find.text('Confirm and Create Trip'), findsOneWidget);
+        final button = find.ancestor(of: find.text('Confirm and Create Trip'), matching: find.byWidgetPredicate((w) => w is FilledButton));
         expect(tester.getSize(button.first).height, greaterThanOrEqualTo(56));
       });
     }

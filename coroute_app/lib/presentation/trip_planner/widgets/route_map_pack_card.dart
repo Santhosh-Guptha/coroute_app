@@ -4,8 +4,6 @@ import 'package:provider/provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
 import '../../../core/config/feature_gates.dart';
-import '../../../core/constants/safety_constants.dart';
-import '../../../data/local/saved_map_pack_store.dart';
 import '../../../data/models/route_model.dart';
 import '../../../data/services/tile_cache_service.dart';
 import '../offline_map_manager_screen.dart';
@@ -455,16 +453,6 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
                 onPressed: () async {
-                  if (!FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks)) {
-                    final existingPacks = await SavedMapPackStore.loadAll();
-                    if (existingPacks.length >= SafetyConstants.freeOfflinePacksLimit &&
-                        !existingPacks.any((p) => p.name == widget.tripName)) {
-                      if (context.mounted) {
-                        FeatureGates.showUpgradeModal(context, Feature.unlimitedOfflinePacks);
-                      }
-                      return;
-                    }
-                  }
                   prefetcher.start(points, label: widget.tripName, highDetail: _highDetail);
                 },
                 icon: const Icon(Icons.download_rounded, size: 16),
