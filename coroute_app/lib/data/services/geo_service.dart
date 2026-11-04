@@ -77,7 +77,8 @@ class GeoService {
       final res = await _api.post('/geo/route', {
         'waypoints': [for (final (lat, lng) in waypoints) {'lat': lat, 'lng': lng}],
       }, const Duration(seconds: 15));
-      return res is Map ? RouteModel.fromJson(Map<String, dynamic>.from(res)) : null;
+      if (res is! Map) return null;
+      return await RouteModel.fromJsonAsync(Map<String, dynamic>.from(res));
     } catch (_) {
       return null;
     }

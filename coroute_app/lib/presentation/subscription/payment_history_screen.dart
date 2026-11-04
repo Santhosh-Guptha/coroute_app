@@ -6,6 +6,7 @@ import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
+import '../../data/services/membership_service.dart';
 import '../../data/services/plan_subscription_service.dart';
 import 'plan_selector_screen.dart';
 import 'subscription_expiry_banner.dart';
@@ -69,13 +70,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
 
   Future<void> _load({bool refresh = false}) async {
     final plan = context.read<PlanSubscriptionService?>();
-    if (plan == null) {
-      setState(() {
-        _loading = false;
-        _error = 'Plan service unavailable.';
-      });
-      return;
-    }
+    final mem = context.read<MembershipService?>();
     setState(() {
       if (refresh) {
         _refreshing = true;
@@ -85,13 +80,39 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
       _error = null;
     });
     try {
-      final data = await plan.fetchHistory();
-      if (refresh) plan.syncFromServer().ignore(); // a paid order may have settled
+      Map<String, dynamic> data = const {};
+      if (plan != null) {
+        try {
+          data = await plan.fetchHistory();
+          if (refresh) plan.syncFromServer().ignore();
+        } catch (_) {}
+      }
+      List<Map<String, dynamic>> memOrders = const [];
+      if (mem != null) {
+        try {
+          final items = await mem.fetchPaymentHistory();
+          memOrders = items.map((m) => {
+            'orderId': m.orderId,
+            'paymentId': m.paymentId,
+            'amount': m.amountInr,
+            'planTier': m.category,
+            'status': m.status,
+            'isFree': m.isFree,
+            'couponCode': m.offerCode,
+            'createdAt': m.createdAt,
+            'paidAt': m.paidAt,
+            'refundStatus': m.refundStatus,
+            'refundedAmount': m.refundedAmount,
+          }).toList();
+        } catch (_) {}
+      }
       if (!mounted) return;
+      final allOrders = [...memOrders, ..._rows(data['orders'])];
+      final allPayments = [...memOrders.where((m) => m['status'] == 'PAID'), ..._rows(data['history'])];
       setState(() {
-        _payments = _newestFirst(_rows(data['history']), const ['paidAt', 'validFrom']);
+        _payments = _newestFirst(allPayments, const ['paidAt', 'validFrom']);
         _periods = _newestFirst(_rows(data['subscriptionHistory']), const ['endedAt', 'validUntil']);
-        _orders = _newestFirst(_rows(data['orders']), const ['createdAt', 'paidAt']);
+        _orders = _newestFirst(allOrders, const ['createdAt', 'paidAt']);
       });
     } on ApiException catch (e) {
       if (!mounted) return;

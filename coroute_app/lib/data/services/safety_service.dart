@@ -516,6 +516,9 @@ class SafetyService extends ChangeNotifier {
   /// The accelerometer is running right now.
   bool get detectorArmed => _accelSub != null;
 
+  /// Whether the safety sensor hardware is unavailable or failed on this device.
+  bool get isSensorUnavailable => _accelUnavailable;
+
   /// "Text the group now" can be used: texts allowed, an SOS is waiting and was not texted yet.
   bool get smsAvailable {
     final p = _port.pendingSos;

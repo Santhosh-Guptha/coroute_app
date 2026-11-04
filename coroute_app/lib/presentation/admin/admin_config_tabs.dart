@@ -104,13 +104,24 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
       try {
         final api = context.read<ApiClient>();
         final memRes = await api.get('/admin/membership/catalog');
-        if (memRes is Map && memRes['categories'] is List) {
-          for (final cat in memRes['categories']) {
+        if (memRes is Map) {
+          final catsRaw = memRes['catalog'] ?? memRes['categories'];
+          final Iterable<dynamic> catList = (catsRaw is Map)
+              ? catsRaw.values
+              : (catsRaw is List ? catsRaw : const []);
+          for (final cat in catList) {
             if (cat is Map) {
               final id = cat['id']?.toString();
               if (id != null) {
-                _memPrices[id]?.text = (cat['priceRupees'] as num?)?.toInt().toString() ?? '';
-                _memCapacities[id]?.text = (cat['capacity'] as num?)?.toInt().toString() ?? '';
+                final price = (cat['monthlyPriceInr'] as num?)?.toInt() ??
+                    (cat['priceRupees'] as num?)?.toInt();
+                if (price != null) {
+                  _memPrices[id]?.text = price.toString();
+                }
+                final cap = (cat['capacity'] as num?)?.toInt();
+                if (cap != null) {
+                  _memCapacities[id]?.text = cap.toString();
+                }
               }
             }
           }
@@ -271,7 +282,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
           'features': ['Convoy & Group Tracking', 'Up to 12 Group Members', 'Shared Trip Coordination', 'PTT & Intercom Access', 'Safety Escalations'],
         },
       ];
-      await context.read<ApiClient>().put('/admin/membership/catalog', {'categories': categories});
+      await context.read<ApiClient>().put('/admin/membership/catalog', {'catalog': categories, 'categories': categories});
       if (mounted) adminSnack(context, 'Membership catalog updated successfully.');
       _load();
     } catch (e) {

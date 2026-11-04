@@ -1,4 +1,34 @@
+import 'package:flutter/foundation.dart';
 import '../../domain/tracking/geo_math.dart';
+
+/// Precalculated rectangular geographic bounding box for O(1) camera framing.
+class RouteBounds {
+  final double minLat;
+  final double maxLat;
+  final double minLng;
+  final double maxLng;
+
+  const RouteBounds({
+    required this.minLat,
+    required this.maxLat,
+    required this.minLng,
+    required this.maxLng,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'minLat': minLat,
+        'maxLat': maxLat,
+        'minLng': minLng,
+        'maxLng': maxLng,
+      };
+
+  factory RouteBounds.fromJson(Map<String, dynamic> j) => RouteBounds(
+        minLat: (j['minLat'] as num).toDouble(),
+        maxLat: (j['maxLat'] as num).toDouble(),
+        minLng: (j['minLng'] as num).toDouble(),
+        maxLng: (j['maxLng'] as num).toDouble(),
+      );
+}
 
 /// The planned driving route through start, stops and destination, computed
 /// by the gateway (free OSRM, or straight lines marked [approximate] when the
@@ -11,6 +41,7 @@ class RouteModel {
   final List<RouteStep> steps;
   final bool approximate;
   final int computedAt;
+  final RouteBounds? bounds;
 
   RouteModel({
     required this.distanceM,
@@ -20,12 +51,49 @@ class RouteModel {
     this.steps = const [],
     this.approximate = false,
     this.computedAt = 0,
-  });
+    List<(double, double)>? precomputedPoints,
+    List<(double, double)>? precomputedDisplayPoints,
+    this.bounds,
+  })  : _points = precomputedPoints,
+        _displayPoints = precomputedDisplayPoints;
 
   List<(double, double)>? _points;
+  List<(double, double)>? _displayPoints;
 
-  /// Decoded route line (lat, lng), decoded once.
+  /// Full-resolution decoded route line (lat, lng), decoded once.
+  /// Retains 100% precision for turn-by-turn navigation, waypoint proximity,
+  /// and dead reckoning.
   List<(double, double)> get points => _points ??= (GeoMath.decodePolyline(polyline) ?? const []);
+
+  /// Simplified route line for overview map rendering (PolylineLayer) to prevent
+  /// GPU Canvas overdraw and frame drops on long-distance trips.
+  List<(double, double)> get displayPoints {
+    if (_displayPoints != null) return _displayPoints!;
+    final pts = points;
+    if (pts.length <= 300) {
+      _displayPoints = pts;
+    } else {
+      _displayPoints = GeoMath.simplify(pts, toleranceM: 15.0);
+    }
+    return _displayPoints!;
+  }
+
+  /// Geographic bounds computed on demand if not already precalculated.
+  RouteBounds? get calculatedBounds {
+    if (bounds != null) return bounds;
+    final pts = points;
+    if (pts.isEmpty) return null;
+    var minLa = pts[0].$1, maxLa = pts[0].$1;
+    var minLn = pts[0].$2, maxLn = pts[0].$2;
+    for (var i = 1; i < pts.length; i++) {
+      final p = pts[i];
+      if (p.$1 < minLa) minLa = p.$1;
+      if (p.$1 > maxLa) maxLa = p.$1;
+      if (p.$2 < minLn) minLn = p.$2;
+      if (p.$2 > maxLn) maxLn = p.$2;
+    }
+    return RouteBounds(minLat: minLa, maxLat: maxLa, minLng: minLn, maxLng: maxLn);
+  }
 
   factory RouteModel.fromJson(Map<String, dynamic> j) {
     final rawSteps = (j['steps'] as List? ?? const []).whereType<Map>().toList();
@@ -46,6 +114,9 @@ class RouteModel {
       ));
     }
 
+    final rawBounds = j['bounds'];
+    final parsedBounds = rawBounds is Map<String, dynamic> ? RouteBounds.fromJson(rawBounds) : null;
+
     return RouteModel(
       distanceM: (j['distanceM'] as num?)?.toDouble() ?? 0,
       durationS: (j['durationS'] as num?)?.toInt() ?? 0,
@@ -57,7 +128,14 @@ class RouteModel {
       steps: parsedSteps,
       approximate: j['approximate'] == true,
       computedAt: (j['computedAt'] as num?)?.toInt() ?? 0,
+      bounds: parsedBounds,
     );
+  }
+
+  /// Parses JSON, decodes polyline, precomputes bounds and Douglas-Peucker simplified
+  /// display points inside a background isolate to keep the UI thread completely unblocked.
+  static Future<RouteModel> fromJsonAsync(Map<String, dynamic> j) async {
+    return compute(_parseRouteInIsolate, j);
   }
 
   /// Finds the active turn step at [alongM] metres from the start of the route.
@@ -95,7 +173,48 @@ class RouteModel {
         'steps': steps.map((s) => s.toJson()).toList(),
         'approximate': approximate,
         'computedAt': computedAt,
+        if (bounds != null) 'bounds': bounds!.toJson(),
       };
+}
+
+/// Background isolate worker for decoding large polylines and precomputing
+/// simplified display geometry without blocking UI frames.
+RouteModel _parseRouteInIsolate(Map<String, dynamic> j) {
+  final base = RouteModel.fromJson(j);
+  final pts = GeoMath.decodePolyline(base.polyline) ?? const <(double, double)>[];
+  List<(double, double)> displayPts;
+  if (pts.length <= 300) {
+    displayPts = pts;
+  } else {
+    displayPts = GeoMath.simplify(pts, toleranceM: 15.0);
+  }
+
+  RouteBounds? b = base.bounds;
+  if (b == null && pts.isNotEmpty) {
+    var minLa = pts[0].$1, maxLa = pts[0].$1;
+    var minLn = pts[0].$2, maxLn = pts[0].$2;
+    for (var i = 1; i < pts.length; i++) {
+      final p = pts[i];
+      if (p.$1 < minLa) minLa = p.$1;
+      if (p.$1 > maxLa) maxLa = p.$1;
+      if (p.$2 < minLn) minLn = p.$2;
+      if (p.$2 > maxLn) maxLn = p.$2;
+    }
+    b = RouteBounds(minLat: minLa, maxLat: maxLa, minLng: minLn, maxLng: maxLn);
+  }
+
+  return RouteModel(
+    distanceM: base.distanceM,
+    durationS: base.durationS,
+    polyline: base.polyline,
+    legs: base.legs,
+    steps: base.steps,
+    approximate: base.approximate,
+    computedAt: base.computedAt,
+    precomputedPoints: pts,
+    precomputedDisplayPoints: displayPts,
+    bounds: b,
+  );
 }
 
 class RouteLeg {

@@ -15,8 +15,29 @@ class Trace {
   void fix(int s, double kmh, {double northM = 0}) =>
       _events.add((t0 + s * 1000, TrackPoint(ts: t0 + s * 1000, lat: lat0 + northM / 111320.0, lng: lng0, speedKmh: kmh, accuracyM: 5)));
 
-  void bucket(int s, {double peak = 1.3, double mean = 1.0, double std = 0.3}) =>
-      _events.add((t0 + s * 1000, AccelBucket(tMs: t0 + s * 1000, peakG: peak, meanG: mean, stdG: std)));
+  void bucket(
+    int s, {
+    double peak = 1.3,
+    double mean = 1.0,
+    double std = 0.3,
+    double peakDyn = 0.0,
+    double gyro = 0.0,
+    double tilt = 0.0,
+    double durMs = 0.0,
+  }) =>
+      _events.add((
+        t0 + s * 1000,
+        AccelBucket(
+          tMs: t0 + s * 1000,
+          peakG: peak,
+          meanG: mean,
+          stdG: std,
+          peakDynG: peakDyn,
+          peakGyroRadS: gyro,
+          tiltDeg: tilt,
+          impactDurationMs: durMs,
+        ),
+      ));
 
   /// Riding at [kmh] from second [from] to [to] (inclusive): a fix and a bumpy bucket each second.
   void ride(int from, int to, double kmh, {double startNorthM = 0}) {
@@ -338,5 +359,115 @@ void main() {
     expect(b[1].peakG, 6.0);
     expect(b[0].stdG, 0.2);
     expect(AccelBucket.decode(Float64List.fromList([double.nan, 1, 1, 1])), isEmpty);
+
+    // Extended 8-double format decoding test
+    final extendedFlat = Float64List.fromList([
+      1000, 1.5, 1.0, 0.2, 0.8, 0.4, 12.0, 40.0,
+      2000, 5.0, 1.8, 0.9, 4.2, 2.8, 55.0, 120.0,
+    ]);
+    final extDecoded = AccelBucket.decode(extendedFlat);
+    expect(extDecoded, hasLength(2));
+    expect(extDecoded[1].peakDynG, 4.2);
+    expect(extDecoded[1].peakGyroRadS, 2.8);
+    expect(extDecoded[1].tiltDeg, 55.0);
+    expect(extDecoded[1].impactDurationMs, 120.0);
+    expect(extDecoded[1].effectiveDynG, 4.2);
+  });
+
+  group('enhanced motorcycle fall and slide scenarios', () {
+    test('lowside fall without 4g spike (peak 2.4g, gyro 2.5 rad/s, tilt 55°): triggers crash', () {
+      final t = Trace()..ride(0, 30, 45);
+      // Lowside fall: moderate dynamic shock 2.4g, high angular velocity 2.5 rad/s, tilt 55°
+      t.bucket(30, peak: 2.5, peakDyn: 2.4, gyro: 2.5, tilt: 55.0, durMs: 80.0, std: 1.2);
+      t.fix(31, 20, northM: 460);
+      t.bucket(31, peak: 1.8, peakDyn: 1.5, gyro: 1.0, tilt: 60.0, std: 0.6);
+      t.fix(32, 0, northM: 465);
+      for (var s = 33; s <= 60; s++) {
+        if (s.isEven) t.fix(s, 0, northM: 465);
+        t.bucket(s, peak: 1.02, std: 0.02, tilt: 65.0);
+      }
+      final events = t.run(CrashDetector());
+      expect(events, hasLength(1));
+      expect(events.single.$2.isSlideFall, isTrue);
+      expect(events.single.$2.hasRotationOrTilt, isTrue);
+      expect(events.single.$2.speedBeforeKmh, 45);
+    });
+
+    test('low-speed intersection fall (18 km/h, tilt 60°, stop): triggers crash', () {
+      final t = Trace();
+      for (var s = 0; s <= 20; s++) {
+        t.fix(s, 18, northM: s * 5.0);
+        t.bucket(s, peak: 1.3, std: 0.2);
+      }
+      // Tip over at junction: 1.9g shock, 2.2 rad/s gyro, 60° tilt
+      t.bucket(21, peak: 2.0, peakDyn: 1.9, gyro: 2.2, tilt: 60.0, durMs: 60.0, std: 1.1);
+      t.fix(22, 0, northM: 105);
+      for (var s = 23; s <= 50; s++) {
+        t.fix(s, 0, northM: 105);
+        t.bucket(s, peak: 1.02, std: 0.02, tilt: 65.0);
+      }
+      final events = t.run(CrashDetector());
+      expect(events, hasLength(1));
+      expect(events.single.$2.isSlideFall, isTrue);
+    });
+
+    test('highside incident (angular snap 3.6 rad/s, 3.5g dynamic shock, rapid stop): triggers crash', () {
+      final t = Trace()..ride(0, 30, 65);
+      // Highside violent snap
+      t.bucket(30, peak: 3.8, peakDyn: 3.6, gyro: 3.6, tilt: 70.0, durMs: 140.0, std: 2.0);
+      t.fix(31, 25, northM: 520);
+      t.fix(33, 0, northM: 530);
+      for (var s = 34; s <= 60; s++) {
+        t.fix(s, 0, northM: 530);
+        t.bucket(s, peak: 1.02, std: 0.02, tilt: 75.0);
+      }
+      final events = t.run(CrashDetector());
+      expect(events, hasLength(1));
+      expect(events.single.$2.hasRotationOrTilt, isTrue);
+    });
+
+    test('speed breaker / rumble strip (peak 2.8g, duration 20ms, tilt 2°, speed drops 40->25 km/h, ride on): no crash', () {
+      final t = Trace()..ride(0, 30, 40);
+      // Speed breaker bump: brief impulse 20ms, no tilt, no rotation
+      t.bucket(31, peak: 2.9, peakDyn: 2.8, gyro: 0.2, tilt: 2.0, durMs: 20.0, std: 0.8);
+      t.ride(32, 60, 25, startNorthM: 350);
+      final d = CrashDetector();
+      expect(t.run(d), isEmpty);
+    });
+
+    test('pebble hit / sensor glitch (4.2g spike, duration 10ms, no rotation, ride on): no crash', () {
+      final t = Trace()..ride(0, 30, 50);
+      // Sub-sample glitch / stone flick on sensor housing
+      t.bucket(31, peak: 4.2, peakDyn: 4.1, gyro: 0.1, tilt: 1.0, durMs: 10.0, std: 0.5);
+      t.ride(32, 60, 50, startNorthM: 430);
+      final d = CrashDetector();
+      expect(t.run(d), isEmpty);
+    });
+
+    test('stale GPS fixes (> 10s old) and inaccurate fixes (> 65m) do not corrupt detection', () {
+      final t = Trace()..ride(0, 30, 55);
+      t.bucket(30, peak: 6.0, std: 1.5);
+      // Inaccurate fix (accuracy 150m) reporting 0 km/h is ignored for stop confirmation
+      t._events.add((Trace.t0 + 31000, TrackPoint(ts: Trace.t0 + 31000, lat: Trace.lat0, lng: Trace.lng0, speedKmh: 0, accuracyM: 150)));
+      // Legitimate accurate stop fix at 34s
+      t.fix(34, 0, northM: 485);
+      for (var s = 35; s <= 70; s++) {
+        t.fix(s, 0, northM: 485);
+        t.bucket(s, peak: 1.02, std: 0.02);
+      }
+      final events = t.run(CrashDetector());
+      expect(events, hasLength(1));
+    });
+
+    test('high road vibration at 70 km/h (peak 2.0g, std 0.35g, no rotation): sensor stays armed, no crash', () {
+      final t = Trace();
+      for (var s = 0; s <= 60; s++) {
+        t.fix(s, 70, northM: s * 70 / 3.6);
+        t.bucket(s, peak: 2.0, peakDyn: 1.4, gyro: 0.3, tilt: 4.0, std: 0.35);
+      }
+      final d = CrashDetector();
+      expect(t.run(d), isEmpty);
+      expect(d.wantsSensor, isTrue);
+    });
   });
 }

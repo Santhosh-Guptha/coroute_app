@@ -109,6 +109,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   app.use(cors(config.corsOrigins.length ? { origin: config.corsOrigins } : { origin: false }));
   // The Razorpay webhook is signed over the exact bytes it sends: keep them raw, and small (1 MB).
   app.use('/api/subscription/webhook', express.raw({ type: () => true, limit: '1mb' }));
+  app.use('/api/membership/webhook', express.raw({ type: () => true, limit: '1mb' }));
   app.use(express.json({ limit: '2mb' }));
 
   const server = http.createServer(app);

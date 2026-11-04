@@ -3,13 +3,14 @@ import 'package:flutter/foundation.dart';
 import '../models/membership_model.dart';
 import 'api_client.dart';
 
-/// Manages CoRoute Membership, Group Seat Entitlements, Two-Role Trip Governance
-/// and Single Active Trip concurrency enforcement.
+/// Manages CoRoute Membership, Group Seat Entitlements, Two-Role Trip Governance,
+/// Single Active Trip concurrency enforcement and secure Razorpay payment lifecycle.
 class MembershipService extends ChangeNotifier {
   final ApiClient _api;
 
   MembershipCatalog? _catalog;
   MyMembershipOverview? _myOverview;
+  List<MembershipPaymentItem> _paymentHistory = const [];
   bool _isLoading = false;
   String? _lastError;
 
@@ -18,6 +19,7 @@ class MembershipService extends ChangeNotifier {
   UserMembership? get ownedMembership => _myOverview?.ownedMembership;
   List<UserMembership> get participating => _myOverview?.participating ?? const [];
   ActiveTripLock? get activeTrip => _myOverview?.activeTrip;
+  List<MembershipPaymentItem> get paymentHistory => _paymentHistory;
   bool get paymentsEnabled => _myOverview?.paymentsEnabled ?? true;
   bool get isLoading => _isLoading;
   String? get lastError => _lastError;
@@ -59,11 +61,107 @@ class MembershipService extends ChangeNotifier {
     return _myOverview;
   }
 
-  /// Purchase or claim an introductory offer for a membership category.
+  /// Create a server-authoritative Razorpay order for membership checkout.
+  /// If amount is ₹0 (e.g. RIDERFREE), order is immediately activated on backend.
+  Future<Map<String, dynamic>?> createOrder({
+    required String categoryId,
+    String? offerCode,
+  }) async {
+    _isLoading = true;
+    _lastError = null;
+    notifyListeners();
+    try {
+      final body = <String, dynamic>{
+        'category': categoryId,
+        'categoryId': categoryId,
+        if (offerCode != null && offerCode.trim().isNotEmpty)
+          'offerCode': offerCode.trim().toUpperCase(),
+      };
+      final res = await _api.post('/membership/order', body);
+      if (res is Map) {
+        final data = Map<String, dynamic>.from(res);
+        if (data['isFree'] == true) {
+          await fetchMyMembership();
+        }
+        return data;
+      }
+    } catch (e) {
+      debugPrint('[MembershipService] createOrder error: $e');
+      if (e is ApiException) {
+        _lastError = e.message;
+      } else {
+        _lastError = 'Order creation failed. Please check your internet connection.';
+      }
+      notifyListeners();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+    return null;
+  }
+
+  /// Cryptographically verify Razorpay payment and activate membership.
+  Future<UserMembership?> verifyPayment({
+    required String orderId,
+    required String paymentId,
+    required String signature,
+  }) async {
+    _isLoading = true;
+    _lastError = null;
+    notifyListeners();
+    try {
+      final body = <String, dynamic>{
+        'orderId': orderId,
+        'paymentId': paymentId,
+        'signature': signature,
+      };
+      final res = await _api.post('/membership/verify', body);
+      if (res is Map && res['membership'] is Map) {
+        final mem = UserMembership.fromJson(Map<String, dynamic>.from(res['membership'] as Map));
+        await fetchMyMembership();
+        await fetchPaymentHistory();
+        return mem;
+      }
+    } catch (e) {
+      debugPrint('[MembershipService] verifyPayment error: $e');
+      if (e is ApiException) {
+        _lastError = e.message;
+      } else {
+        _lastError = 'Payment verification failed.';
+      }
+      notifyListeners();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+    return null;
+  }
+
+  /// Fetch user's payment and transaction history from ledger.
+  Future<List<MembershipPaymentItem>> fetchPaymentHistory() async {
+    try {
+      final res = await _api.get('/membership/payments');
+      if (res is Map && res['payments'] is List) {
+        _paymentHistory = (res['payments'] as List<dynamic>)
+            .whereType<Map>()
+            .map((e) => MembershipPaymentItem.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+        notifyListeners();
+        return _paymentHistory;
+      }
+    } catch (e) {
+      debugPrint('[MembershipService] fetchPaymentHistory error: $e');
+    }
+    return _paymentHistory;
+  }
+
+  /// Purchase or claim an introductory offer for a membership category (legacy or direct wrapper).
   Future<UserMembership?> purchaseMembership({
     required String categoryId,
     String? offerCode,
     String? paymentId,
+    String? orderId,
+    String? signature,
   }) async {
     _isLoading = true;
     _lastError = null;
@@ -71,8 +169,12 @@ class MembershipService extends ChangeNotifier {
     try {
       final body = <String, dynamic>{
         'categoryId': categoryId,
-        if (offerCode != null && offerCode.trim().isNotEmpty) 'offerCode': offerCode.trim().toUpperCase(),
+        'category': categoryId,
+        if (offerCode != null && offerCode.trim().isNotEmpty)
+          'offerCode': offerCode.trim().toUpperCase(),
         if (paymentId != null && paymentId.trim().isNotEmpty) 'paymentId': paymentId.trim(),
+        if (orderId != null && orderId.trim().isNotEmpty) 'orderId': orderId.trim(),
+        if (signature != null && signature.trim().isNotEmpty) 'signature': signature.trim(),
       };
       final res = await _api.post('/membership/purchase', body);
       if (res is Map && res['membership'] is Map) {
@@ -99,10 +201,13 @@ class MembershipService extends ChangeNotifier {
   Future<bool> inviteMember(String identifier) async {
     _lastError = null;
     try {
+      final id = identifier.trim();
       final res = await _api.post('/membership/members/invite', {
-        'identifier': identifier.trim(),
+        'identifier': id,
+        'email': id.contains('@') ? id : null,
+        'userId': !id.contains('@') ? id : null,
       });
-      if (res is Map && res['ok'] == true) {
+      if (res is Map && (res['ok'] == true || res['message'] != null || res['members'] != null)) {
         await fetchMyMembership();
         return true;
       }
@@ -124,9 +229,10 @@ class MembershipService extends ChangeNotifier {
     try {
       final res = await _api.post('/membership/members/respond', {
         'membershipId': membershipId,
+        'action': accept ? 'ACCEPT' : 'DECLINE',
         'accept': accept,
       });
-      if (res is Map && res['ok'] == true) {
+      if (res is Map && (res['ok'] == true || res['message'] != null)) {
         await fetchMyMembership();
         return true;
       }
@@ -143,7 +249,7 @@ class MembershipService extends ChangeNotifier {
     _lastError = null;
     try {
       final res = await _api.delete('/membership/members/$targetUserId');
-      if (res is Map && res['ok'] == true) {
+      if (res is Map && (res['ok'] == true || res['message'] != null || res['members'] != null)) {
         await fetchMyMembership();
         return true;
       }
@@ -154,6 +260,10 @@ class MembershipService extends ChangeNotifier {
     }
     return false;
   }
+
+  // =========================================================================
+  // PLATFORM ADMIN METHODS
+  // =========================================================================
 
   /// Admin: fetch dynamic catalog config.
   Future<Map<String, dynamic>?> fetchAdminCatalog() async {
@@ -170,12 +280,65 @@ class MembershipService extends ChangeNotifier {
   Future<bool> updateAdminCatalog(Map<String, dynamic> catalogData) async {
     try {
       final res = await _api.put('/admin/membership/catalog', catalogData);
-      if (res is Map && res['ok'] == true) {
+      if (res is Map && (res['ok'] == true || res['message'] != null)) {
         await fetchCatalog();
         return true;
       }
     } catch (e) {
       debugPrint('[MembershipService] updateAdminCatalog error: $e');
+    }
+    return false;
+  }
+
+  /// Admin: fetch all memberships across the platform.
+  Future<List<Map<String, dynamic>>> fetchAdminMemberships({int limit = 100}) async {
+    try {
+      final res = await _api.get('/admin/membership/memberships?limit=$limit');
+      if (res is Map && res['memberships'] is List) {
+        return (res['memberships'] as List<dynamic>)
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('[MembershipService] fetchAdminMemberships error: $e');
+    }
+    return [];
+  }
+
+  /// Admin: fetch all payment transactions from ledger.
+  Future<List<Map<String, dynamic>>> fetchAdminPayments({int limit = 100}) async {
+    try {
+      final res = await _api.get('/admin/membership/payments?limit=$limit');
+      if (res is Map && res['payments'] is List) {
+        return (res['payments'] as List<dynamic>)
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('[MembershipService] fetchAdminPayments error: $e');
+    }
+    return [];
+  }
+
+  /// Admin: refund a paid order via Razorpay API and revoke/update membership.
+  Future<bool> adminRefundPayment({
+    required String orderId,
+    int? amountInPaise,
+    String? reason,
+  }) async {
+    try {
+      final body = <String, dynamic>{
+        if (amountInPaise != null) 'amountInPaise': amountInPaise,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      };
+      final res = await _api.post('/admin/membership/payments/$orderId/refund', body);
+      if (res is Map && res['ok'] == true) {
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[MembershipService] adminRefundPayment error: $e');
     }
     return false;
   }
@@ -191,4 +354,3 @@ class MembershipService extends ChangeNotifier {
     return null;
   }
 }
-

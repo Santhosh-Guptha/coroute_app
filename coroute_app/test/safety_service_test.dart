@@ -161,6 +161,7 @@ class FakeAccel implements AccelSource {
   }
 
   void add(AccelBucket b) => _ctrl?.add(b);
+  void addError(Object err) => _ctrl?.addError(err);
 }
 
 class FakeSms implements SmsSender {
@@ -307,6 +308,23 @@ void main() {
       safety.alarmImOk();
       await tester.pump();
       expect(port.raised, isEmpty);
+      await tearDown0(tester);
+    });
+
+    testWidgets('sensor error/disconnection sets isSensorUnavailable without crashing', (tester) async {
+      await setUp0(tester);
+      port.convoy = convoyWith({'me': RiderModel(userId: 'me', name: 'Kiran', lat: 12.97, lng: 77.59, lastSeenEpochMs: t0)});
+      port.changed();
+      port.fixes.add(fix(1, 40));
+      await tester.pump();
+      expect(accel.running, isTrue);
+      expect(safety.isSensorUnavailable, isFalse);
+
+      accel.addError(Exception('Sensor disconnected'));
+      await tester.pump();
+
+      expect(safety.isSensorUnavailable, isTrue);
+      expect(accel.running, isFalse);
       await tearDown0(tester);
     });
   });

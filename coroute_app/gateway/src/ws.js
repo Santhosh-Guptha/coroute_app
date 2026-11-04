@@ -617,11 +617,17 @@ class Hub {
         const rider = room.riders.get(u.userId);
         const isLead = rider && rider.role === 'LEAD';
         const isCreator = room.meta.createdByUserId === u.userId;
-        const isAdmin = u.role === ROLE_ADMIN;
-        if (!isLead && !isCreator && !isAdmin) {
+        const isOwner = room.meta.tripOwnerUserId === u.userId;
+        const isHead = room.meta.tripHeadUserId === u.userId;
+        const isAdmin = u.role === ROLE_ADMIN || u.role === 'MASTER_ADMIN';
+        if (!isLead && !isCreator && !isOwner && !isHead && !isAdmin) {
           throw new ConvoyError('Only the convoy lead or admin can change the trip state.', 403);
         }
-        await this.convoys.setTripStatus(gid, String(msg.status || ''));
+        const status = String(msg.status || '').toUpperCase();
+        if (status === 'ENDED' && !isOwner && !isCreator && !isAdmin) {
+          throw new ConvoyError('Only the Trip Owner or Platform Admin can end the trip.', 403, 'ONLY_OWNER_CAN_END_TRIP');
+        }
+        await this.convoys.setTripStatus(gid, status);
         return;
       }
       case 'REGROUP_SET': {

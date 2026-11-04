@@ -7,8 +7,14 @@ import 'accel_bucket.dart';
 /// Thresholds of the crash rule. Defaults come from [SafetyConstants].
 class CrashThresholds {
   final double armSpeedKmh;
+  final double lowSpeedArmKmh;
   final Duration armWindow;
   final double impactG;
+  final double dynamicImpactG;
+  final double slideImpactG;
+  final double rotationRadS;
+  final double tiltThresholdDeg;
+  final double minDurationMs;
   final Duration stopWithin;
   final Duration highSpeedStopWithin;
   final double stopSpeedKmh;
@@ -21,8 +27,14 @@ class CrashThresholds {
 
   const CrashThresholds({
     this.armSpeedKmh = SafetyConstants.crashArmSpeedKmh,
+    this.lowSpeedArmKmh = SafetyConstants.crashLowSpeedArmKmh,
     this.armWindow = SafetyConstants.crashArmWindow,
     this.impactG = SafetyConstants.crashImpactG,
+    this.dynamicImpactG = SafetyConstants.crashDynamicImpactG,
+    this.slideImpactG = SafetyConstants.crashSlideImpactG,
+    this.rotationRadS = SafetyConstants.crashRotationRadS,
+    this.tiltThresholdDeg = SafetyConstants.crashTiltThresholdDeg,
+    this.minDurationMs = SafetyConstants.crashMinDurationMs,
     this.stopWithin = SafetyConstants.crashStopWithin,
     this.highSpeedStopWithin = const Duration(seconds: 18),
     this.stopSpeedKmh = SafetyConstants.crashStopSpeedKmh,
@@ -38,18 +50,29 @@ class CrashThresholds {
       speedKmh > 60.0 ? highSpeedStopWithin : stopWithin;
 }
 
-/// A likely crash: a hard impact at speed, then a stop, and no riding on.
+/// A likely crash: a hard impact at speed, or a rotational fall/slide, then a stop, and no riding on.
 class CrashEvent {
   final int impactAtMs;
   final double impactG;
   final double speedBeforeKmh;
   final double lat;
   final double lng;
+  final bool hasRotationOrTilt;
+  final bool isSlideFall;
 
-  const CrashEvent({required this.impactAtMs, required this.impactG, required this.speedBeforeKmh, required this.lat, required this.lng});
+  const CrashEvent({
+    required this.impactAtMs,
+    required this.impactG,
+    required this.speedBeforeKmh,
+    required this.lat,
+    required this.lng,
+    this.hasRotationOrTilt = false,
+    this.isSlideFall = false,
+  });
 
   @override
-  String toString() => 'CrashEvent(at $impactAtMs, ${impactG.toStringAsFixed(1)} g, ${speedBeforeKmh.toStringAsFixed(0)} km/h)';
+  String toString() =>
+      'CrashEvent(at $impactAtMs, ${impactG.toStringAsFixed(1)} g, ${speedBeforeKmh.toStringAsFixed(0)} km/h, rot/tilt: $hasRotationOrTilt, slide: $isSlideFall)';
 }
 
 class _Candidate {
@@ -58,6 +81,8 @@ class _Candidate {
   final double speedBefore;
   double lat;
   double lng;
+  final bool hasRotationOrTilt;
+  final bool isSlideFall;
 
   /// Any fix after the impact (fast or slow).
   bool fixSeen = false;
@@ -69,21 +94,31 @@ class _Candidate {
   double? stopLng;
   int stillBuckets = 0;
 
-  _Candidate({required this.impactAt, required this.impactG, required this.speedBefore, required this.lat, required this.lng});
+  _Candidate({
+    required this.impactAt,
+    required this.impactG,
+    required this.speedBefore,
+    required this.lat,
+    required this.lng,
+    this.hasRotationOrTilt = false,
+    this.isSlideFall = false,
+  });
 }
 
 /// Pure crash rule (no timers, no platform code). Feed it the rider's fixes and
 /// the one-second accelerometer buckets; it returns a [CrashEvent] once when the
 /// whole pattern is complete:
 ///
-/// 1. Armed: a fix faster than 25 km/h in the last 30 s.
-/// 2. Impact: a bucket with a peak of 4 g or more while armed.
+/// 1. Armed: a fix faster than [CrashThresholds.armSpeedKmh] (or [lowSpeedArmKmh] for falls) in the last 30 s.
+/// 2. Impact / Slide:
+///    - High impact: dynamic linear shock >= [dynamicImpactG] or raw peak >= [impactG].
+///    - Lowside / Slide: dynamic shock >= [slideImpactG] accompanied by rotation >= [rotationRadS] or tilt >= [tiltThresholdDeg].
+///    - Low-speed fall: tilt >= [tiltThresholdDeg] with abrupt stop.
+///    - Sub-sample noise pulses (< [minDurationMs] without rotation) are rejected.
 /// 3. Stop: a fix at 5 km/h or less within 10 s after the impact (extended to 18 s
 ///    for initial speeds > 60 km/h to account for slides and Doppler smoothing lag).
-///    With the GPS distance filter a phone that does not move gets no fixes at all,
-///    so when NO fix arrives in that window the stop is taken to be at impact + window.
-///    The impact must also be at speed: when there were fixes in the 10 s before it,
-///    at least one was faster than 25 km/h (a phone dropped at a fuel stop is not).
+///    Missing GPS is treated as UNKNOWN, never automatically assumed stopped unless
+///    positive motion sensor evidence confirms complete stillness and tumble/impact.
 /// 4. No riding on for 20 s after the stop: no fix faster than 15 km/h and none
 ///    farther than 80 m from the stop. A rider who gets up and walks about still
 ///    gets the alarm and answers "I'm OK" (product decision r314). Only for an
@@ -100,6 +135,7 @@ class CrashDetector {
 
   final List<TrackPoint> _recent = [];
   int? _lastFastAt;
+  int? _lastLowSpeedAt;
   int _now = 0;
   int _cooldownUntil = 0;
   _Candidate? _c;
@@ -108,8 +144,8 @@ class CrashDetector {
   bool get wantsSensor => _c != null || armedAt(_now);
 
   /// True when a fix faster than the arming speed was seen in the window before [tMs].
-  bool armedAt(int tMs) {
-    final fast = _lastFastAt;
+  bool armedAt(int tMs, {bool lowSpeed = false}) {
+    final fast = lowSpeed ? (_lastLowSpeedAt ?? _lastFastAt) : _lastFastAt;
     return fast != null && tMs - fast <= t.armWindow.inMilliseconds && tMs - fast >= -t.armWindow.inMilliseconds;
   }
 
@@ -118,9 +154,17 @@ class CrashDetector {
 
   CrashEvent? onFix(TrackPoint p) {
     _now = math.max(_now, p.ts);
-    _recent.add(p);
-    _recent.removeWhere((f) => f.ts < _now - 40000);
-    if (p.speedKmh > t.armSpeedKmh) _lastFastAt = math.max(_lastFastAt ?? p.ts, p.ts);
+
+    // Stale or low-accuracy GPS filtering
+    final isStale = _now > 0 && (_now - p.ts > 10000);
+    final isAccurate = p.accuracyM <= 0 || p.accuracyM <= 65.0;
+
+    if (!isStale && isAccurate) {
+      _recent.add(p);
+      _recent.removeWhere((f) => f.ts < _now - 40000);
+      if (p.speedKmh > t.armSpeedKmh) _lastFastAt = math.max(_lastFastAt ?? p.ts, p.ts);
+      if (p.speedKmh > t.lowSpeedArmKmh) _lastLowSpeedAt = math.max(_lastLowSpeedAt ?? p.ts, p.ts);
+    }
 
     final c = _c;
     // A bucket covers one second from its start (impactAt), so a fix inside that same second
@@ -134,7 +178,7 @@ class CrashDetector {
         _c = null; // never came to a stop in time: a pothole or a dropped phone, the ride goes on
         return null;
       }
-      if (p.speedKmh <= t.stopSpeedKmh) {
+      if (p.speedKmh <= t.stopSpeedKmh && isAccurate) {
         c.stopAt = p.ts;
         c.gpsStop = true;
         c.stopLat = p.lat;
@@ -157,18 +201,45 @@ class CrashDetector {
     _now = math.max(_now, b.tMs);
     final c = _c;
     if (c == null) {
-      if (b.peakG >= t.impactG && armedAt(b.tMs) && b.tMs >= _cooldownUntil && !_slowBefore(b.tMs)) {
+      if (b.tMs < _cooldownUntil) return null;
+
+      final isArmed = armedAt(b.tMs);
+      final isLowSpeedArmed = armedAt(b.tMs, lowSpeed: true);
+      final hasRotationOrTilt = b.peakGyroRadS >= t.rotationRadS || b.tiltDeg >= t.tiltThresholdDeg;
+
+      // 1. High impact collision (gravity compensated dynamic peak or total peak)
+      final isHighImpact = (b.effectiveDynG >= t.dynamicImpactG || b.peakG >= t.impactG) && isArmed;
+
+      // 2. Lowside / motorcycle slide (moderate dynamic impact + rotation/tilt)
+      final isSlideFall = (b.effectiveDynG >= t.slideImpactG || b.peakG >= t.slideImpactG) &&
+          hasRotationOrTilt &&
+          isArmed;
+
+      // 3. Low-speed intersection fall / tip-over
+      final isLowSpeedFall = isLowSpeedArmed &&
+          hasRotationOrTilt &&
+          (b.effectiveDynG >= 1.5 || b.peakG >= 1.8);
+
+      // Noise rejection: sub-sample spike (< minDurationMs) without rotational evidence is rejected
+      final isPebbleNoise = b.impactDurationMs > 0 && b.impactDurationMs < t.minDurationMs && !hasRotationOrTilt;
+
+      if ((isHighImpact || isSlideFall || isLowSpeedFall) &&
+          !isPebbleNoise &&
+          !_slowBefore(b.tMs, isLowSpeed: isLowSpeedFall && !isHighImpact)) {
         final last = _recent.isEmpty ? null : _recent.last;
         _c = _Candidate(
           impactAt: b.tMs,
-          impactG: b.peakG,
+          impactG: math.max(b.effectiveDynG, b.peakG),
           speedBefore: _speedBefore(b.tMs),
           lat: last?.lat ?? 0,
           lng: last?.lng ?? 0,
+          hasRotationOrTilt: hasRotationOrTilt,
+          isSlideFall: isSlideFall || isLowSpeedFall,
         );
       }
       return null;
     }
+
     if (b.tMs < c.impactAt) return null;
     var stopAt = c.stopAt;
     final stopWithinMs = t.stopWithinForSpeed(c.speedBefore).inMilliseconds;
@@ -178,13 +249,28 @@ class CrashDetector {
           _c = null; // fixes kept coming but none was slow: still riding
           return null;
         }
-        // No fix at all since the impact: the phone has not moved 8 m (GPS distance filter).
+
+        // GPS is missing (UNKNOWN): do not assume stopped if riding motion/vibrations continue
+        // or if this was just a bump with no rollover/rotation.
+        if (b.stdG > t.stillStdG) {
+          _c = null; // motorcycle still moving / vibrating (e.g. tunnel ride on)
+          return null;
+        }
+
+        // Positive evidence required: either high-impact crash or rotational fall
+        if (!c.hasRotationOrTilt && c.impactG < t.impactG) {
+          _c = null;
+          return null;
+        }
+
+        // Confirmed stillness without GPS fixes
         stopAt = c.impactAt + stopWithinMs;
         c.stopAt = stopAt;
       } else {
         return null; // tumbling and sliding are not judged
       }
     }
+
     // After a GPS stop motion is not judged: a rider who gets up and walks still gets the alarm.
     // After an assumed stop (no fix at all) the phone must lie still, after a 2 s settle (the end
     // of the slide); otherwise riding on with the GPS lost (a tunnel) would look the same.
@@ -206,16 +292,25 @@ class CrashDetector {
     if (!c.gpsStop && c.stillBuckets < (need ~/ 1000) ~/ 2) return null;
     _c = null;
     _cooldownUntil = tMs + t.cooldown.inMilliseconds;
-    return CrashEvent(impactAtMs: c.impactAt, impactG: c.impactG, speedBeforeKmh: c.speedBefore, lat: c.lat, lng: c.lng);
+    return CrashEvent(
+      impactAtMs: c.impactAt,
+      impactG: c.impactG,
+      speedBeforeKmh: c.speedBefore,
+      lat: c.lat,
+      lng: c.lng,
+      hasRotationOrTilt: c.hasRotationOrTilt,
+      isSlideFall: c.isSlideFall,
+    );
   }
 
   /// True when there were fixes in the 10 s before the impact and none was faster than the
   /// arming speed: the phone was not at riding speed (dropped after arriving at a stop).
-  bool _slowBefore(int impactAt) {
+  bool _slowBefore(int impactAt, {bool isLowSpeed = false}) {
+    final armSpeed = isLowSpeed ? t.lowSpeedArmKmh : t.armSpeedKmh;
     var any = false;
     for (final f in _recent) {
       if (f.ts > impactAt || impactAt - f.ts > t.stopWithin.inMilliseconds) continue;
-      if (f.speedKmh > t.armSpeedKmh) return false;
+      if (f.speedKmh > armSpeed) return false;
       any = true;
     }
     return any;
@@ -238,6 +333,7 @@ class CrashDetector {
   void reset() {
     _recent.clear();
     _lastFastAt = null;
+    _lastLowSpeedAt = null;
     _now = 0;
     _cooldownUntil = 0;
     _c = null;

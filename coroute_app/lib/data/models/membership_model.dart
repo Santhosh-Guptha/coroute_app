@@ -25,10 +25,16 @@ class MembershipCategory {
     return MembershipCategory(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
-      priceRupees: (json['priceRupees'] as num?)?.toInt() ?? 0,
+      priceRupees: (json['priceRupees'] as num?)?.toInt() ??
+          (json['monthlyPriceInr'] as num?)?.toInt() ??
+          (json['priceInr'] as num?)?.toInt() ??
+          0,
       capacity: (json['capacity'] as num?)?.toInt() ?? 1,
       description: json['description']?.toString() ?? '',
-      features: (json['features'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [],
+      features: (json['features'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
     );
   }
 
@@ -46,29 +52,56 @@ class MembershipCategory {
 class MembershipCatalog {
   final List<MembershipCategory> categories;
   final List<Map<String, dynamic>> introductoryOffers;
+  final bool paymentsEnabled;
+  final String keyId;
+  final String mode;
 
   const MembershipCatalog({
     this.categories = const [],
     this.introductoryOffers = const [],
+    this.paymentsEnabled = true,
+    this.keyId = '',
+    this.mode = 'test',
   });
 
   factory MembershipCatalog.fromJson(Map<String, dynamic> json) {
-    final cats = (json['categories'] as List<dynamic>?)
-            ?.whereType<Map>()
-            .map((e) => MembershipCategory.fromJson(Map<String, dynamic>.from(e)))
-            .toList() ??
-        [];
-    final offers = (json['introductoryOffers'] as List<dynamic>?)
+    List<MembershipCategory> cats = [];
+    if (json['categories'] is List) {
+      cats = (json['categories'] as List<dynamic>)
+          .whereType<Map>()
+          .map((e) => MembershipCategory.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } else if (json['categories'] is Map) {
+      final map = Map<String, dynamic>.from(json['categories'] as Map);
+      cats = map.entries.map((e) {
+        final val = Map<String, dynamic>.from(e.value as Map);
+        if (!val.containsKey('id')) val['id'] = e.key;
+        return MembershipCategory.fromJson(val);
+      }).toList();
+    }
+
+    final rawOffers = (json['offers'] ?? json['introductoryOffers']) as List<dynamic>?;
+    final offers = rawOffers
             ?.whereType<Map>()
             .map((e) => Map<String, dynamic>.from(e))
             .toList() ??
-        [];
-    return MembershipCatalog(categories: cats, introductoryOffers: offers);
+        const [];
+
+    return MembershipCatalog(
+      categories: cats,
+      introductoryOffers: offers,
+      paymentsEnabled: json['paymentsEnabled'] != false,
+      keyId: json['keyId']?.toString() ?? '',
+      mode: json['mode']?.toString() ?? 'test',
+    );
   }
 
   Map<String, dynamic> toJson() => {
     'categories': categories.map((e) => e.toJson()).toList(),
     'introductoryOffers': introductoryOffers,
+    'paymentsEnabled': paymentsEnabled,
+    'keyId': keyId,
+    'mode': mode,
   };
 }
 
@@ -78,7 +111,7 @@ class MembershipMember {
   final String name;
   final String email;
   final String phone;
-  final String status; // 'ACCEPTED', 'PENDING'
+  final String status; // 'ACCEPTED', 'INVITED', 'DECLINED'
   final int invitedAt;
   final int? acceptedAt;
 
@@ -93,7 +126,7 @@ class MembershipMember {
   });
 
   bool get isAccepted => status == 'ACCEPTED';
-  bool get isPending => status == 'PENDING';
+  bool get isPending => status == 'INVITED' || status == 'PENDING';
 
   factory MembershipMember.fromJson(Map<String, dynamic> json) {
     return MembershipMember(
@@ -123,43 +156,78 @@ class UserMembership {
   final String membershipId;
   final String ownerUserId;
   final String category;
+  final String? categoryName;
   final int capacity;
   final int priceRupees;
   final String status; // 'ACTIVE', 'EXPIRED'
   final int validUntil;
   final List<MembershipMember> members;
+  final String? offerApplied;
+  final String? orderId;
+  final String? paymentId;
 
   const UserMembership({
     required this.membershipId,
     required this.ownerUserId,
     required this.category,
+    this.categoryName,
     required this.capacity,
     required this.priceRupees,
     required this.status,
     required this.validUntil,
     this.members = const [],
+    this.offerApplied,
+    this.orderId,
+    this.paymentId,
   });
 
-  int get occupiedSeats => members.length;
+  String get name {
+    if (categoryName != null && categoryName!.isNotEmpty) return categoryName!;
+    if (category == 'individual') return 'Individual Solo';
+    if (category == 'group_small') return 'Group (2–6)';
+    if (category == 'group_large') return 'Group (7–12)';
+    return category.replaceAll('_', ' ').toUpperCase();
+  }
+
+  /// Occupied seats includes 1 seat for the owner plus accepted member invitations.
+  int get occupiedSeats => 1 + members.where((m) => m.status == 'ACCEPTED').length;
   int get availableSeats => capacity > occupiedSeats ? capacity - occupiedSeats : 0;
   bool get isExpired => validUntil > 0 && validUntil <= DateTime.now().millisecondsSinceEpoch;
   bool get isActive => status == 'ACTIVE' && !isExpired;
   bool isOwner(String uid) => ownerUserId == uid;
 
   factory UserMembership.fromJson(Map<String, dynamic> json) {
-    final rawMembers = json['members'] as List<dynamic>? ?? [];
+    List<MembershipMember> membersList = [];
+    final rawMembers = json['members'];
+    if (rawMembers is List) {
+      membersList = rawMembers
+          .whereType<Map>()
+          .map((e) => MembershipMember.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } else if (rawMembers is Map) {
+      final map = Map<String, dynamic>.from(rawMembers);
+      membersList = map.values
+          .whereType<Map>()
+          .map((e) => MembershipMember.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+
     return UserMembership(
       membershipId: json['membershipId']?.toString() ?? '',
       ownerUserId: json['ownerUserId']?.toString() ?? '',
       category: json['category']?.toString() ?? '',
+      categoryName: json['categoryName']?.toString(),
       capacity: (json['capacity'] as num?)?.toInt() ?? 1,
-      priceRupees: (json['priceRupees'] as num?)?.toInt() ?? 0,
+      priceRupees: (json['priceRupees'] as num?)?.toInt() ??
+          (json['monthlyPriceInr'] as num?)?.toInt() ??
+          (json['priceInr'] as num?)?.toInt() ??
+          0,
       status: json['status']?.toString() ?? 'ACTIVE',
       validUntil: (json['validUntil'] as num?)?.toInt() ?? 0,
-      members: rawMembers
-          .whereType<Map>()
-          .map((e) => MembershipMember.fromJson(Map<String, dynamic>.from(e)))
-          .toList(),
+      members: membersList,
+      offerApplied: json['offerApplied']?.toString(),
+      orderId: json['orderId']?.toString(),
+      paymentId: json['paymentId']?.toString(),
     );
   }
 
@@ -167,11 +235,15 @@ class UserMembership {
     'membershipId': membershipId,
     'ownerUserId': ownerUserId,
     'category': category,
+    if (categoryName != null) 'categoryName': categoryName,
     'capacity': capacity,
     'priceRupees': priceRupees,
     'status': status,
     'validUntil': validUntil,
     'members': members.map((e) => e.toJson()).toList(),
+    if (offerApplied != null) 'offerApplied': offerApplied,
+    if (orderId != null) 'orderId': orderId,
+    if (paymentId != null) 'paymentId': paymentId,
   };
 }
 
@@ -207,6 +279,61 @@ class ActiveTripLock {
     'status': status,
     'updatedAt': updatedAt,
   };
+}
+
+@immutable
+class MembershipPaymentItem {
+  final String orderId;
+  final String paymentId;
+  final double amountInr;
+  final String currency;
+  final String category;
+  final String status;
+  final String mode;
+  final bool isFree;
+  final String? offerCode;
+  final int paidAt;
+  final int createdAt;
+  final String? refundStatus;
+  final double refundedAmount;
+
+  const MembershipPaymentItem({
+    required this.orderId,
+    this.paymentId = '',
+    required this.amountInr,
+    this.currency = 'INR',
+    required this.category,
+    required this.status,
+    this.mode = 'test',
+    this.isFree = false,
+    this.offerCode,
+    this.paidAt = 0,
+    this.createdAt = 0,
+    this.refundStatus,
+    this.refundedAmount = 0,
+  });
+
+  bool get isPaid => status == 'PAID';
+  bool get isRefunded => refundStatus == 'PROCESSED' || refundedAmount > 0;
+
+  factory MembershipPaymentItem.fromJson(Map<String, dynamic> json) {
+    return MembershipPaymentItem(
+      orderId: json['orderId']?.toString() ?? '',
+      paymentId: json['paymentId']?.toString() ?? '',
+      amountInr: (json['amountInr'] as num?)?.toDouble() ??
+          ((json['amountInPaise'] as num?)?.toDouble() ?? 0) / 100,
+      currency: json['currency']?.toString() ?? 'INR',
+      category: json['category']?.toString() ?? '',
+      status: json['status']?.toString() ?? 'CREATED',
+      mode: json['mode']?.toString() ?? 'test',
+      isFree: json['isFree'] == true,
+      offerCode: json['offerCode']?.toString(),
+      paidAt: (json['paidAt'] as num?)?.toInt() ?? 0,
+      createdAt: (json['createdAt'] as num?)?.toInt() ?? 0,
+      refundStatus: json['refundStatus']?.toString(),
+      refundedAmount: (json['refundedAmount'] as num?)?.toDouble() ?? 0,
+    );
+  }
 }
 
 @immutable
@@ -248,4 +375,3 @@ class MyMembershipOverview {
     );
   }
 }
-

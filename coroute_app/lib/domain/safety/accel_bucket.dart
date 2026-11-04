@@ -1,30 +1,84 @@
 import 'dart:typed_data';
 
-/// One second of accelerometer data, reduced on the phone's sensor thread.
-/// Values are the size of the acceleration in g (1.0 = resting on a table).
+/// One second of accelerometer and motorcycle telemetry data, reduced on the phone's sensor thread.
+/// Values are in g units (1.0 = resting on a table), angular velocity in rad/s, tilt in degrees.
 class AccelBucket {
   /// Start of the second, epoch ms.
   final int tMs;
+
+  /// Peak total acceleration norm in g (includes static gravity).
   final double peakG;
+
+  /// Mean acceleration norm in g.
   final double meanG;
 
   /// Standard deviation within the second: near 0 when the phone lies still.
   final double stdG;
 
-  const AccelBucket({required this.tMs, required this.peakG, required this.meanG, required this.stdG});
+  /// Peak dynamic linear acceleration in g (gravity vector isolated).
+  final double peakDynG;
 
-  /// Decodes the flat list the native side sends: `[tMs, peakG, meanG, stdG, ...]`.
+  /// Peak angular velocity magnitude in rad/s within the second.
+  final double peakGyroRadS;
+
+  /// Maximum orientation tilt relative to steady riding baseline in degrees.
+  final double tiltDeg;
+
+  /// Duration of continuous elevated impact acceleration in ms.
+  final double impactDurationMs;
+
+  const AccelBucket({
+    required this.tMs,
+    required this.peakG,
+    required this.meanG,
+    required this.stdG,
+    this.peakDynG = 0.0,
+    this.peakGyroRadS = 0.0,
+    this.tiltDeg = 0.0,
+    this.impactDurationMs = 0.0,
+  });
+
+  /// True dynamic peak acceleration: uses [peakDynG] if available, otherwise falls back to [peakG].
+  double get effectiveDynG => peakDynG > 0.0 ? peakDynG : peakG;
+
+  /// Decodes the flat list the native side sends:
+  /// - Extended format (8 doubles): `[tMs, peakRaw, meanRaw, stdRaw, peakDyn, gyro, tilt, dur, ...]`
+  /// - Legacy format (4 doubles): `[tMs, peakRaw, meanRaw, stdRaw, ...]`
   /// A trailing partial group and non-finite values are skipped.
   static List<AccelBucket> decode(Float64List flat) {
     final out = <AccelBucket>[];
-    for (var i = 0; i + 3 < flat.length; i += 4) {
+    final isExtended = flat.length >= 8 && flat.length % 8 == 0;
+    final stride = isExtended ? 8 : 4;
+
+    for (var i = 0; i + stride - 1 < flat.length; i += stride) {
       final t = flat[i], peak = flat[i + 1], mean = flat[i + 2], std = flat[i + 3];
       if (!t.isFinite || !peak.isFinite || !mean.isFinite || !std.isFinite) continue;
-      out.add(AccelBucket(tMs: t.round(), peakG: peak, meanG: mean, stdG: std));
+
+      if (isExtended) {
+        final dyn = flat[i + 4], gyro = flat[i + 5], tilt = flat[i + 6], dur = flat[i + 7];
+        out.add(AccelBucket(
+          tMs: t.round(),
+          peakG: peak,
+          meanG: mean,
+          stdG: std,
+          peakDynG: dyn.isFinite ? dyn : 0.0,
+          peakGyroRadS: gyro.isFinite ? gyro : 0.0,
+          tiltDeg: tilt.isFinite ? tilt : 0.0,
+          impactDurationMs: dur.isFinite ? dur : 0.0,
+        ));
+      } else {
+        out.add(AccelBucket(
+          tMs: t.round(),
+          peakG: peak,
+          meanG: mean,
+          stdG: std,
+        ));
+      }
     }
     return out;
   }
 
   @override
-  String toString() => 'AccelBucket($tMs, peak ${peakG.toStringAsFixed(2)}, std ${stdG.toStringAsFixed(2)})';
+  String toString() =>
+      'AccelBucket($tMs, peak ${peakG.toStringAsFixed(2)}g, dyn ${effectiveDynG.toStringAsFixed(2)}g, gyro ${peakGyroRadS.toStringAsFixed(2)}r/s, tilt ${tiltDeg.toStringAsFixed(1)}°, std ${stdG.toStringAsFixed(2)})';
 }

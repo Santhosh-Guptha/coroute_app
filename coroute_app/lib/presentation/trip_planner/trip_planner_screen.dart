@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -44,6 +45,8 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   final List<PickedPlace> _stops = [];
   List<PickedPlace> _recent = const [];
   RouteModel? _route;
+  List<LatLng> _cachedDisplayLine = const [];
+  Timer? _routeDebounce;
   bool _routing = false;
   bool _launching = false;
   bool _isPicking = false;
@@ -64,9 +67,17 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
 
   @override
   void dispose() {
+    _routeDebounce?.cancel();
     _name.dispose();
     _nameFocus.dispose();
     super.dispose();
+  }
+
+  void _scheduleRouteRefresh() {
+    _routeDebounce?.cancel();
+    _routeDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) _refreshRoute();
+    });
   }
 
   Future<void> _useCurrentLocationAsStart() async {
@@ -93,11 +104,13 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   /// Recomputes the route. The old line stays on the map (with a thin
   /// progress bar) until the new one arrives.
   Future<void> _refreshRoute() async {
+    _routeDebounce?.cancel();
     final wp = _waypoints;
     final req = ++_routeRequest;
     if (wp.length < 2) {
       setState(() {
         _route = null;
+        _cachedDisplayLine = const [];
         _routing = false;
       });
       return;
@@ -105,19 +118,35 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     setState(() => _routing = true);
     final r = await _geo.route(wp);
     if (!mounted || req != _routeRequest) return;
+    final displayPts = r != null
+        ? [for (final (lat, lng) in r.displayPoints) LatLng(lat, lng)]
+        : const <LatLng>[];
     setState(() {
       _route = r;
+      _cachedDisplayLine = displayPts;
       _routing = false;
     });
     _fit();
   }
 
   void _fit() {
-    final pts = <LatLng>[
-      for (final (lat, lng) in _route?.points ?? _waypoints) LatLng(lat, lng),
-    ];
-    if (pts.length < 2) return;
+    final r = _route;
+    if (r != null) {
+      final b = r.bounds ?? r.calculatedBounds;
+      if (b != null) {
+        try {
+          _map.fitCamera(CameraFit.bounds(
+            bounds: LatLngBounds(LatLng(b.minLat, b.minLng), LatLng(b.maxLat, b.maxLng)),
+            padding: const EdgeInsets.all(36),
+          ));
+          return;
+        } catch (_) {}
+      }
+    }
+    final wp = _waypoints;
+    if (wp.length < 2) return;
     try {
+      final pts = [for (final (lat, lng) in wp) LatLng(lat, lng)];
       _map.fitCamera(CameraFit.bounds(bounds: LatLngBounds.fromPoints(pts), padding: const EdgeInsets.all(36)));
     } catch (_) {}
   }
@@ -149,7 +178,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
 
   void _setDestination(PickedPlace p) {
     setState(() => _destination = p);
-    _refreshRoute();
+    _scheduleRouteRefresh();
   }
 
   Future<void> _addStop() async {
@@ -166,7 +195,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       );
       if (p == null || !mounted) return;
       setState(() => _stops.add(p));
-      _refreshRoute();
+      _scheduleRouteRefresh();
     } finally {
       _isPicking = false;
     }
@@ -193,7 +222,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       );
       if (p == null || !mounted) return;
       setState(() => _stops.add(p));
-      _refreshRoute();
+      _scheduleRouteRefresh();
     } finally {
       _isAddingStopSheet = false;
     }
@@ -212,7 +241,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       );
       if (p == null || !mounted) return;
       setState(() => _stops[i] = p);
-      _refreshRoute();
+      _scheduleRouteRefresh();
     } finally {
       _isPicking = false;
     }
@@ -220,7 +249,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
 
   void _removeStop(int i) {
     setState(() => _stops.removeAt(i));
-    _refreshRoute();
+    _scheduleRouteRefresh();
   }
 
   Future<void> _review() async {
@@ -409,7 +438,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   }
 
   Widget _mapView() {
-    final line = <LatLng>[for (final (lat, lng) in _route?.points ?? const <(double, double)>[]) LatLng(lat, lng)];
+    final line = _cachedDisplayLine;
     final center = _start != null ? LatLng(_start!.lat, _start!.lng) : const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng);
     return FlutterMap(
       mapController: _map,
@@ -578,7 +607,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
               final s = _stops.removeAt(from);
               _stops.insert(to > from ? to - 1 : to, s);
             });
-            _refreshRoute();
+            _scheduleRouteRefresh();
           },
           itemBuilder: (_, i) {
             final s = _stops[i];

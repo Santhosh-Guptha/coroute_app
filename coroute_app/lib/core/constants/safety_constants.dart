@@ -9,8 +9,26 @@ class SafetyConstants {
   static const double crashArmSpeedKmh = 25;
   static const Duration crashArmWindow = Duration(seconds: 30);
 
-  /// A one-second bucket with a peak at or above this (in g) is a possible impact.
+  /// Low-speed threshold for detecting intersection drops / low-speed tip-overs (km/h).
+  static const double crashLowSpeedArmKmh = 15;
+
+  /// A one-second bucket with a raw peak at or above this (in g) is a possible impact.
   static const double crashImpactG = 4.0;
+
+  /// Gravity-compensated dynamic linear impact threshold in g.
+  static const double crashDynamicImpactG = 3.8;
+
+  /// Lowside / motorcycle slide threshold in g when accompanied by rotational fall evidence.
+  static const double crashSlideImpactG = 2.0;
+
+  /// Angular velocity threshold (rad/s) indicating severe motorcycle roll, yaw or tumble.
+  static const double crashRotationRadS = 1.8;
+
+  /// Orientation tilt threshold (degrees) indicating the motorcycle has fallen onto its side.
+  static const double crashTiltThresholdDeg = 45.0;
+
+  /// Minimum impact impulse duration (ms) to reject sub-sample impulses like pebble hits.
+  static const double crashMinDurationMs = 25.0;
 
   /// After the impact the phone must stop (<= [crashStopSpeedKmh]) within this time...
   static const Duration crashStopWithin = Duration(seconds: 10);

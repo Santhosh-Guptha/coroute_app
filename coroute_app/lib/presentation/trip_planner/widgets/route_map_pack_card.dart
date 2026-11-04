@@ -33,6 +33,65 @@ class RouteMapPackCard extends StatefulWidget {
 class _RouteMapPackCardState extends State<RouteMapPackCard> {
   bool _highDetail = true;
   bool _isNavigating = false;
+  Set<(int, int, int)>? _tiles;
+  int _cachedCount = 0;
+  bool _isCached = false;
+  String? _computedPolyline;
+  bool? _computedHighDetail;
+  bool _wasRunning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateTileStats(immediate: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant RouteMapPackCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route?.polyline != widget.route?.polyline) {
+      _computedPolyline = null;
+      _updateTileStats(immediate: widget.route != null && widget.route!.points.length <= 500);
+    }
+  }
+
+  void _updateTileStats({bool immediate = false}) {
+    final r = widget.route;
+    if (r == null || r.approximate || r.points.length < 2) return;
+    final prefetcher = Provider.of<TilePrefetcher?>(context, listen: false);
+    if (prefetcher == null) return;
+
+    final poly = r.polyline;
+    final detail = _highDetail;
+    if (_computedPolyline == poly && _computedHighDetail == detail && _tiles != null) {
+      return;
+    }
+
+    void doCompute() {
+      final pts = r.displayPoints;
+      final tiles = TilePrefetcher.tilesAlong(pts, highDetail: detail);
+      final isCached = prefetcher.isRouteCached(pts, highDetail: detail, precomputedTiles: tiles);
+      final cached = prefetcher.countCachedTiles(pts, highDetail: detail, precomputedTiles: tiles);
+      _tiles = tiles;
+      _isCached = isCached;
+      _cachedCount = cached;
+      _computedPolyline = poly;
+      _computedHighDetail = detail;
+    }
+
+    if (immediate || r.points.length <= 500) {
+      doCompute();
+      if (mounted) setState(() {});
+    } else {
+      Future.microtask(() {
+        if (!mounted) return;
+        doCompute();
+        if (mounted && widget.route?.polyline == poly && _highDetail == detail) {
+          setState(() {});
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,12 +104,25 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
     final prefetcher = context.watch<TilePrefetcher?>();
     if (prefetcher == null) return const SizedBox.shrink();
 
-    final allTiles = TilePrefetcher.tilesAlong(points, highDetail: _highDetail);
-    final totalCount = allTiles.length;
-    if (totalCount == 0) return const SizedBox.shrink();
-
-    final isCached = prefetcher.isRouteCached(points, highDetail: _highDetail);
     final isRunning = prefetcher.running;
+    if (_wasRunning && !isRunning) {
+      _wasRunning = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _computedPolyline = null;
+        _updateTileStats();
+      });
+    } else {
+      _wasRunning = isRunning;
+    }
+
+    if (_tiles == null && (_computedPolyline != r.polyline || _computedHighDetail != _highDetail)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _updateTileStats());
+    }
+
+    final totalCount = _tiles?.length ?? 0;
+    if (totalCount == 0 && _tiles != null) return const SizedBox.shrink();
+
+    final isCached = _isCached;
     final hasError = prefetcher.error != null;
 
     if (isRunning) {
@@ -330,7 +402,7 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
     }
 
     // Idle: ready to download
-    final cached = prefetcher.countCachedTiles(points, highDetail: _highDetail);
+    final cached = _cachedCount;
     final remaining = (totalCount - cached).clamp(0, totalCount);
     final estMb = (remaining * 25 / 1024).toStringAsFixed(1);
 
@@ -403,7 +475,13 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
           const SizedBox(height: 10),
           // High Detail Toggle Row
           InkWell(
-            onTap: () => setState(() => _highDetail = !_highDetail),
+            onTap: () {
+              setState(() {
+                _highDetail = !_highDetail;
+                _computedHighDetail = null;
+              });
+              _updateTileStats();
+            },
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
@@ -415,7 +493,13 @@ class _RouteMapPackCardState extends State<RouteMapPackCard> {
                     child: Checkbox(
                       value: _highDetail,
                       activeColor: AppTheme.brand,
-                      onChanged: (val) => setState(() => _highDetail = val ?? true),
+                      onChanged: (val) {
+                        setState(() {
+                          _highDetail = val ?? true;
+                          _computedHighDetail = null;
+                        });
+                        _updateTileStats();
+                      },
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ),

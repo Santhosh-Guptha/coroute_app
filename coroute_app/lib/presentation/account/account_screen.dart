@@ -10,6 +10,7 @@ import '../../core/theme/theme_controller.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
+import '../../data/services/membership_service.dart';
 import '../../data/services/meta_service.dart';
 import '../../data/services/settings_service.dart';
 import '../../data/services/trip_storage_service.dart';
@@ -25,7 +26,6 @@ import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import '../trip_planner/offline_map_manager_screen.dart';
 import '../subscription/payment_history_screen.dart';
-import '../subscription/plan_selector_screen.dart';
 import '../subscription/membership_dashboard_screen.dart';
 import '../subscription/subscription_expiry_banner.dart';
 import '../../core/config/feature_gates.dart';
@@ -80,8 +80,7 @@ class AccountScreen extends StatelessWidget {
 
     final bikeTitle = auth.isPillion ? 'Pillion' : (vehicleType.isNotEmpty ? vehicleType : 'Your bike');
     final planService = context.watch<PlanSubscriptionService?>();
-    final currentTier = planService?.currentTier ?? FeatureGates.activeTier;
-    final tierLabel = FeatureGates.tierLabel(currentTier);
+    final memService = context.watch<MembershipService?>();
 
     final bikeFacts = <String>[
       if (!auth.isPillion && plate.isNotEmpty) plate,
@@ -305,19 +304,16 @@ class AccountScreen extends StatelessWidget {
                       children: [
                         _SettingsRow(
                           icon: Icons.card_membership_rounded,
-                          title: 'Active Subscription Plan',
-                          subtitle: planService?.pendingPlanSummary != null
-                              ? '$tierLabel · Next: ${planService!.pendingPlanSummary}'
-                              : '$tierLabel · View plan benefits & convoy limits',
-                          value: tierLabel.toUpperCase(),
-                          color: (planService != null && (planService.isExpired || planService.expiringSoon) ? AppTheme.warnText : null),
-                          divider: true,
-                          onTap: () => _push(context, const PlanSelectorScreen()),
-                        ),
-                        _SettingsRow(
-                          icon: Icons.group_work_rounded,
-                          title: 'Group Membership & Seats',
-                          subtitle: 'Capacity management, rider invites & active trip status',
+                          title: 'CoRoute Membership & Plans',
+                          subtitle: memService?.ownedMembership != null
+                              ? '${memService!.ownedMembership!.name} · ₹${memService.ownedMembership!.priceRupees}/mo · ${memService.ownedMembership!.occupiedSeats}/${memService.ownedMembership!.capacity} Seats'
+                              : (memService != null && memService.participating.isNotEmpty
+                                  ? 'Group Participant · Zero extra cost · Managed by Owner'
+                                  : 'Individual & Group plans · From ₹9/mo · Solo safety & Convoy seats'),
+                          value: memService?.ownedMembership != null
+                              ? (memService!.ownedMembership!.isExpired ? 'EXPIRED' : 'ACTIVE')
+                              : (memService != null && memService.participating.isNotEmpty ? 'PARTICIPANT' : 'CHOOSE PLAN'),
+                          color: memService?.ownedMembership?.isExpired == true ? AppTheme.warnText : AppTheme.accentText,
                           divider: true,
                           onTap: () => _push(context, const MembershipDashboardScreen()),
                         ),

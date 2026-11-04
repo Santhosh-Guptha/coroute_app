@@ -106,13 +106,14 @@ class WeatherService extends ChangeNotifier {
   }) {
     if (line.isEmpty) return const [];
     final n = math.max(2, math.min(max, SafetyConstants.weatherMaxPoints));
-    if (line.length == 1) {
-      final p = line.first;
+    final effectiveLine = line.length > 500 ? GeoMath.simplify(line, toleranceM: 100.0) : line;
+    if (effectiveLine.length == 1) {
+      final p = effectiveLine.first;
       return [WeatherPoint(lat: p.$1, lng: p.$2, atS: departS, name: destinationName)];
     }
     final cum = <double>[0];
-    for (var i = 1; i < line.length; i++) {
-      cum.add(cum.last + GeoMath.haversine(line[i - 1].$1, line[i - 1].$2, line[i].$1, line[i].$2));
+    for (var i = 1; i < effectiveLine.length; i++) {
+      cum.add(cum.last + GeoMath.haversine(effectiveLine[i - 1].$1, effectiveLine[i - 1].$2, effectiveLine[i].$1, effectiveLine[i].$2));
     }
     final total = cum.last;
     final out = <WeatherPoint>[];
@@ -123,7 +124,7 @@ class WeatherService extends ChangeNotifier {
       while (idx < cum.length - 1 && cum[idx + 1] < target) {
         idx++;
       }
-      final p = _interpolate(line, cum, idx, target);
+      final p = _interpolate(effectiveLine, cum, idx, target);
       String name;
       if (k == n - 1) {
         name = destinationName;

@@ -340,10 +340,14 @@ class TilePrefetcher extends ChangeNotifier {
       FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks);
 
   /// Checks whether all tiles along [line] are already saved in the local cache.
-  bool isRouteCached(List<(double, double)> line, {bool highDetail = false}) {
+  bool isRouteCached(
+    List<(double, double)> line, {
+    bool highDetail = false,
+    Set<(int, int, int)>? precomputedTiles,
+  }) {
     final cache = _cache;
     if (cache == null || line.isEmpty) return false;
-    final tiles = tilesAlong(line, highDetail: highDetail);
+    final tiles = precomputedTiles ?? tilesAlong(line, highDetail: highDetail);
     if (tiles.isEmpty) return false;
     for (final t in tiles) {
       if (cache.lookup(t.$1, t.$2, t.$3) == null) {
@@ -354,10 +358,14 @@ class TilePrefetcher extends ChangeNotifier {
   }
 
   /// Counts how many tiles along [line] are already saved in the local cache.
-  int countCachedTiles(List<(double, double)> line, {bool highDetail = false}) {
+  int countCachedTiles(
+    List<(double, double)> line, {
+    bool highDetail = false,
+    Set<(int, int, int)>? precomputedTiles,
+  }) {
     final cache = _cache;
     if (cache == null || line.isEmpty) return 0;
-    final tiles = tilesAlong(line, highDetail: highDetail);
+    final tiles = precomputedTiles ?? tilesAlong(line, highDetail: highDetail);
     var count = 0;
     for (final t in tiles) {
       if (cache.lookup(t.$1, t.$2, t.$3) != null) {
@@ -399,7 +407,11 @@ class TilePrefetcher extends ChangeNotifier {
     final effectiveMaxTiles = maxTiles ?? defaultMax;
     if (line.isEmpty || effectiveZooms.isEmpty) return <(int, int, int)>{};
 
-    final samples = _sample(line, SafetyConstants.prefetchSampleM);
+    // For long dense routes (e.g. 5,000 to 35,000 points), simplify with 25m tolerance
+    // before computing corridor sampling. The corridor buffer is 2,500m wide, so 25m tolerance
+    // (1% of corridor width) yields identical tile coverage while avoiding 35,000 haversine loops.
+    final inputLine = line.length > 1500 ? GeoMath.simplify(line, toleranceM: 25.0) : line;
+    final samples = _sample(inputLine, SafetyConstants.prefetchSampleM);
     final out = <(int, int, int)>{};
 
     for (var i = 0; i < samples.length; i++) {

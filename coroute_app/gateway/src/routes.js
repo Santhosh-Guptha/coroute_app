@@ -321,7 +321,11 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     if (!isLead && !isCreator && !isOwner && !isHead && !isAdmin) {
       return res.status(403).json({ error: 'Only the convoy lead or admin can change the trip state.' });
     }
-    res.json({ tripStatus: await convoys.setTripStatus(req.params.groupId, String(req.body?.status || '')) });
+    const status = String(req.body?.status || '').toUpperCase();
+    if (status === 'ENDED' && !isOwner && !isCreator && !isAdmin) {
+      return res.status(403).json({ error: 'Only the Trip Owner or Platform Admin can end the trip.', reason: 'ONLY_OWNER_CAN_END_TRIP' });
+    }
+    res.json({ tripStatus: await convoys.setTripStatus(req.params.groupId, status) });
   }));
 
   // Trips (summary records are kept forever; GPS trails are trimmed by retention)

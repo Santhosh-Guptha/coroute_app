@@ -103,6 +103,86 @@ class GeoMath {
     out.writeCharCode(s + 63);
   }
 
+  /// Simplifies a polyline using the Ramer-Douglas-Peucker algorithm with
+  /// equirectangular distance projection. Returns a reduced list of vertices
+  /// preserving all curves within [toleranceM] metres.
+  ///
+  /// Safe for large routes (35,000+ points) using an iterative stack that
+  /// prevents recursion limit issues and minimizes trigonometric operations.
+  static List<(double, double)> simplify(
+    List<(double, double)> points, {
+    double toleranceM = 15.0,
+  }) {
+    if (points.length <= 2) return points;
+
+    final n = points.length;
+    final keep = List<bool>.filled(n, false);
+    keep[0] = true;
+    keep[n - 1] = true;
+
+    // Stack of segment index ranges to process: [startIdx, endIdx]
+    final stack = <(int, int)>[(0, n - 1)];
+    final tolSq = toleranceM * toleranceM;
+
+    while (stack.isNotEmpty) {
+      final (start, end) = stack.removeLast();
+      if (end <= start + 1) continue;
+
+      final (aLat, aLng) = points[start];
+      final (bLat, bLng) = points[end];
+
+      final midLatRad = _rad((aLat + bLat) * 0.5);
+      final cosLat = math.cos(midLatRad);
+      final kx = _rad(1.0) * earthRadiusM * cosLat;
+      final ky = _rad(1.0) * earthRadiusM;
+
+      final ax = aLng * kx, ay = aLat * ky;
+      final bx = bLng * kx, by = bLat * ky;
+      final dx = bx - ax, dy = by - ay;
+      final lenSq = dx * dx + dy * dy;
+
+      var maxDistSq = -1.0;
+      var maxIdx = -1;
+
+      for (var i = start + 1; i < end; i++) {
+        final (pLat, pLng) = points[i];
+        final px = pLng * kx, py = pLat * ky;
+        double distSq;
+        if (lenSq == 0) {
+          final ddx = px - ax, ddy = py - ay;
+          distSq = ddx * ddx + ddy * ddy;
+        } else {
+          var t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+          if (t < 0.0) {
+            t = 0.0;
+          } else if (t > 1.0) {
+            t = 1.0;
+          }
+          final cx = ax + t * dx, cy = ay + t * dy;
+          final ddx = px - cx, ddy = py - cy;
+          distSq = ddx * ddx + ddy * ddy;
+        }
+
+        if (distSq > maxDistSq) {
+          maxDistSq = distSq;
+          maxIdx = i;
+        }
+      }
+
+      if (maxDistSq > tolSq && maxIdx != -1) {
+        keep[maxIdx] = true;
+        stack.add((start, maxIdx));
+        stack.add((maxIdx, end));
+      }
+    }
+
+    final out = <(double, double)>[];
+    for (var i = 0; i < n; i++) {
+      if (keep[i]) out.add(points[i]);
+    }
+    return out;
+  }
+
   /// Decodes an encoded polyline; returns null when the input is malformed.
   static List<(double, double)>? decodePolyline(String str) {
     final pts = <(double, double)>[];
