@@ -54,7 +54,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
   String? _lastCreatedOrderId;
 
   late MembershipCategory _selectedCategory;
-  final TextEditingController _offerCtrl = TextEditingController(text: 'RIDERFREE');
+  final TextEditingController _offerCtrl = TextEditingController();
 
   // Supported Razorpay payment methods only (no sandbox)
   String _paymentMethod = 'razorpay_upi'; // 'razorpay_upi', 'razorpay_card_netbanking'
@@ -62,10 +62,10 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
   bool _isProcessing = false;
   bool _isValidatingCoupon = false;
 
-  // Coupon state
-  String? _appliedCouponCode = 'RIDERFREE';
+  // Coupon state: clean, empty initial state (no prefilled RIDERFREE, optional)
+  String? _appliedCouponCode;
   int _discountAmountRupees = 0;
-  String? _promoMessage = 'Introductory promo applied: 100% OFF (₹0)';
+  String? _promoMessage;
   String? _errorMessage;
   String? _pendingOrderId;
 
@@ -73,7 +73,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
   void initState() {
     super.initState();
     _selectedCategory = widget.category;
-    _discountAmountRupees = widget.category.priceRupees; // RIDERFREE 100% default
+    _discountAmountRupees = 0;
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
@@ -96,14 +96,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
     });
 
     if (_appliedCouponCode != null) {
-      if (_appliedCouponCode == 'RIDERFREE') {
-        setState(() {
-          _discountAmountRupees = newCat.priceRupees;
-          _promoMessage = 'Introductory promo applied: 100% OFF (₹0)';
-        });
-      } else {
-        _revalidateCouponForCategory(newCat);
-      }
+      _revalidateCouponForCategory(newCat);
     }
   }
 
@@ -496,7 +489,13 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('PROMOTIONAL COUPON', style: AppText.overline),
+                          Expanded(
+                            child: Text(
+                              'PROMOTIONAL COUPON (OPTIONAL)',
+                              style: AppText.overline,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                           if (_appliedCouponCode != null)
                             GestureDetector(
                               onTap: _removeCoupon,
@@ -508,56 +507,82 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _offerCtrl,
-                              textCapitalization: TextCapitalization.characters,
-                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: 1),
-                              decoration: InputDecoration(
-                                hintText: 'Enter promo code (e.g. RIDERFREE)',
-                                hintStyle: TextStyle(color: AppTheme.text2, fontSize: 12),
-                                filled: true,
-                                fillColor: AppTheme.card,
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: AppTheme.border)),
-                                suffixIcon: _appliedCouponCode != null
-                                    ? IconButton(
-                                        icon: const Icon(Icons.cancel_rounded, size: 18),
-                                        onPressed: _removeCoupon,
-                                      )
-                                    : null,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppTheme.brand,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            ),
-                            onPressed: _isValidatingCoupon ? null : _applyPromoCode,
-                            child: _isValidatingCoupon
-                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                                : const Text('Apply', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w800)),
-                          ),
-                        ],
-                      ),
-                      if (_promoMessage != null) ...[
-                        const SizedBox(height: 6),
+                      if (_appliedCouponCode == null) ...[
                         Row(
                           children: [
-                            Icon(Icons.check_circle_rounded, size: 14, color: Colors.lightGreenAccent.shade400),
-                            const SizedBox(width: 6),
                             Expanded(
-                              child: Text(
-                                _promoMessage!,
-                                style: TextStyle(color: Colors.lightGreenAccent.shade400, fontSize: 12, fontWeight: FontWeight.w700),
+                              child: TextField(
+                                controller: _offerCtrl,
+                                textCapitalization: TextCapitalization.characters,
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: 1),
+                                decoration: InputDecoration(
+                                  hintText: 'Enter coupon code',
+                                  hintStyle: TextStyle(color: AppTheme.text2, fontSize: 12),
+                                  filled: true,
+                                  fillColor: AppTheme.card,
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: AppTheme.border)),
+                                ),
                               ),
                             ),
+                            const SizedBox(width: 8),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: AppTheme.brand,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              ),
+                              onPressed: _isValidatingCoupon ? null : _applyPromoCode,
+                              child: _isValidatingCoupon
+                                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                                  : const Text('Apply', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w800)),
+                            ),
                           ],
+                        ),
+                      ] else ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.greenAccent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.4)),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: Colors.greenAccent.withValues(alpha: 0.2),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.check_rounded, color: Colors.greenAccent, size: 16),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '$_appliedCouponCode Applied!',
+                                      style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.w900, fontSize: 13),
+                                    ),
+                                    Text(
+                                      _promoMessage ?? 'Discount applied to plan',
+                                      style: TextStyle(color: Colors.greenAccent.shade100, fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: _removeCoupon,
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  foregroundColor: Colors.redAccent.shade100,
+                                ),
+                                child: const Text('Remove', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ],

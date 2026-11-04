@@ -24,6 +24,7 @@ import '../rider/ride_replay_screen.dart';
 import '../../data/services/gpx_service.dart';
 import 'ride_share_card.dart';
 import 'trip_route_map.dart';
+import '../trip/trip_feedback_sheet.dart';
 
 /// Full report of a finished trip, in two tabs:
 ///  * Summary: the key numbers first (shown at once from the saved trip, no
@@ -282,6 +283,16 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
                   ? SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accentText))
                   : Icon(Icons.route_outlined, color: AppTheme.accentText),
               onPressed: _sharing ? null : _shareGpx,
+            ),
+          if (!widget.adminView)
+            IconButton(
+              tooltip: 'Rate & Review Trip',
+              icon: const Icon(Icons.rate_review_outlined, color: Colors.amber),
+              onPressed: () => TripFeedbackSheet.show(
+                context,
+                tripId: widget.trip.tripId,
+                tripName: widget.trip.tripName,
+              ),
             ),
           IconButton(
             tooltip: '2D Replay & Scrubber',

@@ -300,6 +300,67 @@
     else fetch('/api/pv', { method: 'POST', body: payload, keepalive: true }).catch(function () {});
   } catch (e) { /* ignore */ }
 
+  /* ---------- Live Community Statistics ("CoRoute Community in Motion") ---------- */
+  var communityContainer = doc.getElementById('community-stats-container');
+  if (communityContainer) {
+    function formatNumber(n) {
+      if (typeof n !== 'number') return '--';
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return n.toLocaleString();
+    }
+
+    function fetchCommunityStats() {
+      fetch('/api/public/community-stats')
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (!data || data.enabled === false) {
+            var block = doc.getElementById('community');
+            if (block && data.enabled === false) block.style.display = 'none';
+            return;
+          }
+          var ridersEl = doc.getElementById('stat-total-riders');
+          var activeEl = doc.getElementById('stat-active-riders');
+          var kmEl = doc.getElementById('stat-total-km');
+          var updateEl = doc.getElementById('community-last-updated');
+          var tripsList = doc.getElementById('longest-trips-list');
+
+          if (ridersEl) ridersEl.textContent = formatNumber(data.totalRiders || 0);
+          if (activeEl) activeEl.textContent = formatNumber(data.activeRiders || 0);
+          if (kmEl) kmEl.textContent = formatNumber(data.totalKilometers || 0) + ' km';
+          if (updateEl) {
+            var d = new Date(data.lastUpdated || Date.now());
+            updateEl.textContent = 'Last synced ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          }
+
+          if (tripsList && data.longestTrips && data.longestTrips.length > 0) {
+            tripsList.innerHTML = '';
+            data.longestTrips.forEach(function (trip) {
+              var row = doc.createElement('div');
+              row.className = 'longest-trip-row';
+              var rankClass = 'trip-rank-' + trip.rank;
+              row.innerHTML = 
+                '<div>' +
+                  '<span class="trip-rank-badge ' + rankClass + '">#' + trip.rank + '</span>' +
+                  '<span class="trip-rider-name">' + (trip.anonymousRiderLabel || 'Verified Rider') + '</span>' +
+                '</div>' +
+                '<div class="trip-metrics">' +
+                  '<span class="trip-distance">' + trip.distanceKm + ' km</span>' +
+                  '<span class="trip-duration">' + trip.durationFormatted + '</span>' +
+                '</div>';
+              tripsList.appendChild(row);
+            });
+          } else if (tripsList) {
+            tripsList.innerHTML = '<div class="trip-loading">Verified journeys are being compiled by the network...</div>';
+          }
+        })
+        .catch(function () {});
+    }
+
+    fetchCommunityStats();
+    setInterval(fetchCommunityStats, 60000);
+  }
+
   /* ---------- Start ---------- */
   measureRoutes(doc);
   updateHeader();

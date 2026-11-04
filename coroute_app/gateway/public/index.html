@@ -118,6 +118,46 @@
     </div>
   </section>
 
+  <!-- Live Community Statistics -->
+  <section class="section section--surface hm-community" id="community" aria-labelledby="community-title">
+    <div class="container">
+      <div class="hm-head">
+        <p class="eyebrow">Real riders on the road</p>
+        <h2 id="community-title">CoRoute Community in Motion</h2>
+        <p class="t-lead">Live network pulse across all convoys and solo riders.</p>
+      </div>
+      <div class="community-stats-grid" id="community-stats-container">
+        <div class="community-stat-card">
+          <div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-users"/></svg></div>
+          <div class="stat-number" id="stat-total-riders">--</div>
+          <div class="stat-label">Registered Riders</div>
+        </div>
+        <div class="community-stat-card">
+          <div class="stat-icon stat-icon--live"><span class="live-dot"></span><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-radio"/></svg></div>
+          <div class="stat-number stat-number--live" id="stat-active-riders">--</div>
+          <div class="stat-label">Currently Riding</div>
+        </div>
+        <div class="community-stat-card">
+          <div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-location"/></svg></div>
+          <div class="stat-number" id="stat-total-km">--</div>
+          <div class="stat-label">Verified Kilometres</div>
+        </div>
+      </div>
+
+      <div class="longest-trips-container" id="longest-trips-block">
+        <h3 class="longest-trips-title">Top Verified Longest Journeys</h3>
+        <div class="longest-trips-list" id="longest-trips-list">
+          <div class="trip-loading">Connecting to live community feed...</div>
+        </div>
+      </div>
+
+      <div class="community-pulse-footer">
+        <span class="live-indicator"><span class="pulse-ring"></span> Live Network Feed</span>
+        <span class="last-updated" id="community-last-updated">Connecting...</span>
+      </div>
+    </div>
+  </section>
+
   <!-- How it works -->
   <section class="section" id="how" aria-labelledby="how-title">
     <div class="container">

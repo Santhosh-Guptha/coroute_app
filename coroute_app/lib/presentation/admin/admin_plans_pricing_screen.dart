@@ -6,6 +6,7 @@ import 'admin_config_tabs.dart';
 import 'admin_coupon_usage_tab.dart';
 import 'admin_payment_analytics_tab.dart';
 import 'admin_payments_tabs.dart';
+import 'admin_mobile_dashboard_screen.dart';
 import 'admin_promotions_tabs.dart';
 import 'admin_ui.dart';
 import 'master_admin_dashboard.dart';
@@ -132,12 +133,37 @@ class _AdminPlansPricingScreenState extends State<AdminPlansPricingScreen> {
     );
   }
 
+  int _mapTabToMobileIndex(AdminPaymentsTab tab) {
+    switch (tab) {
+      case AdminPaymentsTab.overview:
+        return 0;
+      case AdminPaymentsTab.payments:
+      case AdminPaymentsTab.analytics:
+        return 1;
+      case AdminPaymentsTab.coupons:
+      case AdminPaymentsTab.couponUsage:
+        return 2;
+      case AdminPaymentsTab.subscribers:
+      case AdminPaymentsTab.pricing:
+      case AdminPaymentsTab.offers:
+        return 3;
+      case AdminPaymentsTab.gateway:
+      case AdminPaymentsTab.audit:
+        return 4;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AdminShell(
       title: 'Configuration Console',
       subtitle: 'Subscribers, payments, pricing matrix and the Razorpay gateway',
       actions: [
+        AdminIconAction(
+          icon: Icons.dashboard_customize_rounded,
+          label: 'Jump to module',
+          onTap: () => _openModuleMenu(context),
+        ),
         AdminIconAction(
           icon: Icons.preview_rounded,
           label: 'Preview rider plans',
@@ -298,163 +324,9 @@ class _AdminPlansPricingScreenState extends State<AdminPlansPricingScreen> {
             );
           }
 
-          // Compact / Mobile Layout: Executive Menu Header + Quick Action Pills
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                margin: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: AppTheme.card,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.border, width: 1.5),
-                  boxShadow: dsFloatingShadow(),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: AppTheme.tint,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: AppTheme.accentText.withValues(alpha: 0.4)),
-                          ),
-                          child: Icon(_currentTab.icon, size: 20, color: AppTheme.accentText),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _currentTab.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppText.title.copyWith(fontSize: 15, fontWeight: FontWeight.w800),
-                              ),
-                              Text(
-                                _currentTab.category.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppText.caption.copyWith(
-                                  color: AppTheme.accentText,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        // Module Menu Button
-                        ElevatedButton.icon(
-                          onPressed: () => _openModuleMenu(context),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.tint,
-                            foregroundColor: AppTheme.accentText,
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              side: BorderSide(color: AppTheme.accentText.withValues(alpha: 0.5), width: 1.5),
-                            ),
-                          ),
-                          icon: const Icon(Icons.dashboard_customize_rounded, size: 16),
-                          label: const Text(
-                            'Modules ▾',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    // Segmented Quick Access Pills: Overview, Pricing, Gateway, Subscribers
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          _QuickPill(
-                            tab: AdminPaymentsTab.overview,
-                            isSelected: _currentTab == AdminPaymentsTab.overview,
-                            onTap: () => _goTo(AdminPaymentsTab.overview),
-                          ),
-                          const SizedBox(width: 6),
-                          _QuickPill(
-                            tab: AdminPaymentsTab.pricing,
-                            isSelected: _currentTab == AdminPaymentsTab.pricing,
-                            onTap: () => _goTo(AdminPaymentsTab.pricing),
-                          ),
-                          const SizedBox(width: 6),
-                          _QuickPill(
-                            tab: AdminPaymentsTab.gateway,
-                            isSelected: _currentTab == AdminPaymentsTab.gateway,
-                            onTap: () => _goTo(AdminPaymentsTab.gateway),
-                          ),
-                          const SizedBox(width: 6),
-                          _QuickPill(
-                            tab: AdminPaymentsTab.subscribers,
-                            isSelected: _currentTab == AdminPaymentsTab.subscribers,
-                            onTap: () => _goTo(AdminPaymentsTab.subscribers),
-                          ),
-                          const SizedBox(width: 6),
-                          _QuickPill(
-                            tab: AdminPaymentsTab.payments,
-                            isSelected: _currentTab == AdminPaymentsTab.payments,
-                            onTap: () => _goTo(AdminPaymentsTab.payments),
-                          ),
-                          const SizedBox(width: 6),
-                          InkWell(
-                            borderRadius: BorderRadius.circular(8),
-                            onTap: () => _openModuleMenu(context),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: AppTheme.bg,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppTheme.border),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.more_horiz_rounded, size: 14, color: AppTheme.text2),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    'All Modules',
-                                    style: AppText.caption.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: IndexedStack(
-                  index: _currentTab.index,
-                  children: [
-                    AdminOverviewTab(onOpen: _goTo),
-                    const AdminSubscribersTab(),
-                    const AdminPaymentsListTab(),
-                    const AdminOffersTab(),
-                    const AdminCouponsTab(),
-                    const AdminPricingTab(),
-                    const AdminGatewayTab(),
-                    const AdminAuditTab(),
-                  ],
-                ),
-              ),
-            ],
+          // Compact / Mobile Layout: Mobile-First Admin Dashboard Redesign (Screens 1-5)
+          return AdminMobileDashboardScreen(
+            initialTabIndex: _mapTabToMobileIndex(_currentTab),
           );
         },
       ),
@@ -510,56 +382,6 @@ class _SidebarMenuItem extends StatelessWidget {
               )
             : null,
         onTap: onTap,
-      ),
-    );
-  }
-}
-
-class _QuickPill extends StatelessWidget {
-  final AdminPaymentsTab tab;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _QuickPill({
-    required this.tab,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? AppTheme.tint : AppTheme.bg,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isSelected ? AppTheme.accentText : AppTheme.border,
-            width: isSelected ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              tab.icon,
-              size: 13,
-              color: isSelected ? AppTheme.accentText : AppTheme.text2,
-            ),
-            const SizedBox(width: 5),
-            Text(
-              tab.label,
-              style: TextStyle(
-                color: isSelected ? AppTheme.accentText : AppTheme.text2,
-                fontSize: 11,
-                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

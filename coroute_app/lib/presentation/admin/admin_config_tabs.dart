@@ -102,6 +102,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
         _updatedBy = res['updatedBy']?.toString() ?? '';
       }
       try {
+        if (!mounted) return;
         final api = context.read<ApiClient>();
         final memRes = await api.get('/admin/membership/catalog');
         if (memRes is Map) {
@@ -661,7 +662,8 @@ class _AdminGatewayTabState extends State<AdminGatewayTab> with AutomaticKeepAli
                 onChanged: _busy != null
                     ? null
                     : (val) async {
-                        final api = context.read<ApiClient>();
+                        if (!mounted) return;
+        final api = context.read<ApiClient>();
                         final planSub = context.read<PlanSubscriptionService>();
                         setState(() => _busy = 'payments');
                         try {

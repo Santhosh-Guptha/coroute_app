@@ -196,6 +196,29 @@ function registerMembershipPublicRoutes({ r, repo, wrap }) {
   }));
 
   /**
+   * GET /api/public/community-stats (and /api/community-stats)
+   * Public read-only riding statistics for website ("CoRoute Community in Motion").
+   * Cached for 60s, rate-limited, privacy-safe, zero PII or coordinates.
+   */
+  let cachedCommunityStats = null;
+  let cachedStatsExpiry = 0;
+
+  const handleCommunityStats = wrap(async (req, res) => {
+    res.set('Cache-Control', 'public, max-age=60');
+    const now = Date.now();
+    if (cachedCommunityStats && now < cachedStatsExpiry) {
+      return res.json(cachedCommunityStats);
+    }
+    const stats = await repo.getCommunityStats();
+    cachedCommunityStats = stats;
+    cachedStatsExpiry = now + 60000;
+    res.json(stats);
+  });
+
+  r.get('/public/community-stats', handleCommunityStats);
+  r.get('/community-stats', handleCommunityStats);
+
+  /**
    * POST /api/membership/webhook
    * Public webhook endpoint from Razorpay with cryptographic HMAC signature verification.
    */
@@ -1661,6 +1684,111 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       fullyRefunded,
       orderId: order.orderId,
     });
+  }));
+
+  // ---------- POST-TRIP FEEDBACK & COMMUNITY STORIES ----------
+  r.post('/trips/:tripId/feedback', wrap(async (req, res) => {
+    const tripId = String(req.params.tripId).trim();
+    const body = req.body || {};
+    const rating = Math.max(1, Math.min(5, Number(body.rating) || 5));
+    const writtenFeedback = String(body.writtenFeedback || body.feedback || '').slice(0, 2000);
+    const suggestions = String(body.suggestions || '').slice(0, 2000);
+    const consentTripDetails = Boolean(body.consentTripDetails);
+    const consentPhoto = Boolean(body.consentPhoto);
+    const photoUrl = body.photoUrl ? String(body.photoUrl).slice(0, 1000) : null;
+
+    const trip = await repo.getTrip(tripId).catch(() => null);
+
+    const doc = {
+      tripId,
+      tripName: trip?.tripName || 'Motorcycle Ride',
+      userId: req.user.userId,
+      userName: req.user.name || 'CoRoute Rider',
+      userEmail: req.user.email || null,
+      rating,
+      writtenFeedback,
+      suggestions,
+      consentTripDetails,
+      consentPhoto,
+      photoUrl,
+      distanceKm: trip ? Math.round(Number(trip.totalDistanceKm || (trip.distanceM ? trip.distanceM / 1000 : 0))) : 0,
+      status: 'PENDING_REVIEW',
+      submittedAt: Date.now(),
+    };
+
+    const saved = await repo.addTripFeedback(doc);
+    res.status(201).json({ ok: true, feedback: saved });
+  }));
+
+  // ---------- ADMIN COMMUNITY STATS CONFIGURATION ----------
+  r.get('/admin/community-stats/config', requireAdmin, wrap(async (req, res) => {
+    const config = await repo.getCommunityStatsConfig();
+    const stats = await repo.getCommunityStats();
+    res.json({ config, stats });
+  }));
+
+  r.put('/admin/community-stats/config', requireAdmin, wrap(async (req, res) => {
+    const body = req.body || {};
+    const updated = await repo.setCommunityStatsConfig({
+      showPublicStats: body.showPublicStats !== undefined ? Boolean(body.showPublicStats) : true,
+      showLongestTrips: body.showLongestTrips !== undefined ? Boolean(body.showLongestTrips) : true,
+      showAnonymousLabels: body.showAnonymousLabels !== undefined ? Boolean(body.showAnonymousLabels) : true,
+      labelPrefix: body.labelPrefix ? String(body.labelPrefix).slice(0, 30) : 'Rider',
+    }, req.user?.email || req.user?.userId || 'admin');
+
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({
+        by: req.user?.email || req.user?.userId || 'admin',
+        action: 'community_stats.config_update',
+        target: 'community_stats_config',
+        details: { config: updated },
+        at: Date.now(),
+      });
+    }
+
+    res.json({ ok: true, config: updated });
+  }));
+
+  // ---------- ADMIN FEEDBACK & COMMUNITY STORIES MODERATION ----------
+  r.get('/admin/feedback', requireAdmin, wrap(async (req, res) => {
+    const items = await repo.listTripFeedback(200);
+    const summary = {
+      total: items.length,
+      pending: items.filter((f) => f.status === 'PENDING_REVIEW').length,
+      approved: items.filter((f) => f.status === 'APPROVED').length,
+      rejected: items.filter((f) => f.status === 'REJECTED').length,
+      withdrawn: items.filter((f) => f.status === 'WITHDRAWN').length,
+      withPhotos: items.filter((f) => f.photoUrl && f.photoUrl.length > 0).length,
+    };
+    res.json({ summary, feedback: items });
+  }));
+
+  r.put('/admin/feedback/:feedbackId/review', requireAdmin, wrap(async (req, res) => {
+    const feedbackId = String(req.params.feedbackId).trim();
+    const body = req.body || {};
+    const action = String(body.action || '').toUpperCase();
+    if (!['APPROVE', 'REJECT', 'REQUEST_CLARIFICATION', 'WITHDRAW'].includes(action)) {
+      return res.status(400).json({ error: 'Valid action required: APPROVE, REJECT, REQUEST_CLARIFICATION, WITHDRAW' });
+    }
+    const adminNotes = String(body.adminNotes || body.notes || '').slice(0, 1000);
+    const updated = await repo.updateTripFeedbackReview(feedbackId, {
+      action,
+      adminNotes,
+      by: req.user?.email || req.user?.userId || 'admin',
+    });
+    if (!updated) return res.status(404).json({ error: 'Feedback record not found' });
+
+    if (typeof repo.addAuditEntry === 'function') {
+      await repo.addAuditEntry({
+        by: req.user?.email || req.user?.userId || 'admin',
+        action: `feedback.${action.toLowerCase()}`,
+        target: feedbackId,
+        details: { action, adminNotes, newStatus: updated.status },
+        at: Date.now(),
+      });
+    }
+
+    res.json({ ok: true, feedback: updated });
   }));
 }
 

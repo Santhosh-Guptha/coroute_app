@@ -746,13 +746,13 @@ class _PaymentCheckoutSheet extends StatefulWidget {
 class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
   late Razorpay _razorpay;
   String? _lastCreatedOrderId;
-  final TextEditingController _offerCtrl = TextEditingController(text: 'RIDERFREE');
+  final TextEditingController _offerCtrl = TextEditingController();
   final TextEditingController _upiVpaCtrl = TextEditingController();
 
   String _paymentMethod = 'upi_instant'; // 'upi_instant', 'upi_custom', 'card_netbanking'
   bool _isProcessing = false;
-  int _discountPercent = 100; // Default introductory offer applies 100% off
-  String? _promoMessage = 'Introductory promo applied: 100% OFF (₹0)';
+  int _discountPercent = 0;
+  String? _promoMessage;
   String? _checkoutError;
 
   @override
@@ -1058,8 +1058,8 @@ class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
                     controller: _offerCtrl,
                     style: const TextStyle(color: Colors.white, fontSize: 14),
                     decoration: InputDecoration(
-                      labelText: 'Introductory Offer / Promo Code',
-                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 13),
+                      hintText: 'Enter coupon code',
+                      hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
                       filled: true,
                       fillColor: Colors.black26,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),

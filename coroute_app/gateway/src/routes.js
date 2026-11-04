@@ -654,7 +654,18 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       sos: { all: sum(ended, 'sos'), recent: sum(recent, 'sos') },
     });
   }));
-  r.get('/admin/feedback', requireAdmin, wrap(async (req, res) => res.json({ feedback: await repo.listFeedback() })));
+  r.get('/admin/feedback', requireAdmin, wrap(async (req, res) => {
+    const items = typeof repo.listTripFeedback === 'function' ? await repo.listTripFeedback(200) : await repo.listFeedback(200);
+    const summary = {
+      total: items.length,
+      pending: items.filter((f) => f.status === 'PENDING_REVIEW').length,
+      approved: items.filter((f) => f.status === 'APPROVED').length,
+      rejected: items.filter((f) => f.status === 'REJECTED').length,
+      withdrawn: items.filter((f) => f.status === 'WITHDRAWN').length,
+      withPhotos: items.filter((f) => f.photoUrl && f.photoUrl.length > 0).length,
+    };
+    res.json({ summary, feedback: items });
+  }));
 
   r.get('/admin/users', requireAdmin, wrap(async (req, res) => {
     const users = await auth.listUsers(5000);

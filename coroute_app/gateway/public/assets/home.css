@@ -113,3 +113,170 @@
   .hm-plan__price{font-size:2.25rem}
 }
 @media (prefers-reduced-motion:reduce){.hm-feature:hover{transform:none}}
+
+/* ---------- CoRoute Community in Motion ---------- */
+.hm-community {
+  background: linear-gradient(180deg, var(--c-surface-1) 0%, rgba(18, 22, 28, 0.8) 100%);
+  border-top: var(--border);
+  border-bottom: var(--border);
+  padding: clamp(48px, 6vw, 80px) 0;
+}
+.community-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--sp-20);
+  margin-top: var(--sp-32);
+}
+.community-stat-card {
+  background: rgba(22, 27, 34, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--r-lg);
+  padding: var(--sp-24);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+  backdrop-filter: blur(8px);
+}
+.community-stat-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 87, 34, 0.3);
+}
+.stat-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--sp-12);
+  color: var(--c-text-2);
+  position: relative;
+}
+.stat-icon--live {
+  background: rgba(0, 230, 118, 0.1);
+  color: #00E676;
+}
+.live-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #00E676;
+  box-shadow: 0 0 8px #00E676;
+  animation: pulseLive 2s infinite;
+}
+@keyframes pulseLive {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(0, 230, 118, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 230, 118, 0); }
+}
+.stat-number {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 3.5vw, 2.75rem);
+  font-weight: 800;
+  color: var(--c-text);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.stat-number--live {
+  color: #00E676;
+}
+.stat-label {
+  margin-top: var(--sp-8);
+  font-size: var(--fs-small);
+  color: var(--c-text-3);
+  text-transform: uppercase;
+  letter-spacing: var(--tr-label);
+  font-weight: 600;
+}
+.longest-trips-container {
+  margin-top: var(--sp-40);
+  background: rgba(15, 18, 22, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--r-lg);
+  padding: var(--sp-24);
+}
+.longest-trips-title {
+  font-size: var(--fs-h4);
+  font-weight: 700;
+  margin-bottom: var(--sp-16);
+  color: var(--c-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.longest-trips-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+.longest-trip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-12) var(--sp-16);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--r-md);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+.trip-rank-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 13px;
+  margin-right: 12px;
+}
+.trip-rank-1 { background: rgba(255, 215, 0, 0.2); color: #FFD700; border: 1px solid rgba(255, 215, 0, 0.4); }
+.trip-rank-2 { background: rgba(192, 192, 192, 0.2); color: #C0C0C0; border: 1px solid rgba(192, 192, 192, 0.4); }
+.trip-rank-3 { background: rgba(205, 127, 50, 0.2); color: #CD7F32; border: 1px solid rgba(205, 127, 50, 0.4); }
+.trip-rider-name {
+  font-weight: 600;
+  color: var(--c-text);
+  font-size: 14px;
+}
+.trip-metrics {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+}
+.trip-distance {
+  font-weight: 700;
+  color: #FF5722;
+}
+.trip-duration {
+  color: var(--c-text-3);
+}
+.community-pulse-footer {
+  margin-top: var(--sp-20);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-small);
+  color: var(--c-text-3);
+  padding: 0 var(--sp-8);
+}
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--c-text-2);
+}
+.pulse-ring {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #FF5722;
+  box-shadow: 0 0 6px #FF5722;
+}
+

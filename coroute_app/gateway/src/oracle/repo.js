@@ -1706,6 +1706,152 @@ class Repo {
     await this.soda.upsertBy(C.organizations, { organizationId: doc.organizationId }, doc);
     return doc;
   }
+
+  // ---------- public community stats & website metrics ----------
+  async getCommunityStatsConfig() {
+    const r = await this.soda.findOne(C.subscriptionConfig, { k: 'community_stats_config' }).catch(() => null);
+    if (r?.value) return r.value;
+    return {
+      showPublicStats: true,
+      showLongestTrips: true,
+      showAnonymousLabels: true,
+      labelPrefix: 'Rider',
+    };
+  }
+
+  async setCommunityStatsConfig(config, updatedBy = 'admin') {
+    const existing = await this.getCommunityStatsConfig();
+    const doc = {
+      ...existing,
+      ...config,
+      k: 'community_stats_config',
+      updatedAt: Date.now(),
+      updatedBy,
+    };
+    await this.soda.upsertBy(C.subscriptionConfig, { k: 'community_stats_config' }, doc);
+    return doc;
+  }
+
+  async getCommunityStats() {
+    const config = await this.getCommunityStatsConfig();
+    if (config.showPublicStats === false) {
+      return {
+        enabled: false,
+        message: 'Community statistics are currently private',
+      };
+    }
+
+    // 1. Registered riders
+    const users = await this.soda.query(C.users, {}, { limit: 100000, fields: 'id' }).catch(() => []);
+    const totalRiders = users.length;
+
+    // 2. Active riders
+    const activeTripsList = await this.soda.query(C.activeTrips, {}, { limit: 10000 }).catch(() => []);
+    const activeRiders = activeTripsList.length;
+
+    // 3. Completed trips and total verified distance
+    const trips = await this.soda.query(C.trips, {}, { limit: 50000 }).catch(() => []);
+    let totalKilometers = 0;
+    for (const t of trips) {
+      const val = t.value || {};
+      const dist = Number(val.totalDistanceKm || (val.distanceM ? val.distanceM / 1000 : 0));
+      if (dist > 0) totalKilometers += dist;
+    }
+    totalKilometers = Math.round(totalKilometers);
+
+    // 4. Top 3 longest trips (anonymized, zero PII, zero raw coordinates)
+    const longestTrips = [];
+    if (config.showLongestTrips !== false) {
+      const sortedTrips = trips
+        .map((t) => t.value)
+        .filter((t) => t && (Number(t.totalDistanceKm) > 0 || Number(t.distanceM) > 0))
+        .sort((a, b) => {
+          const distB = Number(b.totalDistanceKm || (b.distanceM ? b.distanceM / 1000 : 0));
+          const distA = Number(a.totalDistanceKm || (a.distanceM ? a.distanceM / 1000 : 0));
+          return distB - distA;
+        })
+        .slice(0, 3);
+
+      sortedTrips.forEach((trip, idx) => {
+        const distKm = Math.round(Number(trip.totalDistanceKm || (trip.distanceM ? trip.distanceM / 1000 : 0)));
+        const durMs = (trip.endTimeEpochMs && trip.startTimeEpochMs)
+          ? Math.max(0, trip.endTimeEpochMs - trip.startTimeEpochMs)
+          : (trip.movingMs || 0);
+        const hours = Math.floor(durMs / 3600000);
+        const mins = Math.floor((durMs % 3600000) / 60000);
+        const durationFormatted = hours > 0 ? `${hours}h ${mins}m` : `${mins > 0 ? mins : 1}m`;
+
+        const label = config.showAnonymousLabels !== false
+          ? `${config.labelPrefix || 'Rider'} #${idx + 1}`
+          : 'CoRoute Rider';
+
+        longestTrips.push({
+          rank: idx + 1,
+          distanceKm: distKm,
+          durationFormatted,
+          anonymousRiderLabel: label,
+        });
+      });
+    }
+
+    return {
+      enabled: true,
+      totalRiders,
+      activeRiders,
+      totalKilometers,
+      longestTrips,
+      lastUpdated: Date.now(),
+    };
+  }
+
+  // ---------- post-trip feedback & community stories ----------
+  async addTripFeedback(doc) {
+    const feedbackId = doc.feedbackId || `FB-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    const entry = {
+      ...doc,
+      feedbackId,
+      status: doc.status || 'PENDING_REVIEW',
+      submittedAt: doc.submittedAt || Date.now(),
+      reviewHistory: doc.reviewHistory || [],
+    };
+    await this.soda.upsertBy(C.feedback, { feedbackId }, entry);
+    return entry;
+  }
+
+  async listTripFeedback(limit = 200) {
+    const rows = await this.soda.query(C.feedback, {}, {
+      orderBy: [{ path: 'submittedAt', datatype: 'number', order: 'desc' }],
+      limit,
+    }).catch(() => []);
+    return rows.map((r) => ({ ...r.value, key: r.key }));
+  }
+
+  async updateTripFeedbackReview(feedbackId, { action, adminNotes, by }) {
+    const r = await this.soda.findOne(C.feedback, { feedbackId: String(feedbackId) });
+    if (!r) return null;
+    const current = r.value;
+    let newStatus = current.status;
+    if (action === 'APPROVE') newStatus = 'APPROVED';
+    else if (action === 'REJECT') newStatus = 'REJECTED';
+    else if (action === 'REQUEST_CLARIFICATION') newStatus = 'NEEDS_CLARIFICATION';
+    else if (action === 'WITHDRAW') newStatus = 'WITHDRAWN';
+
+    const historyEntry = {
+      action,
+      adminNotes: adminNotes || '',
+      by: by || 'admin',
+      at: Date.now(),
+    };
+
+    const next = {
+      ...current,
+      status: newStatus,
+      reviewHistory: [...(current.reviewHistory || []), historyEntry],
+      updatedAt: Date.now(),
+    };
+    await this.soda.replace(C.feedback, r.key, next);
+    return next;
+  }
 }
 
 module.exports = { Repo, COLLECTIONS: C, ACTIVE_STATUSES, storableAlert };
