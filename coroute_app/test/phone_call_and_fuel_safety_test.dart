@@ -92,7 +92,7 @@ void main() {
   });
 
   group('VoiceService & Phone Call Interruption Tests', () {
-    test('Voice does not speak during active call, but replays critical alerts when call ends', () async {
+    test('Voice guidance remains enabled by default during active call, with critical alerts spoken and queued', () async {
       final settings = SettingsService();
       final engine = FakeVoiceEngine();
       final voice = VoiceService(settings, engine: engine);
@@ -107,20 +107,44 @@ void main() {
       // Call starts
       phone.simulateCallState(PhoneCallStatus.offhook);
 
-      // Non-critical guidance is dropped
-      final dropped = await voice.speak('Turn left onto Outer Ring Rd');
-      expect(dropped, isFalse);
+      // Voice guidance remains enabled by default during call
+      final inCallGuidance = await voice.speak('Turn left onto Outer Ring Rd');
+      expect(inCallGuidance, isTrue);
+      expect(engine.spokenTexts, contains('Turn left onto Outer Ring Rd'));
 
-      // Critical emergency is queued
+      // Critical emergency is spoken immediately AND queued as post-call safety fallback
       final crit = await voice.speak('Rahul SOS Emergency', priority: VoicePriority.critical);
-      expect(crit, isFalse);
+      expect(crit, isTrue);
       expect(phone.pendingPostCallAlerts, contains('Rahul SOS Emergency'));
+      expect(engine.spokenTexts, contains('Rahul SOS Emergency'));
 
-      // Call ends -> VoiceService immediately replays the queued alert!
+      // Call ends -> post-call critical alert replay
       phone.simulateCallState(PhoneCallStatus.idle);
       await Future<void>.delayed(const Duration(milliseconds: 50));
-
       expect(engine.spokenTexts.any((t) => t.contains('Rahul SOS Emergency')), isTrue);
+    });
+
+    test('Manual background voice disable silences ordinary voice but NEVER silences critical emergencies', () async {
+      final settings = SettingsService();
+      final engine = FakeVoiceEngine();
+      final voice = VoiceService(settings, engine: engine);
+      final phone = PhoneCallService(autoStart: false);
+      voice.attachPhoneCallService(phone);
+
+      // Rider disables background voice
+      await settings.setBackgroundVoiceEnabled(false);
+
+      // Call active
+      phone.simulateCallState(PhoneCallStatus.offhook);
+
+      // Ordinary navigation is suppressed
+      final nav = await voice.speak('Turn left onto Highway', priority: VoicePriority.warning);
+      expect(nav, isFalse);
+
+      // Critical emergency alert ALWAYS bypasses manual voice disable
+      final crit = await voice.speak('CRITICAL: Crash detected', priority: VoicePriority.critical);
+      expect(crit, isTrue);
+      expect(engine.spokenTexts, contains('CRITICAL: Crash detected'));
     });
   });
 

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/ride_notification_constants.dart';
 import '../../core/l10n/l10n.dart';
+import 'audio_priority_manager.dart';
 import 'phone_call_service.dart';
 import 'settings_service.dart';
 
@@ -100,9 +101,21 @@ class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
 ///   alert starts it again in the new language.
 /// - Social alerts are never spoken (the callers never pass them).
 class VoiceService extends ChangeNotifier {
-  VoiceService(this._settings, {VoiceEngine? engine, int Function()? clock})
-      : _engine = engine ?? NativeVoiceEngine(),
+  VoiceService(
+    this._settings, {
+    VoiceEngine? engine,
+    int Function()? clock,
+    AudioPriorityManager? priorityManager,
+  })  : _engine = engine ?? NativeVoiceEngine(),
         _clock = clock ?? _wallClock {
+    _priorityManager = priorityManager ??
+        AudioPriorityManager(
+          settings: _settings,
+          engine: _engine,
+          phoneCallService: _phoneCall,
+          clock: _clock,
+        );
+    _priorityManager.bindEnsureEngine(_ensureEngine);
     L10n.changes.addListener(_onLanguage);
   }
 
@@ -111,7 +124,10 @@ class VoiceService extends ChangeNotifier {
   final SettingsService _settings;
   final VoiceEngine _engine;
   final int Function() _clock;
+  late final AudioPriorityManager _priorityManager;
   PhoneCallService? _phoneCall;
+
+  AudioPriorityManager get priorityManager => _priorityManager;
 
   PhoneCallService? get phoneCallService => _phoneCall;
 
@@ -119,16 +135,12 @@ class VoiceService extends ChangeNotifier {
     if (_phoneCall == service) return;
     _phoneCall?.removeListener(_onPhoneCallChanged);
     _phoneCall = service;
+    _priorityManager.attachPhoneCallService(service);
     _phoneCall?.addListener(_onPhoneCallChanged);
   }
 
   void _onPhoneCallChanged() {
-    if (_phoneCall?.isCallActive == false) {
-      final pending = _phoneCall?.flushPostCallAlerts() ?? [];
-      for (final alert in pending) {
-        speak('Safety alert during your call: $alert', priority: VoicePriority.critical);
-      }
-    }
+    // Phone call changes are handled within AudioPriorityManager
   }
 
   Future<bool>? _init;
@@ -138,13 +150,6 @@ class VoiceService extends ChangeNotifier {
   bool _night = false;
   String _requested = 'en';
   String _speechLang = 'en';
-  int _seq = 0;
-
-  /// key -> when it was last spoken (only keys from the last [NotifConstants.voiceDedupe]).
-  final Map<String, int> _spoken = {};
-
-  /// Estimated end times of what was handed to the engine (to cap the queue).
-  final List<int> _queueEnds = [];
 
   /// The engine is running with a usable language.
   bool get available => _available;
@@ -180,51 +185,121 @@ class VoiceService extends ChangeNotifier {
   static int estimateMs(String text) => 600 + text.length * 70;
 
   /// Speaks [text] once. False when it was not spoken (setting off, duplicate key,
-  /// queue full, no engine, or phone call in progress).
-  Future<bool> speak(String text, {VoicePriority priority = VoicePriority.warning, String? key}) async {
+  /// queue full, no engine, or audio congestion).
+  ///
+  /// Background voice guidance remains enabled across phone calls by default.
+  /// If the rider manually disables background voice via [SettingsService.backgroundVoiceEnabled],
+  /// ordinary alerts (P2-P5) are silenced while critical emergency alerts (P0/P1) ALWAYS speak.
+  Future<bool> speak(
+    String text, {
+    VoicePriority priority = VoicePriority.warning,
+    String? key,
+    Duration? ttl,
+    bool isRecoverable = true,
+  }) async {
     final t = text.trim();
     if (t.isEmpty || !_allowed(priority) || _failed) return false;
 
-    // Check if phone call is active: never talk over rider's phone conversation
-    if (_phoneCall?.isCallActive ?? false) {
-      if (priority == VoicePriority.critical) {
-        // Vibrate urgently via device haptics and queue for replay when call ends
-        HapticFeedback.heavyImpact();
-        _phoneCall?.queuePostCallAlert(t);
-      }
-      return false;
-    }
+    final audioPriority = switch (priority) {
+      VoicePriority.critical => AudioPriority.p0CriticalEmergency,
+      VoicePriority.important => AudioPriority.p4ConvoyAnnouncement,
+      VoicePriority.warning => AudioPriority.p3Navigation,
+    };
 
-    final now = _clock();
-    _spoken.removeWhere((_, at) => now - at >= NotifConstants.voiceDedupe.inMilliseconds);
-    final k = key ?? t;
-    if (_spoken.containsKey(k)) return false;
-    final interrupt = priority == VoicePriority.critical;
-    _queueEnds.removeWhere((end) => end <= now);
-    if (!interrupt && _queueEnds.length >= NotifConstants.voiceMaxQueued) return false;
-    // Taken before the first await, so two quick calls with the same key speak once.
-    _spoken[k] = now;
-    final ok = await _ensureEngine();
-    if (!ok) {
-      _spoken.remove(k);
-      return false;
+    return _priorityManager.submit(
+      text: t,
+      priority: audioPriority,
+      dedupeKey: key ?? t,
+      ttl: ttl,
+      dedupeWindow: NotifConstants.voiceDedupe,
+      isRecoverable: isRecoverable,
+    );
+  }
+
+  /// P0: Immediate emergency alert (SOS, crash, vehicle collision).
+  Future<bool> speakEmergency(String text, {String? dedupeKey, Duration? ttl}) {
+    final t = text.trim();
+    if (t.isEmpty || !_settings.voiceCritical || _failed) return Future.value(false);
+    return _priorityManager.submit(
+      text: t,
+      priority: AudioPriority.p0CriticalEmergency,
+      dedupeKey: dedupeKey ?? t,
+      ttl: ttl,
+      dedupeWindow: const Duration(seconds: 5),
+    );
+  }
+
+  /// P1: Fatigue warning & rider safety confirmation prompt.
+  Future<bool> speakFatigueConfirmation(String text, {String? dedupeKey, Duration? ttl}) {
+    final t = text.trim();
+    if (t.isEmpty || _failed) return Future.value(false);
+    return _priorityManager.submit(
+      text: t,
+      priority: AudioPriority.p1SafetyConfirmation,
+      dedupeKey: dedupeKey ?? t,
+      ttl: ttl,
+      dedupeWindow: const Duration(seconds: 15),
+    );
+  }
+
+  /// P2: Immediate road hazard (Black ice, animal, sharp curve).
+  Future<bool> speakHazard(String text, {String? dedupeKey, Duration? ttl}) {
+    final t = text.trim();
+    if (t.isEmpty || (!_settings.hazardAlerts && !_settings.voiceWarnings) || _failed) {
+      return Future.value(false);
     }
-    final said = t.length > NotifConstants.voiceMaxChars ? t.substring(0, NotifConstants.voiceMaxChars) : t;
-    bool spoken;
-    try {
-      spoken = await _engine.speak(said, interrupt: interrupt, id: 'v${++_seq}');
-    } catch (_) {
-      spoken = false;
+    return _priorityManager.submit(
+      text: t,
+      priority: AudioPriority.p2ImmediateHazard,
+      dedupeKey: dedupeKey ?? t,
+      ttl: ttl,
+      dedupeWindow: const Duration(seconds: 10),
+    );
+  }
+
+  /// P3: Navigation cue (Turn instructions, rerouting).
+  Future<bool> speakNavigation(String text, {String? dedupeKey, Duration? ttl}) {
+    final t = text.trim();
+    if (t.isEmpty || !_settings.voiceWarnings || !_groupVoice || _failed) {
+      return Future.value(false);
     }
-    if (!spoken) {
-      _spoken.remove(k);
-      return false;
+    return _priorityManager.submit(
+      text: t,
+      priority: AudioPriority.p3Navigation,
+      dedupeKey: dedupeKey ?? t,
+      ttl: ttl,
+      dedupeWindow: const Duration(seconds: 8),
+    );
+  }
+
+  /// P4: Convoy announcement (Sweeper stop, convoy split, regroup).
+  Future<bool> speakConvoyAnnouncement(String text, {String? dedupeKey, Duration? ttl}) {
+    final t = text.trim();
+    if (t.isEmpty || !_allowed(VoicePriority.important) || _failed) {
+      return Future.value(false);
     }
-    final at = _clock();
-    if (interrupt) _queueEnds.clear();
-    final start = _queueEnds.isEmpty ? at : _queueEnds.reduce((a, b) => a > b ? a : b);
-    _queueEnds.add(start + estimateMs(said));
-    return true;
+    return _priorityManager.submit(
+      text: t,
+      priority: AudioPriority.p4ConvoyAnnouncement,
+      dedupeKey: dedupeKey ?? t,
+      ttl: ttl,
+      dedupeWindow: const Duration(seconds: 15),
+    );
+  }
+
+  /// P5: Informational notification (Fuel advisory, weather, speed limits).
+  Future<bool> speakInformational(String text, {String? dedupeKey, Duration? ttl}) {
+    final t = text.trim();
+    if (t.isEmpty || !_settings.voiceWarnings || _failed) {
+      return Future.value(false);
+    }
+    return _priorityManager.submit(
+      text: t,
+      priority: AudioPriority.p5Informational,
+      dedupeKey: dedupeKey ?? t,
+      ttl: ttl,
+      dedupeWindow: const Duration(seconds: 30),
+    );
   }
 
   /// High-priority alert when Sweeper has halted or encountered distress (REQ-13).
@@ -293,8 +368,8 @@ class VoiceService extends ChangeNotifier {
 
   /// Stops what is being said and drops the queue.
   Future<void> stop() async {
-    _queueEnds.clear();
     if (_init == null) return;
+    await _priorityManager.stop();
     try {
       await _engine.stop();
     } catch (_) {}
@@ -302,8 +377,6 @@ class VoiceService extends ChangeNotifier {
 
   /// Ride end: the engine is unbound; the next alert starts it again.
   Future<void> release() async {
-    _queueEnds.clear();
-    _spoken.clear();
     final wasStarted = _init != null;
     _init = null;
     _failed = false;
@@ -311,6 +384,7 @@ class VoiceService extends ChangeNotifier {
       _available = false;
       notifyListeners();
     }
+    await _priorityManager.release();
     if (!wasStarted) return;
     try {
       await _engine.release();
@@ -323,6 +397,7 @@ class VoiceService extends ChangeNotifier {
   @override
   void dispose() {
     L10n.changes.removeListener(_onLanguage);
+    _priorityManager.dispose();
     super.dispose();
   }
 }

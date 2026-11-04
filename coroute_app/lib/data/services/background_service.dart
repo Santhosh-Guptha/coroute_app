@@ -93,10 +93,13 @@ class BackgroundService {
   /// (dataSync is not used: location already keeps the connection alive, and Android 15
   /// limits dataSync services to 6 hours a day.)
   @visibleForTesting
-  static List<ForegroundServiceTypes> serviceTypesFor({bool micActive = false}) => [
-        ForegroundServiceTypes.location,
-        if (micActive) ForegroundServiceTypes.microphone,
-      ];
+  static List<ForegroundServiceTypes> serviceTypesFor({bool micActive = false, bool? micGranted}) {
+    final active = micGranted ?? micActive;
+    return [
+      ForegroundServiceTypes.location,
+      if (active) ForegroundServiceTypes.microphone,
+    ];
+  }
 
   static Future<bool> _micGranted() async {
     try {

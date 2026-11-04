@@ -35,6 +35,8 @@ class SettingsService extends ChangeNotifier {
   bool _loaded = false;
 
   // 3.15: voice, accident warnings, ride notification, nearby riders consent.
+  static const String keyBackgroundVoiceEnabled = 'coroute_background_voice_enabled';
+  bool _backgroundVoiceEnabled = true;
   bool _voiceCritical = true;
   bool _voiceWarnings = true;
   bool _hazardAlerts = true;
@@ -113,6 +115,9 @@ class SettingsService extends ChangeNotifier {
   bool get soloCheckIn => _soloCheckIn;
   bool get oemGuideSeen => _oemGuideSeen;
   bool get isLoaded => _loaded;
+
+  /// Background voice guidance enabled (on by default; rider can disable ordinary voice, but critical P0/P1 alerts remain audible).
+  bool get backgroundVoiceEnabled => _backgroundVoiceEnabled;
 
   /// Speak emergency alerts (on by default).
   bool get voiceCritical => _voiceCritical;
@@ -200,6 +205,7 @@ class SettingsService extends ChangeNotifier {
       _fatigueReminder = prefs.getBool(SafetyConstants.keyFatigueReminder) ?? true;
       _soloCheckIn = prefs.getBool(SafetyConstants.keySoloCheckIn) ?? true;
       _oemGuideSeen = prefs.getBool(SafetyConstants.keyOemGuideSeen) ?? false;
+      _backgroundVoiceEnabled = prefs.getBool(keyBackgroundVoiceEnabled) ?? true;
       _voiceCritical = prefs.getBool(NetworkConstants.keyVoiceCritical) ?? true;
       _voiceWarnings = prefs.getBool(NetworkConstants.keyVoiceWarnings) ?? true;
       _hazardAlerts = prefs.getBool(NetworkConstants.keyHazardAlerts) ?? true;
@@ -286,6 +292,13 @@ class SettingsService extends ChangeNotifier {
     _soloCheckIn = value;
     notifyListeners();
     await _save(SafetyConstants.keySoloCheckIn, value);
+  }
+
+  Future<void> setBackgroundVoiceEnabled(bool value) async {
+    if (value == _backgroundVoiceEnabled) return;
+    _backgroundVoiceEnabled = value;
+    notifyListeners();
+    await _save(keyBackgroundVoiceEnabled, value);
   }
 
   Future<void> setVoiceCritical(bool value) async {

@@ -56,8 +56,21 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
 
-    // Phrases are short: a focus loss just lets the engine finish or be stopped by the app.
-    private val focusListener = AudioManager.OnAudioFocusChangeListener { }
+    // Transient interruptions (calls, tones) duck audio focus without terminating the engine.
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                hasFocus = false
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                // Transient interruption (call alert, ducking); TTS guidance persists or recovers safely
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                hasFocus = true
+            }
+        }
+    }
 
     private val initTimeout = Runnable { if (!ready) finishInit(false) }
 

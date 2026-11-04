@@ -238,8 +238,13 @@ abstract class SafetyCheckInPort {
   bool sendCheckInWith(CheckInResult result, {double? awayM, CheckInContext? context});
 }
 
+/// Optional extension of [SafetyPort]: updates telemetry status reason for safety escalation.
+abstract class SafetyStatusReasonPort {
+  void updateStatusReason({required String userId, required String reason, String message = ''});
+}
+
 /// Adapts the real ConvoyService and AuthService.
-class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPort {
+class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPort, SafetyStatusReasonPort {
   ConvoySafetyPort(this._convoys, this._auth);
 
   final ConvoyService _convoys;
@@ -340,6 +345,10 @@ class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPor
   @override
   bool sendCheckInWith(CheckInResult result, {double? awayM, CheckInContext? context}) =>
       _convoys.sendCheckIn(result, awayM: awayM, context: context);
+
+  @override
+  void updateStatusReason({required String userId, required String reason, String message = ''}) =>
+      _convoys.updateStatusReason(userId: userId, reason: reason, message: message);
 }
 
 /// Rider safety on the phone: crash detection with a 15 s alarm ("Possible accident
@@ -456,6 +465,8 @@ class SafetyService extends ChangeNotifier {
 
   final Map<String, SafetyPrompt> _prompts = {};
   Timer? _checkInTimer;
+  Timer? _fatigueTimer;
+  bool _fatigueEscalated = false;
   int _lastCheckInEval = 0;
   double? _lastAwayM;
 
@@ -667,6 +678,25 @@ class SafetyService extends ChangeNotifier {
       } else {
         _needHelpAfterCrash();
       }
+    } else if (key == SafetyConstants.promptFatigue) {
+      final wasEscalated = _fatigueEscalated;
+      _fatigueTimer?.cancel();
+      _fatigueTimer = null;
+      _fatigueEscalated = false;
+      if (primary) {
+        if (wasEscalated) {
+          _sendCheckInWith(CheckInResult.ok, context: CheckInContext.fatigue);
+          _updateStatusReason(reason: '', message: '');
+        }
+        _voice?.speakFatigueConfirmation('Safety confirmed. Continuing ride.', dedupeKey: 'fatigue_confirm_ok');
+      } else {
+        _fatigue.reset();
+        if (wasEscalated) {
+          _sendCheckInWith(CheckInResult.ok, context: CheckInContext.fatigue);
+          _updateStatusReason(reason: '', message: '');
+        }
+        _voice?.speakFatigueConfirmation('Break noted. Rest well.', dedupeKey: 'fatigue_break_ok');
+      }
     } else if (key == SafetyConstants.promptOverspeed) {
       _lastOverspeedAlertMs = _now();
     }
@@ -773,6 +803,9 @@ class SafetyService extends ChangeNotifier {
     if (!_settings.crashDetection) _detector.reset();
     if (!_settings.fatigueReminder) {
       _fatigue.reset();
+      _fatigueTimer?.cancel();
+      _fatigueTimer = null;
+      _fatigueEscalated = false;
       _removePrompt(SafetyConstants.promptFatigue);
     }
     if (!_settings.soloCheckIn) {
@@ -795,25 +828,70 @@ class SafetyService extends ChangeNotifier {
       if (_detector.armedAt(p.ts)) _brakes.onFix(p);
       if (ev != null) _openAlarm(ev);
     }
-    if (_settings.fatigueReminder && _fatigue.onFix(p)) {
-      final hours = SafetyConstants.fatigueRideFor.inHours;
-      final mins = SafetyConstants.fatigueBreakFor.inMinutes;
-      _showPrompt(
-        SafetyPrompt(
-          key: SafetyConstants.promptFatigue,
-          kind: SafetyPromptKind.fatigue,
-          title: L10n.t('prompt.fatigue.title'),
-          message: L10n.t('prompt.fatigue.body', {'h': hours, 'min': mins}),
-          primaryLabel: L10n.t('prompt.ok'),
-        ),
-        notifyAlways: false,
-      );
+    if (_fatigue.onFix(p)) {
+      _triggerFatigueAlert();
     }
     _onFuelFix(p);
     _onDarkFix(p);
     _evalFollowUp(_port.activeConvoy);
     _checkSpeedLimit(p);
     _updateSensor();
+  }
+
+  void _triggerFatigueAlert() {
+    final hours = SafetyConstants.fatigueRideFor.inHours;
+    _voice?.speakFatigueConfirmation(
+      "Time for a break. You've been riding for $hours hours. Please confirm your safety.",
+      dedupeKey: 'fatigue_break_alert',
+    );
+    _showPrompt(
+      SafetyPrompt(
+        key: SafetyConstants.promptFatigue,
+        kind: SafetyPromptKind.fatigue,
+        title: "Time for a Break",
+        message: "You've been riding for $hours hours. Please confirm your safety.",
+        primaryLabel: "I'm Alert & Safe",
+        secondaryLabel: "Taking a Break",
+      ),
+      notifyAlways: true,
+    );
+
+    _fatigueTimer?.cancel();
+    _fatigueEscalated = false;
+    _fatigueTimer = Timer(const Duration(seconds: 60), _onFatigue60sTimeout);
+  }
+
+  void _onFatigue60sTimeout() {
+    if (_disposed || !_prompts.containsKey(SafetyConstants.promptFatigue)) return;
+    _voice?.speakFatigueConfirmation(
+      "Safety confirmation required. Ride captain will be notified in 30 seconds.",
+      dedupeKey: 'fatigue_warn_60s',
+    );
+    HapticFeedback.mediumImpact();
+    _fatigueTimer = Timer(const Duration(seconds: 30), _onFatigue90sEscalate);
+  }
+
+  void _onFatigue90sEscalate() {
+    if (_disposed || !_prompts.containsKey(SafetyConstants.promptFatigue)) return;
+    _fatigueEscalated = true;
+    _voice?.speakFatigueConfirmation(
+      "Rider unconfirmed after break reminder. Notifying ride captain.",
+      dedupeKey: 'fatigue_escalated_captain',
+    );
+    _sendCheckInWith(CheckInResult.noReply, context: CheckInContext.fatigue);
+    _updateStatusReason(
+      reason: 'FATIGUE_UNRESPONSIVE',
+      message: 'Rider unconfirmed after 2h riding break reminder',
+    );
+  }
+
+  void _updateStatusReason({required String reason, String message = ''}) {
+    final uid = _port.myUserId;
+    if (uid == null) return;
+    final port = _port;
+    if (port is SafetyStatusReasonPort) {
+      (port as SafetyStatusReasonPort).updateStatusReason(userId: uid, reason: reason, message: message);
+    }
   }
 
   void _onAccel(AccelBucket b) {
@@ -832,6 +910,10 @@ class SafetyService extends ChangeNotifier {
     _detector.reset();
     _accelUnavailable = false; // try the sensor again on the next ride
     _fatigue.reset();
+    _fatigueTimer?.cancel();
+    _fatigueTimer = null;
+    _fatigueEscalated = false;
+    _removePrompt(SafetyConstants.promptFatigue);
     _checkIn.reset();
     _checkInTimer?.cancel();
     _checkInTimer = null;
@@ -1631,6 +1713,8 @@ class SafetyService extends ChangeNotifier {
     _accelSub = null;
     _alarmTimer?.cancel();
     _checkInTimer?.cancel();
+    _fatigueTimer?.cancel();
+    _fatigueTimer = null;
     _smsTimer?.cancel();
     if (BiometricSafetyBridge().isActive) {
       BiometricSafetyBridge().stop();

@@ -25,17 +25,20 @@ class RiderRoles {
   static const String lead = 'LEAD', sweeper = 'SWEEPER', pack = 'PACK';
 }
 
-/// Why a CHECK_IN is sent (3.16): the post-crash "Still okay?" follow-up.
+/// Why a CHECK_IN is sent: post-crash follow-up or prolonged riding fatigue escalation.
 enum CheckInContext {
-  followUp;
+  followUp,
+  fatigue;
 
-  /// Wire name: FOLLOW_UP.
+  /// Wire name: FOLLOW_UP, FATIGUE.
   String get wire => switch (this) {
         CheckInContext.followUp => 'FOLLOW_UP',
+        CheckInContext.fatigue => 'FATIGUE',
       };
 
   static CheckInContext? fromWire(String? s) => switch (s?.toUpperCase()) {
         'FOLLOW_UP' => CheckInContext.followUp,
+        'FATIGUE' => CheckInContext.fatigue,
         _ => null,
       };
 }

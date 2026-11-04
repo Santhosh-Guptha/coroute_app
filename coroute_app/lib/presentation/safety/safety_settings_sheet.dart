@@ -489,6 +489,13 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
           _section(SafetyTexts.voiceSection),
           _group([
             SafetySwitch(
+              icon: Icons.volume_up_rounded,
+              title: 'Background voice guidance',
+              subtitle: 'Voice alerts remain enabled during phone calls (critical emergency alerts always remain audible)',
+              value: s.backgroundVoiceEnabled,
+              onChanged: (v) => s.setBackgroundVoiceEnabled(v),
+            ),
+            SafetySwitch(
               icon: Icons.record_voice_over_outlined,
               title: 'Announce all alerts',
               subtitle: 'Read out all notifications and alerts via voice',
