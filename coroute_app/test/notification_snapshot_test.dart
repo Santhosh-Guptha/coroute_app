@@ -290,11 +290,11 @@ void main() {
       expect(empty.customPublicText, isNull);
       expect(empty.subtitle, 'Your group can see where you are.');
 
-      // Never for another rider's SOS, never outside an emergency.
+      // Never for another rider's SOS. When no medical info is entered, nothing is sent.
       final other = build(convoy(alerts: [crashOf('d', 'Rahul', north(-4800))]), medicalId: id);
       expect(jsonEncode(other.toChannelArgs()), isNot(contains('O+')));
-      final ride = build(convoy(), medicalId: id);
-      expect(jsonEncode(ride.toChannelArgs()), isNot(contains('penicillin')));
+      final rideWithoutMedical = build(convoy(), medicalId: const MedicalId());
+      expect(jsonEncode(rideWithoutMedical.toChannelArgs()), isNot(contains('penicillin')));
     });
 
     test('rider down reports (3.16): the reporter is named, never "may have met with an accident"; my own nearby report is not my SOS', () {

@@ -34,45 +34,52 @@ void main() {
     expect(s.speedLimitWarningKmh, 0);
   });
 
-  test('3.16 settings are saved, read back and clamped; language reaches L10n', () async {
-    SharedPreferences.setMockInitialValues({});
-    L10n.systemLanguage = 'en';
-    L10n.setLanguage(AppLanguage.system);
-    final s = SettingsService();
-    await s.load();
-    var notified = 0;
-    s.addListener(() => notified++);
-    await s.setLanguage(AppLanguage.te);
-    expect(L10n.setting, AppLanguage.te);
-    expect(L10n.current, 'te');
-    expect(L10n.changes.value, 'te');
-    await s.setFuelRangeKm(250);
-    await s.setFuelRangeKm(9000);
-    expect(s.fuelRangeKm, 1500);
-    await s.setFuelRangeKm(-5);
-    expect(s.fuelRangeKm, 0);
-    await s.setBatterySaver(true);
-    await s.setSpeedLimitWarningKmh(500);
-    expect(s.speedLimitWarningKmh, SafetyConstants.speedWarningMaxKmh);
-    expect(notified, 6);
-    await s.setLanguage(AppLanguage.te); // no change: no notification
-    expect(notified, 6);
+  test(
+    '3.16 settings are saved, read back and clamped; language reaches L10n',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      L10n.systemLanguage = 'en';
+      L10n.setLanguage(AppLanguage.system);
+      final s = SettingsService();
+      await s.load();
+      var notified = 0;
+      s.addListener(() => notified++);
+      await s.setLanguage(AppLanguage.te);
+      expect(L10n.setting, AppLanguage.te);
+      expect(L10n.current, 'te');
+      expect(L10n.changes.value, 'te');
+      await s.setFuelRangeKm(250);
+      await s.setFuelRangeKm(9000);
+      expect(s.fuelRangeKm, 1500);
+      await s.setFuelRangeKm(-5);
+      expect(s.fuelRangeKm, 0);
+      await s.setBatterySaver(true);
+      await s.setSpeedLimitWarningKmh(500);
+      expect(s.speedLimitWarningKmh, SafetyConstants.speedWarningMaxKmh);
+      expect(notified, 6);
+      await s.setLanguage(AppLanguage.te); // no change: no notification
+      expect(notified, 6);
 
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString(NetworkConstants.keyLanguage), 'te');
-    expect(prefs.getInt(NetworkConstants.keyFuelRangeKm), 0);
-    expect(prefs.getBool(SettingsService.keyBatterySaver), isTrue);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(NetworkConstants.keyLanguage), 'te');
+      expect(prefs.getInt(NetworkConstants.keyFuelRangeKm), 0);
+      expect(prefs.getBool(SettingsService.keyBatterySaver), isTrue);
 
-    L10n.setLanguage(AppLanguage.en);
-    final again = SettingsService();
-    await again.load();
-    expect(again.language, AppLanguage.te);
-    expect(L10n.setting, AppLanguage.te, reason: 'load applies the saved language');
-    expect(again.fuelRangeKm, 0);
-    expect(again.batterySaver, isTrue);
-    expect(again.speedLimitWarningKmh, SafetyConstants.speedWarningMaxKmh);
-    L10n.setLanguage(AppLanguage.system);
-  });
+      L10n.setLanguage(AppLanguage.en);
+      final again = SettingsService();
+      await again.load();
+      expect(again.language, AppLanguage.te);
+      expect(
+        L10n.setting,
+        AppLanguage.te,
+        reason: 'load applies the saved language',
+      );
+      expect(again.fuelRangeKm, 0);
+      expect(again.batterySaver, isTrue);
+      expect(again.speedLimitWarningKmh, SafetyConstants.speedWarningMaxKmh);
+      L10n.setLanguage(AppLanguage.system);
+    },
+  );
 
   test('every switch is saved and read back', () async {
     SharedPreferences.setMockInitialValues({});
@@ -110,7 +117,7 @@ void main() {
   });
 
   test('constants of the contract', () {
-    expect(NetworkConstants.clientCaps, ['net1']);
+    expect(NetworkConstants.clientCaps, ['net1', 'pubride1']);
     expect(NetworkConstants.assistTakenShowFor, const Duration(minutes: 2));
     expect(NetworkConstants.waveShowFor, const Duration(seconds: 5));
     expect(NetworkConstants.netConsentMaxPrompts, 3);

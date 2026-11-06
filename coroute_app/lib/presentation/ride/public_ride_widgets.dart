@@ -35,8 +35,8 @@ class PublicRideSettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.watch<PublicRideService>();
-    if (!s.available) return const SizedBox.shrink();
+    final s = Provider.of<PublicRideService?>(context);
+    if (s == null || !s.available) return const SizedBox.shrink();
     final rs = s.settings;
     final p = s.prefs;
 
@@ -123,7 +123,8 @@ class PublicRideMarkerLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.watch<PublicRideService>();
+    final s = Provider.of<PublicRideService?>(context);
+    if (s == null) return const SizedBox.shrink();
     final rides = s.rides;
     final warnings = s.warnings;
     final shared = s.channels.where((c) => c.theirLat != null && c.theirLng != null).toList();
@@ -214,8 +215,8 @@ class _PublicRideHudState extends State<PublicRideHud> {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.watch<PublicRideService>();
-    if (!s.available) return const SizedBox.shrink();
+    final s = Provider.of<PublicRideService?>(context);
+    if (s == null || !s.available) return const SizedBox.shrink();
     if (s.noticeSeq != _noticeSeen) {
       _noticeSeen = s.noticeSeq;
       final text = s.notice;

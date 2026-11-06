@@ -175,9 +175,10 @@ void main() {
       final moving = synth([(3, 50)]);
       moving.forEach(rec.onFix);
       expect(rec.currentStop, isNull);
-      // Parked: GPS goes quiet, heartbeats every 30 s carry the parked time.
-      var t = moving.last.ts;
-      for (var i = 0; i < 8; i++) {
+      // Parked: rider comes to a stop; GPS goes quiet, heartbeats every 30 s carry the parked time.
+      var t = moving.last.ts + 30000;
+      rec.onFix(TrackPoint(ts: t, lat: moving.last.lat, lng: moving.last.lng, speedKmh: 0, accuracyM: 5));
+      for (var i = 0; i < 7; i++) {
         t += 30000;
         rec.onHeartbeat(nowMs: t);
       }

@@ -192,8 +192,8 @@ void main() {
   testWidgets('map layer: icons and names at street zoom, nothing when zoomed out', (tester) async {
     final s = MapPlacesService(fetch: (_) async => null);
     s.debugPut('340:1560', PoiCellData(1, [
-      poi('f', 17.01, 78.01, {'amenity': 'fuel', 'fuel:octane_91': 'yes', 'name': 'HP Fuel'}),
-      poi('h', 17.012, 78.01, {'amenity': 'hospital', 'name': 'Govt Hospital', 'emergency': 'yes'}),
+      poi('f', 17.005, 78.01, {'amenity': 'fuel', 'fuel:octane_91': 'yes', 'name': 'HP Fuel'}),
+      poi('h', 17.020, 78.01, {'amenity': 'hospital', 'name': 'Govt Hospital', 'emergency': 'yes'}),
     ]));
     Widget map(double zoom) => MaterialApp(
           home: Scaffold(
@@ -202,7 +202,7 @@ void main() {
               height: 600,
               child: FlutterMap(
                 key: ValueKey(zoom),
-                options: MapOptions(initialCenter: const LatLng(17.011, 78.01), initialZoom: zoom),
+                options: MapOptions(initialCenter: const LatLng(17.0125, 78.01), initialZoom: zoom),
                 children: [MapPlacesLayer(service: s)],
               ),
             ),

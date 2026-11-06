@@ -10,6 +10,7 @@ import 'package:coroute_app/data/services/convoy_service.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/presentation/ride/group_settings_sheet.dart';
+import 'package:coroute_app/presentation/ride/ride_sheet.dart';
 import 'package:coroute_app/presentation/rider/widgets/coroute_orbit_control.dart';
 import 'package:coroute_app/presentation/rider/widgets/glove_quick_settings_modal.dart';
 import 'package:coroute_app/presentation/rider/widgets/minimal_cockpit_overlay.dart';
@@ -181,7 +182,7 @@ void main() {
     // Section cards
     expect(find.text('Ride feature controls'), findsOneWidget);
     expect(find.text('Group limits'), findsOneWidget);
-    expect(find.text('Audio & guidance alerts'), findsOneWidget);
+    expect(find.widgetWithText(SheetSectionTitle, 'Spoken alerts'), findsOneWidget);
     expect(find.text('Sharing my location'), findsOneWidget);
   });
 

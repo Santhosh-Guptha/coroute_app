@@ -219,7 +219,9 @@ void main() {
         data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.3)),
         child: w ?? const SizedBox.shrink(),
       ),
-      home: Scaffold(body: SingleChildScrollView(padding: const EdgeInsets.all(12), child: child)),
+      home: child is SettingsScreen
+          ? child
+          : Scaffold(body: SingleChildScrollView(padding: const EdgeInsets.all(12), child: child)),
     );
     await tester.pumpWidget(providers.isEmpty ? app : MultiProvider(providers: providers, child: app));
     await tester.pump();

@@ -113,7 +113,7 @@ void main() {
         MultiProvider(
           providers: [
             // Legacy plan periods and orders come straight from GET /subscription/history.
-            Provider<ApiClient>.value(value: mockApi),
+            ChangeNotifierProvider<ApiClient>.value(value: mockApi),
             ChangeNotifierProvider<MembershipService?>.value(value: membershipService),
           ],
           child: const MaterialApp(
@@ -125,7 +125,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify the order card is only rendered ONCE, not duplicated
-      expect(find.text('Group (2–6)'), findsWidgets);
+      expect(find.text('Small Group (2–6)'), findsWidgets);
       // Verify payment ID is rendered in CopyRow
       expect(find.byWidgetPredicate((w) => w is Text && w.data == paymentId), findsWidgets);
       expect(find.byWidgetPredicate((w) => w is Text && w.data == orderId), findsWidgets);
@@ -165,7 +165,7 @@ void main() {
         MultiProvider(
           providers: [
             // Legacy plan periods and orders come straight from GET /subscription/history.
-            Provider<ApiClient>.value(value: mockApi),
+            ChangeNotifierProvider<ApiClient>.value(value: mockApi),
             ChangeNotifierProvider<MembershipService?>.value(value: membershipService),
           ],
           child: const MaterialApp(
@@ -209,7 +209,7 @@ void main() {
         MultiProvider(
           providers: [
             // Legacy plan periods and orders come straight from GET /subscription/history.
-            Provider<ApiClient>.value(value: mockApi),
+            ChangeNotifierProvider<ApiClient>.value(value: mockApi),
             ChangeNotifierProvider<MembershipService?>.value(value: membershipService),
           ],
           child: const MaterialApp(

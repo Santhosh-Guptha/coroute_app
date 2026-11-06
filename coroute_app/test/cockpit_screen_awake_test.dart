@@ -83,6 +83,21 @@ class MockConvoyService extends ChangeNotifier implements ConvoyService {
   bool get serverUnreachable => false;
 
   @override
+  bool get serverBusy => false;
+
+  @override
+  bool get lastErrorIsServerBusy => false;
+
+  @override
+  bool get conservingBattery => false;
+
+  @override
+  bool get isLowBattery => false;
+
+  @override
+  bool get batterySaverActive => false;
+
+  @override
   bool get leaveRequestedFromNotification => false;
 
   @override

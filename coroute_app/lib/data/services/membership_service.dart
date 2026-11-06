@@ -107,7 +107,7 @@ class MembershipService extends ChangeNotifier {
 
   /// Authoritatively recognizes whether the rider has an active plan with valid capacity (ISSUE-10):
   /// a membership, or a legacy tier until its end date.
-  bool get hasActivePlan => planAccess.canStartTrip;
+  bool get hasActivePlan => planAccess.isPaid;
 
   /// The rider's plan (the single source for hosting, seats and the home status line). Every rider
   /// has at least Community (free, solo rides), also before the server answered.

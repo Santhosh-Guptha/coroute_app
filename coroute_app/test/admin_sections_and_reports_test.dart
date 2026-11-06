@@ -100,10 +100,10 @@ void main() {
         }
         return http.Response('{}', 404);
       });
-      await tester.pumpWidget(MaterialApp(
-        home: ChangeNotifierProvider<ApiClient>.value(
-          value: ApiClient(httpClient: client),
-          child: const Scaffold(body: SingleChildScrollView(child: AdminRideReportsSection())),
+      await tester.pumpWidget(ChangeNotifierProvider<ApiClient>.value(
+        value: ApiClient(httpClient: client),
+        child: const MaterialApp(
+          home: Scaffold(body: SingleChildScrollView(child: AdminRideReportsSection())),
         ),
       ));
       await tester.pumpAndSettle();

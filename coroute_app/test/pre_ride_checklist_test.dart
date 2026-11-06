@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,6 +11,25 @@ import 'package:coroute_app/presentation/widgets/pre_ride_checklist_sheet.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('flutter.baseflow.com/permissions/methods'), (call) async => 1);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('coroute/safety'), (call) async {
+      if (call.method == 'deviceInfo') {
+        return {
+          'manufacturer': 'Google',
+          'model': 'Pixel 8',
+          'sdkInt': 34,
+          'accelFifo': 1000,
+          'hasAccel': true,
+          'hasGyro': true,
+        };
+      }
+      return null;
+    });
+  });
 
   const perms = [
     PermissionItem(key: 'location', title: 'l', reason: '', required: true, granted: true),
@@ -76,7 +96,8 @@ void main() {
   });
 
   testWidgets('"Start the ride" continues, also with nothing ticked; the skip is saved', (tester) async {
-    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
     await smallPhone(tester);
     bool? result;
     await tester.pumpWidget(host(Scaffold(
