@@ -95,7 +95,7 @@ function writeCaddy(rows) {
 
 /** Routes defined in src/: [{ method, path, file, line }]. Literal paths only (the site page loop is WEB). */
 function srcRoutes() {
-  const prefixFor = (f) => (f === 'app.js' ? '' : f === 'guardian_routes.js' ? '/api/guardian' : '/api');
+  const prefixFor = (f) => (f === 'app.js' ? '' : f === 'guardian_routes.js' ? '/api/guardian' : f === 'public_ride.js' ? '/api/admin/public-ride' : '/api');
   const out = [];
   for (const f of fs.readdirSync(SRC).filter((x) => x.endsWith('.js'))) {
     const lines = fs.readFileSync(path.join(SRC, f), 'utf8').split('\n');

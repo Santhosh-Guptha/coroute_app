@@ -84,6 +84,7 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | WEB | GET | /api/convoys/:groupId/gpx | routes.js | `tracks.load` (database) |
 | WEB | GET | /api/geo/search | routes.js | Photon/Nominatim proxy (own cache and polite queue per node) |
 | WEB | GET | /api/geo/nearby-fuel | routes.js | OSM proxy |
+| WEB | GET | /api/geo/poi-cells | routes.js | Map places by 0.05 degree cell (proxy and cache) |
 | WEB | GET | /api/geo/reverse | routes.js | Nominatim proxy |
 | WEB | POST | /api/geo/route | routes.js | OSRM proxy |
 | WEB | POST | /api/geo/weather | routes.js | Open-Meteo proxy |
