@@ -36,8 +36,9 @@ const { GuardianPush } = require('./guardian_push');
 const { guardianRouter } = require('./guardian_routes');
 const { EmergencySmsGateway } = require('./emergency_sms_gateway');
 const { JobLease } = require('./job_lease');
-// TODO(P1): backups. When src/backups.js exports startBackupJobs({ lease, repo, soda, logger }), it is
-// started with the other leased jobs below; until then this stays null.
+const { Mirror } = require('./mirror');
+// Encrypted Object Storage backups (src/backups.js -> backup_jobs.js): startBackupJobs({ lease, repo, soda, logger })
+// registers 'backup-critical' and 'backup-full' on the job lease. Optional so a build without it still starts.
 const backupModule = (() => {
   try { return require('./backups'); } catch (e) {
     if (e.code === 'MODULE_NOT_FOUND' && String(e.message).includes("'./backups'")) return null;
@@ -50,7 +51,7 @@ function createSoda() {
   return new SodaClient({ baseUrl: config.sodaUrl, user: config.oracleUser, password: config.oraclePassword, timeoutMs: config.oracleTimeoutMs });
 }
 
-async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease } = {}) {
+async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease, mirror: mirrorOpts } = {}) {
   const repo = new Repo(soda);
   const nodeName = config.nodeName || process.env.NODE_NAME || require('os').hostname();
   // Scheduled jobs run on exactly one node of a two-VM deployment (src/job_lease.js, GATEWAY_ROLE).
@@ -112,6 +113,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // Only these proxies' X-Forwarded-For is believed (TRUST_PROXY; default loopback = this VM's Caddy).
   // VM2 also trusts VM1's private IP, so req.ip (and every IP rate limit) is the real client.
   app.set('trust proxy', config.trustProxy);
+  // Two-VM deployment: which node answered (for checking the Caddy route split). Not sent on a single VM.
+  if (config.gatewayRole !== 'all') app.use((req, res, next) => { res.set('X-CoRoute-Node', `${nodeName}/${config.gatewayRole}`); next(); });
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
@@ -146,6 +149,10 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate, network, discovery, emergencyGateway });
   network.attach(hub);
   discovery.attach(hub);
+  // Two-node live mirror (src/mirror.js): off unless MIRROR_LISTEN_HOST / MIRROR_PEER_URL are set (opts: tests).
+  const mirror = new Mirror({ convoys, logger, node: nodeName, ...(mirrorOpts || {}) });
+  mirror.attach(hub);
+  await mirror.start();
   let guardianPush = null;
   // Pilot is disabled by default; an explicit HTTPS origin prevents host-header links.
   if (process.env.GUARDIAN_ENABLED === 'true') {
@@ -193,6 +200,13 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
     res.redirect(302, config.apkArm32Url || `${originOf(req)}${config.apkArm32Path}`);
+  });
+  app.get('/download/ios', (req, res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    const target = config.appStoreUrl || config.iosTestFlightUrl || config.iosIpaUrl || `${originOf(req)}/get#ios`;
+    res.redirect(302, target);
   });
   app.get('/robots.txt', (req, res) => res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${originOf(req)}/sitemap.xml\n`));
   app.get('/sitemap.xml', (req, res) => {
@@ -263,13 +277,19 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     index: false, maxAge: '7d', extensions: false,
     setHeaders: (res, p) => {
       if (p.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
-      // The APK keeps its name across releases: always check for a newer one.
+      // The APK/IPA keeps its name across releases: always check for a newer one.
       if (p.endsWith('.apk')) {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Content-Type', 'application/vnd.android.package-archive');
       }
+      if (p.endsWith('.ipa')) {
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Content-Type', 'application/octet-stream');
+      }
     },
   }));
+  // Load balancer health for live traffic (VM1 primary / VM2 backup): 200 serving, 503 syncing / overloaded / shutdown.
+  app.get('/api/health/live', (req, res) => { const h = mirror.health(); res.status(h.status).set('Cache-Control', 'no-store').json(h.body); });
   app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
@@ -324,6 +344,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     network.stop();
     discovery.stop();
     audit.stop();
+    // Final room state to the peer gateway, then RECONNECT {reason:'shutdown'} to every socket (src/mirror.js).
+    await mirror.shutdown().catch(() => {});
     hub.close();
     for (const ws of hub.wss.clients) ws.terminate();
     await convoys.flushAll();
@@ -333,7 +355,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { app, server, hub, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, audit, routes, emergencyGateway, shutdown };
+  return { app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

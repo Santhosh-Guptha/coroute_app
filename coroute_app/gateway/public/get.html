@@ -40,22 +40,23 @@
       <div class="pg-dl">
         <div class="page-hero__inner">
           <p class="eyebrow">Get the app</p>
-          <h1>Get CoRoute for Android.</h1>
+          <h1>Get CoRoute.</h1>
           <p class="t-lead">The group ride app for long-distance touring: live convoy map, push-to-talk, crash detection and guardians. Up to __MAX_RIDERS__ riders in one ride group.</p>
           <div class="cluster cluster--16">
             <a class="btn btn--primary btn--lg" href="/download"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
-            <a class="btn btn--secondary btn--lg" href="/download/32bit">32-bit download</a>
+            <a class="btn btn--secondary btn--lg" href="/download/ios" id="ios-download-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>Download for iOS</a>
+            <a class="btn btn--ghost btn--lg" href="/download/32bit">32-bit Android</a>
           </div>
           <div class="pg-dl__meta">
-            <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Android 6.0 or newer</span>
+            <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Android 6.0+ &amp; iOS 14.0+</span>
             <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Version __APP_VERSION__</span>
             <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>No trackers or analytics SDKs</span>
           </div>
         </div>
         <aside class="pg-dl__card" aria-labelledby="which-title" data-reveal>
           <h2 class="t-h4" id="which-title">Which one do I need?</h2>
-          <p class="t-small t-muted">Use <strong style="color:var(--c-text)">Download for Android</strong> on almost any phone from the last several years. It is the 64-bit build.</p>
-          <p class="t-small t-muted">If Android says the app is not compatible, or it will not install on an older phone, use the <a class="link" href="/download/32bit">32-bit download</a> instead.</p>
+          <p class="t-small t-muted">For Android, tap <strong style="color:var(--c-text)">Download for Android</strong> on almost any modern phone (64-bit). Older phones can use the 32-bit download.</p>
+          <p class="t-small t-muted">For iPhone, tap <strong style="color:var(--c-text)">Download for iOS</strong> for TestFlight beta or App Store installation.</p>
           <p class="pg-dl__alt">Not sure? Try the main download first. Nothing breaks if it does not install.</p>
         </aside>
       </div>
@@ -166,6 +167,17 @@
             <li><span>If Android asks, allow your browser to install apps. You can switch this off again afterwards.</span></li>
             <li><span>Tap <strong>Install</strong>, then <strong>Open</strong>.</span></li>
             <li><span>Sign up, add your emergency contact and guardians, and run the pre-ride checklist.</span></li>
+          </ol>
+          <div class="stack stack--12" id="ios" style="margin-top:var(--sp-24)">
+            <p class="eyebrow">iPhone and iPad</p>
+            <h2 class="t-h3" id="install-ios-title">Installing on iOS</h2>
+            <p class="t-small t-muted">iOS devices install apps through Apple TestFlight, the App Store, or developer sideloading.</p>
+          </div>
+          <ol class="pg-install" role="list">
+            <li><span>Tap <strong>Download for iOS</strong> above to open the TestFlight or App Store installation page.</span></li>
+            <li><span>If using TestFlight, install Apple TestFlight from the App Store and tap Start Testing.</span></li>
+            <li><span>For offline IPA installation, install the package using Xcode or AltStore with your Apple ID.</span></li>
+            <li><span>Open CoRoute, allow Location (select Always Allow for safety alarms while the phone is locked), Motion and Notifications.</span></li>
           </ol>
         </div>
         <div class="stack stack--24" data-reveal>

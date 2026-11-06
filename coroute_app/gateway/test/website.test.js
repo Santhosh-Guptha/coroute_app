@@ -63,6 +63,9 @@ test('privacy, terms, 404 page, robots, sitemap, static assets, download redirec
   const dl32 = await fetch(base + '/download/32bit', { redirect: 'manual' });
   assert.equal(dl32.status, 302);
   assert.equal(dl32.headers.get('location'), `${base}/coroute-32bit.apk`);
+  const dlIos = await fetch(base + '/download/ios', { redirect: 'manual' });
+  assert.equal(dlIos.status, 302);
+  assert.equal(dlIos.headers.get('location'), `${base}/get#ios`);
 });
 
 test('internal documentation is not served; public pages follow the site rules', async () => {
@@ -99,7 +102,7 @@ test('internal documentation is not served; public pages follow the site rules',
   const get = await (await fetch(base + '/get')).text();
   assert.ok(get.includes(`Up to ${config.maxConvoyRiders} riders`), 'max riders from config');
   assert.ok(!get.includes('__MAX_RIDERS__'));
-  assert.ok(get.includes('href="/download"') && get.includes('href="/download/32bit"'), 'download page links both builds');
+  assert.ok(get.includes('href="/download"') && get.includes('href="/download/32bit"') && get.includes('href="/download/ios"'), 'download page links all builds');
 });
 
 test('site pages: shared shell, unique head tags, active nav, no placeholders left', async () => {

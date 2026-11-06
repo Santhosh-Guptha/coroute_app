@@ -99,6 +99,20 @@ const config = {
   // admin), 'all' (single VM, default). Caddy decides routing; the role only decides which node prefers
   // to run scheduled jobs (src/job_lease.js).
   gatewayRole: oneOf('GATEWAY_ROLE', ['live', 'web', 'all'], 'all'),
+  // Two-node live mirror (src/mirror.js): off unless MIRROR_LISTEN_HOST or MIRROR_PEER_URL is set. MIRROR_KEY
+  // (32+ chars, same on both nodes) authenticates and encrypts the link. LIVE_RIDER_CAP: distinct riders with a
+  // live socket on both nodes before new riders get 503 SERVER_BUSY (0 = off).
+  nodeName: (process.env.NODE_NAME || '').trim() || require('os').hostname(),
+  mirrorListenHost: (process.env.MIRROR_LISTEN_HOST || '').trim(),
+  mirrorListenPort: int('MIRROR_LISTEN_PORT', 3101),
+  mirrorPeerUrl: (process.env.MIRROR_PEER_URL || '').trim(),
+  mirrorKey: (process.env.MIRROR_KEY || '').trim(),
+  mirrorAckTimeoutMs: int('MIRROR_ACK_TIMEOUT_MS', 400),
+  mirrorHandbackDelayMs: int('MIRROR_HANDBACK_DELAY_MS', 15000),
+  mirrorHandbackPerSec: int('MIRROR_HANDBACK_PER_SEC', 25),
+  mirrorStartupWaitMs: int('MIRROR_STARTUP_WAIT_MS', 3000),
+  mirrorSyncTimeoutMs: int('MIRROR_SYNC_TIMEOUT_MS', 30000),
+  liveRiderCap: int('LIVE_RIDER_CAP', 0),
   // Job leases: lease life, renew/poll period, and how long a lease must have been expired before a node
   // of the non-preferred role takes it over.
   jobLeaseTtlMs: int('JOB_LEASE_TTL_MS', 60000),
@@ -126,7 +140,8 @@ const config = {
   wsAlarmsPer10s: int('WS_ALARMS_PER_10S', 3),
 
   // Persistence / retention (zero-maintenance housekeeping)
-  riderPersistIntervalMs: int('RIDER_PERSIST_INTERVAL_MS', 5000),
+  // One room snapshot write per live room per interval (src/convoys.js flushRoom).
+  riderPersistIntervalMs: int('RIDER_PERSIST_INTERVAL_MS', 15000),
   retentionVoiceLogDays: int('RETENTION_VOICE_LOG_DAYS', 7),
   retentionEndedConvoyDays: int('RETENTION_ENDED_CONVOY_DAYS', 90),
   retentionStaleConvoyHours: int('RETENTION_STALE_CONVOY_HOURS', 36),
@@ -141,6 +156,12 @@ const config = {
   // Group tracking and timeline (per-convoy values override these defaults)
   trackMaxPoints: int('TRACK_MAX_POINTS', 120),
   trackRetentionDays: int('TRACK_RETENTION_DAYS', 90),
+  // Track chunks older than this are merged per rider into one simplified document (retention.js; 0 = never).
+  trackDetailDays: int('TRACK_DETAIL_DAYS', 14),
+  trackSimplifyToleranceM: int('TRACK_SIMPLIFY_TOLERANCE_M', 5),
+  // Track uploads are written in batches: at most this long a chunk waits, or this many per bulk insert.
+  trackBatchFlushMs: int('TRACK_BATCH_FLUSH_MS', 250),
+  trackBatchMax: int('TRACK_BATCH_MAX', 50),
   stopRadiusM: int('STOP_RADIUS_M', 50),
   stopExitM: int('STOP_EXIT_M', 60),
   offRouteM: int('OFF_ROUTE_M', 300),
@@ -315,6 +336,10 @@ const config = {
   apkArm32Url: (process.env.APK_ARM32_URL || '').trim(),
   apkPath: '/coroute.apk',
   apkArm32Path: '/coroute-32bit.apk',
+  appStoreUrl: (process.env.APP_STORE_URL || '').trim(),
+  iosTestFlightUrl: (process.env.IOS_TESTFLIGHT_URL || '').trim(),
+  iosIpaUrl: (process.env.IOS_IPA_URL || '').trim(),
+  iosIpaPath: '/coroute.ipa',
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
@@ -360,6 +385,9 @@ const config = {
   reviewPhotoDir: (process.env.REVIEW_PHOTO_DIR || '').trim()
     || (isTest ? require('path').join(require('os').tmpdir(), `coroute-review-photos-${process.pid}`)
       : require('path').join(__dirname, '..', 'data', 'review-photos')),
+  // Review photo storage: 'disk' (reviewPhotoDir) or 'par' (OCI Object Storage via a bucket PAR; never sent to clients).
+  reviewPhotoStore: (process.env.REVIEW_PHOTO_STORE || 'disk').trim().toLowerCase(),
+  reviewPhotoParUrl: (process.env.REVIEW_PHOTO_PAR_URL || '').trim(),
 };
 
 if (!isTest && config.jwtSecret.length < 32) {
