@@ -82,7 +82,7 @@ class _ReplayScreenState extends State<ReplayScreen> {
     try {
       final res = await api.get('/convoys/${widget.groupId}/tracks?simplify=8', timeout: const Duration(seconds: 25));
       final list = (res is Map ? res['tracks'] : null) as List? ?? const [];
-      final tracks = list.whereType<Map>().map((m) => ReplayTrack.fromJson(Map<String, dynamic>.from(m))).where((t) => t.points.length >= 2).toList();
+      final tracks = list.whereType<Map>().map((m) => ReplayTrack.fromJson(Map<String, dynamic>.from(m), segmented: res is Map && res['segmented'] == true)).where((t) => t.points.length >= 2).toList();
       final plan = res is Map ? TripPlan.fromJson(res['plan']) : null;
       var events = widget.events;
       if (events == null) {

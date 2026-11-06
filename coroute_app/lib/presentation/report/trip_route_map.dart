@@ -32,7 +32,8 @@ class TripRouteMap extends StatefulWidget {
   /// OFF_ROUTE timeline entries (with a place) to show as deviation markers.
   final List<TimelineEventModel> deviations;
 
-  /// The planned route as a line (drawn dashed under the ridden routes).
+  /// The planned route as a line: a faint dashed layer under the ridden routes,
+  /// labelled "Planned" in the key. Never drawn as a ridden route (pass null to hide it).
   final List<LatLng>? plannedLine;
 
   /// Riders to show; null shows everyone.
@@ -236,16 +237,15 @@ class TripRouteMapState extends State<TripRouteMap> {
       children: [
         appTileLayer(),
         PolylineLayer(polylines: [
-          // The plan: a dashed neutral line under the ridden routes.
-          if (planned != null && planned.length >= 2) ...[
-            Polyline(points: planned, strokeWidth: 6, color: AppTheme.text.withValues(alpha: 0.25)),
+          // The plan: only a faint dashed neutral line under the ridden routes (no solid casing,
+          // so it can never be mistaken for a route somebody rode).
+          if (planned != null && planned.length >= 2)
             Polyline(
               points: planned,
-              strokeWidth: 3.5,
-              color: AppTheme.text2,
-              pattern: StrokePattern.dashed(segments: const [14, 10]),
+              strokeWidth: 3,
+              color: AppTheme.text2.withValues(alpha: 0.55),
+              pattern: StrokePattern.dashed(segments: const [10, 12]),
             ),
-          ],
           // Dark casing under every route so a colour stays visible on any map background.
           for (final p in shown)
             for (final piece in p.pieces)
@@ -601,7 +601,7 @@ class TripMapLegend extends StatelessWidget {
       item(Container(width: 16, height: 16, decoration: BoxDecoration(color: AppTheme.warnText, shape: BoxShape.circle)), 'Planned stop'),
       item(Icon(Icons.sports_score_rounded, size: 16, color: AppTheme.sos), 'Destination'),
       if (showPlan) ...[
-        item(Text('- - -', style: AppText.caption.copyWith(color: c, fontWeight: FontWeight.w700)), 'Planned route'),
+        item(Text('- - -', style: AppText.caption.copyWith(color: c, fontWeight: FontWeight.w700)), 'Planned'),
         item(Icon(Icons.wrong_location_rounded, size: 16, color: AppTheme.warnText), 'Off route'),
       ],
       item(Text('.....', style: AppText.caption.copyWith(color: c, fontWeight: FontWeight.w700)), 'No signal'),

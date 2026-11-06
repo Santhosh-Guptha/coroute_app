@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/garage_service.dart';
 import '../../domain/garage/bike_profile.dart';
-import '../../core/config/feature_gates.dart';
-import '../../data/services/plan_subscription_service.dart';
+import '../../domain/places/fuel_match.dart';
 
 /// Screen managing multiple motorcycles, service reminders, and active ride bike.
 class GarageScreen extends StatefulWidget {
@@ -31,11 +29,6 @@ class _GarageScreenState extends State<GarageScreen> {
   }
 
   void _showAddBikeModal() {
-    if (!FeatureGates.isUnlocked(Feature.multiBikeGarage) &&
-        _garageService.bikesNotifier.value.isNotEmpty) {
-      FeatureGates.showUpgradeModal(context, Feature.multiBikeGarage);
-      return;
-    }
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -46,11 +39,6 @@ class _GarageScreenState extends State<GarageScreen> {
       ),
       builder: (sheetContext) => _AddBikeSheet(
         onSave: (newBike) async {
-          if (!FeatureGates.isUnlocked(Feature.multiBikeGarage) &&
-              _garageService.bikesNotifier.value.isNotEmpty) {
-            FeatureGates.showUpgradeModal(context, Feature.multiBikeGarage);
-            return;
-          }
           await _garageService.saveBike(newBike);
           if (sheetContext.mounted) {
             Navigator.of(sheetContext).maybePop();
@@ -131,7 +119,6 @@ class _GarageScreenState extends State<GarageScreen> {
 
   @override
   Widget build(BuildContext context) {
-    context.watch<PlanSubscriptionService?>();
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
@@ -149,62 +136,8 @@ class _GarageScreenState extends State<GarageScreen> {
           ),
         ),
         actions: [
-          Builder(builder: (ctx) {
-            final isMultiUnlocked = FeatureGates.isUnlocked(Feature.multiBikeGarage);
-            return Center(
-              child: GestureDetector(
-                onTap: () {
-                  if (!isMultiUnlocked) {
-                    FeatureGates.showUpgradeModal(ctx, Feature.multiBikeGarage);
-                  }
-                },
-                child: Container(
-                  margin: const EdgeInsets.only(right: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isMultiUnlocked
-                        ? AppTheme.accentText.withValues(alpha: 0.12)
-                        : AppTheme.warnTint,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: isMultiUnlocked ? AppTheme.accentText : AppTheme.warnBorder,
-                      width: 1,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        isMultiUnlocked ? Icons.verified_rounded : Icons.lock_outline_rounded,
-                        size: 13,
-                        color: isMultiUnlocked ? AppTheme.accentText : AppTheme.warnText,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        isMultiUnlocked ? 'PRO · UNLIMITED' : '1 BIKE · FREE',
-                        style: TextStyle(
-                          color: isMultiUnlocked ? AppTheme.accentText : AppTheme.warnText,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }),
           IconButton(
-            icon: Icon(
-              !FeatureGates.isUnlocked(Feature.multiBikeGarage) && _garageService.bikesNotifier.value.isNotEmpty
-                  ? Icons.lock_outline_rounded
-                  : Icons.add_circle,
-              color: !FeatureGates.isUnlocked(Feature.multiBikeGarage) && _garageService.bikesNotifier.value.isNotEmpty
-                  ? AppTheme.warnText
-                  : AppTheme.accentText,
-              size: 26,
-            ),
+            icon: Icon(Icons.add_circle, color: AppTheme.accentText, size: 26),
             tooltip: 'Add Motorcycle',
             onPressed: _showAddBikeModal,
           ),
@@ -245,6 +178,7 @@ class _GarageScreenState extends State<GarageScreen> {
                         isActive: isActive,
                         onSelectActive: () => _garageService.setActiveBike(bike.id),
                         onRecordService: () => _showRecordServiceDialog(bike),
+                        onFuelType: (t) => _garageService.saveBike(bike.copyWith(fuelType: t)),
                         // Confirm first: one stray gloved tap used to delete a bike.
                         onDelete: bikes.length > 1
                             ? () async {
@@ -277,6 +211,7 @@ class _BikeCard extends StatelessWidget {
   final VoidCallback onSelectActive;
   final VoidCallback onRecordService;
   final VoidCallback? onDelete;
+  final ValueChanged<BikeFuelType>? onFuelType;
 
   const _BikeCard({
     required this.bike,
@@ -284,6 +219,7 @@ class _BikeCard extends StatelessWidget {
     required this.onSelectActive,
     required this.onRecordService,
     this.onDelete,
+    this.onFuelType,
   });
 
   @override
@@ -388,6 +324,38 @@ class _BikeCard extends StatelessWidget {
 
           Divider(height: 1, color: AppTheme.border),
 
+          // Fuel type: stations on the map and fuel warnings match it.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Row(
+              children: [
+                Icon(bike.fuelType == BikeFuelType.ev ? Icons.ev_station_rounded : Icons.local_gas_station_rounded,
+                    size: 18, color: AppTheme.muted),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Runs on', style: TextStyle(color: AppTheme.muted, fontSize: 12, fontWeight: FontWeight.w700))),
+                PopupMenuButton<BikeFuelType>(
+                  key: ValueKey('fuelType_${bike.id}'),
+                  tooltip: 'Fuel type',
+                  initialValue: bike.fuelType,
+                  enabled: onFuelType != null,
+                  onSelected: (t) => onFuelType?.call(t),
+                  itemBuilder: (_) => [
+                    for (final t in BikeFuelType.values) PopupMenuItem(value: t, child: Text(t.label)),
+                  ],
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    alignment: Alignment.center,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text(bike.fuelType.label, style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w800)),
+                      Icon(Icons.arrow_drop_down_rounded, color: AppTheme.muted),
+                    ]),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           // Specs Grid
           Padding(
             padding: const EdgeInsets.all(16),
@@ -396,14 +364,14 @@ class _BikeCard extends StatelessWidget {
                 Expanded(
                   child: _MiniSpec(
                     label: 'TANK CAPACITY',
-                    value: '${bike.tankCapacityL.toStringAsFixed(1)} L',
+                    value: '${bike.tankCapacityL.toStringAsFixed(1)} ${bike.fuelType.unit}',
                     subtext: '${bike.fullTankRangeKm.round()} km max',
                   ),
                 ),
                 Expanded(
                   child: _MiniSpec(
                     label: 'CONSUMPTION',
-                    value: '${bike.expectedMileageKmL.round()} km/L',
+                    value: '${bike.expectedMileageKmL.round()} km/${bike.fuelType.unit}',
                     subtext: '${bike.reserveRangeKm.round()} km reserve',
                   ),
                 ),
@@ -565,6 +533,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
   final _reserveController = TextEditingController(text: '3.0');
   final _mileageController = TextEditingController(text: '25.0');
   final _odometerController = TextEditingController(text: '0');
+  BikeFuelType _fuelType = BikeFuelType.petrol;
 
   /// Shown under the name field when [SAVE TO GARAGE] is pressed without a name
   /// (the button used to do nothing, with no feedback).
@@ -702,6 +671,21 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
               ],
             ),
             const SizedBox(height: 12),
+            Text('RUNS ON', style: TextStyle(color: AppTheme.muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final t in BikeFuelType.values)
+                  ChoiceChip(
+                    key: ValueKey('addBikeFuel_${t.name}'),
+                    label: Text(t.label),
+                    selected: _fuelType == t,
+                    onSelected: (_) => setState(() => _fuelType = t),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
@@ -710,7 +694,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
-                      labelText: 'Tank (L)',
+                      labelText: 'Tank (${_fuelType.unit})',
                       labelStyle: TextStyle(color: AppTheme.muted),
                     ),
                   ),
@@ -722,7 +706,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
-                      labelText: 'Reserve (L)',
+                      labelText: 'Reserve (${_fuelType.unit})',
                       labelStyle: TextStyle(color: AppTheme.muted),
                     ),
                   ),
@@ -734,7 +718,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
-                      labelText: 'km/L',
+                      labelText: 'km/${_fuelType.unit}',
                       labelStyle: TextStyle(color: AppTheme.muted),
                     ),
                   ),
@@ -777,6 +761,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                     reserveCapacityL: reserve,
                     expectedMileageKmL: mileage,
                     totalOdometerKm: odo,
+                    fuelType: _fuelType,
                   );
 
                   widget.onSave(newBike);

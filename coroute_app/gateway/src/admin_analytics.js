@@ -12,6 +12,8 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const { COLLECTIONS: C, ACTIVE_STATUSES } = require('./oracle/repo');
 const { effectiveSubscription, isPaidTier } = require('./subscription_lifecycle');
+const { isStaffAccount, isGuestAccount, staffEmails, hasStaffMember } = require('./staff');
+const { safeUsage, PRIVACY_NOTE } = require('./public_privacy');
 
 const DAY = 86400000;
 const PAGE = 1000;
@@ -34,7 +36,18 @@ function median(list) {
   const m = Math.floor(a.length / 2);
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
-const isGuest = (u) => u.provider === 'guest' || String(u.email || '').endsWith('@guest.coroute.local');
+const isGuest = (u) => isGuestAccount(u);
+/** Staff (admins, BOOTSTRAP_ADMIN_EMAILS, STAFF_EMAILS; see src/staff.js) among `users`, as a userId set. */
+function staffSet(users) {
+  const emails = staffEmails();
+  return new Set(users.filter((u) => u && u.userId && !isGuest(u) && isStaffAccount(u, emails)).map((u) => u.userId));
+}
+/** userIds of every staff account: one indexed query when the repo has it, else a scan of users. */
+async function staffIdsFor(repo) {
+  if (typeof repo.staffUserIds === 'function') return repo.staffUserIds().catch(() => new Set());
+  return staffSet((await scan(repo.soda, C.users)).rows);
+}
+const memberIdsOf = (c) => Object.keys(c?.members || {});
 /** CLOSED as a real emergency (not a false alarm, cancel or expiry). */
 const sosResolvedReal = (a) => a.resolved === true && !['FALSE_ALARM', 'CANCELLED', 'EXPIRED'].includes(a.resolveReason || a.status);
 const sosFalseAlarm = (a) => a.resolved === true && ['FALSE_ALARM', 'CANCELLED'].includes(a.resolveReason || a.status);
@@ -107,17 +120,24 @@ async function overview({ repo, convoys }, { days = 30, now = Date.now() } = {})
     scan(soda, C.users), scan(soda, C.trips), scan(soda, C.convoys, { tripStatus: 'ENDED' }), scan(soda, C.alerts),
     scan(soda, C.subscriptionConfig, { k: 'rzp_order' }), scan(soda, C.memberships, {}, { cap: 20000 }),
   ]);
-  const riders = users.rows.filter((u) => !isGuest(u));
+  // Staff (admins and STAFF_EMAILS) are never riders for these numbers; guests are counted apart as before.
+  const staffIds = staffSet(users.rows);
+  const riders = users.rows.filter((u) => !isGuest(u) && !staffIds.has(u.userId));
   const holders = membershipHolders(memberships.rows, now);
   const planHolders = riders.filter((u) => effectiveSubscription(u, now).tier !== 'community' || holders.has(u.userId)).length;
-  const paidOrders = orders.rows.filter((o) => o.status === 'PAID' && num(o.amountInPaise) > 0);
+  const allPaidOrders = orders.rows.filter((o) => o.status === 'PAID' && num(o.amountInPaise) > 0);
+  // A staff account's payments (usually checkout tests) are reported apart, never as rider revenue.
+  const staffPaid = allPaidOrders.filter((o) => staffIds.has(o.userId));
+  const paidOrders = allPaidOrders.filter((o) => !staffIds.has(o.userId));
   const liveOrders = paidOrders.filter((o) => o.mode !== 'test');
   const paying = new Set(liveOrders.map((o) => o.userId).filter(Boolean));
   const net = (o) => (num(o.amountInPaise) - num(o.refundedAmountInPaise)) / 100;
   const paidAt = (o) => num(o.paidAt) || num(o.createdAt);
   const tripsIn = trips.rows.filter((t) => num(t.endTimeEpochMs) >= since);
   const endedIn = ended.rows.filter((c) => num(c.endedAtEpochMs || c.updatedAt) >= since);
-  const memberCount = (c) => Object.keys(c.members || {}).length;
+  // Group size counts riders only; a ride a staff account joined still counts as a ride (withStaff).
+  const riderMembers = (c) => memberIdsOf(c).filter((id) => !staffIds.has(id)).length;
+  const sized = ended.rows.filter((c) => riderMembers(c) > 0);
   const groupKm = (c) => num(c.report?.group?.distanceM) / 1000;
   const alertsIn = alerts.rows.filter((a) => num(a.timestamp) >= since);
   const responses = alerts.rows.map(firstResponseSec).filter((x) => x !== null);
@@ -130,7 +150,9 @@ async function overview({ repo, convoys }, { days = 30, now = Date.now() } = {})
     truncated: [users, trips, ended, alerts, orders, memberships].some((s) => s.truncated),
     riders: {
       total: riders.length,
-      guests: users.rows.length - riders.length,
+      excludesStaff: true,
+      staff: staffIds.size,
+      guests: users.rows.filter(isGuest).length,
       active7d: riders.filter((u) => num(u.lastActiveAt || u.lastLoginAt) >= now - 7 * DAY).length,
       active30d: riders.filter((u) => num(u.lastActiveAt || u.lastLoginAt) >= now - 30 * DAY).length,
       newInPeriod: riders.filter((u) => num(u.createdAt) >= since).length,
@@ -150,7 +172,8 @@ async function overview({ repo, convoys }, { days = 30, now = Date.now() } = {})
       kmInPeriod: Math.round(tripsIn.reduce((s, t) => s + tripKm(t), 0)),
       groupKm: Math.round(ended.rows.reduce((s, c) => s + groupKm(c), 0)),
       ridingHours: round1(trips.rows.reduce((s, t) => s + tripMovingMs(t), 0) / 3600000),
-      avgGroupSize: ended.rows.length ? round1(ended.rows.reduce((s, c) => s + memberCount(c), 0) / ended.rows.length) : 0,
+      avgGroupSize: sized.length ? round1(sized.reduce((s, c) => s + riderMembers(c), 0) / sized.length) : 0,
+      withStaff: ended.rows.filter((c) => hasStaffMember(memberIdsOf(c), staffIds)).length,
     },
     safety: {
       sosTotal: alerts.rows.length,
@@ -168,7 +191,9 @@ async function overview({ repo, convoys }, { days = 30, now = Date.now() } = {})
       revenueInPeriodInr: Math.round(liveOrders.filter((o) => paidAt(o) >= since).reduce((s, o) => s + net(o), 0)),
       testPaidOrders: paidOrders.length - liveOrders.length,
       testRevenueInr: Math.round(paidOrders.filter((o) => o.mode === 'test').reduce((s, o) => s + net(o), 0)),
-      couponOrders: orders.rows.filter((o) => o.status === 'PAID' && (o.couponCode || o.offerCode)).length,
+      couponOrders: orders.rows.filter((o) => o.status === 'PAID' && !staffIds.has(o.userId) && (o.couponCode || o.offerCode)).length,
+      staffPaidOrders: staffPaid.length,
+      staffRevenueInr: Math.round(staffPaid.reduce((s, o) => s + net(o), 0)),
     },
   };
 }
@@ -188,12 +213,12 @@ async function riderTotals(repo) {
   return { by, truncated: trips.truncated || alerts.truncated };
 }
 
-function riderRow(u, totals, riding, now) {
+function riderRow(u, totals, riding, now, emails = staffEmails()) {
   const t = totals.get(u.userId) || { trips: 0, km: 0, movingMs: 0, sos: 0, lastTripAt: 0 };
   const st = effectiveSubscription(u, now);
   return {
     userId: u.userId, name: u.name || '', email: u.email || '', phone: u.phone || '',
-    role: u.role || 'RIDER', status: u.status || 'ACTIVE', tier: st.tier, guest: isGuest(u),
+    role: u.role || 'RIDER', status: u.status || 'ACTIVE', tier: st.tier, guest: isGuest(u), staff: !isGuest(u) && isStaffAccount(u, emails),
     trips: t.trips, km: round1(t.km), ridingHours: round1(t.movingMs / 3600000), sos: t.sos,
     lastSeenAt: Math.max(num(u.lastActiveAt || u.lastLoginAt), t.lastTripAt), createdAt: num(u.createdAt),
     riding: riding.get(u.userId) || null,
@@ -244,6 +269,7 @@ async function riderDetail({ repo, convoys }, userId, now = Date.now()) {
     rider: {
       userId: u.userId, name: u.name || '', email: u.email || '', phone: u.phone || '', role: u.role || 'RIDER',
       status: u.status || 'ACTIVE', statusReason: u.statusReason || '', provider: u.provider || 'password', guest: isGuest(u),
+      staff: !isGuest(u) && isStaffAccount(u),
       createdAt: num(u.createdAt), lastSeenAt: Math.max(num(u.lastActiveAt || u.lastLoginAt), tripEnds.length ? Math.max(...tripEnds) : 0),
       appBuild: num(u.appBuild) || null, vehicleType: u.vehicleType || '', riding: riding.get(userId) || null,
     },
@@ -295,7 +321,7 @@ function maxTripsFor(u) {
   return Number.isInteger(v) && v >= 0 ? v : config.maxTripsPerUser;
 }
 
-function groupRow(m, live) {
+function groupRow(m, live, staffIds = new Set()) {
   const g = m.report?.group || {};
   const startedAt = num(m.createdAtEpochMs);
   const endedAt = num(m.endedAtEpochMs);
@@ -303,6 +329,7 @@ function groupRow(m, live) {
     groupId: m.groupId, name: m.name || 'Ride', status: live ? 'LIVE' : (m.tripStatus || 'ENDED'),
     createdByUserName: m.createdByUserName || '', startedAt, endedAt,
     members: Object.keys(m.members || {}).length,
+    hasStaff: hasStaffMember(memberIdsOf(m), staffIds),
     distanceKm: round1(num(g.distanceM) / 1000),
     durationMs: num(g.durationMs) || (endedAt ? Math.max(0, endedAt - startedAt) : 0),
     sos: num(g.sos), arrived: num(g.arrived), hasReport: !!m.report,
@@ -316,9 +343,10 @@ async function groupDetail({ repo, convoys }, groupId) {
   const room = convoys?.rooms?.get(groupId) || null;
   if (!meta && !room) return null;
   const m = meta || room.meta || {};
-  const [events, alerts] = await Promise.all([
+  const [events, alerts, staffIds] = await Promise.all([
     scan(soda, C.events, { groupId }, { cap: 10000 }),
     scan(soda, C.alerts, { groupId }, { cap: 2000 }),
+    staffIdsFor(repo),
   ]);
   const counts = {};
   for (const t of GROUP_EVENT_TYPES) counts[t] = 0;
@@ -335,6 +363,7 @@ async function groupDetail({ repo, convoys }, groupId) {
     return {
       userId: uid, name: s?.name || mem.name || rider.name || '', role: s?.role || mem.role || rider.role || 'PACK',
       online: room ? room.riders.has(uid) : false,
+      staff: staffIds.has(uid),
       trackAvailable: !!s?.trackAvailable,
       distanceKm: round1(num(s?.distanceM) / 1000), movingMs: num(s?.movingMs), avgKmh: round1(s?.avgMovingKmh), maxKmh: round1(s?.maxKmh),
       sos: num(s?.sos), separatedMs: num(s?.separatedMs), offRouteMs: num(s?.offRouteMs), reachedDestination: !!s?.reachedDestination,
@@ -350,6 +379,8 @@ async function groupDetail({ repo, convoys }, groupId) {
       groupId, name: m.name || 'Ride', status: room ? 'LIVE' : (m.tripStatus || 'ENDED'), live,
       createdByUserName: m.createdByUserName || '', startName: m.start?.name || m.startLocationName || '', destinationName: m.destinationName || '',
       startedAt, endedAt, hasReport: !!report,
+      // A ride a staff account joined (often a test) still counts; this flag tells it apart.
+      hasStaff: hasStaffMember(memberIds, staffIds),
     },
     stats: {
       members: memberIds.size,
@@ -376,7 +407,7 @@ async function groupDetail({ repo, convoys }, groupId) {
   };
 }
 
-/** Aggregated, PII-free numbers for the public website. */
+/** Aggregated, PII-free totals (exact). The website only ever gets safeUsage() of this: rounded, thresholded. */
 async function publicUsage(repo, now = Date.now()) {
   const soda = repo.soda;
   const [users, trips, ended, alerts, reviews] = await Promise.all([
@@ -385,12 +416,13 @@ async function publicUsage(repo, now = Date.now()) {
   ]);
   const ratings = reviews.rows.map((r) => r.rating).filter((x) => Number.isInteger(x) && x >= 1 && x <= 5);
   return {
-    riders: users.rows.filter((u) => !isGuest(u)).length,
+    riders: (() => { const staff = staffSet(users.rows); return users.rows.filter((u) => !isGuest(u) && !staff.has(u.userId)).length; })(),
     ridesCompleted: trips.rows.length,
     kmRidden: Math.round(trips.rows.reduce((s, t) => s + tripKm(t), 0)),
     groupsRidden: ended.rows.filter((c) => Object.keys(c.members || {}).length >= 2).length,
     sosResolved: alerts.rows.filter(sosResolvedReal).length,
     avgRating: ratings.length ? round1(ratings.reduce((a, b) => a + b, 0) / ratings.length) : null,
+    ratingsCount: ratings.length,
     updatedAt: now,
   };
 }
@@ -405,8 +437,9 @@ function registerPublicUsageRoutes({ r, repo, wrap }) {
     res.set('Cache-Control', 'public, max-age=300');
     const cfg = typeof repo.getCommunityStatsConfig === 'function' ? await repo.getCommunityStatsConfig().catch(() => ({})) : {};
     if (cfg && cfg.showPublicStats === false) return res.json({ ok: true, enabled: false, stats: null });
-    const stats = await cache.get('usage', () => publicUsage(repo));
-    res.json({ ok: true, enabled: true, stats });
+    // Privacy: rounded down, nothing below 10, a rating only from 10 ratings, time to the hour (public_privacy.js).
+    const stats = safeUsage(await cache.get('usage', () => publicUsage(repo)));
+    res.json({ ok: true, enabled: true, stats, privacy: PRIVACY_NOTE });
   });
   r.get('/public/usage-stats', limiter, handler);
   r.get('/usage-stats', limiter, handler);
@@ -429,7 +462,8 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
     res.set('Cache-Control', 'no-store').json(await cache.get(`overview:${days}`, () => overview({ repo, convoys }, { days })));
   }));
 
-  // ?q=&status=ACTIVE|ON_HOLD|BLOCKED&tier=&riding=1&sort=lastSeen|joined|trips|km|sos|name&limit=&cursor=
+  // ?q=&status=ACTIVE|ON_HOLD|BLOCKED&tier=&riding=1&staff=1|all&sort=lastSeen|joined|trips|km|sos|name&limit=&cursor=
+  // Staff accounts are left out of the list and its total unless staff=1 (only staff) or staff=all (everyone).
   r.get('/admin/analytics/riders', requireAdmin, wrap(async (req, res) => {
     const now = Date.now();
     const limit = clampInt(req.query.limit, 1, 200, 50);
@@ -442,15 +476,20 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
     const [users, totals, riding] = await Promise.all([
       scan(repo.soda, C.users), cache.get('riderTotals', () => riderTotals(repo)), ridingMap(repo, convoys),
     ]);
-    let rows = users.rows.map((u) => riderRow(u, totals.by, riding, now));
+    const emails = staffEmails();
+    let rows = users.rows.map((u) => riderRow(u, totals.by, riding, now, emails));
     if (STATUSES.includes(status)) rows = rows.filter((x) => x.status === status);
     if (TIERS.includes(tier)) rows = rows.filter((x) => x.tier === tier);
     if (String(req.query.riding || '') === '1') rows = rows.filter((x) => x.riding);
     if (q) rows = rows.filter((x) => [x.name, x.email, x.phone, x.userId].some((v) => String(v || '').toLowerCase().includes(q)));
+    const staffMode = ['1', 'all'].includes(String(req.query.staff || '')) ? String(req.query.staff) : '0';
+    const staffCount = rows.filter((x) => x.staff).length;
+    if (staffMode === '1') rows = rows.filter((x) => x.staff);
+    else if (staffMode === '0') rows = rows.filter((x) => !x.staff);
     rows.sort(RIDER_SORTS[sort]);
     const page = rows.slice(cursor, cursor + limit);
     res.set('Cache-Control', 'no-store').json({
-      ok: true, riders: page, total: rows.length, cursor, limit,
+      ok: true, riders: page, total: rows.length, staffCount, excludesStaff: staffMode === '0', cursor, limit,
       nextCursor: cursor + page.length < rows.length ? cursor + page.length : null,
       truncated: users.truncated || totals.truncated,
     });
@@ -472,8 +511,8 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
     const parts = [];
     if (status !== 'ended') parts.push(scan(repo.soda, C.convoys, { tripStatus: { $in: ACTIVE_STATUSES } }, { cap: 2000 }));
     if (status !== 'live') parts.push(scan(repo.soda, C.convoys, { tripStatus: 'ENDED' }));
-    const scans = await Promise.all(parts);
-    let rows = scans.flatMap((s) => s.rows).map((m) => groupRow(m, liveIds.has(m.groupId)));
+    const [scans, staffIds] = await Promise.all([Promise.all(parts), staffIdsFor(repo)]);
+    let rows = scans.flatMap((s) => s.rows).map((m) => groupRow(m, liveIds.has(m.groupId), staffIds));
     if (q) rows = rows.filter((x) => [x.name, x.createdByUserName, x.destinationName, x.groupId].some((v) => String(v || '').toLowerCase().includes(q)));
     rows.sort((a, b) => (b.status === 'LIVE') - (a.status === 'LIVE') || (b.endedAt || b.startedAt) - (a.endedAt || a.startedAt));
     const page = rows.slice(cursor, cursor + limit);

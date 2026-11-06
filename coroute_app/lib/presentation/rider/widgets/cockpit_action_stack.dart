@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../../core/config/feature_gates.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
+import '../../widgets/sheet_coordinator.dart';
 import '../../../data/models/convoy_model.dart';
 import '../../../data/models/rider_model.dart';
 import '../../../data/models/route_essential.dart';
@@ -478,9 +479,11 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
 
     List<RouteEssential> currentStations = List.from(stations);
 
-    showModalBottomSheet(
+    SheetCoordinator.instance.present<void>(context, key: 'fuel_quick', open: () => showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
+      barrierColor: AppScrim.color,
       constraints: BoxConstraints(
         maxWidth: 600,
         maxHeight: screenSize.height * 0.88,
@@ -504,7 +507,11 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
             }
 
             return SafeArea(
-              child: Center(
+              // Only as tall as its content: the rest of the screen is the
+              // scrim, so a tap there closes the sheet.
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                heightFactor: 1.0,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 600),
                   child: Padding(
@@ -668,7 +675,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
           },
         );
       },
-    ).whenComplete(() {
+    )).whenComplete(() {
       _isShowingSheet = false;
     });
   }

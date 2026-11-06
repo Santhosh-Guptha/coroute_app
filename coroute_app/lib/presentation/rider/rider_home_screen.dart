@@ -144,6 +144,15 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
       case RideNotifActionKind.openMap:
       case RideNotifActionKind.sos:
       case RideNotifActionKind.wait:
+      case RideNotifActionKind.talk:
+        // Talk: the ride screen (selected above) has the hold-to-talk bar; nothing is sent by the tap.
+        break;
+      case RideNotifActionKind.endRide:
+        // End ride / Leave from the notification: always the confirm first (never one tap).
+        final c = _convoys;
+        final uid = c?.myUserId;
+        if (c == null || uid == null || c.activeConvoy == null) break;
+        leaveFromNotification(context, c, uid).ignore();
         break;
       case RideNotifActionKind.navigateEmergency:
       case RideNotifActionKind.assistAccept:

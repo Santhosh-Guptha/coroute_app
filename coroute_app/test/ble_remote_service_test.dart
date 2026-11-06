@@ -37,20 +37,20 @@ void main() {
   group('FEAT-01: Feature Entitlement & Lifecycle Tests', () {
     test('TEST-BLE-01: Community Tier has full access to FEAT-01 (Free core safety)', () {
       expect(
-        FeatureGates.isUnlocked(Feature.bleHandlebarRemote, SubscriptionTier.community),
+        FeatureGates.isUnlocked(Feature.bleHandlebarRemote),
         isTrue,
         reason: 'BLE Handlebar Remote must be free for Community tier (hands-on-bars safety).',
       );
       expect(
-        FeatureGates.isUnlocked(Feature.bleHandlebarRemote, SubscriptionTier.proRider),
+        FeatureGates.isUnlocked(Feature.bleHandlebarRemote),
         isTrue,
       );
       expect(
-        FeatureGates.isUnlocked(Feature.bleHandlebarRemote, SubscriptionTier.roadCaptain),
+        FeatureGates.isUnlocked(Feature.bleHandlebarRemote),
         isTrue,
       );
       expect(
-        FeatureGates.isUnlocked(Feature.bleHandlebarRemote, SubscriptionTier.tourOperator),
+        FeatureGates.isUnlocked(Feature.bleHandlebarRemote),
         isTrue,
       );
     });

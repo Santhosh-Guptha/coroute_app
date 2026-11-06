@@ -4,7 +4,10 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const { createRazorpayGateway } = require('./razorpay_gateway');
 const reviews = require('./trip_reviews');
+const { safeCommunityStats } = require('./public_privacy');
 const reviewPhotos = require('./review_photos');
+const { CATALOG_PLANS, COMMUNITY_PLAN, LEGACY_INDIVIDUAL_PLAN, planFrom, entitlementsFor, effectiveMembership, isLegacyMembershipPlan } = require('./entitlements');
+const pricing = require('./plan_pricing');
 
 // Review photos live outside public/ (config.reviewPhotoDir); every read goes through a checked route.
 const photoStore = reviewPhotos.createPhotoStore(config.reviewPhotoDir);
@@ -48,30 +51,6 @@ function releaseUserTransactionLock(userId) {
   activeUserTransactions.delete(userId);
 }
 
-/**
- * Rider-level coupon rules shared by checkout and free activation: per-rider redemption
- * limit, new-members-only, first-payment-only and an allow-list. Null when the rider may use it,
- * otherwise { error, reason } for a 400 answer.
- */
-function couponRiderBlock(coupon, uid, userDoc) {
-  const hist = Array.isArray(userDoc?.paymentHistory) ? userDoc.paymentHistory : [];
-  if (coupon.newMembersOnly && hist.some((p) => p.status === 'PAID')) {
-    return { error: 'This coupon is valid for new members only', reason: 'NEW_MEMBERS_ONLY' };
-  }
-  if (coupon.firstPaymentOnly && hist.length > 0) {
-    return { error: 'This coupon is valid for your first payment only', reason: 'FIRST_PAYMENT_ONLY' };
-  }
-  if (Array.isArray(coupon.allowedUserIds) && coupon.allowedUserIds.length > 0 && !coupon.allowedUserIds.includes(uid)) {
-    return { error: 'This coupon is restricted to select members', reason: 'NOT_ELIGIBLE' };
-  }
-  const maxPerUser = Number(coupon.maxUsagePerUser) || 1;
-  const used = (coupon.usages || []).filter((u) => u.userId === uid).length;
-  if (used >= maxPerUser) {
-    return { error: `You have already redeemed coupon ${coupon.code} (limit ${maxPerUser} per rider)`, reason: 'PER_USER_LIMIT_REACHED' };
-  }
-  return null;
-}
-
 /** True when the coupon covers the whole monthly price of a ₹`priceInr` plan. */
 function couponMakesFree(coupon, priceInr) {
   const v = Number(coupon.discountValue) || 0;
@@ -86,44 +65,79 @@ function couponMakesFree(coupon, priceInr) {
  * plan binding, then the rider rules. Null when it can.
  */
 function freeCouponBlock(coupon, { uid, userDoc, category, plan }) {
-  if (coupon.status !== 'ACTIVE') {
-    const st = String(coupon.status || 'INACTIVE');
-    return { error: `Coupon is ${st.toLowerCase().replace(/_/g, ' ')}`, reason: `COUPON_${st}` };
-  }
+  const chk = pricing.checkCoupon(coupon, { uid, userDoc, planId: category, baseInr: plan.monthlyPriceInr });
+  if (!chk.ok) return { error: chk.error, reason: chk.reason };
   if (!couponMakesFree(coupon, plan.monthlyPriceInr)) {
     return { error: `Coupon ${coupon.code} does not provide a 100% discount. Payment required.`, reason: 'PARTIAL_COUPON' };
   }
-  const tiers = Array.isArray(coupon.applicableTiers) ? coupon.applicableTiers : ['all'];
-  if (!tiers.includes('all') && !tiers.includes(category)) {
-    return { error: `Coupon ${coupon.code} is not valid for ${plan.name || category}`, reason: 'TIER_MISMATCH' };
-  }
-  return couponRiderBlock(coupon, uid, userDoc);
+  return null;
 }
 
-/** A catalog plan that is switched off is not sold (the admin "active" toggle). */
-const planOnSale = (plan) => !!plan && plan.isActive !== false;
+/** A catalog plan that is switched off is not sold (the admin "active" toggle). Community is never sold. */
+const planOnSale = (plan) => !!plan && plan.isActive !== false && plan.id !== COMMUNITY_PLAN && plan.purchasable !== false;
+
+/** Sends the refusal for a plan that cannot be ordered (legacy Individual 410, Community, unknown); true when sent. */
+function refusePlan(res, category, catalog) {
+  const block = pricing.orderBlock(category, catalog);
+  if (!block) return false;
+  const { status, ...body } = block;
+  res.status(status).json(body);
+  return true;
+}
+
+/**
+ * The price of `category` for this rider now, with the coupon `rawCode` when it applies: the single
+ * computation behind the quote, the validation answer and the order. Returns
+ * { quote, coupon, couponError } (couponError: { error, reason } when a typed code was refused).
+ */
+async function priceFor(repo, { uid, userDoc, category, rawCode, catalog, now = Date.now() }) {
+  const plan = catalog[category];
+  const membership = await repo.findMembershipByOwner(uid).catch(() => null);
+  let coupon = null;
+  let couponError = null;
+  let couponDiscount = 0;
+  const clean = typeof rawCode === 'string' ? rawCode.trim().toUpperCase() : '';
+  if (clean) {
+    const found = typeof repo.findCoupon === 'function' ? await repo.findCoupon(clean).catch(() => null) : null;
+    const chk = pricing.checkCoupon(found, { uid, userDoc, planId: category, baseInr: plan.monthlyPriceInr });
+    if (chk.ok) { coupon = found; couponDiscount = chk.discountInr; } else couponError = { code: clean, error: chk.error, reason: chk.reason };
+  }
+  const quote = pricing.computeQuote({ catalog, planId: category, membership, coupon, couponDiscount, now });
+  return { quote, coupon, couponError, membership };
+}
 
 /**
  * Activates or extends a membership from a verified or free order.
  * Records the transaction in the user's payment history and updates the ledger order.
  */
-async function activateMembershipFromOrder({ repo, order, paymentId, method = 'RAZORPAY', source = 'checkout', userDoc = null }) {
+async function activateMembershipFromOrder({ repo, order, paymentId, method = 'RAZORPAY', source = 'checkout', userDoc = null, convoys = null }) {
   const uid = order.userId;
-  const category = order.category || order.planTier || 'individual';
+  const category = order.category || order.planTier || 'group_small';
   const catalog = await repo.getMembershipCatalog();
-  const plan = catalog[category] || catalog.individual;
+  // A legacy Individual order paid before the change still activates (honoured as bought).
+  const plan = catalog[category] || (isLegacyMembershipPlan(category)
+    ? { ...LEGACY_INDIVIDUAL_PLAN, id: category, monthlyPriceInr: Number(order.amount) || LEGACY_INDIVIDUAL_PLAN.monthlyPriceInr }
+    : catalog.group_small);
   const now = Date.now();
 
-  const existing = await repo.findMembershipByOwner(uid);
+  const rawExisting = await repo.findMembershipByOwner(uid);
+  const existing = effectiveMembership(rawExisting, now);
   const membershipId = existing ? existing.membershipId : `mem_${crypto.randomUUID()}`;
   const members = existing ? (existing.members || {}) : {};
 
   const durationDays = plan.billingPeriodDays || 30;
   const isRenewal = existing && existing.status === 'ACTIVE' && existing.category === category;
   const isUpgrade = existing && existing.status === 'ACTIVE' && existing.category !== category;
+  // Orders priced by the quote (plan_pricing.js): the period is the quote's, counted from activation.
+  const q = order.quote && typeof order.quote === 'object' ? order.quote : null;
+  const isDowngrade = !!(q && q.kind === 'downgrade' && existing && existing.status === 'ACTIVE' && existing.validUntil > now);
 
   let validUntil;
-  if (isRenewal) {
+  if (q) {
+    validUntil = isDowngrade
+      ? (Number(q.endsAt) || existing.validUntil + durationDays * 86400000)
+      : now + ((Number(q.billingDays) || durationDays) + (Number(q.extraDays) || 0)) * 86400000;
+  } else if (isRenewal) {
     // Paid renewal adds duration, capped at 1 year from now
     validUntil = order.isFree
       ? Math.max(existing.validUntil, now + durationDays * 86400000)
@@ -149,7 +163,51 @@ async function activateMembershipFromOrder({ repo, order, paymentId, method = 'R
       orderId: order.orderId,
       paymentId: paymentId || order.paymentId || '',
       method,
+      ...(q ? { kind: q.kind, creditInr: Number(q.creditInr) || 0, effectiveAt: isDowngrade ? existing.validUntil : now } : {}),
     });
+  }
+  // What this period cost (list price less coupon): the base of a later upgrade credit.
+  const creditBasisInr = q
+    ? Math.max(0, (Number(q.basePriceInr) || 0) - (Number(q.couponDiscountInr) || 0))
+    : (order.isFree ? 0 : Math.max(0, Number(plan.monthlyPriceInr) || 0));
+
+  if (isDowngrade) {
+    // Fewer seats bought during a paid period: the current plan runs to its end, then this one starts.
+    const membershipDoc = {
+      ...rawExisting,
+      validUntil,
+      scheduledChange: {
+        category,
+        categoryName: plan.name,
+        capacity: plan.capacity,
+        priceInr: plan.monthlyPriceInr,
+        creditBasisInr,
+        billingPeriodDays: durationDays,
+        startsAt: existing.validUntil,
+        endsAt: validUntil,
+        orderId: order.orderId,
+      },
+      upgradeHistory,
+      updatedAt: now,
+    };
+    delete membershipDoc.key;
+    await repo.saveMembership(membershipDoc);
+    await repo.updateRazorpayOrder(order.orderId, {
+      status: 'PAID', paymentId: paymentId || order.paymentId, paidAt: now, method, transactionType: 'DOWNGRADE', activatedAt: now, updatedAt: now,
+    });
+    const user = userDoc || (await repo.findUserById(uid));
+    if (user) {
+      const history = Array.isArray(user.paymentHistory) ? [...user.paymentHistory] : [];
+      const entry = {
+        orderId: order.orderId, paymentId: paymentId || order.paymentId || '', amountInr: (Number(order.amountInPaise) || 0) / 100,
+        category, categoryName: plan.name, method, status: 'PAID', paidAt: now, validUntil, source, isFree: Boolean(order.isFree),
+        transactionType: 'DOWNGRADE', startsAt: existing.validUntil,
+      };
+      const idx = history.findIndex((h) => h.orderId === order.orderId);
+      if (idx >= 0) history[idx] = entry; else history.push(entry);
+      await repo.updateUser(user.key, { lastPayment: entry, paymentHistory: history });
+    }
+    return effectiveMembership(membershipDoc, now);
   }
 
   const membershipDoc = {
@@ -163,9 +221,12 @@ async function activateMembershipFromOrder({ repo, order, paymentId, method = 'R
     minCapacity: plan.minCapacity || 1,
     maxCapacity: plan.maxCapacity || plan.capacity,
     priceInr: plan.monthlyPriceInr,
+    creditBasisInr,
+    billingPeriodDays: durationDays,
     status: 'ACTIVE',
-    validFrom: isUpgrade ? now : (existing ? existing.validFrom : now),
+    validFrom: (isUpgrade || q) ? now : (existing ? existing.validFrom : now),
     validUntil,
+    scheduledChange: null,
     members,
     offerApplied: order.offerCode || null,
     paymentId: paymentId || order.paymentId || null,
@@ -217,13 +278,17 @@ async function activateMembershipFromOrder({ repo, order, paymentId, method = 'R
     });
   }
 
+  // A host who buys or upgrades during a ride gets the new seats on that ride at once.
+  if (convoys && typeof convoys.refreshHostCapacity === 'function') {
+    await convoys.refreshHostCapacity(uid).catch(() => {});
+  }
   return membershipDoc;
 }
 
 /**
  * Public membership routes: catalog, categories and HMAC webhook.
  */
-function registerMembershipPublicRoutes({ r, repo, wrap }) {
+function registerMembershipPublicRoutes({ r, repo, wrap, convoys = null }) {
   const WEBHOOK_MAX_BYTES = 1024 * 1024;
   const seenWebhookIds = new Set();
   const seenWebhookQueue = [];
@@ -252,7 +317,8 @@ function registerMembershipPublicRoutes({ r, repo, wrap }) {
       // Keys might not be configured in offline or initial setup
     }
     const onSale = {};
-    for (const [id, c] of Object.entries(catalog || {})) if (planOnSale(c)) onSale[id] = c;
+    // Community (free, every rider has it) is listed for display; it is never sold.
+    for (const [id, c] of Object.entries(catalog || {})) if (planOnSale(c) || id === COMMUNITY_PLAN) onSale[id] = c;
     res.json({
       categories: onSale,
       offers: activeOffers.map((o) => ({
@@ -271,7 +337,8 @@ function registerMembershipPublicRoutes({ r, repo, wrap }) {
   /**
    * GET /api/public/community-stats (and /api/community-stats)
    * Public read-only riding statistics for website ("CoRoute Community in Motion").
-   * Cached for 60s, rate-limited, privacy-safe, zero PII or coordinates.
+   * Cached for 60s, rate-limited, privacy-safe, zero PII or coordinates: totals only, rounded down with nothing below 10
+   * (public_privacy.js), and no per-ride list (the longest trips stay in the admin view).
    */
   let cachedCommunityStats = null;
   let cachedStatsExpiry = 0;
@@ -282,14 +349,15 @@ function registerMembershipPublicRoutes({ r, repo, wrap }) {
     if (cachedCommunityStats && now < cachedStatsExpiry) {
       return res.json(cachedCommunityStats);
     }
-    const stats = await repo.getCommunityStats();
+    const stats = safeCommunityStats(await repo.getCommunityStats());
     cachedCommunityStats = stats;
     cachedStatsExpiry = now + 60000;
     res.json(stats);
   });
 
-  r.get('/public/community-stats', handleCommunityStats);
-  r.get('/community-stats', handleCommunityStats);
+  const statsLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests.' } });
+  r.get('/public/community-stats', statsLimiter, handleCommunityStats);
+  r.get('/community-stats', statsLimiter, handleCommunityStats);
 
   // Approved rider reviews for the website. Never invented: an empty list when nothing is approved.
   // Public, cached for 30 s (an approval shows up quickly), rate-limited; no names, emails, phones, ids or coordinates.
@@ -366,6 +434,7 @@ function registerMembershipPublicRoutes({ r, repo, wrap }) {
             paymentId: payment.id || '',
             method: String(payment.method || 'upi').toUpperCase(),
             source: 'razorpay_webhook',
+            convoys,
           });
         }
       } else if (eventType === 'payment.failed') {
@@ -418,10 +487,13 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
    */
   r.get('/membership/my', wrap(async (req, res) => {
     const uid = req.user.userId;
-    const owned = await repo.findMembershipByOwner(uid);
+    // The membership as it is now (a downgrade bought earlier starts when the current period ends).
+    const owned = effectiveMembership(await repo.findMembershipByOwner(uid), Date.now());
     const allMemberships = await repo.findMembershipsForUser(uid);
     const participating = allMemberships.filter((m) => m.ownerUserId !== uid);
     const activeTrip = await repo.getActiveTrip(uid);
+    // One answer for "what may I do": seats to host (host included), until when, and from where.
+    const plan = planFrom({ membership: owned, userDoc: req.dbUser || (await repo.findUserById(uid)) });
 
     let effectiveEntitlements = {
       ptt: false,
@@ -441,11 +513,11 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         basicNav: true,
         sharedTrip: true,
       };
-    } else if (owned && owned.status === 'ACTIVE' && owned.validUntil > Date.now()) {
-      const catalog = await repo.getMembershipCatalog();
-      const cat = catalog[owned.category];
-      if (cat?.entitlements) effectiveEntitlements = { ...effectiveEntitlements, ...cat.entitlements };
-    } else if (participating.some((m) => m.status === 'ACTIVE' && m.validUntil > Date.now())) {
+    } else if (plan.canHostGroup || !participating.some((m) => m.status === 'ACTIVE' && m.validUntil > Date.now())) {
+      // The rider's own plan: Community (solo), a membership, or a legacy tier until it ends.
+      effectiveEntitlements = entitlementsFor(plan, await repo.getMembershipCatalog());
+    } else {
+      // A Community rider in someone's group: the group features come with that host's plan.
       effectiveEntitlements = {
         ptt: true,
         convoy: true,
@@ -460,105 +532,62 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       owned: owned || null,
       participating,
       activeTrip: activeTrip || null,
+      plan: {
+        source: plan.source, category: plan.category, name: plan.name, seats: plan.seats,
+        validUntil: plan.validUntil, canStartTrip: plan.canStartTrip, canHostGroup: plan.canHostGroup,
+        legacyTier: plan.legacyTier, isFree: plan.source === 'community',
+        ...(plan.nextPlan ? { nextPlan: plan.nextPlan } : {}),
+      },
       effectiveEntitlements,
       paymentsEnabled: config.paymentsEnabled,
     });
   }));
 
   /**
-   * POST /api/membership/validate-coupon
-   * Validates a promotional coupon code against a specific category for the authenticated user.
-   * Returns calculated discount and final payable amount without creating orders.
+   * GET /api/membership/quote?plan=group_large&coupon=WELCOME50
+   * The price of a plan for this rider now: list price, coupon, upgrade credit for the unused days
+   * of the current paid plan, what to pay, and when the new period starts and ends (plan_pricing.js).
+   * The order uses the same computation. A refused coupon never blocks the quote: the answer is the
+   * full price with `couponError` ({ code, error, reason }) so the app can show it under the field.
+   */
+  r.get('/membership/quote', wrap(async (req, res) => {
+    const uid = req.user.userId;
+    const category = String(req.query.plan || req.query.category || '').trim();
+    const catalog = await repo.getMembershipCatalog();
+    if (refusePlan(res, category, catalog)) return;
+    if (!planOnSale(catalog[category])) {
+      return res.status(400).json({ error: `${catalog[category].name || category} is not on sale right now`, reason: 'PLAN_INACTIVE' });
+    }
+    const { quote, couponError } = await priceFor(repo, { uid, userDoc: req.dbUser, category, rawCode: req.query.coupon || req.query.code, catalog });
+    res.set('Cache-Control', 'no-store').json({ ...quote, couponError, paymentsEnabled: config.paymentsEnabled });
+  }));
+
+  /**
+   * POST /api/membership/validate-coupon { code, category }
+   * Checks a coupon for a plan and this rider (the same rules as the order) and answers the coupon
+   * discount plus the full quote (credit included) the order would charge. A refused code answers
+   * 400 { valid: false, error, reason } (404 when the code does not exist).
    */
   r.post('/membership/validate-coupon', wrap(async (req, res) => {
     const uid = req.user.userId;
-    const { code, category } = req.body || {};
-    if (!code || !category) {
+    const { code } = req.body || {};
+    const category = String((req.body || {}).category || (req.body || {}).categoryId || '').trim();
+    if (!code || !String(code).trim() || !category) {
       return res.status(400).json({ valid: false, error: 'code and category are required', reason: 'BAD_REQUEST' });
     }
-
-    const cleanCode = String(code).trim().toUpperCase();
     const catalog = await repo.getMembershipCatalog();
-    const plan = catalog[category];
-    if (!plan) {
-      return res.status(400).json({ valid: false, error: 'Invalid membership category', reason: 'INVALID_CATEGORY' });
+    const block = pricing.orderBlock(category, catalog);
+    if (block) {
+      const { status, ...body } = block;
+      return res.status(status).json({ valid: false, ...body });
     }
-
-    const coupon = await repo.findCoupon(cleanCode);
-    if (!coupon) {
-      return res.status(404).json({ valid: false, error: `Coupon ${cleanCode} does not exist`, reason: 'COUPON_NOT_FOUND' });
+    const { quote, coupon, couponError } = await priceFor(repo, { uid, userDoc: req.dbUser, category, rawCode: String(code), catalog });
+    if (couponError) {
+      return res.status(couponError.reason === 'COUPON_NOT_FOUND' ? 404 : 400).json({ valid: false, error: couponError.error, reason: couponError.reason, quote });
     }
-
-    // Dynamic status check
-    if (coupon.status === 'USAGE_LIMIT_REACHED') {
-      return res.status(400).json({ valid: false, error: 'This coupon has reached its maximum total redemptions', reason: 'COUPON_LIMIT_REACHED' });
-    }
-    if (coupon.status === 'EXPIRED') {
-      return res.status(400).json({ valid: false, error: 'This coupon has expired', reason: 'COUPON_EXPIRED' });
-    }
-    if (coupon.status === 'SCHEDULED') {
-      return res.status(400).json({ valid: false, error: 'This coupon is scheduled for a future campaign and is not active yet', reason: 'COUPON_SCHEDULED' });
-    }
-    if (coupon.status === 'PAUSED' || coupon.isActive === false) {
-      return res.status(400).json({ valid: false, error: 'This coupon is currently paused by administrator', reason: 'COUPON_PAUSED' });
-    }
-    if (coupon.status === 'ARCHIVED') {
-      return res.status(400).json({ valid: false, error: 'This coupon is archived and no longer valid', reason: 'COUPON_ARCHIVED' });
-    }
-
-    // Tier matching
-    const tiers = Array.isArray(coupon.applicableTiers) ? coupon.applicableTiers : ['all'];
-    if (!tiers.includes('all') && !tiers.includes(category)) {
-      return res.status(400).json({ valid: false, error: `Coupon ${cleanCode} is only applicable to ${tiers.join(', ')}`, reason: 'TIER_MISMATCH' });
-    }
-
-    // Min order amount check
-    const minAmt = Number(coupon.minOrderAmount) || 0;
-    if (minAmt > 0 && plan.monthlyPriceInr < minAmt) {
-      return res.status(400).json({ valid: false, error: `Minimum order amount of ₹${minAmt} required to apply ${cleanCode}`, reason: 'MIN_ORDER_NOT_MET' });
-    }
-
-    // User eligibility restrictions
-    if (coupon.newMembersOnly && req.dbUser) {
-      const hist = Array.isArray(req.dbUser.paymentHistory) ? req.dbUser.paymentHistory : [];
-      if (hist.some((p) => p.status === 'PAID')) {
-        return res.status(400).json({ valid: false, error: 'This coupon is valid for new riders only', reason: 'NEW_MEMBERS_ONLY' });
-      }
-    }
-    if (coupon.firstPaymentOnly && req.dbUser) {
-      const hist = Array.isArray(req.dbUser.paymentHistory) ? req.dbUser.paymentHistory : [];
-      if (hist.length > 0) {
-        return res.status(400).json({ valid: false, error: 'This coupon is valid on first payment only', reason: 'FIRST_PAYMENT_ONLY' });
-      }
-    }
-    if (Array.isArray(coupon.allowedUserIds) && coupon.allowedUserIds.length > 0) {
-      if (!coupon.allowedUserIds.includes(uid)) {
-        return res.status(400).json({ valid: false, error: 'This coupon is restricted to select members', reason: 'NOT_ELIGIBLE' });
-      }
-    }
-
-    // Per user usage limit
-    const maxPerUser = Number(coupon.maxUsagePerUser) || 1;
-    const userRedemptions = (coupon.usages || []).filter((u) => u.userId === uid).length;
-    if (userRedemptions >= maxPerUser) {
-      return res.status(400).json({ valid: false, error: `You have reached the redemption limit (${maxPerUser}) for coupon ${cleanCode}`, reason: 'PER_USER_LIMIT_REACHED' });
-    }
-
-    // Calculate discount
-    let discountAmount = 0;
-    if (couponMakesFree(coupon, plan.monthlyPriceInr)) {
-      discountAmount = plan.monthlyPriceInr;
-    } else if (coupon.discountType === 'percentage') {
-      let raw = (plan.monthlyPriceInr * Number(coupon.discountValue)) / 100;
-      if (coupon.maxDiscountCap && raw > coupon.maxDiscountCap) raw = coupon.maxDiscountCap;
-      discountAmount = Math.round(raw);
-    } else if (coupon.discountType === 'fixed') {
-      let raw = Math.min(plan.monthlyPriceInr, Number(coupon.discountValue) || 0);
-      if (coupon.maxDiscountCap && raw > coupon.maxDiscountCap) raw = coupon.maxDiscountCap;
-      discountAmount = Math.round(raw);
-    }
-
-    const finalAmount = Math.max(0, plan.monthlyPriceInr - discountAmount);
+    const base = quote.basePriceInr;
+    const discountAmount = quote.couponDiscountInr;
+    const finalAmount = Math.max(0, base - discountAmount);
     return res.json({
       valid: true,
       code: coupon.code,
@@ -568,10 +597,12 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       discountValue: coupon.discountValue,
       maxDiscountCap: coupon.maxDiscountCap,
       discountAmount,
-      originalPrice: plan.monthlyPriceInr,
+      originalPrice: base,
       finalAmount,
       isFree: finalAmount === 0,
-      message: `Discount of ₹${discountAmount} applied. Final payable: ₹${finalAmount}`,
+      payableInr: quote.payableInr,
+      quote,
+      message: discountAmount > 0 ? `${coupon.code}: ₹${discountAmount} off` : `${coupon.code} applied`,
     });
   }));
 
@@ -593,10 +624,8 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     }
 
     const catalog = await repo.getMembershipCatalog();
+    if (refusePlan(res, category, catalog)) return;
     const plan = catalog[category];
-    if (!plan) {
-      return res.status(400).json({ error: 'Invalid membership category', reason: 'INVALID_CATEGORY' });
-    }
     if (!planOnSale(plan)) {
       return res.status(400).json({ error: `${plan.name || category} is not on sale right now`, reason: 'PLAN_INACTIVE' });
     }
@@ -609,7 +638,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       const now = Date.now();
       const cleanCoupon = String(couponCode).trim().toUpperCase();
 
-      const existing = await repo.findMembershipByOwner(uid);
+      const existing = effectiveMembership(await repo.findMembershipByOwner(uid), now);
       // Idempotency first: a repeat tap for the plan the rider already has neither stacks months nor
       // spends another redemption of the coupon.
       if (existing && existing.status === 'ACTIVE' && existing.category === category && existing.validUntil > now) {
@@ -638,8 +667,9 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
 
       const isUpgrade = existing && existing.status === 'ACTIVE' && existing.category !== category;
       const orderId = `mem_free_${now}_${crypto.randomBytes(4).toString('hex')}`;
-      const durationDays = plan.billingPeriodDays || 30;
-      const validUntil = now + durationDays * 86400000;
+      // The same price computation as the order: the coupon pays the whole price, any upgrade credit
+      // left over adds days, a downgrade starts when the current paid period ends.
+      const quote = pricing.computeQuote({ catalog, planId: category, membership: existing, coupon: matchedCoupon, couponDiscount: plan.monthlyPriceInr, now });
 
       const orderDoc = {
         orderId,
@@ -654,69 +684,18 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         offerCode: cleanCoupon,
         method: 'COUPON',
         transactionType: isUpgrade ? 'UPGRADE' : 'COUPON_ACTIVATION',
+        originalPrice: plan.monthlyPriceInr,
+        discountAmount: plan.monthlyPriceInr,
+        quote,
         createdAt: now,
         paidAt: now,
       };
       await repo.saveRazorpayOrder(orderDoc);
-
-      const membershipId = existing ? existing.membershipId : `mem_${crypto.randomUUID()}`;
-      const upgradeHistory = Array.isArray(existing?.upgradeHistory) ? [...existing.upgradeHistory] : [];
-      if (isUpgrade) {
-        upgradeHistory.push({
-          fromCategory: existing.category,
-          toCategory: category,
-          upgradedAt: now,
-          orderId,
-          method: 'COUPON',
-          couponCode: cleanCoupon,
-        });
-      }
-
-      const membershipDoc = {
-        membershipId,
-        ownerUserId: uid,
-        ownerName: req.dbUser?.name || existing?.ownerName || 'Rider',
-        ownerEmail: req.dbUser?.email || existing?.ownerEmail || '',
-        category,
-        categoryName: plan.name,
-        capacity: plan.capacity,
-        minCapacity: plan.minCapacity || 1,
-        maxCapacity: plan.maxCapacity || plan.capacity,
-        priceInr: plan.monthlyPriceInr,
-        status: 'ACTIVE',
-        validFrom: now,
-        validUntil,
-        members: existing ? (existing.members || {}) : {},
-        offerApplied: cleanCoupon,
-        paymentId: `free_${orderId}`,
-        orderId,
-        upgradeHistory,
-        createdAt: existing ? existing.createdAt : now,
-        updatedAt: now,
-      };
-      await repo.saveMembership(membershipDoc);
-
-      if (req.dbUser) {
-        const history = Array.isArray(req.dbUser.paymentHistory) ? [...req.dbUser.paymentHistory] : [];
-        const entry = {
-          orderId,
-          paymentId: `free_${orderId}`,
-          amountInr: 0,
-          category,
-          categoryName: plan.name,
-          method: 'COUPON',
-          status: 'PAID',
-          paidAt: now,
-          validUntil,
-          isFree: true,
-          transactionType: isUpgrade ? 'UPGRADE' : 'COUPON_ACTIVATION',
-          source: 'zero_amount_activation',
-        };
-        history.push(entry);
-        await repo.updateUser(req.dbUser.key, {
-          lastPayment: entry,
-          paymentHistory: history,
-        });
+      const membershipDoc = await activateMembershipFromOrder({
+        repo, order: orderDoc, paymentId: `free_${orderId}`, method: 'COUPON', source: 'zero_amount_activation', userDoc: req.dbUser, convoys,
+      });
+      if (isUpgrade && Array.isArray(membershipDoc.upgradeHistory) && membershipDoc.upgradeHistory.length) {
+        membershipDoc.upgradeHistory[membershipDoc.upgradeHistory.length - 1].couponCode = cleanCoupon;
       }
 
       // Counts the redemption (redemption row + coupon usage) so the per-rider and total limits hold.
@@ -744,24 +723,30 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
   }));
 
   /**
-   * POST /api/membership/order
-   * Initiates payment order creation on backend. Orders a 100% coupon pays for in full are activated immediately.
+   * POST /api/membership/order { category, offerCode? }
+   * Creates the payment order at the server's own price (plan_pricing.js: list price - coupon -
+   * upgrade credit, the same as GET /membership/quote; a client amount is never used). An order
+   * that comes to ₹0 (a 100% coupon, or credit covering it) is activated at once, with no payment.
+   * A typed code that is refused answers 400/404 with its reason (the app then drops the code and
+   * the rider can pay the normal price).
    */
   r.post('/membership/order', actionLimiter, wrap(async (req, res) => {
     const uid = req.user.userId;
-    const { category, offerCode } = req.body || {};
+    const body = req.body || {};
+    const category = String(body.category || body.categoryId || '').trim();
+    const offerCode = typeof body.offerCode === 'string' ? body.offerCode : (typeof body.couponCode === 'string' ? body.couponCode : '');
 
     const catalog = await repo.getMembershipCatalog();
+    if (refusePlan(res, category, catalog)) return;
     const plan = catalog[category];
-    if (!plan) {
-      return res.status(400).json({ error: 'Invalid membership category', reason: 'INVALID_CATEGORY' });
-    }
     if (!planOnSale(plan)) {
       return res.status(400).json({ error: `${plan.name || category} is not on sale right now`, reason: 'PLAN_INACTIVE' });
     }
 
+    const now = Date.now();
+    const existingRaw = await repo.findMembershipByOwner(uid);
+    const existing = effectiveMembership(existingRaw, now);
     // Capacity conflict check on downgrade
-    const existing = await repo.findMembershipByOwner(uid);
     if (existing && existing.members && Object.keys(existing.members).length + 1 > plan.capacity) {
       return res.status(409).json({
         error: `Cannot switch to ${plan.name}: current group has ${Object.keys(existing.members).length + 1} members which exceeds new capacity of ${plan.capacity}. Please remove members first.`,
@@ -769,135 +754,46 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       });
     }
 
-    const now = Date.now();
-    let isFreeActivation = false;
     let appliedOffer = null;
-    let discountPercent = 0;
-    let discountAmountInr = 0;
-
     let matchedCoupon = null;
-    if (offerCode) {
-      const cleanOffer = String(offerCode).trim().toUpperCase();
-      if (typeof repo.findCoupon === 'function') {
-        const coup = await repo.findCoupon(cleanOffer);
-        if (coup) {
-          matchedCoupon = coup;
-          // Validate status
-          if (coup.status === 'USAGE_LIMIT_REACHED') {
-            return res.status(400).json({ error: 'This coupon has reached its total usage limit', reason: 'COUPON_LIMIT_REACHED' });
-          }
-          if (coup.status === 'EXPIRED') {
-            return res.status(400).json({ error: 'This coupon has expired', reason: 'COUPON_EXPIRED' });
-          }
-          if (coup.status === 'SCHEDULED') {
-            return res.status(400).json({ error: 'This coupon is not active yet', reason: 'COUPON_SCHEDULED' });
-          }
-          if (coup.status === 'ARCHIVED') {
-            return res.status(400).json({ error: 'This coupon is no longer available', reason: 'COUPON_ARCHIVED' });
-          }
-          if (coup.status === 'PAUSED' || coup.isActive === false) {
-            return res.status(400).json({ error: 'This coupon is currently paused', reason: 'COUPON_PAUSED' });
-          }
-
-          // Plan tier validation
-          const tiers = Array.isArray(coup.applicableTiers) ? coup.applicableTiers : ['all'];
-          if (!tiers.includes('all') && !tiers.includes(category)) {
-            return res.status(400).json({ error: `Coupon ${cleanOffer} is not valid for ${plan.name}`, reason: 'TIER_MISMATCH' });
-          }
-
-          // Min order amount
-          const minAmt = Number(coup.minOrderAmount) || 0;
-          if (minAmt > 0 && plan.monthlyPriceInr < minAmt) {
-            return res.status(400).json({ error: `Minimum order amount of ₹${minAmt} required for coupon ${cleanOffer}`, reason: 'MIN_ORDER_NOT_MET' });
-          }
-
-          // New members only
-          if (coup.newMembersOnly && req.dbUser) {
-            const hist = Array.isArray(req.dbUser.paymentHistory) ? req.dbUser.paymentHistory : [];
-            if (hist.some((p) => p.status === 'PAID')) {
-              return res.status(400).json({ error: 'This coupon is valid for new members only', reason: 'NEW_MEMBERS_ONLY' });
-            }
-          }
-
-          // First payment only
-          if (coup.firstPaymentOnly && req.dbUser) {
-            const hist = Array.isArray(req.dbUser.paymentHistory) ? req.dbUser.paymentHistory : [];
-            if (hist.length > 0) {
-              return res.status(400).json({ error: 'This coupon is valid for your first payment only', reason: 'FIRST_PAYMENT_ONLY' });
-            }
-          }
-
-          // Allowed users restriction
-          if (Array.isArray(coup.allowedUserIds) && coup.allowedUserIds.length > 0) {
-            if (!coup.allowedUserIds.includes(uid)) {
-              return res.status(400).json({ error: 'This coupon is restricted to select members', reason: 'NOT_ELIGIBLE' });
-            }
-          }
-
-          // Per-rider redemption limit
-          const block = couponRiderBlock(coup, uid, req.dbUser);
-          if (block) return res.status(400).json(block);
-
-          appliedOffer = coup.code;
-          if (couponMakesFree(coup, plan.monthlyPriceInr)) {
-            isFreeActivation = true;
-          } else if (coup.discountType === 'percentage') {
-            discountPercent = Number(coup.discountValue) || 0;
-          } else if (coup.discountType === 'fixed') {
-            discountAmountInr = Number(coup.discountValue) || 0;
-          }
-        }
-      }
-
-      if (!appliedOffer && typeof repo.findOffer === 'function') {
+    let couponDiscount = 0;
+    const cleanOffer = offerCode.trim().toUpperCase();
+    if (cleanOffer) {
+      const coup = typeof repo.findCoupon === 'function' ? await repo.findCoupon(cleanOffer) : null;
+      if (coup) {
+        const chk = pricing.checkCoupon(coup, { uid, userDoc: req.dbUser, planId: category, baseInr: plan.monthlyPriceInr });
+        if (!chk.ok) return res.status(400).json({ error: chk.error, reason: chk.reason });
+        matchedCoupon = coup;
+        appliedOffer = coup.code;
+        couponDiscount = chk.discountInr;
+      } else if (typeof repo.findOffer === 'function') {
         const off = await repo.findOffer(cleanOffer);
         if (off && off.isActive !== false && (!off.expiresAt || off.expiresAt > now)) {
           if (off.discountPercent === 100 || off.discountType === 'free') {
-            isFreeActivation = true;
             appliedOffer = off.id;
+            couponDiscount = Number(plan.monthlyPriceInr) || 0;
           } else if (off.discountPercent) {
-            discountPercent = off.discountPercent;
             appliedOffer = off.id;
+            couponDiscount = Math.round(((Number(plan.monthlyPriceInr) || 0) * Number(off.discountPercent)) / 100);
           }
         }
       }
       // A code the rider typed that matches no coupon or live offer is refused, never ignored
       // (the rider must not pay full price believing a discount applied).
       if (!appliedOffer) {
-        return res.status(404).json({ error: `Coupon ${cleanOffer} does not exist or is no longer valid`, reason: 'COUPON_NOT_FOUND' });
+        return res.status(404).json({ error: "We couldn't find that code", reason: 'COUPON_NOT_FOUND' });
       }
     }
 
-    if (config.paymentsEnabled === false) {
-      isFreeActivation = true;
-    }
-
-    let finalAmountInr = plan.monthlyPriceInr;
-    let actualDiscountInr = 0;
-
-    if (isFreeActivation) {
-      finalAmountInr = 0;
-      actualDiscountInr = plan.monthlyPriceInr;
-    } else if (discountPercent > 0) {
-      let rawDiscount = (plan.monthlyPriceInr * discountPercent) / 100;
-      if (matchedCoupon && matchedCoupon.maxDiscountCap && rawDiscount > matchedCoupon.maxDiscountCap) {
-        rawDiscount = matchedCoupon.maxDiscountCap;
-      }
-      actualDiscountInr = Math.round(rawDiscount);
-      finalAmountInr = Math.max(0, plan.monthlyPriceInr - actualDiscountInr);
-    } else if (discountAmountInr > 0) {
-      let rawDiscount = Math.min(plan.monthlyPriceInr, discountAmountInr);
-      if (matchedCoupon && matchedCoupon.maxDiscountCap && rawDiscount > matchedCoupon.maxDiscountCap) {
-        rawDiscount = matchedCoupon.maxDiscountCap;
-      }
-      actualDiscountInr = Math.round(rawDiscount);
-      finalAmountInr = Math.max(0, plan.monthlyPriceInr - actualDiscountInr);
-    }
-
-    const orderId = `mem_ord_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    let quote = pricing.computeQuote({
+      catalog, planId: category, membership: existingRaw, coupon: matchedCoupon || (appliedOffer ? { code: appliedOffer } : null), couponDiscount, now,
+    });
+    if (config.paymentsEnabled === false) quote = { ...quote, payableInr: 0, isFree: true };
+    const finalAmountInr = quote.payableInr;
+    const orderId = `mem_ord_${now}_${crypto.randomBytes(4).toString('hex')}`;
     const amountInPaise = finalAmountInr * 100;
 
-    // Already on this plan: a free order neither stacks months nor spends a coupon redemption.
+    // Already on this plan and nothing to pay: neither stacks months nor spends a coupon redemption.
     if (finalAmountInr === 0 && existing && existing.status === 'ACTIVE' && existing.category === category && existing.validUntil > now) {
       return res.json({
         orderId: `mem_free_active`,
@@ -906,28 +802,30 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         currency: 'INR',
         membership: existing,
         isAlreadyActive: true,
+        quote,
         message: `You already have an active ${existing.categoryName} membership.`,
       });
     }
 
-    // Concurrency-safe coupon reservation for free orders (a ₹0 reservation also counts the usage)
-    if (finalAmountInr === 0 && appliedOffer && matchedCoupon && typeof repo.reserveCouponSlot === 'function') {
-      const resv = await repo.reserveCouponSlot(matchedCoupon.code, {
-        userId: uid,
-        orderId,
-        category,
-        categoryName: plan.name,
-        originalPrice: plan.monthlyPriceInr,
-        discountAmount: actualDiscountInr,
-        finalAmount: 0,
-        userDoc: req.dbUser,
-      });
-      if (!resv.reserved) {
-        return res.status(400).json({ error: resv.error || 'Failed to apply coupon', reason: 'COUPON_RESERVATION_FAILED' });
-      }
-    }
+    const reservation = (rid, final) => ({
+      userId: uid,
+      orderId: rid,
+      category,
+      categoryName: plan.name,
+      originalPrice: plan.monthlyPriceInr,
+      discountAmount: quote.couponDiscountInr,
+      finalAmount: final,
+      userDoc: req.dbUser,
+    });
 
     if (finalAmountInr === 0) {
+      // Concurrency-safe coupon reservation (a ₹0 reservation also counts the usage).
+      if (matchedCoupon && typeof repo.reserveCouponSlot === 'function') {
+        const resv = await repo.reserveCouponSlot(matchedCoupon.code, reservation(orderId, 0));
+        if (!resv.reserved) {
+          return res.status(400).json({ error: resv.error || "This code couldn't be applied", reason: 'COUPON_RESERVATION_FAILED' });
+        }
+      }
       const orderDoc = {
         orderId,
         userId: uid,
@@ -939,7 +837,11 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         mode: 'free',
         isFree: true,
         offerCode: appliedOffer,
-        method: 'COUPON',
+        method: appliedOffer ? 'COUPON' : 'CREDIT',
+        originalPrice: plan.monthlyPriceInr,
+        discountAmount: quote.couponDiscountInr,
+        creditInr: quote.creditInr,
+        quote,
         transactionType: existing && existing.status === 'ACTIVE' && existing.category !== category ? 'UPGRADE' : 'COUPON_ACTIVATION',
         createdAt: now,
         paidAt: now,
@@ -950,9 +852,10 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         repo,
         order: orderDoc,
         paymentId: `free_${orderId}`,
-        method: 'COUPON',
+        method: orderDoc.method,
         source: 'free_offer',
         userDoc: req.dbUser,
+        convoys,
       });
 
       // A coupon's usage was counted by its ₹0 reservation above; an offer counts one redemption.
@@ -966,6 +869,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         amountInr: 0,
         currency: 'INR',
         membership,
+        quote,
       });
     }
 
@@ -976,26 +880,17 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         amountInPaise,
         currency: 'INR',
         receipt: orderId.slice(0, 40),
-        notes: { userId: uid, category, offerCode: appliedOffer || '' },
+        notes: { userId: uid, category, offerCode: appliedOffer || '', kind: quote.kind, creditInr: String(quote.creditInr) },
       });
     } catch (e) {
       return res.status(e.status || 500).json({ error: e.message, code: e.code || 'GATEWAY_ERROR' });
     }
 
     // Concurrency-safe coupon reservation for paid orders using rzpOrder.id
-    if (appliedOffer && matchedCoupon && typeof repo.reserveCouponSlot === 'function') {
-      const resv = await repo.reserveCouponSlot(matchedCoupon.code, {
-        userId: uid,
-        orderId: rzpOrder.id,
-        category,
-        categoryName: plan.name,
-        originalPrice: plan.monthlyPriceInr,
-        discountAmount: actualDiscountInr,
-        finalAmount: finalAmountInr,
-        userDoc: req.dbUser,
-      });
+    if (matchedCoupon && typeof repo.reserveCouponSlot === 'function') {
+      const resv = await repo.reserveCouponSlot(matchedCoupon.code, reservation(rzpOrder.id, finalAmountInr));
       if (!resv.reserved) {
-        return res.status(400).json({ error: resv.error || 'Failed to apply coupon', reason: 'COUPON_RESERVATION_FAILED' });
+        return res.status(400).json({ error: resv.error || "This code couldn't be applied", reason: 'COUPON_RESERVATION_FAILED' });
       }
     }
 
@@ -1011,7 +906,10 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       mode: rzpOrder.mode,
       keyId: rzpOrder.keyId,
       offerCode: appliedOffer,
-      discountAmount: plan.monthlyPriceInr - finalAmountInr,
+      originalPrice: plan.monthlyPriceInr,
+      discountAmount: quote.couponDiscountInr,
+      creditInr: quote.creditInr,
+      quote,
       createdAt: now,
     };
     await repo.saveRazorpayOrder(orderDoc);
@@ -1026,6 +924,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       category,
       categoryName: plan.name,
       isFree: false,
+      quote,
     });
   }));
 
@@ -1104,6 +1003,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       method: 'RAZORPAY',
       source: 'app_verification',
       userDoc: req.dbUser,
+      convoys,
     });
 
     if (order.offerCode) {
@@ -1140,16 +1040,16 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     const { category, offerCode, paymentId, orderId, signature } = req.body || {};
 
     const catalog = await repo.getMembershipCatalog();
-    const plan = catalog[category];
-    if (!plan) {
-      return res.status(400).json({ error: 'Invalid membership category', reason: 'INVALID_CATEGORY' });
-    }
-    if (!planOnSale(plan)) {
+    // A legacy order paid before the change (orderId + signature) is still credited below.
+    const paidLegacyOrder = isLegacyMembershipPlan(category) && orderId && paymentId && signature;
+    if (!paidLegacyOrder && refusePlan(res, category, catalog)) return;
+    const plan = catalog[category] || { ...LEGACY_INDIVIDUAL_PLAN, id: category };
+    if (!paidLegacyOrder && !planOnSale(plan)) {
       return res.status(400).json({ error: `${plan.name || category} is not on sale right now`, reason: 'PLAN_INACTIVE' });
     }
 
     const now = Date.now();
-    const existing = await repo.findMembershipByOwner(uid);
+    const existing = effectiveMembership(await repo.findMembershipByOwner(uid), now);
     if (existing && existing.members && Object.keys(existing.members).length + 1 > plan.capacity) {
       return res.status(409).json({
         error: `Cannot switch to ${plan.name}: current group has ${Object.keys(existing.members).length + 1} members which exceeds new capacity of ${plan.capacity}. Please remove members first.`,
@@ -1183,7 +1083,7 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       if (!isValid) {
         return res.status(400).json({ error: 'Invalid payment signature. Verification failed.', reason: 'INVALID_PAYMENT_SIGNATURE' });
       }
-      const membership = await activateMembershipFromOrder({ repo, order, paymentId, method: 'RAZORPAY', source: 'purchase', userDoc: req.dbUser });
+      const membership = await activateMembershipFromOrder({ repo, order, paymentId, method: 'RAZORPAY', source: 'purchase', userDoc: req.dbUser, convoys });
       if (order.offerCode && typeof repo.confirmCouponRedemption === 'function') {
         await repo.confirmCouponRedemption(orderId, { paymentId, method: 'RAZORPAY', paidAt: Date.now(), userDoc: req.dbUser });
       }
@@ -1235,11 +1135,12 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
       originalPrice: plan.monthlyPriceInr,
       discountAmount: plan.monthlyPriceInr,
       method: 'COUPON',
+      quote: pricing.computeQuote({ catalog, planId: category, membership: await repo.findMembershipByOwner(uid), couponDiscount: plan.monthlyPriceInr, now }),
       createdAt: now,
     };
     await repo.saveRazorpayOrder(orderDoc);
     const membership = await activateMembershipFromOrder({
-      repo, order: orderDoc, paymentId: `free_${freeOrderId}`, method: 'COUPON', source: 'purchase', userDoc: req.dbUser,
+      repo, order: orderDoc, paymentId: `free_${freeOrderId}`, method: 'COUPON', source: 'purchase', userDoc: req.dbUser, convoys,
     });
     if (coupon && typeof repo.confirmCouponRedemption === 'function') {
       await repo.confirmCouponRedemption(freeOrderId, { paymentId: `free_${freeOrderId}`, method: 'COUPON', paidAt: now, userDoc: req.dbUser });
@@ -1498,9 +1399,28 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
     }
     // Every plan: an id-like key, a name, a price of ₹0 or more, a duration of 1 to 3660 days,
     // a capacity of 1 or more; features (short strings) and the on-sale toggle are optional.
+    // The retired Individual plan sent back by an older admin build is dropped, never stored again.
+    delete catalog.individual;
+    if (!Object.keys(catalog).length) return res.status(400).json({ error: 'Valid catalog object required.', reason: 'INVALID_CATALOG' });
+    const current = await repo.getMembershipCatalog();
     for (const [id, c] of Object.entries(catalog)) {
       const bad = (field) => res.status(400).json({ error: `Plan ${id}: invalid ${field}.`, reason: 'INVALID_CATALOG', plan: id, field });
-      if (!/^[a-z0-9_]{2,40}$/.test(id) || !c || typeof c !== 'object') return bad('id');
+      // The plans: Community (free, not sold), Small Group and Large Group (legacy tiers are not sold any more).
+      if (!CATALOG_PLANS.includes(id) || !c || typeof c !== 'object') return bad('id');
+      if (id === COMMUNITY_PLAN) {
+        // Community is free for every rider: only its name, description and feature list are editable.
+        if (c.description !== undefined && (typeof c.description !== 'string' || c.description.length > 300)) return bad('description');
+        if (c.features !== undefined && (!Array.isArray(c.features) || c.features.length > 30 || c.features.some((f) => typeof f !== 'string' || f.length > 80))) return bad('features');
+        const base = current.community || {};
+        catalog[id] = {
+          ...base,
+          name: typeof c.name === 'string' && c.name.trim() ? c.name.trim().slice(0, 40) : base.name,
+          ...(c.description !== undefined ? { description: c.description.trim() } : {}),
+          ...(c.features !== undefined ? { features: c.features.map((f) => f.trim()).filter(Boolean) } : {}),
+          id: COMMUNITY_PLAN, monthlyPriceInr: 0, capacity: 1, minCapacity: 1, maxCapacity: 1, purchasable: false, isActive: true,
+        };
+        continue;
+      }
       if (typeof c.name !== 'string' || !c.name.trim()) return bad('name');
       if (!Number.isFinite(Number(c.monthlyPriceInr)) || Number(c.monthlyPriceInr) < 0) return bad('monthlyPriceInr');
       if (c.billingPeriodDays !== undefined && (!Number.isInteger(Number(c.billingPeriodDays)) || Number(c.billingPeriodDays) < 1 || Number(c.billingPeriodDays) > 3660)) return bad('billingPeriodDays');
@@ -1521,10 +1441,13 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
   r.get('/admin/membership/memberships', requireAdmin, wrap(async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
     const all = await repo.soda.query(repo.soda.collections?.memberships || 'memberships', {}, { limit: 5000 });
-    const memberships = all.map((r) => ({ ...r.value, key: r.key }))
+    // staffOwner: the plan belongs to a staff account (admin / STAFF_EMAILS), left out of member analytics.
+    const staffIds = typeof repo.staffUserIds === 'function' ? await repo.staffUserIds().catch(() => new Set()) : new Set();
+    const memberships = all.map((r) => ({ ...r.value, key: r.key, staffOwner: staffIds.has(r.value?.ownerUserId) }))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
       .slice(0, limit);
-    res.json({ memberships, total: all.length });
+    const staffOwned = all.filter((r) => staffIds.has(r.value?.ownerUserId)).length;
+    res.json({ memberships, total: all.length, staffOwned });
   }));
 
   // ---------- COUPON MANAGEMENT (CRUD, PAUSE, RESUME, STATS) ----------
@@ -1572,7 +1495,9 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
 
     // Calculate aggregated metrics
     const allRedemptions = await repo.listCouponRedemptions({}, 5000);
-    const successful = allRedemptions.filter((r) => r.status === 'SUCCESS');
+    // Staff redemptions (checkout tests by admins / STAFF_EMAILS) are not counted in the summary.
+    const staffIds = typeof repo.staffUserIds === 'function' ? await repo.staffUserIds().catch(() => new Set()) : new Set();
+    const successful = allRedemptions.filter((r) => r.status === 'SUCCESS' && !staffIds.has(r.userId));
     const totalDiscount = successful.reduce((sum, r) => sum + (Number(r.discountAmount) || 0), 0);
     const totalRevenue = successful.reduce((sum, r) => sum + (Number(r.finalAmount) || 0), 0);
     const uniqueUsers = new Set(successful.map((r) => r.userId)).size;
@@ -1585,6 +1510,8 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
         totalDiscountGivenInr: Math.round(totalDiscount * 100) / 100,
         revenueGeneratedInr: Math.round(totalRevenue * 100) / 100,
         uniqueUsersCount: uniqueUsers,
+        excludesStaff: true,
+        staffRedemptions: allRedemptions.filter((r) => r.status === 'SUCCESS' && staffIds.has(r.userId)).length,
       },
       redemptions,
       total: redemptions.length,

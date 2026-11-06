@@ -13,7 +13,6 @@ import 'package:coroute_app/data/models/trip_history_model.dart';
 import 'package:coroute_app/data/services/api_client.dart';
 import 'package:coroute_app/data/services/auth_service.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
-import 'package:coroute_app/presentation/admin/admin_coupon_usage_tab.dart';
 import 'package:coroute_app/presentation/admin/admin_payment_analytics_tab.dart';
 import 'package:coroute_app/presentation/admin/admin_payments_logic.dart';
 import 'package:coroute_app/presentation/admin/admin_plans_pricing_screen.dart';
@@ -77,7 +76,7 @@ void main() {
     });
   });
 
-  group('Admin Console Coupon Usage & Analytics Views', () {
+  group('Admin Console Payments: Revenue and tabs', () {
     // The server plan catalog (GET /api/admin/coupons/plan-options), with prices an admin set.
     const planOptions = [
       {'id': 'proRider', 'label': 'CoRoute Pro', 'kind': 'subscription', 'monthlyInr': 199, 'annualInr': 1999, 'isActive': true},
@@ -86,71 +85,6 @@ void main() {
       {'id': 'group_large', 'label': 'Large Group (7–12)', 'kind': 'membership', 'monthlyInr': 119, 'annualInr': null, 'isActive': true},
       {'id': 'family', 'label': 'Family Pack', 'kind': 'membership', 'monthlyInr': 149, 'annualInr': null, 'isActive': true},
     ];
-
-    testWidgets('AdminCouponUsageTab displays KPIs, filters, and redemptions log', (tester) async {
-      final client = MockClient((req) async {
-        if (req.url.path.contains('/admin/coupons/usage')) {
-          return http.Response(
-            jsonEncode({
-              'summary': {
-                'totalCoupons': 5,
-                'activeCoupons': 4,
-                'totalRedemptions': 12,
-                'totalDiscountGivenInr': 360,
-                'revenueGeneratedInr': 480,
-                'uniqueUsersCount': 10,
-              },
-              'redemptions': [
-                {
-                  'redemptionId': 'red_1',
-                  'couponCode': 'DIWALI50',
-                  'campaignName': 'Diwali 2026 Blitz',
-                  'userId': 'user_1',
-                  'userName': 'Vikram Rathore',
-                  'userEmail': 'vikram@coroute.test',
-                  'category': 'group_small',
-                  'categoryName': 'Group (2–6)',
-                  'originalPrice': 49,
-                  'discountAmount': 24,
-                  'finalAmount': 25,
-                  'orderId': 'mem_ord_test_01',
-                  'status': 'SUCCESS',
-                  'redeemedAt': DateTime.now().millisecondsSinceEpoch,
-                },
-              ],
-            }),
-            200,
-            headers: {'content-type': 'application/json'},
-          );
-        }
-        return http.Response('{}', 404);
-      });
-
-      final apiClient = ApiClient(httpClient: client);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: MultiProvider(
-            providers: [
-              ChangeNotifierProvider<ApiClient>.value(value: apiClient),
-            ],
-            child: const Scaffold(
-              body: AdminCouponUsageTab(),
-            ),
-          ),
-        ),
-      );
-
-      await tester.pump();
-      await tester.pumpAndSettle();
-
-      expect(find.text('Total Redemptions'), findsOneWidget);
-      expect(find.text('Discounts Granted'), findsOneWidget);
-      expect(find.text('Coupon Revenue'), findsOneWidget);
-      expect(find.text('Active Coupons'), findsOneWidget);
-      expect(find.textContaining('DIWALI50'), findsOneWidget);
-      expect(find.textContaining('Vikram Rathore'), findsOneWidget);
-    });
 
     testWidgets('AdminPaymentAnalyticsTab displays financial KPIs, plan breakdown, and timeline', (tester) async {
       final client = MockClient((req) async {
@@ -236,11 +170,11 @@ void main() {
       await tester.pump();
       await tester.pumpAndSettle();
 
-      expect(find.text('Gross Sales'), findsOneWidget);
-      expect(find.text('Total Discounts'), findsOneWidget);
-      expect(find.text('Net Revenue'), findsOneWidget);
-      expect(find.text('Paid Orders'), findsOneWidget);
-      expect(find.text('Free Activations'), findsOneWidget);
+      expect(find.text('Gross sales'), findsOneWidget);
+      expect(find.text('Discounts'), findsOneWidget);
+      expect(find.text('Net revenue'), findsOneWidget);
+      expect(find.text('Paid orders'), findsOneWidget);
+      expect(find.text('Free plans'), findsOneWidget);
       // Names of plans with sales come from the analytics; a plan without sales gets its name and
       // price from the server plan catalog (an admin changed it to ₹119), never a hard-coded ₹99.
       expect(find.text('Individual Membership (₹9/mo)'), findsOneWidget);
@@ -253,52 +187,13 @@ void main() {
       expect(adminPlanLabel('group_small', planOptions), 'Small Group (2–6) (₹59/mo)');
       expect(adminPlanLabel('group_small', planOptions, perMonth: false), 'Small Group (2–6) (₹59)');
       expect(adminPlanLabel('group_large', const []), 'Large Group (7–12)');
-      expect(adminPlanLabel('individual', const []), 'Individual Membership');
-      expect(adminMembershipPlanIds(planOptions), ['individual', 'group_small', 'group_large', 'family']);
+      expect(adminPlanLabel('individual', const []), 'Individual (retired)');
+      // Coupons bind to the paid plans only (Community is free; Individual is retired).
+      expect(adminMembershipPlanIds(planOptions), ['group_small', 'group_large']);
     });
 
-    testWidgets('coupon usage plan filter lists the server catalog prices', (tester) async {
-      final client = MockClient((req) async {
-        if (req.url.path.contains('/admin/coupons/usage')) {
-          return http.Response(jsonEncode({'summary': {}, 'redemptions': []}), 200, headers: {'content-type': 'application/json'});
-        }
-        if (req.url.path.contains('/admin/coupons/plan-options')) {
-          return http.Response(jsonEncode({'plans': planOptions}), 200, headers: {'content-type': 'application/json'});
-        }
-        return http.Response('{}', 404);
-      });
-      await tester.pumpWidget(MaterialApp(
-        home: MultiProvider(
-          providers: [ChangeNotifierProvider<ApiClient>.value(value: ApiClient(httpClient: client))],
-          child: const Scaffold(body: AdminCouponUsageTab()),
-        ),
-      ));
-      await tester.pump();
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('All Plans'));
-      await tester.pumpAndSettle();
-      expect(find.text('Small Group (2–6) (₹59)'), findsWidgets);
-      expect(find.text('Family Pack (₹149)'), findsWidgets);
-      expect(find.textContaining('₹49'), findsNothing);
-    });
-
-    testWidgets('AdminPlansPricingScreen features the required 7 navigation entries', (tester) async {
-      final client = MockClient((req) async {
-        if (req.url.path.contains('/admin/subscription/overview')) {
-          return http.Response(
-            jsonEncode({
-              'subscribers': {'community': 10, 'proRider': 5, 'roadCaptain': 2, 'tourOperator': 1},
-              'totalUsers': 18,
-              'active': 8,
-              'revenue': {'today': 0, 'last7Days': 100, 'last30Days': 500, 'allTime': 1000},
-            }),
-            200,
-            headers: {'content-type': 'application/json'},
-          );
-        }
-        return http.Response('{}', 200, headers: {'content-type': 'application/json'});
-      });
-
+    testWidgets('Payments has four plain tabs: Payments, Revenue, Plans, Coupons (no module menu)', (tester) async {
+      final client = MockClient((req) async => http.Response('{}', 200, headers: {'content-type': 'application/json'}));
       final apiClient = ApiClient(httpClient: client);
       final authService = AuthService(apiClient);
 
@@ -309,22 +204,28 @@ void main() {
               ChangeNotifierProvider<ApiClient>.value(value: apiClient),
               ChangeNotifierProvider<AuthService>.value(value: authService),
             ],
-            child: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.overview),
+            child: const AdminPlansPricingScreen(),
           ),
         ),
       );
-
       await tester.pump();
       await tester.pumpAndSettle();
 
-      // Verify the 7 required tabs in enum
-      expect(AdminPaymentsTab.overview.label, 'Dashboard');
-      expect(AdminPaymentsTab.subscribers.label, 'Membership Management');
-      expect(AdminPaymentsTab.coupons.label, 'Coupon Management');
-      expect(AdminPaymentsTab.couponUsage.label, 'Coupon Usage');
-      expect(AdminPaymentsTab.analytics.label, 'Payment Analytics');
-      expect(AdminPaymentsTab.payments.label, 'Transaction History');
-      expect(AdminPaymentsTab.audit.label, 'Audit Logs');
+      expect(AdminPaymentsTab.values.map((t) => t.label).toList(), ['Payments', 'Revenue', 'Plans', 'Coupons']);
+      for (final label in ['Revenue', 'Plans', 'Coupons']) {
+        expect(find.widgetWithText(Tab, label), findsOneWidget, reason: label);
+      }
+      expect(find.widgetWithText(Tab, 'Payments'), findsOneWidget);
+      // Retired: the module menu, the members, coupon-use, offers, audit and gateway tabs.
+      for (final gone in ['All modules', 'Jump to module', 'Members', 'Coupon use', 'Offers', 'Audit log', 'Gateway', 'MODULE CLUSTER']) {
+        expect(find.widgetWithText(Tab, gone), findsNothing, reason: gone);
+        expect(find.byTooltip(gone), findsNothing, reason: gone);
+      }
+      // Opening on a tab: Coupons shows the coupons and the automatic offers together.
+      await tester.tap(find.widgetWithText(Tab, 'Coupons'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Coupons ('), findsOneWidget);
+      expect(find.textContaining('Offers ('), findsOneWidget);
     });
   });
 }

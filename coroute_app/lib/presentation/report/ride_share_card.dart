@@ -30,8 +30,13 @@ class RideShareData {
   final String from;
   final String to;
 
-  /// The route sketch: the recorded track, or the planned line. May be empty.
+  /// The route sketch: this rider's recorded track only (never the planned
+  /// line, which may contain roads nobody rode). May be empty.
   final List<LatLng> sketch;
+
+  /// Indices in [sketch] where a new ridden piece starts (after a signal gap):
+  /// the sketch is not drawn across them.
+  final Set<int> sketchBreaks;
 
   const RideShareData({
     required this.tripName,
@@ -43,6 +48,7 @@ class RideShareData {
     this.from = '',
     this.to = '',
     this.sketch = const [],
+    this.sketchBreaks = const {},
   });
 
   bool get hasDistance => distanceM > 0 && distanceM.isFinite;
@@ -78,6 +84,20 @@ class RideShareData {
       if (facts.isNotEmpty) facts.join(', '),
       group.join(', '),
     ].join('\n');
+  }
+
+  /// Ridden pieces as one point list for [sketch] plus the indices where each
+  /// later piece starts ([sketchBreaks]). Points without a position are dropped.
+  static ({List<LatLng> points, Set<int> breaks}) joinPieces(List<List<LatLng>> pieces) {
+    final pts = <LatLng>[];
+    final breaks = <int>{};
+    for (final piece in pieces) {
+      final clean = cleanPoints(piece);
+      if (clean.isEmpty) continue;
+      if (pts.isNotEmpty) breaks.add(pts.length);
+      pts.addAll(clean);
+    }
+    return (points: pts, breaks: breaks);
   }
 
   /// Drops points that are not real positions (missing values read as 0, 0).
@@ -162,6 +182,7 @@ class RideShareCard extends StatelessWidget {
                     child: CustomPaint(
                       painter: RouteSketchPainter(
                         points: data.sketch,
+                        breaks: data.sketchBreaks,
                         lineColor: Colors.white,
                         startColor: Colors.white,
                         endColor: _p.brand,
@@ -249,11 +270,15 @@ class RouteSketchPainter extends CustomPainter {
   final Color endColor;
   final Color ringColor;
 
+  /// Indices in [points] where a new piece starts (not joined to the one before).
+  final Set<int> breaks;
+
   /// Longer tracks are thinned to about this many points before drawing.
   static const int maxPoints = 600;
 
   RouteSketchPainter({
     required this.points,
+    this.breaks = const {},
     required this.lineColor,
     required this.startColor,
     required this.endColor,
@@ -261,13 +286,18 @@ class RouteSketchPainter extends CustomPainter {
   });
 
   /// Projects [points] into [size] (with [pad]); public for tests.
+  /// Which indices of [n] points are drawn (thinned to about [maxPoints], the last always kept).
+  static List<int> keptIndices(int n) {
+    final step = n > maxPoints ? (n / maxPoints).ceil() : 1;
+    return [
+      for (var i = 0; i < n; i += step) i,
+      if (n > 0 && (n - 1) % step != 0) n - 1,
+    ];
+  }
+
   static List<Offset> project(List<LatLng> points, Size size, {double pad = 12}) {
     if (points.isEmpty || size.isEmpty) return const [];
-    final step = points.length > maxPoints ? (points.length / maxPoints).ceil() : 1;
-    final pts = <LatLng>[
-      for (var i = 0; i < points.length; i += step) points[i],
-      if ((points.length - 1) % step != 0) points.last,
-    ];
+    final pts = <LatLng>[for (final i in keptIndices(points.length)) points[i]];
     var minLat = double.infinity, maxLat = -double.infinity;
     for (final p in pts) {
       minLat = math.min(minLat, p.latitude);
@@ -304,9 +334,17 @@ class RouteSketchPainter extends CustomPainter {
       _dot(canvas, pts.first, startColor);
       return;
     }
+    final kept = keptIndices(points.length);
     final path = Path()..moveTo(pts.first.dx, pts.first.dy);
     for (var i = 1; i < pts.length; i++) {
-      path.lineTo(pts[i].dx, pts[i].dy);
+      // A signal gap between the two drawn points: lift the pen (no straight line across it).
+      final from = i < kept.length ? kept[i - 1] : 0, to = i < kept.length ? kept[i] : 0;
+      final cut = breaks.isNotEmpty && breaks.any((b) => b > from && b <= to);
+      if (cut) {
+        path.moveTo(pts[i].dx, pts[i].dy);
+      } else {
+        path.lineTo(pts[i].dx, pts[i].dy);
+      }
     }
     canvas.drawPath(
       path,
@@ -329,6 +367,7 @@ class RouteSketchPainter extends CustomPainter {
   @override
   bool shouldRepaint(RouteSketchPainter old) =>
       !identical(old.points, points) ||
+      !identical(old.breaks, breaks) ||
       old.lineColor != lineColor ||
       old.startColor != startColor ||
       old.endColor != endColor ||

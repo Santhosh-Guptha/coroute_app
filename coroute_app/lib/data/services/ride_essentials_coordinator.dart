@@ -44,7 +44,7 @@ class ConvoyEssentialsPort implements RideEssentialsPort {
 /// A single expiry timer invalidates GPS guidance without making a request.
 class RideEssentialsCoordinator extends ChangeNotifier {
   RideEssentialsCoordinator(this.port, this.settings, this.essentials,
-      {required this._fetchRoute, this.reverseGeocode, int Function()? clock})
+      {required this._fetchRoute, this.reverseGeocode, this.fetchRouteHeaded, this.onPrompt, int Function()? clock})
       : _clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch) {
     _guide = _newGuide();
     port.addListener(_onState);
@@ -60,6 +60,12 @@ class RideEssentialsCoordinator extends ChangeNotifier {
   final RouteEssentialsService essentials;
   final RouteFetcher _fetchRoute;
   final ReverseGeocoder? reverseGeocode;
+
+  /// New routes from my position in my direction of travel (optional).
+  final HeadedRouteFetcher? fetchRouteHeaded;
+
+  /// Speaks the short off-route / new-route lines (optional).
+  final NavPromptSink? onPrompt;
   final int Function() _clock;
   late RouteGuide _guide;
   late final StreamSubscription<TrackPoint> _fixes;
@@ -75,7 +81,12 @@ class RideEssentialsCoordinator extends ChangeNotifier {
       _fix != null && _clock() >= _fix!.ts &&
       _clock() - _fix!.ts < fixLifetime.inMilliseconds;
 
-  RouteGuide _newGuide() => RouteGuide(fetchRoute: _fetchRoute, reverseGeocode: reverseGeocode)..addListener(_onGuide);
+  RouteGuide _newGuide() => RouteGuide(
+        fetchRoute: _fetchRoute,
+        reverseGeocode: reverseGeocode,
+        fetchRouteHeaded: fetchRouteHeaded,
+        onPrompt: onPrompt,
+      )..addListener(_onGuide);
 
   void _changed() {
     if (!_disposed) notifyListeners();
@@ -134,13 +145,18 @@ class RideEssentialsCoordinator extends ChangeNotifier {
     final fix = _fix!;
     final me = port.activeConvoy?.riders[port.myUserId];
     final isTunnel = me?.isTunnelCoasting ?? false;
+    final heading = me?.heading;
     _guide.onFix(lat: fix.lat, lng: fix.lng, speedKmh: fix.speedKmh,
         accuracyM: fix.accuracyM, nowMs: fix.ts, online: port.isOnline,
         lowData: settings.lowData || port.conservingBattery,
-        isTunnelCoasting: isTunnel);
+        isTunnelCoasting: isTunnel,
+        headingDeg: (heading != null && heading.isFinite) ? heading : null,
+        autoReroute: settings.autoReroute);
   }
 
   void _onGuide() {
+    // The map shows the guide's line: a new route or status redraws it.
+    _changed();
     if (!_feeding) refresh().ignore();
   }
 

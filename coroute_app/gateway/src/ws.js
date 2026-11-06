@@ -92,7 +92,7 @@ const BYE_REASONS = new Set(['APP_CLOSED', 'SIGN_OUT', 'LEFT']);
 const FEATURES_314 = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster'];
 /** 3.15: safety network and discovery, appended when switched on. */
 /** 3.16: sweeper role, follow-up check-in, town limit, live links (always on). */
-const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), 'ride316', 'featurePolicy1', 'bin1'];
+const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), ...(config.publicRideEnabled ? ['pubride1'] : []), 'ride316', 'featurePolicy1', 'bin1'];
 /** Client capabilities a 3.15 app sends with JOIN. Server-to-client types added in 3.15 go only to sockets with 'net1'. */
 const CAP = /^[a-z0-9]{1,16}$/;
 const INCIDENT_ID = /^NET-[0-9A-F]{12}$/;
@@ -120,9 +120,11 @@ class Hub {
   /**
    * @param {{server: import('http').Server, convoys: import('./convoys').ConvoyManager, repo: any, logger?: any}} deps
    */
-  constructor({ server, convoys, repo, tracks = null, timeline = null, logger = console, path = '/ws', gate = null, network = null, discovery = null, emergencyGateway = null }) {
+  constructor({ server, convoys, repo, tracks = null, timeline = null, logger = console, path = '/ws', gate = null, network = null, discovery = null, emergencyGateway = null, publicRides = null }) {
     this.convoys = convoys; this.repo = repo; this.tracks = tracks; this.timeline = timeline; this.log = logger; this.gate = gate;
     this.network = network; this.discovery = discovery;
+    /** Public ride and road warnings (src/public_ride.js); null when not wired. */
+    this.publicRides = publicRides;
     this.emergencyGateway = emergencyGateway || convoys?.emergencyGateway;
     this.rooms = new Map(); // groupId -> Set<ws>
     this.byUser = new Map(); // userId -> Set<ws> (3.15 personal messages)
@@ -809,6 +811,13 @@ class Hub {
         if (!encounterId) throw new ConvoyError('That group is no longer nearby.', 404, 'ENCOUNTER_CLOSED');
         return this._once(ws, cid, 'WAVE', async () => { this.discovery.wave(u, gid, encounterId); });
       }
+      // ---- Public ride, safe contact and road warnings (src/public_ride.js: its own rate budget,
+      // never the safety lanes, so nothing here can delay or use up an SOS) ----
+      case 'PR_PREFS': case 'PR_CONTACT': case 'PR_REPLY': case 'PR_SAY': case 'PR_SHARE_LOC': case 'PR_SHARE_CONTACT':
+      case 'PR_CLOSE': case 'PR_REPORT': case 'PR_BLOCK': case 'ROAD_WARN': case 'ROAD_WARN_VOTE': {
+        if (!this.publicRides || !config.publicRideEnabled) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
+        return void await this.publicRides.handle(ws, msg);
+      }
       // ---- 3.16 ----
       case 'ROLE_SET': {
         const gid = this._requireRoom(ws);
@@ -817,6 +826,9 @@ class Hub {
       case 'MIC_STATE': {
         const gid = this._requireRoom(ws);
         const room = this.convoys.rooms.get(gid);
+        if (room && typeof this.convoys.isSoloRide === 'function' && this.convoys.isSoloRide(room)) {
+          return this.sendError(ws, 403, 'Talk is for group rides. This is a solo ride.', 'SOLO_RIDE');
+        }
         if (room && room.riders && room.riders.has(u.userId)) {
           room.riders.get(u.userId).micMuted = !!msg.muted;
         }
@@ -848,6 +860,7 @@ class Hub {
         const gid = this._requireRoom(ws);
         await this.convoys.updateConfig(gid, u, msg);
         if (this.discovery) this.discovery.onConfig(gid);
+        if (this.publicRides) this.publicRides.onConfig(gid);
         return;
       }
       case 'TRIP_STATUS': {
@@ -1021,7 +1034,7 @@ class Hub {
         if (!perm.ok) throw new ConvoyError('Not a member of this convoy.', 403);
         const chunk = validateChunk(msg, { tripStartMs: perm.tripStartMs });
         const r = await this.tracks.save(gid, u.userId, chunk);
-        if (perm.ended && !r.duplicate && this.timeline) this.timeline.scheduleRebuild(gid);
+        if (perm.ended && !r.duplicate && this.timeline) this.timeline.scheduleRebuild(gid, u.userId);
         return this.send(ws, { type: 'TRACK_ACK', seq: r.seq, duplicate: r.duplicate, ts: Date.now() });
       }
       case 'TIMELINE_SINCE': {
@@ -1062,6 +1075,11 @@ class Hub {
     const t = Date.now();
 
     if (pkt.kind === VOICE_START) {
+      // Talk is a group feature: a solo ride (Community host) has no one to talk to.
+      const soloRoom = this.convoys.rooms.get(gid);
+      if (soloRoom && typeof this.convoys.isSoloRide === 'function' && this.convoys.isSoloRide(soloRoom)) {
+        return this.sendError(ws, 403, 'Talk is for group rides. This is a solo ride.', 'SOLO_RIDE');
+      }
       // Validate target (must be a current room member, and not yourself).
       if (to) {
         const set = this.rooms.get(gid);

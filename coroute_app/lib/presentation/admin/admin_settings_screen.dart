@@ -5,16 +5,15 @@ import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../auth/access_gate_screen.dart';
-import '../subscription/plan_selector_screen.dart';
-import 'admin_insights_screen.dart';
+import '../subscription/membership_dashboard_screen.dart';
+import 'admin_config_tabs.dart';
 import 'admin_payments_widgets.dart';
-import 'admin_plans_pricing_screen.dart';
 import 'admin_ui.dart';
 import 'master_admin_dashboard.dart';
 
 /// Master admin: settings. What the public website shows (community numbers,
-/// longest trips, anonymous labels), the payment gateway and audit log, app
-/// insights, the rider view, the membership repair tool and sign out.
+/// longest trips, anonymous labels), the payment gateway and the audit log,
+/// the rider view of plans, the membership repair tool and sign out.
 /// Website settings come from `/admin/community-stats/config`.
 class AdminSettingsScreen extends StatefulWidget {
   const AdminSettingsScreen({super.key});
@@ -195,19 +194,19 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                             leading: const AdminRowIcon(Icons.account_balance_wallet_outlined),
                             title: 'Payment gateway',
                             subtitle: 'Razorpay keys, test or live mode',
-                            onTap: () => _push(const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.gateway)),
+                            onTap: () => _push(const _SettingsPage(title: 'Payment gateway', subtitle: 'Razorpay keys, test or live mode', child: AdminGatewayTab())),
                           ),
                           AdminRow(
                             leading: const AdminRowIcon(Icons.fact_check_outlined),
                             title: 'Audit log',
                             subtitle: 'Every admin change',
-                            onTap: () => _push(const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.audit)),
+                            onTap: () => _push(const _SettingsPage(title: 'Audit log', subtitle: 'Every admin change', child: AdminAuditTab())),
                           ),
                           AdminRow(
                             leading: const AdminRowIcon(Icons.preview_rounded),
                             title: 'Rider view of plans',
                             subtitle: 'What riders see when they pick a plan',
-                            onTap: () => _push(const PlanSelectorScreen()),
+                            onTap: () => _push(const MembershipDashboardScreen()),
                             divider: false,
                           ),
                         ],
@@ -215,12 +214,6 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
                       const AdminSectionLabel('Tools'),
                       AdminTable(
                         rows: [
-                          AdminRow(
-                            leading: const AdminRowIcon(Icons.insights_rounded),
-                            title: 'App insights',
-                            subtitle: 'Feedback, website visits, app versions, feature use',
-                            onTap: () => _push(const AdminInsightsScreen()),
-                          ),
                           AdminRow(
                             leading: const AdminRowIcon(Icons.build_outlined),
                             title: 'Repair memberships',
@@ -243,6 +236,26 @@ class _AdminSettingsScreenState extends State<AdminSettingsScreen> {
           }),
         ),
       ),
+    );
+  }
+}
+
+/// One settings page (payment gateway, audit log) in the console frame, with a back button.
+class _SettingsPage extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Widget child;
+
+  const _SettingsPage({required this.title, required this.subtitle, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return AdminShell(
+      title: title,
+      subtitle: subtitle,
+      onBack: () => Navigator.maybePop(context),
+      nav: adminNavItems(context, AdminSection.settings),
+      body: child,
     );
   }
 }

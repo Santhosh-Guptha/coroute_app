@@ -165,8 +165,9 @@ test('no stories: honest empty state; failures: error state with retry', async (
 test('CoRoute in numbers: shows real counts, hides small or missing ones', async () => {
   const full = await runUsage({ '/api/public/usage-stats': { ok: true, stats: { riders: 120, ridesCompleted: 48, kmRidden: 15234.6, groupsRidden: 21, sosResolved: 2, avgRating: 4.62, updatedAt: Date.UTC(2026, 10, 5) } } });
   assert.equal(full.section.hidden, false);
+  // Privacy: rounded down (tens; 100 or 1,000 km) and marked "+"; fewer than 10 SOS alerts are not shown.
   assert.deepEqual(full.tiles, [
-    ['Rides completed', '48'], ['Kilometres ridden', '15,235'], ['Riders', '120'], ['Group rides', '21'], ['SOS alerts resolved', '2'], ['Average rider rating', '4.6 / 5'],
+    ['Rides completed', '40+'], ['Kilometres ridden', '15,000+'], ['Riders', '120+'], ['Group rides', '20+'], ['Average rider rating', '4.6 / 5'],
   ]);
   assert.match(full.note, /^Updated \d{1,2} Nov 2026\.$/);
   assert.deepEqual(full.calls, ['/api/public/usage-stats']);
@@ -182,7 +183,11 @@ test('CoRoute in numbers: shows real counts, hides small or missing ones', async
   const fallback = await runUsage({ '/api/public/community-stats': { enabled: true, totalRiders: 60, totalKilometers: 4200, longestTrips: [] } });
   assert.deepEqual(fallback.calls, ['/api/public/usage-stats', '/api/public/community-stats']);
   assert.equal(fallback.section.hidden, false);
-  assert.deepEqual(fallback.tiles, [['Kilometres ridden', '4,200'], ['Riders', '60']]);
+  assert.deepEqual(fallback.tiles, [['Kilometres ridden', '4,200+'], ['Riders', '60+']]);
+
+  // An older server's exact small totals are rounded here too: 1,234 riders read as 1,200+, 9 group rides are left out.
+  const exact = await runUsage({ '/api/public/usage-stats': { ok: true, stats: { riders: 1234, ridesCompleted: 57, kmRidden: 987, groupsRidden: 9, sosResolved: 12, avgRating: null } } });
+  assert.deepEqual(exact.tiles, [['Rides completed', '50+'], ['Kilometres ridden', '900+'], ['Riders', '1,200+'], ['SOS alerts resolved', '10+']]);
 
   const smallFallback = await runUsage({ '/api/public/community-stats': { enabled: true, totalRiders: 3, totalKilometers: 80 } });
   assert.equal(smallFallback.section.hidden, true);

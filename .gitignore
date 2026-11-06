@@ -28,9 +28,13 @@ tmp/
 qa_screenshots/
 *.png
 *.tar.gz
+*.tgz
 *.apk
 release/**/*.apk
+release/**/*.aab
 .env
 *.env
+*.env*
 coroute_app/_to_delete/
+_to_delete/
 

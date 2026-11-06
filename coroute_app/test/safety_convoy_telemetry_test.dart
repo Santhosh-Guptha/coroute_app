@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/models/safety_wire.dart';
@@ -257,7 +256,6 @@ void main() {
         },
       );
 
-      FeatureGates.forceAllUnlocked = true;
       final spread = RideFacts.totalPackSpreadM(convoy);
       expect(spread, isNotNull);
       // Distance between 12.9700 and 12.9800 is ~1113m
@@ -273,8 +271,6 @@ void main() {
       expect(activeSpread, isNotNull);
 
       // Cleanup
-      FeatureGates.forceAllUnlocked = true;
-      FeatureGates.activeTier = SubscriptionTier.roadCaptain;
     });
   });
 

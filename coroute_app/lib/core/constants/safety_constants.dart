@@ -4,6 +4,14 @@
 class SafetyConstants {
   SafetyConstants._();
 
+  // ---------------------------------------------------------------- emergency numbers (India)
+  /// National emergency number (ERSS), ambulance, police and the NHAI highway helpline.
+  static const String emergencyNumber = '112';
+  static const String ambulanceNumber = '108';
+  static const String policeNumber = '100';
+  static const String highwayHelpline = '1073';
+  static const List<String> emergencyNumbers = [emergencyNumber, ambulanceNumber, policeNumber, highwayHelpline];
+
   // ---------------------------------------------------------------- crash detector
   /// Arming (3.54, was "a fix above 25 km/h in the last 30 s"): the detector arms after the
   /// rider kept at least [crashArmSpeedKmh] for [crashArmSustain] (slow city traffic counts, so a
@@ -146,6 +154,10 @@ class SafetyConstants {
   static const int followUpId = 1105;
   static const int overspeedId = 1106;
   static const String keySpeedLimitWarningKmh = 'coroute_speed_warning_kmh';
+
+  /// My own speed warning choices in Settings (0 = use the group limit) and its upper bound.
+  static const List<int> speedWarningChoices = [0, 50, 60, 80, 100, 120];
+  static const int speedWarningMaxKmh = 200;
 
   // ---------------------------------------------------------------- overspeed warning
   /// Speed tolerance above the limit before alerting (km/h).

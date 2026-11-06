@@ -100,10 +100,13 @@ test('Admin Console Coupon Management, Redemption Tracking & Payment Analytics S
   });
 
   await t.test('Coupon tier restriction enforcement', async () => {
-    // DIWALI50 is only for group_small and group_large, not individual
+    // The retired Individual plan cannot be ordered at all (Community is free), coupon or not.
     const orderWrongTier = await env.api('POST', '/membership/order', { category: 'individual', offerCode: 'DIWALI50' }, riderToken);
-    assert.equal(orderWrongTier.status, 400);
-    assert.equal(orderWrongTier.json.reason, 'TIER_MISMATCH');
+    assert.equal(orderWrongTier.status, 410);
+    assert.equal(orderWrongTier.json.reason, 'LEGACY_PLAN');
+    const community = await env.api('POST', '/membership/order', { category: 'community', offerCode: 'DIWALI50' }, riderToken);
+    assert.equal(community.status, 400);
+    assert.equal(community.json.reason, 'FREE_PLAN');
   });
 
   await t.test('Order creation reserves coupon slot & caps discount', async () => {
@@ -129,7 +132,7 @@ test('Admin Console Coupon Management, Redemption Tracking & Payment Analytics S
     // Rider 1 attempts to use DIWALI50 a second time
     const repeatOrder = await env.api('POST', '/membership/order', { category: 'group_small', offerCode: 'DIWALI50' }, riderToken);
     assert.equal(repeatOrder.status, 400);
-    assert.ok(repeatOrder.json.error.includes('already redeemed') || repeatOrder.json.reason === 'COUPON_RESERVATION_FAILED');
+    assert.ok(['PER_USER_LIMIT_REACHED', 'COUPON_RESERVATION_FAILED'].includes(repeatOrder.json.reason), JSON.stringify(repeatOrder.json));
   });
 
   await t.test('Total usage limit enforcement', async () => {

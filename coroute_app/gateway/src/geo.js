@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const config = require('./config');
 const { encodePolyline, haversine } = require('./geo_math');
 
-const UA = () => `CoRoute/3.1 (+https://coroute.duckdns.org; ${config.geoContact})`;
+const UA = () => config.providerUserAgent;
 const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 24);
 
@@ -155,16 +155,55 @@ class GeoProxy {
   }
 
   /** Driving route through 2..25 waypoints. Returns { distanceM, durationS, polyline, legs[] } or null. */
-  async route(waypoints) {
-    if (!this.routeEnabled || !Array.isArray(waypoints) || waypoints.length < 2 || waypoints.length > 25) return null;
-    const wp = waypoints.map((p) => ({ lat: round(Number(p.lat), 5), lng: round(Number(p.lng), 5) }));
-    if (wp.some((p) => !(Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180))) return null;
+  async route(waypoints, opts = {}) {
+    const r = await this.routeResult(waypoints, opts);
+    return r.route || null;
+  }
+
+  /**
+   * Driving route through 2..25 waypoints, with the reason when there is none:
+   * { route } or { error: 'INVALID_WAYPOINTS' | 'ROUTE_DISABLED' | 'NO_ROUTE' | 'UPSTREAM' }.
+   *
+   * `startBearing` (0..359, the rider's direction of travel) asks for a route that leaves the
+   * first point that way (a new route from where a rider is, so it does not start with a
+   * U-turn); when no road fits that direction the plain route is used instead. Such a start
+   * is rounded to about 11 m, so riders rerouting from the same spot share the cached answer.
+   * Answers are cached (geo_cache, 7 days; NO_ROUTE for a minute in memory), and upstream
+   * calls go through the polite queue.
+   */
+  async routeResult(waypoints, { startBearing } = {}) {
+    if (!this.routeEnabled) return { error: 'ROUTE_DISABLED' };
+    if (!Array.isArray(waypoints) || waypoints.length < 2 || waypoints.length > 25) return { error: 'INVALID_WAYPOINTS' };
+    const wp = waypoints.map((p) => ({ lat: round(Number(p?.lat), 5), lng: round(Number(p?.lng), 5) }));
+    if (wp.some((p) => !(Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180))) return { error: 'INVALID_WAYPOINTS' };
+    let bearing = null;
+    if (startBearing !== undefined && startBearing !== null) {
+      const b = Number(startBearing);
+      if (!Number.isFinite(b)) return { error: 'INVALID_WAYPOINTS' };
+      bearing = ((Math.round(b / 10) * 10) % 360 + 360) % 360; // 10 degree steps: shared cache entries
+      wp[0] = { lat: round(wp[0].lat, 4), lng: round(wp[0].lng, 4) };
+    }
     const coords = wp.map((p) => `${p.lng},${p.lat}`).join(';');
-    return this._cached(`r:${hash(coords)}`, 7, async () => {
+    const key = `r:${hash(bearing === null ? coords : `${coords}|b${bearing}`)}`;
+    const miss = this.noRouteCache?.get(key);
+    if (miss && Date.now() - miss < 60000) return { error: 'NO_ROUTE' };
+    let failure = 'UPSTREAM';
+    const route = await this._cached(key, 7, async () => {
       try {
-        const j = await this._queued(() => this._getJson(`${config.geoRouteUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true`));
+        const base = `${config.geoRouteUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true`;
+        let j = null;
+        if (bearing !== null) {
+          // OSRM: one "value,range" per coordinate, empty for the others.
+          const bearings = [`${bearing},60`, ...wp.slice(1).map(() => '')].join(';');
+          j = await this._queued(() => this._getOsrm(`${base}&bearings=${bearings}`)).catch((e) => {
+            if (e.osrmCode) return null; // no road that way near the rider: try without the direction
+            throw e;
+          });
+          if (j && !j.routes?.length) j = null;
+        }
+        if (!j) j = await this._queued(() => this._getOsrm(base));
         const r = j?.routes?.[0];
-        if (!r) return null;
+        if (!r) { failure = 'NO_ROUTE'; return null; }
         const line = (r.geometry?.coordinates || []).map(([x, y]) => ({ lat: y, lng: x }));
         const steps = [];
         for (const leg of (r.legs || [])) {
@@ -187,8 +226,33 @@ class GeoProxy {
           legs: (r.legs || []).map((l) => ({ distanceM: Math.round(l.distance || 0), durationS: Math.round(l.duration || 0) })),
           steps,
         };
-      } catch (e) { this.log.warn('[geo] route failed', e.message); return null; }
+      } catch (e) {
+        if (e.osrmCode === 'NoRoute' || e.osrmCode === 'NoSegment') failure = 'NO_ROUTE';
+        else this.log.warn('[geo] route failed', e.message);
+        return null;
+      }
     });
+    if (route) return { route };
+    if (failure === 'NO_ROUTE') {
+      if (!this.noRouteCache) this.noRouteCache = new Map();
+      if (this.noRouteCache.size > 500) this.noRouteCache.clear();
+      this.noRouteCache.set(key, Date.now());
+    }
+    return { error: failure };
+  }
+
+  /** OSRM JSON; throws with `osrmCode` set when OSRM answered with an error code (NoRoute, NoSegment, ...). */
+  async _getOsrm(url) {
+    const res = await this.fetch(url, { headers: { 'User-Agent': UA(), Accept: 'application/json', 'Accept-Language': 'en' }, signal: AbortSignal.timeout(8000) });
+    let j = null;
+    try { j = await res.json(); } catch { j = null; }
+    if (j && typeof j.code === 'string' && j.code !== 'Ok') {
+      const e = new Error(`osrm ${j.code}`);
+      e.osrmCode = j.code;
+      throw e;
+    }
+    if (!res.ok) throw new Error(`upstream ${res.status}`);
+    return j;
   }
 
   /**

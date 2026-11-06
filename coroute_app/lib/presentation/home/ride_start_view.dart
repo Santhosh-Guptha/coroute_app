@@ -9,6 +9,7 @@ import '../../data/models/rider_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/intercom_service.dart';
+import '../../data/services/membership_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/settings_service.dart';
 import '../account/edit_profile_screen.dart';
@@ -18,12 +19,9 @@ import '../trip_planner/trip_planner_screen.dart';
 import '../trip/trip_feedback_sheet.dart';
 import '../widgets/emergency_sos_sheet.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
-import '../../core/config/feature_gates.dart';
-import '../../data/services/membership_service.dart';
-import '../../data/services/plan_subscription_service.dart';
+import '../subscription/membership_status_chip.dart';
 import '../../data/services/device_diagnostic_service.dart';
 import '../diagnostics/pre_ride_phone_check_screen.dart';
-import '../subscription/plan_selector_screen.dart';
 import '../garage/garage_screen.dart';
 
 /// The Home tab when no ride is active: greeting, the "No active ride" hero
@@ -72,24 +70,6 @@ class RideStartView extends StatelessWidget {
       if (_needsProfile(context.read<AuthService>())) {
         final ok = await openProfile(context);
         if (!ok || !context.mounted) return;
-      }
-      final planService = context.read<PlanSubscriptionService?>();
-      final maxAllowed = planService?.maxConvoyMembers ?? FeatureGates.maxConvoyMembers();
-      final activeConvoy = context.read<ConvoyService?>()?.activeConvoy;
-      if (activeConvoy != null && activeConvoy.riders.length > maxAllowed) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: AppTheme.card,
-              content: Text(
-                'This group is bigger than your plan allows ($maxAllowed riders). Upgrade to continue.',
-                style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w700),
-              ),
-            ),
-          );
-          FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
-        }
-        return;
       }
       final diagService = context.read<DeviceDiagnosticService?>();
       if (diagService != null) {
@@ -334,66 +314,8 @@ class _Greeting extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              Builder(
-                builder: (ctx) {
-                  final planService = ctx.watch<PlanSubscriptionService?>();
-                  if (planService?.paymentsEnabled == false) return const SizedBox.shrink();
-                  final tier =
-                      planService?.currentTier ?? FeatureGates.activeTier;
-                  final tierName = FeatureGates.tierLabel(tier).toUpperCase();
-                  return GestureDetector(
-                    onTap: () => Navigator.of(ctx).push(
-                      MaterialPageRoute(
-                        builder: (_) => const PlanSelectorScreen(),
-                      ),
-                    ),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accentText.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: AppTheme.accentText,
-                          width: 1.2,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.verified_rounded,
-                            size: 14,
-                            color: AppTheme.accentText,
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              tierName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: AppTheme.accentText,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.chevron_right_rounded,
-                            size: 14,
-                            color: AppTheme.accentText.withValues(alpha: 0.7),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
+              // The rider's membership plan (or "No plan · Join rides free"); tap for plans.
+              const MembershipStatusChip(),
             ],
           ),
         ),
@@ -440,6 +362,9 @@ class _NoRideHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Community (free) starts solo rides; a group plan (or payments off) hosts a group with a code.
+    final ms = context.watch<MembershipService?>();
+    final hostsGroup = ms == null || !ms.paymentsEnabled || ms.planAccess.canHostGroup;
     return DsHeroCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -468,9 +393,11 @@ class _NoRideHero extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Start a ride and share the code, or join with a code from your group.',
-            style: TextStyle(
+          Text(
+            hostsGroup
+                ? 'Start a ride and share the code, or join with a code from your group.'
+                : 'Start a solo ride for free, or join with a code from your group.',
+            style: const TextStyle(
               color: DsHeroCard.secondary,
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -484,56 +411,6 @@ class _NoRideHero extends StatelessWidget {
             tone: DsButtonTone.onHero,
             fontSize: 17,
             onPressed: () => RideStartView.startRide(context),
-          ),
-          Builder(
-            builder: (ctx) {
-              final planService = ctx.watch<PlanSubscriptionService?>();
-              final currentTier =
-                  planService?.currentTier ?? FeatureGates.activeTier;
-              final maxRiders = FeatureGates.maxConvoyMembers(currentTier);
-              final tierLabel = FeatureGates.tierLabel(currentTier);
-              return Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: GestureDetector(
-                  onTap: planService?.paymentsEnabled == false
-                      ? null
-                      : () => Navigator.of(ctx).push(
-                    MaterialPageRoute(
-                      builder: (_) => const PlanSelectorScreen(),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.groups_rounded,
-                        size: 14,
-                        color: DsHeroCard.secondary,
-                      ),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          'Up to $maxRiders riders ($tierLabel)',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: DsHeroCard.secondary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.arrow_forward_ios_rounded,
-                        size: 10,
-                        color: DsHeroCard.secondary,
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
           ),
         ],
       ),
@@ -751,7 +628,7 @@ class _OfflineSoloCard extends StatelessWidget {
     final smsLine = safety.smsStatus?.text ?? '';
     final String status;
     if (!crashOn) {
-      status = 'Crash detection is off. Turn it on in Safety settings.';
+      status = 'Crash detection is off. Turn it on in Settings.';
     } else if (safety.isSensorUnavailable) {
       status = 'This phone has no motion sensor: crash detection cannot run. SOS still works.';
     } else if (safety.detectorArmed) {
@@ -945,33 +822,6 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
     );
     if (!mounted) return;
     if (joined != null) {
-      final memService = context.read<MembershipService?>();
-      if (memService == null) {
-        // Legacy fallback only when MembershipService is absent.
-        // Under CoRoute Membership, invited riders join trips at ₹0 without paying.
-        final planService = context.read<PlanSubscriptionService?>();
-        final maxAllowed = planService?.maxConvoyMembers ?? FeatureGates.maxConvoyMembers();
-        final currentMembers = joined.riders.length;
-        if (currentMembers > maxAllowed) {
-          await convoyService.leaveActiveConvoy(rider.userId);
-          if (!mounted) return;
-          setState(() {
-            _busy = false;
-            _error = 'This group has $currentMembers riders. Your current plan (${FeatureGates.tierLabel(planService?.currentTier ?? FeatureGates.activeTier)}) allows up to $maxAllowed riders.';
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: AppTheme.card,
-              content: Text(
-                'This group is bigger than your plan allows ($maxAllowed riders). Upgrade to join.',
-                style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w700),
-              ),
-            ),
-          );
-          FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
-          return;
-        }
-      }
       Navigator.pop(context, true);
     } else {
       setState(() {

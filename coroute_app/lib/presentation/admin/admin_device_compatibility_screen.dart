@@ -145,7 +145,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
         backgroundColor: const Color(0xFF0D1117),
         elevation: 0,
         title: const Text(
-          'Device Compatibility Dashboard',
+          'Phone compatibility',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
@@ -191,7 +191,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
                     Row(
                       children: [
                         Text(
-                          'Diagnostic Reports ($_totalCount)',
+                          'Reports ($_totalCount)',
                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                         ),
                         const Spacer(),
@@ -256,7 +256,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
               const Icon(Icons.analytics_rounded, color: Colors.tealAccent, size: 20),
               const SizedBox(width: 8),
               const Text(
-                'Fleet Compatibility Overview',
+                'Overview',
                 style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
               ),
             ],

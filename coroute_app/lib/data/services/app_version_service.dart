@@ -1,13 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/constants/app_constants.dart';
 import 'meta_service.dart';
 
 /// Service managing app version checks, release metadata, and mandatory update enforcement.
 class AppVersionService extends ChangeNotifier {
   final MetaService _metaService;
 
-  static const String defaultStoreUrl =
-      'https://play.google.com/store/apps/details?id=space.devmonks.coroute_app';
+  static const String defaultStoreUrl = AppConstants.playStoreUrl;
 
   bool _checking = false;
 

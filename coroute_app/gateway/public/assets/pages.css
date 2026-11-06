@@ -472,12 +472,12 @@
 .hm-cta {
   display: grid; gap: var(--sp-24); align-items: center;
   padding: clamp(28px, 5vw, 56px); border-radius: var(--r-lg);
-  background: var(--c-brand-dark); color: #FFFFFF;
+  background: var(--c-brand-fill); color: #FFFFFF;
 }
 .hm-cta h2 { color: #FFFFFF; font-size: var(--fs-h2); }
 .hm-cta p { color: rgba(255, 255, 255, 0.88); margin-top: var(--sp-8); max-width: 40em; }
-.hm-cta .btn--primary { background: #FFFFFF; color: #174D37 !important; }
-.hm-cta .btn--primary:hover { background: #E7F2EB; }
+.hm-cta .btn--primary { background: #FFFFFF; color: #0B6E78 !important; }
+.hm-cta .btn--primary:hover { background: #E3F3F5; }
 .hm-cta .btn--secondary, .hm-cta .btn--outline { background: transparent; border-color: rgba(255, 255, 255, 0.6); color: #FFFFFF !important; }
 .hm-cta .link-arrow { color: #FFFFFF; min-height: 44px; }
 @media (min-width: 1024px) { .hm-cta { grid-template-columns: 1fr auto; } }
@@ -516,7 +516,7 @@
 .hm-hero--page { padding-top: clamp(40px, 6vw, 80px); }
 
 .hm-hero--page .pg-jump { margin-top: var(--sp-24); }
-.hm-cta .btn--primary { color: #174D37 !important; }
+.hm-cta .btn--primary { color: #0B6E78 !important; }
 /* Section eyebrows keep their small label style inside .hm-head (its lead-paragraph rule is broader). */
 .hm-head > p.eyebrow { font-size: var(--fs-xs); color: var(--c-brand); margin-top: 0; max-width: none; line-height: var(--lh-body); }
 .hm-head > p.eyebrow--safety { color: var(--c-safety-ink); }

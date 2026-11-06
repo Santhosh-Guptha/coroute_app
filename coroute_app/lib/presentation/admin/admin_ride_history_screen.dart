@@ -233,7 +233,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
     }
 
     return AdminShell(
-      title: 'Groups and rides',
+      title: 'Rides',
       subtitle: 'Live and finished rides. Tap a ride for its numbers.',
       onBack: () => Navigator.maybePop(context),
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
@@ -370,7 +370,7 @@ class _RideRow extends StatelessWidget {
       [
         if (hasReport) formatDistance(adminNum(c, 'distanceM')),
         formatDuration(Duration(milliseconds: adminNum(c, 'durationMs').toInt())),
-        '$members ${members == 1 ? 'rider' : 'riders'}${hasReport ? ', $arrived arrived' : ''}',
+        '$members ${members == 1 ? 'rider' : 'riders'}${hasReport ? ', $arrived arrived' : ''}${c['hasStaff'] == true ? ', staff on ride' : ''}',
         if (adminNum(c, 'plannedStops') > 0) '${adminNum(c, 'visitedStops')} of ${adminNum(c, 'plannedStops')} stops',
       ].join(', '),
     ].join('\n');

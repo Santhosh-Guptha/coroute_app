@@ -16,7 +16,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/constants/navigation_constants.dart';
 import '../../core/config/app_config.dart';
-import '../../core/config/feature_gates.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
@@ -59,6 +58,7 @@ import '../ride/discovery_card.dart';
 import '../ride/emergency_guidance.dart';
 import '../ride/group_settings_sheet.dart';
 import '../ride/hazard_marker.dart';
+import '../ride/public_ride_widgets.dart';
 import 'widgets/road_hazard_hud_pill.dart';
 import 'widgets/siren_hud_pill.dart';
 import 'widgets/ble_remote_hud_pill.dart';
@@ -75,6 +75,9 @@ import '../ride/incident_banner.dart';
 import '../ride/incident_sheet.dart';
 import '../ride/incident_view.dart';
 import '../ride/map_focus.dart';
+import '../../data/services/map_places_service.dart';
+import '../map_places/map_places_layer.dart';
+import '../map_places/place_chips.dart';
 import '../ride/meet_here_sheet.dart';
 import '../ride/messages_sheet.dart';
 import '../ride/report_down_sheet.dart';
@@ -83,8 +86,13 @@ import '../ride/rider_card_sheet.dart';
 import '../ride/riders_ladder.dart';
 import '../ride/route_guide.dart';
 import '../safety/sos_hold_screen.dart';
+import 'package:flutter/gestures.dart' show GestureBinding, PointerDownEvent, PointerEvent;
+import '../../core/theme/theme_controller.dart';
+import '../../data/services/safety_native.dart';
+import '../../domain/tracking/screen_awake_policy.dart';
 import '../timeline/member_colors.dart';
 import '../trip/trip_feedback_sheet.dart';
+import '../review/app_review_prompt.dart';
 import '../trip_planner/route_stops_panel.dart';
 import '../widgets/connection_banner.dart';
 import '../widgets/emergency_sos_sheet.dart';
@@ -108,7 +116,8 @@ import '../../data/services/location_precision_service.dart';
 import 'widgets/cockpit_dual_state_banner.dart';
 import 'widgets/cockpit_permission_warning_banner.dart';
 import 'widgets/rider_management_sheet.dart';
-import '../safety/safety_settings_sheet.dart';
+import '../widgets/sheet_coordinator.dart';
+import '../settings/settings_screen.dart';
 
 /// The active ride: the map first, a compact top bar (next stop or
 /// destination, connection and GPS in words), one alert slot, the SOS
@@ -195,13 +204,19 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   late final NavCameraController _navCam = NavCameraController(mapController: _mapController)
     ..addListener(_onNavCamChanged);
 
-  // Free map area for the camera (refreshed by build; the sheet height comes from [_sheetTop]).
+  // Free map area for the camera (refreshed by build; the sheet height comes from [_sheetRestTop]).
   bool _navSide = false;
   double _navPanelW = 0.0;
   double _navTopReserve = 0.0;
   bool _precisePromptShown = false;
   final GlobalKey<RideSheetState> _sheetKey = GlobalKey<RideSheetState>();
   final ValueNotifier<double> _sheetTop = ValueNotifier<double>(196);
+
+  /// The sheet's top edge once at rest ([RideSheet.onTopSettled]): the map
+  /// camera keeps the rider clear of it. Not [_sheetTop], which changes on
+  /// every frame of a drag: moving the camera (and redrawing the map) on each
+  /// of those frames made dragging the sheet stutter.
+  double _sheetRestTop = 196;
 
   /// How far the ride sheet is open, 0 (collapsed) to 1 (fully expanded).
   /// Only the floating controls listen, so dragging the sheet never rebuilds
@@ -215,6 +230,18 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   bool _keepScreenOn = true;
   bool _isRouteObscured = false;
   bool _wakelockActive = false;
+
+  // Always-on ride screen (Agent 4, [ScreenAwakePolicy]): the window dims after 30 s without a
+  // touch; keep-on stops when parked over 5 min or below 15 % battery (the ride continues in
+  // the foreground service). Battery saver also forces the dark ride theme / dark map.
+  int _lastTouchMs = DateTime.now().millisecondsSinceEpoch;
+  int _parkedSinceMs = 0;
+  ScreenAwakeDecision? _awake;
+  Timer? _awakeTimer;
+  bool _dimmed = false;
+  bool _pointerRouted = false;
+  bool _rideDarkWanted = false;
+  ThemeController? _theme;
   RouteObserver<ModalRoute<void>>? _subscribedObserver;
   ModalRoute<void>? _subscribedRoute;
   String? _selectedRiderId;
@@ -316,6 +343,22 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   RouteProgress? _lineSource;
   RouteEssentialsService? _essentials;
 
+  // Map places (fuel, hospitals, mechanics, food...): one cache on the phone, shared with the planner.
+  MapPlacesService? _places;
+  MapPlacesService? _placesFor(bool lowData) {
+    final api = context.read<ApiClient?>();
+    if (api == null) return null;
+    final places = _places ??= MapPlacesService.shared(api);
+    places.lowData = lowData;
+    final safety = context.read<SafetyService?>();
+    if (safety != null) {
+      safety.fuelAheadSource ??= (lat, lng, usableKm, marginKm) => places.fuelAhead(lat, lng, usableKm: usableKm, marginKm: marginKm);
+      final type = safety.fuelEconomy.fuelType;
+      if (places.fuelType != type) WidgetsBinding.instance.addPostFrameCallback((_) => places.fuelType = type);
+    }
+    return places;
+  }
+
   Future<void> _syncEssentials({String? category, bool force = false}) async {
     if (!mounted) return;
     final shared = _rideEssentials;
@@ -341,20 +384,23 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     }
   }
   void _essentialsChanged() { if (mounted) setState(() {}); }
+  /// Every cockpit pop-up opens through here ([SheetCoordinator]): one at a
+  /// time (an open one is closed first, never stacked) and the same button
+  /// closes its own pop-up again. A tap outside or Back closes it (the
+  /// pop-ups are barrier-dismissible); [protected] ones are never replaced.
+  Future<T?> _popup<T>(Object key, Future<T?> Function() open, {bool protected = false}) =>
+      SheetCoordinator.instance.present<T>(context, key: key, open: open, protected: protected);
+
   void _openEssentials() {
     final e = _essentials, s = _convoys;
     if (e == null || s == null) return;
     final c = s.allConvoys[widget.convoyId];
     final me = c?.riders[s.myUserId];
     final leader = me?.role == 'LEAD';
-    showEssentialsSheet(context, service: e, leader: leader, moving: (me?.speedKmh ?? 0) > 5,
+    _popup<void>('essentials', () => showEssentialsSheet(context, service: e, leader: leader, moving: (me?.speedKmh ?? 0) > 5,
       refresh: (category, force) => _syncEssentials(category: category, force: force),
       addStop: (place) {
         if ((s.activeConvoy?.riders[s.myUserId]?.speedKmh ?? 0) > 5 || !s.isOnline) return false;
-        if (leader && !FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
-          FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
-          return false;
-        }
         final picked = PickedPlace(name: place.name, lat: place.lat, lng: place.lng, category: place.category);
         final ok = leader ? s.addStop(picked) : s.suggestStop(picked);
         if (context.mounted) {
@@ -362,7 +408,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Stop request sent. Waiting for the group plan to update.' : 'Could not send. Reconnect and try again.')));
         }
         return ok;
-      });
+      }));
   }
 
   int _lineVersion = -1;
@@ -480,7 +526,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     super.initState();
     _loadDismissed();
     WidgetsBinding.instance.addObserver(this);
-    _sheetTop.addListener(_syncNavInsets);
 
     widget.focus?.addListener(_onFocusRequest);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -497,6 +542,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       _convoys = s;
       s.addListener(_onConvoyUpdate);
       _onConvoyUpdate();
+      try {
+        _theme = Provider.of<ThemeController?>(context, listen: false);
+      } catch (_) {
+        _theme = null;
+      }
+      GestureBinding.instance.pointerRouter.addGlobalRoute(_onAnyPointer);
+      _pointerRouted = true;
       _syncWakelock();
       _onFocusRequest();
       _syncEssentials(category: 'FUEL', force: true);
@@ -512,16 +564,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         _sirenDetector = SirenAcousticDetector(intercomService: intercom);
         _ownsSirenDetector = true;
       }
-      final settings = context.read<SettingsService?>();
       _sirenDetector?.activeSirenNotifier.addListener(_onSirenAlert);
-      // FEAT-MIC-01: Microphone must remain OFF by default at all times.
-      // Eliminate continuous background microphone streaming from SirenAcousticDetector.
-      // Capture is permitted ONLY when rider holds PTT or explicitly enables VOX.
-      if (settings?.emergencySirenAlert == true && FeatureGates.isUnlocked(Feature.sirenAcousticDetector)) {
-        if (_intercomService != null && _sirenDetector != null) {
-          _intercomService!.onMicChunk = _sirenDetector!.processPcmChunk;
-        }
-      }
+      // FEAT-MIC-01: the microphone stays OFF by default; the siren detector is never fed
+      // continuous background audio (capture only while the rider holds PTT or uses VOX).
 
       final existingRemote = context.read<BleRemoteService?>();
       if (existingRemote != null) {
@@ -771,7 +816,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     _hideTimer?.cancel();
     _autoDismissTimer?.cancel();
     _hudToastTimer?.cancel();
-    _sheetTop.removeListener(_syncNavInsets);
+    _awakeTimer?.cancel();
+    if (_pointerRouted) {
+      GestureBinding.instance.pointerRouter.removeGlobalRoute(_onAnyPointer);
+      _pointerRouted = false;
+    }
+    if (_dimmed) SafetyNative.windowBrightness(null).ignore();
+    final theme = _theme;
+    if (_rideDarkWanted && theme != null) scheduleMicrotask(() => theme.setRideDarkOverride(false));
     _navCam.removeListener(_onNavCamChanged);
     _navCam.dispose();
     _sheetTop.dispose();
@@ -837,7 +889,95 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       return false;
     }
 
-    return true;
+    return _evaluateAwake(s, convoy).keepOn;
+  }
+
+  /// Any touch anywhere in the app wakes the dimmed ride screen and restarts the 30 s.
+  void _onAnyPointer(PointerEvent event) {
+    if (event is! PointerDownEvent) return;
+    _lastTouchMs = DateTime.now().millisecondsSinceEpoch;
+    if (_dimmed && mounted) _syncWakelock();
+  }
+
+  /// Riding with the ride screen in front: keep on (dim after 30 s) unless parked or low battery.
+  ScreenAwakeDecision _evaluateAwake(ConvoyService s, ConvoyModel convoy) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    var moving = true;
+    var battery = -1;
+    var charging = false;
+    try {
+      final me = convoy.riders[s.myUserId ?? _auth?.currentUserId ?? ''];
+      moving = me == null || me.speedKmh >= RideThresholds.movingSpeedKmh;
+      battery = s.currentBatteryLevel;
+      charging = s.isCharging;
+    } catch (_) {
+      // Partial test doubles of the service: no battery information (never blocks).
+    }
+    if (moving) {
+      _parkedSinceMs = 0;
+    } else if (_parkedSinceMs == 0) {
+      _parkedSinceMs = now;
+    }
+    final emergency = SosHoldScreen.isOpen || convoy.activeAlerts.any((a) => !a.resolved);
+    final d = ScreenAwakePolicy.decide(
+      riding: true,
+      foreground: true,
+      userKeepOn: true,
+      nowMs: now,
+      lastTouchMs: _lastTouchMs,
+      parkedSinceMs: _parkedSinceMs,
+      batteryPercent: battery,
+      charging: charging,
+      emergencyOpen: emergency,
+    );
+    final before = _awake;
+    _awake = d;
+    final notice = d.notice;
+    if (notice != null && (before == null || before.reason != d.reason)) {
+      // Say why the screen may sleep now (never during a build: the toast calls setState).
+      scheduleMicrotask(() {
+        if (mounted) _showHudToast(notice, Icons.screen_lock_portrait_rounded);
+      });
+    }
+    _armAwakeTimer(d, now);
+    return d;
+  }
+
+  /// One timer for the next dim / parked change instead of polling.
+  void _armAwakeTimer(ScreenAwakeDecision d, int now) {
+    _awakeTimer?.cancel();
+    _awakeTimer = null;
+    final at = ScreenAwakePolicy.nextChangeAt(current: d, nowMs: now, lastTouchMs: _lastTouchMs, parkedSinceMs: _parkedSinceMs);
+    if (at == null) return;
+    _awakeTimer = Timer(Duration(milliseconds: at - now), () {
+      _awakeTimer = null;
+      if (mounted) _syncWakelock();
+    });
+  }
+
+  /// Lowers only CoRoute's window brightness (the system setting is never changed).
+  void _syncDim(bool dim) {
+    if (dim == _dimmed) return;
+    _dimmed = dim;
+    SafetyNative.windowBrightness(dim ? ScreenAwakePolicy.dimBrightness : null).ignore();
+  }
+
+  /// Battery saver during an active ride: the dark ride theme and dark map.
+  void _syncRideDark() {
+    var want = false;
+    try {
+      final s = _convoys;
+      final convoy = s == null ? null : (s.allConvoys[widget.convoyId] ?? s.activeConvoy);
+      want = s != null && convoy != null && !_isTerminalTripStatus(convoy.tripStatus) && s.batterySaverActive;
+    } catch (_) {
+      want = false;
+    }
+    if (want == _rideDarkWanted) return;
+    _rideDarkWanted = want;
+    final theme = _theme;
+    if (theme == null) return;
+    // Never notify the theme listeners in the middle of a build.
+    scheduleMicrotask(() => theme.setRideDarkOverride(want));
   }
 
   ConvoyService? _tryReadConvoyService() {
@@ -857,6 +997,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   Future<void> _syncWakelock() async {
     _navCam.setForeground(_mapOnScreen());
     final shouldKeepOn = _calculateShouldKeepScreenOn();
+    if (!shouldKeepOn) {
+      _awakeTimer?.cancel();
+      _awakeTimer = null;
+    }
+    _syncDim(shouldKeepOn && (_awake?.dim ?? false));
+    _syncRideDark();
     if (shouldKeepOn == _wakelockActive) return;
     _wakelockActive = shouldKeepOn;
     try {
@@ -904,15 +1050,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       lng: lng,
       type: 'CRASH_OR_EMERGENCY',
     );
-    if (mounted) EmergencySosSheet.show(context, lat: lat, lng: lng);
+    if (mounted) _popup<void>('sos', () => EmergencySosSheet.show(context, lat: lat, lng: lng), protected: true);
   }
 
   Future<void> _addStopAt(BuildContext context, ConvoyService service, LatLng point) async {
     final lead = service.canEditRoute;
-    if (lead && !FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
-      FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
-      return;
-    }
     final p = await MapPickerScreen.pick(
       context,
       title: lead ? 'Add a stop' : 'Suggest a stop',
@@ -967,10 +1109,6 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       return;
     }
     if (placement == null) return;
-    if (lead && !FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
-      FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
-      return;
-    }
     final ok = service.addMeetingPoint(
       PickedPlace(lat: lat, lng: lng, name: res.name.isEmpty ? StopKind.meeting.label : res.name, category: RoutePlan.meetingCategory),
       insertBefore: placement.insertBefore,
@@ -992,7 +1130,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       }
       return;
     }
-    final sent = await showReportDownSheet(context, lat: lat, lng: lng, placeName: placeName);
+    final sent = await _popup<bool>('report_down', () => showReportDownSheet(context, lat: lat, lng: lng, placeName: placeName));
     if (sent == null || !mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1027,22 +1165,31 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   void _handleFuelPromptAction(ConvoyService service, RiderModel? me) {
     if (me == null) return;
     final safety = context.read<SafetyService?>();
-    final station = _essentials?.onRouteFuelAhead.firstOrNull ??
-        _essentials?.upcoming
-            .where((e) => e.category == 'FUEL' && !(safety?.isStationClosed(e.placeId) ?? false))
-            .firstOrNull;
-    if (station != null) {
-      final stationName = station.name.isEmpty ? 'Petrol Pump' : station.name;
+    // First choice: the next station on the route that sells this bike's fuel (matched on the phone).
+    final matched = safety?.fuelAhead?.stops
+        .where((s) => s.confirmed && !safety.isStationClosed(s.poi.id))
+        .firstOrNull;
+    final station = matched != null
+        ? null
+        : _essentials?.onRouteFuelAhead.firstOrNull ??
+            _essentials?.upcoming
+                .where((e) => e.category == 'FUEL' && !(safety?.isStationClosed(e.placeId) ?? false))
+                .firstOrNull;
+    if (matched != null || station != null) {
+      final stationLat = matched?.poi.lat ?? station!.lat, stationLng = matched?.poi.lng ?? station!.lng;
+      final stationName = matched != null ? matched.poi.displayName : (station!.name.isEmpty ? 'Petrol Pump' : station.name);
       _guide.addPersonalFuelStop(
-        lat: station.lat,
-        lng: station.lng,
+        lat: stationLat,
+        lng: stationLng,
         name: stationName,
       ).ignore();
-      _focus(station.lat, station.lng);
+      _focus(stationLat, stationLng);
       final usable = safety?.estimatedUsableKm?.round() ?? 30;
-      final distM = (station.routePositionM > (_essentials?.progressM ?? 0))
-          ? (station.routePositionM - (_essentials?.progressM ?? 0))
-          : station.accessDistanceM;
+      final distM = matched != null
+          ? matched.distanceKm * 1000
+          : (station!.routePositionM > (_essentials?.progressM ?? 0))
+              ? (station.routePositionM - (_essentials?.progressM ?? 0))
+              : station.accessDistanceM;
       final distText = (distM > 0) ? ' ${(distM / 1000).toStringAsFixed(1)} km ahead' : '';
 
       service.updateStatusReason(
@@ -1078,9 +1225,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       essentials?.fetchNearbyFuel(lat: me.lat, lng: me.lng, force: true);
     }
 
-    showModalBottomSheet(
+    _popup<void>('fuel_nearby', () => showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
+      barrierColor: AppScrim.color,
       constraints: BoxConstraints(maxWidth: 600, maxHeight: MediaQuery.sizeOf(context).height * 0.88),
       backgroundColor: AppTheme.card,
       shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),
@@ -1090,7 +1239,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           builder: (context, setSheetState) {
             bool isScanning = essentials?.loading ?? false;
             return SafeArea(
-              child: Center(
+              // Only as tall as its content: the rest of the screen is the
+              // scrim, so a tap there closes the sheet.
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                heightFactor: 1.0,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 600),
                   child: Padding(
@@ -1265,7 +1418,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                                   ),
                                   onPressed: () {
                                     if (ctx.mounted) Navigator.pop(ctx);
-                                    showFuelSheet(context);
+                                    _popup<void>('fuel', () => showFuelSheet(context));
                                   },
                                   icon: const Icon(Icons.tune_rounded, size: 18),
                                   label: const Text('Configure Tank Range & Mileage'),
@@ -1283,7 +1436,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           },
         );
       },
-    );
+    ));
   }
 
   void _handleStationClosed(RouteEssential station, ConvoyService service, RiderModel? me) {
@@ -1329,8 +1482,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     }
 
     voice?.speak('Warning: no fuel station within ${usableKm.round()} kilometers. Turn back or call for help.');
-    showDialog<void>(
+    _popup<void>('fuel_warning', () => showDialog<void>(
       context: context,
+      barrierColor: AppScrim.color,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.card,
         title: Text('No Reachable Station Ahead', style: TextStyle(color: AppTheme.sos, fontWeight: FontWeight.bold)),
@@ -1354,25 +1508,29 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           ),
         ],
       ),
-    );
+    ));
   }
 
   void _openRider(RiderModel r) {
     setState(() => _selectedRiderId = r.userId);
-    showRiderCard(
+    _popup<void>('rider_card:${r.userId}', () => showRiderCard(
       context,
       convoyId: widget.convoyId,
       userId: r.userId,
       onShowOnMap: (rider) => _focus(rider.lat, rider.lng),
-    );
+    ));
+  }
+
+  /// The ride has no seat left (the host's membership seats): an invite could not be used.
+  bool _rideFull(ConvoyModel convoy) {
+    if (!convoy.isFull) return false;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('This ride is full (${convoy.riderCountLabel} riders).')));
+    return true;
   }
 
   void _shareInvite(ConvoyModel convoy) {
-    if (convoy.riders.length >= FeatureGates.maxConvoyMembers() &&
-        !FeatureGates.isUnlocked(Feature.unlimitedConvoyCapacity)) {
-      FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
-      return;
-    }
+    if (_rideFull(convoy)) return;
     final link = '${AppConfig.apiBaseUrl}/join/${convoy.joinCode}';
     SharePlus.instance.share(ShareParams(
       text: 'Join my CoRoute ride "${convoy.name}". Code ${convoy.joinCode}. Tap to open: $link',
@@ -1381,11 +1539,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   }
 
   void _copyCode(ConvoyModel convoy) {
-    if (convoy.riders.length >= FeatureGates.maxConvoyMembers() &&
-        !FeatureGates.isUnlocked(Feature.unlimitedConvoyCapacity)) {
-      FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
-      return;
-    }
+    if (_rideFull(convoy)) return;
     Clipboard.setData(ClipboardData(text: convoy.joinCode));
     if (mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
@@ -1490,7 +1644,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       return; // Offline or no answer: the trip report screen can still ask later.
     }
     if (!nav.mounted) return;
-    await TripFeedbackSheet.show(nav.context, tripId: groupId, tripName: tripName);
+    final saved = await TripFeedbackSheet.show(nav.context, tripId: groupId, tripName: tripName);
+    // After a good ride: the store-rating prompt (its own rules decide; usually nothing).
+    if (nav.mounted) await AppReviewPrompt.maybeShowAfterRide(nav.context, tripId: recordId, groupId: groupId, rating: saved?.rating);
   }
 
   /// Feeds my newest position to the navigation camera, which follows it
@@ -1510,7 +1666,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     );
     var saving = false;
     try {
-      saving = service?.isLowBattery ?? false;
+      saving = service?.batterySaverActive ?? false;
     } catch (_) {
       // Partial test doubles of the service: no battery information.
     }
@@ -1537,7 +1693,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   void _syncNavInsets() {
     _navCam.setObscuredInsets(_navSide
         ? EdgeInsets.only(left: _navPanelW, top: _navTopReserve)
-        : EdgeInsets.only(top: _navTopReserve, bottom: _sheetTop.value));
+        : EdgeInsets.only(top: _navTopReserve, bottom: _sheetRestTop));
   }
 
   /// The map is actually on screen (app in front, this tab shown, nothing pushed over it).
@@ -1626,12 +1782,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
 
   void _openIncident(IncidentView i) {
     if (i.hasPosition) _focus(i.lat, i.lng);
-    showIncidentSheet(context, convoyId: widget.convoyId, subjectUserId: i.subjectUserId, alertId: i.alertId);
+    _popup<void>('incident', () => showIncidentSheet(context, convoyId: widget.convoyId, subjectUserId: i.subjectUserId, alertId: i.alertId));
   }
 
   void _openAssist(AssistRequest a) {
     _focus(a.lat, a.lng);
-    showAssistSheet(context, incidentId: a.incidentId);
+    _popup<void>('assist', () => showAssistSheet(context, incidentId: a.incidentId));
   }
 
   /// Rebuilds once when the earliest short notice ([NetworkConstants.assistTakenShowFor],
@@ -1672,7 +1828,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         title: delivered ? 'Your SOS is on' : (service.isOnline ? 'Sending your SOS' : 'SOS waiting to send'),
         message: delivered ? 'Your group can see where you are.' : 'It is kept on the phone and sent as soon as there is signal.',
         actionLabel: 'View SOS',
-        onAction: () => EmergencySosSheet.show(context, lat: me.lat, lng: me.lng),
+        onAction: () => _popup<void>('sos', () => EmergencySosSheet.show(context, lat: me.lat, lng: me.lng), protected: true),
         priority: AlertPriority.sos,
         order: 1000,
       ));
@@ -1937,7 +2093,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     }
     final ok = service.sosOkNotice;
     if (ok != null) out.add(_Slot(key: 'SOS_OK', tier: AlertTier.normal, title: ok));
-    if (convoy.riders.length <= 1) {
+    // The invite code belongs to a group ride; a solo ride (Community host) has none to share.
+    if (convoy.riders.length <= 1 && convoy.hasGroupFeatures) {
       out.add(_Slot(
         key: 'SHARE_CODE',
         tier: AlertTier.normal,
@@ -1980,7 +2137,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           order: 100,
           child: DiscoveryCard(
             encounter: e,
-            onView: () => showDiscoverySheet(context, e, onWave: () => service.wave(e.encounterId)),
+            onView: () => _popup<void>('discovery', () => showDiscoverySheet(context, e, onWave: () => service.wave(e.encounterId))),
             onWave: () => service.wave(e.encounterId),
             onIgnore: () => service.ignoreEncounter(e.encounterId),
           ),
@@ -2119,7 +2276,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     );
     final topSlot = slots.isEmpty ? null : slots.first;
     final extra = slots.length - 1;
-    final dismissSec = context.select<SettingsService?, int>((s) => s?.mapAlertDismissSeconds ?? 5);
+    const dismissSec = NetworkConstants.mapAlertDismissSeconds;
 
     if (topSlot != null) {
       if (topSlot.key != _autoDismissKey || _autoDismissDurationSec != dismissSec) {
@@ -2173,7 +2330,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         // The recenter chip grows with the text size; the zoom pair is 2 x 44 dp + 8.
         final recenterH = Space.s16 + textScaler.scale(18).clamp(18.0, 40.0).toDouble();
         // Zoom pair plus the map orientation (compass) button above it: 3 x 44 dp + 2 x 8.
-        const zoomH = 44.0 + 8.0 + 44.0 + 8.0 + 44.0;
+        // Places button, orientation, zoom in, zoom out: 4 x 44 dp + 3 x 8.
+        const zoomH = 44.0 + 8.0 + 44.0 + 8.0 + 44.0 + 8.0 + 44.0;
         _navSide = side;
         _navPanelW = panelW;
         _navTopReserve = topInset + topBarReserve;
@@ -2201,6 +2359,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                 child: RideSheet(
                 key: _sheetKey,
                 onTopChanged: (v) => _sheetTop.value = v,
+                onTopSettled: (v) {
+                  _sheetRestTop = v;
+                  _syncNavInsets();
+                },
                 onExpansionChanged: (t) => _sheetExpansion.value = t,
                 maxFraction: sheetMax,
                 minFraction: null, // Anchors sheet to exact bottom of hands-free VOX/PTT bar; cannot drag down further
@@ -2266,7 +2428,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                         SmartAirbagBridgeService().connectionState == AirbagConnectionState.connected,
                     isRemotePaired: _bleRemote?.status == BleRemoteStatus.paired,
                     isOfflineMode: isOfflineMode,
-                    onOfflineModeTap: () => _showOfflineExplainer(context, convoy, service),
+                    onOfflineModeTap: () => _popup<void>('offline', () => _showOfflineExplainer(context, convoy, service)),
                   ),
                   // HUD Toast Banner (cleanly positioned under top bar, never covering it)
                   if (_hudToastMessage != null)
@@ -2311,6 +2473,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                         ],
                       ),
                     ),
+                  // Public ride: road warnings ahead, requests to my ride, open chats, "Warn riders".
+                  const PublicRideHud(),
                   if (connection != null && prefetcher != null)
                     CockpitDualStateBanner(
                       isOffline: true,
@@ -2446,7 +2610,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                               ));
                             },
                             onFocusLocation: (lat, lng) => _focus(lat, lng),
-                            onOpenFuelSheet: () => showFuelSheet(context),
+                            onOpenFuelSheet: () => _popup<void>('fuel', () => showFuelSheet(context)),
                             onOpenStopsSheet: () => _openStops(convoy),
                           ),
                         ),
@@ -2518,6 +2682,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (_placesFor(lowData) case final places?) ...[
+                    PlacesMapButton(
+                      service: places,
+                      usableKm: () => context.read<SafetyService?>()?.estimatedUsableKm,
+                      marginKm: () => context.read<SettingsService?>()?.fuelProfile.marginKm ?? 0,
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   MapOrientationButton(controller: _navCam),
                   const SizedBox(height: 8),
                   _MapZoomButton(
@@ -2583,6 +2755,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               // Keeps the Orbit button clear of SOS (left) and the zoom / recenter stack (right).
               sheetClearance: Space.s12 + zoomH + Space.s8 + recenterH + Space.s8,
               leftInset: side ? panelW : leftInset,
+              // A solo ride (Community host) shows no Intercom or Group tiles.
+              isSolo: convoy.isSoloRide,
               onIntercomTap: () {
                 final intercom = context.read<IntercomService?>();
                 if (intercom != null) {
@@ -2604,43 +2778,33 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               onSosTap: () {
                 if (!SosHoldScreen.isOpen) _openSosHold(service, auth);
               },
-              onGroupTap: () => showGroupSettings(context, convoyId: widget.convoyId),
-              onFuelTap: () => showFuelSheet(context),
+              onGroupTap: () => _popup<void>('group', () => showGroupSettings(context, convoyId: widget.convoyId)),
+              onFuelTap: () => _popup<void>('fuel', () => showFuelSheet(context)),
               onRouteTap: _openEssentials,
               onGuardianTap: () {
-                if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
-                  FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
-                  return;
-                }
-                showGuardianSheet(context, groupId: convoy.groupId);
+                _popup<void>('guardian', () => showGuardianSheet(context, groupId: convoy.groupId));
               },
               onMoreTap: () {
                 final settings = context.read<SettingsService?>();
                 final intercom = context.read<IntercomService?>();
-                GloveQuickSettingsModal.show(
+                _popup<void>('quick_settings', () => GloveQuickSettingsModal.show(
                   context,
                   settingsService: settings,
                   intercomService: intercom,
                   keepScreenOn: _keepScreenOn,
-                  autoFollow: _autoFollow,
                   onToggleKeepScreenOn: _toggleKeepScreenOn,
-                  onToggleAutoFollow: () => _setAutoFollow(!_autoFollow),
                   groupId: convoy.groupId,
                   onOpenGuardian: () {
-                    if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
-                      FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
-                      return;
-                    }
-                    showGuardianSheet(context, groupId: convoy.groupId);
+                    _popup<void>('guardian', () => showGuardianSheet(context, groupId: convoy.groupId));
                   },
-                  onOpenFuel: () => showFuelSheet(context),
+                  onOpenFuel: () => _popup<void>('fuel', () => showFuelSheet(context)),
                   onLaunchOfflineNav: () => _launchOfflineNav(convoy, me, snap),
                   onSettingToggled: (name, isEnabled) => _showHudToast(
                     '$name: ${isEnabled ? "ON" : "OFF"}',
                     Icons.tune_rounded,
                     isEnabled ? AppTheme.accentText : AppTheme.muted,
                   ),
-                );
+                ));
               },
             ),
           ],
@@ -2708,8 +2872,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               nextM: next != null ? snap.nextStopM : snap.remainingM,
               nextLabel: next != null ? 'Next stop' : 'Destination',
               reason: riderReasonText(me),
-              onTellWhy: () => RiderStatusSheet.show(context, userId: me.userId),
+              onTellWhy: () => _popup<void>('status', () => RiderStatusSheet.show(context, userId: me.userId)),
               onTap: toggle,
+              isSolo: convoy.isSoloRide,
             )
           else
             GestureDetector(
@@ -2728,10 +2893,12 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                 ),
               ),
             ),
-          MinimalHoldToTalkBar(
-            convoy: convoy,
-            me: me,
-          ),
+          // Talk is a group feature: no talk bar in a solo ride (Community host).
+          if (convoy.hasGroupFeatures)
+            MinimalHoldToTalkBar(
+              convoy: convoy,
+              me: me,
+            ),
         ],
       ),
     );
@@ -2795,24 +2962,30 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                   ? rawAheadM
                   : (me.lat != 0 && me.lng != 0 ? GeoMath.haversine(me.lat, me.lng, nearestFuel.lat, nearestFuel.lng) : null))
               : null;
-          final isSafetyHealthy = !(safety?.isSensorUnavailable ?? false);
+          // "CHECK" when the sensors are missing or the rider turned crash detection off (tap opens Settings).
+          final crashOn = ctx.select<SettingsService?, bool>((s) => s?.crashDetection ?? true);
+          final isSafetyHealthy = crashOn && !(safety?.isSensorUnavailable ?? false);
+          // Prefer the next station that sells this bike's fuel, from the map places on the phone.
+          final ahead = safety?.fuelAhead?.stops;
+          final matchedFuel = ahead?.where((s) => s.confirmed).firstOrNull ?? ahead?.firstOrNull;
 
           return GloveQuickActionGrid(
             convoy: convoy,
             me: me,
-            onOpenIntercom: () => IntercomOptions.show(context),
+            onOpenIntercom: () => _popup<void>('intercom', () => IntercomOptions.show(context)),
             onOpenStops: () => _openStops(convoy),
-            onTellWhy: () => RiderStatusSheet.show(context, userId: me.userId),
+            onTellWhy: () => _popup<void>('status', () => RiderStatusSheet.show(context, userId: me.userId)),
             stopReasonText: riderReasonText(me),
             onOpenFuel: () => _openNearbyFuelSheet(service, me),
             estimatedUsableKm: estimate,
-            nearestFuelName: nearestFuel?.name,
-            nearestFuelAheadM: fuelAheadM,
-            onOpenMessages: () => showMessagesSheet(context, convoyId: convoy.groupId, me: me),
+            nearestFuelName: matchedFuel?.poi.displayName ?? nearestFuel?.name,
+            nearestFuelAheadM: matchedFuel != null ? matchedFuel.distanceKm * 1000 : fuelAheadM,
+            onOpenMessages: () => _popup<void>('messages', () => showMessagesSheet(context, convoyId: convoy.groupId, me: me)),
             chatQueued: chatQueued,
-            onOpenSafetyStatus: () => SafetySettingsSheet.show(context),
+            onOpenSafetyStatus: () => _popup<void>('safety', () => SettingsScreen.open(context)),
             isSafetyHealthy: isSafetyHealthy,
             isSolo: convoy.isSolo,
+            groupFeatures: convoy.hasGroupFeatures,
           );
         },
       ),
@@ -2828,13 +3001,13 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           statuses: statuses,
           nowMs: now,
           onTapRider: _openRider,
-          onOpenManageRiders: () => RiderManagementSheet.show(
+          onOpenManageRiders: () => _popup<void>('riders', () => RiderManagementSheet.show(
             context,
             convoy: convoy,
             me: me,
             onShareInvite: () => _shareInvite(convoy),
             onCopyCode: () => _copyCode(convoy),
-          ),
+          )),
           isLead: lead,
         ),
         const SizedBox(height: Space.s12),
@@ -2844,20 +3017,21 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       SecondaryManagementGroup(
         convoy: convoy,
         isLead: lead,
-        onOpenManageRiders: () => RiderManagementSheet.show(
+        onOpenManageRiders: () => _popup<void>('riders', () => RiderManagementSheet.show(
           context,
           convoy: convoy,
           me: me,
           onShareInvite: () => _shareInvite(convoy),
           onCopyCode: () => _copyCode(convoy),
-        ),
-        onOpenAudioSettings: () => IntercomOptions.show(context),
-        onOpenGroupSettings: () => showGroupSettings(context, convoyId: convoy.groupId),
-        onOpenGuardian: () => showGuardianSheet(context, groupId: convoy.groupId),
-        onOpenSafetyStatus: () => SafetySettingsSheet.show(context),
+        )),
+        onOpenAudioSettings: () => _popup<void>('intercom', () => IntercomOptions.show(context)),
+        onOpenGroupSettings: () => _popup<void>('group', () => showGroupSettings(context, convoyId: convoy.groupId)),
+        onOpenGuardian: () => _popup<void>('guardian', () => showGuardianSheet(context, groupId: convoy.groupId)),
+        onOpenSafetyStatus: () => _popup<void>('safety', () => SettingsScreen.open(context)),
         onShareEta: hasDest ? () => _shareEta(convoy, snap.remainingM, snap.eta) : null,
         etaSubtitle: _etaShareSubtitle(snap),
         isSolo: convoy.isSolo,
+        groupFeatures: convoy.hasGroupFeatures,
       ),
       const SizedBox(height: Space.s16),
 
@@ -2884,14 +3058,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   }
 
   void _openStops(ConvoyModel convoy) {
-    showAppSheet<void>(
+    _popup<void>('stops', () => showAppSheet<void>(
       context,
       title: 'Route and stops',
       isScrollControlled: true,
       builder: (ctx) => Consumer<ConvoyService>(
         builder: (_, svc, _) => RouteStopsPanel(convoy: svc.allConvoys[convoy.groupId] ?? convoy),
       ),
-    );
+    ));
   }
 
   void _launchOfflineNav(ConvoyModel convoy, RiderModel me, RideSnapshot snap) {
@@ -2925,8 +3099,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     );
   }
 
-  void _showOfflineExplainer(BuildContext context, ConvoyModel convoy, ConvoyService service) {
-    showAppSheet<void>(
+  Future<void> _showOfflineExplainer(BuildContext context, ConvoyModel convoy, ConvoyService service) {
+    return showAppSheet<void>(
       context,
       builder: (ctx) {
         return Padding(
@@ -3064,6 +3238,18 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                   : AppTheme.brand.withOpacity(0.9),
             ),
           ]),
+        // Map places: icons from zoom 12, names from zoom 14, decluttered, nearest first.
+        if (_placesFor(lowData) case final places?)
+          MapPlacesLayer(
+            service: places,
+            riderLat: RideFacts.hasPosition(me) ? me.lat : null,
+            riderLng: RideFacts.hasPosition(me) ? me.lng : null,
+            routeLine: (_guide.active?.isUsable ?? false) ? _guide.active!.points : convoy.routeLine,
+            groupFuelStops: [
+              for (final s in convoy.plannedStops)
+                if (s.category == 'FUEL') (lat: s.lat, lng: s.lng, name: s.name),
+            ],
+          ),
         if (_essentials != null && convoy.activeAlerts.isEmpty)
           MarkerLayer(rotate: true, markers: [for (final p in _essentials!.upcoming.take(3)) Marker(
             point: LatLng(p.lat, p.lng), width: 40, height: 40,
@@ -3117,6 +3303,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           driverId: uid,
           driverPose: _navCam.pose,
         ),
+        // Public rides nearby, road warnings ahead, a chat partner's shared location (below the safety markers).
+        PublicRideMarkerLayer(onTapRide: (r) => _popup<void>('public_ride', () => showPublicRideSheet(context, r))),
         MarkerLayer(rotate: true, markers: _safetyMarkers(convoy, service, me, now, guidance: guidance, incidents: incidents)),
       ],
     ),

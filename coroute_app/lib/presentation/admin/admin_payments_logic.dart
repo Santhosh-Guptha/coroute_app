@@ -1,19 +1,30 @@
 import 'package:intl/intl.dart';
-import '../../core/config/feature_gates.dart';
 
 // Pure helpers of the "Payments & Plans" admin console: labels, money and
 // date formatting, and the checks run before a form is sent. No widgets
 // and no I/O, so they are unit-tested directly.
 
-/// The paid tiers, in price order, as the server names them.
+/// The legacy paid tiers (no longer sold). They show read-only as "Legacy: ..." in rider details,
+/// payments and old coupon bindings until the last one ends.
 const List<String> adminPaidTierNames = ['proRider', 'roadCaptain', 'tourOperator'];
 
-/// "CoRoute Pro" for `proRider`, "All plans" for `all`, the raw name otherwise.
+const Map<String, String> _legacyTierNames = {
+  'proRider': 'CoRoute Pro',
+  'roadCaptain': 'Road Captain',
+  'tourOperator': 'Tour Operator',
+};
+
+/// The plan name an admin sees: "Small Group (2–6)" for a membership plan, "Legacy: Road Captain"
+/// for a legacy tier, "No plan" for `community`, "All plans" for `all`, the raw name otherwise.
 String adminTierLabel(Object? tier) {
   final name = tier?.toString() ?? '';
   if (name.isEmpty || name == 'all') return 'All plans';
-  for (final t in SubscriptionTier.values) {
-    if (t.name.toLowerCase() == name.toLowerCase()) return FeatureGates.tierLabel(t);
+  if (name.toLowerCase() == 'community') return 'Community';
+  if (name == 'individual') return 'Individual (retired)';
+  final membership = adminMembershipPlanNames[name];
+  if (membership != null) return membership;
+  for (final e in _legacyTierNames.entries) {
+    if (e.key.toLowerCase() == name.toLowerCase()) return 'Legacy: ${e.value}';
   }
   return name;
 }
@@ -41,14 +52,18 @@ String adminInrPaise(num? paise) => paise == null ? '₹—' : adminInr(paise / 
 /// A number from JSON (number or numeric string), null otherwise.
 num? adminNumOrNull(Object? v) => v is num ? v : num.tryParse('${v ?? ''}');
 
-/// The membership plans the console always lists, with names but no prices: prices come from
-/// the server plan catalog (`GET /api/admin/coupons/plan-options`, `monthlyInr`), so an admin
-/// price change on the gateway never leaves an old price in the app (3.54).
+/// The plans of the catalog, with names but no prices: prices come from the server plan catalog
+/// (`GET /api/admin/coupons/plan-options`, `monthlyInr`), so an admin price change on the gateway
+/// never leaves an old price in the app (3.54). Community is free (not sold); the paid ₹9
+/// Individual plan was retired (an active one is honoured until it ends).
 const Map<String, String> adminMembershipPlanNames = {
-  'individual': 'Individual Membership',
+  'community': 'Community',
   'group_small': 'Small Group (2–6)',
   'group_large': 'Large Group (7–12)',
 };
+
+/// The plans riders can buy (and coupons can be bound to): the paid plans only.
+const List<String> adminPaidPlanIds = ['group_small', 'group_large'];
 
 /// "Small Group (2–6) (₹59/mo)" from the server plan [options] for [id]; the catalog label when
 /// the server has one, and no price when the server has none (never a hard-coded price).
@@ -61,20 +76,15 @@ String adminPlanLabel(String id, List<Map<String, dynamic>> options, {bool perMo
     }
   }
   final label = opt?['label']?.toString().trim() ?? '';
-  final name = label.isNotEmpty ? label : (adminMembershipPlanNames[id] ?? id);
+  final name = label.isNotEmpty ? label : (adminMembershipPlanNames[id] ?? adminTierLabel(id));
   final price = adminNumOrNull(opt?['monthlyInr']);
   if (price == null || price <= 0) return name;
   return '$name (${adminInr(price)}${perMonth ? '/mo' : ''})';
 }
 
-/// The membership plan ids to list: the known ones, then any other membership plan the server
-/// catalog has.
-List<String> adminMembershipPlanIds(List<Map<String, dynamic>> options) => [
-      ...adminMembershipPlanNames.keys,
-      for (final o in options)
-        if (o['kind']?.toString() == 'membership' && !adminMembershipPlanNames.containsKey(o['id']?.toString()) && (o['id']?.toString() ?? '').isNotEmpty)
-          o['id'].toString(),
-    ];
+/// The plan ids to list for coupons and paid-plan figures: the paid plans riders can buy
+/// ([options] is kept for callers; the server offers no other plan).
+List<String> adminMembershipPlanIds(List<Map<String, dynamic>> options) => [...adminPaidPlanIds];
 
 /// The first of [keys] in [m] that holds a number.
 num? adminPickNum(Map? m, List<String> keys) {
@@ -126,38 +136,6 @@ int? adminRupeesToPaise(String text) {
   final paise = (double.parse(clean) * 100).round();
   return paise > 0 ? paise : null;
 }
-
-/// One paid tier's row of the pricing form, as typed.
-typedef PlanPriceDraft = ({String monthly, String annual});
-
-/// Checks the pricing form before `PUT /admin/subscription/pricing`: every
-/// paid tier needs whole-rupee prices above zero, and a year may never cost
-/// less than a month. Returns the first problem in plain words, or null.
-String? validatePlanPricing(Map<String, PlanPriceDraft> drafts) {
-  for (final tier in [...adminPaidTierNames, ...drafts.keys.where((k) => !adminPaidTierNames.contains(k))]) {
-    final d = drafts[tier];
-    if (d == null) continue;
-    final label = adminTierLabel(tier);
-    final monthly = int.tryParse(d.monthly.trim());
-    final annual = int.tryParse(d.annual.trim());
-    if (monthly == null || monthly <= 0) return '$label: the monthly price must be a whole number of rupees above 0.';
-    if (annual == null || annual <= 0) return '$label: the annual price must be a whole number of rupees above 0.';
-    if (annual < monthly) {
-      return '$label: the annual price (${adminInr(annual)}) cannot be lower than the monthly price (${adminInr(monthly)}).';
-    }
-  }
-  return null;
-}
-
-/// The `plans` body of the pricing PUT from a form [validatePlanPricing] accepted.
-Map<String, dynamic> planPricingPayload(Map<String, PlanPriceDraft> drafts, Map<String, String> labels) => {
-      for (final e in drafts.entries)
-        e.key: {
-          'monthly': int.parse(e.value.monthly.trim()),
-          'annual': int.parse(e.value.annual.trim()),
-          'label': labels[e.key] ?? adminTierLabel(e.key),
-        },
-    };
 
 /// Checks a discount (offers: percentage | fixed | price; coupons: percentage | fixed | free).
 String? validateDiscount(String type, num? value) {

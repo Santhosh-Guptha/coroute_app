@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/ride_notification_constants.dart';
 import 'phone_call_service.dart';
-import 'settings_service.dart';
 import 'voice_service.dart';
 
 /// Centralized Audio Priority Levels (P0 to P5).
@@ -73,7 +72,6 @@ class AudioAlertItem {
 /// priority preemption, deduplication, TTL pruning, call-state handling, and multi-modal fallbacks.
 class AudioPriorityManager extends ChangeNotifier {
   AudioPriorityManager({
-    required this.settings,
     VoiceEngine? engine,
     PhoneCallService? phoneCallService,
     int Function()? clock,
@@ -85,7 +83,6 @@ class AudioPriorityManager extends ChangeNotifier {
 
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 
-  final SettingsService settings;
   final VoiceEngine _engine;
   final int Function() _clock;
   PhoneCallService? _phoneCall;
@@ -179,8 +176,9 @@ class AudioPriorityManager extends ChangeNotifier {
   }
 
   /// Submits an audio alert for playback.
-  /// Returns `true` if scheduled or played immediately; `false` if suppressed by settings,
-  /// deduplication, or queue congestion.
+  /// Returns `true` if scheduled or played immediately; `false` if suppressed by
+  /// deduplication or queue congestion. Which alerts may speak at all is decided by
+  /// [VoiceService] (emergencies always do).
   Future<bool> submit({
     required String text,
     required AudioPriority priority,
@@ -197,19 +195,7 @@ class AudioPriorityManager extends ChangeNotifier {
     final key = dedupeKey ?? cleanText;
     final window = dedupeWindow ?? dedupeWindowFor(priority);
 
-    // 1. Manual background voice setting check:
-    // If the rider manually disabled background voice, ordinary alerts (P2-P5) are silenced.
-    // Critical alerts (P0 and P1) ALWAYS bypass this gate.
-    if (!settings.backgroundVoiceEnabled && !priority.isCritical) {
-      return false;
-    }
-
-    // 2. Settings check (voice critical switch):
-    if (priority == AudioPriority.p0CriticalEmergency && !settings.voiceCritical) {
-      return false;
-    }
-
-    // 3. Deduplication check:
+    // 1. Deduplication check:
     _pruneDedupeHistory(now);
     final history = _dedupeHistory[key];
     if (history != null) {
@@ -224,7 +210,7 @@ class AudioPriorityManager extends ChangeNotifier {
       return false;
     }
 
-    // 4. Queue congestion check for non-critical alerts:
+    // 2. Queue congestion check for non-critical alerts:
     _queueEnds.removeWhere((end) => end <= now);
     if (!priority.isCritical && _queueEnds.length >= NotifConstants.voiceMaxQueued) {
       return false;
@@ -248,14 +234,14 @@ class AudioPriorityManager extends ChangeNotifier {
     // Multi-modal haptic feedback based on priority level
     _triggerHapticsFor(priority);
 
-    // 5. In-call audio safety handling:
+    // 3. In-call audio safety handling:
     final inCall = _phoneCall?.isCallActive ?? false;
     if (inCall && priority == AudioPriority.p0CriticalEmergency) {
       // When a phone call is active, queue into post-call alerts in case OS/Bluetooth SCO blocks audio
       _phoneCall?.queuePostCallAlert(cleanText);
     }
 
-    // 6. Preemption check:
+    // 4. Preemption check:
     if (_current != null) {
       if (priority < _current!.priority) {
         // Higher priority arrives: PREEMPT currently playing item immediately!

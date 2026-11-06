@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/constants/app_constants.dart';
+import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
@@ -15,6 +17,7 @@ import '../../data/services/settings_service.dart';
 import '../ride/incident_banner.dart' show PositiveLine;
 import '../ride/incident_sheet.dart' show HospitalLine, LiveLinkControls;
 import '../ride/incident_view.dart' show etaWords, networkStateWords;
+import 'sheet_coordinator.dart';
 
 /// What the SOS sheet tells the rider about delivery.
 enum SosSheetStatus { delivered, sending, waitingForSignal, unknown }
@@ -73,6 +76,49 @@ class EmergencySosSheet extends StatelessWidget {
     }
   }
 
+  /// Asks before the rider's own SOS is turned off ("Help reached me" or
+  /// "False alarm"). True only on [confirmLabel].
+  ///
+  /// Protected: a tap outside does NOT close it (an accidental tap must
+  /// never decide an SOS step); only "Keep SOS Active" or [confirmLabel] do.
+  /// Back closes it like any dialog and keeps the SOS on.
+  static Future<bool> confirmTurnOff(
+    BuildContext context, {
+    required String title,
+    required String message,
+    required String confirmLabel,
+  }) async {
+    final ok = await showProtectedDialog<bool>(
+      context,
+      builder: (ctx) => Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: AlertDialog(
+            backgroundColor: AppTheme.card,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  if (ctx.mounted) Navigator.pop(ctx, false);
+                },
+                child: const Text('Keep SOS Active'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (ctx.mounted) Navigator.pop(ctx, true);
+                },
+                child: Text(confirmLabel),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return ok == true;
+  }
+
   /// Delivery state from what the phone knows (pure, for tests).
   static SosSheetStatus statusFor({required bool hasService, required bool pending, required bool online, required bool hasOpenAlert}) {
     if (!hasService) return SosSheetStatus.unknown;
@@ -80,12 +126,15 @@ class EmergencySosSheet extends StatelessWidget {
     return hasOpenAlert ? SosSheetStatus.delivered : SosSheetStatus.unknown;
   }
 
-  static (String, String) textFor(SosSheetStatus status) {
+  /// [solo]: a solo ride (Community host) has no group, so the words speak of "your SOS" only.
+  static (String, String) textFor(SosSheetStatus status, {bool solo = false}) {
     switch (status) {
       case SosSheetStatus.delivered:
-        return ('SOS sent to your group', 'Your group can see where you are. You can also call or text your contact.');
+        return solo
+            ? ('SOS sent', 'CoRoute has your SOS and where you are. You can also call or text your contact.')
+            : ('SOS sent to your group', 'Your group can see where you are. You can also call or text your contact.');
       case SosSheetStatus.sending:
-        return ('Sending your SOS to your group...', 'Keep the app open. You can also call or text your emergency contact below.');
+        return (solo ? 'Sending your SOS...' : 'Sending your SOS to your group...', 'Keep the app open. You can also call or text your emergency contact below.');
       case SosSheetStatus.waitingForSignal:
         return (
           'No signal. SOS not sent yet',
@@ -147,11 +196,10 @@ class EmergencySosSheet extends StatelessWidget {
   }
 
   /// Indian nationwide emergency numbers supported for offline/zero-signal dialing.
-  static const List<String> indianEmergencyNumbers = ['112', '108', '100', '1073'];
+  static const List<String> indianEmergencyNumbers = SafetyConstants.emergencyNumbers;
 
   /// Generates a standardized Google Maps location pin link.
-  static String formatMapsLink(double lat, double lng) =>
-      'https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng.toStringAsFixed(6)}';
+  static String formatMapsLink(double lat, double lng) => AppConstants.mapsLink(lat, lng);
 
   /// Constructs a tel: URI for direct phone dialing.
   static Uri buildEmergencyCallUri(String phone) {
@@ -207,11 +255,12 @@ class EmergencySosSheet extends StatelessWidget {
       (s) => (s != null, s?.pendingSos != null, s?.isOnline ?? false, s?.myOpenSosAlertId),
     );
     final status = statusFor(hasService: hasService, pending: pending, online: online, hasOpenAlert: openAlertId != null || alertId != null);
-    final (title, subtitle) = textFor(status);
+    final soloRide = context.select<ConvoyService?, bool>((s) => s?.activeConvoy?.isSoloRide ?? false);
+    final (title, subtitle) = textFor(status, solo: soloRide);
     final emergencyPhone = auth.emergencyContact?.trim() ?? '';
     final emergencyName = auth.emergencyContactName?.trim() ?? '';
     final hasEmergencyContact = emergencyPhone.isNotEmpty;
-    final mapsUrl = 'https://maps.google.com/?q=${lat.toStringAsFixed(6)},${lng.toStringAsFixed(6)}';
+    final mapsUrl = formatMapsLink(lat, lng);
     // Emergency texts (opt-in): status line, and "Text the group now" while the SOS is not delivered.
     final smsOn = context.select<SettingsService?, bool>((s) => s?.smsFallback ?? false);
     final (smsStatus, smsAvailable) = context.select<SafetyService?, (SmsFallbackStatus?, bool)>(
@@ -430,14 +479,14 @@ class EmergencySosSheet extends StatelessWidget {
               icon: Icons.local_hospital_outlined,
               tone: DsButtonTone.sos,
               fontSize: 15,
-              onPressed: () => _makeCall(context, '112'),
+              onPressed: () => _makeCall(context, SafetyConstants.emergencyNumber),
             ),
             const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => _makeCall(context, '108'),
+                    onPressed: () => _makeCall(context, SafetyConstants.ambulanceNumber),
                     icon: const Icon(Icons.local_hospital_outlined, size: 18),
                     label: const Text('Dial 108 (Ambulance)', maxLines: 2, textAlign: TextAlign.center),
                     style: dial(color: AppTheme.sos, height: 52, fontSize: 12),
@@ -446,7 +495,7 @@ class EmergencySosSheet extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => _makeCall(context, '100'),
+                    onPressed: () => _makeCall(context, SafetyConstants.policeNumber),
                     icon: const Icon(Icons.local_police_outlined, size: 18),
                     label: const Text('Dial 100 (Police)', maxLines: 2, textAlign: TextAlign.center),
                     style: dial(color: AppTheme.sos, height: 52, fontSize: 12),
@@ -456,7 +505,7 @@ class EmergencySosSheet extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             OutlinedButton.icon(
-              onPressed: () => _makeCall(context, '1073'),
+              onPressed: () => _makeCall(context, SafetyConstants.highwayHelpline),
               icon: const Icon(Icons.emergency_outlined, size: 18),
               label: const Text('Dial 1073 (NHAI Highway Helpline)', maxLines: 1, overflow: TextOverflow.ellipsis),
               style: dial(color: AppTheme.warnText, height: 48, fontSize: 12),
@@ -468,35 +517,13 @@ class EmergencySosSheet extends StatelessWidget {
               label: L10n.t('sos.ok'),
               icon: Icons.verified_user_outlined,
               onPressed: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 480),
-                      child: AlertDialog(
-                        backgroundColor: AppTheme.card,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        title: const Text('Cancel SOS?'),
-                        content: const Text('Has help reached you? Your SOS will turn off.'),
-                        actions: [
-                          TextButton(
-                            onPressed: () {
-                              if (ctx.mounted) Navigator.pop(ctx, false);
-                            },
-                            child: const Text('Keep SOS Active'),
-                          ),
-                          FilledButton(
-                            onPressed: () {
-                              if (ctx.mounted) Navigator.pop(ctx, true);
-                            },
-                            child: const Text('Confirm Cancel'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                final ok = await confirmTurnOff(
+                  context,
+                  title: 'Cancel SOS?',
+                  message: 'Has help reached you? Your SOS will turn off.',
+                  confirmLabel: 'Confirm Cancel',
                 );
-                if (ok == true && context.mounted) {
+                if (ok && context.mounted) {
                   _close(context, convoyService, ResolveReason.resolved);
                 }
               },
@@ -507,35 +534,13 @@ class EmergencySosSheet extends StatelessWidget {
               icon: Icons.do_not_disturb_on_outlined,
               tone: DsButtonTone.outline,
               onPressed: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 480),
-                      child: AlertDialog(
-                        backgroundColor: AppTheme.card,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        title: const Text('Cancel as False Alarm?'),
-                        content: const Text('Was this SOS a mistake and you are safe?'),
-                        actions: [
-                          TextButton(
-                            onPressed: () {
-                              if (ctx.mounted) Navigator.pop(ctx, false);
-                            },
-                            child: const Text('Keep SOS Active'),
-                          ),
-                          FilledButton(
-                            onPressed: () {
-                              if (ctx.mounted) Navigator.pop(ctx, true);
-                            },
-                            child: const Text('Confirm False Alarm'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                final ok = await confirmTurnOff(
+                  context,
+                  title: 'Cancel as False Alarm?',
+                  message: 'Was this SOS a mistake and you are safe?',
+                  confirmLabel: 'Confirm False Alarm',
                 );
-                if (ok == true && context.mounted) {
+                if (ok && context.mounted) {
                   _close(context, convoyService, ResolveReason.falseAlarm);
                 }
               },

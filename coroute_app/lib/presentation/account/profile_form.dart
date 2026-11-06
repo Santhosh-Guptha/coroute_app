@@ -4,16 +4,14 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
-import '../../core/constants/safety_constants.dart';
 import '../../data/models/medical_info.dart';
 import '../../data/services/auth_service.dart';
-import '../../data/services/settings_service.dart';
 import '../safety/safety_card_sheet.dart';
-import '../safety/safety_settings_sheet.dart';
 
 /// The one profile form: name, mobile number, bike (or pillion), the
 /// emergency contact, optional medical info ("Notes for a doctor", the
-/// safety card), the tank range, the language and the emergency text opt-out.
+/// safety card) and the emergency text opt-out. Tank range and language are in
+/// Settings.
 /// Used by [EditProfileScreen] and by the forced CompleteProfileScreen after
 /// a Google sign-in.
 ///
@@ -122,8 +120,6 @@ class _ProfileFormState extends State<ProfileForm> {
   bool _pillion = false;
   bool _busy = false;
   String? _error;
-  bool _customFuel = false;
-  final _fuel = TextEditingController();
 
   @override
   void initState() {
@@ -170,7 +166,6 @@ class _ProfileFormState extends State<ProfileForm> {
     _contactPhone.dispose();
     _allergies.dispose();
     _notes.dispose();
-    _fuel.dispose();
     super.dispose();
   }
 
@@ -253,38 +248,6 @@ class _ProfileFormState extends State<ProfileForm> {
 
   /// Switch rows look like the canvas settings rows (15/700 label, caption under it).
   TextStyle get _switchTitle => AppText.body.copyWith(fontWeight: FontWeight.w700);
-
-  /// Tank range (3.16, item 2) and the safety language (item 23); saved at once
-  /// in the phone's settings, not with the profile. Hidden when no SettingsService.
-  List<Widget> _rideAndLanguage() {
-    final s = Provider.of<SettingsService?>(context);
-    if (s == null) return const [];
-    final fuel = s.fuelRangeKm;
-    final isChoice = SafetySettingsSheet.fuelChoices.contains(fuel);
-    return [
-      _section('Ride'),
-      FuelRangeField(
-        value: fuel,
-        custom: _customFuel || (!isChoice && fuel > 0),
-        controller: _fuel,
-        onChoice: (v) {
-          setState(() => _customFuel = false);
-          s.setFuelRangeKm(v);
-        },
-        onCustom: () {
-          _fuel.text = isChoice ? '' : '$fuel';
-          setState(() => _customFuel = true);
-        },
-        onSave: () {
-          final v = int.tryParse(_fuel.text.trim()) ?? 0;
-          s.setFuelRangeKm(v.clamp(0, SafetyConstants.fuelMaxRangeKm));
-          setState(() => _customFuel = false);
-        },
-      ),
-      _section('Language'),
-      LanguagePicker(value: s.language, onChanged: (l) => s.setLanguage(l)),
-    ];
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -444,7 +407,6 @@ class _ProfileFormState extends State<ProfileForm> {
           title: Text('Share with a rider who comes to help', style: _switchTitle),
           subtitle: Text('Only after they accept, while your alert is open.', style: AppText.caption),
         ),
-        ..._rideAndLanguage(),
         _section('Emergency texts'),
         // Shown as a positive choice (on = receive); stored as the gateway's smsOptOut.
         SwitchListTile(

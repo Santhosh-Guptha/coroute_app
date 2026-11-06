@@ -157,7 +157,7 @@ void main() {
     await renderAndSaveScreen(
       tester: tester,
       env: env,
-      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.pricing),
+      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.plans),
       outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-071_admin_plans_pricing_screen.png',
     );
 
@@ -165,7 +165,7 @@ void main() {
     await renderAndSaveScreen(
       tester: tester,
       env: env,
-      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.offers),
+      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.coupons),
       outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-072_admin_promotions_tabs.png',
     );
 
@@ -193,16 +193,16 @@ void main() {
     await renderAndSaveScreen(
       tester: tester,
       env: env,
-      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.analytics),
+      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.revenue),
       outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-075_admin_payment_analytics_tab.png',
     );
 
-    // SCR-076: Admin Coupon Usage Tab
+    // SCR-076: Admin Payments list (the coupon usage tab was retired; coupons used are under Revenue)
     await renderAndSaveScreen(
       tester: tester,
       env: env,
-      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.couponUsage),
-      outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-076_admin_coupon_usage_tab.png',
+      widget: const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.payments),
+      outputPath: '../docs/ui-audit/screenshots/13_admin_client/SCR-076_admin_payments_list.png',
     );
 
     // SCR-077: Admin Settings (website numbers, gateway, audit log, tools)

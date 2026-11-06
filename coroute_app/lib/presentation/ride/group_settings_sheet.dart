@@ -1,19 +1,16 @@
 import 'guardian_sheet.dart';
+import 'public_ride_widgets.dart';
 import 'ride_feature_summary.dart';
 import 'ride_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../core/config/feature_gates.dart';
 import '../../core/constants/app_constants.dart';
-import '../../core/constants/network_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/network_wire.dart';
 import '../../data/models/safety_wire.dart';
 import '../../data/services/convoy_service.dart';
-import '../../data/services/settings_service.dart';
-import '../../data/services/plan_subscription_service.dart';
 
 bool _isGroupSettingsShowing = false;
 
@@ -55,7 +52,6 @@ class GroupSettingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    context.watch<PlanSubscriptionService?>();
     final service = context.watch<ConvoyService>();
     final convoy = service.allConvoys[convoyId];
     if (convoy == null) return const SizedBox.shrink();
@@ -318,90 +314,17 @@ class GroupSettingsView extends StatelessWidget {
             ),
           const SizedBox(height: 8),
 
-          // Mid-Ride Dynamic Waypoint Push
-          SheetSectionTitle('Send stops during the ride'),
+          // 4. Spoken alerts for the whole group (each rider's own voice choice is in Settings).
+          SheetSectionTitle('Spoken alerts'),
           group([
             DsSwitchRow(
-              label: 'Send stops and regroup points',
-              subtitle: 'The Lead sends route changes and regroup points to all.',
-              value: FeatureGates.isUnlocked(Feature.dynamicWaypointPush),
-              onChanged: (v) {
-                if (!FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
-                  FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
-                  return;
-                }
-              },
+              label: 'Spoken alerts',
+              subtitle: 'Separation and emergency warnings are read out.',
+              value: convoy.voiceGuidanceEnabled,
+              onChanged: lead ? (v) => service.updateGroupConfig(voiceGuidanceEnabled: v) : null,
               divider: false,
             ),
           ]),
-          const SizedBox(height: 8),
-
-          // 4. Alerts & Voice Guidance
-          SheetSectionTitle('Audio & guidance alerts'),
-          Builder(
-            builder: (context) {
-              final riderSettings = context.watch<SettingsService?>();
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  group([
-                    DsSwitchRow(
-                      label: 'Spoken alerts',
-                      subtitle: 'Separation and emergency warnings are read out.',
-                      value: convoy.voiceGuidanceEnabled,
-                      onChanged: lead ? (v) => service.updateGroupConfig(voiceGuidanceEnabled: v) : null,
-                      divider: true,
-                    ),
-                    DsSwitchRow(
-                      label: 'Lead voice first',
-                      subtitle: 'Other voices get quieter when the Lead speaks.',
-                      value: FeatureGates.isUnlocked(Feature.priorityIntercomDucking),
-                      onChanged: (v) {
-                        if (!FeatureGates.isUnlocked(Feature.priorityIntercomDucking)) {
-                          FeatureGates.showUpgradeModal(context, Feature.priorityIntercomDucking);
-                          return;
-                        }
-                      },
-                      divider: riderSettings != null,
-                    ),
-                    if (riderSettings != null)
-                      DsSwitchRow(
-                        label: 'Announce all alerts',
-                        subtitle: 'Read out all alerts.',
-                        value: riderSettings.voiceAnnounceAllAlerts,
-                        onChanged: (v) => riderSettings.setVoiceAnnounceAllAlerts(v),
-                        divider: false,
-                      ),
-                  ]),
-                  const SizedBox(height: 14),
-                  if (riderSettings != null)
-                  section(
-                    title: 'Map alert banner duration',
-                    value: riderSettings.mapAlertDismissSeconds == 0 ? 'Manual' : '${riderSettings.mapAlertDismissSeconds}s',
-                    help: riderSettings.mapAlertDismissSeconds == 0
-                        ? 'Manual dismissal only on map HUD.'
-                        : 'Leaves the map after ${riderSettings.mapAlertDismissSeconds}s.',
-                    control: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: Space.s8),
-                      child: Wrap(
-                        spacing: Space.s8,
-                        runSpacing: Space.s4,
-                        children: [
-                          for (final sec in NetworkConstants.mapAlertDismissChoices)
-                            ChoiceChip(
-                              label: Text(sec == 0 ? 'Manual' : '${sec}s'),
-                              selected: riderSettings.mapAlertDismissSeconds == sec,
-                              materialTapTargetSize: MaterialTapTargetSize.padded,
-                              onSelected: (_) => riderSettings.setMapAlertDismissSeconds(sec),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
           const SizedBox(height: 8),
 
           // 5. Network & Discovery Settings
@@ -420,6 +343,9 @@ class GroupSettingsView extends StatelessWidget {
                 }
               },
             ),
+
+          // Public ride (every plan): the host turns it on; my own "near me" and road warnings.
+          PublicRideSettingsCard(lead: lead),
 
           // 6. Location Status
           const SizedBox(height: 18),

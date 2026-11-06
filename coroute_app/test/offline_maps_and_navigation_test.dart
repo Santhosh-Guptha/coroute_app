@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/core/constants/app_constants.dart';
 import 'package:coroute_app/core/constants/safety_constants.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
@@ -38,13 +37,11 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
-    FeatureGates.forceAllUnlocked = true;
     tmp = await Directory.systemTemp.createTemp('coroute_offline_nav_');
     now = DateTime.now().millisecondsSinceEpoch;
   });
 
   tearDown(() async {
-    FeatureGates.forceAllUnlocked = false;
     TileCache.instance = null;
     try {
       await tmp.delete(recursive: true);

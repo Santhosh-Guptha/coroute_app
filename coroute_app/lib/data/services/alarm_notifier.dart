@@ -199,7 +199,9 @@ class AlarmNotifier {
             presentAlert: true,
             presentSound: true,
             presentBanner: true,
-            interruptionLevel: InterruptionLevel.critical,
+            // Time sensitive (iOS 15+, Time Sensitive capability): critical alerts need an Apple
+            // entitlement CoRoute does not have. See docs/BATTERY.md (iOS gaps).
+            interruptionLevel: InterruptionLevel.timeSensitive,
           ),
         ),
         payload: payloadCrash,
@@ -248,7 +250,7 @@ class AlarmNotifier {
             presentAlert: true,
             presentSound: true,
             presentBanner: true,
-            interruptionLevel: isCritical ? InterruptionLevel.critical : InterruptionLevel.timeSensitive,
+            interruptionLevel: InterruptionLevel.timeSensitive,
           ),
         ),
         payload: '$payloadPrompt:${p.key}',

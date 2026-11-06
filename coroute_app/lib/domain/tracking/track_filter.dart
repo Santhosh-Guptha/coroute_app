@@ -13,6 +13,7 @@ class TrackFilter {
     this.maxKmh = 250,
     this.minMoveM = 3,
     this.stationaryKeepEvery = const Duration(seconds: 25),
+    this.reanchorAfter = 3,
   });
 
   final double maxAccuracyM;
@@ -20,10 +21,27 @@ class TrackFilter {
   final double minMoveM;
   final Duration stationaryKeepEvery;
 
+  /// After this many fixes in a row that all "teleport" away from the last
+  /// kept fix but agree with each other, the last kept fix was the bad one
+  /// (a wrong cold-start fix): recording continues from the new position
+  /// instead of dropping the rest of the ride.
+  final int reanchorAfter;
+
   TrackPoint? _last;
   TrackPoint? get last => _last;
+  final List<TrackPoint> _jumped = [];
 
-  void reset() => _last = null;
+  void reset() {
+    _last = null;
+    _jumped.clear();
+  }
+
+  bool _teleport(TrackPoint a, TrackPoint b) {
+    final dtMs = b.ts - a.ts;
+    final d = GeoMath.haversine(a.lat, a.lng, b.lat, b.lng);
+    if (d <= 200) return false;
+    return dtMs <= 0 || d / (dtMs / 1000) * 3.6 > maxKmh;
+  }
 
   /// Returns true when [p] should be recorded (and remembers it).
   bool accept(TrackPoint p) {
@@ -35,7 +53,16 @@ class TrackFilter {
       if (dtMs <= 0) return false;
       final d = GeoMath.haversine(last.lat, last.lng, p.lat, p.lng);
       final kmh = d / (dtMs / 1000) * 3.6;
-      if (kmh > maxKmh && d > 200) return false; // teleport
+      if (kmh > maxKmh && d > 200) {
+        // Teleport, unless the following fixes keep agreeing with this one.
+        if (_jumped.isNotEmpty && _teleport(_jumped.last, p)) _jumped.clear();
+        _jumped.add(p);
+        if (_jumped.length < reanchorAfter) return false;
+        _jumped.clear();
+        _last = p;
+        return true;
+      }
+      _jumped.clear();
       if (d < minMoveM && p.speedKmh < 3 && dtMs < stationaryKeepEvery.inMilliseconds) return false; // drift
     }
     _last = p;

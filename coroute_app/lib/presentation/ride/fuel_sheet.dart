@@ -173,7 +173,8 @@ class _FuelSheetState extends State<_FuelSheet> {
     }
     final ok = safety!.refuel(
       full: full,
-      addedL: !full && added ? value : null,
+      // On a full fill the litres typed (if any) teach the phone the bike's real mileage.
+      addedL: added && value.isFinite && value > 0 && (!full || value <= p.capacityL) ? value : null,
       currentL: !full && !added && p.litresMode ? value : null,
       currentKm: !full && !added && !p.litresMode ? value : null,
     );

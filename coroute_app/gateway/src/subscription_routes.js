@@ -5,7 +5,18 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const { createRazorpayGateway, RazorpayError } = require('./razorpay_gateway');
 const { effectiveSubscription, isPaidTier } = require('./subscription_lifecycle');
+const { isStaffAccount, isGuestAccount, staffEmails } = require('./staff');
 const { verifyToken } = require('./auth');
+const { MEMBERSHIP_PLANS, isLegacyTier, normalizePlanId } = require('./entitlements');
+const { couponFitsPlan } = require('./plan_pricing');
+
+/**
+ * The legacy tiers (CoRoute Pro, Road Captain, Tour Operator) are no longer sold: riders buy the
+ * membership plans only. create-order answers 410 LEGACY_PLAN; status, history, verify and webhooks
+ * of orders made before stay alive for old app builds. `allowNewOrders` exists only so the older
+ * test suites can still exercise the settle/refund paths of a pre-existing legacy order.
+ */
+const legacySales = { allowNewOrders: false };
 
 const PLAN_PRICES_INR = {
   community: { monthly: 0, annual: 0, label: 'Community Rider' },
@@ -24,38 +35,27 @@ const DEFAULT_COUPONS = [
   {
     code: 'WELCOME50',
     name: 'Welcome 50% off',
-    description: '50% discount on any monthly or annual plan',
+    description: '50% off your first paid plan (Small Group or Large Group)',
     discountType: 'percentage',
     discountValue: 50,
-    applicableTiers: ['all'],
+    // Bound to the paid plans; no minimum order (the plans cost less than the old ₹100 minimum).
+    applicableTiers: [...MEMBERSHIP_PLANS],
     applicableCycles: ['all'],
     maxUsageTotal: 1000,
     maxUsagePerUser: 1,
-    minOrderAmount: 100,
-    validDays: 180,
-  },
-  {
-    code: 'CAPTAIN100',
-    name: 'Captain ₹100 off',
-    description: 'Flat ₹100 discount on Road Captain and Tour Operator passes',
-    discountType: 'fixed',
-    discountValue: 100,
-    applicableTiers: ['roadCaptain', 'tourOperator'],
-    applicableCycles: ['all'],
-    maxUsageTotal: 500,
-    maxUsagePerUser: 1,
-    minOrderAmount: 149,
+    minOrderAmount: 0,
+    newMembersOnly: true,
     validDays: 180,
   },
   {
     code: 'RIDERFREE',
     name: 'Rider free introductory month',
-    description: 'One free month (introductory offer), once per rider',
+    description: 'One free month of a group plan (introductory offer), once per rider',
     discountType: 'free',
     discountValue: 100,
-    // Bound to named plans (not "all"): the monthly Pro / Road Captain passes and the membership plans.
-    applicableTiers: ['proRider', 'roadCaptain', 'individual', 'group_small', 'group_large'],
-    applicableCycles: ['monthly'],
+    // Bound to named plans (not "all"): the paid plans.
+    applicableTiers: [...MEMBERSHIP_PLANS],
+    applicableCycles: ['all'],
     maxUsageTotal: 100,
     maxUsagePerUser: 1,
     minOrderAmount: 0,
@@ -64,15 +64,48 @@ const DEFAULT_COUPONS = [
 ];
 
 /**
+ * True for a seeded launch coupon still in its first-release shape, which made it unusable after
+ * the plan change: WELCOME50 with the ₹100 minimum (every plan costs less), RIDERFREE bound to the
+ * retired Individual plan. An admin edit away from that shape is left alone.
+ */
+function seedNeedsFix(c) {
+  if (!c || c.createdBy !== 'seed' || c.status === 'ARCHIVED') return false;
+  const tiers = Array.isArray(c.applicableTiers) ? c.applicableTiers : [];
+  if (c.code === 'WELCOME50') return Number(c.minOrderAmount) === 100 || tiers.includes('individual');
+  if (c.code === 'RIDERFREE') return tiers.includes('individual');
+  return false;
+}
+
+/**
  * Seeds the DEFAULT_COUPONS that are not in the coupon store yet (an archived or edited record
- * counts as present and is left alone). Returns the codes it created.
+ * counts as present and is left alone), and once rebinds a seeded coupon still in its first-release
+ * shape (seedNeedsFix) to today's plans and rules, keeping its usage history; a seeded window that
+ * already ran out starts again. Returns the codes it created or fixed.
  */
 async function seedDefaultCoupons(repo, now = Date.now()) {
   if (!repo || typeof repo.findCoupon !== 'function' || typeof repo.saveCoupon !== 'function') return [];
   const created = [];
   for (const d of DEFAULT_COUPONS) {
-    if (await repo.findCoupon(d.code)) continue;
     const { validDays, ...fields } = d;
+    const existing = await repo.findCoupon(d.code);
+    if (existing) {
+      if (!seedNeedsFix(existing)) continue;
+      const fixed = { ...existing, applicableTiers: fields.applicableTiers, applicableCycles: fields.applicableCycles, minOrderAmount: fields.minOrderAmount, description: fields.description };
+      if (fields.newMembersOnly) fixed.newMembersOnly = true;
+      delete fixed.key;
+      if (existing.status === 'EXPIRED' || (existing.expiresAt && existing.expiresAt < now)) {
+        fixed.expiresAt = now + validDays * 86400000;
+        fixed.status = 'ACTIVE';
+        fixed.isActive = true;
+      } else if (existing.status === 'PAUSED') {
+        fixed.isActive = false;
+      } else {
+        delete fixed.isActive;
+      }
+      await repo.saveCoupon(fixed);
+      created.push(d.code);
+      continue;
+    }
     await repo.saveCoupon({ ...fields, validFrom: now, expiresAt: now + validDays * 86400000, isActive: true, createdBy: 'seed' });
     created.push(d.code);
   }
@@ -138,7 +171,9 @@ function evaluateCoupon(coupon, { userId, planTier, billingCycle = 'monthly', am
     }
   }
   const tier = normalizeTier(planTier);
-  if (coupon.applicableTiers && !coupon.applicableTiers.includes('all') && !coupon.applicableTiers.includes(tier)) {
+  // A membership plan id (group_small, group_large) is matched the way checkout matches it.
+  const memberPlan = MEMBERSHIP_PLANS.includes(String(planTier || '').trim()) ? String(planTier).trim() : null;
+  if (coupon.applicableTiers && !coupon.applicableTiers.includes('all') && !coupon.applicableTiers.includes(tier) && !(memberPlan && couponFitsPlan(coupon, memberPlan))) {
     return { valid: false, error: `Coupon is not valid for ${tier}`, reason: 'TIER_MISMATCH' };
   }
   if (coupon.applicableCycles && !coupon.applicableCycles.includes('all') && !coupon.applicableCycles.includes(billingCycle)) {
@@ -186,19 +221,14 @@ function normalizeTier(tier) {
 }
 
 /**
- * Every plan a coupon can be bound to: the paid subscription tiers and the membership
- * categories, with their current price and whether they are on sale.
+ * Every plan a coupon can be bound to: the three membership plans (Individual, Small Group,
+ * Large Group) with their current price and whether they are on sale. Legacy tiers are not offered.
  */
 async function couponPlanOptions(repo) {
-  const plans = await getEffectivePlans(repo);
   const out = [];
-  for (const tier of ['proRider', 'roadCaptain', 'tourOperator']) {
-    const p = plans[tier];
-    if (!p) continue;
-    out.push({ id: tier, label: p.label || tier, kind: 'subscription', monthlyInr: Number(p.monthly) || 0, annualInr: Number(p.annual) || 0, isActive: p.isActive !== false });
-  }
   const catalog = repo && typeof repo.getMembershipCatalog === 'function' ? await repo.getMembershipCatalog().catch(() => ({})) : {};
-  for (const [id, c] of Object.entries(catalog || {})) {
+  for (const id of MEMBERSHIP_PLANS) {
+    const c = catalog && catalog[id];
     if (!c || typeof c !== 'object') continue;
     out.push({ id, label: c.name || id, kind: 'membership', monthlyInr: Number(c.monthlyPriceInr) || 0, annualInr: null, isActive: c.isActive !== false });
   }
@@ -218,10 +248,17 @@ function cleanApplicablePlans(input, options) {
   const ids = new Set(options.map((o) => o.id));
   const tiers = [];
   const unknown = [];
+  let legacyOnly = true;
   for (const r of raw) {
-    const id = ids.has(r) ? r : (normalizeTier(r) !== 'community' && ids.has(normalizeTier(r)) ? normalizeTier(r) : null);
+    // A legacy tier in an edited binding (an older record sent back) is dropped, never stored again.
+    if (isLegacyTier(r) || normalizeTier(r) !== 'community') continue;
+    legacyOnly = false;
+    // Plan ids in any case / spelling ("Small Group", "GROUP_LARGE"); the retired Individual maps to Small Group.
+    const alias = normalizePlanId(r);
+    const id = ids.has(r) ? r : (ids.has(alias) ? alias : null);
     if (id) { if (!tiers.includes(id)) tiers.push(id); } else unknown.push(r);
   }
+  if (legacyOnly) return { unknown: raw };
   return unknown.length ? { unknown } : { tiers };
 }
 
@@ -981,6 +1018,13 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     keyGenerator: (req) => `co:${req.user.userId}`, message: { error: 'Too many orders. Try again in a minute.', code: 'RATE_LIMITED' },
   });
   r.post('/subscription/create-order', createOrderLimiter, wrap(async (req, res) => {
+    // No new legacy purchases: riders buy a membership plan (Individual, Small Group, Large Group).
+    if (!legacySales.allowNewOrders) {
+      return res.status(410).json({
+        error: 'This plan is no longer sold. Choose Individual, Small Group or Large Group in the app.',
+        code: 'LEGACY_PLAN', reason: 'LEGACY_PLAN',
+      });
+    }
     const userId = req.user.userId;
     const userDoc = req.dbUser || (await repo.findUserById(userId));
     if (!userDoc) return res.status(404).json({ error: 'User not found' });
@@ -1624,6 +1668,8 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       if (at >= startOfToday(now)) bucket.today += amountInr;
     };
     const allUsers = async () => (typeof repo.listUsersBySubscription === 'function' ? repo.listUsersBySubscription(null, 10000) : repo.listUsers(10000));
+    /** Staff accounts (admins, STAFF_EMAILS; src/staff.js) are not counted as subscribers or revenue. */
+    const isStaffUser = (u, emails) => !isGuestAccount(u) && isStaffAccount(u, emails);
     /** One subscribers-table row. */
     const subscriberRow = (u, now) => {
       const st = effectiveSubscription(u, now);
@@ -1643,7 +1689,10 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     // GET /api/admin/subscription/overview
     r.get('/admin/subscription/overview', requireAdmin, wrap(async (req, res) => {
       const now = Date.now();
-      const users = await allUsers();
+      const emails = staffEmails();
+      const everyone = await allUsers();
+      const staffIds = new Set(everyone.filter((u) => isStaffUser(u, emails)).map((u) => u.userId));
+      const users = everyone.filter((u) => !staffIds.has(u.userId));
       const subscribers = { community: 0, proRider: 0, roadCaptain: 0, tourOperator: 0 };
       let active = 0; let expiringIn7Days = 0; let expiredLast30Days = 0;
       for (const u of users) {
@@ -1653,7 +1702,8 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
         if (st.isExpired && st.expiredAt >= now - 30 * DAY) expiredLast30Days++;
       }
       const orders = await repo.listRazorpayOrders({}, 10000);
-      const revenue = emptyRevenue(); const testRevenue = emptyRevenue();
+      const revenue = emptyRevenue(); const testRevenue = emptyRevenue(); const staffRevenue = emptyRevenue();
+      let staffPaidOrders = 0;
       const pendingClaims = 0; // the direct UPI / UTR path was removed; kept at 0 for older app builds
       let failedSignatures = 0; let paidOrders = 0; let failedPayments = 0; let expiredOrders = 0; let refundedOrders = 0;
       const refunds = { allTime: 0, testAllTime: 0 };
@@ -1664,6 +1714,12 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
         if (o.status !== 'PAID') continue;
         const amountInr = (Number(o.amountInPaise) || 0) / 100;
         if (amountInr <= 0) continue;
+        if (staffIds.has(o.userId)) {
+          // A staff payment (usually a checkout test) is flagged apart, never rider revenue.
+          staffPaidOrders++;
+          addRevenue(staffRevenue, amountInr - (Number(o.refundedAmountInPaise) || 0) / 100, Number(o.paidAt) || Number(o.createdAt) || 0, now);
+          continue;
+        }
         paidOrders++;
         const refundedInr = (Number(o.refundedAmountInPaise) || 0) / 100;
         if (refundedInr > 0) {
@@ -1675,8 +1731,8 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       }
       const sweep = typeof repo.getSubscriptionSweepStatus === 'function' ? await repo.getSubscriptionSweepStatus().catch(() => null) : null;
       res.set('Cache-Control', 'no-store').json({
-        subscribers, totalUsers: users.length, active, expiringIn7Days, expiredLast30Days,
-        revenue, testRevenue, paidOrders, pendingClaims, failedSignatures, failedPayments, expiredOrders, refundedOrders, refunds,
+        subscribers, totalUsers: users.length, excludesStaff: true, staffAccounts: staffIds.size, active, expiringIn7Days, expiredLast30Days,
+        revenue, testRevenue, staffRevenue, staffPaidOrders, paidOrders, pendingClaims, failedSignatures, failedPayments, expiredOrders, refundedOrders, refunds,
         lastSweepAt: Number(sweep?.lastSweepAt) || 0, lastSweep: sweep ? { scanned: sweep.scanned || 0, expired: sweep.expired || 0, warned: sweep.warned || 0 } : null,
         generatedAt: now,
       });
@@ -1691,7 +1747,11 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       const tier = rawTier ? (rawTier === 'community' ? 'community' : normalizeTier(rawTier)) : '';
       const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 50));
       const cursor = Math.max(0, parseInt(req.query.cursor, 10) || 0);
-      let rows = (await allUsers()).map((u) => subscriberRow(u, now));
+      // Staff accounts are left out unless ?staff=1 (only staff) or ?staff=all; each row says staff: true|false.
+      const emails = staffEmails();
+      const staffMode = ['1', 'all'].includes(String(req.query.staff || '')) ? String(req.query.staff) : '0';
+      let rows = (await allUsers()).map((u) => ({ ...subscriberRow(u, now), staff: isStaffUser(u, emails) }))
+        .filter((x) => (staffMode === 'all' ? true : (staffMode === '1' ? x.staff : !x.staff)));
       if (state === 'active') rows = rows.filter((x) => x.state === 'active' || x.state === 'expiring');
       else if (state === 'expiring') rows = rows.filter((x) => x.state === 'expiring');
       else if (state === 'expired') rows = rows.filter((x) => x.state === 'expired');
@@ -1748,6 +1808,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
 }
 
 module.exports = {
+  legacySales,
   PLAN_PRICES_INR,
   DEFAULT_COUPONS,
   seedDefaultCoupons,

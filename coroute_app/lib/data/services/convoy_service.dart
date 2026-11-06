@@ -1,4 +1,5 @@
 import '../../domain/tracking/ride_power_policy.dart';
+import '../../domain/tracking/battery_saver.dart';
 import '../../domain/tracking/location_cadence.dart';
 import '../../domain/tracking/battery_performance_monitor.dart';
 import '../../domain/safety/accel_bucket.dart';
@@ -40,6 +41,7 @@ import '../models/stop_point_model.dart';
 import '../models/trip_history_model.dart';
 import '../../domain/notify/status_text.dart';
 import '../../domain/tracking/geo_math.dart';
+import '../../domain/tracking/track_cleaner.dart';
 import '../../domain/tracking/track_point.dart';
 import 'api_client.dart';
 import 'background_service.dart';
@@ -47,7 +49,6 @@ import 'geo_service.dart';
 import 'realtime_service.dart';
 import 'settings_service.dart';
 import 'timeline_service.dart';
-import 'plan_subscription_service.dart';
 import 'track_recorder.dart';
 import 'trip_storage_service.dart';
 
@@ -66,7 +67,7 @@ class ConvoyService extends ChangeNotifier {
     this.timeline,
     this.settings,
     this.mesh,
-    this.planSubscription,
+    this.onPlanChanged,
     this.tilePrefetcher,
     this._accel,
     DeadReckoningEngine? deadReckoning,
@@ -129,6 +130,24 @@ class ConvoyService extends ChangeNotifier {
   /// Low battery detection (< 20%) state.
   bool get isLowBattery => _power.isLowBattery || (_currentBatteryLevel < 20 && !_isCharging);
 
+  /// Battery saver (Agent 4): the rider's switch, or automatic at 20 % or less (with
+  /// hysteresis, see [BatterySaverPolicy]). Gentler GPS, slower telemetry, 15 fps camera
+  /// and the dark map; never fewer safety features.
+  final BatterySaverPolicy _saverPolicy = BatterySaverPolicy();
+  bool _saverWas = false;
+  BatterySaverState get batterySaver =>
+      _saverPolicy.update(percent: _currentBatteryLevel, charging: _isCharging, userOn: settings?.batterySaver ?? false);
+  bool get batterySaverActive => batterySaver.active || isLowBattery;
+
+  /// Re-applies the battery saver levers when it switched on or off.
+  void _syncBatterySaver() {
+    final on = batterySaverActive;
+    if (on == _saverWas) return;
+    _saverWas = on;
+    _applyLowBatteryPolicy(on);
+    notifyListeners();
+  }
+
   /// Monitors and computes battery drain per riding hour.
   final BatteryPerformanceMonitor batteryMonitor = BatteryPerformanceMonitor();
 
@@ -144,7 +163,9 @@ class ConvoyService extends ChangeNotifier {
   final TripStorageService _trips;
   final TrackRecorder? recorder;
   final TimelineService? timeline;
-  final PlanSubscriptionService? planSubscription;
+  /// The rider's plan changed on the gateway (a legacy tier ending, warned or revoked): the app
+  /// re-reads its membership, the single source of what the rider may host.
+  final VoidCallback? onPlanChanged;
   final Battery _battery = Battery();
 
   StreamSubscription<Map<String, dynamic>>? _eventSub;
@@ -916,6 +937,10 @@ class ConvoyService extends ChangeNotifier {
     _myUserId = uid;
   }
 
+  /// "End ride" / "Leave" on the ride notification: the app asks for a confirm first
+  /// (same path as the plain notification's Leave button). Nothing ends by itself.
+  void requestLeaveFromNotification() => _onNotificationButton(BackgroundService.buttonLeave);
+
   /// SOS pressed on a notification: asks the UI to show the hold-to-send SOS screen.
   /// Never raises an SOS by itself.
   void openSosFromNotification() {
@@ -1242,6 +1267,8 @@ class ConvoyService extends ChangeNotifier {
           assistDefault: e['assistDefault'] is bool ? e['assistDefault'] as bool : null,
           townLimitKmh: (e['townLimitKmh'] as num?)?.toInt(),
           featurePolicy: e['featurePolicy'] is Map ? RideFeaturePolicy.fromJson(e['featurePolicy']) : null,
+          // The host's seats: raised at once when the host upgrades during the ride.
+          capacity: (e['capacity'] as num?)?.toInt(),
         );
         break;
       case 'TRIP_STATUS':
@@ -1273,32 +1300,11 @@ class ConvoyService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// `SUBSCRIPTION_ACTIVATED {tier, validUntil}`, `SUBSCRIPTION_EXPIRING {daysRemaining, tier, validUntil}`
-  /// and `SUBSCRIPTION_EXPIRED {previousTier, expiredAt}` from the gateway.
+  /// `SUBSCRIPTION_ACTIVATED`, `SUBSCRIPTION_EXPIRING`, `SUBSCRIPTION_EXPIRED` and
+  /// `SUBSCRIPTION_REVOKED` (legacy tiers, until the last one ends): the plan is re-read from
+  /// the membership, which already counts a legacy tier until its end date.
   void _onSubscriptionEvent(String type, Map<String, dynamic> e) {
-    final plan = planSubscription;
-    if (plan == null) return;
-    switch (type) {
-      case 'SUBSCRIPTION_ACTIVATED':
-        final tierName = e['tier']?.toString();
-        final until = e['validUntil'] is num ? (e['validUntil'] as num).toInt() : 0;
-        if (tierName == null) return;
-        plan.applyServerSubscription(tierName, until);
-        break;
-      case 'SUBSCRIPTION_EXPIRING':
-        plan.handleExpiringEvent(e);
-        break;
-      case 'SUBSCRIPTION_EXPIRED':
-        plan.handleExpiredEvent(e);
-        break;
-      case 'SUBSCRIPTION_REVOKED':
-        // {previousTier, revokedAt, reason}: ended by support or refunded; handled like an expiry.
-        plan.handleRevokedEvent(e);
-        break;
-      default:
-        return;
-    }
-    notifyListeners(); // convoy capacity and gated controls follow the tier
+    onPlanChanged?.call();
   }
 
   void _applyFleet(dynamic list) {
@@ -1404,7 +1410,7 @@ class ConvoyService extends ChangeNotifier {
     _clearNetwork();
     _writeRideAlive(false);
     if (_myUserId != null && convoy.riders.containsKey(_myUserId)) {
-      _trips.saveTrip(buildTripHistory(convoy, userId: _myUserId), userId: _myUserId).ignore();
+      _saveEndedTrip(convoy, _myUserId).ignore();
     }
     _stopStatus();
     recorder?.stop().ignore();
@@ -1505,7 +1511,7 @@ class ConvoyService extends ChangeNotifier {
       } else if (e.code == 'MEMBERSHIP_EXPIRED') {
         _lastError = 'Active membership required. Please renew your membership.';
       } else if (e.code == 'SOLO_TRIP_ONLY') {
-        _lastError = 'This is an Individual Membership trip. Additional riders cannot join.';
+        _lastError = "This is a solo ride. Others can't join it.";
       } else {
         _lastError = e.message;
       }
@@ -1529,7 +1535,7 @@ class ConvoyService extends ChangeNotifier {
     _writeRideAlive(false);
     final convoy = _allConvoys[gid];
     if (convoy != null && convoy.riders.isNotEmpty) {
-      _trips.saveTrip(buildTripHistory(convoy, userId: userId), userId: userId).ignore();
+      _saveEndedTrip(convoy, userId).ignore();
     }
     _stopStatus();
     recorder?.stop().ignore();
@@ -1744,7 +1750,7 @@ class ConvoyService extends ChangeNotifier {
   void _subscribeGps() {
     _gpsSub?.cancel();
     _gpsSub = Geolocator.getPositionStream(
-      locationSettings: _settingsFor(idle: _gpsIdleProfile, lowBattery: isLowBattery),
+      locationSettings: _settingsFor(idle: _gpsIdleProfile, lowBattery: batterySaverActive),
     ).listen(_onPosition, onError: (e) {
       debugPrint('GPS stream note: $e');
     });
@@ -1773,8 +1779,9 @@ class ConvoyService extends ChangeNotifier {
   }
 
   void _onDeadReckoningTick([Timer? timer, int? overrideNowMs]) {
-    if (!(settings?.tunnelDeadReckoning ?? true)) return;
     if (!_isRealGpsActive && timer != null) return;
+    // Battery: parked (idle GPS profile) and not coasting: nothing to estimate this second.
+    if (timer != null && _gpsIdleProfile && !_deadReckoning.isCoasting && !_deadReckoning.isConverging) return;
     final userId = _myUserId;
     final convoy = activeConvoy;
     if (userId == null || convoy == null) return;
@@ -1795,7 +1802,7 @@ class ConvoyService extends ChangeNotifier {
         speedKmh: fix.speedKmh,
         accuracyM: 80.0,
       );
-      recorder?.onFix(coastingFix);
+      recorder?.onFix(coastingFix, estimated: true); // projected along the plan: never part of the track
       if (_myFixes.hasListener) _myFixes.add(coastingFix);
 
       final updated = me.copyWith(
@@ -1821,7 +1828,7 @@ class ConvoyService extends ChangeNotifier {
         speedKmh: point.speedKmh,
         accuracyM: 20.0,
       );
-      recorder?.onFix(convFix);
+      recorder?.onFix(convFix, estimated: true); // blend between the estimate and GPS: never part of the track
       if (_myFixes.hasListener) _myFixes.add(convFix);
 
       final updated = me.copyWith(
@@ -1871,7 +1878,7 @@ class ConvoyService extends ChangeNotifier {
       speedKmh: fix.speedKmh,
       accuracyM: 80.0,
     );
-    recorder?.onFix(coastingFix);
+    recorder?.onFix(coastingFix, estimated: true); // projected along the plan: never part of the track
     if (_myFixes.hasListener) _myFixes.add(coastingFix);
 
     final updated = rider.copyWith(
@@ -1986,7 +1993,8 @@ class ConvoyService extends ChangeNotifier {
           speedKmh: point.speedKmh,
           accuracyM: accuracy,
         );
-        recorder?.onFix(fix);
+        // The track records the real GPS fix; the blended position only moves the marker smoothly.
+        recorder?.onFix(TrackPoint(ts: now, lat: position.latitude, lng: position.longitude, speedKmh: speedKmh, accuracyM: accuracy));
         if (_myFixes.hasListener) _myFixes.add(fix);
         final base = current ?? RiderModel(userId: userId, name: 'Rider', lat: point.lat, lng: point.lng, lastSeenEpochMs: now);
         final updated = base.copyWith(
@@ -2027,7 +2035,8 @@ class ConvoyService extends ChangeNotifier {
           speedKmh: point.speedKmh,
           accuracyM: accuracy,
         );
-        recorder?.onFix(fix);
+        // The track records the real GPS fix; the blended position only moves the marker smoothly.
+        recorder?.onFix(TrackPoint(ts: now, lat: position.latitude, lng: position.longitude, speedKmh: speedKmh, accuracyM: accuracy));
         if (_myFixes.hasListener) _myFixes.add(fix);
         final base = current ?? RiderModel(userId: userId, name: 'Rider', lat: point.lat, lng: point.lng, lastSeenEpochMs: now);
         final updated = base.copyWith(
@@ -2083,7 +2092,7 @@ class ConvoyService extends ChangeNotifier {
     } else {
       _stationarySince ??= DateTime.now();
       // Throttle GPS polling when stationary: switch to idle profile after 30s (low battery) or 60s (normal)
-      final stationaryThreshold = isLowBattery ? const Duration(seconds: 30) : const Duration(seconds: 60);
+      final stationaryThreshold = batterySaverActive ? const Duration(seconds: 30) : const Duration(seconds: 60);
       if (!_gpsIdleProfile && DateTime.now().difference(_stationarySince!) >= stationaryThreshold) {
         _gpsIdleProfile = true;
         _subscribeGps();
@@ -2133,7 +2142,8 @@ class ConvoyService extends ChangeNotifier {
       _gpsBand.band,
       base: _power.telemetryInterval(moving: isMoving, lowData: settings?.lowData ?? false, critical: critical),
       moving: isMoving,
-      lowData: (settings?.lowData ?? false) || _power.conserving || isLowBattery,
+      lowData: (settings?.lowData ?? false) || _power.conserving || isLowBattery ||
+          BatterySaverProfile.slowTelemetry(batterySaver, critical: critical),
       groupSize: convoy.riders.length,
     );
     if (since >= interval || movedFar || shouldClearStatus) {
@@ -2299,10 +2309,13 @@ class ConvoyService extends ChangeNotifier {
       if (before != _power.conserving || prevLow != nowLow || prevLevel != _currentBatteryLevel) {
         notifyListeners();
       }
+      _syncBatterySaver();
     } catch (_) {}
   }
 
   void _applyLowBatteryPolicy(bool lowBattery) {
+    // The rider's battery saver switch counts as low battery for these levers too.
+    lowBattery = lowBattery || (settings?.batterySaver ?? false);
     tilePrefetcher?.handleLowBattery(lowBattery);
     mesh?.setLowBatteryMode(lowBattery);
     if (_isRealGpsActive) {
@@ -2370,11 +2383,15 @@ class ConvoyService extends ChangeNotifier {
   }) {
     final gid = groupId ?? _activeGroupId;
     if (gid == null || text.trim().isEmpty) return;
+    // Messages are a group feature: a solo ride (Community host) has nobody to message.
+    if (_allConvoys[gid]?.isSoloRide == true) return;
     _enqueue('CHAT', {'text': text.trim(), 'isQuickCard': isQuickCard, 'cardType': cardType, 'sentAt': _clock()}, targetGroupId: gid);
   }
 
   void requestWait(String requesterName) {
     if (_activeGroupId == null) return;
+    // "Wait for me" asks the group: nothing to ask in a solo ride.
+    if (activeConvoy?.isSoloRide == true) return;
     _enqueue('WAIT', {});
   }
 
@@ -2459,7 +2476,7 @@ class ConvoyService extends ChangeNotifier {
     final convoy = activeConvoy;
     if (convoy == null) return;
     if (_myUserId != null && convoy.riders.containsKey(_myUserId)) {
-      await _trips.saveTrip(buildTripHistory(convoy, userId: _myUserId), userId: _myUserId);
+      await _saveEndedTrip(convoy, _myUserId);
     }
     _enqueue('TRIP_STATUS', {'status': 'ENDED'});
     _onTripEnded(convoy.copyWith(tripStatus: 'ENDED'));
@@ -2938,6 +2955,7 @@ class ConvoyService extends ChangeNotifier {
   }
 
   void _onSettingsChanged() {
+    _syncBatterySaver();
     final on = _smsFallbackOn;
     if (on == _smsFallbackWas) return;
     _smsFallbackWas = on;
@@ -3422,12 +3440,42 @@ class ConvoyService extends ChangeNotifier {
   }
 
   // ----------------------------------------------------------- trip summary
+  /// Saves the ended trip to history at once, with the numbers and the trail
+  /// computed on this phone from its own recorded track (no server work, works
+  /// offline). The server's report replaces it later; the server uses these
+  /// numbers itself when the track never reached it.
+  Future<void> _saveEndedTrip(ConvoyModel convoy, String? userId) async {
+    ({TripStats stats, List<TrackPoint> cleaned})? summary;
+    try {
+      summary = await recorder?.summaryOf(convoy.groupId, minStop: Duration(seconds: convoy.stopThresholdSeconds));
+    } catch (_) {
+      summary = null;
+    }
+    await _trips.saveTrip(buildTripHistory(convoy, userId: userId, summary: summary), userId: userId);
+  }
+
   /// The phone's own record of a convoy trip, saved the moment it ends so the
   /// trip is in history at once (also offline). It carries no made-up numbers:
-  /// distance, speeds and the route come from the server's report, which
-  /// replaces this record a minute later (same trip id).
-  TripHistoryModel buildTripHistory(ConvoyModel convoy, {String? userId}) {
+  /// with a [summary] (this phone's own cleaned track) distance, speeds, stops
+  /// and the trail come from it; without one they stay 0 until the server's
+  /// report replaces this record (same trip id). The trail is only this
+  /// rider's recorded track, cut at signal gaps, never the planned route.
+  TripHistoryModel buildTripHistory(ConvoyModel convoy, {String? userId, ({TripStats stats, List<TrackPoint> cleaned})? summary}) {
     final now = DateTime.now().millisecondsSinceEpoch;
+    final s = summary?.stats;
+    final trail = summary == null
+        ? const <TripBreadcrumbPoint>[]
+        : [
+            for (final e in TrackCleaner.trail(summary.cleaned))
+              TripBreadcrumbPoint(
+                lat: double.parse(e.point.lat.toStringAsFixed(5)),
+                lng: double.parse(e.point.lng.toStringAsFixed(5)),
+                speedKmh: e.point.speedKmh,
+                heading: 0,
+                timestamp: e.point.ts,
+                gapBefore: e.gapBefore,
+              ),
+          ];
     return TripHistoryModel(
       tripId: 'TRIP-${convoy.groupId.replaceAll('GRP-', '')}-${userId ?? convoy.createdByUserId}',
       tripName: convoy.name,
@@ -3435,15 +3483,19 @@ class ConvoyService extends ChangeNotifier {
       destinationName: convoy.destinationName.isNotEmpty ? convoy.destinationName : 'Final Waypoint',
       startTimeEpochMs: convoy.createdAtEpochMs,
       endTimeEpochMs: math.max(now, convoy.createdAtEpochMs + 60000),
-      totalDistanceKm: 0,
-      topSpeedKmh: 0,
-      avgSpeedKmh: 0,
+      totalDistanceKm: s == null ? 0 : double.parse((s.distanceM / 1000).toStringAsFixed(1)),
+      topSpeedKmh: s?.maxKmh ?? 0,
+      avgSpeedKmh: s?.avgMovingKmh ?? 0,
       riderCount: convoy.riders.length,
-      stopCount: 0,
+      stopCount: s?.stops.length ?? 0,
+      movingMs: s?.movingMs ?? 0,
+      restMs: s?.restMs ?? 0,
+      breadcrumbTrail: trail,
       userId: userId ?? convoy.createdByUserId,
       createdByUserName: convoy.createdByUserName,
       groupId: convoy.groupId,
       source: 'device',
+      clientStats: s?.toJson(),
     );
   }
 

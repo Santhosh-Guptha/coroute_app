@@ -16,7 +16,6 @@ import '../auth/access_gate_screen.dart';
 import '../ride/riders_ladder.dart';
 import '../timeline/member_colors.dart';
 import 'admin_convoy_inspector.dart';
-import 'admin_device_compatibility_screen.dart';
 import 'admin_emergencies_panel.dart';
 import 'admin_insights_screen.dart';
 import 'admin_payments_logic.dart';
@@ -29,8 +28,9 @@ import 'admin_settings_screen.dart';
 import 'admin_ui.dart';
 import 'admin_users_screen.dart';
 
-/// The sections of the one admin console (rail on wide screens, drawer on phones).
-enum AdminSection { dashboard, users, rides, safety, payments, plans, reviews, insights, devices, settings }
+/// The sections of the one admin console (rail on wide screens, drawer on phones): eight, each
+/// with a short plain name. Plans and coupons are tabs of Payments; phone reports are in Insights.
+enum AdminSection { dashboard, users, rides, safety, payments, reviews, insights, settings }
 
 /// The nav items for an admin screen that shows [current]. From the
 /// overview a section is pushed; from another section it replaces that
@@ -63,13 +63,11 @@ List<AdminNavItem> adminNavItems(BuildContext context, AdminSection current, {in
       onTap: current == AdminSection.dashboard ? null : () => Navigator.maybePop(context),
     ),
     item(AdminSection.users, Icons.people_alt_outlined, 'Riders', () => const AdminUsersScreen()),
-    item(AdminSection.rides, Icons.alt_route_rounded, 'Groups and rides', () => const AdminRideHistoryScreen()),
+    item(AdminSection.rides, Icons.alt_route_rounded, 'Rides', () => const AdminRideHistoryScreen()),
     item(AdminSection.safety, Icons.sos_rounded, 'Safety', () => const AdminSafetyScreen()),
     item(AdminSection.payments, Icons.payments_outlined, 'Payments', () => const AdminPlansPricingScreen()),
-    item(AdminSection.plans, Icons.sell_outlined, 'Plans and coupons', () => const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.pricing)),
     item(AdminSection.reviews, Icons.rate_review_outlined, 'Reviews', () => const AdminReviewsScreen()),
     item(AdminSection.insights, Icons.insights_rounded, 'Insights', () => const AdminInsightsScreen()),
-    item(AdminSection.devices, Icons.phonelink_setup_rounded, 'Devices', () => const AdminDeviceCompatibilityScreen()),
     item(AdminSection.settings, Icons.settings_outlined, 'Settings', () => const AdminSettingsScreen()),
     if (onSignOut != null) AdminNavItem(icon: Icons.logout_rounded, label: 'Sign out', danger: true, onTap: onSignOut),
   ];
@@ -89,13 +87,29 @@ class MasterAdminDashboard extends StatefulWidget {
 
   const MasterAdminDashboard({super.key, this.alarm});
 
+  /// Riders, staff and accounts on hold from `GET /admin/users`: the server's `counts` (staff
+  /// and guests are not riders). An older gateway without `counts` is counted the same way.
+  static ({int riders, int staff, int onHold}) userCounts(Object? res) {
+    int n(Object? v) => v is num ? v.toInt() : 0;
+    final c = res is Map ? res['counts'] : null;
+    if (c is Map) return (riders: n(c['riders']), staff: n(c['staff']), onHold: n(c['onHold']));
+    final users = adminMapList(res is Map ? res['users'] : null);
+    bool guest(Map<String, dynamic> u) =>
+        u['provider'] == 'guest' || u['isGuest'] == true || (u['email']?.toString() ?? '').endsWith('@guest.coroute.local');
+    return (
+      riders: users.where((u) => !AdminUsersScreen.isStaff(u) && !guest(u)).length,
+      staff: users.where(AdminUsersScreen.isStaff).length,
+      onHold: users.where((u) => AccountStatus.fromCode(u['status']) == AccountStatus.onHold).length,
+    );
+  }
+
   @override
   State<MasterAdminDashboard> createState() => _MasterAdminDashboardState();
 }
 
 class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
-  /// Registered accounts, null until the first answer (then the counts show).
-  List<Map<String, dynamic>>? _users;
+  /// Rider / staff / on-hold counts from /admin/users, null until the first answer.
+  ({int riders, int staff, int onHold})? _userCounts;
   bool _loadingUsers = false;
   final GlobalKey<AdminEmergenciesPanelState> _emergencies = GlobalKey<AdminEmergenciesPanelState>();
 
@@ -142,7 +156,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
     setState(() => _loadingUsers = true);
     try {
       final res = await context.read<ApiClient>().get('/admin/users');
-      _users = adminMapList(res is Map ? res['users'] : null);
+      _userCounts = MasterAdminDashboard.userCounts(res);
     } catch (_) {
       // Offline or busy: the counts that need it stay hidden or keep their last value.
     }
@@ -242,8 +256,8 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
     });
     final totalRiders = convoys.fold<int>(0, (n, c) => n + c.riders.length);
 
-    final users = _users;
-    final onHold = users?.where((u) => AccountStatus.fromCode(u['status']) == AccountStatus.onHold).length;
+    final counts = _userCounts;
+    final onHold = counts?.onHold;
 
     // 1. Emergencies: every open SOS and crash, with the alarm while the console is open.
     final sosSection = <Widget>[
@@ -270,7 +284,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             AdminRow(
               leading: const AdminRowIcon(Icons.two_wheeler_rounded),
               title: 'No live rides right now',
-              subtitle: 'Finished rides are in Groups and rides.',
+              subtitle: 'Finished rides are in Rides.',
               divider: false,
               onTap: () => _push(const AdminRideHistoryScreen()),
             )
@@ -322,11 +336,11 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
         delta: sos.isEmpty ? 'None open' : 'Needs attention',
         deltaColor: sos.isEmpty ? null : AppTheme.sos,
       ),
-      if (users != null)
+      if (counts != null)
         AdminKpiTile(
-          label: 'Accounts',
-          value: '${users.length}',
-          delta: (onHold ?? 0) > 0 ? '$onHold on hold' : 'All in good standing',
+          label: 'Riders (excl. staff)',
+          value: '${counts.riders}',
+          delta: (onHold ?? 0) > 0 ? '$onHold on hold' : (counts.staff > 0 ? '${counts.staff} staff not counted' : 'All in good standing'),
           deltaColor: (onHold ?? 0) > 0 ? AppTheme.warnText : null,
         ),
     ];
@@ -365,7 +379,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
         )
       else ...[
         AdminKpiGrid(tiles: [
-          AdminKpiTile(label: 'Riders', value: adminCount(riders['total']), delta: '${adminCount(riders['newInPeriod'])} new'),
+          AdminKpiTile(label: 'Riders', value: adminCount(riders['total']), delta: '${adminCount(riders['newInPeriod'])} new, excl. staff'),
           AdminKpiTile(label: 'Active 7 days', value: adminCount(riders['active7d']), delta: '${adminCount(riders['active30d'])} in 30 days'),
           AdminKpiTile(label: 'Rides finished', value: adminCount(rides['groupsInPeriod']), delta: '${adminCount(rides['groupsCompleted'])} all time'),
           AdminKpiTile(label: 'Rider trips', value: adminCount(rides['tripsInPeriod']), delta: '${adminCount(rides['completedTrips'])} all time'),
@@ -405,27 +419,21 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
           ),
           AdminRow(
             leading: const AdminRowIcon(Icons.alt_route_rounded),
-            title: 'Groups and rides',
+            title: 'Rides',
             subtitle: 'Live and finished rides, with each ride\'s numbers',
             onTap: () => _push(const AdminRideHistoryScreen()),
           ),
           AdminRow(
             leading: AdminRowIcon(Icons.sos_rounded, color: sos.isEmpty ? null : AppTheme.sos),
             title: 'Safety',
-            subtitle: 'Emergencies, false alarms, broadcast',
+            subtitle: 'Emergencies, false alarms, public ride reports',
             onTap: () => _push(const AdminSafetyScreen()),
           ),
           AdminRow(
             leading: const AdminRowIcon(Icons.payments_outlined),
             title: 'Payments',
-            subtitle: 'Payments, members, refunds',
+            subtitle: 'Payments, revenue, plans and coupons',
             onTap: () => _push(const AdminPlansPricingScreen()),
-          ),
-          AdminRow(
-            leading: const AdminRowIcon(Icons.sell_outlined),
-            title: 'Plans and coupons',
-            subtitle: 'Prices, plan features, coupons and offers',
-            onTap: () => _push(const AdminPlansPricingScreen(initialTab: AdminPaymentsTab.pricing)),
           ),
           AdminRow(
             leading: const AdminRowIcon(Icons.rate_review_outlined),
@@ -434,15 +442,15 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             onTap: () => _push(const AdminReviewsScreen()),
           ),
           AdminRow(
-            leading: const AdminRowIcon(Icons.phonelink_setup_rounded),
-            title: 'Devices',
-            subtitle: 'Phone compatibility reports',
-            onTap: () => _push(const AdminDeviceCompatibilityScreen()),
+            leading: const AdminRowIcon(Icons.insights_rounded),
+            title: 'Insights',
+            subtitle: 'Feedback, website visits, app versions, phones',
+            onTap: () => _push(const AdminInsightsScreen()),
           ),
           AdminRow(
             leading: const AdminRowIcon(Icons.settings_outlined),
             title: 'Settings',
-            subtitle: 'Website, payment gateway, audit log, tools',
+            subtitle: 'Website, payment gateway, audit log',
             onTap: () => _push(const AdminSettingsScreen()),
             divider: false,
           ),

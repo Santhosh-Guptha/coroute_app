@@ -222,24 +222,22 @@ void main() {
 
   group('FEAT-02: Entitlement & Feature Gating Tests', () {
     tearDown(() {
-      FeatureGates.forceAllUnlocked = true;
     });
 
     test('TEST-ENT-01: Broadcast is available in single plan for all riders', () {
       // Single plan architecture: broadcast is available for all riders
-      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast, SubscriptionTier.community), isTrue);
-      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast, SubscriptionTier.proRider), isTrue);
-      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast, SubscriptionTier.roadCaptain), isTrue);
-      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast, SubscriptionTier.tourOperator), isTrue);
+      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast), isTrue);
+      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast), isTrue);
+      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast), isTrue);
+      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast), isTrue);
     });
 
     test('TEST-ENT-02: Receive is unlocked for ALL tiers (Community, Pro, Captain, Tour Operator)', () {
-      FeatureGates.forceAllUnlocked = false;
 
-      expect(FeatureGates.isUnlocked(Feature.roadHazardReceive, SubscriptionTier.community), isTrue);
-      expect(FeatureGates.isUnlocked(Feature.roadHazardReceive, SubscriptionTier.proRider), isTrue);
-      expect(FeatureGates.isUnlocked(Feature.roadHazardReceive, SubscriptionTier.roadCaptain), isTrue);
-      expect(FeatureGates.isUnlocked(Feature.roadHazardReceive, SubscriptionTier.tourOperator), isTrue);
+      expect(FeatureGates.isUnlocked(Feature.roadHazardReceive), isTrue);
+      expect(FeatureGates.isUnlocked(Feature.roadHazardReceive), isTrue);
+      expect(FeatureGates.isUnlocked(Feature.roadHazardReceive), isTrue);
+      expect(FeatureGates.isUnlocked(Feature.roadHazardReceive), isTrue);
     });
   });
 }

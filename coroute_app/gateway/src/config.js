@@ -57,6 +57,9 @@ function trustList(v) {
   return items.length ? items : ['loopback'];
 }
 
+/** The one support / contact address (website contact, map-data providers); SUPPORT_EMAIL overrides it. */
+const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim();
+
 const config = {
   env: process.env.NODE_ENV || 'production',
   port: int('PORT', 3000),
@@ -77,6 +80,8 @@ const config = {
   googleClientIds: list('GOOGLE_CLIENT_IDS'),
   // Seeds the first admin account(s) only; roles are then managed in the database.
   adminEmails: list('BOOTSTRAP_ADMIN_EMAILS', list('ADMIN_EMAILS')),
+  // Extra staff accounts (comma list of emails) left out of rider counts and analytics, like admins.
+  staffEmails: list('STAFF_EMAILS'),
   // Account gate: how long a users document is trusted before it is read again (status, role, password change).
   userGateTtlMs: int('USER_GATE_TTL_MS', 30000),
   // JWT_SECRET_PREVIOUS (optional, rotation grace): tokens signed with it are still ACCEPTED (never signed);
@@ -280,6 +285,20 @@ const config = {
   discoveryWaveGapMin: int('DISCOVERY_WAVE_GAP_MIN', 5),
   discoveryLateralM: int('DISCOVERY_LATERAL_M', 300),
   discoveryCrossWindowS: int('DISCOVERY_CROSS_WINDOW_S', 180),
+  // Public ride, safe contact and road warnings (src/public_ride.js). Every plan; off per ride by default.
+  publicRideEnabled: int('PUBLIC_RIDE_ENABLED', 1) === 1,
+  publicRideTickMs: int('PUBLIC_RIDE_TICK_MS', 30000),
+  publicRideSnapM: int('PUBLIC_RIDE_SNAP_M', 500),
+  publicRideParkMin: int('PUBLIC_RIDE_PARK_MIN', 10),
+  publicRideRequestMin: int('PUBLIC_RIDE_REQUEST_MIN', 10),
+  publicRideChannelMin: int('PUBLIC_RIDE_CHANNEL_MIN', 30),
+  publicRideBlockDays: int('PUBLIC_RIDE_BLOCK_DAYS', 30),
+  publicRideSuspendBlocks: int('PUBLIC_RIDE_SUSPEND_BLOCKS', 3),
+  publicRideSuspendDays: int('PUBLIC_RIDE_SUSPEND_DAYS', 7),
+  roadWarnConfirms: int('ROAD_WARN_CONFIRMS', 2),
+  roadWarnNearM: int('ROAD_WARN_NEAR_M', 5000),
+  roadWarnReachM: int('ROAD_WARN_REACH_M', 20000),
+  roadWarnMergeM: int('ROAD_WARN_MERGE_M', 1000),
   auditRetentionDays: int('AUDIT_RETENTION_DAYS', 180),
 
   // 3.16 safety round. "Far by road": after escalation, the best candidate the road check rejected is
@@ -324,12 +343,14 @@ const config = {
   geoCountryBbox: (process.env.GEO_COUNTRY_BBOX || '68.0,6.4,97.6,37.1').split(',').map(Number),
   geoPhotonMinIntervalMs: int('GEO_PHOTON_MIN_INTERVAL_MS', 250),
   geoReverseTimeoutMs: int('GEO_REVERSE_TIMEOUT_MS', 8000),
-  geoContact: (process.env.GEO_CONTACT || process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
+  geoContact: (process.env.GEO_CONTACT || SUPPORT_EMAIL).trim(),
   geoCacheDays: int('GEO_CACHE_DAYS', 30),
   geoMinIntervalMs: int('GEO_MIN_INTERVAL_MS', 1100),
 
   // Website: where the "Download" buttons send people. Play Store URL once the listing is live,
   // otherwise the APKs served by this gateway from public/ (see deploy/RUNBOOK.md section 4).
+  // PLAY_STORE_URL (https only) also turns on the website's <!--play--> blocks: the "Rate CoRoute on Google Play"
+  // button. Empty: those blocks are left out and the <!--no-play--> text shows instead (src/pages.js).
   // Empty APK_URL / APK_ARM32_URL mean <origin>/coroute.apk and <origin>/coroute-32bit.apk.
   playStoreUrl: (process.env.PLAY_STORE_URL || '').trim(),
   apkUrl: (process.env.APK_URL || '').trim(),
@@ -344,7 +365,7 @@ const config = {
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
   latestAppBuild: int('LATEST_APP_BUILD', 10018),
-  supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
+  supportEmail: SUPPORT_EMAIL,
 
   // Payment Screen & Subscription Gating Toggle
   // When false: disables payment screens and unlocks plan-based features for all users.
@@ -389,6 +410,10 @@ const config = {
   reviewPhotoStore: (process.env.REVIEW_PHOTO_STORE || 'disk').trim().toLowerCase(),
   reviewPhotoParUrl: (process.env.REVIEW_PHOTO_PAR_URL || '').trim(),
 };
+
+// User-Agent for the map-data providers (Nominatim, Photon, Overpass ask for a contact): the gateway
+// version, this site's origin and the contact address, in one place.
+config.providerUserAgent = `CoRoute/${require('../package.json').version} (+${config.publicOrigin || 'https://coroute.duckdns.org'}; ${config.geoContact})`;
 
 if (!isTest && config.jwtSecret.length < 32) {
   throw new Error('[config] JWT_SECRET must be at least 32 characters');

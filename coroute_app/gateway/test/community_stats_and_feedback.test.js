@@ -51,13 +51,20 @@ test('Public Community Stats & Post-Trip Feedback Review Suite', async (t) => {
     const body = res.json;
 
     assert.equal(body.enabled, true);
-    assert.ok(typeof body.totalRiders === 'number' && body.totalRiders >= 2);
-    assert.ok(typeof body.totalKilometers === 'number' && body.totalKilometers >= 700);
-    assert.ok(Array.isArray(body.longestTrips));
-    assert.ok(body.longestTrips.length >= 2);
+    // Privacy (public_privacy.js): one rider is below the threshold of 10 and reads as 0; distance is rounded
+    // down to 100 km; no per-ride list on the public website.
+    assert.equal(body.totalRiders, 0);
+    assert.ok(typeof body.totalKilometers === 'number' && body.totalKilometers >= 700 && body.totalKilometers % 100 === 0);
+    assert.deepEqual(body.longestTrips, []);
+    assert.equal(body.lastUpdated % 3600000, 0, 'time to the hour only');
+
+    // The exact figures and the longest trips stay in the admin view.
+    const admin = await env.api('GET', '/admin/community-stats/config', undefined, adminToken);
+    assert.equal(admin.json.stats.totalRiders, 1); // Rider Alpha; the admin is staff and not counted
+    assert.ok(admin.json.stats.longestTrips.length >= 2);
 
     // Verify longest trip ordering
-    const topTrip = body.longestTrips[0];
+    const topTrip = admin.json.stats.longestTrips[0];
     assert.equal(topTrip.rank, 1);
     assert.equal(topTrip.distanceKm, 420);
     assert.equal(topTrip.anonymousRiderLabel, 'Rider #1');

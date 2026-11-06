@@ -8,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/domain/mesh/mesh_transport.dart';
 import 'package:coroute_app/domain/tracking/battery_governor.dart';
 import 'package:coroute_app/domain/tracking/battery_performance_monitor.dart';
@@ -390,7 +389,6 @@ void main() {
   group('ISSUE-6H: Automated Performance & UI Thread Benchmarks', () {
     test('TilePrefetcher.tilesAlongAsync handles 5,000 route points without blocking UI thread', () async {
       SharedPreferences.setMockInitialValues({});
-      FeatureGates.forceAllUnlocked = true;
 
       // Generate dense 5,000 points serpentine route
       final points = <(double, double)>[];

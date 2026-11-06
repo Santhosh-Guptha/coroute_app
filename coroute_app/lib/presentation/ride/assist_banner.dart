@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/emergency_nav_constants.dart';
+import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
@@ -306,7 +307,7 @@ class AssistBanner extends StatelessWidget {
       case AssistStage.onScene:
         actions = [
           pair(
-            outline(Icons.local_hospital_outlined, L10n.t('assist.call112.short'), () => dialNumber(context, '112')),
+            outline(Icons.local_hospital_outlined, L10n.t('assist.call112.short'), () => dialNumber(context, SafetyConstants.emergencyNumber)),
             outline(Icons.open_in_full_rounded, L10n.t('assist.details'), open),
           ),
         ];

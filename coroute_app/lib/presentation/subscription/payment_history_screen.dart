@@ -2,18 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/membership_model.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/membership_service.dart';
-import '../../data/services/plan_subscription_service.dart';
-import 'plan_selector_screen.dart';
-import 'subscription_expiry_banner.dart';
+import 'membership_dashboard_screen.dart';
 
-/// Payments & plan history: the current plan, every plan period, every
-/// payment and the order ledger, all from `GET /subscription/history`.
+/// Payments & plan history: the current plan (membership, or a legacy plan until it ends), every
+/// membership payment, and the legacy plan periods and orders from `GET /subscription/history`
+/// (read-only: legacy plans are no longer sold).
 class PaymentHistoryScreen extends StatefulWidget {
   const PaymentHistoryScreen({super.key});
 
@@ -142,7 +140,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
   }
 
   Future<void> _load({bool refresh = false}) async {
-    final plan = context.read<PlanSubscriptionService?>();
+    final api = context.read<ApiClient?>();
     final mem = context.read<MembershipService?>();
     setState(() {
       if (refresh) {
@@ -154,10 +152,11 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
     });
     try {
       Map<String, dynamic> data = const {};
-      if (plan != null) {
+      if (api != null) {
+        // Legacy plan periods and orders (old purchases stay visible, read-only).
         try {
-          data = await plan.fetchHistory();
-          if (refresh) plan.syncFromServer().ignore();
+          final res = await api.get('/subscription/history');
+          if (res is Map) data = Map<String, dynamic>.from(res);
         } catch (_) {}
       }
       List<Map<String, dynamic>> memOrders = const [];
@@ -235,12 +234,22 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
   static String _tierName(dynamic v) {
     final name = v?.toString() ?? '';
     if (name.isEmpty) return 'Plan';
-    for (final t in SubscriptionTier.values) {
-      if (t.name.toLowerCase() == name.toLowerCase()) return FeatureGates.tierLabel(t);
+    switch (name.toLowerCase()) {
+      case 'individual':
+        return 'Individual';
+      case 'group_small':
+        return 'Small Group (2–6)';
+      case 'group_large':
+        return 'Large Group (7–12)';
+      case 'prorider':
+        return 'CoRoute Pro (legacy)';
+      case 'roadcaptain':
+        return 'Road Captain (legacy)';
+      case 'touroperator':
+        return 'Tour Operator (legacy)';
+      case 'community':
+        return 'No plan';
     }
-    if (name.toLowerCase() == 'individual') return 'Individual Solo';
-    if (name.toLowerCase() == 'group_small') return 'Group (2–6)';
-    if (name.toLowerCase() == 'group_large') return 'Group (7–12)';
     return name.replaceAll('_', ' ').toUpperCase();
   }
 
@@ -282,7 +291,6 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final plan = context.watch<PlanSubscriptionService?>();
     final mem = context.watch<MembershipService?>();
 
     Widget body;
@@ -307,8 +315,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
               children: [
-                const SubscriptionExpiryBanner(),
-                if (plan != null || mem != null) _CurrentPlanCard(plan: plan, mem: mem, periods: _periods),
+                if (mem != null) _CurrentPlanCard(mem: mem, periods: _periods),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   DsCard(
@@ -417,10 +424,9 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
 }
 
 class _CurrentPlanCard extends StatelessWidget {
-  final PlanSubscriptionService? plan;
   final MembershipService? mem;
   final List<Map<String, dynamic>> periods;
-  const _CurrentPlanCard({this.plan, this.mem, required this.periods});
+  const _CurrentPlanCard({this.mem, required this.periods});
 
   @override
   Widget build(BuildContext context) {
@@ -457,9 +463,11 @@ class _CurrentPlanCard extends StatelessWidget {
       isExpired = false;
       isExpiringSoon = daysRemaining > 0 && daysRemaining <= 7;
       isParticipatingMember = true;
-    } else if (plan != null && plan!.currentTier != SubscriptionTier.community && !plan!.isExpired) {
-      planName = FeatureGates.tierLabel(plan!.currentTier);
-      validUntilMs = plan!.validUntil;
+    } else if (mem?.planAccess.isLegacy == true) {
+      // A legacy plan bought before the membership plans: kept until its end date.
+      final access = mem!.planAccess;
+      planName = '${access.name} (legacy)';
+      validUntilMs = access.validUntil;
       daysRemaining = _PaymentHistoryScreenState._calculateDaysRemainingKolkata(validUntilMs);
       isPaid = true;
       isExpired = false;
@@ -473,18 +481,8 @@ class _CurrentPlanCard extends StatelessWidget {
       isExpiringSoon = false;
       previousPlanName = owned.name;
       expiredAtMs = owned.validUntil;
-    } else if (plan != null && plan!.isExpired) {
-      final prev = plan!.previousTier;
-      planName = FeatureGates.tierLabel(prev ?? plan!.currentTier);
-      validUntilMs = plan!.validUntil;
-      daysRemaining = 0;
-      isPaid = false;
-      isExpired = true;
-      isExpiringSoon = false;
-      previousPlanName = prev != null ? FeatureGates.tierLabel(prev) : null;
-      expiredAtMs = plan!.expiredAt > 0 ? plan!.expiredAt : plan!.validUntil;
     } else {
-      planName = FeatureGates.tierLabel(SubscriptionTier.community);
+      planName = 'No plan';
       validUntilMs = 0;
       daysRemaining = 0;
       isPaid = false;
@@ -578,11 +576,7 @@ class _CurrentPlanCard extends StatelessWidget {
                 tone: isExpired ? DsButtonTone.brand : DsButtonTone.outline,
                 onPressed: () => Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => PlanSelectorScreen(
-                      preselectTier: isExpired && plan != null ? plan!.renewTier : null,
-                    ),
-                  ),
+                  MaterialPageRoute(builder: (_) => const MembershipDashboardScreen()),
                 ),
               ),
             ),

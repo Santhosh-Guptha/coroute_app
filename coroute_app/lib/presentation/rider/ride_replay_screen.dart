@@ -2,9 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/map_tiles.dart';
+import '../../core/ui/app_bottom_sheet.dart' show AppScrim;
 import '../../data/services/gpx_service.dart';
 import '../../domain/garage/bike_profile.dart';
 import 'widgets/tactical_ride_share_card.dart';
@@ -18,6 +18,10 @@ class RideReplayScreen extends StatefulWidget {
   final List<GpxWaypoint> waypoints;
   final BikeProfile? bike;
 
+  /// Indices in [trackpoints] where a new recorded piece starts (after a
+  /// signal gap): the route is not drawn across them.
+  final Set<int> breaks;
+
   const RideReplayScreen({
     super.key,
     required this.rideTitle,
@@ -25,6 +29,7 @@ class RideReplayScreen extends StatefulWidget {
     required this.trackpoints,
     this.waypoints = const [],
     this.bike,
+    this.breaks = const {},
   });
 
   @override
@@ -129,8 +134,14 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
         maxHeight: MediaQuery.sizeOf(context).height * 0.88,
         maxWidth: 600,
       ),
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Center(
+      barrierColor: AppScrim.color,
+      // Only as tall as the card, at the bottom: a full-height Center made the
+      // transparent sheet around the card swallow taps meant for the scrim.
+      builder: (ctx) => Align(
+        alignment: Alignment.bottomCenter,
+        heightFactor: 1.0,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 600),
           child: Padding(
@@ -148,10 +159,6 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
                 bike: widget.bike,
                 onExportGpx: () async {
                   if (ctx.mounted) Navigator.pop(ctx);
-                  if (!FeatureGates.isUnlocked(Feature.advancedTelemetryReplay)) {
-                    FeatureGates.showUpgradeModal(context, Feature.advancedTelemetryReplay);
-                    return;
-                  }
                   await GpxService.shareGpxFile(
                     rideName: widget.rideTitle,
                     trackpoints: widget.trackpoints,
@@ -190,7 +197,23 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
 
     final currentPt = widget.trackpoints[_currentIndex];
     final allPoints = widget.trackpoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
-    final playedPoints = widget.trackpoints.sublist(0, _currentIndex + 1).map((p) => LatLng(p.latitude, p.longitude)).toList();
+    // Cut at signal gaps: nothing recorded there is drawn as a ridden line.
+    List<List<LatLng>> piecesUpTo(int end) {
+      final out = <List<LatLng>>[];
+      var cur = <LatLng>[];
+      for (var i = 0; i <= end && i < allPoints.length; i++) {
+        if (i > 0 && widget.breaks.contains(i)) {
+          out.add(cur);
+          cur = <LatLng>[];
+        }
+        cur.add(allPoints[i]);
+      }
+      out.add(cur);
+      return [for (final p in out) if (p.length >= 2) p];
+    }
+
+    final allPieces = piecesUpTo(allPoints.length - 1);
+    final playedPieces = piecesUpTo(_currentIndex);
 
     return Scaffold(
       backgroundColor: AppTheme.darkCanvas,
@@ -212,16 +235,18 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
               // Full route (dimmed base)
               PolylineLayer(
                 polylines: [
-                  Polyline(
-                    points: allPoints,
-                    strokeWidth: 4.0,
-                    color: AppTheme.isLight ? AppTheme.border2 : Colors.white.withOpacity(0.25),
-                  ),
-                  Polyline(
-                    points: playedPoints,
-                    strokeWidth: 4.5,
-                    color: AppTheme.accentText,
-                  ),
+                  for (final piece in allPieces)
+                    Polyline(
+                      points: piece,
+                      strokeWidth: 4.0,
+                      color: AppTheme.isLight ? AppTheme.border2 : Colors.white.withOpacity(0.25),
+                    ),
+                  for (final piece in playedPieces)
+                    Polyline(
+                      points: piece,
+                      strokeWidth: 4.5,
+                      color: AppTheme.accentText,
+                    ),
                 ],
               ),
 

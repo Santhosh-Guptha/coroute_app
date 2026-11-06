@@ -1,33 +1,24 @@
-import 'package:flutter/material.dart';
-
-/// Subscription tiers and feature entitlements for CoRoute.
+/// The feature gating map of CoRoute, plans v2.
 ///
-/// Riders pick the plan to ride with on the Plan Selector screen, at or below the
-/// tier the gateway says they hold; every screen, button and cockpit control maps
-/// strictly to that effective plan.
-enum SubscriptionTier {
-  /// Free community tier: standard convoy (up to 4 bikes), basic telemetry, SOS.
-  community,
-
-  /// Individual pass: Solo tourers, Guardian web share link, advanced ride analytics.
-  proRider,
-
-  /// Convoy host pass: One captain unlocks up to 40 bikes, priority intercom ducking,
-  /// mid-ride waypoint broadcast, and total pack spread alerts.
-  roadCaptain,
-
-  /// Commercial agency pass: Fleet dispatcher, unlimited bikes, insurance incident exports.
-  tourOperator,
-}
+/// Plans: Community (free forever, every rider has it: SOLO rides), Small Group 2–6 and Large
+/// Group 7–12 (paid: host a group). No feature is sold on its own. What a plan changes is whether
+/// the rider's OWN rides are solo or group, and how many riders the host may bring: that lives in
+/// [PlanAccess] (membership_model.dart) and is decided by the gateway (a Community ride has one
+/// seat: 409 SOLO_TRIP_ONLY to join it, 403 SOLO_RIDE for talk / messages / regroup / roles in it;
+/// 409 CONVOY_FULL past a group host's seats).
+///
+///  * [FeatureAccess.safety]: never paywalled, in every ride, with any plan.
+///  * [FeatureAccess.groupRide]: comes with a GROUP ride; inside one every rider has it (also a
+///    Community rider who joined), because the host's group plan pays for the group. Not in a
+///    solo ride ([availableInRide]).
+///  * [FeatureAccess.personal]: free personal tools.
+enum FeatureAccess { safety, groupRide, personal }
 
 enum Feature {
-  /// Priority audio channel that ducks background chatter when Road Captain speaks.
+  /// Priority audio channel that ducks background chatter when the ride lead speaks.
   priorityIntercomDucking,
 
-  /// Ability to host convoys larger than 4 riders (up to 40 riders).
-  unlimitedConvoyCapacity,
-
-  /// Unlimited 2.5 km Minkowski corridor offline map tile downloads.
+  /// Corridor offline map tile downloads.
   unlimitedOfflinePacks,
 
   /// Scoped browser-based live tracking web link for family ("Ride Guardian").
@@ -48,71 +39,77 @@ enum Feature {
   /// High-contrast AMOLED outdoor sunlight theme.
   sunlightHudMode,
 
-  /// B2B Fleet health, tour timetable variance & client risk scorecard.
-  fleetAnalytics,
-
-  /// Collective road hazard AI telemetry broadcast (Road Captain only).
+  /// Collective road hazard broadcast to the riders behind.
   roadHazardBroadcast,
 
-  /// Collective road hazard telemetry reception and helmet audio warnings (Community & Pro).
+  /// Road hazard reception and helmet audio warnings.
   roadHazardReceive,
 
-  /// Emergency siren acoustic frequency detector & audio ducking (Community & all tiers).
+  /// Emergency siren acoustic frequency detector & audio ducking.
   sirenAcousticDetector,
 
-  /// BLE handlebar wireless remote for hands-free PTT, tactical signals, and SOS (Community & all tiers).
+  /// BLE handlebar wireless remote for hands-free PTT, tactical signals, and SOS.
   bleHandlebarRemote,
 
-  /// Smartwatch biometric trauma & pulse verification for crash escalation (Pro Rider & Road Captain).
+  /// Smartwatch biometric trauma & pulse verification for crash escalation.
   biometricTraumaPulse,
 
-  /// Low-connectivity SOS & satellite emergency relay (Pro Rider & Tour Operator).
+  /// Low-connectivity SOS & satellite emergency relay.
   satelliteSosRelay,
 
-  /// Hands-free helmet Bluetooth intercom voice safety hotwords (Community & all tiers).
+  /// Hands-free helmet Bluetooth intercom voice safety hotwords.
   voiceSafetyHotwords,
 
-  /// Peer-to-Peer Bluetooth & Wi-Fi offline convoy mesh networking (Road Captain & Pro Rider).
+  /// Peer-to-Peer Bluetooth & Wi-Fi offline convoy mesh networking.
   p2pOfflineMesh,
 
-  /// Smart airbag vest BLE bridge for instantaneous pyrotechnic deployment escalation (Community & all tiers).
+  /// Smart airbag vest BLE bridge for instantaneous crash escalation.
   smartAirbagVest,
 }
 
 class FeatureGates {
   FeatureGates._();
 
-  /// Whether the payment screen, subscription plans, and feature gating are active.
-  /// When true (default): features adhere to the user's active subscription tier and payment screens are enabled.
-  /// When false: payment screens are OFF, feature gating is disabled, and all features are unlocked freely.
-  static bool paymentsEnabled = true;
-
-  /// CURRENT MASTER OVERRIDE:
-  /// When true, all features across all tiers are unlocked.
-  /// When false (default), features strictly adhere to [activeTier] for testing plan rules.
-  static bool forceAllUnlocked = true;
-
-  /// Active subscription tier for this session.
-  static SubscriptionTier activeTier = SubscriptionTier.tourOperator;
-
-  /// Checks whether a given [feature] is unlocked for the user.
-  /// All features are included for all riders. Seat capacity is the only distinction.
-  static bool isUnlocked(Feature feature, [SubscriptionTier? tier]) {
-    return true;
+  /// Which kind of feature [feature] is (see the map above).
+  static FeatureAccess accessOf(Feature feature) {
+    switch (feature) {
+      case Feature.guardianLiveShare:
+      case Feature.roadHazardReceive:
+      case Feature.sirenAcousticDetector:
+      case Feature.bleHandlebarRemote:
+      case Feature.biometricTraumaPulse:
+      case Feature.satelliteSosRelay:
+      case Feature.voiceSafetyHotwords:
+      case Feature.smartAirbagVest:
+      case Feature.p2pOfflineMesh:
+        return FeatureAccess.safety;
+      case Feature.priorityIntercomDucking:
+      case Feature.dynamicWaypointPush:
+      case Feature.totalConvoySpreadAlert:
+      case Feature.roadHazardBroadcast:
+        return FeatureAccess.groupRide;
+      case Feature.unlimitedOfflinePacks:
+      case Feature.advancedTelemetryReplay:
+      case Feature.multiBikeGarage:
+      case Feature.sunlightHudMode:
+        return FeatureAccess.personal;
+    }
   }
 
-  /// Returns which tier is required to unlock the given feature.
-  static SubscriptionTier requiredTier(Feature feature) {
-    return SubscriptionTier.community;
-  }
+  /// True for every rider: safety and personal features are free, and group features come with
+  /// the ride itself (the gateway admits riders up to the host's seats). Plans never lock a feature.
+  static bool isUnlocked(Feature feature) => true;
+
+  /// In a ride: group-ride features only in a group ride; safety and personal features always.
+  /// [soloRide] is `ConvoyModel.isSoloRide` (the host rides on Community).
+  static bool availableInRide(Feature feature, {required bool soloRide}) =>
+      !soloRide || accessOf(feature) != FeatureAccess.groupRide;
 
   /// Human-friendly feature display name.
   static String featureName(Feature feature) {
     switch (feature) {
       case Feature.priorityIntercomDucking:
         return 'Priority Intercom Voice Ducking (-18 dB)';
-      case Feature.unlimitedConvoyCapacity:
-        return 'Large Convoy Capacity (Up to 40+ Bikes)';
       case Feature.dynamicWaypointPush:
         return 'Mid-Ride Waypoint & Regroup Dispatch';
       case Feature.totalConvoySpreadAlert:
@@ -120,15 +117,13 @@ class FeatureGates {
       case Feature.guardianLiveShare:
         return 'Ride Guardian Encrypted Live Share';
       case Feature.unlimitedOfflinePacks:
-        return 'Unlimited Corridor Offline Map Packs';
+        return 'Corridor Offline Map Packs';
       case Feature.advancedTelemetryReplay:
         return '2D Route Replay & GPX Telemetry Export';
       case Feature.multiBikeGarage:
         return 'Multi-Bike Motorcycle Garage';
       case Feature.sunlightHudMode:
         return 'AMOLED Sunlight HUD High-Contrast';
-      case Feature.fleetAnalytics:
-        return 'B2B Fleet Health & Client Risk Scorecard';
       case Feature.roadHazardBroadcast:
         return 'Road Hazard Telemetry Mesh Broadcast';
       case Feature.roadHazardReceive:
@@ -172,9 +167,7 @@ class FeatureGates {
       case Feature.roadHazardReceive:
         return 'Delivers spatial helmet voice warnings and HUD alerts 300 meters before upcoming road hazards.';
       case Feature.priorityIntercomDucking:
-        return 'Road Captain audio broadcasts automatically duck background chatter by -18 dB so hazard warnings cut through instantly.';
-      case Feature.unlimitedConvoyCapacity:
-        return 'Scale your convoy beyond the free 4-bike limit up to 40 riders (Road Captain) or 100+ riders (Tour Operator).';
+        return 'The ride lead\'s audio automatically ducks background chatter by -18 dB so hazard warnings cut through instantly.';
       case Feature.dynamicWaypointPush:
         return 'Push route changes, fuel stops, and rest regroup waypoints dynamically to all connected riders in real-time.';
       case Feature.totalConvoySpreadAlert:
@@ -182,41 +175,13 @@ class FeatureGates {
       case Feature.guardianLiveShare:
         return 'Generate an encrypted live web tracking link for family or friends to monitor your ride in real-time.';
       case Feature.unlimitedOfflinePacks:
-        return 'Download unlimited 2.5 km lateral corridor offline map tile packs across mountain passes and cellular dead zones.';
+        return 'Download 2.5 km lateral corridor offline map tile packs across mountain passes and cellular dead zones.';
       case Feature.advancedTelemetryReplay:
         return 'Scrub through your ride with speed HUD, elevation profile, and high-resolution GPX export.';
       case Feature.multiBikeGarage:
         return 'Manage multiple motorcycles in your garage with unique tank capacities, reserve alerts, and service logs.';
       case Feature.sunlightHudMode:
         return 'Ultra-high-contrast AMOLED heads-up display mode designed for harsh noon sunlight on handlebars.';
-      case Feature.fleetAnalytics:
-        return 'Commercial fleet analytics, wear index estimation, scheduled waypoint timetable variance, and audit logs.';
-    }
-  }
-
-  /// Displays a plan-gate modal: a one-tap switch when the rider already holds
-  /// the needed tier (e.g. after dropping to Community), otherwise a way to upgrade.
-  static void showUpgradeModal(BuildContext context, Feature feature) {
-    // All features are unlocked by default across all tiers.
-    return;
-  }
-
-  /// Returns the maximum allowable convoy size for the given tier.
-  static int maxConvoyMembers([SubscriptionTier? tier]) {
-    return 100;
-  }
-
-  /// Label for displaying the tier in settings or profile.
-  static String tierLabel(SubscriptionTier tier) {
-    switch (tier) {
-      case SubscriptionTier.community:
-        return 'Community Rider';
-      case SubscriptionTier.proRider:
-        return 'CoRoute Pro';
-      case SubscriptionTier.roadCaptain:
-        return 'Road Captain';
-      case SubscriptionTier.tourOperator:
-        return 'Tour Operator';
     }
   }
 }

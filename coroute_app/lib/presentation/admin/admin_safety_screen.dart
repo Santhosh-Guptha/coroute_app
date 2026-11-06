@@ -9,14 +9,16 @@ import 'admin_convoy_inspector.dart';
 import 'admin_emergencies_panel.dart';
 import 'admin_payments_logic.dart';
 import 'admin_payments_widgets.dart';
+import 'admin_ride_reports.dart';
 import 'admin_rider_insights.dart';
 import 'admin_ui.dart';
 import 'master_admin_dashboard.dart';
 
 /// Master admin: safety. Every open SOS and crash (the Emergencies panel with
-/// its alarm), riders with repeated false alarms (with reset), and the safety
-/// broadcast to every live ride. Data from `/admin/emergencies` and
-/// `/admin/safety`. Pull down to refresh.
+/// its alarm), riders with repeated false alarms (with reset), public ride
+/// reports (dismiss, warn, suspend) and the safety broadcast to every live
+/// ride. Data from `/admin/emergencies`, `/admin/safety` and
+/// `/admin/public-ride/reports`. Pull down to refresh.
 class AdminSafetyScreen extends StatefulWidget {
   /// The emergency alarm sound; tests pass a fake.
   final AdminAlarm? alarm;
@@ -29,6 +31,7 @@ class AdminSafetyScreen extends StatefulWidget {
 
 class _AdminSafetyScreenState extends State<AdminSafetyScreen> {
   final GlobalKey<AdminEmergenciesPanelState> _panel = GlobalKey<AdminEmergenciesPanelState>();
+  final GlobalKey<AdminRideReportsSectionState> _reports = GlobalKey<AdminRideReportsSectionState>();
   List<Map<String, dynamic>> _falseAlarmUsers = [];
   int _incidents = 0;
   bool _loading = true;
@@ -70,7 +73,11 @@ class _AdminSafetyScreenState extends State<AdminSafetyScreen> {
   }
 
   Future<void> _refresh() async {
-    await Future.wait([_load(), _panel.currentState?.reload() ?? Future<void>.value()]);
+    await Future.wait([
+      _load(),
+      _panel.currentState?.reload() ?? Future<void>.value(),
+      _reports.currentState?.reload() ?? Future<void>.value(),
+    ]);
   }
 
   Future<void> _reset(Map<String, dynamic> u) async {
@@ -116,7 +123,7 @@ class _AdminSafetyScreenState extends State<AdminSafetyScreen> {
     final e = _error;
     return AdminShell(
       title: 'Safety',
-      subtitle: 'Emergencies and false alarms',
+      subtitle: 'Emergencies, false alarms and reports',
       actions: [
         AdminIconAction(icon: Icons.campaign_rounded, label: 'Safety broadcast', onTap: _broadcast),
         AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _refresh),
@@ -152,6 +159,8 @@ class _AdminSafetyScreenState extends State<AdminSafetyScreen> {
                           for (var i = 0; i < _falseAlarmUsers.length; i++) _falseAlarmRow(_falseAlarmUsers[i], last: i == _falseAlarmUsers.length - 1),
                         ],
                       ),
+                      AdminRideReportsSection(key: _reports),
+                      const SizedBox(height: 24),
                     ],
                   ),
                 ),

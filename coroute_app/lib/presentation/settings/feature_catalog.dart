@@ -41,23 +41,14 @@ enum Impact {
 enum SettingsTarget {
   none,
 
-  /// Profile > Ride cockpit & safety settings (SafetySettingsScreen).
-  riderSettings,
+  /// Profile > Settings (SettingsScreen): every rider switch in one place.
+  settings,
 
-  /// The Ride safety sheet (SafetySettingsSheet): reminders, voice, lock screen, maps, language.
-  rideSafety,
-
-  /// Profile > Permissions.
+  /// Settings > Permissions.
   permissions,
 
-  /// Profile > Night mode (theme and how long alerts stay on the map).
-  nightMode,
-
-  /// Profile > Tank size & fuel.
+  /// Settings > Fuel (tank size and fuel left).
   fuel,
-
-  /// Profile > Data saver switch.
-  dataSaver,
 
   /// Offline map packs.
   offlineMaps,
@@ -68,7 +59,7 @@ enum SettingsTarget {
   /// Profile > Membership & Plans.
   membership,
 
-  /// Profile > Device & Diagnostics (phone check).
+  /// Settings > Phone check.
   phoneCheck,
 
   /// Profile > Edit profile (name, bike, emergency contact, medical info).
@@ -144,12 +135,11 @@ const List<FeatureInfo> featureCatalog = [
     group: FeatureGroup.riding,
     icon: Icons.checklist_rounded,
     name: 'Pre-ride checklist',
-    what: 'A quick list before you start: crash alerts, texts, helmet and papers.',
+    what: 'A quick list before you start: permissions, battery, helmet and papers.',
     when: 'Before each ride. Works offline.',
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Stays on your phone.',
-    changeHint: 'Crash detection is switched on or off here.',
   ),
   FeatureInfo(
     id: 'data_saver',
@@ -161,7 +151,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.saves,
     data: Impact.saves,
     privacy: 'Nothing extra is shared.',
-    settings: SettingsTarget.dataSaver,
+    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'tunnel',
@@ -169,11 +159,10 @@ const List<FeatureInfo> featureCatalog = [
     icon: Icons.alt_route_rounded,
     name: 'Tunnel mode',
     what: 'Keeps your dot moving when GPS drops, like in tunnels.',
-    when: 'During a ride. Works offline.',
+    when: 'Always on during a ride. Works offline.',
     battery: Impact.low,
     data: Impact.none,
     privacy: 'Stays on your phone.',
-    settings: SettingsTarget.riderSettings,
   ),
   FeatureInfo(
     id: 'lock_screen',
@@ -185,7 +174,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.low,
     data: Impact.none,
     privacy: 'Visible to anyone who sees your locked phone.',
-    settings: SettingsTarget.rideSafety,
+    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'fuel',
@@ -231,7 +220,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Group speed limit breaks are shown on the group timeline.',
-    settings: SettingsTarget.rideSafety,
+    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'remote',
@@ -243,7 +232,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.low,
     data: Impact.none,
     privacy: 'Stays on your phone.',
-    settings: SettingsTarget.riderSettings,
+    changeHint: 'Turn it on in the Talk panel during a group ride.',
   ),
   FeatureInfo(
     id: 'garage',
@@ -262,12 +251,12 @@ const List<FeatureInfo> featureCatalog = [
     group: FeatureGroup.riding,
     icon: Icons.dark_mode_rounded,
     name: 'Night mode',
-    what: 'Light or dark look, and how long alerts stay on the map.',
+    what: 'Light or dark look: automatic by sunrise and sunset, or your choice.',
     when: 'Any time.',
     battery: Impact.saves,
     data: Impact.none,
     privacy: 'Stays on your phone.',
-    settings: SettingsTarget.nightMode,
+    settings: SettingsTarget.settings,
   ),
 
   // ---------------------------------------------------------------- Safety
@@ -293,7 +282,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.medium,
     data: Impact.none,
     privacy: 'Nothing is sent if you tap I\'m OK in time.',
-    changeHint: 'Switch it on or off in the pre-ride checklist.',
+    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'sms',
@@ -305,19 +294,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Your contact, the Lead and nearby riders (up to 10) get your location.',
-    settings: SettingsTarget.riderSettings,
-  ),
-  FeatureInfo(
-    id: 'whatsapp',
-    group: FeatureGroup.safety,
-    icon: Icons.chat_rounded,
-    name: 'WhatsApp SOS',
-    what: 'Also sends your SOS with a live link on WhatsApp.',
-    when: 'Needs internet and WhatsApp.',
-    battery: Impact.none,
-    data: Impact.low,
-    privacy: 'Your emergency contact gets your location.',
-    settings: SettingsTarget.riderSettings,
+    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'checkin',
@@ -329,7 +306,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.low,
     privacy: 'If you do not answer in 2 min, your Lead is told.',
-    settings: SettingsTarget.rideSafety,
+    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'break',
@@ -341,7 +318,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Only you see it.',
-    settings: SettingsTarget.rideSafety,
+    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'road_warnings',
@@ -353,7 +330,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.low,
     data: Impact.low,
     privacy: 'No names are shown.',
-    settings: SettingsTarget.riderSettings,
+    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'medical',
@@ -364,8 +341,8 @@ const List<FeatureInfo> featureCatalog = [
     when: 'Shown during an SOS. Works offline.',
     battery: Impact.none,
     data: Impact.none,
-    privacy: 'Your group sees it in an SOS. Lock screen only if you allow it.',
-    settings: SettingsTarget.rideSafety,
+    privacy: 'Your group sees it in an SOS, and on your lock screen during it.',
+    settings: SettingsTarget.profile,
   ),
   FeatureInfo(
     id: 'nearby_help',
@@ -377,7 +354,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.low,
     privacy: 'Name and bike shared only after a rider accepts. Never your phone number.',
-    settings: SettingsTarget.rideSafety,
+    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'report_down',
@@ -433,35 +410,22 @@ const List<FeatureInfo> featureCatalog = [
     icon: Icons.volume_down_rounded,
     name: 'Lead voice first',
     what: 'Other voices get quieter when the Lead speaks.',
-    when: 'During group talk.',
+    when: 'Automatic during group talk.',
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Nothing extra is shared.',
-    settings: SettingsTarget.riderSettings,
   ),
   FeatureInfo(
     id: 'spoken_alerts',
     group: FeatureGroup.talk,
     icon: Icons.campaign_rounded,
     name: 'Spoken alerts',
-    what: 'Reads out emergencies, warnings and directions.',
+    what: 'Reads out warnings and directions. Emergencies are always spoken.',
     when: 'During a ride. Works offline.',
     battery: Impact.low,
     data: Impact.none,
     privacy: 'Played on your phone or headset only.',
-    settings: SettingsTarget.rideSafety,
-  ),
-  FeatureInfo(
-    id: 'voice_commands',
-    group: FeatureGroup.talk,
-    icon: Icons.mic_rounded,
-    name: 'Voice commands',
-    what: 'Say "CoRoute I\'m OK", "CoRoute SOS", "CoRoute Fuel" or "CoRoute Regroup".',
-    when: 'Needs a headset mic. Off by default.',
-    battery: Impact.medium,
-    data: Impact.none,
-    privacy: 'Listens through your mic during the ride.',
-    settings: SettingsTarget.riderSettings,
+    settings: SettingsTarget.settings,
   ),
   FeatureInfo(
     id: 'quick_messages',
@@ -484,7 +448,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Stays on your phone.',
-    settings: SettingsTarget.rideSafety,
+    settings: SettingsTarget.settings,
   ),
 
   // ---------------------------------------------------------------- Group
@@ -612,11 +576,10 @@ const List<FeatureInfo> featureCatalog = [
     icon: Icons.wifi_rounded,
     name: 'Save maps on Wi-Fi',
     what: 'Saves the route map before the ride (about 12 MB, kept 30 days).',
-    when: 'On Wi-Fi only.',
+    when: 'Automatic on Wi-Fi, not in data saver.',
     battery: Impact.low,
     data: Impact.none,
     privacy: 'Maps are saved on your phone.',
-    settings: SettingsTarget.rideSafety,
   ),
   FeatureInfo(
     id: 'map_memory',

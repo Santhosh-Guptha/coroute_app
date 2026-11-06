@@ -101,6 +101,19 @@
             android:turnScreenOn="true"
             android:taskAffinity="space.devmonks.coroute_app.sos"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- Agent 4: another rider's SOS over the lock screen (full-screen intent of the urgent alert;
+             heads-up only when Android 14+ denies full-screen alerts). Shows names only; "Open
+             CoRoute" asks for the unlock first. Not exported. -->
+        <activity
+            android:name=".UrgentAlertActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="space.devmonks.coroute_app.urgent"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
         <!-- Android Quick Settings Tile for Emergency Medical ID -->
         <service
             android:name=".MedicalTileService"

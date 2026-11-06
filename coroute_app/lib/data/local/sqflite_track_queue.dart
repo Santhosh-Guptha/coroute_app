@@ -118,6 +118,23 @@ class SqfliteTrackQueue implements TrackQueue {
   }
 
   @override
+  Future<List<TrackPoint>> points(String groupId) async {
+    await flushBuffer();
+    final db = await _open();
+    final rows = await db.query('points', columns: ['ts', 'lat', 'lng', 'v', 'acc'], where: 'gid = ?', whereArgs: [groupId], orderBy: 'ts ASC');
+    return [
+      for (final r in rows)
+        TrackPoint(
+          ts: r['ts'] as int,
+          lat: (r['lat'] as num).toDouble(),
+          lng: (r['lng'] as num).toDouble(),
+          speedKmh: (r['v'] as num).toDouble(),
+          accuracyM: (r['acc'] as num).toDouble(),
+        ),
+    ];
+  }
+
+  @override
   Future<void> prune({Duration keep = const Duration(days: 2)}) async {
     final db = await _open();
     final cutoff = DateTime.now().millisecondsSinceEpoch - keep.inMilliseconds;

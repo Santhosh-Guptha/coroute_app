@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
@@ -115,8 +114,6 @@ void main() {
 
 
   testWidgets('GloveQuickSettingsModal renders Ride Guardian and Fuel in-flight actions', (tester) async {
-    FeatureGates.activeTier = SubscriptionTier.proRider;
-    addTearDown(() => FeatureGates.activeTier = SubscriptionTier.community);
     final settings = SettingsService();
     await settings.load();
 
@@ -132,9 +129,7 @@ void main() {
                 ctx,
                 settingsService: settings,
                 keepScreenOn: true,
-                autoFollow: true,
                 onToggleKeepScreenOn: () {},
-                onToggleAutoFollow: () {},
                 onOpenGuardian: () => guardianClicked = true,
                 onOpenFuel: () => fuelClicked = true,
               );

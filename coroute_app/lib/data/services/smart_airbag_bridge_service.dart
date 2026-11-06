@@ -604,7 +604,8 @@ class SmartAirbagBridgeService extends ChangeNotifier {
     }
   }
 
-  /// Triggers a manual hardware test deployment for safety verification.
+  /// Triggers a simulated vest deployment (tests only; the developer row that used it is gone).
+  @visibleForTesting
   void triggerHardwareTestDeployment() {
     _handleDeploymentSignal(reason: 'Manual Hardware Test Trigger');
   }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../../domain/tracking/stop_detector.dart';
+import '../../domain/tracking/track_cleaner.dart';
 import '../../domain/tracking/track_filter.dart';
 import '../../domain/tracking/track_point.dart';
 import '../local/track_queue.dart';
@@ -86,10 +87,12 @@ class TrackRecorder extends ChangeNotifier {
     }
   }
 
-  /// Feeds one GPS fix.
-  void onFix(TrackPoint p) {
+  /// Feeds one GPS fix. [estimated] positions (tunnel coasting along the
+  /// planned route, the glide back to GPS after it, map smoothing) are never
+  /// recorded: the trip summary must show only where the rider really was.
+  void onFix(TrackPoint p, {bool estimated = false}) {
     final gid = _groupId;
-    if (gid == null) return;
+    if (gid == null || estimated) return;
     if (!_filter.accept(p)) return;
     _lastFix = p;
     _recorded++;
@@ -106,11 +109,33 @@ class TrackRecorder extends ChangeNotifier {
   void onHeartbeat({int? nowMs}) {
     final last = _lastFix;
     if (last == null || _groupId == null) return;
+    // Only while really parked: never stamp an old position as "still here" while moving.
+    if (last.speedKmh >= 3) return;
     onFix(TrackPoint(ts: nowMs ?? DateTime.now().millisecondsSinceEpoch, lat: last.lat, lng: last.lng, speedKmh: 0, accuracyM: last.accuracyM));
   }
 
   /// Uploads now (for example when the connection comes back).
   void uploadNow() => _upload();
+
+  /// This rider's own recorded track of [groupId] (everything still on the phone), oldest first.
+  Future<List<TrackPoint>> trackOf(String groupId) async {
+    try {
+      await _queue.flushBuffer();
+      return await _queue.points(groupId);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// The trip summary computed on the phone from its own track, or null
+  /// without a usable track (the server's report is used then).
+  Future<({TripStats stats, List<TrackPoint> cleaned})?> summaryOf(String groupId, {Duration minStop = const Duration(minutes: 3)}) async {
+    final raw = await trackOf(groupId);
+    if (raw.length < 2) return null;
+    final cleaned = TrackCleaner.clean(raw);
+    final stats = TripStats.compute(cleaned, minStop: minStop);
+    return stats.isEmpty ? null : (stats: stats, cleaned: cleaned);
+  }
 
   void _upload() {
     _sinceUpload = 0;

@@ -11,7 +11,6 @@ import 'package:coroute_app/data/services/auth_service.dart';
 import 'package:coroute_app/data/services/membership_service.dart';
 import 'package:coroute_app/presentation/subscription/membership_payment_screen.dart';
 import 'package:coroute_app/presentation/subscription/payment_success_screen.dart';
-import 'package:coroute_app/presentation/trip_planner/trip_creation_payment_alert_sheet.dart';
 import 'package:coroute_app/presentation/trip_planner/trip_review_sheet.dart';
 
 class _FakeApiClient extends ApiClient {
@@ -20,24 +19,75 @@ class _FakeApiClient extends ApiClient {
   /// Every POST the screens made, in order: (path, body).
   final List<(String, Map)> posts = [];
 
-  /// Coupon codes the gateway refuses at validate-coupon, with the reason it gives.
+  /// Every GET the screens made, in order.
+  final List<String> gets = [];
+
+  /// Coupon codes the gateway refuses, with the reason it gives (in the quote's `couponError`).
   static const refusals = {
     'USEDCODE': ('You have reached the redemption limit (1) for coupon USEDCODE', 'PER_USER_LIMIT_REACHED'),
-    'GROUPONLY': ('Coupon GROUPONLY is only applicable to group_small', 'TIER_MISMATCH'),
+    'GROUPONLY': ('Coupon GROUPONLY is only applicable to group_large', 'TIER_MISMATCH'),
     'OLDCODE': ('This coupon has expired', 'COUPON_EXPIRED'),
     'NOSUCH': ('Coupon NOSUCH does not exist', 'COUPON_NOT_FOUND'),
   };
 
+  static const prices = {'group_small': (49, 'Small Group'), 'group_large': (99, 'Large Group')};
+
+  /// The server quote: Large Group is an upgrade from a Small Group with 19 unused days (₹31 credit).
+  Map<String, dynamic> quote(String plan, String coupon) {
+    final (base, name) = prices[plan] ?? (49, 'Small Group');
+    var discount = 0;
+    Map<String, dynamic>? error;
+    final refusal = refusals[coupon];
+    if (refusal != null) {
+      error = {'code': coupon, 'error': refusal.$1, 'reason': refusal.$2};
+    } else if (coupon == 'RIDERFREE' || coupon == 'ONCEONLY') {
+      discount = base;
+    } else if (coupon == 'SAVE3') {
+      discount = 3;
+    } else if (coupon.isNotEmpty) {
+      error = {'code': coupon, 'error': "We couldn't find that code", 'reason': 'COUPON_NOT_FOUND'};
+    }
+    final credit = plan == 'group_large' ? 31 : 0;
+    final used = (base - discount) < credit ? (base - discount) : credit;
+    final payable = base - discount - used;
+    return {
+      'plan': plan,
+      'planName': name,
+      'kind': credit > 0 ? 'upgrade' : 'new',
+      'basePriceInr': base,
+      'couponCode': discount > 0 ? coupon : null,
+      'couponDiscountInr': discount,
+      'creditInr': used,
+      'unusedDays': credit > 0 ? 19 : 0,
+      'payableInr': payable,
+      'breakdown': [
+        {'label': '$name (30 days)', 'amountInr': base},
+        if (discount > 0) {'label': 'Coupon $coupon', 'amountInr': -discount},
+        if (used > 0) {'label': 'Credit for 19 unused days of Small Group', 'amountInr': -used},
+        {'label': 'To pay now', 'amountInr': payable},
+      ],
+      'summary': used > 0 ? '$name ₹$base − ₹$used credit for 19 unused days = ₹$payable' : '$name ₹$base = ₹$payable',
+      'notes': [if (used > 0) 'Starts now and runs 30 days, until 5 Dec.'],
+      'couponError': error,
+    };
+  }
+
   @override
   Future<dynamic> get(String path, {Duration timeout = const Duration(seconds: 10)}) async {
+    gets.add(path);
     if (path == '/membership/catalog') {
       return {
         'categories': {
-          'individual': {'id': 'individual', 'name': 'Individual Membership', 'monthlyPriceInr': 9, 'capacity': 1},
-          'group_small': {'id': 'group_small', 'name': 'Group Membership (2–6)', 'monthlyPriceInr': 49, 'capacity': 6},
+          'community': {'id': 'community', 'name': 'Community', 'monthlyPriceInr': 0, 'capacity': 1, 'purchasable': false},
+          'group_small': {'id': 'group_small', 'name': 'Small Group', 'monthlyPriceInr': 49, 'capacity': 6},
+          'group_large': {'id': 'group_large', 'name': 'Large Group', 'monthlyPriceInr': 99, 'capacity': 12},
         },
         'paymentsEnabled': true,
       };
+    }
+    if (path.startsWith('/membership/quote')) {
+      final q = Uri.parse(path).queryParameters;
+      return quote(q['plan'] ?? '', (q['coupon'] ?? '').toUpperCase());
     }
     if (path == '/membership/my') {
       return {
@@ -54,63 +104,36 @@ class _FakeApiClient extends ApiClient {
     final m = body is Map ? body : const {};
     posts.add((path, m));
     if (path == '/membership/order') {
+      final code = m['offerCode']?.toString();
+      // ONCEONLY was accepted in the quote, but the rider spent it meanwhile: the order refuses it.
+      if (code == 'ONCEONLY') {
+        throw const ApiException(400, "You've already used this code", null, 'PER_USER_LIMIT_REACHED');
+      }
+      if (code == 'RIDERFREE') {
+        // ₹0: the server activates the plan itself (no payment opens).
+        return {
+          'orderId': 'mem_ord_free_1',
+          'isFree': true,
+          'amountInr': 0,
+          'membership': {
+            'membershipId': 'mem_free_123',
+            'ownerUserId': 'user_tester',
+            'category': m['category'],
+            'categoryName': 'Small Group',
+            'capacity': 6,
+            'priceInr': 49,
+            'status': 'ACTIVE',
+            'validUntil': DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch,
+          },
+        };
+      }
       // A paid order; payments are not configured in tests (no key), so checkout stops before Razorpay.
+      final q = quote(m['category']?.toString() ?? '', code ?? '');
       return {
         'orderId': 'order_test_123',
         'keyId': '',
-        'amountInPaise': 900,
+        'amountInPaise': (q['payableInr'] as int) * 100,
         'isFree': false,
-      };
-    }
-    if (path == '/membership/validate-coupon') {
-      final code = m['code']?.toString() ?? '';
-      final refusal = refusals[code];
-      if (refusal != null) throw ApiException(400, refusal.$1, null, refusal.$2);
-      if (code == 'RIDERFREE' || code == 'ONCEONLY') {
-        return {
-          'valid': true,
-          'code': code,
-          'discountType': 'free',
-          'discountAmount': 9,
-          'originalPrice': 9,
-          'finalAmount': 0,
-          'isFree': true,
-          'message': 'Discount of ₹9 applied. Final payable: ₹0',
-        };
-      }
-      if (code == 'SAVE3') {
-        return {
-          'valid': true,
-          'code': code,
-          'discountType': 'fixed',
-          'discountAmount': 3,
-          'originalPrice': 9,
-          'finalAmount': 6,
-          'isFree': false,
-          'message': 'Discount of ₹3 applied. Final payable: ₹6',
-        };
-      }
-      throw ApiException(404, 'Coupon $code does not exist', null, 'COUPON_NOT_FOUND');
-    }
-    if (path == '/membership/activate-free') {
-      // ONCEONLY validated, but the rider spent it meanwhile: the server refuses the activation.
-      if (m['couponCode'] == 'ONCEONLY') {
-        throw const ApiException(400, 'You have already redeemed coupon ONCEONLY (limit 1 per rider)', null, 'PER_USER_LIMIT_REACHED');
-      }
-      return {
-        'success': true,
-        'isFree': true,
-        'orderId': 'FREE-ACTIVATION-TEST',
-        'membership': {
-          'id': 'mem_free_123',
-          'userId': 'user_tester',
-          'categoryId': 'individual',
-          'categoryName': 'Individual Membership',
-          'capacity': 1,
-          'priceRupees': 9,
-          'status': 'ACTIVE',
-          'validUntil': DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch,
-        },
       };
     }
     return {};
@@ -120,13 +143,6 @@ class _FakeApiClient extends ApiClient {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
-
-  const testCategory = MembershipCategory(
-    id: 'individual',
-    name: 'Individual Membership',
-    priceRupees: 9,
-    capacity: 1,
-  );
 
   final testMembership = UserMembership(
     membershipId: 'mem_12345',
@@ -156,162 +172,18 @@ void main() {
     );
   }
 
-  group('Stage 1: Trip Creation Payment Alert Sheet', () {
-    testWidgets('shows the normal price when no offer is advertised (no code assumed)', (tester) async {
-      tester.view.physicalSize = const Size(600, 1000);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-      bool? result;
-
-      await tester.pumpWidget(createTestApp(
-        Builder(
-          builder: (context) => ElevatedButton(
-            onPressed: () async {
-              result = await TripCreationPaymentAlertSheet.show(context, category: testCategory);
-            },
-            child: const Text('Open Sheet'),
-          ),
-        ),
-      ));
-
-      await tester.tap(find.text('Open Sheet'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Membership Required'), findsOneWidget);
-      expect(find.textContaining('RIDERFREE'), findsNothing);
-      expect(find.textContaining('Offer ('), findsNothing);
-      expect(find.text('₹9.00'), findsOneWidget);
-      expect(find.text('Proceed to Payment (₹9)'), findsOneWidget);
-
-      await tester.tap(find.text('Proceed to Payment (₹9)'));
-      await tester.pumpAndSettle();
-      expect(result, isTrue);
-    });
-
-    testWidgets('renders plan details, an advertised offer and triggers action buttons', (tester) async {
-      tester.view.physicalSize = const Size(600, 1000);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-      bool? result;
-
-      await tester.pumpWidget(createTestApp(
-        Builder(
-          builder: (context) => ElevatedButton(
-            onPressed: () async {
-              result = await TripCreationPaymentAlertSheet.show(
-                context,
-                category: testCategory,
-                activeOfferCode: 'MONSOON',
-                discountPercent: 100,
-              );
-            },
-            child: const Text('Open Sheet'),
-          ),
-        ),
-      ));
-
-      await tester.tap(find.text('Open Sheet'));
-      await tester.pumpAndSettle();
-
-      // Verify Stage 1 UI
-      expect(find.text('Membership Required'), findsOneWidget);
-      expect(find.text('Individual Membership'), findsOneWidget);
-      expect(find.text('1 Rider'), findsOneWidget);
-      expect(find.text('Offer (MONSOON)'), findsOneWidget);
-      expect(find.text('-₹9 (100% OFF)'), findsOneWidget);
-      expect(find.text('₹0.00 (Free)'), findsOneWidget);
-      expect(find.text('Activate Free Introductory Offer'), findsOneWidget);
-      expect(find.text('Maybe Later'), findsOneWidget);
-
-      // Tap Proceed
-      await tester.tap(find.text('Activate Free Introductory Offer'));
-      await tester.pumpAndSettle();
-
-      expect(result, isTrue);
-    });
-
-    testWidgets('Maybe Later dismisses without proceeding', (tester) async {
-      tester.view.physicalSize = const Size(600, 1000);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-      bool? result = true;
-
-      await tester.pumpWidget(createTestApp(
-        Builder(
-          builder: (context) => ElevatedButton(
-            onPressed: () async {
-              result = await TripCreationPaymentAlertSheet.show(context, category: testCategory);
-            },
-            child: const Text('Open Sheet'),
-          ),
-        ),
-      ));
-
-      await tester.tap(find.text('Open Sheet'));
-      await tester.pumpAndSettle();
-
-      // Tap Maybe Later
-      await tester.tap(find.text('Maybe Later'));
-      await tester.pumpAndSettle();
-
-      expect(result, isFalse);
-    });
-  });
+  // Stage 1 (the trip creation payment alert sheet) was retired: the app never opened it.
 
   group('Stage 2: Membership Payment Screen', () {
-    testWidgets('hides payment methods at ₹0, restores them when coupon removed, and handles free activation', (tester) async {
-      tester.view.physicalSize = const Size(600, 1200);
+    const smallGroup = MembershipCategory(id: 'group_small', name: 'Small Group', priceRupees: 49, capacity: 6);
+    const largeGroup = MembershipCategory(id: 'group_large', name: 'Large Group', priceRupees: 99, capacity: 12);
+
+    Future<void> openPaymentScreen(WidgetTester tester, {MembershipCategory category = smallGroup}) async {
+      tester.view.physicalSize = const Size(600, 1600);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(createTestApp(
-        const MembershipPaymentScreen(
-          category: testCategory,
-          isTripCreationFlow: true,
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      // Verify UI - starts with empty coupon as requested
-      expect(find.text('Membership Payment'), findsOneWidget);
-      expect(find.text('Individual Membership'), findsOneWidget);
-      expect(find.text('1 Rider Capacity · Monthly Subscription'), findsOneWidget);
-      expect(find.text('PROMOTIONAL COUPON (OPTIONAL)'), findsOneWidget);
-      expect(find.text('Enter coupon code'), findsOneWidget);
-
-      // Initially at ₹9: Payment methods (UPI, Cards) are visible
-      expect(find.text('Instant UPI Apps'), findsOneWidget);
-      expect(find.text('Cards & Net Banking'), findsOneWidget);
-      expect(find.text('Pay ₹9 & Activate Membership'), findsOneWidget);
-
-      // Apply RIDERFREE coupon
-      await tester.enterText(find.byType(TextField).first, 'RIDERFREE');
-      await tester.tap(find.text('Apply'));
-      await tester.pumpAndSettle();
-
-      // At ₹0: Payment methods (UPI, Cards) MUST be hidden, Instant activation card visible
-      expect(find.text('RIDERFREE Applied!'), findsOneWidget);
-      expect(find.text('Instant UPI Apps'), findsNothing);
-      expect(find.text('Cards & Net Banking'), findsNothing);
-      expect(find.text('100% Free Activation'), findsOneWidget);
-      expect(find.text('Activate Free Membership (₹0)'), findsOneWidget);
-
-      // Remove coupon via "Remove Coupon" button
-      await tester.tap(find.text('Remove Coupon'));
-      await tester.pumpAndSettle();
-
-      // Should restore base price ₹9.00 and payment methods now visible again!
-      expect(find.text('₹9.00'), findsWidgets);
-      expect(find.text('Instant UPI Apps'), findsOneWidget);
-      expect(find.text('Cards & Net Banking'), findsOneWidget);
-      expect(find.text('Pay ₹9 & Activate Membership'), findsOneWidget);
-    });
-
-    Future<void> openPaymentScreen(WidgetTester tester) async {
-      tester.view.physicalSize = const Size(600, 1400);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-      await tester.pumpWidget(createTestApp(
-        const MembershipPaymentScreen(category: testCategory, isTripCreationFlow: true),
+        MembershipPaymentScreen(category: category, isTripCreationFlow: true),
       ));
       await tester.pumpAndSettle();
     }
@@ -328,15 +200,45 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('paying without a code sends no coupon and never activates for free', (tester) async {
+    testWidgets('hides payment methods at ₹0, restores them when the coupon is removed', (tester) async {
       await openPaymentScreen(tester);
-      await tapPay(tester, 'Pay ₹9 & Activate Membership');
+
+      // Starts with an empty coupon and the server price.
+      expect(find.text('Membership Payment'), findsOneWidget);
+      expect(find.text('Small Group'), findsOneWidget);
+      expect(find.text('6 Riders Capacity · Monthly Subscription'), findsOneWidget);
+      expect(find.text('PROMOTIONAL COUPON (OPTIONAL)'), findsOneWidget);
+      expect(find.text('Enter coupon code'), findsOneWidget);
+      expect(api.gets.any((g) => g.startsWith('/membership/quote?plan=group_small')), isTrue);
+      expect(find.text('Instant UPI Apps'), findsOneWidget);
+      expect(find.text('Cards & Net Banking'), findsOneWidget);
+      expect(find.text('Pay ₹49 & Activate Membership'), findsOneWidget);
+
+      await applyCode(tester, 'riderfree');
+
+      expect(find.text('RIDERFREE Applied!'), findsOneWidget);
+      expect(find.text('Instant UPI Apps'), findsNothing);
+      expect(find.text('Cards & Net Banking'), findsNothing);
+      expect(find.text('100% Free Activation'), findsOneWidget);
+      expect(find.text('Activate Free Membership (₹0)'), findsOneWidget);
+
+      await tester.tap(find.text('Remove Coupon'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('₹49.00'), findsWidgets);
+      expect(find.text('Instant UPI Apps'), findsOneWidget);
+      expect(find.text('Pay ₹49 & Activate Membership'), findsOneWidget);
+    });
+
+    testWidgets('paying without a code sends no coupon and no amount: the server prices it', (tester) async {
+      await openPaymentScreen(tester);
+      await tapPay(tester, 'Pay ₹49 & Activate Membership');
 
       final orders = api.posts.where((p) => p.$1 == '/membership/order').toList();
       expect(orders, hasLength(1));
       expect(orders.single.$2.containsKey('offerCode'), isFalse);
+      expect(orders.single.$2.containsKey('amount'), isFalse);
       expect(api.posts.any((p) => p.$1 == '/membership/activate-free'), isFalse);
-      expect(api.posts.any((p) => (p.$2['offerCode'] ?? p.$2['couponCode']) == 'RIDERFREE'), isFalse);
     });
 
     for (final c in const [
@@ -345,20 +247,20 @@ void main() {
       ('OLDCODE', 'Code expired'),
       ('NOSUCH', "We couldn't find that code"),
     ]) {
-      testWidgets('a refused code (${c.$1}) shows "${c.$2}" and the rider can still pay the normal price', (tester) async {
+      testWidgets('a refused code (${c.$1}) shows "${c.$2}" under the field, is cleared, and Pay still works', (tester) async {
         await openPaymentScreen(tester);
         await applyCode(tester, c.$1);
 
         expect(find.text(c.$2), findsOneWidget);
         expect(find.text('${c.$1} Applied!'), findsNothing);
+        expect(find.widgetWithText(TextField, c.$1), findsNothing, reason: 'the code is cleared');
         expect(find.text('Instant UPI Apps'), findsOneWidget);
-        expect(find.text('Pay ₹9 & Activate Membership'), findsOneWidget);
+        expect(find.text('Pay ₹49 & Activate Membership'), findsOneWidget);
 
-        await tapPay(tester, 'Pay ₹9 & Activate Membership');
+        await tapPay(tester, 'Pay ₹49 & Activate Membership');
         final orders = api.posts.where((p) => p.$1 == '/membership/order').toList();
         expect(orders, hasLength(1));
         expect(orders.single.$2.containsKey('offerCode'), isFalse);
-        expect(api.posts.any((p) => p.$1 == '/membership/activate-free'), isFalse);
       });
     }
 
@@ -367,26 +269,36 @@ void main() {
       await applyCode(tester, 'SAVE3');
 
       expect(find.text('SAVE3 Applied!'), findsOneWidget);
-      expect(find.text('Pay ₹6 & Activate Membership'), findsOneWidget);
-      await tapPay(tester, 'Pay ₹6 & Activate Membership');
+      expect(find.text('−₹3.00'), findsOneWidget);
+      expect(find.text('Pay ₹46 & Activate Membership'), findsOneWidget);
+      await tapPay(tester, 'Pay ₹46 & Activate Membership');
 
       final orders = api.posts.where((p) => p.$1 == '/membership/order').toList();
       expect(orders.single.$2['offerCode'], 'SAVE3');
-      expect(api.posts.any((p) => p.$1 == '/membership/activate-free'), isFalse);
     });
 
-    testWidgets('₹0 activation happens only after the server confirms the code is free', (tester) async {
+    testWidgets('an upgrade shows the credit for unused days and the plain sentence', (tester) async {
+      await openPaymentScreen(tester, category: largeGroup);
+
+      expect(find.text('Credit for 19 unused days of Small Group'), findsOneWidget);
+      expect(find.text('−₹31.00'), findsOneWidget);
+      expect(find.text('Large Group ₹99 − ₹31 credit for 19 unused days = ₹68'), findsOneWidget);
+      expect(find.text('Pay ₹68 & Activate Membership'), findsOneWidget);
+    });
+
+    testWidgets('₹0 goes through the order: the server activates it, no payment opens', (tester) async {
       await openPaymentScreen(tester);
       await applyCode(tester, 'RIDERFREE');
       await tapPay(tester, 'Activate Free Membership (₹0)');
 
-      final free = api.posts.where((p) => p.$1 == '/membership/activate-free').toList();
-      expect(free, hasLength(1));
-      expect(free.single.$2['couponCode'], 'RIDERFREE');
+      final orders = api.posts.where((p) => p.$1 == '/membership/order').toList();
+      expect(orders, hasLength(1));
+      expect(orders.single.$2['offerCode'], 'RIDERFREE');
+      expect(api.posts.any((p) => p.$1 == '/membership/activate-free'), isFalse);
       expect(find.text('Membership Activated!'), findsOneWidget);
     });
 
-    testWidgets('a free code the server refuses at activation is removed and the normal price returns', (tester) async {
+    testWidgets('a code the order refuses is removed and the normal price returns', (tester) async {
       await openPaymentScreen(tester);
       await applyCode(tester, 'ONCEONLY');
       expect(find.text('Activate Free Membership (₹0)'), findsOneWidget);
@@ -398,7 +310,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('ONCEONLY Applied!'), findsNothing);
-      expect(find.text('Pay ₹9 & Activate Membership'), findsOneWidget);
+      expect(find.text('Pay ₹49 & Activate Membership'), findsOneWidget);
       expect(find.text('Membership Activated!'), findsNothing);
     });
   });

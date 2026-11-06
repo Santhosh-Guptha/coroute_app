@@ -1,6 +1,6 @@
 'use strict';
 /**
- * The launch coupons (WELCOME50, CAPTAIN100, RIDERFREE) are ordinary coupon records: seeded once,
+ * The launch coupons (WELCOME50, RIDERFREE) are ordinary coupon records: seeded once,
  * admin-managed, bound to plans, limited in total and to one redemption per rider, with a fixed
  * validity window. /membership/purchase obeys the same rules and never re-credits a payment. The
  * admin payment history prices orders from the stored catalog, not from hard-coded amounts.
@@ -56,13 +56,15 @@ test('launch coupons are admin-managed records with plan binding, limits and val
   });
 
   await t.test('re-seeding never overwrites an admin edit nor resurrects an archived coupon', async () => {
+    // (CAPTAIN100, a Road Captain-only coupon, is no longer seeded: WELCOME50 is edited and archived here.)
     const patched = await env.api('PATCH', '/admin/coupons/WELCOME50', { maxUsageTotal: 7 }, A);
     assert.equal(patched.status, 200);
-    assert.equal((await env.api('DELETE', '/admin/coupons/CAPTAIN100', null, A)).status, 200);
+    assert.equal((await env.api('DELETE', '/admin/coupons/WELCOME50', null, A)).status, 200);
     assert.deepEqual(await seedDefaultCoupons(repo), []);
     assert.equal((await repo.findCoupon('WELCOME50')).maxUsageTotal, 7);
-    assert.equal((await repo.findCoupon('CAPTAIN100')).status, 'ARCHIVED');
-    const archived = await env.api('POST', '/subscription/validate-coupon', { code: 'CAPTAIN100', planTier: 'roadCaptain', billingCycle: 'monthly', amount: 599 });
+    assert.equal((await repo.findCoupon('WELCOME50')).status, 'ARCHIVED');
+    assert.equal(await repo.findCoupon('CAPTAIN100'), null);
+    const archived = await env.api('POST', '/membership/validate-coupon', { code: 'WELCOME50', category: 'group_large' }, A);
     assert.equal(archived.status, 400);
     assert.equal(archived.json.valid, false);
   });
@@ -74,74 +76,71 @@ test('launch coupons are admin-managed records with plan binding, limits and val
     assert.equal(await resolveCoupon('WELCOME50', null), null);
   });
 
-  await t.test('subscription: RIDERFREE activates once per rider, then is refused', async () => {
+  await t.test('legacy plans: no new order even with a free coupon; RIDERFREE is for the membership plans', async () => {
+    // Was: RIDERFREE settled a free CoRoute Pro month. Legacy tiers are no longer sold (410), and the
+    // seeded RIDERFREE is bound to the paid plans (Small Group and Large Group) only.
     const r = await env.register('Sub Rider', 'sub.rider@coroute.test');
-    const first = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly', couponCode: 'RIDERFREE' }, r.token);
-    assert.equal(first.status, 200, JSON.stringify(first.json));
-    assert.equal(first.json.isFree, true);
-    const ok = await env.api('POST', '/subscription/verify-payment', { orderId: first.json.orderId }, r.token);
-    assert.equal(ok.status, 200, JSON.stringify(ok.json));
-    const used = await repo.findCoupon('RIDERFREE');
-    assert.equal(used.usageCount, 1);
-    const again = await env.api('POST', '/subscription/create-order', { planTier: 'roadCaptain', billingCycle: 'monthly', couponCode: 'RIDERFREE' }, r.token);
-    assert.equal(again.status, 400);
-    assert.equal(again.json.reason, 'PER_USER_LIMIT_REACHED');
-    // Two free orders quoted before either is settled: only the first settles.
-    const r3 = await env.register('Sub Rider Three', 'sub.rider3@coroute.test');
-    const q1 = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly', couponCode: 'RIDERFREE' }, r3.token);
-    const q2 = await env.api('POST', '/subscription/create-order', { planTier: 'roadCaptain', billingCycle: 'monthly', couponCode: 'RIDERFREE' }, r3.token);
-    assert.equal(q1.status, 200);
-    assert.equal(q2.status, 200);
-    assert.equal((await env.api('POST', '/subscription/verify-payment', { orderId: q1.json.orderId }, r3.token)).status, 200);
-    const second = await env.api('POST', '/subscription/verify-payment', { orderId: q2.json.orderId }, r3.token);
-    assert.equal(second.status, 400);
-    assert.equal(second.json.reason, 'PER_USER_LIMIT_REACHED');
-    assert.equal((await repo.findCoupon('RIDERFREE')).usageCount, 2);
-    // Settling the first again is idempotent (no third usage).
-    assert.equal((await env.api('POST', '/subscription/verify-payment', { orderId: q1.json.orderId }, r3.token)).status, 200);
-    assert.equal((await repo.findCoupon('RIDERFREE')).usageCount, 2);
-    // Annual is outside the binding.
-    const r2 = await env.register('Sub Rider Two', 'sub.rider2@coroute.test');
-    const annual = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'annual', couponCode: 'RIDERFREE' }, r2.token);
-    assert.equal(annual.status, 400);
-    assert.equal(annual.json.reason, 'CYCLE_MISMATCH');
+    const legacy = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly', couponCode: 'RIDERFREE' }, r.token);
+    assert.equal(legacy.status, 410);
+    assert.equal(legacy.json.code, 'LEGACY_PLAN');
+    const oldQuote = await env.api('POST', '/subscription/validate-coupon', { code: 'RIDERFREE', planTier: 'roadCaptain', billingCycle: 'monthly', amount: 599 });
+    assert.equal(oldQuote.status, 400);
+    assert.equal(oldQuote.json.reason, 'TIER_MISMATCH');
+    for (const category of ['group_small', 'group_large']) {
+      const q = await env.api('POST', '/membership/validate-coupon', { code: 'RIDERFREE', category }, r.token);
+      assert.equal(q.status, 200, `${category}: ${JSON.stringify(q.json)}`);
+      assert.equal(q.json.isFree, true);
+      assert.equal(q.json.quote.payableInr, 0);
+    }
+    const legacyPlan = await env.api('POST', '/membership/validate-coupon', { code: 'RIDERFREE', category: 'individual' }, r.token);
+    assert.equal(legacyPlan.status, 410);
+    assert.equal(legacyPlan.json.reason, 'LEGACY_PLAN');
+    assert.equal((await repo.findCoupon('RIDERFREE')).usageCount || 0, 0, 'nothing redeemed by the refused legacy order');
   });
 
   await t.test('membership: RIDERFREE via /membership/purchase is counted, not reusable, and bound to its plans', async () => {
     const r = await env.register('Mem Rider', 'mem.rider@coroute.test');
-    const first = await env.api('POST', '/membership/purchase', { category: 'individual', offerCode: 'RIDERFREE' }, r.token);
+    const first = await env.api('POST', '/membership/purchase', { category: 'group_small', offerCode: 'RIDERFREE' }, r.token);
     assert.equal(first.status, 201, JSON.stringify(first.json));
     assert.equal(first.json.membership.offerApplied, 'RIDERFREE');
     const until = first.json.membership.validUntil;
     // Repeat for the same plan: no extra month, no second redemption.
-    const repeat = await env.api('POST', '/membership/purchase', { category: 'individual', offerCode: 'RIDERFREE' }, r.token);
+    const repeat = await env.api('POST', '/membership/purchase', { category: 'group_small', offerCode: 'RIDERFREE' }, r.token);
     assert.equal(repeat.status, 200);
     assert.equal(repeat.json.isAlreadyActive, true);
     assert.equal(repeat.json.membership.validUntil, until);
     // Another plan with the same code: refused (once per rider).
-    const other = await env.api('POST', '/membership/purchase', { category: 'group_small', offerCode: 'RIDERFREE' }, r.token);
+    const other = await env.api('POST', '/membership/purchase', { category: 'group_large', offerCode: 'RIDERFREE' }, r.token);
     assert.equal(other.status, 400);
     assert.equal(other.json.reason, 'PER_USER_LIMIT_REACHED');
     const rows = await repo.listCouponRedemptions({ couponCode: 'RIDERFREE', userId: r.user.userId });
     assert.equal(rows.length, 1);
     // An unknown code is refused, never silently ignored.
-    const unknown = await env.api('POST', '/membership/purchase', { category: 'group_small', offerCode: 'NOPE123' }, r.token);
+    const unknown = await env.api('POST', '/membership/purchase', { category: 'group_large', offerCode: 'NOPE123' }, r.token);
     assert.equal(unknown.status, 404);
 
-    // A plan added later is not covered by the binding.
+    // Riders buy only the three membership plans: the admin cannot add a fourth (was: a "club_xl" plan).
     const catalog = await repo.getMembershipCatalog();
     catalog.club_xl = { id: 'club_xl', name: 'Club XL', monthlyPriceInr: 199, capacity: 20, billingPeriodDays: 30 };
+    const extra = await env.api('PUT', '/admin/membership/catalog', { catalog }, A);
+    assert.equal(extra.status, 400);
+    assert.equal(extra.json.reason, 'INVALID_CATALOG');
+    delete catalog.club_xl;
+    catalog.group_large.monthlyPriceInr = 199;
     assert.equal((await env.api('PUT', '/admin/membership/catalog', { catalog }, A)).status, 200);
     const r2 = await env.register('Club Rider', 'club.rider@coroute.test');
-    const xl = await env.api('POST', '/membership/activate-free', { category: 'club_xl', couponCode: 'RIDERFREE' }, r2.token);
-    assert.equal(xl.status, 400);
-    assert.equal(xl.json.reason, 'TIER_MISMATCH');
+    // A coupon record from before, bound to a legacy tier only: kept, but it covers no membership plan.
+    const t0 = Date.now();
+    await repo.saveCoupon({ code: 'CAPTAINFREE', discountType: 'free', discountValue: 100, applicableTiers: ['roadCaptain'], maxUsageTotal: 5, maxUsagePerUser: 1, validFrom: t0, expiresAt: t0 + 30 * DAY, isActive: true });
+    const old = await env.api('POST', '/membership/activate-free', { category: 'group_large', couponCode: 'CAPTAINFREE' }, r2.token);
+    assert.equal(old.status, 400);
+    assert.equal(old.json.reason, 'TIER_MISMATCH');
     // A flat ₹100 coupon does not make a ₹199 plan free.
-    await env.api('POST', '/admin/coupons', { code: 'FLAT100', discountType: 'fixed', discountValue: 100, applicablePlans: ['club_xl'] }, A);
-    const flat = await env.api('POST', '/membership/activate-free', { category: 'club_xl', couponCode: 'FLAT100' }, r2.token);
+    await env.api('POST', '/admin/coupons', { code: 'FLAT100', discountType: 'fixed', discountValue: 100, applicablePlans: ['group_large'] }, A);
+    const flat = await env.api('POST', '/membership/activate-free', { category: 'group_large', couponCode: 'FLAT100' }, r2.token);
     assert.equal(flat.status, 400);
     assert.equal(flat.json.reason, 'PARTIAL_COUPON');
-    const quote = await env.api('POST', '/membership/validate-coupon', { code: 'FLAT100', category: 'club_xl' }, r2.token);
+    const quote = await env.api('POST', '/membership/validate-coupon', { code: 'FLAT100', category: 'group_large' }, r2.token);
     assert.equal(quote.json.finalAmount, 99);
     assert.equal(quote.json.isFree, false);
   });
@@ -149,13 +148,13 @@ test('launch coupons are admin-managed records with plan binding, limits and val
   await t.test('a paused RIDERFREE is refused everywhere', async () => {
     assert.equal((await env.api('POST', '/admin/coupons/RIDERFREE/pause', {}, A)).status, 200);
     const r = await env.register('Late Rider', 'late.rider@coroute.test');
-    const v = await env.api('POST', '/membership/validate-coupon', { code: 'RIDERFREE', category: 'individual' }, r.token);
+    const v = await env.api('POST', '/membership/validate-coupon', { code: 'RIDERFREE', category: 'group_small' }, r.token);
     assert.equal(v.status, 400);
-    const act = await env.api('POST', '/membership/activate-free', { category: 'individual', couponCode: 'RIDERFREE' }, r.token);
+    const act = await env.api('POST', '/membership/activate-free', { category: 'group_small', couponCode: 'RIDERFREE' }, r.token);
     assert.equal(act.status, 400);
     assert.equal(act.json.reason, 'COUPON_PAUSED');
     const sub = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly', couponCode: 'RIDERFREE' }, r.token);
-    assert.equal(sub.status, 400);
+    assert.equal(sub.status, 410, 'legacy plans are refused whatever the coupon');
     assert.equal((await env.api('POST', '/admin/coupons/RIDERFREE/resume', {}, A)).status, 200);
   });
 
@@ -205,6 +204,6 @@ test('launch coupons are admin-managed records with plan binding, limits and val
     const an = await env.api('GET', '/admin/payments/analytics?range=7d', null, A);
     assert.equal(an.status, 200);
     assert.equal(an.json.byPlan.group_large.priceInr, 149);
-    assert.equal(an.json.byPlan.club_xl.priceInr, 199);
+    assert.equal(an.json.byPlan.club_xl, undefined, 'only the three membership plans are reported');
   });
 });

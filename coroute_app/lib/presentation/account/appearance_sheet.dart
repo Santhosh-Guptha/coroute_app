@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import '../../core/config/feature_gates.dart';
-import '../../core/constants/network_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../core/ui/ui.dart';
-import '../../data/services/settings_service.dart';
 
-/// Light, dark or automatic. Opened from Account.
+/// Light, dark or automatic. Opened from Settings > Night mode.
 class AppearanceSheet extends StatelessWidget {
   const AppearanceSheet({super.key});
 
@@ -59,7 +56,7 @@ class AppearanceSheet extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              AppSheetHeader(title: 'Appearance', subtitle: summary(t)),
+              AppSheetHeader(title: 'Night mode', subtitle: summary(t)),
               DsCard(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Column(
@@ -73,66 +70,11 @@ class AppearanceSheet extends StatelessWidget {
                         selected: t.preference == options[i].$1,
                         divider: i < options.length - 1,
                         onTap: () {
-                          if (options[i].$1 == ThemePreference.light &&
-                              !FeatureGates.isUnlocked(Feature.sunlightHudMode)) {
-                            FeatureGates.showUpgradeModal(context, Feature.sunlightHudMode);
-                            return;
-                          }
                           t.setPreference(options[i].$1);
                         },
                       ),
                   ],
                 ),
-              ),
-              Builder(
-                builder: (context) {
-                  final s = context.watch<SettingsService?>();
-                  if (s == null) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Semantics(header: true, child: DsSectionHeader('Map HUD & Alerts')),
-                        const SizedBox(height: 10),
-                        DsCard(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.timer_outlined, size: 22, color: AppTheme.accentText),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      s.mapAlertDismissSeconds == 0
-                                          ? 'Manual dismissal only on map'
-                                          : 'Alerts leave the map after ${s.mapAlertDismissSeconds}s',
-                                      style: AppText.body.copyWith(fontWeight: FontWeight.w700),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Wrap(
-                                spacing: Space.s8,
-                                runSpacing: Space.s8,
-                                children: [
-                                  for (final sec in NetworkConstants.mapAlertDismissChoices)
-                                    ChoiceChip(
-                                      label: Text(sec == 0 ? 'Manual' : '${sec}s'),
-                                      selected: s.mapAlertDismissSeconds == sec,
-                                      onSelected: (_) => s.setMapAlertDismissSeconds(sec),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
               ),
             ],
           ),

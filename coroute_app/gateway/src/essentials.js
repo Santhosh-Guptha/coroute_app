@@ -1,5 +1,6 @@
 "use strict";
 const crypto = require("crypto");
+const config = require("./config");
 const { decodePolyline, cumulative, pointToSegment } = require("./geo_math");
 
 // Provider objects stay here; the wire contract uses metres, seconds and epoch ms.
@@ -100,7 +101,7 @@ class OverpassPlacesProvider {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "CoRoute/3.34 (+https://coroute.duckdns.org; contact@coroute.duckdns.org)"
+            "User-Agent": config.providerUserAgent
           },
           body: "data=" + encodeURIComponent(query),
           signal: AbortSignal.timeout(12000)

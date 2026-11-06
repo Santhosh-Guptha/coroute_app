@@ -227,9 +227,10 @@ void main() {
       expect(find.text('Admin'), findsNothing);
       expect(find.text('Live rides, history and users'), findsNothing);
 
-      // 3. Verify legitimate rider settings are shown
+      // 3. Verify legitimate rider settings are shown (Permissions now lives in the one
+      //    Settings screen, opened from this row).
       expect(find.text('Change password'), findsOneWidget);
-      expect(find.text('Permissions'), findsOneWidget);
+      expect(find.byKey(const Key('profile_settings')), findsOneWidget);
     });
 
     testWidgets('AccountScreen DOES show Admin tile only when signed in as Master Admin', (tester) async {
@@ -411,8 +412,12 @@ void main() {
       expect(find.text('42'), findsOneWidget);
       expect(find.text('3.5'), findsOneWidget);
       // Every section is one tap away.
-      for (final label in ['Riders', 'Groups and rides', 'Safety', 'Payments', 'Plans and coupons', 'Reviews', 'Devices', 'Settings']) {
+      for (final label in ['Riders', 'Rides', 'Safety', 'Payments', 'Reviews', 'Insights', 'Settings']) {
         expect(find.text(label), findsWidgets, reason: label);
+      }
+      // Merged away: plans and coupons are tabs of Payments, phone reports are in Insights.
+      for (final gone in ['Plans and coupons', 'Devices', 'Groups and rides']) {
+        expect(find.text(gone), findsNothing, reason: gone);
       }
       expect(tester.takeException(), isNull);
     });
@@ -480,8 +485,11 @@ void main() {
       // Verification: On wide screen, MasterAdminDashboard retains AdminTwoUp split layout
       expect(find.byType(AdminTwoUp), findsOneWidget);
       // Verification: Desktop nav rail items are present (the rail and the Sections list share labels)
-      for (final label in ['Overview', 'Riders', 'Groups and rides', 'Safety', 'Payments', 'Plans and coupons', 'Reviews', 'Insights', 'Devices', 'Settings']) {
+      for (final label in ['Overview', 'Riders', 'Rides', 'Safety', 'Payments', 'Reviews', 'Insights', 'Settings']) {
         expect(find.text(label), findsWidgets, reason: label);
+      }
+      for (final gone in ['Plans and coupons', 'Devices', 'Groups and rides']) {
+        expect(find.text(gone), findsNothing, reason: gone);
       }
     });
   });

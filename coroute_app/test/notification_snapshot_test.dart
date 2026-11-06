@@ -132,7 +132,11 @@ void main() {
       expect(s.ahead[1].flag, 'No signal', reason: 'no update for 3 min');
       expect(s.behind.first.flag, 'Stopped 5 min');
       expect(s.ahead.first.flag, isNull);
-      expect(s.subtitle, 'Arjun 1.2 km ahead, Rahul 2.2 km behind');
+      // Agent 4: "Riding with <group>", speed • distance • next stop / ETA, SOS / Talk / Leave.
+      expect(s.title, 'Riding with Weekend Ride');
+      expect(s.subtitle, startsWith('40 km/h • 33 km • Goa, ETA '));
+      expect(s.showTalk, isTrue);
+      expect(s.endLabel, 'Leave');
       expect(s.header, 'Weekend Ride, 7 riders');
       expect(s.statusLine, 'All 7 riders together');
       expect(s.showSos, isTrue);
@@ -140,17 +144,17 @@ void main() {
       expect(s.contextAction, NotifContextAction.none);
     });
 
-    test('header: destination, remaining km along the route and ETA as a clock time', () {
+    test('body: speed, remaining km along the route and the destination ETA as a clock time', () {
       final s = build(convoy());
       final remaining = RideFacts.remainingM(lat: myLat, lng: lng0, line: convoy().routeLine, destLat: 13.30, destLng: lng0)!;
       expect(remaining, closeTo(33358, 30));
       final eta = RideFacts.etaFor(remaining, route)!;
       // Rounded down to the minute, so the text does not change with every fix.
       final at = DateTime.fromMillisecondsSinceEpoch(((now + eta.inMilliseconds) ~/ 60000) * 60000, isUtc: true);
-      expect(s.title, 'Goa, 33 km, ETA ${at.hour}:${at.minute.toString().padLeft(2, '0')}');
+      expect(s.subtitle, '40 km/h • 33 km • Goa, ETA ${at.hour}:${at.minute.toString().padLeft(2, '0')}');
     });
 
-    test('no destination: the convoy name; no route: crow-flies remaining, no ETA', () {
+    test('no destination: speed only; no route: crow-flies remaining, no ETA', () {
       final noDest = ConvoyModel(
         groupId: 'G1',
         name: 'Weekend Ride',
@@ -160,9 +164,10 @@ void main() {
         createdAtEpochMs: now,
         riders: sampleRiders(),
       );
-      expect(build(noDest).title, 'Weekend Ride');
+      expect(build(noDest).title, 'Riding with Weekend Ride');
+      expect(build(noDest).subtitle, '40 km/h');
       final s = build(convoy(withRoute: false));
-      expect(s.title, 'Goa, 33 km');
+      expect(s.subtitle, '40 km/h • 33 km • Goa');
     });
 
     test('rounding keeps the text stable across small moves (same dedupeKey)', () {

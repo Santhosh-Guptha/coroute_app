@@ -30,7 +30,12 @@ class AlertSpec {
 
   /// Spoken once per [key] when the alert first appears (null: not spoken).
   final String? speech;
-  const AlertSpec(this.key, this.channel, this.title, this.body, {this.aboutMe = false, this.speech});
+
+  /// Never spoken, even with "announce all alerts" on (shown only). My own
+  /// "off the planned route": the ride's navigation voice says it, with its
+  /// own limits, so the group timeline must not repeat it.
+  final bool silent;
+  const AlertSpec(this.key, this.channel, this.title, this.body, {this.aboutMe = false, this.speech, this.silent = false});
 
   /// Android notification id derived from [key] (positive 31-bit, stable across runs).
   int get id {
@@ -50,10 +55,11 @@ class AlertSpec {
       other.body == body &&
       other.channel == channel &&
       other.aboutMe == aboutMe &&
-      other.speech == speech;
+      other.speech == speech &&
+      other.silent == silent;
 
   @override
-  int get hashCode => Object.hash(key, title, body, channel, aboutMe, speech);
+  int get hashCode => Object.hash(key, title, body, channel, aboutMe, speech, silent);
 }
 
 /// Who this phone belongs to, for deciding who gets which alert.
@@ -319,7 +325,11 @@ class AlertPolicy {
           break;
         case 'OFF_ROUTE':
           if (mine) {
-            out.add(AlertSpec('OFF_ROUTE:${e.userId}', AlertChannel.updates, 'You are off the planned route', 'Check the map to get back on the route.'));
+            // Shown, never spoken: the server opens this again whenever I cross its
+            // 300 m line (and while I follow my own new route), and the ride's
+            // navigation voice already says "Off route" with its own limits.
+            out.add(AlertSpec('OFF_ROUTE:${e.userId}', AlertChannel.updates, 'You are off the planned route', 'Check the map to get back on the route.',
+                silent: true));
           } else if (me.isLead) {
             out.add(AlertSpec('OFF_ROUTE:${e.userId}', AlertChannel.updates, '$who is off the route', 'For ${TimelineText.duration(dur)}$where.'));
           }

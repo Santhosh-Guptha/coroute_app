@@ -1,3 +1,4 @@
+import '../../core/constants/app_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../data/models/emergency_roster.dart';
 import '../tracking/geo_math.dart';
@@ -133,12 +134,12 @@ class SmsText {
   }) {
     final who = name.trim().isEmpty ? 'A rider' : name.trim();
     final time = '${_two(at.hour)}:${_two(at.minute)}';
-    final link = 'https://maps.google.com/?q=${lat.toStringAsFixed(5)},${lng.toStringAsFixed(5)}';
+    final link = AppConstants.mapsLink(lat, lng, digits: 5);
     final ride = (convoyName ?? '').trim();
     if (indianCorridor) {
       final act = auto ? 'crashed' : 'needs help';
       final ridePart = ride.isEmpty ? '' : ' Ride: $ride.';
-      return 'CoRoute SOS: $who $act at $time. Lat:${lat.toStringAsFixed(5)}, Lng:${lng.toStringAsFixed(5)}. Maps: $link$ridePart NHAI: 1073. ERSS: 112';
+      return 'CoRoute SOS: $who $act at $time. Lat:${lat.toStringAsFixed(5)}, Lng:${lng.toStringAsFixed(5)}. Maps: $link$ridePart NHAI: ${SafetyConstants.highwayHelpline}. ERSS: ${SafetyConstants.emergencyNumber}';
     }
     final head = auto
         ? 'CoRoute automatic alert: $who may have crashed at $time and did not answer.'

@@ -18,7 +18,7 @@ import 'settings_service.dart';
 import 'timeline_service.dart';
 
 /// A button of the big ride notification, as the app sees it.
-enum RideNotifActionKind { sos, wait, openMap, navigateEmergency, assistAccept, openFuel, viewGroup, viewFuel }
+enum RideNotifActionKind { sos, wait, openMap, navigateEmergency, assistAccept, openFuel, viewGroup, viewFuel, talk, endRide }
 
 class RideNotifAction {
   final RideNotifActionKind kind;
@@ -26,6 +26,11 @@ class RideNotifAction {
   /// alertId or incidentId for [RideNotifActionKind.navigateEmergency] and [RideNotifActionKind.assistAccept].
   final String? ref;
   const RideNotifAction(this.kind, [this.ref]);
+
+  /// Talk (opens the ride screen with the hold-to-talk bar) and End ride / Leave (opens the
+  /// app's confirm; never ends anything by itself), Agent 4.
+  static const String actionTalk = 'TALK';
+  static const String actionEnd = 'END';
 
   /// From the native `{action, ref}` map; null for anything unknown.
   static RideNotifAction? fromMap(Object? raw) {
@@ -39,6 +44,10 @@ class RideNotifAction {
         return const RideNotifAction(RideNotifActionKind.viewGroup);
       case 'VIEW_FUEL':
         return const RideNotifAction(RideNotifActionKind.viewFuel);
+      case actionTalk:
+        return const RideNotifAction(RideNotifActionKind.talk);
+      case actionEnd:
+        return const RideNotifAction(RideNotifActionKind.endRide);
       case NotifConstants.actionSos:
         return const RideNotifAction(RideNotifActionKind.sos);
       case NotifConstants.actionWait:
@@ -76,6 +85,25 @@ class RideNotificationChannel {
   /// phone cannot (old Android, notifications blocked, service not running, layout error).
   /// Throws MissingPluginException off Android.
   Future<bool> show(Map<String, Object?> args) async => (await _ch.invokeMethod<bool>('show', args)) == true;
+
+  /// Agent 4: another rider's SOS over the lock screen (Android): full-screen when allowed,
+  /// heads-up otherwise (Android 14+ without the full-screen permission). False off Android or
+  /// on any failure; the caller then posts its own notification.
+  static Future<bool> postUrgent(int id, String channelId, String title, String body) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
+    try {
+      final ok = await const MethodChannel(NotifConstants.notifChannel).invokeMethod<bool>('showUrgent', <String, Object?>{
+        'id': id,
+        'channelId': channelId,
+        'title': title,
+        'body': body,
+        'fullScreen': true,
+      });
+      return ok == true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// Supported on Android 7+ and iOS (custom notification actions & ongoing updates).
   Future<bool> supported() async {
@@ -184,6 +212,7 @@ class RideNotificationService {
     MedicalId? Function()? medicalId,
     RideEssentialsCoordinator? essentials,
     SafetyService? safety,
+    bool? Function()? talkAllowed,
   }) : this.forPort(
           ConvoyRideNotifPort(convoys),
           settings,
@@ -194,6 +223,7 @@ class RideNotificationService {
           medicalId: medicalId,
           essentials: essentials,
           safety: safety,
+          talkAllowed: talkAllowed,
         );
 
   /// For tests: any port, any timeline source. [medicalId] (3.16) returns the rider's
@@ -209,6 +239,7 @@ class RideNotificationService {
     MedicalId? Function()? medicalId,
     this.essentials,
     this.safety,
+    this._talkAllowed,
   })  : _events = timelineEvents ?? (() => const <TimelineEventModel>[]),
         _channel = channel ?? RideNotificationChannel(),
         _clock = clock ?? _wallClock,
@@ -244,6 +275,10 @@ class RideNotificationService {
   final int Function() _clock;
   final String? Function(int ms)? _clockText;
   final MedicalId? Function() _medicalId;
+
+  /// The plan's intercom gate for the Talk button: true / false when known, null = unknown
+  /// (Talk shows for group rides). Wired by the plan gating when it lands.
+  final bool? Function()? _talkAllowed;
   StreamSubscription<RideNotifAction>? _actionSub;
 
   final ValueNotifier<RideNotifAction?> _pending = ValueNotifier<RideNotifAction?>(null);
@@ -304,7 +339,7 @@ class RideNotificationService {
     }
     final gid = _port.activeConvoy!.groupId;
     if (gid != _rideGroup) _startRide(gid);
-    if (!_settings.richNotification || _gaveUp || _supported == false) {
+    if (_gaveUp || _supported == false) {
       _deactivate();
       return;
     }
@@ -405,7 +440,7 @@ class RideNotificationService {
       _inFlight = false;
     }
     if (_disposed) return;
-    if (_dirty && _rideActive && !_gaveUp && _settings.richNotification) {
+    if (_dirty && _rideActive && !_gaveUp) {
       final q = _quick();
       if (q != null && _quickKey(q) != _lastQuick) {
         _pushNow();
@@ -419,7 +454,7 @@ class RideNotificationService {
     _dirty = false;
     final force = _forceNext;
     _forceNext = false;
-    if (!_rideActive || !_settings.richNotification || _gaveUp) return;
+    if (!_rideActive || _gaveUp) return;
     final ok = _supported ??= await _channel.supported();
     if (_disposed) return;
     if (!ok) {
@@ -441,6 +476,7 @@ class RideNotificationService {
       lockScreenPublic: _settings.rideOnLockScreen,
       clockText: _clockText,
       medicalId: _medicalId(),
+      talkAllowed: _talkAllowed?.call(),
     );
     final quick = _quickKey(NotificationSnapshotBuilder.quickState(convoy: convoy, myUserId: uid, assists: _port.assistRequests, hazards: _port.hazards));
     final args = snap.toChannelArgs();
@@ -535,7 +571,7 @@ class RideNotificationService {
   }
 
   void _onServiceStarted() {
-    if (_disposed || !_rideActive || _gaveUp || !_settings.richNotification) return;
+    if (_disposed || !_rideActive || _gaveUp) return;
     // The plugin just posted its plain notification over ours.
     _lastKey = null;
     _lastQuick = null;
@@ -575,6 +611,12 @@ class RideNotificationService {
         break;
       case RideNotifActionKind.openMap:
       case RideNotifActionKind.navigateEmergency:
+        _pending.value = a;
+        break;
+      case RideNotifActionKind.talk:
+      case RideNotifActionKind.endRide:
+        // Talk opens the ride screen (hold to talk); End / Leave opens the confirm. Nothing else.
+        if (!_rideActive) return;
         _pending.value = a;
         break;
       case RideNotifActionKind.assistAccept:

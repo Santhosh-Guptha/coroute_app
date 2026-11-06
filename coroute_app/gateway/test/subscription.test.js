@@ -10,7 +10,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const { setRazorpayFetch } = require('../src/razorpay_gateway');
-const { webCheckoutToken } = require('../src/subscription_routes');
+const { webCheckoutToken, legacySales } = require('../src/subscription_routes');
+// The legacy tiers are no longer sold (create-order answers 410 LEGACY_PLAN, see
+// test/membership_plans.test.js). This suite keeps covering how an order made before that cut-off
+// still settles, refunds, expires and is audited, so it re-opens legacy orders for itself only.
+legacySales.allowNewOrders = true;
 const { boot } = require('./_helpers');
 
 // Fake Razorpay Orders API: records calls, answers like the real one.
@@ -349,44 +353,44 @@ test('Subscription Razorpay Payment Suite', async (t) => {
   });
 
   await t.test('POST /api/subscription/validate-coupon evaluates discount rules, limits and expiry', async () => {
-    // 1. WELCOME50 (50% off Rs 149 = Rs 75 discount, payable Rs 74)
+    // 1. WELCOME50 is bound to the paid membership plans (50% off Small Group ₹49 = ₹25, payable ₹24),
+    //    with no minimum order; a legacy tier is outside it.
     const res50 = await env.api('POST', '/subscription/validate-coupon', {
       code: 'WELCOME50',
-      planTier: 'proRider',
+      planTier: 'group_small',
       billingCycle: 'monthly',
-      amount: 149,
+      amount: 49,
     });
-    assert.equal(res50.status, 200);
+    assert.equal(res50.status, 200, JSON.stringify(res50.json));
     assert.equal(res50.json.valid, true);
-    assert.equal(res50.json.discountAmount, 75);
-    assert.equal(res50.json.finalAmount, 74);
-    assert.equal(res50.json.finalAmountPaise, 7400);
+    assert.equal(res50.json.discountAmount, 25);
+    assert.equal(res50.json.finalAmount, 24);
+    assert.equal(res50.json.finalAmountPaise, 2400);
     assert.equal(res50.json.isFree, false);
     assert.ok(res50.json.usagesRemaining >= 900);
+    const res50Legacy = await env.api('POST', '/subscription/validate-coupon', { code: 'WELCOME50', planTier: 'proRider', billingCycle: 'monthly', amount: 149 });
+    assert.equal(res50Legacy.status, 400);
+    assert.equal(res50Legacy.json.reason, 'TIER_MISMATCH');
 
-    // 2. CAPTAIN100 (Flat Rs 100 off on Road Captain Rs 599 -> payable Rs 499)
+    // 2. CAPTAIN100 (a Road Captain-only launch coupon) is no longer seeded: legacy tiers are not sold.
     const resCap = await env.api('POST', '/subscription/validate-coupon', {
       code: 'CAPTAIN100',
       planTier: 'roadCaptain',
       billingCycle: 'monthly',
       amount: 599,
     });
-    assert.equal(resCap.status, 200);
-    assert.equal(resCap.json.valid, true);
-    assert.equal(resCap.json.discountAmount, 100);
-    assert.equal(resCap.json.finalAmount, 499);
+    assert.equal(resCap.status, 404);
 
-    // 3. RIDERFREE (100% Free Pass -> payable Rs 0)
+    // 3. RIDERFREE is bound to the three membership plans only: a legacy tier is outside it.
     const resFree = await env.api('POST', '/subscription/validate-coupon', {
       code: 'RIDERFREE',
       planTier: 'proRider',
       billingCycle: 'monthly',
       amount: 149,
     });
-    assert.equal(resFree.status, 200);
-    assert.equal(resFree.json.valid, true);
-    assert.equal(resFree.json.isFree, true);
-    assert.equal(resFree.json.finalAmount, 0);
+    assert.equal(resFree.status, 400);
+    assert.equal(resFree.json.valid, false);
+    assert.equal(resFree.json.reason, 'TIER_MISMATCH');
 
     // 4. Invalid coupon returns 404
     const resInv = await env.api('POST', '/subscription/validate-coupon', {
@@ -401,8 +405,11 @@ test('Subscription Razorpay Payment Suite', async (t) => {
 
   await t.test('a 100% free coupon order from the app activates without Razorpay; the public verify refuses it', async () => {
     const free = await env.register('FreeRider', 'free.rider@test.com');
+    // A coupon record from before the cut-off, still bound to a legacy tier (kept as it was).
+    const t0 = Date.now();
+    await env.gw.repo.saveCoupon({ code: 'OLDFREE', name: 'Old free month', discountType: 'free', discountValue: 100, applicableTiers: ['proRider'], applicableCycles: ['monthly'], maxUsageTotal: 10, maxUsagePerUser: 1, minOrderAmount: 0, validFrom: t0, expiresAt: t0 + 30 * 86400000, isActive: true, createdBy: 'seed' });
     const before = rzpCalls.length;
-    const order = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly', couponCode: 'RIDERFREE' }, free.token);
+    const order = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly', couponCode: 'OLDFREE' }, free.token);
     assert.equal(order.status, 200, JSON.stringify(order.json));
     assert.equal(order.json.isFree, true);
     assert.equal(order.json.amount, 0);
@@ -442,13 +449,19 @@ test('Subscription Razorpay Payment Suite', async (t) => {
     assert.equal(cfgRes.json.plans.proRider.monthly, 199);
     assert.equal(cfgRes.json.plans.proRider.label, 'CoRoute Pro Max');
 
-    // 5. Admin creates a new coupon with usage limit and expiry
+    // 5. Admin creates a new coupon with usage limit and expiry. A binding to legacy tiers only is
+    // refused: coupons are bound to the membership plans from now on.
+    const legacyOnly = await env.api('POST', '/admin/coupons', {
+      code: 'OLDTIER25', discountType: 'percentage', discountValue: 25, applicableTiers: ['proRider', 'roadCaptain'],
+    }, adminToken);
+    assert.equal(legacyOnly.status, 400);
+    assert.equal(legacyOnly.json.reason, 'UNKNOWN_PLAN');
     const newCouponRes = await env.api('POST', '/admin/coupons', {
       code: 'FESTIVE25',
       description: 'Festive Season 25% Off',
       discountType: 'percentage',
       discountValue: 25,
-      applicableTiers: ['proRider', 'roadCaptain'],
+      applicableTiers: ['group_small', 'group_large'],
       maxUsageTotal: 250,
       maxUsagePerUser: 1,
       expiresAt: Date.now() + 60 * 86400000,
@@ -463,16 +476,14 @@ test('Subscription Razorpay Payment Suite', async (t) => {
     assert.equal(listRes.status, 200);
     assert.ok(listRes.json.coupons.some((c) => c.code === 'FESTIVE25'));
 
-    // 7. Validate FESTIVE25 via public endpoint
-    const testValidate = await env.api('POST', '/subscription/validate-coupon', {
+    // 7. Validate FESTIVE25 for a membership plan (Large Group, Rs 99)
+    const testValidate = await env.api('POST', '/membership/validate-coupon', {
       code: 'FESTIVE25',
-      planTier: 'proRider',
-      billingCycle: 'monthly',
-      amount: 200,
-    });
+      category: 'group_large',
+    }, riderToken);
     assert.equal(testValidate.status, 200);
-    assert.equal(testValidate.json.discountAmount, 50); // 25% of 200
-    assert.equal(testValidate.json.finalAmount, 150);
+    assert.equal(testValidate.json.discountAmount, 25); // 25% of 99, rounded
+    assert.equal(testValidate.json.finalAmount, 74);
 
     // 8. Admin patches coupon (e.g. adjusts limit or pauses)
     const patchRes = await env.api('PATCH', '/admin/coupons/FESTIVE25', {
@@ -482,11 +493,10 @@ test('Subscription Razorpay Payment Suite', async (t) => {
     assert.equal(patchRes.json.coupon.isActive, false);
 
     // 9. When paused, validation rejects with 400
-    const pausedValidate = await env.api('POST', '/subscription/validate-coupon', {
+    const pausedValidate = await env.api('POST', '/membership/validate-coupon', {
       code: 'FESTIVE25',
-      planTier: 'proRider',
-      amount: 200,
-    });
+      category: 'group_large',
+    }, riderToken);
     assert.equal(pausedValidate.status, 400);
     assert.equal(pausedValidate.json.valid, false);
 
@@ -767,7 +777,9 @@ test('Admin console: overview, subscribers list, offers (auto-apply, coupon wins
     const o = res.json;
     assert.equal(o.subscribers.roadCaptain, 1);
     assert.equal(o.subscribers.proRider, 0);
-    assert.equal(o.subscribers.community, 3); // admin, lapsed (effective community), buyer
+    assert.equal(o.subscribers.community, 2); // lapsed (effective community), buyer; the admin is staff
+    assert.equal(o.totalUsers, 3);
+    assert.equal(o.staffAccounts, 1);
     assert.equal(o.active, 1);
     assert.equal(o.expiringIn7Days, 0);
     assert.equal(o.expiredLast30Days, 1);
@@ -823,11 +835,14 @@ test('Admin console: overview, subscribers list, offers (auto-apply, coupon wins
 
     const all = await env.api('GET', '/admin/subscriptions?limit=2', null, A);
     assert.equal(all.json.subscribers.length, 2);
-    assert.equal(all.json.total, 4);
+    assert.equal(all.json.total, 3); // the admin is staff: ?staff=1 lists it
     assert.equal(all.json.nextCursor, '2');
     const page2 = await env.api('GET', '/admin/subscriptions?limit=2&cursor=2', null, A);
-    assert.equal(page2.json.subscribers.length, 2);
+    assert.equal(page2.json.subscribers.length, 1);
     assert.equal(page2.json.nextCursor, null);
+    const staff = await env.api('GET', '/admin/subscriptions?staff=1', null, A);
+    assert.deepEqual(staff.json.subscribers.map((x) => [x.userId, x.staff]), [[admin.user.userId, true]]);
+    assert.equal((await env.api('GET', '/admin/subscriptions?staff=all', null, A)).json.total, 4);
   });
 
   let offerId = '';
@@ -895,11 +910,14 @@ test('Admin console: overview, subscribers list, offers (auto-apply, coupon wins
     assert.equal(annual.json.offer.id, offerId);
     assert.equal(annual.json.offer.discountAmount, Math.round(1199 * 0.2));
 
-    // Coupon given: the coupon applies, the offer does not (no stacking)
-    const withCoupon = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly', couponCode: 'WELCOME50' }, buyer.token);
+    // Coupon given: the coupon applies, the offer does not (no stacking). (WELCOME50 is bound to the
+    // paid membership plans now, so this legacy path uses its own any-plan 50% coupon.)
+    const t50 = Date.now();
+    await repo.saveCoupon({ code: 'LEGACY50', discountType: 'percentage', discountValue: 50, applicableTiers: ['all'], maxUsageTotal: 10, maxUsagePerUser: 1, validFrom: t50 - 1000, expiresAt: t50 + 86400000, isActive: true });
+    const withCoupon = await env.api('POST', '/subscription/create-order', { planTier: 'proRider', billingCycle: 'monthly', couponCode: 'LEGACY50' }, buyer.token);
     assert.equal(withCoupon.status, 200, JSON.stringify(withCoupon.json));
     assert.equal(withCoupon.json.amount, 74); // 149 - round(74.5) = 74
-    assert.equal(withCoupon.json.coupon.code, 'WELCOME50');
+    assert.equal(withCoupon.json.coupon.code, 'LEGACY50');
     assert.equal(withCoupon.json.offer, undefined);
     const couponLedger = await repo.findRazorpayOrder(withCoupon.json.orderId);
     assert.equal(couponLedger.offerId, null);

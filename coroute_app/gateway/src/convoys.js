@@ -13,12 +13,14 @@ const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const config = require('./config');
 const { featurePolicy, policyPatch, roomAnalytics } = require('./feature_policy');
+const { resolvePlan, clampSeats } = require('./entitlements');
 const { FeatureAnalytics } = require('./feature_analytics');
 const { ACTIVE_STATUSES } = require('./oracle/repo');
 const { haversine, encodePolyline, decodePolyline, pointToSegment } = require('./geo_math');
 const { scrub, scrubConvoyMeta, mentions } = require('./anonymise');
 const { validPhone, roleOf } = require('./validate');
 const { realContactNumber } = require('./auth');
+const { applyPublicRidePatch, publicRideView } = require('./public_ride_settings');
 
 const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'MEETING', 'SCENIC', 'TOLL', 'OTHER', 'HOSPITAL', 'REPAIR', 'STAY', 'PHARMACY', 'TYRE', 'WASHROOM', 'ATM', 'POLICE', 'PARKING']);
 /** The chat card posted when a rider asks the group to wait (plain text, no emoji). */
@@ -244,8 +246,72 @@ class ConvoyManager extends EventEmitter {
       visibility: m.visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
       discovery: m.discovery === true,
       assistDefault: m.assistDefault !== false,
+      publicRide: publicRideView(m.publicRide),
       activeRegroup: room.regroup || m.activeRegroup || null,
+      // Seats of this ride, host included: the host's membership seats (never the server ceiling).
+      capacity: this._storedCapacity(m),
+      capacityPlan: m.capacityPlan || null,
+      // A solo ride (Community host): the app hides talk, messages, invite and regroup.
+      soloRide: this.isSoloRide(room),
     };
+  }
+
+  /**
+   * A SOLO ride: its host rides on Community (or the legacy Individual plan), so the ride has one
+   * seat. Talk, messages, wait requests, regroup and lead/sweep roles are group features and are
+   * refused in it (403 SOLO_RIDE); every safety feature works the same. With payments off every
+   * ride is a group ride. A host who upgrades during the ride turns it into a group ride at once.
+   */
+  isSoloRide(room) {
+    if (config.paymentsEnabled === false || !room || !room.meta) return false;
+    return this._storedCapacity(room.meta) <= 1;
+  }
+
+  /** Throws 403 SOLO_RIDE for a group feature used in a solo ride. */
+  _requireGroupRide(room) {
+    if (this.isSoloRide(room)) {
+      throw new ConvoyError('Talk, messages and regroup are for group rides. This is a solo ride.', 403, 'SOLO_RIDE');
+    }
+  }
+
+  /** The capacity stored on the convoy; rides from before capacities were stored read as the ceiling. */
+  _storedCapacity(meta) {
+    const cap = Number(meta && meta.capacity);
+    return Number.isFinite(cap) && cap >= 1 ? clampSeats(cap) : clampSeats(config.maxConvoyRiders);
+  }
+
+  /**
+   * The seats of `room` now: the host's active plan (an upgrade during the ride raises it and is
+   * stored and announced), else what was stored when the ride started (a plan ending mid-ride, the
+   * host falling back to Community's one seat, never shrinks a ride already under way).
+   * Payments off: the server ceiling.
+   */
+  async _currentCapacity(room) {
+    if (config.paymentsEnabled === false) return clampSeats(config.maxConvoyRiders);
+    const ownerId = room.meta.tripOwnerUserId || room.meta.createdByUserId;
+    const plan = await resolvePlan(this.repo, ownerId);
+    if (plan.seats >= 1 && plan.seats > this._storedCapacity(room.meta)) {
+      room.meta.capacity = plan.seats;
+      room.meta.capacityPlan = plan.category;
+      this._touch(room);
+      await this.repo.saveConvoyMeta(room.meta);
+      this._emit(room.groupId, 'CONFIG', this._configPayload(room));
+      return plan.seats;
+    }
+    return this._storedCapacity(room.meta);
+  }
+
+  /**
+   * After the host's plan changed (bought, upgraded): their live rides take the new seats at once,
+   * so every rider sees the right count/capacity without waiting for the next join.
+   */
+  async refreshHostCapacity(userId) {
+    if (!userId) return;
+    for (const room of [...this.rooms.values()]) {
+      if (!ACTIVE_STATUSES.includes(room.meta.tripStatus)) continue;
+      if ((room.meta.tripOwnerUserId || room.meta.createdByUserId) !== userId) continue;
+      await this._currentCapacity(room);
+    }
   }
 
   /** { network, ownNearest } of an alert from the safety network (memory only), or null. */
@@ -294,15 +360,20 @@ class ConvoyManager extends EventEmitter {
     this._admitNewRider(user.userId);
 
     // Concurrency-safe single active trip enforcement when monetization/membership is active
+    let capacity = clampSeats(config.maxConvoyRiders);
+    let capacityPlan = null;
     if (config.paymentsEnabled !== false) {
       const active = await this._activeLock(user.userId);
       if (active && ['PLANNING', 'STARTED', 'PAUSED'].includes(active.status)) {
         throw new ConvoyError('You already have an active trip. End or leave it first.', 409, 'ACTIVE_TRIP_CONFLICT');
       }
-      const membership = await this.repo.findMembershipByOwner(user.userId);
-      if (!membership || membership.status !== 'ACTIVE' || membership.validUntil <= now()) {
+      // The host's plan (membership, or a legacy tier until it ends) decides the seats of the ride.
+      const plan = await resolvePlan(this.repo, user.userId);
+      if (!plan.canStartTrip) {
         throw new ConvoyError('Active membership required to create a trip.', 402, 'MEMBERSHIP_EXPIRED');
       }
+      capacity = plan.seats;
+      capacityPlan = plan.category;
     }
 
     // Leave any other non-active residues
@@ -337,6 +408,8 @@ class ConvoyManager extends EventEmitter {
       routeBreadcrumbs: sanitizeBreadcrumbs(p.routeBreadcrumbs),
       stopPoints: sanitizeStops(p.stops, { by: user, status: 'PLANNED' }),
       waitRequests: {},
+      capacity,
+      capacityPlan,
       members: { [user.userId]: memberRecord(user, { ...riderInput, role: 'LEAD' }, t) },
     });
     const rider = buildRider(user, { ...riderInput, role: 'LEAD' }, t);
@@ -376,49 +449,48 @@ class ConvoyManager extends EventEmitter {
       }
     }
 
-    // Capacity cap based on the Trip Owner's membership category
+    // Capacity: the host's membership seats (host included), never the global ceiling.
     const ownerId = meta.tripOwnerUserId || meta.createdByUserId;
-    let allowedCapacity = config.maxConvoyRiders;
-    if (config.paymentsEnabled !== false) {
-      const ownerMem = await this.repo.findMembershipByOwner(ownerId);
-      if (ownerMem && ownerMem.status === 'ACTIVE') {
-        if (ownerMem.category === 'individual' || ownerMem.capacity <= 1) {
-          if (!room.riders.has(user.userId) && user.userId !== ownerId) {
-            throw new ConvoyError('This is a solo trip under an Individual Membership. Additional riders cannot join.', 409, 'SOLO_TRIP_ONLY');
-          }
-        }
-        const cap = Number(ownerMem.capacity);
-        if (Number.isFinite(cap) && cap >= 1) allowedCapacity = Math.floor(cap);
-      }
+    const allowedCapacity = await this._currentCapacity(room);
+    if (allowedCapacity <= 1 && !room.riders.has(user.userId) && user.userId !== ownerId) {
+      throw new ConvoyError("This is a solo ride. Others can't join it.", 409, 'SOLO_TRIP_ONLY');
     }
     // Removed from the owner's membership group: no new join (a rider already riding is never dropped).
     if (!room.riders.has(user.userId) && room.meta.joinBlocked && room.meta.joinBlocked[user.userId]) {
       throw new ConvoyError('The trip owner removed you from this group.', 403, 'JOIN_BLOCKED');
     }
-    if (!room.riders.has(user.userId) && room.riders.size >= allowedCapacity) {
+    // A seat is held from this check until the rider is in, so concurrent joins never overfill the ride.
+    const joining = room.joining || (room.joining = new Set());
+    const isNew = !room.riders.has(user.userId) && !joining.has(user.userId);
+    if (isNew && room.riders.size + joining.size >= allowedCapacity) {
       throw new ConvoyError(`This convoy is full (${allowedCapacity} riders).`, 409, 'CONVOY_FULL');
     }
-    if (!room.riders.has(user.userId)) await this.leaveAll(user.userId, { except: meta.groupId });
+    if (isNew) joining.add(user.userId);
+    try {
+      if (!room.riders.has(user.userId)) await this.leaveAll(user.userId, { except: meta.groupId });
 
-    const existing = room.riders.get(user.userId);
-    const profile = profileOf(await this.repo.findUserById(user.userId));
-    const rider = buildRider(user, { ...(existing || {}), ...clientRiderInput(riderProfile), ...profile, role: existing?.role || 'PACK' }, now());
-    room.riders.set(rider.userId, rider);
-    const prev = room.meta.members?.[rider.userId];
-    const record = memberRecord(user, rider, existing ? (prev?.joinedAt || rider.joinedAt) : now());
-    record.firstJoinedAt = prev?.firstJoinedAt || prev?.joinedAt || record.joinedAt;
-    room.meta.members = { ...(room.meta.members || {}), [rider.userId]: record };
-    await this.repo.upsertRider(room.groupId, rider);
-    this._touch(room);
-    await this.repo.saveConvoyMeta(room.meta);
-    await this.repo.setActiveTrip(user.userId, {
-      groupId: room.groupId,
-      role: user.userId === (room.meta.tripOwnerUserId || room.meta.createdByUserId) ? 'OWNER' : (user.userId === room.meta.tripHeadUserId ? 'HEAD' : 'PARTICIPANT'),
-      status: room.meta.tripStatus || 'STARTED',
-    });
-    this._emit(room.groupId, 'RIDER_UPDATE', { rider: publicRider(rider), joined: !existing });
-    this.emit('fleet');
-    return this.snapshot(room);
+      const existing = room.riders.get(user.userId);
+      const profile = profileOf(await this.repo.findUserById(user.userId));
+      const rider = buildRider(user, { ...(existing || {}), ...clientRiderInput(riderProfile), ...profile, role: existing?.role || 'PACK' }, now());
+      room.riders.set(rider.userId, rider);
+      const prev = room.meta.members?.[rider.userId];
+      const record = memberRecord(user, rider, existing ? (prev?.joinedAt || rider.joinedAt) : now());
+      record.firstJoinedAt = prev?.firstJoinedAt || prev?.joinedAt || record.joinedAt;
+      room.meta.members = { ...(room.meta.members || {}), [rider.userId]: record };
+      await this.repo.upsertRider(room.groupId, rider);
+      this._touch(room);
+      await this.repo.saveConvoyMeta(room.meta);
+      await this.repo.setActiveTrip(user.userId, {
+        groupId: room.groupId,
+        role: user.userId === (room.meta.tripOwnerUserId || room.meta.createdByUserId) ? 'OWNER' : (user.userId === room.meta.tripHeadUserId ? 'HEAD' : 'PARTICIPANT'),
+        status: room.meta.tripStatus || 'STARTED',
+      });
+      this._emit(room.groupId, 'RIDER_UPDATE', { rider: publicRider(rider), joined: !existing });
+      this.emit('fleet');
+      return this.snapshot(room);
+    } finally {
+      if (isNew) joining.delete(user.userId);
+    }
   }
 
   /** Removes the rider from every active convoy they are in (except `except`). */
@@ -583,6 +655,7 @@ class ConvoyManager extends EventEmitter {
     const isCreator = room.meta.createdByUserId === user.userId;
     const isAdmin = user.role === 'ADMIN' || user.role === 'MASTER_ADMIN';
     if (!isMember && !isCreator && !isAdmin) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    this._requireGroupRide(room);
     const clean = String(text || '').trim().slice(0, 500);
     if (!clean) throw new ConvoyError('Message text is required.');
     const t = now();
@@ -635,6 +708,7 @@ class ConvoyManager extends EventEmitter {
   async requestWait(groupId, user) {
     const room = await this.getRoom(groupId);
     if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    this._requireGroupRide(room);
     room.meta.waitRequests = { ...(room.meta.waitRequests || {}), [user.name]: now() };
     // Expire stale wait requests (>2 min) while we are here.
     for (const [k, v] of Object.entries(room.meta.waitRequests)) if (now() - v > 150000) delete room.meta.waitRequests[k];
@@ -1076,6 +1150,7 @@ class ConvoyManager extends EventEmitter {
   async setRole(groupId, user, userId, role) {
     const room = await this.getRoom(groupId);
     this._requireLead(room, user);
+    this._requireGroupRide(room);
     const r = roleOf(role);
     if (!r) throw new ConvoyError('Role must be SWEEPER or PACK.', 400, 'BAD_ROLE');
     const uid = typeof userId === 'string' && userId.length <= 64 ? userId : '';
@@ -1621,6 +1696,7 @@ class ConvoyManager extends EventEmitter {
   async setRegroup(groupId, user, payload = {}) {
     const room = await this.getRoom(groupId);
     if (!room.riders.has(user.userId)) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    this._requireGroupRide(room);
     const rider = room.riders.get(user.userId);
     const isLeadOrSweeper = rider.role === 'LEAD' || rider.role === 'SWEEPER' || room.meta.createdByUserId === user.userId || user.role === 'MASTER_ADMIN';
     if (!isLeadOrSweeper) {
@@ -1720,6 +1796,8 @@ class ConvoyManager extends EventEmitter {
     if (patch.visibility === 'PUBLIC' || patch.visibility === 'PRIVATE') updated.visibility = patch.visibility;
     if (typeof patch.discovery === 'boolean') updated.discovery = patch.discovery;
     if (typeof patch.assistDefault === 'boolean') updated.assistDefault = patch.assistDefault;
+    // Public ride (every plan; the host decides, the rider of a solo ride is its host).
+    if (patch.publicRide && typeof patch.publicRide === 'object') updated.publicRide = applyPublicRidePatch(updated.publicRide, patch.publicRide);
     if (nextPolicy) updated.featurePolicy = nextPolicy;
     updated.updatedAt = now();
     await this.repo.saveConvoyMeta(updated);
@@ -1732,13 +1810,22 @@ class ConvoyManager extends EventEmitter {
       }
       this._schedulePersist(room);
     }
+    this._emit(groupId, 'CONFIG', this._configPayload(room));
+  }
+
+  /** The CONFIG event: group settings and the ride's seats. */
+  _configPayload(room) {
     const { distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled } = room.meta;
-    this._emit(groupId, 'CONFIG', {
+    return {
       distanceThresholdMeters, stopThresholdSeconds, voiceGuidanceEnabled, speedLimitKmh: room.meta.speedLimitKmh || 0,
       townLimitKmh: room.meta.townLimitKmh || 0,
       featurePolicy: featurePolicy(room.meta.featurePolicy),
       visibility: room.meta.visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE', discovery: room.meta.discovery === true, assistDefault: room.meta.assistDefault !== false,
-    });
+      publicRide: publicRideView(room.meta.publicRide),
+      capacity: this._storedCapacity(room.meta),
+      capacityPlan: room.meta.capacityPlan || null,
+      soloRide: this.isSoloRide(room),
+    };
   }
 
   /**

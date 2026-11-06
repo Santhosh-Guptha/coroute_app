@@ -1237,3 +1237,45 @@ num adminNum(Map m, String k) => m[k] is num ? m[k] as num : 0;
 
 /// [s] with its first letter in capitals ("emergency" to "Emergency").
 String adminCapitalize(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+
+/// A row of plain tabs over their pages, no wider than [adminMaxContentWidth]: the one tab
+/// layout of the console (Payments, Safety, Insights), the same on a phone and a tablet.
+class AdminTabbedBody extends StatelessWidget {
+  final TabController controller;
+  final List<String> labels;
+  final List<Widget> children;
+
+  const AdminTabbedBody({super.key, required this.controller, required this.labels, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: AppTheme.border))),
+              child: TabBar(
+                controller: controller,
+                indicatorColor: AppTheme.brand,
+                indicatorWeight: 3,
+                dividerColor: Colors.transparent,
+                labelColor: AppTheme.accentText,
+                unselectedLabelColor: AppTheme.muted,
+                labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                tabs: [for (final l in labels) Tab(height: 48, text: l)],
+              ),
+            ),
+            Expanded(child: TabBarView(controller: controller, children: children)),
+          ],
+        ),
+      ),
+    );
+  }
+}

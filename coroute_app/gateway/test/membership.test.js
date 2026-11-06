@@ -78,16 +78,18 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
   // 1. Catalog & Initial Values
   // =========================================================================
 
-  await t.test('GET /api/membership/catalog returns initial categories: ₹9, ₹49, ₹99 and keyId', async () => {
+  await t.test('GET /api/membership/catalog returns initial categories: Community free, ₹49, ₹99 and keyId', async () => {
     const res = await env.api('GET', '/membership/catalog');
     assert.equal(res.status, 200);
     assert.ok(res.json.categories);
+    assert.equal(res.json.categories.individual, undefined, 'the paid ₹9 Individual plan is retired');
 
-    const ind = res.json.categories.individual;
-    assert.equal(ind.monthlyPriceInr, 9);
-    assert.equal(ind.capacity, 1);
-    assert.equal(ind.entitlements.ptt, false);
-    assert.equal(ind.entitlements.convoy, false);
+    const com = res.json.categories.community;
+    assert.equal(com.monthlyPriceInr, 0);
+    assert.equal(com.capacity, 1);
+    assert.equal(com.purchasable, false);
+    assert.equal(com.entitlements.ptt, false);
+    assert.equal(com.entitlements.convoy, false);
 
     const sm = res.json.categories.group_small;
     assert.equal(sm.monthlyPriceInr, 49);
@@ -324,7 +326,7 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
   // 5. Safety-First Mid-Trip Expiry Continuity
   // =========================================================================
 
-  await t.test('Mid-trip expiry: active trip continues uninterrupted, but new trip is blocked after end', async () => {
+  await t.test('Mid-trip expiry: active trip continues uninterrupted; after the end a new trip is a solo Community ride', async () => {
     const ownerMem = await env.gw.repo.findMembershipByOwner(ownerUser.userId);
     ownerMem.validUntil = Date.now() - 1000; // Expired 1 second ago
     await env.gw.repo.saveMembership(ownerMem);
@@ -347,8 +349,10 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
     assert.equal(lockHead, null);
 
     const newTripRes = await env.api('POST', '/convoys', { name: 'Expired Owner Trip' }, ownerToken);
-    assert.equal(newTripRes.status, 402);
-    assert.equal(newTripRes.json.reason, 'MEMBERSHIP_EXPIRED');
+    assert.equal(newTripRes.status, 201);
+    assert.equal(newTripRes.json.capacity, 1, 'Community: solo ride');
+    assert.equal(newTripRes.json.soloRide, true);
+    assert.equal((await env.api('POST', `/convoys/${newTripRes.json.groupId}/status`, { status: 'ENDED' }, ownerToken)).status, 200);
   });
 
   // =========================================================================
@@ -427,7 +431,7 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
   await t.test('POST /api/membership/verify detects and blocks payment replay attacks', async () => {
     // Create a new distinct order
     const order2 = await env.api('POST', '/membership/order', {
-      category: 'individual',
+      category: 'group_large',
     }, riderBToken);
     assert.equal(order2.status, 201);
     const orderId2 = order2.json.orderId;
@@ -466,7 +470,7 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
 
     // Create another order for webhook test
     const r3 = await env.register('Rider Webhook', 'rwebhook@test.com');
-    const ord = await env.api('POST', '/membership/order', { category: 'individual' }, r3.token);
+    const ord = await env.api('POST', '/membership/order', { category: 'group_small' }, r3.token);
     assert.equal(ord.status, 201);
     const targetOrderId = ord.json.orderId;
     const webhookPaymentId = `pay_hook_${Date.now()}`;
@@ -478,7 +482,7 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
           entity: {
             id: webhookPaymentId,
             order_id: targetOrderId,
-            amount: 900,
+            amount: 4900,
             method: 'upi',
           },
         },
@@ -502,7 +506,7 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
     const r3Mem = await env.gw.repo.findMembershipByOwner(r3.user.userId);
     assert.ok(r3Mem);
     assert.equal(r3Mem.status, 'ACTIVE');
-    assert.equal(r3Mem.category, 'individual');
+    assert.equal(r3Mem.category, 'group_small');
   });
 
   // =========================================================================
@@ -511,13 +515,18 @@ test('Membership, Monetization, Ownership & Trip Management Suite', async (t) =>
 
   await t.test('Platform Admin updates membership catalog dynamically', async () => {
     const catalog = await env.gw.repo.getMembershipCatalog();
-    catalog.individual.monthlyPriceInr = 12;
+    catalog.group_small.monthlyPriceInr = 59;
+    // Community stays free: only its description and features are editable.
+    catalog.community = { ...catalog.community, monthlyPriceInr: 25, capacity: 4, description: 'Ride solo, free forever.' };
 
     const updateRes = await env.api('PUT', '/admin/membership/catalog', { catalog }, adminToken);
     assert.equal(updateRes.status, 200);
 
     const checkRes = await env.api('GET', '/membership/catalog');
-    assert.equal(checkRes.json.categories.individual.monthlyPriceInr, 12);
+    assert.equal(checkRes.json.categories.group_small.monthlyPriceInr, 59);
+    assert.equal(checkRes.json.categories.community.monthlyPriceInr, 0);
+    assert.equal(checkRes.json.categories.community.capacity, 1);
+    assert.equal(checkRes.json.categories.community.description, 'Ride solo, free forever.');
   });
 
   await t.test('Platform Admin lists all memberships and payment transactions', async () => {

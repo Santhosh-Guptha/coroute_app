@@ -346,7 +346,7 @@ test('group timeline: every member tracked, isolated per group, exact report', a
   assert.ok(row && row.hasReport && row.members >= 3 && row.distanceM > 30000, JSON.stringify(row));
   assert.equal((await api('GET', '/admin/convoys/history', null, A.token)).status, 403, 'riders cannot list all rides');
   const stats = (await api('GET', '/admin/stats?days=30', null, ADM.token)).json;
-  assert.ok(stats.rides.all >= 1 && stats.riderTrips >= 1 && stats.riders >= 5 && stats.distanceM.all > 30000, JSON.stringify(stats));
+  assert.ok(stats.rides.all >= 1 && stats.riderTrips >= 1 && stats.riders >= 4 && stats.staff >= 1 && stats.distanceM.all > 30000, JSON.stringify(stats));
   const sum = await api('GET', `/convoys/${gid}/summary`, null, ADM.token);
   assert.equal(sum.status, 200);
   assert.ok(sum.json.report && sum.json.events.length > 10 && sum.json.plan && sum.json.members.length >= 3);

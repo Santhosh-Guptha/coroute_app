@@ -59,7 +59,7 @@ test('CoRoute Payment Security, Zero-Amount Activation & Idempotency Suite', asy
     // Validate RIDERFREE (default 100% free)
     const vFree = await env.api('POST', '/membership/validate-coupon', {
       code: 'RIDERFREE',
-      category: 'individual',
+      category: 'group_small',
     }, riderToken);
     assert.equal(vFree.status, 200);
     assert.equal(vFree.json.valid, true);
@@ -77,31 +77,36 @@ test('CoRoute Payment Security, Zero-Amount Activation & Idempotency Suite', asy
     assert.equal(vHalf.json.finalAmount, 24);
     assert.equal(vHalf.json.isFree, false);
 
-    // Validate HALFOFF on individual (tier mismatch)
+    // Validate HALFOFF on group_large (tier mismatch)
     const vMismatch = await env.api('POST', '/membership/validate-coupon', {
       code: 'HALFOFF',
-      category: 'individual',
+      category: 'group_large',
     }, riderToken);
     assert.equal(vMismatch.status, 400);
     assert.equal(vMismatch.json.valid, false);
     assert.equal(vMismatch.json.reason, 'TIER_MISMATCH');
+
+    // The retired Individual plan is not sold any more (Community is free).
+    const vLegacy = await env.api('POST', '/membership/validate-coupon', { code: 'HALFOFF', category: 'individual' }, riderToken);
+    assert.equal(vLegacy.status, 410);
+    assert.equal(vLegacy.json.reason, 'LEGACY_PLAN');
   });
 
   await t.test('3. Zero-amount membership activation POST /api/membership/activate-free', async () => {
     const actRes = await env.api('POST', '/membership/activate-free', {
-      category: 'individual',
+      category: 'group_small',
       couponCode: 'RIDERFREE',
     }, riderToken);
 
     assert.equal(actRes.status, 201);
     assert.equal(actRes.json.success, true);
-    assert.equal(actRes.json.membership.category, 'individual');
+    assert.equal(actRes.json.membership.category, 'group_small');
     assert.equal(actRes.json.membership.status, 'ACTIVE');
 
     // Verify GET /api/membership/my
     const myRes = await env.api('GET', '/membership/my', null, riderToken);
     assert.equal(myRes.status, 200);
-    assert.equal(myRes.json.owned.category, 'individual');
+    assert.equal(myRes.json.owned.category, 'group_small');
     assert.equal(myRes.json.owned.status, 'ACTIVE');
   });
 
@@ -111,7 +116,7 @@ test('CoRoute Payment Security, Zero-Amount Activation & Idempotency Suite', asy
 
     // Call activate-free again for identical category
     const actAgain = await env.api('POST', '/membership/activate-free', {
-      category: 'individual',
+      category: 'group_small',
       couponCode: 'RIDERFREE',
     }, riderToken);
 
@@ -130,35 +135,35 @@ test('CoRoute Payment Security, Zero-Amount Activation & Idempotency Suite', asy
     // rider could redeem again and again, for any plan. It is now a seeded coupon record with a
     // per-rider limit of 1, so this rider's second redemption (here for an upgrade) is refused.
     const reuse = await env.api('POST', '/membership/activate-free', {
-      category: 'group_small',
+      category: 'group_large',
       couponCode: 'RIDERFREE',
     }, riderToken);
     assert.equal(reuse.status, 400);
     assert.equal(reuse.json.reason, 'PER_USER_LIMIT_REACHED');
 
-    // The upgrade itself is still exercised, paid for by an admin-made 100% coupon bound to group_small.
+    // The upgrade itself is still exercised, paid for by an admin-made 100% coupon bound to group_large.
     const cRes = await env.api('POST', '/admin/coupons', {
       code: 'GROUPFREE',
       discountType: 'free',
-      applicablePlans: ['group_small'],
+      applicablePlans: ['group_large'],
       maxUsageTotal: 5,
       maxUsagePerUser: 1,
     }, adminToken);
     assert.equal(cRes.status, 201);
 
-    // Upgrade from individual (1) to group_small (6)
+    // Upgrade from group_small (6) to group_large (12)
     const upgRes = await env.api('POST', '/membership/activate-free', {
-      category: 'group_small',
+      category: 'group_large',
       couponCode: 'GROUPFREE',
     }, riderToken);
 
     assert.equal(upgRes.status, 201);
-    assert.equal(upgRes.json.membership.category, 'group_small');
-    assert.equal(upgRes.json.membership.capacity, 6);
+    assert.equal(upgRes.json.membership.category, 'group_large');
+    assert.equal(upgRes.json.membership.capacity, 12);
     assert.ok(Array.isArray(upgRes.json.membership.upgradeHistory));
     assert.equal(upgRes.json.membership.upgradeHistory.length, 1);
-    assert.equal(upgRes.json.membership.upgradeHistory[0].fromCategory, 'individual');
-    assert.equal(upgRes.json.membership.upgradeHistory[0].toCategory, 'group_small');
+    assert.equal(upgRes.json.membership.upgradeHistory[0].fromCategory, 'group_small');
+    assert.equal(upgRes.json.membership.upgradeHistory[0].toCategory, 'group_large');
   });
 
   await t.test('6. Removal of sandbox activation loophole from POST /api/membership/purchase', async () => {

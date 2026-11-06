@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../core/config/feature_gates.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
 import '../../../data/models/convoy_model.dart';
@@ -198,6 +197,9 @@ class GloveQuickActionGrid extends StatelessWidget {
   final bool isSafetyHealthy;
   final bool isSolo;
 
+  /// False in a solo ride (Community host): no Talk and no Messages tiles.
+  final bool groupFeatures;
+
   const GloveQuickActionGrid({
     super.key,
     required this.convoy,
@@ -215,6 +217,7 @@ class GloveQuickActionGrid extends StatelessWidget {
     required this.onOpenSafetyStatus,
     this.isSafetyHealthy = true,
     this.isSolo = false,
+    this.groupFeatures = true,
   });
 
   @override
@@ -245,16 +248,18 @@ class GloveQuickActionGrid extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(
-              child: GloveActionTile(
-                icon: Icons.headset_mic_rounded,
-                iconColor: AppTheme.brand,
-                title: isSolo ? 'Intercom' : 'Talk to All',
-                subtitle: commsSubtitle,
-                onTap: onOpenIntercom,
+            if (groupFeatures) ...[
+              Expanded(
+                child: GloveActionTile(
+                  icon: Icons.headset_mic_rounded,
+                  iconColor: AppTheme.brand,
+                  title: isSolo ? 'Intercom' : 'Talk to All',
+                  subtitle: commsSubtitle,
+                  onTap: onOpenIntercom,
+                ),
               ),
-            ),
-            const SizedBox(width: Space.s8),
+              const SizedBox(width: Space.s8),
+            ],
             Expanded(
               child: GloveActionTile(
                 icon: Icons.route_rounded,
@@ -298,18 +303,20 @@ class GloveQuickActionGrid extends StatelessWidget {
         const SizedBox(height: Space.s8),
         Row(
           children: [
-            Expanded(
-              child: GloveActionTile(
-                icon: Icons.chat_bubble_outline_rounded,
-                iconColor: AppTheme.warnText,
-                title: 'Messages ($msgCount)',
-                subtitle: msgSubtitle,
-                onTap: onOpenMessages,
-                badgeText: chatQueued > 0 ? '$chatQueued' : null,
-                badgeColor: AppTheme.warnText,
+            if (groupFeatures) ...[
+              Expanded(
+                child: GloveActionTile(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  iconColor: AppTheme.warnText,
+                  title: 'Messages ($msgCount)',
+                  subtitle: msgSubtitle,
+                  onTap: onOpenMessages,
+                  badgeText: chatQueued > 0 ? '$chatQueued' : null,
+                  badgeColor: AppTheme.warnText,
+                ),
               ),
-            ),
-            const SizedBox(width: Space.s8),
+              const SizedBox(width: Space.s8),
+            ],
             Expanded(
               child: GloveActionTile(
                 icon: Icons.shield_rounded,
@@ -535,6 +542,9 @@ class SecondaryManagementGroup extends StatelessWidget {
   final String? etaSubtitle;
   final bool isSolo;
 
+  /// False in a solo ride (Community host): no invite code, audio or group settings.
+  final bool groupFeatures;
+
   const SecondaryManagementGroup({
     super.key,
     required this.convoy,
@@ -547,12 +557,11 @@ class SecondaryManagementGroup extends StatelessWidget {
     this.onShareEta,
     this.etaSubtitle,
     this.isSolo = false,
+    this.groupFeatures = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    final maxCapacity = FeatureGates.maxConvoyMembers();
-
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.card,
@@ -563,20 +572,22 @@ class SecondaryManagementGroup extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _CardTile(
-            icon: Icons.group_add_rounded,
-            iconColor: AppTheme.brand,
-            title: 'Manage Riders & Invite',
-            subtitle: '${convoy.riders.length}/$maxCapacity bikes · Join code ${convoy.joinCode}',
-            onTap: onOpenManageRiders,
-          ),
-          if (!isSolo) ...[
+          if (groupFeatures) ...[
+            _CardTile(
+              icon: Icons.group_add_rounded,
+              iconColor: AppTheme.brand,
+              title: 'Manage Riders & Invite',
+              subtitle: '${convoy.riderCountLabel} riders · Join code ${convoy.joinCode}',
+              onTap: onOpenManageRiders,
+            ),
             const Divider(height: 1),
+          ],
+          if (!isSolo && groupFeatures) ...[
             _CardTile(
               icon: Icons.tune_rounded,
               iconColor: AppTheme.accentText,
-              title: 'Audio & Comms Preferences',
-              subtitle: 'Hands-free, headset button, Lead first',
+              title: 'Talk settings',
+              subtitle: 'Hear the group, microphone, headset button',
               onTap: onOpenAudioSettings,
             ),
             const Divider(height: 1),
@@ -587,8 +598,8 @@ class SecondaryManagementGroup extends StatelessWidget {
               subtitle: 'Speed limit, distance alerts, who sees you',
               onTap: onOpenGroupSettings,
             ),
+            const Divider(height: 1),
           ],
-          const Divider(height: 1),
           _CardTile(
             icon: Icons.shield_rounded,
             iconColor: AppTheme.accentText,
@@ -598,10 +609,10 @@ class SecondaryManagementGroup extends StatelessWidget {
           ),
           const Divider(height: 1),
           _CardTile(
-            icon: Icons.health_and_safety_rounded,
+            icon: Icons.settings_rounded,
             iconColor: AppTheme.brand,
-            title: 'Safety & System Diagnostics',
-            subtitle: 'Crash alerts, GPS and offline maps',
+            title: 'Settings',
+            subtitle: 'Safety, voice, map and privacy',
             onTap: onOpenSafetyStatus,
           ),
           if (onShareEta != null) ...[

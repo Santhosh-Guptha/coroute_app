@@ -20,6 +20,25 @@ class ConvoyModel {
 
   /// True when the trip has only 1 participant (solo trip / convoy.riders.length <= 1).
   bool get isSolo => riders.length <= 1;
+
+  /// A SOLO ride: the host rides on Community (free), so the gateway gave it one seat. Talk,
+  /// messages, the invite code, regroup and lead/sweep roles are group features and are hidden
+  /// (the gateway refuses them with SOLO_RIDE); every safety feature stays. A group ride (seats 2+,
+  /// or unknown from an older server) shows them to every rider in it, whatever their own plan.
+  bool get isSoloRide => capacity == 1;
+
+  /// The group features (talk, messages, invite, regroup, roles) belong to this ride.
+  bool get hasGroupFeatures => !isSoloRide;
+
+  /// Seats of this ride, host included: the host's membership seats, set by the gateway when the
+  /// ride starts (and raised when the host upgrades). 0 when the gateway did not say (older server).
+  final int capacity;
+
+  /// Riders in the ride over its seats, e.g. "1/6"; only the count when the seats are unknown.
+  String get riderCountLabel => capacity > 0 ? '${riders.length}/$capacity' : '${riders.length}';
+
+  /// No seat is left for a new rider.
+  bool get isFull => capacity > 0 && riders.length >= capacity;
   final String startLocationName;
   final String destinationName;
   final double destinationLat;
@@ -114,6 +133,7 @@ class ConvoyModel {
     this.townLimitKmh = 0,
     this.featurePolicy = const RideFeaturePolicy(),
     this.featureAnalytics = const {},
+    this.capacity = 0,
   });
 
   ConvoyModel copyWith({
@@ -152,6 +172,7 @@ class ConvoyModel {
     int? townLimitKmh,
     RideFeaturePolicy? featurePolicy,
     Map<String, dynamic>? featureAnalytics,
+    int? capacity,
   }) {
     return ConvoyModel(
       groupId: groupId ?? this.groupId,
@@ -188,6 +209,7 @@ class ConvoyModel {
       townLimitKmh: townLimitKmh ?? this.townLimitKmh,
       featurePolicy: featurePolicy ?? this.featurePolicy,
       featureAnalytics: featureAnalytics ?? this.featureAnalytics,
+      capacity: capacity ?? this.capacity,
     );
   }
 
@@ -226,6 +248,7 @@ class ConvoyModel {
       'townLimitKmh': townLimitKmh,
       'featurePolicy': featurePolicy.toJson(),
       'featureAnalytics': featureAnalytics,
+      if (capacity > 0) 'capacity': capacity,
     };
   }
 
@@ -308,6 +331,7 @@ class ConvoyModel {
       townLimitKmh: (json['townLimitKmh'] as num?)?.toInt() ?? 0,
       featurePolicy: RideFeaturePolicy.fromJson(json['featurePolicy']),
       featureAnalytics: json['featureAnalytics'] is Map ? Map<String, dynamic>.from(json['featureAnalytics']) : const {},
+      capacity: (json['capacity'] as num?)?.toInt() ?? 0,
     );
   }
 }

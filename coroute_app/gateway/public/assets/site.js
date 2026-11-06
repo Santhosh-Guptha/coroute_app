@@ -257,6 +257,16 @@
       setErr(msg, text); return !text;
     };
     var consent = $('fb-consent');
+    // Topic: links such as "Share a safety idea" (data-fb-topic) or /?topic=safety-idea#feedback preselect it.
+    var topic = $('fb-topic');
+    var pickTopic = function (v) {
+      if (!topic || !v) return;
+      for (var i = 0; i < topic.options.length; i++) if (topic.options[i].value === v) { topic.value = v; return; }
+    };
+    try { pickTopic(new URLSearchParams(location.search).get('topic')); } catch (e) { /* old browser */ }
+    $$('[data-fb-topic]').forEach(function (a) {
+      a.addEventListener('click', function () { pickTopic(a.getAttribute('data-fb-topic')); });
+    });
     var checkConsent = function () {
       if (!consent) return true;
       setErr(consent, consent.checked ? '' : 'Please tick the box so we can store your message and reply.'); return consent.checked;
@@ -284,7 +294,8 @@
         .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, j: j }; }); })
         .then(function (res) {
           if (res.status === 201 || res.status === 204) {
-            form.reset(); stamp();
+            var keepTopic = topic ? topic.value : '';
+            form.reset(); stamp(); pickTopic(keepTopic);
             setState('sent', 'Thanks. Your feedback reached the Coroute team.');
             return;
           }
@@ -565,12 +576,25 @@
      Source: GET /api/public/usage-stats -> { ok, stats: { riders, ridesCompleted, kmRidden, groupsRidden, sosResolved,
      avgRating (or null), updatedAt } }. Fallback when that is missing (404 on older servers): GET /api/public/community-stats
      -> { enabled, totalRiders, totalKilometers }. The section stays hidden unless the numbers are real and large enough
-     to mean something (at least 10 completed rides); a small or missing number is left out, never shown as a boast. */
+     to mean something (at least 10 completed rides); a small or missing number is left out, never shown as a boast.
+     Privacy: the server already rounds (src/public_privacy.js); the same rules are applied here too, so an older
+     server's exact totals are never shown: counts rounded down to tens (hundreds from 1,000), nothing below 10,
+     distance rounded down to 100 km (1,000 km from 10,000 km), shown with "+" because the real total is higher. */
   var usageBox = doc.querySelector('[data-usage-stats]');
   var usageList = doc.getElementById('usage-stats-list');
   if (usageBox && usageList && 'fetch' in win) {
     var uNum = function (v) { var n = typeof v === 'string' ? parseFloat(v) : v; return typeof n === 'number' && isFinite(n) && n >= 0 ? n : null; };
-    var uFmt = function (n) { return Math.round(n).toLocaleString('en-IN'); };
+    var uFmt = function (n) { return Math.round(n).toLocaleString('en-IN') + '+'; };
+    var uCount = function (n) {
+      if (n === null || n < 10) return null;
+      var step = n < 1000 ? 10 : n < 100000 ? 100 : 1000;
+      return Math.floor(n / step) * step;
+    };
+    var uKm = function (n) {
+      if (n === null) return null;
+      var r = Math.floor(n / (n < 10000 ? 100 : 1000)) * (n < 10000 ? 100 : 1000);
+      return r >= 100 ? r : null;
+    };
     var uGet = function (url) {
       return fetch(url, { headers: { Accept: 'application/json' }, credentials: 'omit' }).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -581,33 +605,54 @@
       var st = j && j.stats;
       if (!st || typeof st !== 'object') throw new Error('unexpected shape');
       return {
-        riders: uNum(st.riders), rides: uNum(st.ridesCompleted), km: uNum(st.kmRidden), groups: uNum(st.groupsRidden),
-        sos: uNum(st.sosResolved), rating: uNum(st.avgRating), updatedAt: st.updatedAt, gate: uNum(st.ridesCompleted) !== null && uNum(st.ridesCompleted) >= 10,
+        riders: uCount(uNum(st.riders)), rides: uCount(uNum(st.ridesCompleted)), km: uKm(uNum(st.kmRidden)), groups: uCount(uNum(st.groupsRidden)),
+        sos: uCount(uNum(st.sosResolved)), rating: uNum(st.avgRating), updatedAt: st.updatedAt, gate: uCount(uNum(st.ridesCompleted)) !== null,
       };
     };
     var fromCommunity = function (j) {
       if (!j || j.enabled === false) throw new Error('private');
-      var riders = uNum(j.totalRiders), km = uNum(j.totalKilometers);
+      var riders = uCount(uNum(j.totalRiders)), km = uKm(uNum(j.totalKilometers));
       // No completed-ride count here, so ask more of the numbers that are present.
-      return { riders: riders, rides: null, km: km, groups: null, sos: null, rating: null, updatedAt: j.lastUpdated, gate: riders !== null && riders >= 10 && km !== null && km >= 1000 };
+      return { riders: riders, rides: null, km: km, groups: null, sos: null, rating: null, updatedAt: j.lastUpdated, gate: riders !== null && km !== null && km >= 1000 };
     };
+    // Counters roll up to the real value (from the last shown value on a refresh). Without animation support,
+    // or with reduced motion, the final number is written at once.
+    var uShown = {};
+    var uReduce = win.matchMedia ? win.matchMedia('(prefers-reduced-motion: reduce)').matches : true;
+    var uAnimate = function (dd, key, to, fmt) {
+      var from = key in uShown ? uShown[key] : 0;
+      uShown[key] = to;
+      dd.setAttribute('aria-label', fmt(to));
+      if (uReduce || !win.requestAnimationFrame || from === to) { dd.textContent = fmt(to); return; }
+      var t0 = null, dur = from ? 900 : 1400;
+      dd.textContent = fmt(from);
+      var step = function (now) {
+        if (t0 === null) t0 = now;
+        var k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+        dd.textContent = fmt(from + (to - from) * e);
+        if (k < 1) win.requestAnimationFrame(step);
+      };
+      win.requestAnimationFrame(step);
+    };
+    var uRating = function (n) { return n.toFixed(1) + ' / 5'; };
     var renderUsage = function (u) {
       if (!u.gate) return;
       var tiles = [];
-      if (u.rides !== null && u.rides >= 10) tiles.push(['Rides completed', uFmt(u.rides)]);
-      if (u.km !== null && u.km >= 100) tiles.push(['Kilometres ridden', uFmt(u.km)]);
-      if (u.riders !== null && u.riders >= 10) tiles.push(['Riders', uFmt(u.riders)]);
-      if (u.groups !== null && u.groups >= 3) tiles.push(['Group rides', uFmt(u.groups)]);
-      if (u.sos !== null && u.sos >= 1) tiles.push([u.sos === 1 ? 'SOS alert resolved' : 'SOS alerts resolved', uFmt(u.sos)]);
-      if (u.rating !== null && u.rating >= 1 && u.rating <= 5) tiles.push(['Average rider rating', u.rating.toFixed(1) + ' / 5']);
+      if (u.rides !== null && u.rides >= 10) tiles.push(['Rides completed', u.rides, uFmt]);
+      if (u.km !== null && u.km >= 100) tiles.push(['Kilometres ridden', u.km, uFmt]);
+      if (u.riders !== null && u.riders >= 10) tiles.push(['Riders', u.riders, uFmt]);
+      if (u.groups !== null && u.groups >= 10) tiles.push(['Group rides', u.groups, uFmt]);
+      if (u.sos !== null && u.sos >= 10) tiles.push(['SOS alerts resolved', u.sos, uFmt]);
+      if (u.rating !== null && u.rating >= 1 && u.rating <= 5) tiles.push(['Average rider rating', u.rating, uRating]);
       if (tiles.length < 2) return;
       usageList.textContent = '';
       tiles.forEach(function (t) {
         var d = doc.createElement('div');
         var dt = doc.createElement('dt'); dt.textContent = t[0];
-        var dd = doc.createElement('dd'); dd.textContent = t[1];
+        var dd = doc.createElement('dd');
         d.appendChild(dt); d.appendChild(dd);
         usageList.appendChild(d);
+        uAnimate(dd, t[0], t[2] === uRating ? Math.round(t[1] * 10) / 10 : Math.round(t[1]), t[2]);
       });
       var note = doc.getElementById('usage-stats-note');
       var at = u.updatedAt ? new Date(typeof u.updatedAt === 'string' && /^\d+$/.test(u.updatedAt) ? +u.updatedAt : u.updatedAt) : null;
@@ -615,12 +660,15 @@
       usageBox.hidden = false;
     };
     var loadUsage = function () {
+      if (doc.hidden) return;
       uGet('/api/public/usage-stats').then(fromUsage)
         .catch(function () { return uGet('/api/public/community-stats').then(fromCommunity); })
         .then(renderUsage)
-        .catch(function () { /* stays hidden: no numbers are better than wrong ones */ });
+        .catch(function () { /* stays as it was: no numbers are better than wrong ones */ });
     };
     loadUsage();
+    // Live: check again every minute while the page is open (the server caches, so this is cheap).
+    if (win.setInterval) win.setInterval(loadUsage, 60000);
   }
 
   /* ---------- Theme toggle (light / dark), remembered in this browser only ---------- */

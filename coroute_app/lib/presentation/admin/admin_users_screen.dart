@@ -10,8 +10,9 @@ import 'admin_ui.dart';
 import 'admin_user_details_screen.dart';
 import 'master_admin_dashboard.dart';
 
-/// Which users the list shows.
-enum AdminUserFilter { all, active, onHold, blocked, riding }
+/// Which users the list shows. Every filter but [staff] leaves staff accounts (admins and the
+/// gateway's STAFF_EMAILS) out, so the rider total never counts them; [staff] lists only them.
+enum AdminUserFilter { all, active, onHold, blocked, riding, staff }
 
 /// Order of the list (the gateway's `sort` values).
 enum AdminRiderSort { lastSeen, joined, trips, km, sos, name }
@@ -31,7 +32,8 @@ class AdminUsersScreen extends StatefulWidget {
   /// Riders per request.
   static const int pageSize = 50;
 
-  /// The plan tiers the gateway knows ('' = every plan).
+  /// The legacy tiers the gateway can filter by ('' = every rider); shown read-only as "Legacy".
+  /// Membership plans are listed under Plans & Coupons.
   static const List<String> tiers = ['', 'community', 'proRider', 'roadCaptain', 'tourOperator'];
 
   /// Query string for one page (pure, for tests).
@@ -54,10 +56,19 @@ class AdminUsersScreen extends StatefulWidget {
       if (status.isNotEmpty) 'status': status,
       if (tier.isNotEmpty) 'tier': tier,
       if (filter == AdminUserFilter.riding) 'riding': '1',
+      if (filter == AdminUserFilter.staff) 'staff': '1',
       'sort': sort.name,
       'limit': '$limit',
       'cursor': '$cursor',
     };
+  }
+
+  /// A staff account (admin or STAFF_EMAILS): the gateway's `staff` flag, or an admin role
+  /// from an older gateway that does not send it. Staff are never counted as riders.
+  static bool isStaff(Map<String, dynamic> u) {
+    final flag = u['staff'];
+    if (flag is bool) return flag;
+    return u['role']?.toString() == AppConstants.adminRole;
   }
 
   /// One account of the legacy `/admin/users` list as a rider row of the analytics endpoint.
@@ -208,12 +219,15 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
   static bool _isRiding(Map<String, dynamic> u) => u['riding'] != null || u['isInActiveConvoy'] == true;
 
   bool _matchesLegacy(Map<String, dynamic> u) {
+    // Like the gateway: staff only under the Staff filter, never in the rider list or its total.
+    if ((_filter == AdminUserFilter.staff) != AdminUsersScreen.isStaff(u)) return false;
     final ok = switch (_filter) {
       AdminUserFilter.all => true,
       AdminUserFilter.active => _statusOf(u) == AccountStatus.active,
       AdminUserFilter.onHold => _statusOf(u) == AccountStatus.onHold,
       AdminUserFilter.blocked => _statusOf(u) == AccountStatus.blocked,
       AdminUserFilter.riding => _isRiding(u),
+      AdminUserFilter.staff => true,
     };
     if (!ok) return false;
     if (_tier.isNotEmpty && (u['tier']?.toString() ?? '') != _tier) return false;
@@ -253,6 +267,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
         AdminUserFilter.onHold => 'On hold',
         AdminUserFilter.blocked => 'Blocked',
         AdminUserFilter.riding => 'Riding now',
+        AdminUserFilter.staff => 'Staff',
       };
 
   static String _sortLabel(AdminRiderSort s) => switch (s) {
@@ -266,10 +281,10 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
 
   static String tierLabel(String t) => switch (t) {
         '' => 'All plans',
-        'community' => 'Community',
-        'proRider' => 'Pro Rider',
-        'roadCaptain' => 'Road Captain',
-        'tourOperator' => 'Tour Operator',
+        'community' => 'No legacy plan',
+        'proRider' => 'Legacy: CoRoute Pro',
+        'roadCaptain' => 'Legacy: Road Captain',
+        'tourOperator' => 'Legacy: Tour Operator',
         _ => t,
       };
 
@@ -311,7 +326,9 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
 
     return AdminShell(
       title: 'Riders',
-      subtitle: _loaded ? '$total ${total == 1 ? 'account' : 'accounts'}' : 'Registered accounts',
+      subtitle: !_loaded
+          ? 'Registered accounts'
+          : (_filter == AdminUserFilter.staff ? '$total staff' : '$total ${total == 1 ? 'rider' : 'riders'} (excl. staff)'),
       onBack: () => Navigator.maybePop(context),
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
       nav: adminNavItems(context, AdminSection.users),
@@ -482,6 +499,7 @@ class _UserRow extends StatelessWidget {
     final u = user;
     final name = (u['name']?.toString() ?? '').trim();
     final isAdmin = u['role'] == AppConstants.adminRole;
+    final isStaff = AdminUsersScreen.isStaff(u);
     final status = AccountStatus.fromCode(u['status'] ?? 'ACTIVE');
     final ridingInfo = u['riding'] ?? u['activeGroup'];
     final groupName = ridingInfo is Map ? (ridingInfo['name']?.toString() ?? '') : '';
@@ -506,13 +524,13 @@ class _UserRow extends StatelessWidget {
       if (stats.isNotEmpty) StatusLine(icon: Icons.insights_rounded, text: stats),
     ];
     final tags = [
-      if (isAdmin) 'Admin',
+      if (isStaff) isAdmin ? 'Staff, admin' : 'Staff',
       if (u['guest'] == true) 'Guest',
       if (tier.isNotEmpty && tier != 'community') _AdminUsersScreenState.tierLabel(tier),
     ];
 
     return AdminRow(
-      leading: RiderAvatar(name: name.isEmpty ? '?' : name, color: isAdmin ? AppTheme.warnText : null),
+      leading: RiderAvatar(name: name.isEmpty ? '?' : name, color: isStaff ? AppTheme.warnText : null),
       title: '${name.isEmpty ? 'Unnamed rider' : name}${isMe ? ' (you)' : ''}',
       subtitle: contact,
       detail: tags.isEmpty ? null : tags.join(' · '),

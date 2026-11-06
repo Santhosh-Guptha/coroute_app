@@ -120,7 +120,7 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
                 ),
                 const SizedBox(height: Space.s8),
                 Text(
-                  'You can change this any time in Profile, Ride safety.',
+                  'You can change this any time in Profile > Settings.',
                   style: AppText.caption,
                 ),
                 const SizedBox(height: Space.s12),

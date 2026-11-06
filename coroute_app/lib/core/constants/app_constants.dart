@@ -54,4 +54,17 @@ class AppConstants {
   static const double defaultMapLng = 78.9629;
 
   static const String osmUserAgent = 'CoRouteFlutter/3.0 (devmonks.space; space.devmonks.coroute_app)';
+
+  /// The Android application id (Play Store listing) for the "Rate CoRoute" prompt.
+  static const String androidPackageId = 'space.devmonks.coroute_app';
+
+  /// The Play Store page (the update screen opens it when the server gives no store link).
+  static const String playStoreUrl = 'https://play.google.com/store/apps/details?id=$androidPackageId';
+
+  /// A Google Maps link to a point, for emergency texts and shares ("Maps: <link>").
+  static String mapsLink(double lat, double lng, {int digits = 6}) =>
+      'https://maps.google.com/?q=${lat.toStringAsFixed(digits)},${lng.toStringAsFixed(digits)}';
+
+  /// The App Store page (https). Empty: there is none yet, so iOS never shows the rating prompt.
+  static const String iosAppStoreUrl = String.fromEnvironment('COROUTE_IOS_STORE_URL', defaultValue: '');
 }

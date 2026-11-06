@@ -18,6 +18,7 @@ import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/presentation/ride/group_settings_sheet.dart';
 import 'package:coroute_app/presentation/ride/network_consent_sheet.dart';
 import 'package:coroute_app/presentation/safety/safety_settings_sheet.dart';
+import 'package:coroute_app/presentation/settings/settings_screen.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -72,13 +73,14 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('safety settings: nearby riders switches write the profile, the others the phone settings', (tester) async {
+  testWidgets('Settings: nearby riders switches write the profile, the others the phone settings', (tester) async {
     final settings = SettingsService();
     await settings.load();
     final (auth, patches) = authWithPatches();
-    await host(tester, const SafetySettingsSheet(), settings: settings, auth: auth);
+    await host(tester, const SettingsScreen(), settings: settings, auth: auth);
     expect(tester.takeException(), isNull);
-    expect(find.byType(Switch), findsNWidgets(17));
+    // Ride 1, Safety 5, Nearby riders 2, Voice 1, Map 2 (battery and data saver), Privacy 1.
+    expect(find.byType(Switch), findsNWidgets(12));
     final list = find.byType(Scrollable).first;
 
     await tester.scrollUntilVisible(find.text(SafetyTexts.helpTitle), 80, scrollable: list);
@@ -89,12 +91,8 @@ void main() {
     expect(patches.last, {'assistHelp': false});
     expect(auth.assistHelp, isFalse);
 
-    await tester.scrollUntilVisible(find.text(SafetyTexts.medicalTitle), 80, scrollable: list);
-    expect(auth.responderMedical, isFalse, reason: 'default off');
-    await tester.tap(find.text(SafetyTexts.medicalTitle));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(patches.last, {'responderMedical': true});
+    // Sharing medical info with a responder is chosen in the profile, next to the medical info.
+    expect(find.text(SafetyTexts.medicalTitle), findsNothing);
 
     await tester.scrollUntilVisible(find.text(SafetyTexts.hazardTitle), 80, scrollable: list);
     expect(settings.hazardAlerts, isTrue);
@@ -112,7 +110,7 @@ void main() {
     await tester.tap(find.text(SafetyTexts.lockTitle));
     await tester.pump();
     expect(settings.rideOnLockScreen, isFalse);
-    expect(patches, hasLength(2), reason: 'phone-only settings never call the server');
+    expect(patches, hasLength(1), reason: 'phone-only settings never call the server');
     expect(tester.takeException(), isNull);
   });
 
@@ -120,7 +118,7 @@ void main() {
     final settings = SettingsService();
     await settings.load();
     final (auth, _) = authWithPatches(fail: true);
-    await host(tester, const SafetySettingsSheet(), settings: settings, auth: auth);
+    await host(tester, const SettingsScreen(), settings: settings, auth: auth);
     final list = find.byType(Scrollable).first;
     await tester.scrollUntilVisible(find.text(SafetyTexts.askTitle), 80, scrollable: list);
     await tester.tap(find.text(SafetyTexts.askTitle));

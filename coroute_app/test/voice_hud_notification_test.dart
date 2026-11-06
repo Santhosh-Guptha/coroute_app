@@ -22,7 +22,7 @@ import 'package:coroute_app/domain/notify/alert_policy.dart';
 import 'package:coroute_app/presentation/account/appearance_sheet.dart';
 import 'package:coroute_app/presentation/alerts/alert_tiers.dart';
 import 'package:coroute_app/presentation/ride/group_settings_sheet.dart';
-import 'package:coroute_app/presentation/safety/safety_settings_sheet.dart';
+import 'package:coroute_app/presentation/settings/settings_screen.dart';
 
 class MockVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
   final List<String> spokenLines = [];
@@ -158,56 +158,15 @@ void main() {
     L10n.setLanguage(AppLanguage.en);
   });
 
-  group('SettingsService voiceAnnounceAllAlerts and mapAlertDismissSeconds', () {
-    test('default settings values are voiceAnnounceAllAlerts=true and mapAlertDismissSeconds=5', () async {
+  // "Announce all alerts" and the map alert time are no longer settings: alerts without
+  // their own line are always read out (with Spoken alerts on), and an ordinary alert
+  // leaves the map after a fixed time.
+  group('Spoken alerts and the map alert time', () {
+    test('spoken alerts are on by default and the map alert time is fixed', () async {
       final s = SettingsService();
       await s.load();
-      expect(s.voiceAnnounceAllAlerts, isTrue);
-      expect(s.mapAlertDismissSeconds, 5);
-    });
-
-    test('updating voiceAnnounceAllAlerts notifies listeners and persists', () async {
-      final s = SettingsService();
-      await s.load();
-      var notified = false;
-      s.addListener(() => notified = true);
-
-      await s.setVoiceAnnounceAllAlerts(false);
-      expect(s.voiceAnnounceAllAlerts, isFalse);
-      expect(notified, isTrue);
-
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getBool(NetworkConstants.keyVoiceAnnounceAllAlerts), isFalse);
-    });
-
-    test('updating mapAlertDismissSeconds notifies listeners and persists', () async {
-      final s = SettingsService();
-      await s.load();
-      var notified = false;
-      s.addListener(() => notified = true);
-
-      await s.setMapAlertDismissSeconds(8);
-      expect(s.mapAlertDismissSeconds, 8);
-      expect(notified, isTrue);
-
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getInt(NetworkConstants.keyMapAlertDismissSeconds), 8);
-
-      // Clamping negative values to 0 (manual mode).
-      await s.setMapAlertDismissSeconds(-5);
-      expect(s.mapAlertDismissSeconds, 0);
-    });
-
-    test('settings load restores persisted values', () async {
-      SharedPreferences.setMockInitialValues({
-        NetworkConstants.keyVoiceAnnounceAllAlerts: false,
-        NetworkConstants.keyMapAlertDismissSeconds: 12,
-      });
-
-      final s = SettingsService();
-      await s.load();
-      expect(s.voiceAnnounceAllAlerts, isFalse);
-      expect(s.mapAlertDismissSeconds, 12);
+      expect(s.voiceWarnings, isTrue);
+      expect(NetworkConstants.mapAlertDismissSeconds, 5);
     });
   });
 
@@ -219,7 +178,7 @@ void main() {
       final voice = VoiceService(s, engine: engine);
       final convoys = FakeConvoyService()..settings = s;
       final timeline = FakeTimelineService();
-      final alertService = AlertService(convoys, timeline, voice: voice, settings: s);
+      final alertService = AlertService(convoys, timeline, voice: voice);
 
       // Alert with explicit speech.
       const specWithSpeech = AlertSpec(
@@ -253,16 +212,16 @@ void main() {
       alertService.dispose();
     });
 
-    test('suppresses non-critical alerts when voiceAnnounceAllAlerts is false', () async {
+    test('suppresses non-critical alerts when spoken alerts are off; emergencies still speak', () async {
       final s = SettingsService();
       await s.load();
-      await s.setVoiceAnnounceAllAlerts(false);
+      await s.setVoiceWarnings(false);
 
       final engine = MockVoiceEngine();
       final voice = VoiceService(s, engine: engine);
       final convoys = FakeConvoyService()..settings = s;
       final timeline = FakeTimelineService();
-      final alertService = AlertService(convoys, timeline, voice: voice, settings: s);
+      final alertService = AlertService(convoys, timeline, voice: voice);
 
       // Warning alert without speech.
       const specWarning = AlertSpec(
@@ -276,7 +235,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(engine.spokenLines, isEmpty);
 
-      // Critical alert still speaks if voiceCritical is on.
+      // A critical alert always speaks.
       const specCritical = AlertSpec(
         'SOS:u9',
         AlertChannel.sos,
@@ -304,7 +263,7 @@ void main() {
         ..myUserId = 'user_rider'
         ..settings = s;
       final timeline = FakeTimelineService()..groupId = 'GRP-TEST-1';
-      final alertService = AlertService(convoys, timeline, voice: voice, settings: s);
+      final alertService = AlertService(convoys, timeline, voice: voice);
 
       // Initial load with a prior event so subsequent events are live.
       final nowMs = DateTime.now().millisecondsSinceEpoch;
@@ -385,63 +344,44 @@ void main() {
   });
 
   group('Configuration UI widgets', () {
-    testWidgets('SafetySettingsSheet renders Announce all alerts and duration selector', (tester) async {
+    testWidgets('Settings has one spoken alerts switch and no alert duration chooser', (tester) async {
       final s = SettingsService();
       await s.load();
 
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.themeFor(AppPalette.dark),
-          home: Scaffold(
-            body: MultiProvider(
-              providers: [
-                ChangeNotifierProvider<SettingsService>.value(value: s),
-                Provider<AuthService?>.value(value: null),
-                Provider<ConvoyService?>.value(value: null),
-              ],
-              child: const SingleChildScrollView(child: SafetySettingsSheet()),
-            ),
+          home: MultiProvider(
+            providers: [
+              ChangeNotifierProvider<SettingsService>.value(value: s),
+              Provider<AuthService?>.value(value: null),
+              Provider<ConvoyService?>.value(value: null),
+            ],
+            child: const SettingsScreen(),
           ),
         ),
       );
       await tester.pumpAndSettle();
 
-      // Find "Announce all alerts" switch.
-      final voiceSwitch = find.text('Announce all alerts');
-      expect(voiceSwitch, findsOneWidget);
+      expect(find.byKey(const ValueKey('settings_spoken_alerts')), findsOneWidget);
+      expect(find.text('Announce all alerts'), findsNothing);
+      expect(find.text('Map alert banner duration'), findsNothing);
 
-      // Find "Map alert banner duration".
-      expect(find.text('Map alert banner duration'), findsOneWidget);
-      expect(find.text('5s'), findsWidgets);
-      expect(find.text('Manual'), findsWidgets);
-
-      // Scroll to and tap on 8s choice chip.
-      await tester.ensureVisible(find.text('8s').first);
-      await tester.tap(find.text('8s').first);
+      await tester.ensureVisible(find.byKey(const ValueKey('settings_spoken_alerts')));
+      await tester.tap(find.byKey(const ValueKey('settings_spoken_alerts')));
       await tester.pumpAndSettle();
-      expect(s.mapAlertDismissSeconds, 8);
-
-      // Scroll to and tap on Manual choice chip.
-      await tester.ensureVisible(find.text('Manual').first);
-      await tester.tap(find.text('Manual').first);
-      await tester.pumpAndSettle();
-      expect(s.mapAlertDismissSeconds, 0);
+      expect(s.voiceWarnings, isFalse);
     });
 
-    testWidgets('AppearanceSheet renders Map HUD duration choices', (tester) async {
-      final s = SettingsService();
-      await s.load();
+    testWidgets('AppearanceSheet only chooses the look', (tester) async {
       final theme = ThemeController();
 
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.themeFor(AppPalette.dark),
           home: Scaffold(
-            body: MultiProvider(
-              providers: [
-                ChangeNotifierProvider<SettingsService>.value(value: s),
-                ChangeNotifierProvider<ThemeController>.value(value: theme),
-              ],
+            body: ChangeNotifierProvider<ThemeController>.value(
+              value: theme,
               child: const SingleChildScrollView(child: AppearanceSheet()),
             ),
           ),
@@ -449,16 +389,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('MAP HUD & ALERTS'), findsOneWidget);
-      expect(find.text('3s'), findsWidgets);
-      expect(find.text('5s'), findsWidgets);
-
-      await tester.tap(find.text('3s').first);
-      await tester.pumpAndSettle();
-      expect(s.mapAlertDismissSeconds, 3);
+      expect(find.text('Automatic'), findsOneWidget);
+      expect(find.text('MAP HUD & ALERTS'), findsNothing);
+      expect(find.text('3s'), findsNothing);
     });
 
-    testWidgets('GroupSettingsView renders Announce all alerts and HUD duration choices', (tester) async {
+    testWidgets('GroupSettingsView keeps the group spoken alerts switch and no rider settings', (tester) async {
       final s = SettingsService();
       await s.load();
       final convoy = makeConvoy(groupId: 'GRP-TEST-1', myId: 'user_rider');
@@ -483,17 +419,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Find "Announce all alerts" switch.
-      expect(find.text('Announce all alerts'), findsOneWidget);
-
-      // Find "Map alert banner duration".
-      expect(find.text('Map alert banner duration'), findsOneWidget);
-      expect(find.text('12s'), findsWidgets);
-
-      await tester.ensureVisible(find.text('12s').first);
-      await tester.tap(find.text('12s').first);
-      await tester.pumpAndSettle();
-      expect(s.mapAlertDismissSeconds, 12);
+      expect(find.text('Spoken alerts'), findsWidgets);
+      expect(find.text('Announce all alerts'), findsNothing);
+      expect(find.text('Map alert banner duration'), findsNothing);
+      expect(find.text('Lead voice first'), findsNothing);
+      expect(find.text('Send stops and regroup points'), findsNothing);
     });
   });
 }

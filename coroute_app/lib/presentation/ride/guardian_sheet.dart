@@ -6,8 +6,6 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/convoy_service.dart';
-import '../../data/services/plan_subscription_service.dart';
-import '../../core/config/feature_gates.dart';
 
 bool _isGuardianSheetShowing = false;
 
@@ -15,10 +13,6 @@ Future<void> showGuardianSheet(
   BuildContext context, {
   required String groupId,
 }) async {
-  if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
-    FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
-    return;
-  }
   if (_isGuardianSheetShowing) return;
   _isGuardianSheetShowing = true;
   try {
@@ -39,65 +33,7 @@ class GuardianSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final planService = context.watch<PlanSubscriptionService?>();
-    final isUnlocked = planService?.isUnlocked(Feature.guardianLiveShare) ??
-        FeatureGates.isUnlocked(Feature.guardianLiveShare);
-
-    if (!isUnlocked) {
-      return Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppTheme.card,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.warnBorder, width: 1.5),
-              ),
-              child: Column(
-                children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: AppTheme.warnTint,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.lock_rounded, size: 28, color: AppTheme.warnText),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'Ride Guardian is a Pro Feature',
-                    style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w800, fontSize: 18),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Ride Guardian encrypted browser live-share is available on CoRoute Pro and Road Captain Pass.\n\nUpgrade your plan to unlock encrypted real-time location sharing for family and friends.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.4),
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: AppTheme.brand),
-                      onPressed: () {
-                        FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
-                      },
-                      child: const Text('UPGRADE TO COROUTE PRO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-    }
+    // Ride Guardian is a safety feature: open to every rider, never behind a plan.
     final token = context.select<ApiClient, String?>((api) => api.token);
     return _GuardianContent(key: ValueKey((groupId, token)), groupId: groupId);
   }
@@ -178,10 +114,6 @@ class _GuardianSheetState extends State<_GuardianContent> {
   }
 
   Future<void> _create() => _run(() async {
-    if (!FeatureGates.isUnlocked(Feature.guardianLiveShare)) {
-      FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
-      return;
-    }
     if (_pin.text.isNotEmpty && !RegExp(r'^[0-9]{4,8}$').hasMatch(_pin.text)) {
       throw const ApiException(400, 'Use a PIN of 4 to 8 digits.');
     }

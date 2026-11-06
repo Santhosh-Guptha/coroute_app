@@ -118,7 +118,7 @@ void main() {
       for (final k in core) {
         expect(coreStrings['en']!.containsKey(k), isTrue, reason: k);
       }
-      for (final prefix in ['notif.', 'prompt.', 'fuel.', 'dark.', 'weather.']) {
+      for (final prefix in ['notif.', 'prompt.', 'fuel.', 'dark.', 'weather.', 'nav.']) {
         expect(safetyStrings['en']!.keys.any((k) => k.startsWith(prefix)), isTrue, reason: prefix);
       }
       for (final prefix in ['crash.', 'sos.', 'incident.', 'assist.', 'hazard.', 'settings.', 'card.', 'report.']) {

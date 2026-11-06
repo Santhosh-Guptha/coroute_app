@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/config/feature_gates.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_controller.dart';
 import '../../../core/ui/ui.dart';
@@ -10,24 +9,18 @@ import '../../../data/services/settings_service.dart';
 import '../../ride/fuel_sheet.dart';
 import '../../ride/guardian_sheet.dart';
 
-/// Ultra-clean, minimal, glove-friendly sheet for the live cockpit.
-///
-/// Designed for riders wearing thick motorcycle gloves:
-/// - Oversized touch targets (>= 60 dp rows; entire row toggles).
-/// - Exactly 4 essential, high-impact in-flight toggles:
-///   1. Voice Alerts & Intercom (Mute/Unmute voice and intercom audio)
-///   2. Sunlight Mode (High-contrast AMOLED outdoor HUD strictly gated by [Feature.sunlightHudMode])
-///   3. Battery Conserve (Standard vs Endurance Low-Data mode)
-///   4. Screen Always-On (Prevent display sleeping while mounted)
-/// - Clean quick actions: Fuel and Guardian (strictly gated by [Feature.guardianLiveShare]).
-/// - ZERO emojis, ASCII hyphens only.
+/// The cockpit's quick settings: only in-ride toggles, sized for gloves
+/// (>= 64 dp rows; the whole row toggles). Everything else is in Settings.
+///   1. Voice: mute or unmute spoken alerts and the intercom (emergencies always speak).
+///   2. Night map: dark map now, or back to automatic.
+///   3. Battery saver: the same switch as in Settings.
+///   4. Screen always on while the phone is mounted.
+/// Quick actions: Guardian link, Fuel and (when given) offline voice navigation.
 class GloveQuickSettingsModal extends StatelessWidget {
   final SettingsService? settingsService;
   final IntercomService? intercomService;
   final bool keepScreenOn;
-  final bool autoFollow;
   final VoidCallback onToggleKeepScreenOn;
-  final VoidCallback? onToggleAutoFollow;
   final void Function(String name, bool isEnabled)? onSettingToggled;
   final String? groupId;
   final VoidCallback? onOpenGuardian;
@@ -39,9 +32,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
     this.settingsService,
     this.intercomService,
     required this.keepScreenOn,
-    this.autoFollow = true,
     required this.onToggleKeepScreenOn,
-    this.onToggleAutoFollow,
     this.onSettingToggled,
     this.groupId,
     this.onOpenGuardian,
@@ -56,9 +47,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
     SettingsService? settingsService,
     IntercomService? intercomService,
     required bool keepScreenOn,
-    bool autoFollow = true,
     required VoidCallback onToggleKeepScreenOn,
-    VoidCallback? onToggleAutoFollow,
     void Function(String name, bool isEnabled)? onSettingToggled,
     String? groupId,
     VoidCallback? onOpenGuardian,
@@ -77,18 +66,24 @@ class GloveQuickSettingsModal extends StatelessWidget {
           maxWidth: 600,
           maxHeight: screenSize.height * 0.88,
         ),
+        isDismissible: true,
+        enableDrag: true,
         backgroundColor: Colors.transparent,
-        barrierColor: const Color(0xFF15232E).withOpacity(0.5),
-        builder: (ctx) => Center(
+        barrierColor: AppScrim.color,
+        // Only as tall as the card, at the bottom: with a full-height Center
+        // the transparent sheet around the card swallowed taps, so a tap
+        // "outside" the card did not close it. Now the space around the card
+        // is the scrim and a tap there closes it.
+        builder: (ctx) => Align(
+          alignment: Alignment.bottomCenter,
+          heightFactor: 1.0,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 600),
             child: GloveQuickSettingsModal(
               settingsService: settingsService,
               intercomService: intercomService,
               keepScreenOn: keepScreenOn,
-              autoFollow: autoFollow,
               onToggleKeepScreenOn: onToggleKeepScreenOn,
-              onToggleAutoFollow: onToggleAutoFollow,
               onSettingToggled: onSettingToggled,
               groupId: groupId,
               onOpenGuardian: onOpenGuardian,
@@ -109,95 +104,68 @@ class GloveQuickSettingsModal extends StatelessWidget {
     final intercom = intercomService ?? (context.mounted ? context.read<IntercomService?>() : null);
     final themeCtrl = context.watch<ThemeController?>();
 
-    // 1. Voice Alerts & Intercom State
-    final voiceAlertsOn = settings?.voiceAnnounceAllAlerts ?? true;
+    // 1. Voice: spoken alerts and the intercom together (emergencies always speak).
+    final voiceAlertsOn = settings?.voiceWarnings ?? true;
     final isMicMuted = intercom?.isMicMuted ?? false;
     final isDeafened = intercom?.isDeafened ?? false;
-    final isVoiceAndIntercomOn = voiceAlertsOn && !isMicMuted && !isDeafened;
+    final isVoiceOn = voiceAlertsOn && !isMicMuted && !isDeafened;
 
-    // 2. Sunlight Mode (Gated by FeatureGates)
-    final isSunlightUnlocked = FeatureGates.isUnlocked(Feature.sunlightHudMode);
-    final isSunlightActive = isSunlightUnlocked && (themeCtrl?.preference == ThemePreference.light);
+    // 2. Night map: dark now, or automatic (by sunrise and sunset).
+    final isNightMap = themeCtrl?.preference == ThemePreference.dark;
 
-    // 3. Battery Conserve
-    final batteryConserveOn = settings?.lowData ?? false;
-
-    // 4. Screen Always-On
-    final screenAlwaysOn = keepScreenOn;
-
-    // Guardian Unlocked status
-    final isGuardianUnlocked = FeatureGates.isUnlocked(Feature.guardianLiveShare);
+    // 3. Battery saver (the Settings switch).
+    final batterySaverOn = settings?.batterySaver ?? false;
 
     final toggles = [
       _QuickSettingItem(
         key: const Key('quick_setting_voice_alerts'),
-        label: 'Voice & Intercom',
-        subtitle: isVoiceAndIntercomOn
-            ? 'Voice alerts & intercom live'
-            : 'All voice prompts and intercom muted',
-        icon: isVoiceAndIntercomOn ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-        isActive: isVoiceAndIntercomOn,
-        isLocked: false,
+        label: 'Voice',
+        subtitle: isVoiceOn ? 'Spoken alerts and talk on' : 'Muted. Emergencies are still spoken.',
+        icon: isVoiceOn ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+        isActive: isVoiceOn,
         onToggle: () {
-          final next = !isVoiceAndIntercomOn;
-          settings?.setVoiceAnnounceAllAlerts(next);
+          final next = !isVoiceOn;
+          settings?.setVoiceWarnings(next);
           if (intercom != null) {
             intercom.setMicMuted(!next);
             intercom.setDeafened(!next);
           }
-          onSettingToggled?.call('Voice & Intercom', next);
-          onSettingToggled?.call('Voice Alerts', next);
+          onSettingToggled?.call('Voice', next);
         },
       ),
       _QuickSettingItem(
-        key: const Key('quick_setting_sunlight_mode'),
-        label: 'Sunlight Mode',
-        subtitle: !isSunlightUnlocked
-            ? 'Requires Pro Rider plan · Tap to unlock'
-            : (isSunlightActive
-                ? 'High-contrast AMOLED outdoor HUD active'
-                : 'Auto daytime/night ambient contrast'),
-        icon: Icons.wb_sunny_rounded,
-        isActive: isSunlightActive,
-        isLocked: !isSunlightUnlocked,
+        key: const Key('quick_setting_night_map'),
+        label: 'Night map',
+        subtitle: isNightMap ? 'Dark map on' : 'Automatic by sunrise and sunset',
+        icon: Icons.dark_mode_rounded,
+        isActive: isNightMap,
         onToggle: () {
-          if (!isSunlightUnlocked) {
-            FeatureGates.showUpgradeModal(context, Feature.sunlightHudMode);
-            return;
-          }
-          final next = !isSunlightActive;
-          themeCtrl?.setPreference(next ? ThemePreference.light : ThemePreference.auto);
-          onSettingToggled?.call('Sunlight Mode', next);
+          final next = !isNightMap;
+          themeCtrl?.setPreference(next ? ThemePreference.dark : ThemePreference.auto);
+          onSettingToggled?.call('Night map', next);
         },
       ),
       _QuickSettingItem(
-        key: const Key('quick_setting_battery_conserve'),
-        label: 'Battery Conserve',
-        subtitle: batteryConserveOn
-            ? 'Endurance low-data & throttled sync'
-            : 'Normal data use',
+        key: const Key('quick_setting_battery_saver'),
+        label: 'Battery saver',
+        subtitle: batterySaverOn ? 'Gentler GPS and a lighter map' : 'Turns on by itself when battery is low',
         icon: Icons.battery_saver_rounded,
-        isActive: batteryConserveOn,
-        isLocked: false,
+        isActive: batterySaverOn,
         onToggle: () {
-          final next = !batteryConserveOn;
-          settings?.setLowData(next);
-          onSettingToggled?.call('Battery Conserve', next);
+          final next = !batterySaverOn;
+          settings?.setBatterySaver(next);
+          onSettingToggled?.call('Battery saver', next);
         },
       ),
       _QuickSettingItem(
         key: const Key('quick_setting_screen_always_on'),
-        label: 'Screen Always-On',
-        subtitle: screenAlwaysOn
-            ? 'Display stays awake while mounted'
-            : 'Follow phone display sleep timeout',
+        label: 'Screen always on',
+        subtitle: keepScreenOn ? 'The screen stays awake while mounted' : 'Follows the phone\'s sleep time',
         icon: Icons.screen_lock_portrait_rounded,
-        isActive: screenAlwaysOn,
-        isLocked: false,
+        isActive: keepScreenOn,
         onToggle: () {
           onToggleKeepScreenOn();
-          onSettingToggled?.call('Screen Always-On', !keepScreenOn);
-          onSettingToggled?.call('Screen Always On', !keepScreenOn);
+          onSettingToggled?.call('Screen always on', !keepScreenOn);
         },
       ),
     ];
@@ -248,13 +216,13 @@ class GloveQuickSettingsModal extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Cockpit Quick Settings',
+                      Text('Quick settings',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: AppText.headline.copyWith(fontSize: 18)),
                       const SizedBox(height: 2),
                       Text(
-                        '4 essential in-flight controls sized for gloves',
+                        'In-ride switches. Everything else is in Settings.',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppText.label,
@@ -286,7 +254,6 @@ class GloveQuickSettingsModal extends StatelessWidget {
                       subtitle: toggles[i].subtitle,
                       icon: toggles[i].icon,
                       isActive: toggles[i].isActive,
-                      isLocked: toggles[i].isLocked,
                       divider: i < toggles.length - 1,
                       onToggle: toggles[i].onToggle,
                     ),
@@ -300,16 +267,12 @@ class GloveQuickSettingsModal extends StatelessWidget {
                 Expanded(
                   child: DsButton(
                     key: const Key('quick_action_guardian_share'),
-                    label: isGuardianUnlocked ? 'Guardian link' : 'Guardian (Locked)',
-                    icon: isGuardianUnlocked ? Icons.verified_user_outlined : Icons.lock_rounded,
-                    tone: isGuardianUnlocked ? DsButtonTone.outline : DsButtonTone.warn,
+                    label: 'Guardian link',
+                    icon: Icons.verified_user_outlined,
+                    tone: DsButtonTone.outline,
                     height: 54,
                     fontSize: 13,
                     onPressed: () {
-                      if (!isGuardianUnlocked) {
-                        FeatureGates.showUpgradeModal(context, Feature.guardianLiveShare);
-                        return;
-                      }
                       Navigator.of(context).pop();
                       if (onOpenGuardian != null) {
                         onOpenGuardian!();
@@ -374,7 +337,6 @@ class _QuickSettingItem {
   final String subtitle;
   final IconData icon;
   final bool isActive;
-  final bool isLocked;
   final VoidCallback onToggle;
 
   const _QuickSettingItem({
@@ -383,7 +345,6 @@ class _QuickSettingItem {
     required this.subtitle,
     required this.icon,
     required this.isActive,
-    required this.isLocked,
     required this.onToggle,
   });
 }
@@ -395,7 +356,6 @@ class _GloveSettingRow extends StatelessWidget {
   final String subtitle;
   final IconData icon;
   final bool isActive;
-  final bool isLocked;
   final bool divider;
   final VoidCallback onToggle;
 
@@ -405,7 +365,6 @@ class _GloveSettingRow extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.isActive,
-    required this.isLocked,
     required this.divider,
     required this.onToggle,
   });
@@ -428,18 +387,10 @@ class _GloveSettingRow extends StatelessWidget {
                 height: 36,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: isLocked
-                      ? AppTheme.warnTint
-                      : (isActive ? AppTheme.tint : AppTheme.soft),
+                  color: isActive ? AppTheme.tint : AppTheme.soft,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(
-                  icon,
-                  size: 20,
-                  color: isLocked
-                      ? AppTheme.warnText
-                      : (isActive ? AppTheme.accentText : AppTheme.muted),
-                ),
+                child: Icon(icon, size: 20, color: isActive ? AppTheme.accentText : AppTheme.muted),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -447,66 +398,26 @@ class _GloveSettingRow extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            label,
-                            style: AppText.body.copyWith(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.text,
-                            ),
-                          ),
-                        ),
-                        if (isLocked) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppTheme.warnTint,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: AppTheme.warnBorder, width: 0.8),
-                            ),
-                            child: Text(
-                              'PRO',
-                              style: TextStyle(
-                                color: AppTheme.warnText,
-                                fontSize: 9,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
+                    Text(
+                      label,
+                      style: AppText.body.copyWith(fontSize: 15, fontWeight: FontWeight.w700, color: AppTheme.text),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: AppText.caption.copyWith(
-                        color: isLocked ? AppTheme.warnText : AppTheme.text2,
-                        fontSize: 12,
-                      ),
+                      style: AppText.caption.copyWith(color: AppTheme.text2, fontSize: 12),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 10),
-              if (isLocked)
-                IconButton(
-                  icon: Icon(Icons.lock_rounded, size: 22, color: AppTheme.warnText),
-                  tooltip: 'Requires upgrade',
-                  onPressed: onToggle,
-                )
-              else
-                Switch(
-                  value: isActive,
-                  onChanged: (_) => onToggle(),
-                  activeColor: AppTheme.brand,
-                ),
+              Switch(
+                value: isActive,
+                onChanged: (_) => onToggle(),
+                activeColor: AppTheme.brand,
+              ),
             ],
           ),
         ),

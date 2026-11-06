@@ -32,7 +32,7 @@ import 'package:coroute_app/presentation/ride/navigate_to.dart';
 import 'package:coroute_app/presentation/ride/ride_sheet.dart';
 import 'package:coroute_app/presentation/ride/rider_card_sheet.dart';
 import 'package:coroute_app/presentation/rider/rider_home_screen.dart';
-import 'package:coroute_app/presentation/safety/safety_settings_sheet.dart';
+import 'package:coroute_app/presentation/settings/settings_screen.dart';
 import 'package:coroute_app/presentation/trip_planner/trip_review_sheet.dart';
 
 const int now = 1800000000000;
@@ -569,17 +569,15 @@ void main() {
     });
   });
 
-  group('safety settings (items 2, 9, 15, 21, 22, 23)', () {
-    Future<SettingsService> settingsFor(WidgetTester tester, {bool rideActive = false, _Convoys? convoys}) async {
+  // The one Settings screen (it replaced the ride safety sheet).
+  group('settings (items 2, 9, 15, 21, 22, 23)', () {
+    Future<SettingsService> settingsFor(WidgetTester tester) async {
       final s = SettingsService();
       await s.load();
       await render(
         tester,
-        const SafetySettingsSheet(),
-        providers: [
-          ChangeNotifierProvider<SettingsService>.value(value: s),
-          if (convoys != null) ChangeNotifierProvider<ConvoyService>.value(value: convoys),
-        ],
+        const SettingsScreen(),
+        providers: [ChangeNotifierProvider<SettingsService>.value(value: s)],
         size: const Size(320, 900),
       );
       return s;
@@ -605,29 +603,18 @@ void main() {
       expect(L10n.current, 'en');
     });
 
-    testWidgets('new switches: speak more after dark, medical ID on the lock screen, documents reminder, route maps', (tester) async {
-      final s = await settingsFor(tester);
-      final list = find.byType(Scrollable).first;
-      expect(s.speakMoreAfterDark, isTrue);
-      expect(s.medicalIdOnLockScreen, isFalse);
-      expect(s.documentsReminder, isTrue);
-      expect(s.saveRouteMaps, isTrue);
-      for (final (title, read) in [
-        ('Speak more after dark', () => s.speakMoreAfterDark),
-        ('Show my medical ID on the lock screen during an SOS', () => s.medicalIdOnLockScreen),
-        ('Helmet and documents reminder', () => s.documentsReminder),
-        ('Save route maps on Wi-Fi', () => s.saveRouteMaps),
-      ]) {
-        await tester.scrollUntilVisible(find.text(title), 200, scrollable: list);
-        final before = read();
-        await tester.tap(find.text(title));
-        await tester.pump();
-        expect(read(), !before, reason: title);
+    // Speak more after dark, the documents line, saving route maps on Wi-Fi and the
+    // medical ID on the lock screen are always on now: no switches to show.
+    testWidgets('settings that the app decides have no switch', (tester) async {
+      await settingsFor(tester);
+      for (final title in ['Speak more after dark', 'Helmet and documents reminder', 'Save route maps on Wi-Fi',
+          'Show my medical ID on the lock screen during an SOS', 'Large ride notification', 'Speak emergency alerts']) {
+        expect(find.text(title), findsNothing, reason: title);
       }
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('ride safety opens the same simple fuel setup', (tester) async {
+    testWidgets('Settings opens the same simple fuel setup', (tester) async {
       await settingsFor(tester);
       await tester.scrollUntilVisible(find.text('Fuel'), 200, scrollable: find.byType(Scrollable).first);
       await tester.tap(find.text('Fuel')); await tester.pumpAndSettle();
@@ -635,27 +622,6 @@ void main() {
       expect(find.text('Full tank distance (km)'), findsOneWidget);
       expect(find.text('Tank range (km)'), findsNothing);
       await tester.pumpWidget(const SizedBox());
-    });
-
-    testWidgets('the developer impact row appears after 7 title taps and only during a ride', (tester) async {
-      await settingsFor(tester);
-      for (var i = 0; i < 7; i++) {
-        await tester.tap(find.text('Ride safety'));
-        await tester.pump();
-      }
-      expect(find.byKey(const ValueKey('devImpact')), findsNothing, reason: 'no ride');
-
-      await settingsFor(tester, convoys: _Convoys(api(), convoy()));
-      expect(find.byKey(const ValueKey('devImpact')), findsNothing);
-      for (var i = 0; i < 6; i++) {
-        await tester.tap(find.text('Ride safety'));
-        await tester.pump();
-      }
-      expect(find.byKey(const ValueKey('devImpact')), findsNothing, reason: 'six taps are not enough');
-      await tester.tap(find.text('Ride safety'));
-      await tester.pump();
-      expect(find.byKey(const ValueKey('devImpact')), findsOneWidget);
-      expect(find.text('Developer: simulate wearable impact'), findsOneWidget);
     });
   });
 

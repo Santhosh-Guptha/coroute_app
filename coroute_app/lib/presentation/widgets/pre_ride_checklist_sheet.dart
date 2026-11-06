@@ -175,12 +175,15 @@ class PreRideChecklist {
 
 /// Shown before creating or joining a ride. It never blocks: "Start the ride" always works;
 /// items that need attention are amber with a "Fix" button. The first line (3.16, item 9)
-/// reminds about helmet, licence and documents; it follows the "Helmet and documents
-/// reminder" setting.
+/// reminds about helmet, licence and documents. Crash detection shows its state; when it
+/// is off it can be turned on here (turning it off is only in Settings, which asks first).
 class PreRideChecklistSheet extends StatefulWidget {
   final List<AutoCheck> checks;
 
   static const String documentsLine = 'Helmet on, licence and documents with you?';
+
+  /// Shown under the crash detection title when it is off.
+  static const String crashOffLine = 'Off. If you crash, nobody is alerted. Turn it on for this ride.';
 
   /// Asks for a permission (tests pass a fake); defaults to [PermissionsService.request].
   final Future<bool> Function(String key)? requestPermission;
@@ -229,7 +232,6 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> with Widg
   late List<AutoCheck> _checks;
   final Set<int> _ticked = {};
   bool _skip24h = false;
-  bool _smsDenied = false;
 
   Future<bool> _request(String key) => (widget.requestPermission ?? PermissionsService.request)(key);
 
@@ -298,18 +300,6 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> with Widg
     setState(() => _checks[index] = c.withOk(ok));
   }
 
-  /// "Text the group if there is no internet": switching on asks for SEND_SMS first.
-  Future<void> _setSms(SettingsService s, bool on) async {
-    if (!on) {
-      await s.setSmsFallback(false);
-      return;
-    }
-    final ok = await _request('sms');
-    if (!mounted) return;
-    setState(() => _smsDenied = !ok);
-    if (ok) await s.setSmsFallback(true);
-  }
-
   /// The full phone check (about 10 s: GPS fix, sensors, sound, battery, SOS reach). Optional.
   Future<void> _openPhoneCheck() async {
     await Navigator.push<bool>(
@@ -339,28 +329,27 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> with Widg
               shrinkWrap: true,
               padding: EdgeInsets.zero,
               children: [
-                if (Provider.of<SettingsService?>(context)?.documentsReminder ?? false)
-                  Padding(
-                    padding: const EdgeInsets.only(top: Space.s4, bottom: Space.s8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(12)),
-                          child: Icon(Icons.sports_motorsports_rounded, size: 20, color: AppTheme.accentText),
+                Padding(
+                  padding: const EdgeInsets.only(top: Space.s4, bottom: Space.s8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(12)),
+                        child: Icon(Icons.sports_motorsports_rounded, size: 20, color: AppTheme.accentText),
+                      ),
+                      const SizedBox(width: Space.s12),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 7),
+                          child: Text(PreRideChecklistSheet.documentsLine, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
                         ),
-                        const SizedBox(width: Space.s12),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 7),
-                            child: Text(PreRideChecklistSheet.documentsLine, maxLines: 3, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
+                ),
                 for (var i = 0; i < _checks.length; i++) _autoRow(i),
                 Align(
                   alignment: Alignment.centerLeft,
@@ -410,30 +399,49 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> with Widg
     );
   }
 
-  /// The two safety switches (shown when the settings service is available).
+  /// Crash detection at a glance (shown when the settings service is available): on, or
+  /// off with a "Turn on" button. Turning it off and emergency texts are in Settings.
   List<Widget> _safetyRows() {
     final s = Provider.of<SettingsService?>(context);
     if (s == null) return const [];
+    final on = s.crashDetection;
     return [
       const Divider(),
       Padding(
         padding: const EdgeInsets.only(top: Space.s12, bottom: Space.s4),
         child: Semantics(header: true, child: Text('Ride safety', style: AppText.overline)),
       ),
-      SafetySwitch(
-        icon: Icons.car_crash_rounded,
-        title: SafetyTexts.crashTitle,
-        subtitle: SafetyTexts.crashExplain,
-        value: s.crashDetection,
-        onChanged: (v) => s.setCrashDetection(v),
-      ),
-      SafetySwitch(
-        icon: Icons.sms_rounded,
-        title: SafetyTexts.smsTitle,
-        subtitle: SafetyTexts.smsExplain,
-        value: s.smsFallback,
-        onChanged: (v) => _setSms(s, v),
-        warning: _smsDenied ? SafetyTexts.smsDenied : null,
+      Container(
+        key: const ValueKey('checklist_crash'),
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: const EdgeInsets.symmetric(vertical: Space.s8),
+        child: Row(
+          children: [
+            Icon(on ? Icons.check_circle_rounded : Icons.car_crash_rounded, size: 22, color: on ? AppTheme.accentText : AppTheme.warnText),
+            const SizedBox(width: Space.s12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(SafetyTexts.crashTitle, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                  Text(
+                    on ? SafetyTexts.crashExplain : PreRideChecklistSheet.crashOffLine,
+                    style: AppText.caption.copyWith(color: on ? null : AppTheme.warnText),
+                  ),
+                ],
+              ),
+            ),
+            if (!on) ...[
+              const SizedBox(width: Space.s8),
+              TextButton(
+                key: const ValueKey('checklist_crash_on'),
+                onPressed: () => s.setCrashDetection(true),
+                child: const Text('Turn on'),
+              ),
+            ],
+          ],
+        ),
       ),
     ];
   }

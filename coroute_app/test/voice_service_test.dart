@@ -75,12 +75,13 @@ void main() {
     expect(engine.inits, 1, reason: 'started once per ride');
   });
 
-  test('critical speaks with "Speak emergency alerts" on, and interrupts', () async {
+  // Emergency voice has no switch any more: critical alerts always speak.
+  test('critical always speaks, even with spoken alerts off, and interrupts', () async {
     expect(await voice.speak('Emergency. Rahul may have met with an accident.', priority: VoicePriority.critical, key: 'SOS:1'), isTrue);
     expect(engine.spoken.single, ('Emergency. Rahul may have met with an accident.', true));
-    await settings.setVoiceCritical(false);
-    expect(await voice.speak('Emergency again.', priority: VoicePriority.critical, key: 'SOS:2'), isFalse);
-    expect(engine.spoken, hasLength(1));
+    await settings.setVoiceWarnings(false);
+    expect(await voice.speak('Emergency again.', priority: VoicePriority.critical, key: 'SOS:2'), isTrue);
+    expect(engine.spoken, hasLength(2));
   });
 
   test('warnings need "Speak warnings" AND the group voice switch, and queue', () async {
@@ -200,18 +201,12 @@ void main() {
       expect(await voice.speak('Kiran is 2 km from the group.', priority: VoicePriority.important, key: 'SEP:k'), isFalse);
     });
 
-    test('after dark with "Speak more after dark": important is spoken even with warnings off, if voice is on at all', () async {
+    // "Speak more after dark" is always on now (no switch).
+    test('after dark: important is spoken even with warnings off; by day it is not', () async {
       await settings.setVoiceWarnings(false);
       voice.setNight(true);
-      expect(settings.speakMoreAfterDark, isTrue, reason: 'default on');
       expect(await voice.speak('Kiran has been stopped for 5 min.', priority: VoicePriority.important, key: 'STOPPED:k'), isTrue);
       expect(await voice.speak('Hazard ahead.', priority: VoicePriority.warning, key: 'HAZ:1'), isFalse, reason: 'plain warnings stay off');
-      await settings.setVoiceCritical(false);
-      expect(await voice.speak('Kiran is far.', priority: VoicePriority.important, key: 'SEP:k'), isFalse, reason: 'voice is off altogether');
-      await settings.setVoiceCritical(true);
-      await settings.setSpeakMoreAfterDark(false);
-      expect(await voice.speak('Kiran is far.', priority: VoicePriority.important, key: 'SEP:k'), isFalse, reason: 'setting off');
-      await settings.setSpeakMoreAfterDark(true);
       voice.setNight(false);
       expect(await voice.speak('Kiran is far.', priority: VoicePriority.important, key: 'SEP:k'), isFalse, reason: 'by day');
     });

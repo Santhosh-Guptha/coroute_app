@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
-import '../../data/services/plan_subscription_service.dart';
+import '../../data/services/membership_service.dart';
 import 'admin_payments_logic.dart';
 import 'admin_payments_widgets.dart';
 import 'admin_ui.dart';
@@ -14,32 +14,15 @@ import 'admin_ui.dart';
 // Pricing
 // ======================================================================
 
-/// `GET/PUT /admin/subscription/pricing`: monthly and annual INR prices and
-/// the label of each paid plan, checked (annual ≥ monthly) before sending.
+/// "Plans & Coupons": the plans from `GET/PUT /admin/membership/catalog`. Community is free for
+/// every rider (solo rides) and never sold: only its description and feature list are edited.
+/// Small Group and Large Group are paid: price, seats, duration, description, features and whether
+/// each is on sale. The legacy tiers and the retired ₹9 Individual plan are not edited here.
 class AdminPricingTab extends StatefulWidget {
   const AdminPricingTab({super.key});
 
   @override
   State<AdminPricingTab> createState() => _AdminPricingTabState();
-}
-
-class _PlanControllers {
-  final TextEditingController label = TextEditingController();
-  final TextEditingController monthly = TextEditingController();
-  final TextEditingController annual = TextEditingController();
-
-  /// One feature per line (shown to riders on the plan card).
-  final TextEditingController features = TextEditingController();
-
-  /// On sale: when off, checkout refuses new orders for this plan.
-  bool active = true;
-
-  void dispose() {
-    label.dispose();
-    monthly.dispose();
-    annual.dispose();
-    features.dispose();
-  }
 }
 
 /// One membership plan of the catalog being edited.
@@ -48,6 +31,7 @@ class _MemControllers {
   final TextEditingController price = TextEditingController();
   final TextEditingController capacity = TextEditingController();
   final TextEditingController days = TextEditingController();
+  final TextEditingController description = TextEditingController();
   final TextEditingController features = TextEditingController();
   bool active = true;
 
@@ -56,6 +40,7 @@ class _MemControllers {
     price.dispose();
     capacity.dispose();
     days.dispose();
+    description.dispose();
     features.dispose();
   }
 }
@@ -65,19 +50,12 @@ List<String> _featureLines(String text) =>
     text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).take(20).toList();
 
 class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAliveClientMixin {
-  final Map<String, _PlanControllers> _form = {for (final t in adminPaidTierNames) t: _PlanControllers()};
-  List<Map<String, dynamic>> _history = [];
   bool _loading = true;
   bool _loaded = false;
-  bool _saving = false;
   String? _error;
-  String? _problem;
-  int _updatedAt = 0;
-  String _updatedBy = '';
   /// The membership catalog as stored (every field kept on save) and its form.
   Map<String, Map<String, dynamic>> _catalog = {};
   final Map<String, _MemControllers> _mem = {};
-  Map<String, dynamic>? _membershipAnalytics;
   bool _savingMembership = false;
 
   @override
@@ -91,9 +69,6 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
 
   @override
   void dispose() {
-    for (final c in _form.values) {
-      c.dispose();
-    }
     for (final c in _mem.values) {
       c.dispose();
     }
@@ -106,25 +81,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
       _error = null;
     });
     try {
-      final res = await context.read<ApiClient>().get('/admin/subscription/pricing');
-      if (res is Map) {
-        final plans = res['plans'] is Map ? Map<String, dynamic>.from(res['plans'] as Map) : <String, dynamic>{};
-        for (final t in adminPaidTierNames) {
-          final p = plans[t] is Map ? plans[t] as Map : const {};
-          final c = _form[t]!;
-          c.label.text = p['label']?.toString() ?? adminTierLabel(t);
-          c.monthly.text = adminNumOrNull(p['monthly'])?.toInt().toString() ?? '';
-          c.annual.text = adminNumOrNull(p['annual'])?.toInt().toString() ?? '';
-          final f = p['features'];
-          c.features.text = f is List ? f.map((x) => x.toString()).join('\n') : '';
-          c.active = p['isActive'] != false;
-        }
-        _history = adminMapList(res['history']);
-        _updatedAt = adminEpoch(res['updatedAt']);
-        _updatedBy = res['updatedBy']?.toString() ?? '';
-      }
-      try {
-        if (!mounted) return;
+      {
         final api = context.read<ApiClient>();
         final memRes = await api.get('/admin/membership/catalog');
         final catsRaw = memRes is Map ? memRes['catalog'] : null;
@@ -133,6 +90,8 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
           for (final e in catsRaw.entries) {
             if (e.value is! Map) continue;
             final id = e.key.toString();
+            // Only the plans riders can buy (a stored legacy entry is never shown or saved back).
+            if (!adminMembershipPlanNames.containsKey(id)) continue;
             final cat = Map<String, dynamic>.from(e.value as Map);
             next[id] = cat;
             final c = _mem.putIfAbsent(id, _MemControllers.new);
@@ -140,21 +99,15 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
             c.price.text = adminNumOrNull(cat['monthlyPriceInr'])?.toString() ?? '';
             c.capacity.text = adminNumOrNull(cat['capacity'])?.toInt().toString() ?? '1';
             c.days.text = adminNumOrNull(cat['billingPeriodDays'])?.toInt().toString() ?? '30';
+            c.description.text = cat['description']?.toString() ?? '';
             final f = cat['features'];
             c.features.text = f is List ? f.map((x) => x.toString()).join('\n') : '';
             c.active = cat['isActive'] != false;
           }
           _catalog = next;
         }
-        final analyticsRes = await api.get('/admin/membership/analytics');
-        if (analyticsRes is Map) {
-          _membershipAnalytics = Map<String, dynamic>.from(analyticsRes);
-        }
-      } catch (e) {
-        debugPrint('[AdminPricingTab] membership load error: $e');
       }
       _loaded = true;
-      _problem = null;
     } catch (e) {
       _error = adminErrorOf(e);
       if (mounted && _loaded) adminSnack(context, _error!, error: true);
@@ -162,67 +115,9 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
     if (mounted) setState(() => _loading = false);
   }
 
-  Map<String, PlanPriceDraft> get _drafts => {
-        for (final e in _form.entries) e.key: (monthly: e.value.monthly.text, annual: e.value.annual.text),
-      };
-
-  Future<void> _save() async {
-    final drafts = _drafts;
-    final problem = validatePlanPricing(drafts);
-    if (problem != null) {
-      setState(() => _problem = problem);
-      return;
-    }
-    final base = planPricingPayload(drafts, {
-      for (final e in _form.entries)
-        if (e.value.label.text.trim().isNotEmpty) e.key: e.value.label.text.trim(),
-    });
-    final plans = <String, dynamic>{
-      for (final e in base.entries)
-        e.key: <String, dynamic>{
-          ...Map<String, dynamic>.from(e.value as Map),
-          'features': _featureLines(_form[e.key]?.features.text ?? ''),
-          'isActive': _form[e.key]?.active ?? true,
-        },
-    };
-    final ok = await confirmAction(
-      context,
-      title: 'Publish new prices?',
-      message: 'New orders in the app and on the website use these prices right away. Active plans keep what they paid.',
-      confirmLabel: 'Publish',
-    );
-    if (!ok || !mounted) return;
-    setState(() {
-      _saving = true;
-      _problem = null;
-    });
-    try {
-      final res = await context.read<ApiClient>().put('/admin/subscription/pricing', {'plans': plans});
-      if (!mounted) return;
-      final saved = res is Map && res['plans'] is Map ? Map<String, dynamic>.from(res['plans'] as Map) : plans;
-      // This admin's own app shows the new prices at once.
-      context.read<PlanSubscriptionService?>()?.applyConfiguredPlans(saved);
-      adminSnack(context, 'Prices published.');
-      _load();
-    } catch (e) {
-      if (mounted) setState(() => _problem = adminErrorOf(e));
-    }
-    if (mounted) setState(() => _saving = false);
-  }
-
-  String _historyLine(Map<String, dynamic> h) {
-    final prices = h['prices'] is Map ? h['prices'] as Map : const {};
-    return [
-      for (final t in adminPaidTierNames)
-        if (prices[t] is Map)
-          '${adminTierLabel(t)} ${adminInr(adminNumOrNull((prices[t] as Map)['monthly']))}/${adminInr(adminNumOrNull((prices[t] as Map)['annual']))}',
-    ].join(' · ');
-  }
-
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final p = _problem;
     return AdminTabBody(
       loading: _loading,
       hasData: _loaded,
@@ -230,52 +125,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
       onRefresh: _load,
       children: [
         const SizedBox(height: 4),
-        AdminTitledCard(
-          title: 'Plan prices (INR)',
-          trailing: _updatedAt > 0 ? Text('Saved ${adminDate(_updatedAt, time: true)}', style: AppText.caption) : null,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Community is always free. A year must cost at least as much as a month; riders see the annual saving in the app.',
-                style: AppText.caption,
-              ),
-              if (_updatedBy.isNotEmpty) Text('Last change by $_updatedBy', style: AppText.caption),
-              for (final t in adminPaidTierNames) ...[
-                const SizedBox(height: 16),
-                _priceRow(t, _form[t]!),
-              ],
-              if (p != null) ...[
-                const SizedBox(height: 12),
-                Text(p, style: AppText.caption.copyWith(color: AppTheme.sos, fontWeight: FontWeight.w700)),
-              ],
-              const SizedBox(height: 16),
-              DsButton(label: _saving ? 'Publishing…' : 'Publish prices', icon: Icons.publish_rounded, onPressed: _saving ? null : _save),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
         _buildMembershipSection(),
-        if (_membershipAnalytics != null) ...[
-          const SizedBox(height: 20),
-          _buildMembershipAnalytics(),
-        ],
-        if (_history.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          AdminTable(
-            title: 'Price history',
-            rows: [
-              for (var i = 0; i < _history.length; i++)
-                AdminRow(
-                  leading: const AdminRowIcon(Icons.history_rounded),
-                  title: adminDate(_history[i]['at'], time: true),
-                  subtitle: _history[i]['by']?.toString() ?? '',
-                  detail: _historyLine(_history[i]),
-                  divider: i < _history.length - 1,
-                ),
-            ],
-          ),
-        ],
         const SizedBox(height: 24),
       ],
     );
@@ -288,6 +138,15 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
     for (final e in _catalog.entries) {
       final c = _mem[e.key];
       if (c == null) continue;
+      if (e.key == 'community') {
+        // Community is free with one seat (the server keeps it so): only the words change.
+        catalog[e.key] = <String, dynamic>{
+          ...e.value,
+          'description': c.description.text.trim(),
+          'features': _featureLines(c.features.text),
+        };
+        continue;
+      }
       final price = num.tryParse(c.price.text.trim());
       final cap = int.tryParse(c.capacity.text.trim());
       final days = int.tryParse(c.days.text.trim());
@@ -295,7 +154,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
       String? problem;
       if (name.isEmpty) problem = 'Every plan needs a name.';
       if (price == null || price < 0) problem = '$name: the price must be ₹0 or more.';
-      if (cap == null || cap < 1) problem = '$name: the capacity must be 1 or more.';
+      if (cap == null || cap < 1) problem = '$name: the seats must be 1 or more.';
       if (days == null || days < 1 || days > 3660) problem = '$name: the duration must be 1 to 3660 days.';
       if (problem != null) {
         adminSnack(context, problem, error: true);
@@ -310,6 +169,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
         'capacity': cap,
         if (current['maxCapacity'] != null) 'maxCapacity': cap,
         'billingPeriodDays': days,
+        'description': c.description.text.trim(),
         'features': _featureLines(c.features.text),
         'isActive': c.active,
       };
@@ -329,13 +189,15 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
 
   Widget _buildMembershipSection() {
     return AdminTitledCard(
-      title: 'Membership plans',
+      title: 'Plans',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Price, how many riders a plan covers, how long it lasts, what it includes and whether it is on sale. Plans that are off sale are hidden from riders and refused at checkout.',
-            style: AppText.caption,
+            'Community is free for every rider (solo rides, every safety feature). Small Group and Large Group are paid: '
+            'price, seats (riders the host can bring, host included), how long it lasts, what it includes and whether it is on sale. '
+            'Plans that are off sale are hidden from riders and refused at checkout. Joining someone\'s ride is always free.',
+            style: AppText.caption.copyWith(height: 1.4),
           ),
           if (_catalog.isEmpty)
             Padding(
@@ -359,6 +221,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
   }
 
   Widget _memCategoryRow(String id, _MemControllers c) {
+    if (id == 'community') return _communityRow(c);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -385,7 +248,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
               child: TextField(
                 controller: c.capacity,
                 keyboardType: TextInputType.number,
-                decoration: adminInput('Riders'),
+                decoration: adminInput('Seats (host incl.)'),
               ),
             ),
             const SizedBox(width: 12),
@@ -400,6 +263,13 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
         ),
         const SizedBox(height: 8),
         TextField(
+          controller: c.description,
+          minLines: 1,
+          maxLines: 3,
+          decoration: adminInput('Description'),
+        ),
+        const SizedBox(height: 8),
+        TextField(
           controller: c.features,
           minLines: 2,
           maxLines: 6,
@@ -409,126 +279,37 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
     );
   }
 
-  Widget _buildMembershipAnalytics() {
-    final a = _membershipAnalytics;
-    if (a == null) return const SizedBox.shrink();
-    return AdminTitledCard(
-      title: 'Privacy-Safe Membership & Trip Analytics',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Zero raw GPS coordinates or location breadcrumbs are stored or exposed. Aggregate figures only.',
-            style: AppText.caption.copyWith(color: AppTheme.accentText),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _analyticsTile('Active Memberships', '${a['activeMemberships'] ?? 0}', Icons.card_membership_rounded),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _analyticsTile('Total Capacity', '${a['totalCapacity'] ?? 0}', Icons.groups_rounded),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _analyticsTile('Occupied Seats', '${a['occupiedSeats'] ?? 0}', Icons.person_pin_rounded),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _analyticsTile('Active Convoys', '${a['activeConvoys'] ?? 0}', Icons.two_wheeler_rounded),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _analyticsTile(String label, String value, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.card,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: AppTheme.accentText),
-              const SizedBox(width: 6),
-              Expanded(child: Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11), overflow: TextOverflow.ellipsis)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-        ],
-      ),
-    );
-  }
-
-  Widget _priceRow(String tier, _PlanControllers c) {
-    final m = num.tryParse(c.monthly.text.trim()) ?? 0;
-    final a = num.tryParse(c.annual.text.trim()) ?? 0;
-    final pct = PlanSubscriptionService.annualSavingPercent(m, a);
+  /// Community: free, one seat, never sold; the admin edits only what riders read about it.
+  Widget _communityRow(_MemControllers c) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        DsSwitchRow(
-          label: adminTierLabel(tier),
-          subtitle: c.active ? 'On sale' : 'Off sale: checkout refuses new orders',
-          value: c.active,
-          onChanged: (v) => setState(() => c.active = v),
-          divider: false,
-        ),
-        TextField(controller: c.label, decoration: adminInput('Name shown to riders')),
-        const SizedBox(height: 8),
         Row(
           children: [
-            Expanded(
-              child: TextField(
-                controller: c.monthly,
-                keyboardType: TextInputType.number,
-                onChanged: (_) => setState(() {}),
-                decoration: adminInput('Monthly', prefix: '₹ '),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: c.annual,
-                keyboardType: TextInputType.number,
-                onChanged: (_) => setState(() {}),
-                decoration: adminInput('Annual', prefix: '₹ '),
-              ),
-            ),
+            Expanded(child: Text(c.name.text.isEmpty ? 'Community' : c.name.text, style: AppText.title)),
+            Text('Free · solo rides', style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
           ],
         ),
         const SizedBox(height: 4),
-        Text(
-          a > 0 && m > 0 && a < m
-              ? 'Annual is lower than monthly: fix before publishing.'
-              : (pct > 0 ? 'Annual saves riders $pct% (${adminInr(PlanSubscriptionService.annualSaving(m, a))} a year).' : 'No annual saving.'),
-          style: AppText.caption.copyWith(color: a > 0 && m > 0 && a < m ? AppTheme.sos : AppTheme.accentText, fontWeight: FontWeight.w700),
+        Text('Every rider has it. Not sold, so no price, seats or on-sale switch.', style: AppText.caption),
+        const SizedBox(height: 10),
+        TextField(
+          controller: c.description,
+          minLines: 1,
+          maxLines: 3,
+          decoration: adminInput('Description'),
         ),
         const SizedBox(height: 8),
         TextField(
           controller: c.features,
           minLines: 2,
-          maxLines: 6,
-          decoration: adminInput('Features', helper: 'One per line, shown to riders.'),
+          maxLines: 8,
+          decoration: adminInput('Features', helper: 'One per line.'),
         ),
       ],
     );
   }
+
 }
 
 // ======================================================================
@@ -711,16 +492,14 @@ class _AdminGatewayTabState extends State<AdminGatewayTab> with AutomaticKeepAli
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _data?['paymentsEnabled'] != false
-                          ? 'Payment Screen: ON (Plan-Based)'
-                          : 'Payment Screen: OFF (Free Mode)',
+                      _data?['paymentsEnabled'] != false ? 'Plans are sold' : 'Free mode: no plans sold',
                       style: AppText.title,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       _data?['paymentsEnabled'] != false
-                          ? 'Features are gated by plan tiers. Payment screens and checkout are active.'
-                          : 'Payment screen is OFF. All features across all tiers are unlocked freely for all riders.',
+                          ? 'Riders buy a group plan to host group rides.'
+                          : 'Checkout is off and every rider can host a group ride.',
                       style: AppText.caption,
                     ),
                   ],
@@ -733,16 +512,24 @@ class _AdminGatewayTabState extends State<AdminGatewayTab> with AutomaticKeepAli
                 onChanged: _busy != null
                     ? null
                     : (val) async {
-                        if (!mounted) return;
-        final api = context.read<ApiClient>();
-                        final planSub = context.read<PlanSubscriptionService>();
+                        final api = context.read<ApiClient>();
+                        final membership = context.read<MembershipService?>();
+                        final ok = await confirmAction(
+                          context,
+                          title: val ? 'Start selling plans?' : 'Turn on free mode?',
+                          message: val
+                              ? 'Riders need a group plan again to host a group ride. Rides already running keep their seats.'
+                              : 'Checkout stops and every rider can host a group ride for free until you turn plans back on.',
+                          confirmLabel: val ? 'Sell plans' : 'Free mode',
+                        );
+                        if (!ok || !mounted) return;
                         setState(() => _busy = 'payments');
                         try {
                           final res = await api.put('/admin/payment-gateway', {'paymentsEnabled': val});
                           if (!context.mounted) return;
                           if (res is Map) _data = Map<String, dynamic>.from(res)..remove('success');
-                          planSub.setPaymentsEnabled(val).ignore();
-                          adminSnack(context, val ? 'Payment screen and plan gating enabled.' : 'Payment screen turned OFF (All features unlocked).');
+                          membership?.fetchMyMembership().ignore();
+                          adminSnack(context, val ? 'Plans are on sale again.' : 'Free mode is on.');
                         } catch (e) {
                           if (!context.mounted) return;
                           adminSnack(context, adminErrorOf(e), error: true);

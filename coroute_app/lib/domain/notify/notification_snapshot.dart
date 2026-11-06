@@ -14,6 +14,7 @@ import '../timeline/timeline_text.dart';
 import '../tracking/bearing.dart';
 import '../tracking/geo_math.dart';
 import 'relation.dart';
+import 'ride_notification_content.dart';
 import 'status_text.dart';
 
 /// What the big ride notification shows, by priority: own group emergency,
@@ -63,26 +64,44 @@ enum NotifContextAction {
       };
 }
 
-/// The rider's own medical ID for the lock screen during their own SOS (3.16,
-/// opt-in setting "Show my medical ID on the lock screen during an SOS").
-/// Blanks read "not given"; nothing of it appears unless the setting is on.
+/// The rider's own medical ID for the lock screen: a short badge during every ride and the
+/// full line during their own SOS. Always on (no switch); the rider controls it by editing or
+/// clearing their medical info. Only what the rider entered for emergencies: name, blood group,
+/// allergies and emergency contact. Never a position or location history.
 class MedicalId {
+  final String name;
   final String bloodGroup;
   final String allergies;
   final String contactName;
   final String contactPhone;
 
-  const MedicalId({this.bloodGroup = '', this.allergies = '', this.contactName = '', this.contactPhone = ''});
+  const MedicalId({this.name = '', this.bloodGroup = '', this.allergies = '', this.contactName = '', this.contactPhone = ''});
 
   /// From the signed-in rider's profile.
   factory MedicalId.fromAuth(AuthService a) => MedicalId(
+        name: (a.currentUserName ?? '').trim(),
         bloodGroup: a.bloodGroup.trim(),
         allergies: a.allergies.trim(),
         contactName: (a.emergencyContactName ?? '').trim(),
         contactPhone: (a.emergencyContact ?? '').trim(),
       );
 
+  /// No medical information entered (the name alone is not a medical ID).
   bool get isEmpty => bloodGroup.isEmpty && allergies.isEmpty && contactName.isEmpty && contactPhone.isEmpty;
+
+  /// Lock-screen badge during a ride, only the parts the rider entered, or null when empty:
+  /// "Medical ID: Kiran · Blood O+ · Allergies: penicillin · ICE: Asha 98765 43210".
+  String? badge() {
+    if (isEmpty) return null;
+    final contact = [if (contactName.isNotEmpty) contactName, if (contactPhone.isNotEmpty) contactPhone].join(' ');
+    final parts = <String>[
+      if (name.isNotEmpty) name,
+      if (bloodGroup.isNotEmpty) 'Blood $bloodGroup',
+      if (allergies.isNotEmpty) 'Allergies: $allergies',
+      if (contact.isNotEmpty) 'ICE: $contact',
+    ];
+    return 'Medical ID: ${parts.join(' · ')}';
+  }
 
   /// "Blood group O+. Allergies: penicillin. Emergency contact: Asha 98765 43210."
   String line() {
@@ -175,6 +194,15 @@ class NotificationSnapshot {
   /// Real-time pack telemetry e.g. "Pack #3 • 71 km/h".
   final String? telemetry;
 
+  /// Talk button (group rides whose plan allows the intercom).
+  final bool showTalk;
+
+  /// "End ride" (solo) / "Leave" (group); empty = no button (emergency modes).
+  final String endLabel;
+
+  /// The rider's own medical ID badge on the lock screen during a ride (null = none entered).
+  final String? medicalBadge;
+
   const NotificationSnapshot({
     required this.mode,
     required this.tone,
@@ -193,12 +221,15 @@ class NotificationSnapshot {
     this.showSos = true,
     this.showWait = true,
     this.customPublicText,
+    this.showTalk = false,
+    this.endLabel = '',
+    this.medicalBadge,
   });
 
   /// Lock screen text when the content is hidden: never names, places or numbers,
   /// unless the rider chose to show their own medical ID during their own SOS.
   String get publicTitle => customPublicText != null ? NotifConstants.appTitle : NotifConstants.publicTitle;
-  String get publicText => customPublicText ?? (mode.isEmergency ? NotifConstants.publicEmergencyText : '');
+  String get publicText => customPublicText ?? (mode.isEmergency ? NotifConstants.publicEmergencyText : (medicalBadge ?? ''));
 
   static const String sosLabel = 'SOS';
   static const String waitLabel = 'Wait for me';
@@ -229,6 +260,11 @@ class NotificationSnapshot {
         'sosLabel': sosLabel,
         'waitLabel': waitLabel,
         'mapLabel': mapLabel,
+        'showTalk': showTalk,
+        'talkLabel': RideNotificationContent.talkLabel,
+        'showEnd': endLabel.isNotEmpty,
+        'endLabel': endLabel,
+        'medicalBadge': medicalBadge ?? '',
       };
 
   String get dedupeKey => [
@@ -250,6 +286,9 @@ class NotificationSnapshot {
         showSos,
         showWait,
         customPublicText ?? '',
+        showTalk,
+        endLabel,
+        medicalBadge ?? '',
       ].join('\u0001');
 }
 
@@ -280,6 +319,7 @@ class NotificationSnapshotBuilder {
     required bool lockScreenPublic,
     String? Function(int ms)? clockText,
     MedicalId? medicalId,
+    bool? talkAllowed,
   }) {
     final clock = clockText ?? defaultClock;
     final events = timeline?.events ?? timelineEvents;
@@ -287,7 +327,6 @@ class NotificationSnapshotBuilder {
     final ladder = _ladder(convoy, myUserId, me, events, nowMs);
     final header = _header(convoy);
     final rideStatus = _rideStatus(convoy, myUserId, me, events, nowMs);
-    final ladderLine = _ladderSummary(ladder.ahead, ladder.behind);
     final packPosition = ladder.ahead.length + 1;
     final speed = me != null && me.speedKmh > 0 ? '${me.speedKmh.round()} km/h' : '0 km/h';
     final telemetry = 'Pack #$packPosition • $speed';
@@ -304,7 +343,8 @@ class NotificationSnapshotBuilder {
       return _assist(assist, me, ladder, header, rideStatus, lockScreenPublic);
     }
 
-    // 3. Accident reported ahead.
+    // 3. Accident reported ahead (same buttons as the ride).
+    final content = _rideContent(convoy, me, nowMs, clock, talkAllowed);
     final hazard = nearestHazard(hazards, me);
     if (hazard != null) {
       final d = _distanceTo(me, hazard.lat, hazard.lng) ?? hazard.aheadM;
@@ -321,15 +361,18 @@ class NotificationSnapshotBuilder {
         telemetry: telemetry,
         lockScreenPublic: lockScreenPublic,
         showWait: ladder.othersCount > 0,
+        showTalk: content.showTalk,
+        endLabel: content.endLabel,
+        medicalBadge: medicalId?.badge(),
       );
     }
 
-    // 4. The ride.
+    // 4. The ride: "Riding with <group>" / "Solo ride", speed • distance • next stop / ETA.
     return NotificationSnapshot(
       mode: NotifMode.ride,
       tone: NotifTone.normal,
-      title: _destinationLine(convoy, me, nowMs, clock),
-      subtitle: ladderLine.isNotEmpty ? ladderLine : rideStatus,
+      title: content.title,
+      subtitle: content.body.isNotEmpty ? content.body : rideStatus,
       header: header,
       statusLine: rideStatus,
       ahead: ladder.ahead,
@@ -337,6 +380,9 @@ class NotificationSnapshotBuilder {
       telemetry: telemetry,
       lockScreenPublic: lockScreenPublic,
       showWait: ladder.othersCount > 0,
+      showTalk: content.showTalk,
+      endLabel: content.endLabel,
+      medicalBadge: medicalId?.badge(),
     );
   }
 
@@ -619,29 +665,46 @@ class NotificationSnapshotBuilder {
     return '${convoy.name}, $n rider${n == 1 ? '' : 's'}';
   }
 
-  /// "Goa, 42 km, ETA 4:35 PM" (remaining along the route, ETA as clock time so no timer is needed).
-  static String _destinationLine(ConvoyModel convoy, RiderModel? me, int nowMs, String? Function(int ms) clock) {
-    if (!RideFacts.hasDestination(convoy)) return convoy.name;
-    final raw = convoy.destinationName.split(',').first.trim();
-    final dest = raw.isEmpty ? 'Destination' : (raw.length > 24 ? '${raw.substring(0, 23)}.' : raw);
-    if (me == null || !RideFacts.hasPosition(me)) return dest;
-    final remaining = RideFacts.remainingM(
-      lat: me.lat,
-      lng: me.lng,
-      line: convoy.routeLine,
-      destLat: convoy.destinationLat,
-      destLng: convoy.destinationLng,
-    );
-    if (remaining == null) return dest;
-    final parts = <String>[dest, StatusText.roundedDistance(remaining)];
-    final eta = RideFacts.etaFor(remaining, convoy.route);
-    if (eta != null) {
-      // Rounded to the minute so the text does not change with every fix.
-      final at = ((nowMs + eta.inMilliseconds) ~/ 60000) * 60000;
-      final t = clock(at);
-      if (t != null && t.isNotEmpty) parts.add('ETA $t');
+  /// Title and body of the ride notification ([RideNotificationContent]): distance and ETA to the
+  /// next planned stop, else to the destination (along the route when there is one). The ETA is a
+  /// clock time rounded to the minute, so no timer is needed and the text stays stable.
+  static RideNotificationContent _rideContent(
+      ConvoyModel convoy, RiderModel? me, int nowMs, String? Function(int ms) clock, bool? talkAllowed) {
+    final pos = (me != null && RideFacts.hasPosition(me)) ? me : null;
+    double? distance;
+    String? target;
+    final stop = RideFacts.nextStop(convoy);
+    if (stop != null) {
+      target = stop.name.trim().isEmpty ? 'Next stop' : stop.name.trim();
+      if (pos != null) distance = RideFacts.distanceToM(pos, stop.lat, stop.lng, convoy.routeLine);
+    } else if (RideFacts.hasDestination(convoy)) {
+      final raw = convoy.destinationName.split(',').first.trim();
+      target = raw.isEmpty ? 'Destination' : raw;
+      if (pos != null) {
+        distance = RideFacts.remainingM(
+          lat: pos.lat,
+          lng: pos.lng,
+          line: convoy.routeLine,
+          destLat: convoy.destinationLat,
+          destLng: convoy.destinationLng,
+        );
+      }
     }
-    return parts.join(', ');
+    String? eta;
+    final left = RideFacts.etaFor(distance, convoy.route);
+    if (left != null) {
+      final at = ((nowMs + left.inMilliseconds) ~/ 60000) * 60000;
+      eta = clock(at);
+    }
+    return RideNotificationContent.build(
+      groupName: convoy.name,
+      solo: convoy.isSolo,
+      speedKmh: pos?.speedKmh,
+      distanceM: distance,
+      targetName: target,
+      etaClock: eta,
+      talkAllowed: talkAllowed,
+    );
   }
 
   static _Ladder _ladder(ConvoyModel convoy, String myUserId, RiderModel? me, List<TimelineEventModel> events, int nowMs) {
@@ -714,15 +777,6 @@ class NotificationSnapshotBuilder {
       return Duration(milliseconds: nowMs - r.stoppedSince);
     }
     return null;
-  }
-
-  /// "Arjun 1.2 km ahead, Kiran 3.4 km behind" (nearest on each side).
-  static String _ladderSummary(List<RiderLine> ahead, List<RiderLine> behind) {
-    final parts = <String>[
-      if (ahead.isNotEmpty) '${ahead.first.name} ${ahead.first.detail}',
-      if (behind.isNotEmpty) '${behind.first.name} ${behind.first.detail}',
-    ];
-    return parts.join(', ');
   }
 
   /// The worst open group warning, else "All 6 riders together".

@@ -3,20 +3,57 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/safety_constants.dart';
 
-/// Rider-only numbers for one trip (3.16: hard stops). Kept on the phone
-/// only, never uploaded and never part of the trip history.
+/// Rider-only numbers for one trip (3.16: hard stops; ride analytics: rest
+/// breaks, safety alerts, SOS and crash alerts). Kept on the phone only, never
+/// uploaded and never part of the trip history.
 class RideStats {
   final String groupId;
   final int hardStops;
   final int endedAt;
 
-  const RideStats({required this.groupId, required this.hardStops, required this.endedAt});
+  /// Rest breaks of 10 min or more after riding (fatigue tracker), and "Taking a break" answers.
+  final int breaks;
 
-  Map<String, Object?> toJson() => {'h': hardStops, 'e': endedAt};
+  /// Safety prompts shown during the ride (check-in, fatigue, fuel, speed, follow-up).
+  final int alerts;
+
+  /// An SOS was open during the ride / a crash alert counted down.
+  final bool sos;
+  final bool crashAlert;
+
+  const RideStats({
+    required this.groupId,
+    required this.hardStops,
+    required this.endedAt,
+    this.breaks = 0,
+    this.alerts = 0,
+    this.sos = false,
+    this.crashAlert = false,
+  });
+
+  bool get hadEmergency => sos || crashAlert;
+
+  Map<String, Object?> toJson() => {
+        'h': hardStops,
+        'e': endedAt,
+        if (breaks > 0) 'b': breaks,
+        if (alerts > 0) 'a': alerts,
+        if (sos) 's': 1,
+        if (crashAlert) 'c': 1,
+      };
 
   static RideStats? fromJson(String groupId, Object? j) {
     if (j is! Map) return null;
-    return RideStats(groupId: groupId, hardStops: (j['h'] as num?)?.toInt() ?? 0, endedAt: (j['e'] as num?)?.toInt() ?? 0);
+    int n(String k) => (j[k] as num?)?.toInt() ?? 0;
+    return RideStats(
+      groupId: groupId,
+      hardStops: n('h'),
+      endedAt: n('e'),
+      breaks: n('b'),
+      alerts: n('a'),
+      sos: n('s') > 0,
+      crashAlert: n('c') > 0,
+    );
   }
 }
 
@@ -28,6 +65,14 @@ class RideStatsStore {
   static Future<RideStats?> load(String groupId) async {
     final all = await _all();
     return RideStats.fromJson(groupId, all[groupId]);
+  }
+
+  /// Every ride this phone keeps numbers for (the last 90 days, at most [SafetyConstants.rideStatsMax]).
+  static Future<List<RideStats>> loadAll() async {
+    final all = await _all();
+    return [
+      for (final e in all.entries) ?RideStats.fromJson(e.key, e.value),
+    ];
   }
 
   static Future<void> save(RideStats s) async {

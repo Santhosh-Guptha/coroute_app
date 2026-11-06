@@ -1,3 +1,5 @@
+import '../../domain/tracking/track_cleaner.dart';
+
 class TripBreadcrumbPoint {
   final double lat;
   final double lng;
@@ -5,12 +7,16 @@ class TripBreadcrumbPoint {
   final double heading;
   final int timestamp;
 
+  /// A signal gap comes before this point: the line is cut here (JSON `gap`).
+  final bool gapBefore;
+
   TripBreadcrumbPoint({
     required this.lat,
     required this.lng,
     required this.speedKmh,
     required this.heading,
     required this.timestamp,
+    this.gapBefore = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -19,6 +25,7 @@ class TripBreadcrumbPoint {
         'speedKmh': speedKmh,
         'heading': heading,
         'timestamp': timestamp,
+        if (gapBefore) 'gap': true,
       };
 
   factory TripBreadcrumbPoint.fromJson(Map<String, dynamic> json) =>
@@ -28,7 +35,31 @@ class TripBreadcrumbPoint {
         speedKmh: (json['speedKmh'] as num?)?.toDouble() ?? 0.0,
         heading: (json['heading'] as num?)?.toDouble() ?? 0.0,
         timestamp: (json['timestamp'] as num?)?.toInt() ?? 0,
+        gapBefore: json['gap'] == true,
       );
+
+  /// The trail as the pieces that were really ridden: cut at every marked
+  /// signal gap and at impossible jumps (older trails have no marks; they are
+  /// simplified, so long straight lines between points are normal there and
+  /// only a jump cuts). Points without a position (0, 0) are skipped.
+  static List<List<TripBreadcrumbPoint>> pieces(List<TripBreadcrumbPoint> trail) {
+    final out = <List<TripBreadcrumbPoint>>[];
+    var cur = <TripBreadcrumbPoint>[];
+    for (final p in trail) {
+      if (p.lat == 0 && p.lng == 0) continue;
+      if (cur.isNotEmpty) {
+        final a = cur.last;
+        final cut = p.gapBefore || (a.timestamp > 0 && p.timestamp > 0 && TrackRules.jumpBetween(a.lat, a.lng, a.timestamp, p.lat, p.lng, p.timestamp));
+        if (cut) {
+          out.add(cur);
+          cur = <TripBreadcrumbPoint>[];
+        }
+      }
+      cur.add(p);
+    }
+    if (cur.isNotEmpty) out.add(cur);
+    return out;
+  }
 }
 
 class TripHistoryModel {
@@ -55,6 +86,10 @@ class TripHistoryModel {
   /// 'server': built from the recorded routes when the trip ended (exact).
   /// 'device': the phone's own record, kept until the server's arrives.
   final String source;
+
+  /// The trip numbers this phone computed from its own recorded track (see
+  /// TripStats.toJson), sent with the trip; null when it had no track.
+  final Map<String, num>? clientStats;
 
   /// How many trail points the server holds for this trip. The trip list is synced without
   /// trails (data and memory on low-end phones); a trail is loaded when the trip is opened.
@@ -87,6 +122,7 @@ class TripHistoryModel {
     this.movingMs = 0,
     this.restMs = 0,
     this.source = 'device',
+    this.clientStats,
     int? trailPoints,
   }) : trailPoints = trailPoints ?? breadcrumbTrail.length;
 
@@ -116,6 +152,7 @@ class TripHistoryModel {
       'movingMs': movingMs,
       'restMs': restMs,
       'trailPoints': trailPoints,
+      if (clientStats != null) 'clientStats': clientStats,
     };
   }
 
@@ -142,6 +179,7 @@ class TripHistoryModel {
         movingMs: movingMs,
         restMs: restMs,
         source: source,
+        clientStats: clientStats,
         trailPoints: trail.isNotEmpty ? trail.length : trailPoints,
       );
 
@@ -172,6 +210,12 @@ class TripHistoryModel {
       movingMs: (json['movingMs'] as num?)?.toInt() ?? 0,
       restMs: (json['restMs'] as num?)?.toInt() ?? 0,
       trailPoints: (json['trailPoints'] as num?)?.toInt(),
+      clientStats: json['clientStats'] is Map
+          ? {
+              for (final e in (json['clientStats'] as Map).entries)
+                if (e.value is num) e.key.toString(): e.value as num,
+            }
+          : null,
     );
   }
 }

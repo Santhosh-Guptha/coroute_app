@@ -22,6 +22,7 @@ import 'package:coroute_app/presentation/safety/crash_alarm_host.dart';
 import 'package:coroute_app/presentation/safety/crash_alarm_screen.dart';
 import 'package:coroute_app/presentation/safety/oem_battery_guide.dart';
 import 'package:coroute_app/presentation/safety/safety_settings_sheet.dart';
+import 'package:coroute_app/presentation/settings/settings_screen.dart';
 import 'package:coroute_app/presentation/safety/sos_hold_screen.dart';
 import 'package:coroute_app/core/ui/sos_button.dart';
 
@@ -195,7 +196,8 @@ void main() {
     port.dispose();
   });
 
-  testWidgets('safety settings sheet: ride safety, accident warnings, voice and notification switches; SMS asks for the permission first', (tester) async {
+  // The one Settings screen replaced the safety settings sheet and the glove settings screen.
+  testWidgets('Settings: safety switches; SMS asks for the permission first; crash detection off asks first', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final settings = SettingsService();
     await settings.load();
@@ -206,7 +208,7 @@ void main() {
       value: settings,
       child: host(
         Scaffold(
-          body: SafetySettingsSheet(requestPermission: (key) async {
+          body: SettingsScreen(requestPermission: (key) async {
             asked.add(key);
             return grant;
           }),
@@ -228,7 +230,26 @@ void main() {
     await tester.tap(find.text(SafetyTexts.smsTitle));
     await tester.pump();
     expect(settings.smsFallback, isTrue);
-    expect(SafetySettingsSheet.summary(settings), isNotEmpty);
+    expect(SettingsScreen.summary(settings), '${SafetyTexts.crashTitle} on');
+
+    // Crash detection: turning it off asks first; Cancel keeps it on.
+    await tester.scrollUntilVisible(find.byKey(const ValueKey('settings_crash')), -150);
+    await tester.tap(find.byKey(const ValueKey('settings_crash')));
+    await tester.pumpAndSettle();
+    expect(find.text('Turn off crash detection?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(settings.crashDetection, isTrue);
+    await tester.tap(find.byKey(const ValueKey('settings_crash')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Turn off'));
+    await tester.pumpAndSettle();
+    expect(settings.crashDetection, isFalse);
+    expect(SettingsScreen.summary(settings), '${SafetyTexts.crashTitle} off');
+    // Turning it back on is instant.
+    await tester.tap(find.byKey(const ValueKey('settings_crash')));
+    await tester.pump();
+    expect(settings.crashDetection, isTrue);
   });
 
   for (final lang in [AppLanguage.hi, AppLanguage.te]) {

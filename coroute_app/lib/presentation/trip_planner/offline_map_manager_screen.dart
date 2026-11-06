@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../core/config/feature_gates.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/local/saved_map_pack_store.dart';
 import '../../data/models/saved_map_pack.dart';
 import '../../data/services/tile_cache_service.dart';
-import '../../data/services/plan_subscription_service.dart';
 import 'offline_tile_verification_screen.dart';
 import 'trip_planner_screen.dart';
 
@@ -157,7 +154,6 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    context.watch<PlanSubscriptionService?>();
     final cacheBytes = TileCache.instance?.approxBytes ?? 0;
     final maxBytes = SafetyConstants.tileCacheMaxBytes;
     final usedMb = (cacheBytes / (1024 * 1024)).toStringAsFixed(1);
@@ -199,29 +195,6 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
                   physics: const BouncingScrollPhysics(),
                   keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                   children: [
-                    // Plan Entitlement Status Banner
-                    Container(
-                    margin: const EdgeInsets.only(bottom: 14),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.accentText.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppTheme.accentText, width: 1.2),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.verified_rounded, color: AppTheme.accentText, size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            '${FeatureGates.tierLabel(FeatureGates.activeTier).toUpperCase()} · UNLIMITED PACKS ACTIVE',
-                            style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w800, fontSize: 12),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
                 // Storage Gauge Card
                 Container(
                   padding: const EdgeInsets.all(16),

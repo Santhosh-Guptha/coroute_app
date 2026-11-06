@@ -185,10 +185,10 @@ void main() {
     );
 
     expect(find.text('Manage Riders & Invite'), findsOneWidget);
-    expect(find.text('Audio & Comms Preferences'), findsOneWidget);
+    expect(find.text('Talk settings'), findsOneWidget);
     expect(find.text('Group Safety & Speed Limits'), findsOneWidget);
     expect(find.text('Ride Guardian Live Share'), findsOneWidget);
-    expect(find.text('Safety & System Diagnostics'), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
     expect(find.text('Share my ETA'), findsOneWidget);
 
     // Verify no obsolete 100-bike copy is displayed
@@ -198,7 +198,7 @@ void main() {
     await tester.tap(find.text('Manage Riders & Invite'));
     expect(manageRidersTapped, isTrue);
 
-    await tester.tap(find.text('Audio & Comms Preferences'));
+    await tester.tap(find.text('Talk settings'));
     expect(audioTapped, isTrue);
 
     await tester.tap(find.text('Group Safety & Speed Limits'));
@@ -207,7 +207,7 @@ void main() {
     await tester.tap(find.text('Ride Guardian Live Share'));
     expect(guardianTapped, isTrue);
 
-    await tester.tap(find.text('Safety & System Diagnostics'));
+    await tester.tap(find.text('Settings'));
     expect(safetyDiagTapped, isTrue);
 
     await tester.tap(find.text('Share my ETA'));

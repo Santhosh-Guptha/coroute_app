@@ -14,6 +14,7 @@ import '../../data/services/settings_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../data/services/auth_service.dart';
 import '../report/trip_report_screen.dart';
+import '../analytics/ride_analytics_screen.dart';
 import '../../core/theme/map_tiles.dart';
 import 'rider_home_screen.dart';
 
@@ -134,7 +135,20 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                     title: 'Trips',
                     subtitle: subtitle ?? 'Every ride you finish is saved here',
                     onBack: widget.embedded ? null : () => Navigator.maybePop(context),
-                    trailing: _NewRideButton(onTap: () => RiderHomeScreen.selectTab(context, HomeTab.ride)),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DsRoundButton(
+                          key: const Key('trips_ride_analytics'),
+                          icon: Icons.insights_rounded,
+                          label: 'Your ride analytics',
+                          onTap: () => RideAnalyticsScreen.open(context),
+                          size: 48,
+                        ),
+                        const SizedBox(width: Space.s8),
+                        _NewRideButton(onTap: () => RiderHomeScreen.selectTab(context, HomeTab.ride)),
+                      ],
+                    ),
                   ),
                 ),
                 Expanded(
@@ -348,15 +362,15 @@ class TripReplayDetailScreen extends StatefulWidget {
   /// GPX 1.1 of this trip's saved route, for other map and fitness apps.
   static String gpx(TripHistoryModel trip) {
     String esc(String v) => v.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-    final pts = trip.breadcrumbTrail
-        .where((p) => p.lat != 0 || p.lng != 0)
-        .map((p) => '    <trkpt lat="${p.lat.toStringAsFixed(6)}" lon="${p.lng.toStringAsFixed(6)}">'
-            '${p.timestamp > 0 ? '<time>${DateTime.fromMillisecondsSinceEpoch(p.timestamp, isUtc: true).toIso8601String()}</time>' : ''}</trkpt>')
-        .join('\n');
+    // One <trkseg> per ridden piece: a signal gap is not a straight ride in other apps either.
+    final segs = TripBreadcrumbPoint.pieces(trip.breadcrumbTrail)
+        .map((piece) => '<trkseg>\n${piece.map((p) => '    <trkpt lat="${p.lat.toStringAsFixed(6)}" lon="${p.lng.toStringAsFixed(6)}">'
+            '${p.timestamp > 0 ? '<time>${DateTime.fromMillisecondsSinceEpoch(p.timestamp, isUtc: true).toIso8601String()}</time>' : ''}</trkpt>').join('\n')}\n  </trkseg>')
+        .join();
     return '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<gpx version="1.1" creator="CoRoute" xmlns="http://www.topografix.com/GPX/1/1">\n'
         '  <metadata><name>${esc(trip.tripName)}</name></metadata>\n'
-        '  <trk><name>${esc(trip.tripName)}</name><trkseg>\n$pts\n  </trkseg></trk>\n</gpx>\n';
+        '  <trk><name>${esc(trip.tripName)}</name>${segs.isEmpty ? '<trkseg>\n\n  </trkseg>' : segs}</trk>\n</gpx>\n';
   }
 
   @override
@@ -483,6 +497,10 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final points = trip.breadcrumbTrail.where((p) => p.lat != 0 || p.lng != 0).map((p) => LatLng(p.lat, p.lng)).toList();
+    // Only what was recorded is drawn as ridden; a signal gap is a dotted link.
+    final pieces = [
+      for (final piece in TripBreadcrumbPoint.pieces(trip.breadcrumbTrail)) [for (final p in piece) LatLng(p.lat, p.lng)],
+    ];
     final bounds = points.length >= 2 ? LatLngBounds.fromPoints(points) : null;
     final center = points.isNotEmpty ? points.first : const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng);
 
@@ -563,7 +581,12 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
           children: [
             appTileLayer(),
             if (points.length >= 2)
-              PolylineLayer(polylines: [Polyline(points: points, strokeWidth: 5.0, color: AppTheme.brand)]),
+              PolylineLayer(polylines: [
+                for (final piece in pieces)
+                  if (piece.length >= 2) Polyline(points: piece, strokeWidth: 5.0, color: AppTheme.brand),
+                for (var i = 1; i < pieces.length; i++)
+                  Polyline(points: [pieces[i - 1].last, pieces[i].first], strokeWidth: 2.5, color: AppTheme.brand.withValues(alpha: 0.8), pattern: StrokePattern.dotted()),
+              ]),
             if (points.isNotEmpty)
               MarkerLayer(
                 markers: [

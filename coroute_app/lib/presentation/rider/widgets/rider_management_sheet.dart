@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/config/feature_gates.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
 import '../../../data/models/convoy_model.dart';
@@ -44,8 +43,17 @@ class RiderManagementSheet extends StatelessWidget {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
+      isDismissible: true,
+      enableDrag: true,
+      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.88),
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Center(
+      barrierColor: AppScrim.color,
+      // Only as tall as the card, at the bottom: a full-height Center made the
+      // transparent sheet around the card swallow taps meant for the scrim.
+      builder: (ctx) => Align(
+        alignment: Alignment.bottomCenter,
+        heightFactor: 1.0,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 600),
           child: Container(
@@ -73,17 +81,15 @@ class RiderManagementSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxCapacity = FeatureGates.maxConvoyMembers();
-    final riderCount = convoy.riders.length;
-    final isAtCapacity = riderCount >= maxCapacity;
-
-    String tierLabel;
-    if (maxCapacity <= 1) {
-      tierLabel = 'Individual Solo (1)';
-    } else if (maxCapacity <= 6) {
-      tierLabel = 'Small Group (2–6)';
+    // Seats come from the host's membership (set by the gateway on the ride), never a global cap.
+    final isAtCapacity = convoy.isFull;
+    final String tierLabel;
+    if (convoy.capacity <= 0) {
+      tierLabel = 'Group ride';
+    } else if (convoy.capacity <= 1) {
+      tierLabel = 'Solo trip';
     } else {
-      tierLabel = 'Large Group (7–12)';
+      tierLabel = 'Up to ${convoy.capacity} riders';
     }
 
     return Column(
@@ -122,7 +128,7 @@ class RiderManagementSheet extends StatelessWidget {
                   Text('Manage Convoy Riders', style: AppText.title),
                   const SizedBox(height: 2),
                   Text(
-                    '$tierLabel · $riderCount/$maxCapacity Bikes Joined',
+                    '$tierLabel · ${convoy.riderCountLabel} joined',
                     style: AppText.caption.copyWith(color: AppTheme.text2),
                   ),
                 ],

@@ -1,4 +1,5 @@
 import 'geo_math.dart';
+import 'track_cleaner.dart';
 
 /// One rider's recorded route for the replay view: points sorted by time.
 class ReplayTrack {
@@ -6,22 +7,31 @@ class ReplayTrack {
   final String name;
   final List<ReplayPoint> points;
 
-  const ReplayTrack({required this.userId, required this.name, required this.points});
+  /// The gateway already cut this track at signal gaps ([ReplayPoint.brk]);
+  /// then only those cuts (and impossible jumps) split it. Older gateways
+  /// sent tracks simplified across gaps: the old, looser rule applies to those.
+  final bool segmented;
+
+  const ReplayTrack({required this.userId, required this.name, required this.points, this.segmented = false});
 
   int get firstTs => points.isEmpty ? 0 : points.first.ts;
   int get lastTs => points.isEmpty ? 0 : points.last.ts;
 
-  /// Parses the gateway's compact form `[[ts, lat, lng, kmh], ...]`.
-  factory ReplayTrack.fromJson(Map<String, dynamic> j) {
+  /// Parses the gateway's compact form `[[ts, lat, lng, kmh, brk?], ...]`
+  /// (`brk` 1: a new piece starts here). [segmented]: the response said
+  /// `segmented: true` (the gateway cut the track at gaps).
+  factory ReplayTrack.fromJson(Map<String, dynamic> j, {bool segmented = false}) {
     final pts = <ReplayPoint>[];
     for (final raw in (j['points'] as List? ?? const [])) {
       if (raw is List && raw.length >= 3 && raw[0] is num && raw[1] is num && raw[2] is num) {
-        pts.add(ReplayPoint((raw[0] as num).toInt(), (raw[1] as num).toDouble(), (raw[2] as num).toDouble(),
-            raw.length > 3 && raw[3] is num ? (raw[3] as num).toDouble() : 0));
+        final lat = (raw[1] as num).toDouble(), lng = (raw[2] as num).toDouble();
+        if (lat == 0 && lng == 0) continue; // no position
+        pts.add(ReplayPoint((raw[0] as num).toInt(), lat, lng, raw.length > 3 && raw[3] is num ? (raw[3] as num).toDouble() : 0,
+            raw.length > 4 && raw[4] == 1));
       }
     }
     pts.sort((a, b) => a.ts.compareTo(b.ts));
-    return ReplayTrack(userId: j['userId']?.toString() ?? '', name: j['name']?.toString() ?? '', points: pts);
+    return ReplayTrack(userId: j['userId']?.toString() ?? '', name: j['name']?.toString() ?? '', points: pts, segmented: segmented || pts.any((p) => p.brk));
   }
 
   /// Where the rider was at [ts]: interpolated between the two nearest points.
@@ -40,13 +50,15 @@ class ReplayTrack {
     }
     final a = points[lo], b = points[hi];
     if (a.ts == ts || hi == lo) return a;
-    if (b.ts - a.ts > maxGap.inMilliseconds) return null;
+    if (b.ts - a.ts > maxGap.inMilliseconds || b.brk) return null;
     final f = (ts - a.ts) / (b.ts - a.ts);
     return ReplayPoint(ts, a.lat + (b.lat - a.lat) * f, a.lng + (b.lng - a.lng) * f, a.kmh + (b.kmh - a.kmh) * f);
   }
 
-  /// The route cut where the phone had no signal: a pause longer than
-  /// [maxGap] with movement, or a jump faster than [maxKmh] (a bad fix).
+  /// The route cut where the phone had no signal. A [segmented] track is cut
+  /// where the gateway marked it (no fix for over 2 minutes while moving, or a
+  /// jump: see TrackRules) and at impossible jumps; an older unmarked one at a
+  /// pause longer than [maxGap] with movement, or a jump faster than [maxKmh].
   /// [pieces] are drawn as the ridden route, [gaps] as dotted links, so a
   /// dead zone is never drawn as if the rider rode a straight line.
   ({List<List<ReplayPoint>> pieces, List<(ReplayPoint, ReplayPoint)> gaps}) split({
@@ -63,7 +75,10 @@ class ReplayTrack {
         final d = GeoMath.haversine(a.lat, a.lng, p.lat, p.lng);
         final dt = p.ts - a.ts;
         final kmh = dt > 0 ? d / (dt / 1000) * 3.6 : double.infinity;
-        if ((dt > maxGap.inMilliseconds && d > minGapMoveM) || (d > minGapMoveM && kmh > maxKmh)) {
+        final cut = segmented
+            ? (p.brk || TrackRules.jumpBetween(a.lat, a.lng, a.ts, p.lat, p.lng, p.ts))
+            : ((dt > maxGap.inMilliseconds && d > minGapMoveM) || (d > minGapMoveM && kmh > maxKmh));
+        if (cut) {
           if (cur.length >= 2) pieces.add(cur);
           gaps.add((a, p));
           cur = <ReplayPoint>[];
@@ -103,5 +118,8 @@ class ReplayPoint {
   final double lat;
   final double lng;
   final double kmh;
-  const ReplayPoint(this.ts, this.lat, this.lng, this.kmh);
+
+  /// A new piece starts here (the gateway's `brk`): nothing was recorded since the previous point.
+  final bool brk;
+  const ReplayPoint(this.ts, this.lat, this.lng, this.kmh, [this.brk = false]);
 }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../core/config/feature_gates.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
@@ -178,30 +177,18 @@ class _MeetHereSheetState extends State<MeetHereSheet> {
           const SizedBox(height: 18),
           if (lead) ...[
             DsButton(
-              label: FeatureGates.isUnlocked(Feature.dynamicWaypointPush)
-                  ? 'Meet here'
-                  : 'Meet here (Road Captain)',
+              label: 'Meet here',
               icon: Icons.groups_rounded,
               onPressed: () {
-                if (!FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
-                  FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
-                  return;
-                }
                 Navigator.of(context).pop(MeetHereResult(MeetHereAction.meet, _name));
               },
             ),
             const SizedBox(height: 10),
             DsButton(
-              label: FeatureGates.isUnlocked(Feature.dynamicWaypointPush)
-                  ? 'Add a stop here'
-                  : 'Add a stop here (Road Captain)',
+              label: 'Add a stop here',
               icon: Icons.add_location_alt_rounded,
               tone: DsButtonTone.outline,
               onPressed: () {
-                if (!FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
-                  FeatureGates.showUpgradeModal(context, Feature.dynamicWaypointPush);
-                  return;
-                }
                 Navigator.of(context).pop(MeetHereResult(MeetHereAction.addStop, _name));
               },
             ),

@@ -104,6 +104,15 @@ class SafetyNative {
     } catch (_) {}
   }
 
+  /// Always-on ride screen: dims only CoRoute's window ([value] 0..1 of the panel range), or
+  /// gives the brightness back to the system with null. Never changes the system setting.
+  static Future<void> windowBrightness(double? value) async {
+    if (!_supported) return;
+    try {
+      await _channel.invokeMethod<void>('windowBrightness', <String, double>{'value': value ?? -1.0});
+    } catch (_) {}
+  }
+
   /// The app's own cache folder (`context.cacheDir` / `Caches`), for the map tile cache. Null off mobile.
   static Future<String?> cacheDir() async {
     if (!_supported) return null;

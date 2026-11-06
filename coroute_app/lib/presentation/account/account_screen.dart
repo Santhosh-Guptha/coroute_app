@@ -1,4 +1,3 @@
-import '../ride/fuel_sheet.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -6,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/app_config.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/theme/theme_controller.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
@@ -16,25 +14,21 @@ import '../../data/services/settings_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../admin/master_admin_dashboard.dart';
 import '../auth/access_gate_screen.dart';
-import '../diagnostics/pre_ride_phone_check_screen.dart';
-import '../onboarding/permissions_screen.dart';
 import '../rider/rider_home_screen.dart';
 import '../rider/trip_history_screen.dart';
-import '../safety/safety_settings_screen.dart';
-import '../settings/features_guide_screen.dart';
-import '../widgets/data_saver_tile.dart';
-import 'appearance_sheet.dart';
+import '../settings/settings_screen.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import '../subscription/payment_history_screen.dart';
 import '../subscription/membership_dashboard_screen.dart';
-import '../subscription/subscription_expiry_banner.dart';
-import '../../data/services/plan_subscription_service.dart';
+import '../../data/models/membership_model.dart';
 import '../garage/garage_screen.dart';
+import '../analytics/ride_analytics_screen.dart';
+import '../feedback/suggest_feature_screen.dart';
 
-/// The Profile tab: who you are, then every setting in one place.
-/// Each item (theme, data saver, permissions, sign out, version) appears
-/// only here in the app.
+/// The Profile tab: who you are, your bike, emergency contact and plan, your
+/// ride analytics, one row into Settings (every rider setting is there), help
+/// and the account.
 class AccountScreen extends StatelessWidget {
   /// True when shown as the Profile tab (no back button).
   final bool embedded;
@@ -62,7 +56,6 @@ class AccountScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final meta = context.watch<MetaService>().meta;
-    final theme = context.watch<ThemeController>();
     final settings = context.watch<SettingsService?>();
     final trips = context.watch<TripStorageService?>();
     final base = AppConfig.apiBaseUrl;
@@ -79,8 +72,8 @@ class AccountScreen extends StatelessWidget {
     final analytics = trips == null ? null : HomeAnalytics.of(trips.trips);
 
     final bikeTitle = auth.isPillion ? 'Pillion' : (vehicleType.isNotEmpty ? vehicleType : 'Your bike');
-    final planService = context.watch<PlanSubscriptionService?>();
     final memService = context.watch<MembershipService?>();
+    final access = (memService?.planAccess ?? PlanAccess.community).current;
 
     final bikeFacts = <String>[
       if (!auth.isPillion && plate.isNotEmpty) plate,
@@ -110,9 +103,6 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 18),
-
-                // Paid plan ending or ended: one tap opens the plan selector to renew.
-                const SubscriptionExpiryBanner(),
 
                 // Who you are: one tap opens the one profile editor.
                 DsCard(
@@ -295,7 +285,7 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
 
-                if (planService?.paymentsEnabled == true) ...[
+                if (memService?.paymentsEnabled == true) ...[
                   const SizedBox(height: Space.s24),
                   const DsSectionHeader('Membership & Plans'),
                   const SizedBox(height: Space.s12),
@@ -306,15 +296,15 @@ class AccountScreen extends StatelessWidget {
                         _SettingsRow(
                           icon: Icons.card_membership_rounded,
                           title: 'Membership & plans',
-                          subtitle: memService?.ownedMembership != null
-                              ? '${memService!.ownedMembership!.name} · ₹${memService.ownedMembership!.priceRupees}/mo · ${memService.ownedMembership!.occupiedSeats}/${memService.ownedMembership!.capacity} Seats'
+                          subtitle: access.isPaid
+                              ? access.statusLine()
                               : (memService != null && memService.participating.isNotEmpty
                                   ? 'Group member · Free for you'
-                                  : 'Plans from ₹9/month'),
-                          value: memService?.ownedMembership != null
-                              ? (memService!.ownedMembership!.isExpired ? 'EXPIRED' : 'ACTIVE')
-                              : (memService != null && memService.participating.isNotEmpty ? 'PARTICIPANT' : 'CHOOSE PLAN'),
-                          color: memService?.ownedMembership?.isExpired == true ? AppTheme.warnText : AppTheme.accentText,
+                                  : access.statusLine(groupFromPrice: memService?.groupFromPrice)),
+                          value: access.isPaid
+                              ? (access.isLegacy ? 'LEGACY' : 'ACTIVE')
+                              : (memService != null && memService.participating.isNotEmpty ? 'PARTICIPANT' : 'FREE'),
+                          color: AppTheme.accentText,
                           divider: true,
                           onTap: () => _push(context, const MembershipDashboardScreen()),
                         ),
@@ -329,60 +319,29 @@ class AccountScreen extends StatelessWidget {
                     ),
                   ),
                 ],
+                // Every rider setting lives on the one Settings screen.
                 const SizedBox(height: Space.s24),
-                const DsSectionHeader('Riding'),
-                const SizedBox(height: Space.s12),
                 DsCard(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Column(
                     children: [
-                      if (settings != null)
-                        _SettingsRow(
-                          icon: Icons.health_and_safety_rounded,
-                          title: 'Ride & safety settings',
-                          subtitle: 'Crash alerts, tunnels, remote, voice',
-                          // Reflect the real switch: "ARMED" while crash detection is off misled riders.
-                          value: settings.crashDetection ? 'ARMED' : 'OFF',
-                          color: settings.crashDetection ? null : AppTheme.warnText,
-                          onTap: () => _push(context, const SafetySettingsScreen()),
-                        ),
                       _SettingsRow(
-                        icon: Icons.verified_user_rounded,
-                        title: 'Permissions',
-                        subtitle: 'Location, microphone, notifications, battery and texts',
-                        onTap: () => _push(context, const PermissionsScreen()),
+                        key: const Key('profile_ride_analytics'),
+                        icon: Icons.insights_rounded,
+                        title: 'Your ride analytics',
+                        subtitle: 'Calculated on your phone. Only you can see this.',
+                        onTap: () => RideAnalyticsScreen.open(context),
                       ),
                       _SettingsRow(
-                        icon: Icons.phonelink_setup_rounded,
-                        title: 'Phone check',
-                        subtitle: 'Test GPS and sensors before a ride',
-                        onTap: () => _push(context, const PreRidePhoneCheckScreen(autoRun: false)),
-                      ),
-                      const DataSaverTile(divider: false),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: Space.s24),
-                const DsSectionHeader('Bike & map'),
-                const SizedBox(height: Space.s12),
-                DsCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: Column(
-                    children: [
-                      if (settings != null)
-                        _SettingsRow(
-                          icon: Icons.local_gas_station_rounded,
-                          title: 'Tank size & fuel',
-                          subtitle: 'Set your range and update fuel left',
-                          onTap: () => showFuelSheet(context, configure: true),
-                        ),
-                      _SettingsRow(
-                        icon: theme.isLight ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                        title: 'Night mode',
-                        value: AppearanceSheet.summary(theme),
-                        onTap: () => AppearanceSheet.show(context),
+                        key: const Key('profile_settings'),
+                        icon: Icons.settings_rounded,
+                        title: SettingsScreen.title,
+                        subtitle: 'Ride, safety, voice, map and privacy',
+                        // Reflects the real switch, so a rider never misses that crash detection is off.
+                        value: settings == null || settings.crashDetection ? null : 'Crash detection off',
+                        color: settings != null && !settings.crashDetection ? AppTheme.warnText : null,
                         divider: false,
+                        onTap: () => SettingsScreen.open(context),
                       ),
                     ],
                   ),
@@ -422,17 +381,17 @@ class AccountScreen extends StatelessWidget {
                   child: Column(
                     children: [
                       _SettingsRow(
-                        key: const Key('profile_features_guide'),
-                        icon: Icons.help_outline_rounded,
-                        title: 'Features guide',
-                        subtitle: 'What each feature does',
-                        onTap: () => _push(context, const FeaturesGuideScreen()),
-                      ),
-                      _SettingsRow(
                         icon: Icons.bug_report_rounded,
                         title: 'Report a problem',
                         subtitle: 'We reply by e-mail.',
                         onTap: () => _push(context, const ReportProblemScreen()),
+                      ),
+                      _SettingsRow(
+                        key: const Key('profile_suggest_feature'),
+                        icon: Icons.lightbulb_outline_rounded,
+                        title: 'Suggest a safety feature',
+                        subtitle: 'Your ideas shape what we build next',
+                        onTap: () => SuggestFeatureScreen.open(context),
                       ),
                       _SettingsRow(icon: Icons.privacy_tip_rounded, title: 'Privacy policy', onTap: () => _open(context, privacyUrl)),
                       _SettingsRow(icon: Icons.gavel_rounded, title: 'Terms of use', onTap: () => _open(context, termsUrl), divider: false),

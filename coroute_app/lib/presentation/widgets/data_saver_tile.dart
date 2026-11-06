@@ -4,18 +4,15 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/settings_service.dart';
 
-/// The "Data saver" switch (Profile tab), styled like a canvas settings row:
+/// The "Data saver" switch (Settings > Map & offline), styled like a settings row:
 /// teal icon, 15/700 label, 12/600 line under it, switch on the right.
 /// Shows nothing when the settings service is not provided (isolated screens
 /// in tests).
 class DataSaverTile extends StatelessWidget {
-  /// Kept for older callers; the tile always uses the normal size now.
-  final bool dense;
-
   /// Hairline under the row (off for the last row of a card).
   final bool divider;
 
-  const DataSaverTile({super.key, this.dense = false, this.divider = true});
+  const DataSaverTile({super.key, this.divider = true});
 
   static const String title = 'Data saver';
   static const String subtitle = 'Uses less mobile data for talk and map.';

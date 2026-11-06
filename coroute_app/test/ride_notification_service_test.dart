@@ -367,26 +367,8 @@ void main() {
     await tearDown0();
   });
 
-  testWidgets('setting off: plain notification; on again: pushed again', (tester) async {
-    await setUp0(tester);
-    port.convoy = ride();
-    port.changed();
-    await tester.pump();
-    expect(service!.richActive, isTrue);
-    await settings.setRichNotification(false);
-    await tester.pump();
-    expect(service!.richActive, isFalse);
-    expect(BackgroundService.richActive, isFalse);
-    await advance(tester, const Duration(seconds: 10));
-    port.changed();
-    await tester.pump();
-    expect(channel.shows, hasLength(1));
-    await settings.setRichNotification(true);
-    await tester.pump();
-    expect(channel.shows, hasLength(2));
-    expect(service!.richActive, isTrue);
-    await tearDown0();
-  });
+  // The "Large ride notification" switch was removed: the large notification is always
+  // used when the phone supports it (the plain one remains the fallback).
 
   testWidgets('lock screen setting reaches the native side', (tester) async {
     await setUp0(tester);
@@ -506,5 +488,107 @@ void main() {
     expect(RideNotifAction.fromMap({'action': 'ASSIST_ACCEPT'}), isNull, reason: 'needs the incident');
     expect(RideNotifAction.fromMap({'action': 'LEAVE'}), isNull);
     expect(RideNotifAction.fromMap(null), isNull);
+  });
+  // ------------------------------------------------------------ Agent 4: content, throttle, buttons
+
+  ConvoyModel rideAt(double kmh, {bool solo = false}) {
+    final c = ride();
+    final me = RiderModel(userId: 'me', name: 'Kiran', lat: 13.0, lng: 77.6, speedKmh: kmh, lastSeenEpochMs: t0);
+    return c.copyWith(riders: solo ? {'me': me} : {...c.riders, 'me': me});
+  }
+
+  testWidgets('Agent 4: a new speed on every fix is pushed at most once per 10 s window', (tester) async {
+    await setUp0(tester);
+    port.convoy = rideAt(40);
+    port.changed();
+    await tester.pump();
+    expect(channel.shows, hasLength(1));
+    expect(channel.shows.last['title'], 'Riding with Weekend Ride');
+    expect(channel.shows.last['subtitle'], '40 km/h');
+    expect(channel.shows.last['showTalk'], isTrue);
+    expect(channel.shows.last['showEnd'], isTrue);
+    expect(channel.shows.last['endLabel'], 'Leave');
+    expect(channel.shows.last['showSos'], isTrue);
+
+    for (var i = 1; i <= 9; i++) {
+      await advance(tester, const Duration(seconds: 1));
+      port.convoy = rideAt(40.0 + i);
+      port.changed();
+      await tester.pump();
+    }
+    expect(channel.shows, hasLength(1), reason: 'nine fixes in 9 s, no push yet');
+    await advance(tester, const Duration(seconds: 2));
+    expect(channel.shows, hasLength(2), reason: 'one push when the 10 s window ends');
+    expect(channel.shows.last['subtitle'], '49 km/h', reason: 'the newest value, not every value');
+
+    // An emergency is never held back by the window.
+    port.convoy = rideAt(49).copyWith(activeAlerts: [sos()]);
+    port.changed();
+    await tester.pump();
+    expect(channel.shows, hasLength(3));
+    expect(channel.shows.last['showEnd'], isFalse, reason: 'no End / Leave during an emergency');
+    await tearDown0();
+  });
+
+  testWidgets('Agent 4: solo ride and plan gate: no Talk, "End ride"', (tester) async {
+    await setUp0(tester);
+    port.convoy = rideAt(0, solo: true);
+    port.changed();
+    await tester.pump();
+    expect(channel.shows.last['title'], 'Solo ride');
+    expect(channel.shows.last['subtitle'], 'Stopped');
+    expect(channel.shows.last['showTalk'], isFalse);
+    expect(channel.shows.last['endLabel'], 'End ride');
+    await tearDown0();
+
+    await setUp0(tester, start: false);
+    service = RideNotificationService.forPort(port, settings, channel: channel, clock: () => now, talkAllowed: () => false);
+    port.convoy = rideAt(30);
+    port.changed();
+    await tester.pump();
+    expect(channel.shows.last['title'], 'Riding with Weekend Ride');
+    expect(channel.shows.last['showTalk'], isFalse, reason: 'the plan does not include the intercom');
+    expect(channel.shows.last['showWait'], isTrue, reason: 'Wait takes the free slot');
+    await tearDown0();
+  });
+
+  testWidgets('Agent 4: Talk and End / Leave only open the app (End asks to confirm there)', (tester) async {
+    await setUp0(tester);
+    port.convoy = rideAt(40);
+    port.changed();
+    await tester.pump();
+    final s = service!;
+    channel.ctrl.add(const RideNotifAction(RideNotifActionKind.talk));
+    await tester.pump();
+    expect(s.pendingUiAction.value, const RideNotifAction(RideNotifActionKind.talk));
+    s.clearUiAction();
+    channel.ctrl.add(const RideNotifAction(RideNotifActionKind.endRide));
+    await tester.pump();
+    expect(s.pendingUiAction.value, const RideNotifAction(RideNotifActionKind.endRide));
+    expect(port.sosOpened, 0);
+    expect(port.waits, 0);
+    expect(RideNotifAction.fromMap({'action': 'TALK', 'ref': ''}), const RideNotifAction(RideNotifActionKind.talk));
+    expect(RideNotifAction.fromMap({'action': 'END', 'ref': ''}), const RideNotifAction(RideNotifActionKind.endRide));
+    s.clearUiAction();
+
+    // After the ride: the buttons do nothing.
+    port.convoy = ride(status: 'ENDED');
+    port.changed();
+    await tester.pump();
+    channel.ctrl.add(const RideNotifAction(RideNotifActionKind.endRide));
+    await tester.pump();
+    expect(s.pendingUiAction.value, isNull);
+    await tearDown0();
+  });
+
+  testWidgets('Agent 4: the medical ID badge is on the lock screen during every ride', (tester) async {
+    await setUp0(tester);
+    medical = const MedicalId(name: 'Kiran', bloodGroup: 'O+', allergies: 'penicillin', contactName: 'Asha', contactPhone: '98765 43210');
+    port.convoy = rideAt(40);
+    port.changed();
+    await tester.pump();
+    expect(channel.shows.last['medicalBadge'], 'Medical ID: Kiran · Blood O+ · Allergies: penicillin · ICE: Asha 98765 43210');
+    expect(channel.shows.last['publicText'], channel.shows.last['medicalBadge']);
+    await tearDown0();
   });
 }

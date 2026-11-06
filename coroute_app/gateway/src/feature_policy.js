@@ -1,7 +1,6 @@
  'use strict';
-const { effectiveSubscription } = require('./subscription_lifecycle');
-/** The tier a rider is gated by: the effective one (a lapsed paid tier is community at once). */
-function tierOf(user, now = Date.now()) { return effectiveSubscription(user, now).tier; }
+// Group settings chosen by the ride's lead (not plan gating: what a rider may do comes from
+// ./entitlements, the membership plans).
 const DEFAULTS = Object.freeze({ essentialsEnabled: true, autoDiscovery: true, groupFuelEnabled: true,
   guardianEnabled: true, guardianRequirePin: false, guardianMaxHours: 72,
   notificationInsights: true, guardianStopMinutes: 15, guardianOfflineMinutes: 10,
@@ -42,4 +41,4 @@ function roomAnalytics(room, now = Date.now()) {
     route: { calculated: !!room.meta.route && !room.meta.route.approximate },
   } };
 }
-module.exports = { DEFAULTS, featurePolicy, policyPatch, roomAnalytics, tierOf };
+module.exports = { DEFAULTS, featurePolicy, policyPatch, roomAnalytics };

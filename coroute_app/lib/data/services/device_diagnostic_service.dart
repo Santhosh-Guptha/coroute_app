@@ -11,10 +11,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../models/device_diagnostic_report.dart';
 import 'api_client.dart';
 import 'background_service.dart';
+import 'meta_service.dart';
 import 'permissions_service.dart';
 import 'safety_native.dart';
 import 'sms_sender.dart';
@@ -226,8 +228,8 @@ class DeviceDiagnosticService extends ChangeNotifier {
             ? (probe.isIOS ? 'iOS ${safetyInfo.release}' : 'Android ${safetyInfo.release}')
             : (!kIsWeb ? '${Platform.operatingSystem} ${Platform.operatingSystemVersion}' : 'Web'),
         apiLevel: safetyInfo.sdkInt,
-        appVersion: pkg.version.isNotEmpty ? pkg.version : '3.53.18',
-        buildNumber: pkg.buildNumber.isNotEmpty ? pkg.buildNumber : '10015',
+        appVersion: pkg.version.isNotEmpty ? pkg.version : 'unknown',
+        buildNumber: pkg.buildNumber.isNotEmpty ? pkg.buildNumber : 'unknown',
         cpuArch: safetyInfo.cpuAbi.isNotEmpty ? safetyInfo.cpuAbi : 'arm64',
         batteryOptimizationStatus: batteryExempt ? 'Unrestricted (Ignoring Optimizations)' : 'Optimized / Restricted',
       );
@@ -863,11 +865,12 @@ class DeviceDiagnosticService extends ChangeNotifier {
     try {
       return await PackageInfo.fromPlatform();
     } catch (_) {
+      // The version MetaService read at start-up (empty when that failed too: shown as unknown).
       return PackageInfo(
-        appName: 'CoRoute',
-        packageName: 'space.devmonks.coroute_app',
-        version: '3.53.18',
-        buildNumber: '10015',
+        appName: AppConstants.appName,
+        packageName: AppConstants.androidPackageId,
+        version: MetaService.currentVersion,
+        buildNumber: MetaService.currentBuild > 0 ? '${MetaService.currentBuild}' : '',
         buildSignature: '',
       );
     }
@@ -1000,7 +1003,7 @@ class PhoneProbe {
     if (!isMobile) return null;
     try {
       if (isAndroid) return null; // read in [nativeProbe] ('canDial')
-      return await canLaunchUrl(Uri(scheme: 'tel', path: '112'));
+      return await canLaunchUrl(Uri(scheme: 'tel', path: SafetyConstants.emergencyNumber));
     } catch (_) {
       return null;
     }

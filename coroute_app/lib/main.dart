@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:url_launcher/url_launcher.dart';
 import 'core/constants/app_constants.dart';
+import 'data/local/review_prompt_store.dart';
 import 'core/l10n/l10n.dart';
 import 'core/constants/navigation_constants.dart';
 import 'core/theme/app_theme.dart';
@@ -28,20 +29,22 @@ import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
 import 'data/services/app_version_service.dart';
 import 'data/services/device_diagnostic_service.dart';
-import 'data/services/plan_subscription_service.dart';
 import 'data/services/membership_service.dart';
 import 'data/local/ride_stats_store.dart';
 import 'data/local/sqflite_track_queue.dart';
 import 'data/services/realtime_service.dart';
 import 'data/services/ride_notification_service.dart';
+import 'data/services/medical_id_lock_sync.dart';
 import 'data/services/safety_native.dart';
 import 'data/services/safety_service.dart';
 import 'data/services/settings_service.dart';
 import 'data/services/tile_cache_service.dart';
 import 'data/services/timeline_service.dart';
+import 'data/services/public_ride_service.dart';
 import 'data/services/track_recorder.dart';
 import 'data/services/track_uploader.dart';
 import 'data/services/trip_storage_service.dart';
+import 'data/services/nav_voice.dart';
 import 'data/services/voice_service.dart';
 import 'data/services/weather_service.dart';
 import 'data/services/permission_revocation_safety_service.dart';
@@ -49,7 +52,6 @@ import 'domain/notify/notification_snapshot.dart';
 import 'presentation/auth/access_gate_screen.dart';
 import 'presentation/ride/emergency_guidance.dart';
 import 'presentation/safety/crash_alarm_host.dart';
-import 'presentation/subscription/subscription_notice_host.dart';
 import 'presentation/splash/splash_screen.dart';
 
 /// Lets services navigate (sign-out on session expiry, deep links) without a BuildContext.
@@ -65,6 +67,8 @@ void main() async {
   await MetaService.readPackageInfo();
   final theme = ThemeController();
   await theme.load();
+  // Another rider's SOS over the lock screen (Android full-screen intent, heads-up fallback).
+  AlertService.urgentPoster = RideNotificationChannel.postUrgent;
   // The phone's language decides the safety texts when the setting is "System language".
   L10n.systemLanguage = WidgetsBinding.instance.platformDispatcher.locale.languageCode;
   // Data saver is known before the first frame, so the first ride already uses it.
@@ -79,6 +83,8 @@ void main() async {
   }
   // Rider-only ride numbers (hard stops) older than 90 days go; nothing else to maintain.
   RideStatsStore.prune().ignore();
+  // Install time for the store-rating prompt (never in the first days after install).
+  ReviewPromptStore.markFirstSeen().ignore();
   SystemChrome.setSystemUIOverlayStyle(AppTheme.overlayStyle);
   runApp(CoRouteApp(theme: theme, settings: settings));
 }
@@ -122,20 +128,21 @@ class CoRouteApp extends StatelessWidget {
         ChangeNotifierProvider(create: (ctx) => MetaService(ctx.read<ApiClient>())..load()),
         ChangeNotifierProvider(create: (ctx) => AppVersionService(ctx.read<MetaService>())),
         ChangeNotifierProvider(create: (ctx) {
-          final plan = PlanSubscriptionService(ctx.read<ApiClient>());
-          // The plan rides along with /me and login replies; sign-out drops it back to Community.
-          final auth = ctx.read<AuthService>();
-          auth.onSubscriptionStatus = plan.applySubscriptionStatus;
-          auth.onSessionCleared = () => plan.resetLocal().ignore();
-          plan.load().then((_) {
-            final status = auth.lastSubscriptionStatus;
-            if (status != null) plan.applySubscriptionStatus(status);
-          }).ignore();
-          return plan;
+          // The membership is the single source of the rider's plan; sign-out forgets it.
+          final ms = MembershipService(ctx.read<ApiClient>())..fetchMyMembership()..fetchCatalog();
+          ctx.read<AuthService>().onSessionCleared = () => ms.clearLocal().ignore();
+          return ms;
         }),
-        ChangeNotifierProvider(create: (ctx) => MembershipService(ctx.read<ApiClient>())..fetchMyMembership()..fetchCatalog()),
         ChangeNotifierProvider(create: (ctx) => TripStorageService(ctx.read<ApiClient>())),
         ChangeNotifierProvider(create: (ctx) => TimelineService(ctx.read<ApiClient>(), ctx.read<RealtimeService>())),
+        // Public ride, safe contact and road warnings (every plan; gateway feature pubride1). Road
+        // warnings speak in the important tier and stay silent while my group has an emergency open.
+        ChangeNotifierProvider<PublicRideService>(create: (ctx) {
+          final pr = PublicRideService(ctx.read<RealtimeService>());
+          pr.speaker = (line, key) => ctx.read<VoiceService>().speak(line, priority: VoicePriority.important, key: key).ignore();
+          pr.emergencyActive = () => ctx.read<ConvoyService>().activeConvoy?.activeAlerts.any((a) => !a.resolved) ?? false;
+          return pr;
+        }),
         ChangeNotifierProvider(create: (ctx) {
           final queue = SqfliteTrackQueue();
           return TrackRecorder(queue, TrackUploader(ctx.read<ApiClient>(), queue));
@@ -151,7 +158,7 @@ class CoRouteApp extends StatelessWidget {
               timeline: ctx.read<TimelineService>(),
               settings: ctx.read<SettingsService>(),
               mesh: ctx.read<P2pMeshService>(),
-              planSubscription: ctx.read<PlanSubscriptionService>(),
+              onPlanChanged: () => ctx.read<MembershipService>().fetchMyMembership().ignore(),
             );
             final theme = ctx.read<ThemeController>();
             convoys.addListener(() {
@@ -246,8 +253,18 @@ class CoRouteApp extends StatelessWidget {
               RouteEssentialsService(ctx.read<ApiClient>()),
               fetchRoute: geo.route,
               reverseGeocode: geo.reverse,
+              // Auto re-route: from where I am, in my direction of travel; short spoken lines.
+              fetchRouteHeaded: (wp, heading) => geo.route(wp, startHeadingDeg: heading),
+              onPrompt: NavVoice(ctx.read<VoiceService>()).say,
             );
           },
+        ),
+        // Medical ID on the lock screen / quick settings tile: always on, kept in step with the
+        // profile (Agent 4: the on/off switch was removed; edit or clear the info instead).
+        Provider<MedicalIdLockSync>(
+          lazy: false,
+          create: (ctx) => MedicalIdLockSync(ctx.read<AuthService>(), ctx.read<SettingsService>()),
+          dispose: (_, m) => m.dispose(),
         ),
         // The big ride notification on the home and lock screen (replaces the plain one in place).
         Provider<RideNotificationService>(
@@ -255,14 +272,22 @@ class CoRouteApp extends StatelessWidget {
           create: (ctx) {
             final settings = ctx.read<SettingsService>();
             final auth = ctx.read<AuthService>();
+            final convoys = ctx.read<ConvoyService>();
             return RideNotificationService(
-              ctx.read<ConvoyService>(),
+              convoys,
               ctx.read<TimelineService>(),
               settings,
               essentials: ctx.read<RideEssentialsCoordinator>(),
               safety: ctx.read<SafetyService>(),
-              // Opt-in (3.16): the rider's medical ID on the lock screen during their own SOS.
-              medicalId: () => settings.medicalIdOnLockScreen ? MedicalId.fromAuth(auth) : null,
+              // Always on (Agent 4): the rider's medical ID badge on the lock screen during a ride
+              // and the full line during their own SOS; empty when no medical info was entered.
+              medicalId: () => MedicalId.fromAuth(auth),
+              // Talk follows the ride's plan: a solo ride (Community host, one seat) has no Talk;
+              // null while the seats are unknown (older gateway), so a group ride still shows it.
+              talkAllowed: () {
+                final ride = convoys.activeConvoy;
+                return ride == null || ride.capacity <= 0 ? null : ride.hasGroupFeatures;
+              },
             );
           },
           dispose: (_, n) => n.dispose(),
@@ -299,10 +324,7 @@ class _App extends StatelessWidget {
           data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1.0).clamp(0.85, 1.3).toDouble())),
           child: CrashAlarmHost(
             navigatorKey: appNavigatorKey,
-            child: SubscriptionNoticeHost(
-              navigatorKey: appNavigatorKey,
-              child: _UpdateGate(child: child ?? const SizedBox.shrink()),
-            ),
+            child: _UpdateGate(child: child ?? const SizedBox.shrink()),
           ),
         );
       },
@@ -434,8 +456,8 @@ class _DeepLinkListenerState extends State<_DeepLinkListener> {
       return;
     }
     if (uri.scheme == 'coroute' && uri.host == 'subscription') {
-      // Back from the website checkout: re-read the plan; an open checkout closes itself on success.
-      context.read<PlanSubscriptionService>().handleCheckoutReturn(uri).ignore();
+      // Back from the website checkout: re-read the membership (the single source of the plan).
+      context.read<MembershipService>().fetchMyMembership().ignore();
       return;
     }
     final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();

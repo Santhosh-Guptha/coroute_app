@@ -50,6 +50,10 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
                 alarmWindow(call.argument<Boolean>("on") == true)
                 result.success(null)
             }
+            "windowBrightness" -> {
+                windowBrightness(call.argument<Double>("value") ?: -1.0)
+                result.success(null)
+            }
             "cacheDir" -> result.success(cacheDir())
             "networkKind" -> result.success(networkKind())
             "phoneProbe" -> phoneProbe(result)
@@ -290,6 +294,25 @@ class SafetyChannel(private val activity: Activity) : MethodChannel.MethodCallHa
         } catch (e: Exception) {
             // ActivityNotFoundException or SecurityException: not on this phone.
             false
+        }
+    }
+
+    /**
+     * Always-on ride screen: dims only CoRoute's window ([value] 0..1 of the panel range), or
+     * gives the brightness back to the system for a negative value. The system setting and the
+     * WRITE_SETTINGS permission are never touched.
+     */
+    private fun windowBrightness(value: Double) {
+        try {
+            val lp = activity.window.attributes
+            lp.screenBrightness = if (value < 0.0) {
+                WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            } else {
+                value.toFloat().coerceIn(0.01f, 1.0f)
+            }
+            activity.window.attributes = lp
+        } catch (e: Exception) {
+            // No window (activity finishing): nothing to dim.
         }
     }
 

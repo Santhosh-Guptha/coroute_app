@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const { requireAuth, requireAdmin, AuthError } = require('./auth');
+const { requireAuth, requireAdmin, AuthError, verifyToken } = require('./auth');
 const { ValidationError, tripRecord, sitePath, weatherPoints, liveTokenOf } = require('./validate');
 const { identity } = require('./anonymise');
 const { ConvoyError, falseAlarmCount, sha256 } = require('./convoys');
@@ -13,13 +13,14 @@ const { registerSubscriptionPublicRoutes, registerSubscriptionAuthRoutes } = req
 const { registerMembershipPublicRoutes, registerMembershipAuthRoutes } = require('./membership_routes');
 const { registerAdminAnalyticsRoutes, registerPublicUsageRoutes, maxTripsFor } = require('./admin_analytics');
 const { adminGrantPlan, adminRevokePlan } = require('./subscription_routes');
+const { isStaffAccount, isGuestAccount, staffEmails, hasStaffMember } = require('./staff');
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells = null, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null }) {
   const r = express.Router();
   r.use((req, res, next) => {
     const feature = req.path.startsWith('/geo/essentials') ? 'essentials' : req.path.startsWith('/geo/weather') ? 'weather'
@@ -143,6 +144,9 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     res.status(204).end();
   }));
 
+  // Topics the website feedback form offers (index.html #fb-topic). 'safety-idea' feeds future safety features.
+  // Website topics, plus the app's "Suggest a safety feature" chips (group-riding, map-navigation).
+  const FEEDBACK_TOPICS = ['general', 'safety-idea', 'bug', 'story', 'other', 'group-riding', 'map-navigation'];
   r.post('/feedback', feedbackLimiter, wrap(async (req, res) => {
     const b = req.body || {};
     // Honeypot: real users never fill the hidden "website" field. Timing: humans take > 3 s.
@@ -152,14 +156,21 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     const name = String(b.name || '').trim().slice(0, 80);
     const email = String(b.email || '').trim().toLowerCase();
     const message = String(b.message || '').trim();
+    // Topic (website form): empty means general; anything not on the list is refused, never stored.
+    const topic = String(b.topic || '').trim().toLowerCase() || 'general';
     const errors = {};
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) errors.email = 'Enter a valid e-mail address.';
+    if (!FEEDBACK_TOPICS.includes(topic)) errors.topic = 'Choose a topic from the list.';
+    // A signed-in app rider may send an idea without an e-mail ("Contact me" off): the app's token
+    // stands in for it. Nothing about the account is stored with it (private by default).
+    const auth = req.headers.authorization || '';
+    const appRider = !email && auth.startsWith('Bearer ') && !!verifyToken(auth.slice(7));
+    if (!appRider && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) errors.email = 'Enter a valid e-mail address.';
     if (message.length < 20) errors.message = 'Please write at least 20 characters.';
     if (message.length > 2000) errors.message = 'Please keep it under 2000 characters.';
     if (/https?:\/\/\S+/gi.test(message) && (message.match(/https?:\/\//gi) || []).length > 2) errors.message = 'Too many links.';
     if (Object.keys(errors).length) return res.status(422).json({ error: 'Please correct the highlighted fields.', fields: errors });
     await repo.addFeedback({
-      name, email, message, createdAt: Date.now(),
+      name: email ? name : '', email, message, topic, contact: !!email, createdAt: Date.now(),
       userAgent: String(req.headers['user-agent'] || '').slice(0, 160),
       appVersion: String(b.appVersion || '').slice(0, 40),
       device: String(b.device || '').slice(0, 80),
@@ -199,9 +210,11 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
 
   // Razorpay webhook endpoint (public, HMAC-signature authenticated)
   registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap });
-  registerMembershipPublicRoutes({ r, repo, wrap });
+  registerMembershipPublicRoutes({ r, repo, wrap, convoys });
   // Aggregated, PII-free usage numbers for the website (cached 5 min).
   registerPublicUsageRoutes({ r, repo, wrap });
+  // Rounded count of riders on a ride right now for the website (cached 30 s, no PII).
+  require('./public_live').registerPublicLiveRoutes({ r, convoys, wrap });
 
   // ---- authenticated ----
   r.use(requireAuth(gate), apiLimiter);
@@ -235,6 +248,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     if (hub) hub.disconnectUser(user.userId, 4401, 'ACCOUNT_GONE');
     // 3.15: out of every safety network incident (their own ones close; queued audit rows dropped).
     if (network) network.forgetUser(user.userId);
+    // Public ride: preferences, blocks, requests, chats and the contact log about this rider.
+    if (hub && hub.publicRides) await hub.publicRides.forgetUser(user.userId).catch(() => {});
     const gwSms = emergencyGateway || convoys?.emergencyGateway;
     if (gwSms && typeof gwSms.revokeLinksFor === 'function') gwSms.revokeLinksFor(user.userId);
     await convoys.leaveAll(user.userId);
@@ -515,7 +530,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       if (!clipped.length) continue;
       out.push({ userId: uid, name: v.meta.members?.[uid]?.name || '', points: toWire(filterPoints(clipped), simplifyM) });
     }
-    res.json({ groupId: v.meta.groupId, tracks: out, format: ['ts', 'lat', 'lng', 'kmh'], plan: publicPlan(v.meta) });
+    // Each rider's own cleaned track only; `brk` (5th element, 1) starts a new segment after a signal gap.
+    res.json({ groupId: v.meta.groupId, tracks: out, format: ['ts', 'lat', 'lng', 'kmh', 'brk'], segmented: true, plan: publicPlan(v.meta) });
   }));
 
   // Batch upload of recorded points (the app's normal path; also works after the trip ended, within the grace period).
@@ -549,7 +565,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       acked.push(r2.seq);
       if (!r2.duplicate) added = true;
     }
-    if (perm.ended && added && timeline) timeline.scheduleRebuild(gid);
+    if (perm.ended && added && timeline) timeline.scheduleRebuild(gid, req.user.userId);
     res.json({ acked, rejected });
   }));
 
@@ -609,6 +625,17 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       results: await geo.nearbyFuel(lat, lng, radiusKm),
     });
   }));
+  // Map places by 0.05 degree cell: the phone picks the cells (route corridor ahead or around the
+  // rider) and does all filtering, fuel matching and ranking; the gateway only proxies and caches.
+  const poiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `poi:${req.user?.userId || req.ip}`, message: { error: 'Too many place lookups. Wait a moment.', code: 'RATE_LIMITED' } });
+  r.get('/geo/poi-cells', poiLimiter, wrap(async (req, res) => {
+    if (!poiCells) return res.status(503).json({ error: 'Map places are unavailable.', code: 'PLACES_NOT_CONFIGURED' });
+    try {
+      const out = await poiCells.cells(req.query.cells);
+      res.set('Cache-Control', out.pending.length ? 'no-store' : 'private, max-age=3600').json(out);
+    } catch (e) { res.status(e.status || 503).json({ error: 'Map places are unavailable.', code: e.code || 'PLACES_UNAVAILABLE' }); }
+  }));
   r.get('/geo/reverse', geoLimiter, wrap(async (req, res) => {
     const lat = Number(req.query.lat), lng = Number(req.query.lng);
     if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) return res.status(400).json({ error: 'Invalid coordinates.' });
@@ -626,10 +653,25 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     }
     catch (e) { res.status(e.status || 503).json({ error: 'Route essentials are unavailable.', code: e.code || 'ESSENTIALS_UNAVAILABLE' }); }
   }));
-  r.post('/geo/route', geoLimiter, wrap(async (req, res) => {
-    const route = await geo.route(req.body?.waypoints);
-    if (!route) return res.status(502).json({ error: 'Route is not available right now.' });
-    res.json(route);
+  // Planned routes and riders' new routes from where they are (startBearing: their direction of
+  // travel). Clear errors with a code; a rider's app asks at most once per 15 s, this caps a user.
+  const routeLimiter = rateLimit({
+    windowMs: 60 * 1000, limit: 12, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `rt:${req.user?.userId || req.ip}`, message: { error: 'Too many route requests. Wait a moment.', code: 'RATE_LIMITED' },
+  });
+  const ROUTE_ERRORS = {
+    INVALID_WAYPOINTS: [400, 'Send 2 to 25 waypoints with valid coordinates (and startBearing 0 to 359 if any).'],
+    ROUTE_DISABLED: [503, 'Routing is not available on this server.'],
+    NO_ROUTE: [422, 'No road route between these points.'],
+    UPSTREAM: [502, 'Route is not available right now.'],
+  };
+  r.post('/geo/route', geoLimiter, routeLimiter, wrap(async (req, res) => {
+    const out = await geo.routeResult(req.body?.waypoints, { startBearing: req.body?.startBearing });
+    if (!out.route) {
+      const [status, error] = ROUTE_ERRORS[out.error] || ROUTE_ERRORS.UPSTREAM;
+      return res.status(status).json({ error, code: out.error || 'UPSTREAM' });
+    }
+    res.json(out.route);
   }));
   // Weather on the route (3.16): 1 to 5 points with their ETA, answered from a 0.1 degree grid cache (Open-Meteo).
   const weatherLimiter = rateLimit({
@@ -704,7 +746,9 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     res.json(await auth.appBuilds({ days, minBuild: config.minAppBuild, latestBuild: config.latestAppBuild }));
   }));
   // Finished rides across all riders, with each report's headline numbers and retention status.
-  const convoySummary = (m) => {
+  const staffIdsOfRepo = () => (typeof repo.staffUserIds === 'function' ? repo.staffUserIds().catch(() => new Set()) : Promise.resolve(new Set()));
+  // staffIds (optional): flags a ride a staff account joined (hasStaff) and sizes the group by riders only.
+  const convoySummary = (m, staffIds = null) => {
     const startedAt = m.createdAtEpochMs || 0;
     const endedAt = m.endedAtEpochMs || 0;
     const retentionDays = config.retentionEndedConvoyDays || 90;
@@ -717,6 +761,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       startedAt, endedAt,
       startName: m.start?.name || m.startLocationName || '', destinationName: m.destinationName || '',
       members: Object.keys(m.members || {}).length,
+      riderMembers: staffIds ? Object.keys(m.members || {}).filter((id) => !staffIds.has(id)).length : Object.keys(m.members || {}).length,
+      hasStaff: staffIds ? hasStaffMember(Object.keys(m.members || {}), staffIds) : false,
       hasReport: !!m.report,
       distanceM: m.report?.group?.distanceM || 0,
       durationMs: m.report?.group?.durationMs || Math.max(0, endedAt - startedAt),
@@ -733,7 +779,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
 
   r.get('/admin/groups', requireAdmin, wrap(async (req, res) => {
     const active = await convoys.fleet();
-    const ended = (await repo.listEndedConvoyMeta(500)).map(convoySummary);
+    const staffIds = await staffIdsOfRepo();
+    const ended = (await repo.listEndedConvoyMeta(500)).map((m) => convoySummary(m, staffIds));
     const approachingRetention = ended.filter((c) => c.isApproachingRetention || c.gpsStripped);
     res.json({
       active,
@@ -745,18 +792,27 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
 
   r.get('/admin/convoys/history', requireAdmin, wrap(async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
-    res.json({ convoys: (await repo.listEndedConvoyMeta(limit)).map(convoySummary) });
+    const staffIds = await staffIdsOfRepo();
+    res.json({ convoys: (await repo.listEndedConvoyMeta(limit)).map((m) => convoySummary(m, staffIds)) });
   }));
   r.get('/admin/stats', requireAdmin, wrap(async (req, res) => {
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 3650);
     const since = Date.now() - days * 86400000;
-    const ended = (await repo.listEndedConvoyMeta(5000)).map(convoySummary);
+    const all = await repo.listUsers(5000);
+    // Staff accounts (admins, STAFF_EMAILS) are not riders; guests are counted as before.
+    const emails = staffEmails();
+    const staff = all.filter((u) => !isGuestAccount(u) && isStaffAccount(u, emails));
+    const staffIds = new Set(staff.map((u) => u.userId));
+    const users = all.filter((u) => !staffIds.has(u.userId));
+    const ended = (await repo.listEndedConvoyMeta(5000)).map((m) => convoySummary(m, staffIds));
     const recent = ended.filter((c) => c.endedAt >= since);
-    const users = await repo.listUsers(5000);
     const sum = (list, k) => list.reduce((s, c) => s + (c[k] || 0), 0);
+    const sized = ended.filter((c) => c.riderMembers > 0);
     res.json({
       days,
       riders: users.length,
+      excludesStaff: true,
+      staff: staff.length,
       activeRiders: users.filter((u) => (u.lastActiveAt || 0) >= since).length,
       newRiders: users.filter((u) => (u.createdAt || 0) >= since).length,
       liveConvoys: convoys.rooms.size,
@@ -764,7 +820,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       distanceM: { all: sum(ended, 'distanceM'), recent: sum(recent, 'distanceM') },
       rideMs: { all: sum(ended, 'durationMs'), recent: sum(recent, 'durationMs') },
       riderTrips: await repo.countTrips(),
-      avgGroupSize: ended.length ? +(sum(ended, 'members') / ended.length).toFixed(1) : 0,
+      avgGroupSize: sized.length ? +(sum(sized, 'riderMembers') / sized.length).toFixed(1) : 0,
+      ridesWithStaff: ended.filter((c) => c.hasStaff).length,
       sos: { all: sum(ended, 'sos'), recent: sum(recent, 'sos') },
     });
   }));
@@ -798,15 +855,27 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
         }
       }
     }
+    const emails = staffEmails();
     const enriched = users.map((u) => {
       const act = activeMap.get(u.userId) || null;
       return {
         ...u,
+        staff: !isGuestAccount(u) && isStaffAccount(u, emails),
         activeGroup: act,
         isInActiveConvoy: !!act,
       };
     });
-    res.json({ users: enriched });
+    // Counted here so the console never recounts on the phone: riders exclude staff and guests.
+    const guests = enriched.filter((u) => isGuestAccount(u)).length;
+    const staff = enriched.filter((u) => u.staff).length;
+    res.json({
+      users: enriched,
+      counts: {
+        accounts: enriched.length, riders: enriched.length - staff - guests, staff, guests,
+        onHold: enriched.filter((u) => u.status === 'ON_HOLD').length,
+        ridersOnHold: enriched.filter((u) => u.status === 'ON_HOLD' && !u.staff).length,
+      },
+    });
   }));
 
   r.get('/admin/users/:userId/details', requireAdmin, wrap(async (req, res) => {

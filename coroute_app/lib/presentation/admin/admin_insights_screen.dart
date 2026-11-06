@@ -4,12 +4,14 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
+import 'admin_device_compatibility_screen.dart';
 import 'admin_ui.dart';
 import 'feature_analytics_view.dart';
 import 'master_admin_dashboard.dart';
 
-/// Master admin: website/app feedback, first-party page-view counts and the
-/// app builds riders use (to know when the minimum build can be raised).
+/// Master admin: Insights. Website and app feedback, first-party page-view
+/// counts, the app builds riders use (to know when the minimum build can be
+/// raised, with the phone compatibility reports) and live feature use.
 /// Pull down to refresh; the old numbers stay visible while they reload.
 class AdminInsightsScreen extends StatefulWidget {
   const AdminInsightsScreen({super.key});
@@ -85,48 +87,14 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
   @override
   Widget build(BuildContext context) {
     return AdminShell(
-      title: 'Feedback and analytics',
+      title: 'Insights',
       subtitle: 'Last 30 days',
-      onBack: () => Navigator.maybePop(context),
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
       nav: adminNavItems(context, AdminSection.insights),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: AppTheme.border))),
-                child: TabBar(
-                  controller: _tabs,
-                  indicatorColor: AppTheme.brand,
-                  indicatorWeight: 3,
-                  dividerColor: Colors.transparent,
-                  labelColor: AppTheme.accentText,
-                  unselectedLabelColor: AppTheme.muted,
-                  labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-                  unselectedLabelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  tabs: [
-                    Tab(height: 48, text: _loaded ? 'Feedback (${_feedback.length})' : 'Feedback'),
-                    const Tab(height: 48, text: 'Page views'),
-                    const Tab(height: 48, text: 'App versions'),
-                    const Tab(height: 48, text: 'Live features'),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabs,
-                  children: [_tab(_feedbackList), _tab(_viewsList), _tab(_buildsList), const FeatureAnalyticsView()],
-                ),
-              ),
-            ],
-          ),
-        ),
+      body: AdminTabbedBody(
+        controller: _tabs,
+        labels: [_loaded ? 'Feedback (${_feedback.length})' : 'Feedback', 'Visits', 'App versions', 'Feature use'],
+        children: [_tab(_feedbackList), _tab(_viewsList), _tab(_buildsList), const FeatureAnalyticsView()],
       ),
     );
   }
@@ -299,6 +267,18 @@ class _AdminInsightsScreenState extends State<AdminInsightsScreen> with SingleTi
           columns: const ['Build', 'Riders'],
           empty: Text('No app versions reported yet.', style: AppText.body.copyWith(color: AppTheme.text2)),
           rows: rows,
+        ),
+        const AdminSectionLabel('Phones'),
+        AdminTable(
+          rows: [
+            AdminRow(
+              leading: const AdminRowIcon(Icons.phonelink_setup_rounded),
+              title: 'Phone compatibility reports',
+              subtitle: 'Sensor and background checks sent from riders\' phones',
+              divider: false,
+              onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const AdminDeviceCompatibilityScreen())),
+            ),
+          ],
         ),
         const SizedBox(height: 16),
         DsCard(

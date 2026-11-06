@@ -4,9 +4,13 @@ import '../../core/constants/route_constants.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/route_model.dart';
 import '../../data/models/stop_point_model.dart';
+import '../navigation/heading_tracker.dart';
+import '../navigation/nav_prompts.dart';
+import '../navigation/off_route_monitor.dart';
+import '../navigation/reroute_controller.dart';
+import '../navigation/reroute_rules.dart';
 import '../ride/ride_facts.dart';
 import 'off_route_detector.dart';
-import 'reroute_policy.dart';
 import 'route_plan.dart';
 import 'route_progress.dart';
 import '../timeline/timeline_text.dart';
@@ -17,32 +21,55 @@ import '../tracking/geo_math.dart';
 /// is not available (offline, error, timeout). Never throws.
 typedef RouteFetcher = Future<RouteModel?> Function(List<(double, double)> waypoints);
 
+/// Like [RouteFetcher], with my direction of travel at the first point
+/// (degrees, null when unknown), so the new route does not start with a U-turn.
+typedef HeadedRouteFetcher = Future<RouteModel?> Function(List<(double, double)> waypoints, double? startHeadingDeg);
+
+/// Says one navigation line (the voice applies mute and language).
+typedef NavPromptSink = void Function(NavPrompt prompt);
+
 /// Reverse geocodes a coordinate (lat, lng) to a place or road name.
 typedef ReverseGeocoder = Future<String?> Function(double lat, double lng);
 
 /// Follows my position along the route during a ride and, when I leave the
-/// planned route, quietly fetches a personal route from where I am to the
-/// destination through the stops I still have to ride to.
+/// route I follow, fetches a personal route from where I am (in my
+/// direction of travel) through the stops I still have to ride to, to the
+/// destination.
 ///
 /// * Works only on the fixes it is given (the ride coordinator passes my own
 ///   location fixes as they arrive). No timers, no extra GPS, no polling:
 ///   with no new fix it does nothing.
-/// * The personal route is mine only; the group plan stays as it is.
+/// * Leaving the route, the requests and the spoken lines follow
+///   [RerouteController] ([RerouteRules]): off after 8 s beyond 40 m heading
+///   away (or 120 m at once), back within 25 m for 5 s; one request at a
+///   time, at least 15 s apart, three failures and it stops; one short line
+///   per departure, never more than one off-route line per 2 minutes.
+/// * The personal route is mine only; the group plan stays as it is. A new
+///   group plan (the lead changed the route) drops it and starts over.
 /// * Back on the planned route: the personal route is dropped.
-/// * Requests follow [ReroutePolicy] (one per minute, one per 3 minutes with
-///   data saver, back-off after failures, none while offline).
 ///
 /// It notifies listeners only when the status line or the active route
 /// changes; progress along the line is read by the ride screen when it
 /// rebuilds for the same fix.
 class RouteGuide extends ChangeNotifier {
-  RouteGuide({required this.fetchRoute, this.reverseGeocode});
+  RouteGuide({required this.fetchRoute, this.reverseGeocode, this.fetchRouteHeaded, this.onPrompt});
 
   final RouteFetcher fetchRoute;
   final ReverseGeocoder? reverseGeocode;
-  final ReroutePolicy policy = ReroutePolicy();
-  final OffRouteDetector _detector = OffRouteDetector();
+
+  /// Used instead of [fetchRoute] for new routes when given (sends my heading).
+  final HeadedRouteFetcher? fetchRouteHeaded;
+
+  /// Where the short navigation lines go (null: not spoken).
+  final NavPromptSink? onPrompt;
+
+  /// Leaving the route, requests and spoken lines (exposed for tests).
+  final RerouteController reroute = RerouteController();
+  final HeadingTracker _heading = HeadingTracker();
   final OffRouteDetector _rejoin = OffRouteDetector(initial: OffRouteState.offRoute);
+  int _lastFixMs = 0;
+  bool _online = true;
+  bool _offStatusShown = false;
 
   ConvoyModel? _convoy;
   String _uid = '';
@@ -96,6 +123,8 @@ class RouteGuide extends ChangeNotifier {
       if (_disposed || route == null || route.points.length < 2) return false;
       _personal = route;
       _personalProgress = RouteProgress(route.points);
+      reroute.followNewLine();
+      _rejoin.reset(OffRouteState.offRoute);
       _personalFuelStop = StopPointModel(
         stopId: 'personal_fuel_${DateTime.now().millisecondsSinceEpoch}',
         lat: lat,
@@ -116,6 +145,7 @@ class RouteGuide extends ChangeNotifier {
   void clearPersonalFuelStop() {
     _personalFuelStop = null;
     _clearPersonal();
+    reroute.followNewLine();
     _notify();
   }
 
@@ -219,9 +249,11 @@ class RouteGuide extends ChangeNotifier {
     final hadPersonal = _personal != null;
     _arrived = false;
     _clearPersonal();
-    _detector.reset();
+    // Re-anchor on the new group route: a request on its way is dropped.
+    reroute.reset();
     _rejoin.reset(OffRouteState.offRoute);
     _lastFix = null;
+    _offStatusShown = false;
     if (hadPersonal || _status != null) {
       _status = null;
       _statusUntilMs = 0;
@@ -237,6 +269,10 @@ class RouteGuide extends ChangeNotifier {
   }
 
   /// One location fix of mine. Cheap: a windowed match on one or two lines.
+  ///
+  /// [headingDeg] is the GPS direction of travel when known (else it is
+  /// taken from my movement); [autoReroute] false never asks for a new
+  /// route (the "Auto re-route" setting), it only says "Off route." once.
   void onFix({
     required double lat,
     required double lng,
@@ -246,12 +282,17 @@ class RouteGuide extends ChangeNotifier {
     required bool online,
     required bool lowData,
     bool isTunnelCoasting = false,
+    double? headingDeg,
+    bool autoReroute = true,
   }) {
     if (_disposed) return;
     if (lat == 0 && lng == 0) return;
     final fix = (lat, lng);
     if (fix == _lastFix) return;
     _lastFix = fix;
+    _lastFixMs = nowMs;
+    _online = online;
+    final heading = _heading.update(lat, lng, gpsHeadingDeg: headingDeg, speedKmh: speedKmh);
     var changed = false;
     if (_statusUntilMs > 0 && nowMs >= _statusUntilMs) {
       _status = null;
@@ -293,7 +334,7 @@ class RouteGuide extends ChangeNotifier {
       return;
     }
 
-    final limit = OffRouteDetector.limitFor(accuracyM);
+    final limit = RerouteRules.offLimitFor(accuracyM);
     final onPlan = plan.update(lat, lng, acceptM: limit, accuracyM: accuracyM);
     if (onPlan != null && onPlan.onLine && !_everOnPlan) {
       _everOnPlan = true;
@@ -309,7 +350,8 @@ class RouteGuide extends ChangeNotifier {
     if (!_arrived && _nearEnd(plan)) {
       _arrived = true;
       _generation++; // a route still on its way is no longer needed
-      _detector.reset();
+      reroute.reset();
+      _offStatusShown = false;
       if (_personal == null && _status != null && _statusUntilMs == 0) {
         _status = null;
         changed = true;
@@ -326,6 +368,8 @@ class RouteGuide extends ChangeNotifier {
     final suppressOff = isTunnelCoasting || nearPortal;
 
     final personal = _personalProgress;
+    RouteProgress line = plan;
+    RouteMatch? m = onPlan;
     if (personal != null) {
       if (onPlan != null) {
         _rejoin.onFix(
@@ -338,42 +382,93 @@ class RouteGuide extends ChangeNotifier {
         );
         if (!_rejoin.isOff) {
           _clearPersonal();
-          _detector.reset();
+          reroute.followNewLine();
           _rejoin.reset(OffRouteState.offRoute);
+          _offStatusShown = false;
           _setStatus('Back on the planned route', untilMs: nowMs + RouteConstants.backOnRouteNoticeFor.inMilliseconds, force: true);
           return;
         }
       }
-      final m = personal.update(lat, lng, acceptM: limit, accuracyM: accuracyM);
-      if (m != null) {
-        _detector.onFix(
-          tsMs: nowMs,
-          offM: m.offM,
-          alongM: m.onLine ? m.alongM : null,
-          accuracyM: accuracyM,
-          speedKmh: speedKmh,
-          isTunnelCoasting: suppressOff,
-        );
+      line = personal;
+      m = personal.update(lat, lng, acceptM: limit, accuracyM: accuracyM);
+      // Riding the group plan again (a short cut back to the group) is not
+      // leaving my new route: the plan counts too until the rejoin drops it.
+      if (onPlan != null && onPlan.onLine && (m == null || onPlan.offM < m.offM)) {
+        line = plan;
+        m = onPlan;
       }
-    } else if (onPlan != null) {
-      final wasOff = _detector.isOff;
-      _detector.onFix(
-        tsMs: nowMs,
-        offM: onPlan.offM,
-        alongM: onPlan.onLine ? onPlan.alongM : null,
-        accuracyM: accuracyM,
-        speedKmh: speedKmh,
-        isTunnelCoasting: suppressOff,
-      );
-      if (wasOff && !_detector.isOff) {
-        _generation++; // a request still on its way is no longer needed
+    }
+    if (m == null) {
+      if (changed) _notify();
+      return;
+    }
+
+    final step = reroute.onFix(
+      NavFix(tsMs: nowMs, speedKmh: speedKmh, accuracyM: accuracyM, headingDeg: heading),
+      offM: m.offM,
+      routeBearingDeg: _bearingAt(line, m),
+      suppress: suppressOff,
+      online: online,
+      autoReroute: autoReroute,
+    );
+    _say(step.prompts);
+    if (step.event == FollowEvent.cameBack) {
+      _generation++; // a request still on its way is no longer needed
+      _offStatusShown = false;
+      if (personal == null) {
         _setStatus('Back on the planned route', untilMs: nowMs + RouteConstants.backOnRouteNoticeFor.inMilliseconds);
         return;
       }
+      _setStatus(null, force: changed);
+      return;
     }
-
-    if (_detector.isOff) _reroute(lat, lng, nowMs: nowMs, online: online, lowData: lowData);
+    if (step.request) _reroute(lat, lng, heading, nowMs);
+    if (_syncOffStatus()) changed = false;
     if (changed) _notify();
+  }
+
+  /// Direction of [line] at the match (degrees), or null.
+  static double? _bearingAt(RouteProgress line, RouteMatch m) {
+    final pts = line.points;
+    final i = m.index;
+    if (i < 0 || i + 1 >= pts.length) return null;
+    final (aLat, aLng) = pts[i];
+    final (bLat, bLng) = pts[i + 1];
+    if (aLat == bLat && aLng == bLng) return null;
+    return RerouteRules.bearing(aLat, aLng, bLat, bLng);
+  }
+
+  /// The status line while off the route; true when it notified.
+  bool _syncOffStatus() {
+    final planned = _personal == null;
+    final text = switch (reroute.status) {
+      RerouteStatus.following => null,
+      RerouteStatus.finding => planned ? 'Off the planned route, finding a new route' : 'Off route, finding a new route',
+      RerouteStatus.noSignal => 'Off the planned route, no signal for a new route',
+      RerouteStatus.gaveUp => "Couldn't find a new route. Follow the group.",
+      RerouteStatus.off => planned ? 'Off the planned route' : 'Off route',
+    };
+    if (text != null) {
+      _offStatusShown = true;
+      if (text == _status && _statusUntilMs == 0) return false;
+      _setStatus(text);
+      return true;
+    }
+    if (!_offStatusShown) return false;
+    _offStatusShown = false;
+    if (_status == null) return false;
+    _setStatus(null);
+    return true;
+  }
+
+  void _say(List<NavPrompt> prompts) {
+    final sink = onPrompt;
+    if (sink == null || _disposed) return;
+    for (final p in prompts) {
+      try {
+        sink(p);
+      } catch (_) {}
+    }
   }
 
   /// True when the last matched point of the plan (or of my personal route)
@@ -387,51 +482,49 @@ class RouteGuide extends ChangeNotifier {
     return near(plan) || near(_personalProgress);
   }
 
-  void _reroute(double lat, double lng, {required int nowMs, required bool online, required bool lowData}) {
+  void _reroute(double lat, double lng, double? heading, int nowMs) {
     final convoy = _convoy;
     if (convoy == null) return;
-    if (!policy.canRequest(nowMs: nowMs, online: online, lowData: lowData)) {
-      if (!policy.inFlight && _personal == null) _setStatus('Off the planned route');
-      return;
-    }
+    // From here through the stops I still have to ride to (the next one
+    // first), to the destination.
     final waypoints = RoutePlan.rerouteWaypoints(convoy, _uid, lat, lng, plan: _plan, myAlongM: _plan?.matched?.alongM);
     if (waypoints.length < 2) return;
-    policy.started(nowMs);
-    final gen = _generation;
-    if (_personal == null) _setStatus('Off the planned route, finding a new route');
-    _fetch(waypoints, gen).ignore();
+    final ticket = reroute.begin(nowMs);
+    _fetch(waypoints, heading, ticket, _generation).ignore();
   }
 
-  Future<void> _fetch(List<(double, double)> waypoints, int gen) async {
+  Future<void> _fetch(List<(double, double)> waypoints, double? heading, int ticket, int gen) async {
     RouteModel? r;
     try {
-      r = await fetchRoute(waypoints);
+      final headed = fetchRouteHeaded;
+      r = headed != null ? await headed(waypoints, heading) : await fetchRoute(waypoints);
     } catch (_) {
       r = null;
     }
     if (_disposed) return;
     final route = r;
-    final ok = route != null && !route.approximate && route.points.length >= 2;
     RouteProgress? progress;
     RouteMatch? here;
-    if (route != null && ok) {
+    if (route != null && !route.approximate && route.points.length >= 2) {
       progress = RouteProgress(route.points);
       final last = _lastFix;
       if (last != null) here = progress.update(last.$1, last.$2);
     }
     // A route that does not start where I am (my road or track is not on
-    // the map) backs off like a failure, so it is not asked for every minute.
-    policy.finished(ok: ok && (here == null || here.onLine));
-    if (gen != _generation || !_detector.isOff || _arrived) return;
-    if (route == null || progress == null) {
-      if (_personal == null) _setStatus('Off the planned route');
+    // the map) counts as a failure and is not shown: following it would put
+    // me off the route again at once.
+    final usable = progress != null && (here == null || here.onLine);
+    final out = reroute.finish(ticket, ok: usable, online: _online, nowMs: _lastFixMs);
+    _say(out.prompts);
+    if (!out.current || gen != _generation || _arrived || !usable || route == null) {
+      _syncOffStatus();
       return;
     }
     _personal = route;
     _personalProgress = progress;
     _routeVersion++;
-    _detector.reset();
     _rejoin.reset(OffRouteState.offRoute);
+    _offStatusShown = false;
     _setStatus('New route, ${TimelineText.distance(route.distanceM)}', force: true);
   }
 

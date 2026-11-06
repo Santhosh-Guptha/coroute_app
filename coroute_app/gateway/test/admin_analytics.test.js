@@ -99,11 +99,14 @@ test('admin analytics, rider config, public usage stats, coupon plan binding', a
     assert.equal(res.status, 200, JSON.stringify(res.json));
     const o = res.json;
     assert.equal(o.truncated, false);
-    assert.equal(o.riders.total, 3);
-    assert.equal(o.riders.active7d, 2); // admin (just registered) + Ravi
-    assert.equal(o.riders.active30d, 3);
+    // The admin is staff, not a rider: Ravi and Meera only.
+    assert.equal(o.riders.total, 2);
+    assert.equal(o.riders.staff, 1);
+    assert.equal(o.riders.excludesStaff, true);
+    assert.equal(o.riders.active7d, 1); // Ravi (the just-registered admin is not counted)
+    assert.equal(o.riders.active30d, 2);
     assert.equal(o.riders.paying, 1); // only the live paid order counts
-    assert.equal(o.riders.conversionPct, 33.3);
+    assert.equal(o.riders.conversionPct, 50);
     assert.equal(o.rides.completedTrips, 3);
     assert.equal(o.rides.tripsInPeriod, 2);
     assert.equal(o.rides.kmRidden, 268);
@@ -126,16 +129,17 @@ test('admin analytics, rider config, public usage stats, coupon plan binding', a
   });
 
   await t.test('riders list: search, sort, filter and paging', async () => {
-    const all = await api('GET', '/admin/analytics/riders?sort=km&limit=2', null, A);
+    const all = await api('GET', '/admin/analytics/riders?sort=km&limit=1', null, A);
     assert.equal(all.status, 200);
-    assert.equal(all.json.total, 3);
-    assert.equal(all.json.riders.length, 2);
-    assert.equal(all.json.nextCursor, 2);
+    assert.equal(all.json.total, 2); // the admin is staff: listed under staff=1, not in the total
+    assert.equal(all.json.staffCount, 1);
+    assert.equal(all.json.riders.length, 1);
+    assert.equal(all.json.nextCursor, 1);
     assert.equal(all.json.riders[0].userId, u1);
     assert.equal(all.json.riders[0].km, 150);
     assert.equal(all.json.riders[0].trips, 2);
     assert.equal(all.json.riders[0].sos, 2);
-    const next = await api('GET', '/admin/analytics/riders?sort=km&limit=2&cursor=2', null, A);
+    const next = await api('GET', '/admin/analytics/riders?sort=km&limit=1&cursor=1', null, A);
     assert.equal(next.json.riders.length, 1);
     assert.equal(next.json.nextCursor, null);
     const q = await api('GET', '/admin/analytics/riders?q=meera', null, A);
@@ -253,58 +257,54 @@ test('admin analytics, rider config, public usage stats, coupon plan binding', a
     const opts = await api('GET', '/admin/coupons/plan-options', null, A);
     assert.equal(opts.status, 200);
     const ids = opts.json.plans.map((p) => p.id);
-    for (const id of ['proRider', 'roadCaptain', 'tourOperator', 'individual', 'group_small', 'group_large']) assert.ok(ids.includes(id), id);
+    // Only the paid plans can be bound (Community is free); legacy tiers are not offered any more.
+    assert.deepEqual(ids, ['group_small', 'group_large']);
 
-    const unknown = await api('POST', '/admin/coupons', { code: 'BADPLAN10', discountType: 'percentage', discountValue: 10, applicablePlans: ['proRider', 'diamond'] }, A);
+    const unknown = await api('POST', '/admin/coupons', { code: 'BADPLAN10', discountType: 'percentage', discountValue: 10, applicablePlans: ['group_small', 'diamond'] }, A);
     assert.equal(unknown.status, 400);
     assert.equal(unknown.json.reason, 'UNKNOWN_PLAN');
     assert.deepEqual(unknown.json.unknown, ['diamond']);
+    const legacyOnly = await api('POST', '/admin/coupons', { code: 'PROONLY20', discountType: 'percentage', discountValue: 20, applicablePlans: ['pro'] }, A);
+    assert.equal(legacyOnly.status, 400);
+    assert.equal(legacyOnly.json.reason, 'UNKNOWN_PLAN');
 
     const window = await api('POST', '/admin/coupons', { code: 'BADWIN10', discountType: 'percentage', discountValue: 10, validFrom: now, expiresAt: now - 1000 }, A);
     assert.equal(window.status, 400);
     assert.equal(window.json.reason, 'BAD_WINDOW');
 
-    const ok = await api('POST', '/admin/coupons', { code: 'PROONLY20', discountType: 'percentage', discountValue: 20, applicablePlans: ['pro'], maxUsagePerUser: 1, maxUsageTotal: 10 }, A);
+    const ok = await api('POST', '/admin/coupons', { code: 'SMALLONLY20', discountType: 'percentage', discountValue: 20, applicablePlans: ['group_small', 'pro'], maxUsagePerUser: 1, maxUsageTotal: 10 }, A);
     assert.equal(ok.status, 201, JSON.stringify(ok.json));
-    assert.deepEqual(ok.json.coupon.applicableTiers, ['proRider']); // alias stored as the plan id
+    assert.deepEqual(ok.json.coupon.applicableTiers, ['group_small']); // a legacy alias is dropped, never stored
 
-    const right = await api('POST', '/subscription/validate-coupon', { code: 'PROONLY20', planTier: 'proRider', billingCycle: 'monthly', amount: 149 }, r1.token);
+    const right = await api('POST', '/membership/validate-coupon', { code: 'SMALLONLY20', category: 'group_small' }, r1.token);
     assert.equal(right.status, 200, JSON.stringify(right.json));
-    assert.equal(right.json.finalAmount, 119);
-    const wrong = await api('POST', '/subscription/validate-coupon', { code: 'PROONLY20', planTier: 'roadCaptain', billingCycle: 'monthly', amount: 599 }, r1.token);
+    assert.equal(right.json.finalAmount, 39);
+    const wrong = await api('POST', '/membership/validate-coupon', { code: 'SMALLONLY20', category: 'group_large' }, r1.token);
     assert.equal(wrong.status, 400);
     assert.equal(wrong.json.reason, 'TIER_MISMATCH');
-    const wrongOrder = await api('POST', '/subscription/create-order', { planTier: 'roadCaptain', billingCycle: 'monthly', couponCode: 'PROONLY20' }, r1.token);
-    assert.equal(wrongOrder.status, 400);
-    assert.equal(wrongOrder.json.reason, 'TIER_MISMATCH');
-    // Membership checkout honours the same binding.
-    const memWrong = await api('POST', '/membership/validate-coupon', { code: 'PROONLY20', category: 'group_small' }, r1.token);
-    assert.equal(memWrong.status, 400);
-    assert.equal(memWrong.json.reason, 'TIER_MISMATCH');
+    // A legacy order is refused before any coupon is looked at.
+    const legacyOrder = await api('POST', '/subscription/create-order', { planTier: 'roadCaptain', billingCycle: 'monthly', couponCode: 'SMALLONLY20' }, r1.token);
+    assert.equal(legacyOrder.status, 410);
+    assert.equal(legacyOrder.json.code, 'LEGACY_PLAN');
 
-    // Patch the binding; unknown ids are refused on edit too.
-    assert.equal((await api('PATCH', '/admin/coupons/PROONLY20', { applicablePlans: ['nope'] }, A)).json.reason, 'UNKNOWN_PLAN');
-    const patched = await api('PATCH', '/admin/coupons/PROONLY20', { applicablePlans: ['proRider', 'group_small'] }, A);
+    // Patch the binding; unknown ids are refused on edit too, legacy ids are dropped.
+    assert.equal((await api('PATCH', '/admin/coupons/SMALLONLY20', { applicablePlans: ['nope'] }, A)).json.reason, 'UNKNOWN_PLAN');
+    const patched = await api('PATCH', '/admin/coupons/SMALLONLY20', { applicablePlans: ['proRider', 'group_large'] }, A);
     assert.equal(patched.status, 200);
-    assert.deepEqual(patched.json.coupon.applicableTiers, ['proRider', 'group_small']);
+    assert.deepEqual(patched.json.coupon.applicableTiers, ['group_large']);
 
     // Expired.
     await api('POST', '/admin/coupons', { code: 'OLDNEWS5', discountType: 'fixed', discountValue: 5, validFrom: now - 10 * DAY, expiresAt: now - DAY }, A);
-    const expired = await api('POST', '/subscription/validate-coupon', { code: 'OLDNEWS5', planTier: 'proRider', amount: 149 }, r1.token);
-    assert.equal(expired.status, 400);
-    assert.equal(expired.json.reason, 'COUPON_EXPIRED');
     const memExpired = await api('POST', '/membership/order', { category: 'group_small', offerCode: 'OLDNEWS5' }, r1.token);
     assert.equal(memExpired.status, 400);
     assert.equal(memExpired.json.reason, 'COUPON_EXPIRED');
 
     // Per-rider limit: a used coupon is refused for that rider only.
-    await repo.recordCouponUsage('PROONLY20', { userId: u1, orderId: 'order_x', discountAmount: 30 });
-    const again = await api('POST', '/subscription/validate-coupon', { code: 'PROONLY20', planTier: 'proRider', amount: 149 }, r1.token);
-    assert.equal(again.json.reason, 'PER_USER_LIMIT_REACHED');
-    const memAgain = await api('POST', '/membership/order', { category: 'group_small', offerCode: 'PROONLY20' }, r1.token);
+    await repo.recordCouponUsage('SMALLONLY20', { userId: u1, orderId: 'order_x', discountAmount: 10 });
+    const memAgain = await api('POST', '/membership/order', { category: 'group_large', offerCode: 'SMALLONLY20' }, r1.token);
     assert.equal(memAgain.status, 400);
     assert.equal(memAgain.json.reason, 'PER_USER_LIMIT_REACHED');
-    const other = await api('POST', '/subscription/validate-coupon', { code: 'PROONLY20', planTier: 'proRider', amount: 149 }, r2.token);
+    const other = await api('POST', '/membership/validate-coupon', { code: 'SMALLONLY20', category: 'group_large' }, r2.token);
     assert.equal(other.status, 200);
 
     // A code that matches nothing is refused at membership checkout (never silently full price).
@@ -322,16 +322,20 @@ test('admin analytics, rider config, public usage stats, coupon plan binding', a
     assert.equal(put.status, 200, JSON.stringify(put.json));
     assert.deepEqual(put.json.plans.tourOperator.features, ['Fleet view', 'Priority support']);
     assert.equal(put.json.plans.tourOperator.isActive, false);
+    // Legacy tiers are not sold at all any more (old builds get 410 LEGACY_PLAN).
     const order = await api('POST', '/subscription/create-order', { planTier: 'tourOperator', billingCycle: 'monthly' }, r1.token);
-    assert.equal(order.status, 400);
-    assert.equal(order.json.reason, 'PLAN_INACTIVE');
+    assert.equal(order.status, 410);
+    assert.equal(order.json.reason, 'LEGACY_PLAN');
 
     const catalog = await repo.getMembershipCatalog();
     catalog.group_large.isActive = false;
     assert.equal((await api('PUT', '/admin/membership/catalog', { catalog }, A)).status, 200);
     const pub = await api('GET', '/membership/catalog', null, r1.token);
     assert.equal(pub.json.categories.group_large, undefined);
-    assert.ok(pub.json.categories.individual);
+    assert.ok(pub.json.categories.group_small);
+    assert.equal(pub.json.categories.individual, undefined, 'the retired Individual plan is not listed');
+    assert.equal(pub.json.categories.community.monthlyPriceInr, 0, 'Community is listed (free, not sold)');
+    assert.equal(pub.json.categories.community.purchasable, false);
     const mo = await api('POST', '/membership/order', { category: 'group_large' }, r1.token);
     assert.equal(mo.status, 400);
     assert.equal(mo.json.reason, 'PLAN_INACTIVE');
@@ -356,7 +360,7 @@ test('admin analytics, rider config, public usage stats, coupon plan binding', a
     // The empty answer above is cached for 5 minutes; the aggregate itself is checked directly.
     const { publicUsage } = require('../src/admin_analytics');
     const s = await publicUsage(repo);
-    assert.equal(s.riders, 3);
+    assert.equal(s.riders, 2); // the admin is staff
     assert.equal(s.ridesCompleted, 4); // three seeded + the one Meera saved above
     assert.equal(s.kmRidden, 268);
     assert.equal(s.groupsRidden, 1); // only rides with two or more riders

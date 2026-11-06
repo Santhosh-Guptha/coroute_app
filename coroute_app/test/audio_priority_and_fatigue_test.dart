@@ -159,7 +159,6 @@ void main() {
       engine = TestVoiceEngine();
       simTime = 1700000000000;
       priorityManager = AudioPriorityManager(
-        settings: settings,
         engine: engine,
         clock: () => simTime,
       );
@@ -222,47 +221,9 @@ void main() {
       expect(engine.spokenList, hasLength(2));
     });
 
-    test('Manual background voice switch silences P2-P5 but NEVER mutes P0 or P1', () async {
-      await settings.setBackgroundVoiceEnabled(false);
-
-      // P3 navigation is muted
-      final nav = await priorityManager.submit(
-        text: 'Turn right at the junction',
-        priority: AudioPriority.p3Navigation,
-      );
-      expect(nav, isFalse);
-
-      // P4 convoy announcement is muted
-      final convoy = await priorityManager.submit(
-        text: 'Convoy split into two groups',
-        priority: AudioPriority.p4ConvoyAnnouncement,
-      );
-      expect(convoy, isFalse);
-
-      // P5 informational is muted
-      final info = await priorityManager.submit(
-        text: 'Low fuel warning: 25 km remaining',
-        priority: AudioPriority.p5Informational,
-      );
-      expect(info, isFalse);
-
-      // P0 critical emergency ALWAYS bypasses mute
-      final emergency = await priorityManager.submit(
-        text: 'SOS: Rahul has fallen 2 km behind',
-        priority: AudioPriority.p0CriticalEmergency,
-      );
-      expect(emergency, isTrue);
-
-      // P1 safety confirmation ALWAYS bypasses mute
-      final safetyConfirm = await priorityManager.submit(
-        text: 'Safety confirmation required: confirm you are safe',
-        priority: AudioPriority.p1SafetyConfirmation,
-      );
-      expect(safetyConfirm, isTrue);
-    });
-
-    test('Visual fallback stream receives alerts regardless of voice mute state', () async {
-      await settings.setBackgroundVoiceEnabled(false);
+    // The "background voice guidance" switch was removed: spoken alerts are chosen once
+    // in Settings (VoiceService applies it) and emergencies always speak.
+    test('Visual fallback stream receives alerts', () async {
 
       final visualAlerts = <AudioAlertItem>[];
       final sub = priorityManager.onVisualAlert.listen(visualAlerts.add);

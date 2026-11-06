@@ -125,9 +125,7 @@ void main() {
         home: Scaffold(
           body: GloveQuickSettingsModal(
             keepScreenOn: true,
-            autoFollow: true,
             onToggleKeepScreenOn: () {},
-            onToggleAutoFollow: () {},
             onLaunchOfflineNav: () => navTapped = true,
           ),
         ),

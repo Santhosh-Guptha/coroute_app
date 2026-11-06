@@ -3,14 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
+import '../../widgets/sheet_coordinator.dart';
 
 /// Draggable CoRoute Orbit Control button and In-Cockpit Quick Access panel.
 ///
 /// Features:
 /// - Draggable 60 dp round thumb button (3 px teal ring) that magnetically
 ///   snaps to the left or right handlebar edge.
-/// - While open the ring turns amber with a soft amber glow and a dim scrim
-///   covers the map (tap outside to close).
+/// - While open the ring turns amber with a soft amber glow and the cockpit
+///   scrim covers the map. The panel is a modal route opened through
+///   [SheetCoordinator]: a tap outside or the back button closes it, and any
+///   other cockpit pop-up replaces it (never stacked).
 /// - In-cockpit 6-tile Quick Access panel (Intercom, Group, Fuel, Route,
 ///   Guardian, More) plus an optional full-width Emergency SOS button.
 /// - 100% in-cockpit popup architecture: never navigates away from the live map.
@@ -59,18 +62,16 @@ class CorouteOrbitControl extends StatefulWidget {
     this.leftInset = 0,
   });
 
+  /// [SheetCoordinator] key of the quick-access panel.
+  static const String popupKey = 'orbit';
+
   @override
   State<CorouteOrbitControl> createState() => _CorouteOrbitControlState();
 }
 
-class _CorouteOrbitControlState extends State<CorouteOrbitControl>
-    with SingleTickerProviderStateMixin {
+class _CorouteOrbitControlState extends State<CorouteOrbitControl> {
   static const double _fabSize = 60;
   static const double _edgeGap = 16;
-
-  late final AnimationController _animController;
-  late final Animation<double> _scaleAnimation;
-  late final Animation<double> _fadeAnimation;
 
   Offset? _position;
   bool _isOpen = false;
@@ -81,48 +82,153 @@ class _CorouteOrbitControlState extends State<CorouteOrbitControl>
   double? _shownTop;
 
   @override
-  void initState() {
-    super.initState();
-    _animController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 240),
-    );
-    _scaleAnimation = CurvedAnimation(
-      parent: _animController,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeIn,
-    );
-    _fadeAnimation = CurvedAnimation(
-      parent: _animController,
-      curve: Curves.easeOut,
-    );
-  }
-
-  @override
   void dispose() {
-    _animController.dispose();
+    if (_isOpen) {
+      // The cockpit went away with the panel open: close the panel's route
+      // too (after this frame: the navigator is locked while unmounting).
+      WidgetsBinding.instance.addPostFrameCallback((_) => SheetCoordinator.instance.close(CorouteOrbitControl.popupKey));
+    }
     super.dispose();
   }
 
+  // Where the panel goes (worked out by build, used when it opens).
+  double _panelLeft = 0;
+  double _panelRight = 0;
+  double _panelW = 280;
+  bool _onLeft = true;
+  EdgeInsets _padding = EdgeInsets.zero;
+
   void _togglePopup() {
+    if (_isOpen) {
+      _closePopup();
+    } else {
+      _openPopup();
+    }
+  }
+
+  /// Opens the quick-access panel as a modal route through the cockpit's
+  /// [SheetCoordinator]: the scrim, a tap outside and the back button close
+  /// it, and any other cockpit pop-up opening replaces it.
+  void _openPopup() {
     HapticFeedback.lightImpact();
-    setState(() {
-      _isOpen = !_isOpen;
-      if (_isOpen) {
-        _animController.forward();
-      } else {
-        _animController.reverse();
-      }
-    });
+    final size = MediaQuery.sizeOf(context);
+    final padding = _padding;
+    final onLeft = _onLeft;
+    final width = _panelW;
+    final left = onLeft ? _panelLeft : null;
+    final right = onLeft ? null : _panelRight;
+    final top = ((_shownTop ?? _position!.dy) - 70)
+        .clamp(padding.top + 12, (size.height - 400).clamp(padding.top + 12, double.infinity))
+        .toDouble();
+    setState(() => _isOpen = true);
+    SheetCoordinator.instance
+        .present<void>(
+          context,
+          key: CorouteOrbitControl.popupKey,
+          toggle: false,
+          open: () => showPopupPanel<void>(
+            context,
+            barrierLabel: 'Close Orbit quick access',
+            builder: (ctx) => _panelPage(ctx, padding: padding, left: left, right: right, top: top, width: width, onLeft: onLeft),
+          ),
+        )
+        .whenComplete(() {
+          if (mounted && _isOpen) setState(() => _isOpen = false);
+        });
   }
 
   void _closePopup() {
     if (!_isOpen) return;
     HapticFeedback.selectionClick();
-    setState(() {
-      _isOpen = false;
-      _animController.reverse();
-    });
+    if (!SheetCoordinator.instance.close(CorouteOrbitControl.popupKey) && mounted) {
+      setState(() => _isOpen = false);
+    }
+  }
+
+  /// The open panel: the quick-access card beside the button and the "Tap
+  /// outside to close" hint. Everything else is the route's scrim.
+  Widget _panelPage(
+    BuildContext ctx, {
+    required EdgeInsets padding,
+    required double? left,
+    required double? right,
+    required double top,
+    required double width,
+    required bool onLeft,
+  }) {
+    final animation = ModalRoute.of(ctx)?.animation ?? kAlwaysCompleteAnimation;
+    // A tile closes the panel (its own route) before running its action, so
+    // the pop-up it opens replaces the panel instead of stacking on it.
+    void close() {
+      HapticFeedback.selectionClick();
+      Navigator.of(ctx).pop();
+    }
+
+    return Stack(
+      children: [
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: padding.bottom + 36,
+          child: const IgnorePointer(
+            child: Material(
+              type: MaterialType.transparency,
+              child: Text(
+                'Tap outside to close',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: left,
+          right: right,
+          width: width,
+          top: top,
+          child: ScaleTransition(
+            scale: animation.drive(Tween<double>(begin: 0.92, end: 1.0).chain(CurveTween(curve: Curves.easeOutCubic))),
+            alignment: onLeft ? Alignment.centerLeft : Alignment.centerRight,
+            child: Material(
+              type: MaterialType.transparency,
+              child: _OrbitQuickAccessCard(
+                isSolo: widget.isSolo,
+                onIntercomTap: () {
+                  close();
+                  widget.onIntercomTap();
+                },
+                onGroupTap: () {
+                  close();
+                  widget.onGroupTap();
+                },
+                onFuelTap: () {
+                  close();
+                  widget.onFuelTap();
+                },
+                onRouteTap: () {
+                  close();
+                  widget.onRouteTap();
+                },
+                onGuardianTap: () {
+                  close();
+                  widget.onGuardianTap();
+                },
+                onMoreTap: () {
+                  close();
+                  widget.onMoreTap();
+                },
+                onSosTap: widget.onSosTap == null
+                    ? null
+                    : () {
+                        close();
+                        widget.onSosTap!();
+                      },
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -157,6 +263,11 @@ class _CorouteOrbitControlState extends State<CorouteOrbitControl>
         .clamp(padding.right + 12, (size.width - widget.leftInset - 12 - panelW).clamp(padding.right + 12, double.infinity))
         .toDouble();
     final ringColor = _isOpen ? AppTheme.warnText : AppTheme.accentText;
+    _panelLeft = panelLeft;
+    _panelRight = panelRight;
+    _panelW = panelW;
+    _onLeft = onLeft;
+    _padding = padding;
 
     final orbitFab = GestureDetector(
       key: const Key('coroute_orbit_fab_button'),
@@ -222,96 +333,6 @@ class _CorouteOrbitControlState extends State<CorouteOrbitControl>
 
     return Stack(
       children: [
-        // Dim scrim when the panel is open: tap anywhere outside to close.
-        if (_isOpen)
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: _closePopup,
-              behavior: HitTestBehavior.opaque,
-              child: AnimatedBuilder(
-                animation: _fadeAnimation,
-                builder: (context, _) => Container(
-                  color: const Color(0xFF15232E).withOpacity(0.55 * _fadeAnimation.value),
-                ),
-              ),
-            ),
-          ),
-
-        if (_isOpen)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: padding.bottom + 36,
-            child: IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _fadeAnimation,
-                builder: (context, _) => Opacity(
-                  opacity: _fadeAnimation.value,
-                  child: const Text(
-                    'Tap outside to close',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-        // Floating quick-access panel beside the button.
-        if (_isOpen)
-          Positioned(
-            left: onLeft ? panelLeft : null,
-            right: onLeft ? null : panelRight,
-            width: panelW,
-            top: ((_shownTop ?? _position!.dy) - 70).clamp(padding.top + 12, (size.height - 400).clamp(padding.top + 12, double.infinity)),
-            child: AnimatedBuilder(
-              animation: _animController,
-              builder: (context, child) {
-                return Opacity(
-                  opacity: _fadeAnimation.value,
-                  child: Transform.scale(
-                    scale: 0.92 + 0.08 * _scaleAnimation.value,
-                    alignment: onLeft ? Alignment.centerLeft : Alignment.centerRight,
-                    child: child,
-                  ),
-                );
-              },
-              child: _OrbitQuickAccessCard(
-                isSolo: widget.isSolo,
-                onIntercomTap: () {
-                  _closePopup();
-                  widget.onIntercomTap();
-                },
-                onGroupTap: () {
-                  _closePopup();
-                  widget.onGroupTap();
-                },
-                onFuelTap: () {
-                  _closePopup();
-                  widget.onFuelTap();
-                },
-                onRouteTap: () {
-                  _closePopup();
-                  widget.onRouteTap();
-                },
-                onGuardianTap: () {
-                  _closePopup();
-                  widget.onGuardianTap();
-                },
-                onMoreTap: () {
-                  _closePopup();
-                  widget.onMoreTap();
-                },
-                onSosTap: widget.onSosTap == null
-                    ? null
-                    : () {
-                        _closePopup();
-                        widget.onSosTap!();
-                      },
-              ),
-            ),
-          ),
-
         // The draggable floating button.
         if (widget.sheetHeight == null && widget.sheetExpansion == null)
           Positioned(

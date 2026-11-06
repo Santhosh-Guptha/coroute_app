@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:coroute_app/data/services/api_client.dart';
 import 'package:coroute_app/data/services/membership_service.dart';
-import 'package:coroute_app/data/services/plan_subscription_service.dart';
 import 'package:coroute_app/presentation/subscription/payment_history_screen.dart';
 
 class MockApiClient extends ApiClient {
@@ -30,13 +29,11 @@ void main() {
 
   group('Payment History Deduplication and Asia/Kolkata Timezone', () {
     late MockApiClient mockApi;
-    late PlanSubscriptionService planService;
     late MembershipService membershipService;
 
     setUp(() {
       SharedPreferences.setMockInitialValues({});
       mockApi = MockApiClient();
-      planService = PlanSubscriptionService(mockApi);
       membershipService = MembershipService(mockApi);
     });
 
@@ -115,7 +112,8 @@ void main() {
       await tester.pumpWidget(
         MultiProvider(
           providers: [
-            ChangeNotifierProvider<PlanSubscriptionService?>.value(value: planService),
+            // Legacy plan periods and orders come straight from GET /subscription/history.
+            Provider<ApiClient>.value(value: mockApi),
             ChangeNotifierProvider<MembershipService?>.value(value: membershipService),
           ],
           child: const MaterialApp(
@@ -166,7 +164,8 @@ void main() {
       await tester.pumpWidget(
         MultiProvider(
           providers: [
-            ChangeNotifierProvider<PlanSubscriptionService?>.value(value: planService),
+            // Legacy plan periods and orders come straight from GET /subscription/history.
+            Provider<ApiClient>.value(value: mockApi),
             ChangeNotifierProvider<MembershipService?>.value(value: membershipService),
           ],
           child: const MaterialApp(
@@ -209,7 +208,8 @@ void main() {
       await tester.pumpWidget(
         MultiProvider(
           providers: [
-            ChangeNotifierProvider<PlanSubscriptionService?>.value(value: planService),
+            // Legacy plan periods and orders come straight from GET /subscription/history.
+            Provider<ApiClient>.value(value: mockApi),
             ChangeNotifierProvider<MembershipService?>.value(value: membershipService),
           ],
           child: const MaterialApp(

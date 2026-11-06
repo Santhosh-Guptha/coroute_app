@@ -6,7 +6,7 @@
 // * once I have arrived, riding around the destination town never asks for a
 //   new route;
 // * a new route that does not start where I am (my road is not on the map)
-//   backs off like a failure instead of being asked for every minute;
+//   counts as a failure (not shown) instead of being asked for again at once;
 // * a rider who joined halfway (or whose pass was missed in a dead zone) is
 //   never routed back to a stop behind them;
 // * request budget over a long off-route stretch, and a parked rider.
@@ -19,6 +19,7 @@ import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/models/route_model.dart';
 import 'package:coroute_app/data/models/stop_point_model.dart';
+import 'package:coroute_app/domain/navigation/reroute_rules.dart';
 import 'package:coroute_app/domain/route/route_plan.dart';
 import 'package:coroute_app/domain/route/route_progress.dart';
 import 'package:coroute_app/domain/tracking/geo_math.dart';
@@ -219,7 +220,7 @@ void main() {
       expect(callTimes.length, 1);
     });
 
-    test('a new route that does not start where I am backs off like a failure (still shown)', () async {
+    test('a new route that does not start where I am counts as a failure (not shown) and backs off', () async {
       for (var n = 0.0; n <= 1000; n += 100) {
         fix(n);
       }
@@ -231,24 +232,24 @@ void main() {
       // The route service snapped me to a road 2.7 km away (a track not on the map).
       pending.single.complete(routeOf([at(n, 3000), at(20000)]));
       await settle();
-      expect(g.hasPersonalRoute, isTrue);
-      expect(g.policy.failures, 1);
+      expect(g.hasPersonalRoute, isFalse, reason: 'following it would put me off the route again at once');
+      expect(g.reroute.scheduler.failures, 1);
       while (callTimes.length < 2) {
         fix(n, 300);
         n += 100;
       }
-      expect(callTimes[1] - callTimes[0], greaterThanOrEqualTo(RouteConstants.rerouteMinInterval.inMilliseconds));
+      expect(callTimes[1] - callTimes[0], greaterThanOrEqualTo(RerouteRules.minRerouteInterval.inMilliseconds));
       pending.last.complete(routeOf([at(n, 3000), at(20000)]));
       await settle();
-      expect(g.policy.failures, 2);
+      expect(g.reroute.scheduler.failures, 2);
       while (callTimes.length < 3) {
         fix(n, 300);
         n += 100;
       }
-      expect(callTimes[2] - callTimes[1], greaterThanOrEqualTo(2 * RouteConstants.rerouteMinInterval.inMilliseconds));
+      expect(callTimes[2] - callTimes[1], greaterThanOrEqualTo(2 * RerouteRules.minRerouteInterval.inMilliseconds));
     });
 
-    test('30 minutes off the route with the service down: at most 6 requests, never two at once', () async {
+    test('30 minutes off the route with the service down: 3 requests, then one quiet try per 5 minutes, never two at once', () async {
       instant = () => null;
       for (var n = 0.0; n <= 1000; n += 100) {
         fix(n);
@@ -260,12 +261,17 @@ void main() {
         east += 50;
         await settle();
       }
-      // 60, 120, 240, 480, 600 s apart.
-      expect(callTimes.length, lessThanOrEqualTo(6));
+      // 3 within the first minute, then one per 5 minutes.
+      expect(callTimes.length, lessThanOrEqualTo(3 + 6));
+      expect(callTimes.where((c) => c - start < 60000).length, 3);
       for (var i = 1; i < callTimes.length; i++) {
-        expect(callTimes[i] - callTimes[i - 1], greaterThanOrEqualTo(RouteConstants.rerouteMinInterval.inMilliseconds));
+        expect(callTimes[i] - callTimes[i - 1], greaterThanOrEqualTo(RerouteRules.minRerouteInterval.inMilliseconds));
       }
-      expect(g.policy.inFlight, isFalse);
+      for (var i = 3; i < callTimes.length; i++) {
+        expect(callTimes[i] - callTimes[i - 1], greaterThanOrEqualTo(RerouteRules.retryAfterGiveUp.inMilliseconds));
+      }
+      expect(g.reroute.scheduler.inFlight, isFalse);
+      expect(g.statusLine, "Couldn't find a new route. Follow the group.");
     });
 
     test('parked at a dhaba 250 m off the road with GPS jitter: no request, no status', () {

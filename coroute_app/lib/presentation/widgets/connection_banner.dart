@@ -18,10 +18,11 @@ class ConnectionBanner extends StatelessWidget {
   /// The text lines of the banner (pure, for tests).
   /// [serverUnreachable]: the phone has internet but the CoRoute server does not answer;
   /// the ride is still recorded on the phone, so the text only talks about the server.
-  static List<String> lines({required bool connecting, required int pendingPoints, required bool sosWaiting, bool serverUnreachable = false}) => [
+  /// [solo]: a solo ride (Community host) says "your ride", not "your group".
+  static List<String> lines({required bool connecting, required int pendingPoints, required bool sosWaiting, bool serverUnreachable = false, bool solo = false}) => [
         serverUnreachable
             ? 'CoRoute server not reachable'
-            : (connecting ? 'Reconnecting to your group...' : 'Offline. Positions shown may be out of date.'),
+            : (connecting ? (solo ? 'Reconnecting your ride...' : 'Reconnecting to your group...') : 'Offline. Positions shown may be out of date.'),
         if (pendingPoints > 0) '$pendingPoints ${pendingPoints == 1 ? 'point' : 'points'} waiting to upload',
         if (sosWaiting) 'SOS waiting to send',
       ];
@@ -54,20 +55,20 @@ class ConnectionBanner extends StatelessWidget {
     final rt = context.watch<RealtimeService>();
     final state = rt.state;
     // ConvoyService is optional here (some screens and tests show the banner without it).
-    final (sosWaiting, pendingPoints) = context.select<ConvoyService?, (bool, int)>(
-      (s) => (s?.pendingSos != null, s?.pendingTrackPoints ?? 0),
+    final (sosWaiting, pendingPoints, solo) = context.select<ConvoyService?, (bool, int, bool)>(
+      (s) => (s?.pendingSos != null, s?.pendingTrackPoints ?? 0, s?.activeConvoy?.isSoloRide ?? false),
     );
     if (state == RealtimeState.connected && !sosWaiting) return const SizedBox.shrink();
     if (state == RealtimeState.connected) {
       // Connected but the SOS is not confirmed yet: it is being sent.
       return _strip(
         icon: Icon(Icons.sos_rounded, size: 18, color: AppTheme.sos),
-        children: [_line('Sending your SOS to your group...', AppTheme.sos)],
+        children: [_line(solo ? 'Sending your SOS...' : 'Sending your SOS to your group...', AppTheme.sos)],
         critical: true,
       );
     }
     final connecting = state == RealtimeState.connecting;
-    final text = lines(connecting: connecting, pendingPoints: pendingPoints, sosWaiting: sosWaiting, serverUnreachable: rt.serverUnreachable);
+    final text = lines(connecting: connecting, pendingPoints: pendingPoints, sosWaiting: sosWaiting, serverUnreachable: rt.serverUnreachable, solo: solo);
     return _strip(
       icon: SizedBox(
         width: 18,

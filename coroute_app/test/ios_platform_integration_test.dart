@@ -10,7 +10,6 @@ import 'package:coroute_app/data/services/phone_call_service.dart';
 import 'package:coroute_app/data/services/ride_notification_service.dart';
 import 'package:coroute_app/data/services/safety_native.dart';
 import 'package:coroute_app/data/services/sms_sender.dart';
-import 'package:coroute_app/data/services/subscription_reminders.dart';
 import 'package:coroute_app/data/services/voice_service.dart';
 
 void main() {
@@ -257,23 +256,7 @@ void main() {
       expect(phone.pendingPostCallAlerts, isEmpty);
     });
 
-    test('6. PlanReminderScheduler is supported on iOS and schedules reminders', () async {
-      final scheduler = PlanReminderScheduler();
-      expect(scheduler.supported, isTrue);
-
-      final reminders = [
-        PlanReminder(
-          id: 101,
-          daysBefore: 3,
-          at: DateTime.now().add(const Duration(days: 3)),
-          title: 'CoRoute Membership Expiring',
-          body: 'Your plan expires in 3 days. Renew to stay protected.',
-        ),
-      ];
-
-      expect(reminders.first.daysBefore, equals(3));
-      expect(scheduler.supported, isTrue);
-    });
+    // 6. (PlanReminderScheduler) retired with the legacy tiers' local expiry reminders.
 
     test('7. AlarmNotifier initializes on iOS platform and supports Darwin notification pathways', () async {
       final fakePlugin = _FakeLocalNotificationsPlugin();

@@ -375,6 +375,8 @@ private class SafetyChannel: NSObject {
   private let motion = CMMotionManager()
   private let pathMonitor = NWPathMonitor()
   private var currentNetworkKind = "none"
+  /// Brightness before the ride screen dimmed itself (iOS has no per-window brightness).
+  private var savedBrightness: CGFloat?
 
   init(controller: FlutterViewController?) {
     self.controller = controller
@@ -407,6 +409,23 @@ private class SafetyChannel: NSObject {
       let on = (call.arguments as? [String: Any])?["on"] as? Bool ?? false
       DispatchQueue.main.async {
         UIApplication.shared.isIdleTimerDisabled = on
+      }
+      result(nil)
+    case "windowBrightness":
+      // Always-on ride screen: dim after 30 s without a touch, restore on touch / exit.
+      let value = (call.arguments as? [String: Any])?["value"] as? Double ?? -1.0
+      DispatchQueue.main.async {
+        if value < 0 {
+          if let saved = self.savedBrightness {
+            UIScreen.main.brightness = saved
+            self.savedBrightness = nil
+          }
+        } else {
+          if self.savedBrightness == nil {
+            self.savedBrightness = UIScreen.main.brightness
+          }
+          UIScreen.main.brightness = CGFloat(max(0.01, min(1.0, value)))
+        }
       }
       result(nil)
     case "cacheDir":
@@ -612,10 +631,13 @@ private class RideNotification: NSObject {
     let mapAction = UNNotificationAction(identifier: "MAP", title: "🗺 Open Map", options: [.foreground])
     let navAction = UNNotificationAction(identifier: "NAV_EMERGENCY", title: "🧭 Navigate", options: [.foreground])
     let assistAction = UNNotificationAction(identifier: "ASSIST_ACCEPT", title: "🤝 I Can Help", options: [.foreground])
+    // Agent 4: Talk (opens the ride screen with hold to talk) and End ride / Leave (the app asks to confirm).
+    let talkAction = UNNotificationAction(identifier: "TALK", title: "🎙 Talk", options: [.foreground])
+    let endAction = UNNotificationAction(identifier: "END", title: "End ride / Leave", options: [.foreground, .authenticationRequired])
 
     let category = UNNotificationCategory(
       identifier: categoryId,
-      actions: [sosAction, waitAction, mapAction, navAction, assistAction],
+      actions: [sosAction, talkAction, endAction, waitAction, mapAction, navAction, assistAction],
       intentIdentifiers: [],
       options: [.customDismissAction]
     )
@@ -649,7 +671,8 @@ private class RideNotification: NSObject {
     }
 
     let title = (args["title"] as? String) ?? "CoRoute Active Convoy"
-    let body = (args["body"] as? String) ?? "Convoy tracking and emergency safety active"
+    // Dart sends the ride line as "subtitle" (speed • distance • next stop / ETA).
+    let body = (args["body"] as? String) ?? (args["subtitle"] as? String) ?? "Convoy tracking and emergency safety active"
     let ref = (args["ref"] as? String) ?? ""
 
     let content = UNMutableNotificationContent()
@@ -658,6 +681,10 @@ private class RideNotification: NSObject {
     content.categoryIdentifier = categoryId
     content.userInfo = ["ref": ref]
     content.sound = nil // Silent ongoing tracking notification
+    if #available(iOS 15.0, *) {
+      // The ride status never lights the screen or breaks through Focus; alerts do (time sensitive).
+      content.interruptionLevel = .passive
+    }
 
     let request = UNNotificationRequest(identifier: notifId, content: content, trigger: nil)
     UNUserNotificationCenter.current().add(request) { error in

@@ -14,6 +14,7 @@
  *    selected them.
  */
 const crypto = require('crypto');
+const { toDay } = require('./public_privacy');
 
 const STATUS = Object.freeze({
   PENDING: 'PENDING_REVIEW',
@@ -423,8 +424,9 @@ function publicStory(doc, idx, cfg = {}) {
     anonymousRiderLabel: label,
     templateLayout: layout,
     layout,
-    approvedAt: doc.approvedAt || null,
-    submittedAt: doc.submittedAt || null,
+    // Dates to the day only: the website shows month and year, and a finer time could point at one ride.
+    approvedAt: toDay(doc.approvedAt),
+    submittedAt: toDay(doc.submittedAt),
   };
 }
 

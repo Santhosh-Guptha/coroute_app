@@ -50,7 +50,7 @@ test('privacy, terms, 404 page, robots, sitemap, static assets, download redirec
   assert.ok(!sm.includes('/download<'), 'the download redirect is not a page');
 
   for (const p of ['/og-image.png', '/favicon.svg', '/favicon-32.png', '/apple-touch-icon.png', '/site.webmanifest',
-    '/assets/site.css', '/assets/site.js', '/assets/icons.svg', '/assets/topo.svg', '/assets/live.css', '/assets/live.js', '/fonts/barlow-condensed-700.woff2', '/fonts/barlow-400.woff2', '/fonts/barlow-600.woff2', '/fonts/OFL-Barlow.txt']) {
+    '/assets/site.css', '/assets/site.js', '/assets/home.css', '/assets/home.js', '/assets/hero3d.js', '/assets/icons.svg', '/assets/topo.svg', '/assets/live.css', '/assets/live.js', '/fonts/manrope-latin.woff2', '/fonts/manrope-latin-ext.woff2', '/fonts/OFL-Manrope.txt']) {
     assert.equal((await fetch(base + p)).status, 200, p);
   }
   const al = await fetch(base + '/.well-known/assetlinks.json');
@@ -97,10 +97,11 @@ test('internal documentation is not served; public pages follow the site rules',
     // No third-party requests: no external scripts, stylesheets or fonts.
     assert.ok(!/<script[^>]+src="https?:/i.test(text) && !/<link[^>]+rel="(?:stylesheet|preconnect|preload)"[^>]+href="https?:/i.test(text) && !/url\(\s*["']?https?:/i.test(text), `${f}: third-party resource`);
   }
-  // The convoy size on the download page comes from the gateway's configuration.
+  // The convoy size on the download page is the largest paid plan's seats (catalog), not the server ceiling.
   const config = require('../src/config');
+  const { siteMaxRiders } = require('../src/plan_pricing');
   const get = await (await fetch(base + '/get')).text();
-  assert.ok(get.includes(`Up to ${config.maxConvoyRiders} riders`), 'max riders from config');
+  assert.ok(get.includes(`Up to ${siteMaxRiders(null, config.maxConvoyRiders)} riders`), 'max riders from the plan catalog');
   assert.ok(!get.includes('__MAX_RIDERS__'));
   assert.ok(get.includes('href="/download"') && get.includes('href="/download/32bit"'), 'download page links all Android builds');
   // The iOS button appears only when APP_STORE_URL / IOS_TESTFLIGHT_URL / IOS_IPA_URL is set (website_ios_blocks.test.js).
@@ -330,23 +331,42 @@ test('terms agree with the privacy policy on who an SOS reaches; iOS wording is 
 });
 
 // ---------------------------------------------------------------------------
-// Website = information + payment handover. No plans, prices, coupons or admin UI on public pages;
+// Website = information + live pricing + payment handover. Prices appear ONLY as rendered from the app's plan list
+// (GET /api/membership/catalog, admin-editable): no price is written into any page. No coupons or admin UI;
 // /checkout only pays an order the app created.
 // ---------------------------------------------------------------------------
-test('public pages carry no plans, prices, coupons or admin UI; the admin page is gone', async () => {
+test('pricing comes only from the catalog API: no hard-coded prices, coupons or admin UI on public pages', async () => {
   for (const p of ['/pricing-admin', '/pricing-admin.html']) assert.equal((await fetch(base + p, { redirect: 'manual' })).status, 404, p);
   const sm = await (await fetch(base + '/sitemap.xml')).text();
   assert.ok(!sm.includes('/checkout<') && !sm.includes('/pricing-admin'), 'checkout and admin pages are not listed');
   for (const p of ['/', '/features', '/how-it-works', '/safety', '/about', '/get', '/privacy', '/terms', '/no-such-page']) {
     const html = await (await fetch(base + p)).text();
     assert.ok(!/href="\/checkout|href="\/pricing-admin/.test(html), `${p}: links to checkout or admin`);
-    assert.ok(!/See plans|Plans &amp; Pay|Compare plans|Choose Pro|id="plans"|hm-plan\b/.test(html), `${p}: plan section or CTA`);
+    assert.ok(!/Choose Pro|Plans &amp; Pay|hm-plan\b|id="plans"/.test(html), `${p}: old plan section or CTA`);
     assert.ok(!/coupon/i.test(html), `${p}: coupon UI`);
-    assert.ok(!html.includes('/api/subscription/config') && !html.includes('/api/create-order'), `${p}: pricing / order calls`);
-    if (p !== '/terms' && p !== '/privacy') assert.ok(!/&#8377;\s?\d|Rs\.? ?\d/.test(html), `${p}: shows a price`);
+    assert.ok(!html.includes('/api/subscription/config') && !html.includes('/api/create-order'), `${p}: order calls`);
+    if (p !== '/terms' && p !== '/privacy') assert.ok(!/&#8377;\s?\d|\u20B9\s?\d|Rs\.? ?\d|INR ?\d|\d+\s*(?:\/|per) ?month/i.test(html), `${p}: hard-coded price`);
   }
   const home = await (await fetch(base + '/')).text();
   assert.ok(home.includes('href="/get"') && home.includes('Get the app'));
+  // The pricing section is an empty frame that home.js fills from the catalog.
+  const sec = home.slice(home.indexOf('id="pricing"'), home.indexOf('</section>', home.indexOf('id="pricing"')));
+  assert.ok(sec.includes('data-pricing') && sec.includes('id="pricing-list"'), 'home: pricing frame');
+  assert.ok(!/\d/.test(sec.replace(/<[^>]+>/g, '')), 'home: no number written into the pricing section');
+  assert.ok(sec.includes('Join a ride you are invited to: Free.'), 'home: joining is free');
+  assert.ok(/href="\/#pricing"/.test(home), 'header links to pricing');
+  const fs = require('fs');
+  const path = require('path');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', 'home.js'), 'utf8');
+  const block = js.slice(js.indexOf('/* ---------- Pricing'), js.indexOf('/* ---------- end pricing'));
+  assert.ok(block.length > 1000, 'home.js has the pricing block');
+  assert.ok(block.includes("getJSON('/api/membership/catalog')"), 'pricing: read from the catalog');
+  assert.ok(!/innerHTML/.test(js), 'home.js: no innerHTML');
+  assert.ok(!/(?:\\u20B9|\u20B9|&#8377;)'?\s*\+?\s*'?\d/.test(block) && !/(?:price|Price|Inr)\w*\s*[:=]\s*[1-9]/.test(block), 'pricing: no price constants in the script');
+  // The catalog the page reads is public and carries prices and seats.
+  const cat = await (await fetch(base + '/api/membership/catalog')).json();
+  assert.ok(cat.categories && typeof cat.categories === 'object');
+  for (const c of Object.values(cat.categories)) assert.equal(typeof c.monthlyPriceInr, 'number');
 });
 
 test('checkout page: app-order payment only, noindex, return link to the app', async () => {
@@ -389,7 +409,7 @@ test('website index contains community stories container and small square checkb
 // ---------------------------------------------------------------------------
 test('home page: touring pitch, safe / secure / memorable sections, moderated reviews, no invented proof', async () => {
   const html = await (await fetch(base + '/')).text();
-  for (const id of ['long-haul', 'safe', 'secure', 'memorable', 'reviews', 'faq', 'feedback']) {
+  for (const id of ['features', 'long-haul', 'safe', 'secure', 'memorable', 'how', 'pricing', 'numbers', 'reviews', 'faq', 'feedback']) {
     assert.ok(html.includes(`id="${id}"`), `home: section #${id}`);
   }
   assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, 'home: exactly one h1');
@@ -429,13 +449,15 @@ test('home page: "CoRoute in numbers" is hidden until real counts load; stories 
   assert.ok(/\bhidden\b/.test(m[0]) && m[0].includes('data-usage-stats'), 'numbers: hidden by default, filled by site.js');
   assert.ok(html.includes('id="usage-stats-list"'), 'numbers: list container');
   // No number is written into the page itself: they only come from the API.
-  const section = html.slice(html.indexOf('id="numbers"'), html.indexOf('<!-- Reviews -->'));
+  const section = html.slice(html.indexOf('id="numbers"'), html.indexOf('<!-- /numbers -->'));
+  assert.ok(section.length > 200, 'numbers: section found');
   assert.ok(!/\d{2,}/.test(section.replace(/<[^>]+>/g, '')), 'numbers: no hard-coded counts');
   const fs = require('fs');
   const path = require('path');
   const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', 'site.js'), 'utf8');
   const usage = js.slice(js.indexOf('CoRoute in numbers'), js.indexOf('Theme toggle'));
   assert.ok(usage.includes("'/api/public/usage-stats'") && usage.includes("'/api/public/community-stats'"), 'numbers: API with fallback');
+  assert.ok(usage.includes('setInterval(loadUsage, 60000)') && usage.includes('requestAnimationFrame'), 'numbers: live refresh every 60 s with counters');
   assert.ok(!/innerHTML/.test(usage), 'numbers: no innerHTML');
   const { TEMPLATE_IDS } = require('../src/trip_reviews');
   for (const id of TEMPLATE_IDS) assert.ok(js.includes(`'${id}'`), `site.js knows template ${id}`);

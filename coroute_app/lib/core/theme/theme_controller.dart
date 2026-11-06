@@ -60,8 +60,17 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
   bool _sensorAvailable = true;
   bool? _sensorDark;
   double? _lat, _lng;
+  bool _rideDark = false;
 
   ThemePreference get preference => _pref;
+
+  /// Battery saver during a ride: the dark palette and the dark map, whatever the preference.
+  bool get rideDarkOverride => _rideDark;
+  void setRideDarkOverride(bool on) {
+    if (on == _rideDark) return;
+    _rideDark = on;
+    _evaluate();
+  }
   AppPalette get palette => _palette;
   bool get isLight => _palette.isLight;
 
@@ -158,6 +167,7 @@ class ThemeController extends ChangeNotifier with WidgetsBindingObserver {
         light = _sunLight();
         break;
     }
+    if (_rideDark) light = false;
     _apply(light ? AppPalette.light : AppPalette.dark, initial: initial);
   }
 

@@ -263,21 +263,98 @@ function mergeChunkPoints(chunks) {
   return out;
 }
 
-/** Drops fixes that are inaccurate, out of order or physically impossible. */
-function filterPoints(points, { maxAccuracyM = 50, maxKmh = 250 } = {}) {
-  const out = [];
-  for (const p of points) {
+/** Segment rules shared with the app (lib/domain/tracking/track_cleaner.dart): keep them in step. */
+const SEGMENT_GAP_MS = 2 * 60000; // no fix for longer than this while moving: a signal gap
+const SEGMENT_GAP_MOVE_M = 50; // ... but only when the rider moved at least this far meanwhile
+const SEGMENT_JUMP_M = 500; // a jump this long ...
+const SEGMENT_JUMP_KMH = 250; // ... faster than this is never a ridden line
+
+/** True when going from a to b is physically impossible (a teleport, not a ride). */
+function impossibleLink(a, b, { maxKmh = 250, minJumpM = 200 } = {}) {
+  const d = haversine(a.lat, a.lng, b.lat, b.lng);
+  if (d <= minJumpM) return false;
+  const dt = (b.ts - a.ts) / 1000;
+  return dt <= 0 || (d / dt) * 3.6 > maxKmh;
+}
+
+/**
+ * The cleaned track the trip summary, the map, the replay and the GPX are all built from:
+ * valid and accurate fixes only (accuracy 0 = not reported), sorted by time, one per timestamp,
+ * without bad fixes. A bad fix is a short run (at most `maxOutlierRun` points) that is only
+ * reachable from the rest by an impossible jump: a single wild fix in the middle, a wrong first
+ * fix after a cold start, a stray last fix. Unlike a plain "compare with the last kept point"
+ * filter, one wrong first fix can not throw away the whole ride.
+ */
+function filterPoints(points, { maxAccuracyM = 50, maxKmh = 250, minJumpM = 200, maxOutlierRun = 2 } = {}) {
+  const list = [];
+  for (const p of points || []) {
+    if (!p || !Number.isFinite(p.ts) || !Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
+    if (Math.abs(p.lat) > 90 || Math.abs(p.lng) > 180 || (p.lat === 0 && p.lng === 0)) continue;
     if (p.acc && p.acc > maxAccuracyM) continue;
-    const last = out[out.length - 1];
-    if (last) {
-      const dt = (p.ts - last.ts) / 1000;
-      if (dt <= 0) continue;
-      const d = haversine(last.lat, last.lng, p.lat, p.lng);
-      if ((d / dt) * 3.6 > maxKmh && d > 200) continue; // teleport
-    }
-    out.push(p);
+    list.push(p);
   }
+  list.sort((a, b) => a.ts - b.ts);
+  const sorted = [];
+  for (const p of list) if (!sorted.length || sorted[sorted.length - 1].ts !== p.ts) sorted.push(p);
+  // Runs of mutually plausible points, cut at every impossible jump.
+  const opts = { maxKmh, minJumpM };
+  let runs = [];
+  let cur = [];
+  for (const p of sorted) {
+    if (cur.length && impossibleLink(cur[cur.length - 1], p, opts)) { runs.push(cur); cur = []; }
+    cur.push(p);
+  }
+  if (cur.length) runs.push(cur);
+  if (runs.length <= 1) return runs[0] || [];
+  // Short runs cut off by impossible jumps are bad fixes (unless the whole track is like that).
+  if (runs.some((r) => r.length > maxOutlierRun)) runs = runs.filter((r) => r.length > maxOutlierRun);
+  const out = [];
+  for (const r of runs) for (const p of r) out.push(p);
   return out;
+}
+
+/**
+ * Splits a cleaned, time-sorted track into the stretches that were really recorded. A new
+ * segment starts after a signal gap (no fix for more than 2 minutes while the rider moved) or an
+ * impossible jump (more than 500 m at more than 250 km/h). Between segments nothing was recorded,
+ * so maps draw that as a dotted link (or not at all), never as a ridden line.
+ */
+function splitSegments(points, { gapMs = SEGMENT_GAP_MS, gapMoveM = SEGMENT_GAP_MOVE_M, jumpM = SEGMENT_JUMP_M, jumpKmh = SEGMENT_JUMP_KMH } = {}) {
+  const segs = [];
+  let cur = [];
+  for (const p of points || []) {
+    if (cur.length) {
+      const a = cur[cur.length - 1];
+      const d = haversine(a.lat, a.lng, p.lat, p.lng);
+      const dt = p.ts - a.ts;
+      const jump = d > jumpM && (dt <= 0 || (d / (dt / 1000)) * 3.6 > jumpKmh);
+      if (jump || (dt > gapMs && d > gapMoveM)) { segs.push(cur); cur = []; }
+    }
+    cur.push(p);
+  }
+  if (cur.length) segs.push(cur);
+  return segs;
+}
+
+/**
+ * A cleaned track simplified segment by segment (so a gap is never simplified away) for maps and
+ * the stored trip trail: at most `maxPoints` points, the tolerance doubling until it fits. The
+ * first point of every segment after the first carries `gap: true`.
+ */
+function segmentedTrail(points, { toleranceM = 20, maxPoints = 4000 } = {}) {
+  const segs = splitSegments(points);
+  let tol = Math.max(0, toleranceM);
+  let out = [];
+  for (let round = 0; round < 12; round++) {
+    out = [];
+    segs.forEach((seg, i) => {
+      const pts = tol > 0 && seg.length > 2 ? simplify(seg, tol) : seg;
+      pts.forEach((p, j) => out.push(i > 0 && j === 0 ? { ...p, gap: true } : p));
+    });
+    if (out.length <= maxPoints) break;
+    tol = tol > 0 ? tol * 2 : 5;
+  }
+  return out.length > maxPoints ? out.slice(0, maxPoints) : out;
 }
 
 /**
@@ -321,7 +398,7 @@ function detectStops(points, { radiusM = config.stopRadiusM, exitM = config.stop
 function analyseTrack(rawPoints, { minStopMs = 120000, gapMs = config.offlineAlertMinutes * 60000 } = {}) {
   const points = filterPoints(rawPoints);
   if (points.length === 0) {
-    return { points, distanceM: 0, firstTs: 0, lastTs: 0, spanMs: 0, restMs: 0, gapMs: 0, movingMs: 0, maxKmh: 0, avgMovingKmh: 0, stops: [], segments: [], gaps: [] };
+    return { points, distanceM: 0, recordedDistanceM: 0, gapDistanceM: 0, pieces: 0, firstTs: 0, lastTs: 0, spanMs: 0, restMs: 0, gapMs: 0, movingMs: 0, maxKmh: 0, avgMovingKmh: 0, stops: [], segments: [], gaps: [] };
   }
   const stops = detectStops(points, { minStopMs });
   const inStop = (ts) => stops.some((s) => ts > s.startTs && ts <= s.endTs);
@@ -333,6 +410,7 @@ function analyseTrack(rawPoints, { minStopMs = 120000, gapMs = config.offlineAle
     const d = haversine(a.lat, a.lng, b.lat, b.lng);
     const dt = b.ts - a.ts;
     if (inStop(b.ts) && inStop(a.ts + 1)) continue; // jitter while parked
+    if (impossibleLink(a, b)) continue; // two plausible runs joined by a teleport: never ridden
     if (dt > gapMs && d > config.stopExitM) gaps.push({ startTs: a.ts, endTs: b.ts, durationMs: dt, distanceM: d });
     distanceM += d;
     const implied = dt > 0 ? (d / (dt / 1000)) * 3.6 : 0;
@@ -342,6 +420,16 @@ function analyseTrack(rawPoints, { minStopMs = 120000, gapMs = config.offlineAle
   }
   const firstTs = points[0].ts, lastTs = points[points.length - 1].ts;
   const spanMs = lastTs - firstTs;
+  // What was really recorded (inside segments) and the straight lines across signal gaps between them.
+  const segs = splitSegments(points);
+  let recordedDistanceM = 0;
+  for (const seg of segs) {
+    for (let i = 1; i < seg.length; i++) {
+      const a = seg[i - 1], b = seg[i];
+      if (inStop(b.ts) && inStop(a.ts + 1)) continue;
+      recordedDistanceM += haversine(a.lat, a.lng, b.lat, b.lng);
+    }
+  }
   const restMs = stops.reduce((s, x) => s + x.durationMs, 0);
   const gapTotal = gaps.reduce((s, x) => s + x.durationMs, 0);
   const gapDistance = gaps.reduce((s, x) => s + x.distanceM, 0);
@@ -367,22 +455,37 @@ function analyseTrack(rawPoints, { minStopMs = 120000, gapMs = config.offlineAle
 
   return {
     points, distanceM, firstTs, lastTs, spanMs, restMs, gapMs: gapTotal, movingMs,
+    recordedDistanceM, gapDistanceM: Math.max(0, distanceM - recordedDistanceM), pieces: segs.length,
     // Average while moving: the straight line across a signal gap is not riding time, so it is left out.
     maxKmh: Math.round(maxKmh), avgMovingKmh: movingMs > 0 ? +(Math.max(0, distanceM - gapDistance) / 1000 / (movingMs / 3600000)).toFixed(1) : 0,
     stops, segments, gaps,
   };
 }
 
-/** Compact wire form for the replay view: [[ts, lat, lng, v], ...], optionally simplified. */
+/**
+ * Compact wire form for the maps and the replay: [[ts, lat, lng, v], ...], optionally simplified
+ * (segment by segment). The first point after a signal gap or a jump has a fifth element 1
+ * ("break": the line is cut there). Old apps read the first four elements only.
+ */
 function toWire(points, simplifyM = 0) {
-  const pts = simplifyM > 0 ? simplify(points, simplifyM) : points;
-  return pts.map((p) => [p.ts, +p.lat.toFixed(5), +p.lng.toFixed(5), p.v || 0]);
+  const out = [];
+  splitSegments(points).forEach((seg, i) => {
+    const pts = simplifyM > 0 && seg.length > 2 ? simplify(seg, simplifyM) : seg;
+    pts.forEach((p, j) => {
+      const row = [p.ts, +p.lat.toFixed(5), +p.lng.toFixed(5), p.v || 0];
+      if (i > 0 && j === 0) row.push(1);
+      out.push(row);
+    });
+  });
+  return out;
 }
 
 function toGpx({ name, tracks }) {
   const esc = (s) => String(s).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
-  const trk = tracks.map((t) => `  <trk><name>${esc(t.name)}</name><trkseg>\n${t.points.map((p) =>
-    `    <trkpt lat="${p.lat.toFixed(6)}" lon="${p.lng.toFixed(6)}"><time>${new Date(p.ts).toISOString()}</time></trkpt>`).join('\n')}\n  </trkseg></trk>`).join('\n');
+  // One <trkseg> per recorded segment: other apps do not join a signal gap with a straight line either.
+  const seg = (pts) => `<trkseg>\n${pts.map((p) =>
+    `    <trkpt lat="${p.lat.toFixed(6)}" lon="${p.lng.toFixed(6)}"><time>${new Date(p.ts).toISOString()}</time></trkpt>`).join('\n')}\n  </trkseg>`;
+  const trk = tracks.map((t) => `  <trk><name>${esc(t.name)}</name>${splitSegments(t.points).map(seg).join('')}</trk>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="CoRoute" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>${esc(name)}</name></metadata>\n${trk}\n</gpx>\n`;
 }
 
@@ -402,4 +505,7 @@ function uploadPermission(meta, userId, nowMs = Date.now()) {
   return { ok: true, tripStartMs: meta.createdAtEpochMs || 0, ended };
 }
 
-module.exports = { uploadPermission, TrackStore, TrackError, validateChunk, filterPoints, detectStops, analyseTrack, toWire, toGpx, simplifyTrack, encodeChunkBody, mergeChunkPoints };
+module.exports = {
+  uploadPermission, TrackStore, TrackError, validateChunk, filterPoints, detectStops, analyseTrack, toWire, toGpx, simplifyTrack, encodeChunkBody, mergeChunkPoints,
+  splitSegments, segmentedTrail, impossibleLink, SEGMENT_GAP_MS, SEGMENT_JUMP_M,
+};

@@ -5,7 +5,8 @@ class NetworkConstants {
   NetworkConstants._();
 
   /// Capabilities this app announces in every JOIN (only to a gateway that supports `net1`).
-  static const List<String> clientCaps = ['net1'];
+  /// `pubride1`: Public ride, safe contact and road warnings (data/services/public_ride_service.dart).
+  static const List<String> clientCaps = ['net1', 'pubride1'];
 
   /// "Another nearby rider is responding" stays visible this long.
   static const Duration assistTakenShowFor = Duration(minutes: 2);
@@ -30,24 +31,19 @@ class NetworkConstants {
   static const Duration resendGrace = Duration(seconds: 30);
 
   // ------------------------------------------------------------ settings keys
-  static const String keyVoiceCritical = 'coroute_voice_critical';
   static const String keyVoiceWarnings = 'coroute_voice_warnings';
   static const String keyHazardAlerts = 'coroute_hazard_alerts';
   static const String keyRideOnLockScreen = 'coroute_ride_lock_screen';
-  static const String keyRichNotification = 'coroute_rich_notification';
   static const String keyNetConsentSeen = 'coroute_net_consent_seen';
   static const String keyNetConsentPrompts = 'coroute_net_consent_prompts';
 
   // 3.16 settings keys.
   static const String keyLanguage = 'coroute_language';
   static const String keyFuelRangeKm = 'coroute_fuel_range_km';
-  static const String keySpeakAfterDark = 'coroute_speak_after_dark';
-  static const String keyMedicalIdLock = 'coroute_medical_id_lock';
-  static const String keyDocsReminder = 'coroute_docs_reminder';
-  static const String keySaveRouteMaps = 'coroute_save_route_maps';
-  static const String keyVoiceAnnounceAllAlerts = 'coroute_voice_announce_all_alerts';
-  static const String keyMapAlertDismissSeconds = 'coroute_map_alert_dismiss_seconds';
-  static const List<int> mapAlertDismissChoices = [0, 3, 5, 8, 12];
+
+  /// How long an ordinary alert stays on the ride map before it leaves by itself.
+  /// SOS, the overspeed warning and alerts that need an answer stay until handled.
+  static const int mapAlertDismissSeconds = 5;
 
   /// Tank range (km) bounds of the fuel reminder setting (0 = off).
   static const int fuelRangeMaxKm = 1500;

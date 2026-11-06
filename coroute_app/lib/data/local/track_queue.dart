@@ -26,6 +26,11 @@ abstract class TrackQueue {
 
   /// Writes anything still buffered in memory.
   Future<void> flushBuffer();
+
+  /// Every point of one group still on the phone (uploaded or not; uploaded
+  /// points are kept for two days), oldest first: the trip summary is computed
+  /// from these on the phone.
+  Future<List<TrackPoint>> points(String groupId);
 }
 
 /// In-memory queue for tests and for platforms without SQLite.
@@ -70,6 +75,10 @@ class MemoryTrackQueue implements TrackQueue {
 
   @override
   Future<void> flushBuffer() async {}
+
+  @override
+  Future<List<TrackPoint>> points(String groupId) async =>
+      (_rows.where((r) => r.groupId == groupId).map((r) => r.point).toList()..sort((a, b) => a.ts.compareTo(b.ts)));
 }
 
 class _Row {

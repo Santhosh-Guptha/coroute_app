@@ -7,14 +7,10 @@ import 'package:coroute_app/presentation/safety/crash_alarm_screen.dart';
 
 void main() {
   setUp(() {
-    FeatureGates.forceAllUnlocked = false;
-    FeatureGates.activeTier = SubscriptionTier.proRider;
     BiometricSafetyBridge().reset();
   });
 
   tearDown(() {
-    FeatureGates.forceAllUnlocked = false;
-    FeatureGates.activeTier = SubscriptionTier.community;
     BiometricSafetyBridge().reset();
   });
 
@@ -22,26 +18,26 @@ void main() {
     test('TEST-BIO-01: Pro & Road Captain Tier Entitlement Gating', () {
       // In single-plan architecture, all features are unlocked for all riders
       expect(
-        FeatureGates.isUnlocked(Feature.biometricTraumaPulse, SubscriptionTier.community),
+        FeatureGates.isUnlocked(Feature.biometricTraumaPulse),
         isTrue,
       );
-      expect(FeatureGates.requiredTier(Feature.biometricTraumaPulse), equals(SubscriptionTier.community));
+      expect(FeatureGates.accessOf(Feature.biometricTraumaPulse), equals(FeatureAccess.safety));
 
       // Pro Rider: unlocked
       expect(
-        FeatureGates.isUnlocked(Feature.biometricTraumaPulse, SubscriptionTier.proRider),
+        FeatureGates.isUnlocked(Feature.biometricTraumaPulse),
         isTrue,
       );
 
       // Road Captain: unlocked
       expect(
-        FeatureGates.isUnlocked(Feature.biometricTraumaPulse, SubscriptionTier.roadCaptain),
+        FeatureGates.isUnlocked(Feature.biometricTraumaPulse),
         isTrue,
       );
 
       // Tour Operator: unlocked
       expect(
-        FeatureGates.isUnlocked(Feature.biometricTraumaPulse, SubscriptionTier.tourOperator),
+        FeatureGates.isUnlocked(Feature.biometricTraumaPulse),
         isTrue,
       );
     });

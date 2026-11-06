@@ -4,104 +4,185 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>CoRoute: Group Motorcycle Touring Safety App for Long-Distance Riders</title>
-  <meta name="description" content="The group motorcycle touring safety app for long-distance riders. Live convoy map, push-to-talk, crash detection with SOS, guardians who follow live, fuel and break reminders. Location shared only with your group.">
+  <meta name="description" content="The group motorcycle touring safety app for long-distance riders. Live convoy map, push-to-talk, crash detection with SOS, guardians who follow live, Medical ID, offline maps and fuel reminders. Location shared only with your group.">
   <link rel="canonical" href="__ORIGIN__/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="CoRoute">
   <meta property="og:locale" content="en_IN">
-  <meta property="og:title" content="CoRoute: the group motorcycle touring safety app">
-  <meta property="og:description" content="Ride far, ride together, come home. Live convoy map, push-to-talk, crash detection and SOS, guardians who follow live, and a trip report to keep. For Android.">
+  <meta property="og:title" content="CoRoute: Ride Together. Stay Safe.">
+  <meta property="og:description" content="The group motorcycle touring safety app. Live convoy map, push-to-talk, crash detection and SOS, guardians who follow live, and a trip report to keep. For Android.">
   <meta property="og:url" content="__ORIGIN__/">
   <meta property="og:image" content="__ORIGIN__/og-image.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="CoRoute: the group motorcycle touring safety app">
+  <meta name="twitter:title" content="CoRoute: Ride Together. Stay Safe.">
   <meta name="twitter:description" content="Live convoy map, push-to-talk, crash detection and SOS, guardians who follow live, and a trip report to keep. For Android.">
   <meta name="twitter:image" content="__ORIGIN__/og-image.png">
-  <meta name="theme-color" content="#0B0D0E">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F4F7F9">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0F171D">
   <meta name="color-scheme" content="light dark">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/site.css">
   <link rel="stylesheet" href="/assets/home.css">
   <script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
   <script src="/assets/site.js" defer></script>
   <script src="/assets/home.js" defer></script>
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"CoRoute","operatingSystem":"Android 6.0 or newer","applicationCategory":"TravelApplication","description":"Group motorcycle touring safety app: live convoy map, push-to-talk, crash detection and SOS, guardian live links, fuel and break reminders, trip reports.","url":"__ORIGIN__/","downloadUrl":"__ORIGIN__/get"}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"CoRoute","operatingSystem":"Android 6.0 or newer","applicationCategory":"TravelApplication","description":"Group motorcycle touring safety app: live convoy map, push-to-talk, crash detection and SOS, guardian live links, Medical ID, offline maps, fuel and break reminders, trip reports.","url":"__ORIGIN__/","downloadUrl":"__ORIGIN__/get"}</script>
 </head>
 <body data-page="home">
   <!--#include header-->
 
   <main class="site-main" id="main" tabindex="-1">
 
-    <!-- Hero -->
-    <section class="hp-hero" data-hero data-progress="exit" aria-labelledby="hero-title">
-      <svg class="hero__ridges" aria-hidden="true" focusable="false"></svg>
-      <canvas class="hero__ground" aria-hidden="true"></canvas>
-      <svg class="hero__riders" aria-hidden="true" focusable="false"></svg>
-      <div class="hp-hero__shade" aria-hidden="true"></div>
-      <div class="container hp-hero__inner">
-        <p class="hp-kicker">For touring groups and long-distance riders</p>
-        <h1 class="hp-hero__title" id="hero-title">Ride far. Ride together. <span>Come home.</span></h1>
-        <p class="hp-hero__lead">CoRoute keeps your whole group on one live map, talking on push-to-talk, and looked after by crash detection and the people waiting at home. Made for multi-day rides to Ladakh, Spiti, the Konkan coast and everywhere the signal fades.</p>
-        <div class="hp-hero__cta">
+    <!-- Hero: the motto over a live 3D mountain road (assets/hero3d.js, loaded late; the drawing below is the
+         static fallback for reduced motion, no WebGL or before the scene is ready) -->
+    <section class="hx" aria-labelledby="hero-title">
+      <div class="hx__scene" data-hero3d data-src="/assets/hero3d.js" data-state="poster" aria-hidden="true">
+        <svg class="hx__poster" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice" focusable="false">
+          <defs>
+            <linearGradient id="hx-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="hx-sky-top"/><stop offset="0.62" class="hx-sky-hor"/></linearGradient>
+          </defs>
+          <rect width="1600" height="900" fill="url(#hx-sky)"/>
+          <path class="hx-m3" d="M0 470 L120 410 L230 445 L380 352 L520 432 L640 386 L800 300 L930 402 L1060 338 L1200 414 L1330 334 L1460 402 L1600 360 V900 H0Z"/>
+          <path class="hx-m2" d="M0 566 L150 476 L300 546 L460 452 L620 546 L760 486 L880 566 L1040 478 L1200 548 L1380 466 L1600 546 V900 H0Z"/>
+          <path class="hx-m1" d="M0 690 L180 604 L360 696 L520 646 L700 726 L860 770 L1100 700 L1280 646 L1440 696 L1600 626 V900 H0Z"/>
+          <path class="hx-road" d="M740 900 C 860 800, 1040 742, 990 650 C 965 602, 1005 560, 1020 528 L1030 528 C 1020 562, 990 604, 1018 650 C 1086 760, 980 820, 1080 900 Z"/>
+          <path class="hx-route" d="M910 900 C 960 820, 1070 752, 1004 650 C 982 606, 1010 560, 1025 528"/>
+          <circle class="hx-r hx-r--a" cx="936" cy="852" r="13"/>
+          <circle class="hx-r hx-r--b" cx="990" cy="786" r="11"/>
+          <circle class="hx-r hx-r--c" cx="1026" cy="724" r="9"/>
+          <circle class="hx-r hx-r--d" cx="1010" cy="668" r="7.5"/>
+          <circle class="hx-r hx-r--e" cx="999" cy="622" r="6"/>
+        </svg>
+      </div>
+      <div class="hx__scrim" aria-hidden="true"></div>
+      <div class="container hx__inner">
+        <p class="hx__kicker"><span class="hx__kicker-dot" aria-hidden="true"></span>For touring groups and long-distance riders</p>
+        <h1 class="hx__title" id="hero-title">Ride Together. <span>Stay Safe.</span></h1>
+        <p class="hx__lead">One live map for the whole group, push-to-talk in the helmet, crash detection that calls your people, and guardians at home who can follow along.<span class="hx__lead-more"> Made for multi-day rides to Ladakh, Spiti, the Konkan coast and everywhere the signal fades.</span></p>
+        <div class="hx__cta">
           <a class="btn btn--primary btn--lg" href="/get"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
           <!--ios--><a class="btn btn--secondary btn--lg" href="/get#ios"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>Download for iOS</a><!--/ios-->
           <a class="btn btn--ghost btn--lg" href="/how-it-works">How it works</a>
         </div>
-        <p class="hp-hero__note"><!--ios-->Android 6.0 or newer and iOS 14.0 or newer.<!--/ios--><!--no-ios-->Android 6.0 or newer.<!--/no-ios--> Free to start. No ads, no trackers.</p>
-        <ul class="hp-pillars" role="list" aria-label="What CoRoute is built on">
-          <li><a href="#safe"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg><span><b>Safe</b>Crash alerts, SOS, guardians</span></a></li>
-          <li><a href="#secure"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg><span><b>Secure</b>Shared only with your group</span></a></li>
-          <li><a href="#memorable"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-history"/></svg><span><b>Memorable</b>Trip report and replay</span></a></li>
+        <p class="hx__free"><a href="#community-free"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-free"/></svg><span><b>Community:</b> solo riding is always free, with every safety feature.</span></a></p>
+        <p class="hx__note"><!--ios-->Android 6.0 or newer and iOS 14.0 or newer.<!--/ios--><!--no-ios-->Android 6.0 or newer.<!--/no-ios--> No ads, no trackers.</p>
+        <p class="hx__live" id="live-now" data-live-now hidden><span class="hx__pulse" aria-hidden="true"></span><span id="live-now-text"></span></p>
+      </div>
+    </section>
+
+    <!-- Motto: what every feature is for -->
+    <section class="motto" aria-labelledby="motto-title">
+      <div class="container">
+        <div class="motto__card">
+          <div class="motto__words">
+            <p class="eyebrow">Our promise</p>
+            <h2 id="motto-title">Ride far. Ride together. <span>Come home.</span></h2>
+            <p>Every feature in CoRoute exists for one of three reasons: to keep the group together, to get help fast when something goes wrong, and to make the ride worth remembering.</p>
+          </div>
+          <ul class="motto__pillars" role="list" aria-label="What CoRoute is built on">
+            <li><a href="#safe"><span class="motto__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></span><span><b>Safe</b>Crash alerts, SOS, guardians</span></a></li>
+            <li><a href="#secure"><span class="motto__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></span><span><b>Secure</b>Shared only with your group</span></a></li>
+            <li><a href="#memorable"><span class="motto__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-history"/></svg></span><span><b>Memorable</b>Trip report and replay</span></a></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- CoRoute in numbers: hidden until site.js has real counts large enough to be worth showing; refreshed every minute -->
+    <section class="section section--tight hp-numbers" id="numbers" aria-labelledby="numbers-title" data-usage-stats hidden>
+      <div class="container">
+        <div class="hp-numbers__head">
+          <div class="hp-head">
+            <p class="eyebrow">CoRoute in numbers</p>
+            <h2 id="numbers-title">Real rides, counted with privacy.</h2>
+            <p>Totals from completed rides on CoRoute, rounded down so that no single rider can be picked out. Nothing is estimated, and this page checks again every minute.</p>
+          </div>
+          <p class="hp-numbers__badge"><span class="hx__pulse" aria-hidden="true"></span>Live</p>
+        </div>
+        <dl class="hp-numbers__list" id="usage-stats-list"></dl>
+        <p class="hp-numbers__note t-small t-muted" id="usage-stats-note" aria-live="polite"></p>
+        <div class="hp-count" id="how-we-count" aria-labelledby="how-we-count-title">
+          <h3 class="hp-count__title" id="how-we-count-title"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>How we count</h3>
+          <ul class="hp-count__list" role="list">
+            <li><b>Totals only.</b> Counted from completed rides. Never per city, per route or per rider, and no times finer than the hour.</li>
+            <li><b>Rounded down.</b> Counts are rounded down to tens, distance to hundreds or thousands of kilometres. A number appears only once at least ten riders or rides are behind it.</li>
+            <li><b>No tracking.</b> No cookies, no trackers and no analytics scripts on this site. Visits are counted by page and day only, never by person.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+    <!-- /numbers -->
+
+    <!-- Features: safety first -->
+    <section class="section fx" id="features" aria-labelledby="features-title">
+      <div class="container">
+        <div class="hp-head">
+          <p class="eyebrow eyebrow--safety">Safety first</p>
+          <h2 id="features-title">Built for the moment nobody plans for.</h2>
+          <p>Most rides end with chai and a group photo. CoRoute is built for the one that does not, and stays quiet the rest of the time.</p>
+        </div>
+        <ul class="fx-grid" role="list">
+          <li class="fx-card fx-card--wide fx-card--sos" data-reveal>
+            <span class="fx-card__icon fx-card__icon--sos"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg></span>
+            <h3>Crash detection</h3>
+            <p>Runs on your phone through the whole ride, even with the screen locked. A hard impact and a fall start a loud alarm with 15 seconds to cancel. If you do not, help is asked for.</p>
+          </li>
+          <li class="fx-card fx-card--sos" data-reveal>
+            <span class="fx-card__icon fx-card__icon--sos"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg></span>
+            <h3>SOS to your group</h3>
+            <p>Hold to send. Your riders hear an alarm and get a route back to you, with the nearest hospital in the alert.</p>
+          </li>
+          <li class="fx-card" data-reveal>
+            <span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></span>
+            <h3>Guardians at home</h3>
+            <p>Family follow on a private link in any browser, no app needed. They hear about an SOS or a long unexpected stop.</p>
+          </li>
+          <li class="fx-card" data-reveal>
+            <span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-medical"/></svg></span>
+            <h3>Medical ID</h3>
+            <p>Blood group, allergies and an emergency contact can show on your lock screen, only while your SOS is open. Off by default.</p>
+          </li>
+          <li class="fx-card" data-reveal>
+            <span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-wifi-off"/></svg></span>
+            <h3>Offline maps</h3>
+            <p>Save the map along your route on Wi-Fi the night before. It still shows on the high passes, with no signal at all.</p>
+          </li>
+          <li class="fx-card" data-reveal>
+            <span class="fx-card__icon fx-card__icon--amber"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg></span>
+            <h3>Fuel and essentials</h3>
+            <p>A reminder before the reserve, and fuel, puncture repair, food and medical help along the road ahead.</p>
+          </li>
+          <li class="fx-card" data-reveal>
+            <span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-navigate"/></svg></span>
+            <h3>Re-routing</h3>
+            <p>Missed a turn? CoRoute notices you are off route and finds a new way back to the group's plan.</p>
+          </li>
         </ul>
       </div>
     </section>
 
-    <!-- Built for the long haul -->
-    <section class="section hp-haul" id="long-haul" aria-labelledby="haul-title">
-      <div class="container">
+    <!-- Built for the long haul: the group features -->
+    <section class="section section--surface fx fx--group" id="long-haul" aria-labelledby="haul-title">
+      <div class="container fx-split">
         <div class="hp-head">
-          <p class="eyebrow">Built for the long haul</p>
-          <h2 id="haul-title">Day five, 400 km from home, no signal for an hour. CoRoute is made for that.</h2>
+          <p class="eyebrow">Built for the group</p>
+          <h2 id="haul-title">Day five, 400 km from home, no signal for an hour. Still together.</h2>
           <p>Long rides break groups apart: a slow climb, a missed turn, a fuel stop nobody planned. These are the tools that keep a touring group together from the first morning to the last.</p>
+          <a class="link-arrow" href="/features"><span>Every feature, before, during and after the ride</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
         </div>
-        <ul class="hp-tiles" role="list" data-reveal-stagger="70">
-          <li class="hp-tile" data-reveal>
-            <span class="hp-tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg></span>
-            <h3>Routes and stops, planned once</h3>
-            <p>Set the destination and the fuel, food and rest stops before anyone rolls off. Everyone rides the same plan, and route essentials show fuel, puncture repair, food and medical help along the road.</p>
-          </li>
-          <li class="hp-tile" data-reveal>
-            <span class="hp-tile__icon hp-tile__icon--amber"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-fuel"/></svg></span>
-            <h3>Fuel range you can see</h3>
-            <p>Tell CoRoute your tank and mileage. It reminds you to fill up before the reserve, and can share just your remaining range with the group, so the next petrol bunk stop works for the bike with the smallest tank.</p>
-          </li>
-          <li class="hp-tile" data-reveal>
-            <span class="hp-tile__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-wifi-off"/></svg></span>
-            <h3>Maps that work without signal</h3>
-            <p>Save the map along your planned route on Wi-Fi the night before. It stays on your phone, so the map still shows on the high passes. Positions you record without signal are sent when you are back in range.</p>
-          </li>
-          <li class="hp-tile" data-reveal>
-            <span class="hp-tile__icon hp-tile__icon--amber"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-rest"/></svg></span>
-            <h3>Break reminders</h3>
-            <p>After about two hours of riding without a proper stop, CoRoute suggests a short break. Long days are when tired mistakes happen.</p>
-          </li>
-          <li class="hp-tile" data-reveal>
-            <span class="hp-tile__icon hp-tile__icon--nav"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></span>
-            <h3>Lead, sweeper and nobody lost</h3>
-            <p>Every rider on one map, ordered by road distance. The lead and the sweeper hear about it when someone drops behind, goes quiet or runs low on battery.</p>
-          </li>
-          <li class="hp-tile" data-reveal>
-            <span class="hp-tile__icon hp-tile__icon--nav"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg></span>
-            <h3>Push-to-talk in the helmet</h3>
-            <p>Hold to talk to the whole group through your helmet headset or phone. The microphone is off the rest of the time, and voice is never recorded.</p>
-          </li>
+        <ul class="fx-list" role="list">
+          <li data-reveal><span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-map"/></svg></span><div><h3>Live group map</h3><p>Every rider on one map, ordered by road distance. The lead and the sweeper hear when someone drops behind, goes quiet or runs low on battery.</p></div></li>
+          <li data-reveal><span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg></span><div><h3>Push-to-talk</h3><p>Hold to talk to the whole group through your helmet headset or phone. The microphone is off the rest of the time, and voice is never recorded.</p></div></li>
+          <li data-reveal><span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-meeting"/></svg></span><div><h3>Regroup</h3><p>One tap asks the group for a short stop, and planned regroup points keep everyone on the same plan when the signal drops.</p></div></li>
+          <li data-reveal><span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg></span><div><h3>Routes and stops, planned once</h3><p>Set the destination and the fuel, food and rest stops before anyone rolls off. Break reminders suggest a stop after about two hours.</p></div></li>
+          <li data-reveal><span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-wave"/></svg></span><div><h3>Public rides</h3><p>Turn on public ride and riders nearby can see a rough spot, heading and group size, never names or exact positions. Say hi, ask for help or warn about the road with short, filtered messages. Off unless the host turns it on.</p></div></li>
         </ul>
       </div>
     </section>
@@ -220,16 +301,124 @@
       </div>
     </section>
 
-    <!-- CoRoute in numbers: hidden until site.js has real counts large enough to be worth showing -->
-    <section class="section hp-numbers" id="numbers" aria-labelledby="numbers-title" data-usage-stats hidden>
+    <!-- Your ride analytics: what the app shows each rider about their own riding. The card is a labelled sample. -->
+    <section class="section section--surface ra" id="ride-analytics" aria-labelledby="ra-title">
+      <div class="container hp-split">
+        <div class="hp-head">
+          <p class="eyebrow">Your ride analytics</p>
+          <h2 id="ra-title">Know your riding, kilometre by kilometre.</h2>
+          <p>CoRoute adds up your own rides into personal analytics: how far, how long, how fast and how safely you ride. They are built on your phone from your own rides, private to you, and free for every rider.</p>
+          <ul class="hp-memo__list ra__list" role="list">
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg><span><b>Distance and rides.</b> Kilometres by week and month, rides completed and your longest day.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg><span><b>Hours in the saddle.</b> Moving time, stops and how long your breaks really were.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg><span><b>Top speed and averages.</b> Your fastest stretch and your average moving speed, ride by ride.</span></li>
+            <li><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg><span><b>Safety stats.</b> Hard braking counted by your phone, alerts and regroups, so you can see how you ride and improve.</span></li>
+          </ul>
+          <p class="ra__private t-small"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg>Only you see them. They are never on this website, never used for ads and never sold.</p>
+        </div>
+        <figure class="ra-card" aria-labelledby="ra-cap">
+          <div class="ra-card__frame" aria-hidden="true">
+            <div class="ra-card__top"><span class="ra-card__title">My riding</span><span class="ra-badge">Sample</span></div>
+            <dl class="ra-tiles">
+              <div><dt>Distance</dt><dd>1,240 <small>km</small></dd></div>
+              <div><dt>Moving time</dt><dd>31 <small>h</small></dd></div>
+              <div><dt>Rides</dt><dd>14</dd></div>
+              <div><dt>Top speed</dt><dd>92 <small>km/h</small></dd></div>
+            </dl>
+            <p class="ra-card__label">Kilometres by week</p>
+            <svg class="ra-chart" viewBox="0 0 320 110" focusable="false">
+              <line class="ra-chart__base" x1="0" y1="96" x2="320" y2="96"/>
+              <rect class="ra-chart__bar" x="8" y="62" width="26" height="34" rx="5"/>
+              <rect class="ra-chart__bar" x="48" y="40" width="26" height="56" rx="5"/>
+              <rect class="ra-chart__bar" x="88" y="70" width="26" height="26" rx="5"/>
+              <rect class="ra-chart__bar" x="128" y="24" width="26" height="72" rx="5"/>
+              <rect class="ra-chart__bar" x="168" y="52" width="26" height="44" rx="5"/>
+              <rect class="ra-chart__bar" x="208" y="78" width="26" height="18" rx="5"/>
+              <rect class="ra-chart__bar ra-chart__bar--now" x="248" y="10" width="26" height="86" rx="5"/>
+              <rect class="ra-chart__bar ra-chart__bar--next" x="288" y="88" width="26" height="8" rx="4"/>
+            </svg>
+            <ul class="ra-safety" role="list">
+              <li><b>3</b> hard brakes</li>
+              <li><b>6</b> regroups</li>
+              <li><b>0</b> SOS alerts</li>
+            </ul>
+          </div>
+          <figcaption id="ra-cap"><span class="ra-badge">Sample</span> An illustration with made-up sample numbers, not a real rider's data. Your own analytics fill in from your rides, in the app.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="section hw" id="how" aria-labelledby="how-title">
       <div class="container">
         <div class="hp-head">
-          <p class="eyebrow">CoRoute in numbers</p>
-          <h2 id="numbers-title">Real rides, counted by the server.</h2>
-          <p>These numbers come straight from completed rides on CoRoute. Nothing is estimated or rounded up.</p>
+          <p class="eyebrow">How it works</p>
+          <h2 id="how-title">Ready before the first kick-start.</h2>
+          <p>Ten minutes at home, and the whole group rides with it.</p>
         </div>
-        <dl class="hp-numbers__list" id="usage-stats-list"></dl>
-        <p class="hp-numbers__note t-small t-muted" id="usage-stats-note"></p>
+        <ol class="hw-steps" role="list">
+          <li class="hw-step" data-reveal><span class="hw-step__n" aria-hidden="true">1</span><h3>Create the ride</h3><p>The host sets the destination and the stops, and saves the map for the route.</p></li>
+          <li class="hw-step" data-reveal><span class="hw-step__n" aria-hidden="true">2</span><h3>Invite the group</h3><p>Share the ride code or link. Riders join from their own phones, and each adds an emergency contact and a guardian.</p></li>
+          <li class="hw-step" data-reveal><span class="hw-step__n" aria-hidden="true">3</span><h3>Ride together</h3><p>One live map, push-to-talk and crash detection for everyone, until the trip report arrives at the end.</p></li>
+        </ol>
+        <a class="link-arrow" href="/how-it-works"><span>The full setup guide</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+      </div>
+    </section>
+
+    <!-- Group rides: what a group plan adds. The price chips are filled by home.js from GET /api/membership/catalog;
+         no price is written into this page. -->
+    <section class="section section--surface gx" id="group-rides" aria-labelledby="group-title">
+      <div class="container gx__grid">
+        <div class="hp-head gx__head">
+          <p class="eyebrow eyebrow--safety">For group rides</p>
+          <h2 id="group-title">Get safety for your group rides.</h2>
+          <p>Solo safety is free. When you ride out with friends, one group plan on the host's phone covers the whole group: everyone on one map, talking, and looking out for each other.</p>
+          <ul class="gx-plans" id="group-plans" role="list" aria-label="Group plans and prices from the app" hidden></ul>
+          <div class="gx__cta">
+            <a class="btn btn--primary btn--lg" href="/get"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Host a group ride</a>
+            <a class="btn btn--ghost btn--lg" href="#pricing">Compare plans</a>
+          </div>
+          <p class="gx__fine t-small t-muted">Riders who join a group ride pay nothing. Plans are bought and managed in the app.</p>
+        </div>
+        <ul class="gx-list" role="list">
+          <li data-reveal><span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-map"/></svg></span><div><h3>Live group map</h3><p>Every rider on one map, in road order. Know who is behind, who stopped and whose battery is low.</p></div></li>
+          <li data-reveal><span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg></span><div><h3>Push-to-talk</h3><p>Talk to the whole group through your helmet headset. Never recorded.</p></div></li>
+          <li data-reveal><span class="fx-card__icon fx-card__icon--sos"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg></span><div><h3>Group SOS</h3><p>A crash or an SOS reaches every rider in the group with a route back to you.</p></div></li>
+          <li data-reveal><span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-meeting"/></svg></span><div><h3>Regroup</h3><p>One tap calls a short stop, and planned regroup points hold the plan when the signal drops.</p></div></li>
+          <li data-reveal><span class="fx-card__icon fx-card__icon--amber"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg></span><div><h3>Lead and sweep</h3><p>The lead and the sweeper hear when someone drops back, goes quiet or leaves the route.</p></div></li>
+          <li data-reveal><span class="fx-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-wave"/></svg></span><div><h3>Public ride sharing</h3><p>If the host turns it on, riders nearby see a rough spot and group size, never names, and can say hi or warn about the road.</p></div></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Pricing: read live from GET /api/membership/catalog by home.js. No price is written into this page. -->
+    <section class="section px" id="pricing" aria-labelledby="pricing-title" data-pricing>
+      <div class="container">
+        <div class="hp-head px__head">
+          <p class="eyebrow">Pricing</p>
+          <h2 id="pricing-title">Simple plans, sized to your group.</h2>
+          <p>Solo riding is free, always. Group plans are only for the host of a group ride. The plans below are read live from the app, so what you see here is what the app charges today.</p>
+        </div>
+        <div class="px-solo" id="community-free">
+          <span class="px-solo__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-free"/></svg></span>
+          <div>
+            <p class="px-solo__tag">Community plan</p>
+            <h3 class="px-solo__title">Solo riding is always free.</h3>
+            <p>Every safety feature, free for solo riders, forever: crash detection and SOS, guardians who follow live, Medical ID, offline maps, fuel and break reminders, trip reports and your ride analytics. No trial, no card, no ads.</p>
+          </div>
+        </div>
+        <div class="px-grid" id="pricing-list" aria-live="polite" aria-busy="true" data-state="loading">
+          <div class="px-card px-card--skel" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="px-card px-card--skel" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="px-card px-card--skel" aria-hidden="true"><i></i><i></i><i></i></div>
+          <p class="sr-only">Loading plans.</p>
+          <noscript><p class="px-msg">Plans and prices are shown in the CoRoute app.</p></noscript>
+        </div>
+        <div class="px-free">
+          <span class="px-free__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></span>
+          <p><b>Join a ride you are invited to: Free.</b> Riders in a group never pay. Only the host's plan counts, and family who follow on a guardian link need no app and no plan.</p>
+        </div>
+        <p class="px-note t-small t-muted" id="pricing-note">Plans are bought and managed inside the app. No ads, ever.</p>
       </div>
     </section>
 
@@ -258,12 +447,40 @@
           <p class="sr-only">Loading rider stories.</p>
           <noscript><p class="rv-empty">Rider stories need JavaScript to load. Everything else on this page works without it.</p></noscript>
         </div>
-        <p class="hp-reviews__foot t-small t-muted">Shared a story and want it taken down? Tell us with the <a class="link" href="#feedback">feedback form</a>.</p>
+        <p class="hp-reviews__foot t-small t-muted">Shared a story and want it taken down? Tell us with the <a class="link" href="#feedback" data-fb-topic="story">feedback form</a>.</p>
+      </div>
+    </section>
+
+    <!-- Help us build: ratings (Google Play only when PLAY_STORE_URL is set, see src/pages.js) and safety ideas -->
+    <section class="section hb" id="help-build" aria-labelledby="hb-title">
+      <div class="container">
+        <div class="hp-head hb__head">
+          <p class="eyebrow">Ride with us</p>
+          <h2 id="hb-title">Help us build the future of rider safety.</h2>
+          <p>CoRoute is made by a small team of riders. Every rating and every idea tells us what to build next: smarter crash detection, help that works where the signal ends, and safety features nobody has thought of yet.</p>
+        </div>
+        <ul class="hb-grid" role="list">
+          <li class="hb-card hb-card--rate" id="rate">
+            <span class="hb-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-heart"/></svg></span>
+            <!--play--><h3>Love riding safer? Rate CoRoute on Google Play.</h3>
+            <p>A rating and a few words help other riders find CoRoute and tell us what is working. Rather stay in the app? <b>Rate us in the app</b>: the trip report asks after every ride.</p>
+            <a class="btn btn--primary hb-card__btn" href="__PLAY_STORE_URL__" target="_blank" rel="noopener noreferrer" data-play-rate>Rate CoRoute on Google Play<svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-up-right"/></svg><span class="sr-only"> (opens Google Play)</span></a><!--/play-->
+            <!--no-play--><h3>Share your story after a ride in the app.</h3>
+            <p>When a ride ends, the trip report asks how it went. <b>Rate us in the app</b>, write a few lines and add a group photo if you like. With your permission it can appear on this page.</p>
+            <a class="btn btn--secondary hb-card__btn" href="#reviews">Read rider stories</a><!--/no-play-->
+          </li>
+          <li class="hb-card hb-card--idea" id="ideas">
+            <span class="hb-card__icon hb-card__icon--amber"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-message"/></svg></span>
+            <h3>Got an idea for a safety feature?</h3>
+            <p>Tell us what you wished CoRoute did on your last ride. Ideas go straight to the team, and the best ones become the next safety features.</p>
+            <a class="btn btn--secondary hb-card__btn" href="#feedback" data-fb-topic="safety-idea">Share a safety idea</a>
+          </li>
+        </ul>
       </div>
     </section>
 
     <!-- FAQ -->
-    <section class="section" id="faq" aria-labelledby="faq-title">
+    <section class="section section--surface" id="faq" aria-labelledby="faq-title">
       <div class="container hp-faq-wrap">
         <div class="hp-head">
           <p class="eyebrow">Questions riders ask</p>
@@ -293,7 +510,11 @@
           </details>
           <details>
             <summary>Is it free?</summary>
-            <div class="hp-faq__a"><p>Downloading CoRoute and joining a ride you are invited to is free. The rider who hosts the ride needs a membership, chosen inside the app. There are no ads.</p></div>
+            <div class="hp-faq__a"><p>Yes for solo riders, always. The Community plan gives solo riders every safety feature free, forever: crash detection and SOS, guardians, Medical ID, offline maps, trip reports and your ride analytics. Joining a group ride you are invited to is free too. Only the host of a group ride needs a group plan, shown in the <a class="link" href="#pricing">pricing section</a> and read live from the app. There are no ads.</p></div>
+          </details>
+          <details>
+            <summary>What do the numbers on this site say about me?</summary>
+            <div class="hp-faq__a"><p>Nothing. They are totals from completed rides, rounded down, and a number only appears once at least ten riders or rides are behind it. There is nothing per city, per route or per rider. The site sets no cookies and loads no trackers. Your own ride analytics live in the app, for you only.</p></div>
           </details>
           <details>
             <summary>Is there an iPhone version?</summary>
@@ -308,6 +529,7 @@
       <div class="container">
         <div class="hp-final__box">
           <div>
+            <p class="hp-final__motto">Ride Together. Stay Safe.</p>
             <h2 id="final-title">Set it up before the next long ride.</h2>
             <p>Install, add an emergency contact and a guardian, save the map for your route. Ten minutes at home, and the whole group rides with it.</p>
           </div>
@@ -326,13 +548,23 @@
         <div class="hp-head">
           <p class="eyebrow">Contact</p>
           <h2 id="feedback-title">Tell us how the ride went.</h2>
-          <p>Bugs, ideas, or something that felt wrong on the road. This message goes to the CoRoute team and is not published. To share a story on this page, use the feedback screen in the app after your trip.</p>
+          <p>Bugs, ideas, or something that felt wrong on the road. Ideas for new safety features are especially welcome. This message goes to the CoRoute team and is not published. To share a story on this page, use the feedback screen in the app after your trip.</p>
         </div>
         <form class="hp-form" data-feedback action="/api/feedback" method="post" novalidate>
           <input type="hidden" name="t" id="fb-t" value="">
           <div class="form-group">
             <label class="form-label" for="fb-name">Name <span class="t-muted">(optional)</span></label>
             <input class="form-input" id="fb-name" name="name" type="text" autocomplete="name" maxlength="80">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fb-topic">Topic</label>
+            <select class="form-select" id="fb-topic" name="topic">
+              <option value="general">General feedback</option>
+              <option value="safety-idea">Safety idea</option>
+              <option value="bug">Something went wrong</option>
+              <option value="story">My story on this page</option>
+              <option value="other">Something else</option>
+            </select>
           </div>
           <div class="form-group">
             <label class="form-label" for="fb-email">E-mail, so we can reply</label>

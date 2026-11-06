@@ -124,15 +124,15 @@ void main() {
       expect(engine.spokenTexts.any((t) => t.contains('Rahul SOS Emergency')), isTrue);
     });
 
-    test('Manual background voice disable silences ordinary voice but NEVER silences critical emergencies', () async {
+    test('Spoken alerts off silences ordinary voice but NEVER silences critical emergencies', () async {
       final settings = SettingsService();
       final engine = FakeVoiceEngine();
       final voice = VoiceService(settings, engine: engine);
       final phone = PhoneCallService(autoStart: false);
       voice.attachPhoneCallService(phone);
 
-      // Rider disables background voice
-      await settings.setBackgroundVoiceEnabled(false);
+      // Rider turns spoken alerts off (the one voice switch in Settings)
+      await settings.setVoiceWarnings(false);
 
       // Call active
       phone.simulateCallState(PhoneCallStatus.offhook);

@@ -12,6 +12,20 @@ test('platform blocks: iOS content only when an iOS link is configured', () => {
   assert.equal(applyPlatformBlocks(html, false), 'ABSOONC');
 });
 
+test('platform blocks: Google Play content only with an https PLAY_STORE_URL, which fills __PLAY_STORE_URL__', () => {
+  const html = 'A<!--play--><a href="__PLAY_STORE_URL__">Rate</a><!--/play-->B<!--no-play-->STORY<!--/no-play-->C';
+  const url = 'https://play.google.com/store/apps/details?id=com.example.app&hl=en';
+  assert.equal(applyPlatformBlocks(html, false, url), 'A<a href="https://play.google.com/store/apps/details?id=com.example.app&amp;hl=en">Rate</a>BC');
+  assert.equal(applyPlatformBlocks(html, false), 'ABSTORYC');
+  assert.equal(applyPlatformBlocks(html, false, ''), 'ABSTORYC');
+  // Anything that is not a plain https link counts as not configured.
+  for (const bad of ['http://play.google.com/x', 'javascript:alert(1)', 'https://x.example/"onmouseover="1', 'https://x.example/<b>', ' ']) {
+    assert.equal(applyPlatformBlocks(html, false, bad), 'ABSTORYC', bad);
+  }
+  // iOS and Play blocks are independent.
+  assert.equal(applyPlatformBlocks('<!--ios-->I<!--/ios--><!--play-->P<!--/play--><!--no-play-->N<!--/no-play-->', true, url), 'IP');
+});
+
 let gw, base;
 before(async () => {
   gw = await createApp({ soda: new MemorySoda(), logger: { info() {}, warn() {}, error() {} } });
@@ -32,4 +46,12 @@ test('without an iOS link the site never offers an iOS download and says so cons
   const get = await (await fetch(base + '/get')).text();
   assert.ok(get.includes('No iOS version yet.'));
   assert.ok(!get.includes('id="ios"'));
+});
+
+test('without PLAY_STORE_URL the site asks for a story in the app instead of a Google Play rating', async () => {
+  const home = await (await fetch(base + '/')).text();
+  assert.ok(!home.includes('Rate CoRoute on Google Play'), 'no Play rating button');
+  assert.ok(!home.includes('__PLAY_STORE_URL__') && !/<!--\/?(no-)?play-->/.test(home), 'no placeholder or block markers left');
+  assert.ok(home.includes('Share your story after a ride in the app.'));
+  assert.ok(home.includes('Rate us in the app'));
 });

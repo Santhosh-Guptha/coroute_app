@@ -1,6 +1,5 @@
 import 'membership_payment_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -150,9 +149,15 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     }
   }
 
-  /// Opens the Mandatory Payment Checkout Sheet for a specific membership category.
+  /// Opens checkout for a paid plan (the server prices it: coupon and upgrade credit included).
+  /// A plan that is not sold any more (the retired Individual) opens the cheapest paid plan.
   void _openPaymentCheckoutSheet(MembershipCategory cat) async {
     HapticFeedback.mediumImpact();
+    if (!cat.canBuy) {
+      final paid = context.read<MembershipService>().catalog?.paidCategories ?? const <MembershipCategory>[];
+      if (paid.isEmpty || cat.isCommunity) return;
+      cat = paid.first;
+    }
     final ok = await MembershipPaymentScreen.push(context, category: cat);
     if (ok == true && mounted) {
       final ms = context.read<MembershipService>(); await ms.fetchMyMembership();
@@ -236,7 +241,12 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
               _buildVerificationState(),
               const SizedBox(height: 24),
             ] else ...[
-              // No owned membership: Display participating card (if any) and catalog selection cards.
+              // No owned membership: a legacy plan (kept until it ends), the participating card (if
+              // any) and the catalog selection cards.
+              if (ms.planAccess.isLegacy) ...[
+                _buildLegacyPlanCard(ms.planAccess),
+                const SizedBox(height: 16),
+              ],
               if (overview != null && overview.participating.isNotEmpty) ...[
                 _buildParticipatingCard(overview.participating.first),
                 const SizedBox(height: 16),
@@ -286,6 +296,35 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     );
   }
 
+  /// A plan bought before the membership plans (CoRoute Pro, Road Captain, Tour Operator): its
+  /// name and end date; it keeps the same hosting until then and cannot be renewed.
+  Widget _buildLegacyPlanCard(PlanAccess access) {
+    final until = access.validUntil > 0 ? PlanAccess.untilLabel(access.validUntil) : null;
+    return Container(
+      key: const Key('membership_legacy_plan'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.accentText, width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${access.name}${until != null ? ' · until $until' : ''}',
+              style: TextStyle(color: AppTheme.text, fontSize: 16, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text(
+            '${access.canHostGroup ? 'Host up to ${access.seats} riders' : 'Solo trips'} until it ends. '
+            'This older plan is not sold any more: when it ends you are on Community (free, solo rides). '
+            'Small Group or Large Group below lets you host a group.',
+            style: TextStyle(color: AppTheme.text2, fontSize: 12, height: 1.35),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSafetyGuaranteeBanner() {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -309,7 +348,8 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
                 ),
                 SizedBox(height: 4),
                 Text(
-                  'If your plan ends mid-ride, the ride goes on. SOS and crash alerts always work.',
+                  'Community is free for every rider: solo rides with SOS, crash alerts and guardians. '
+                  'If a paid plan ends mid-ride, the ride goes on.',
                   style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
                 ),
               ],
@@ -500,6 +540,12 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       priceRupees: owned.priceRupees,
       capacity: owned.capacity,
     );
+    // A plan that is not sold any more (the retired ₹9 Individual) is not renewed: the rider is on
+    // Community (free, solo rides) and the button offers the cheapest group plan.
+    final paid = catalog?.paidCategories ?? const <MembershipCategory>[];
+    final renewable = currentCat.canBuy || paid.isEmpty;
+    final renewCat = renewable ? currentCat : paid.first;
+    final renewLabel = renewable ? 'Renew Current Plan (₹${owned.priceRupees} / mo)' : 'Host a group from ₹${renewCat.priceRupees}';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -523,7 +569,9 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Your ${owned.name} plan ended on $validDate. Renew to get your group seats back.',
+            renewable
+                ? 'Your ${owned.name} plan ended on $validDate. You ride on Community (free, solo rides) until you renew.'
+                : 'Your ${owned.name} plan ended on $validDate. You ride on Community now: free, solo rides, every safety feature.',
             style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3),
           ),
           const SizedBox(height: 14),
@@ -532,7 +580,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             child: ElevatedButton.icon(
               icon: const Icon(Icons.autorenew_rounded, color: Colors.black, size: 20),
               label: Text(
-                'Renew Current Plan (₹${owned.priceRupees} / mo)',
+                renewLabel,
                 style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 14),
               ),
               style: ElevatedButton.styleFrom(
@@ -540,7 +588,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              onPressed: () => _openPaymentCheckoutSheet(currentCat!),
+              onPressed: () => _openPaymentCheckoutSheet(renewCat),
             ),
           ),
         ],
@@ -793,32 +841,21 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     bool isExpandableContent = false,
     bool isRenewal = false,
   }) {
-    final categories = (catalog != null && catalog.categories.isNotEmpty)
-        ? catalog.categories
+    // Community (free, shown for what it includes) and the paid plans; the retired ₹9 Individual is not offered.
+    final listed = (catalog?.categories ?? const <MembershipCategory>[]).where((c) => c.isCommunity || c.canBuy).toList();
+    // Prices and seats come only from the server catalog. Until it loads (offline), only the
+    // free Community plan is shown, never invented paid plans.
+    final categories = listed.isNotEmpty
+        ? listed
         : const [
             MembershipCategory(
-              id: 'individual',
-              name: 'Individual Solo Rider',
-              priceRupees: 9,
+              id: 'community',
+              name: 'Community',
+              priceRupees: 0,
               capacity: 1,
-              description: 'Safety, crash alerts and solo rides.',
-              features: ['Solo Ride Tracking', 'Essential Safety & Crash SOS', 'Turn-by-Turn GPS Navigation'],
-            ),
-            MembershipCategory(
-              id: 'group_small',
-              name: 'Group Membership (2–6)',
-              priceRupees: 49,
-              capacity: 6,
-              description: 'Group map and talk for your riding group.',
-              features: ['Convoy & Group Tracking', 'PTT Voice Intercom', 'Captain & Sweeper Roles', 'Participants Ride for ₹0'],
-            ),
-            MembershipCategory(
-              id: 'group_large',
-              name: 'Extended Group (7–12)',
-              priceRupees: 99,
-              capacity: 12,
-              description: 'For large groups and tours.',
-              features: ['Large Fleet Matrix', 'Sweeper Priority Voice', 'Live Convoy Dispatch', '12 Covered Seats'],
+              purchasable: false,
+              description: 'Free for every rider: solo rides with every safety feature.',
+              features: ['Solo rides with live tracking', 'SOS, crash alerts and guardians', 'Join any group ride for free'],
             ),
           ];
 
@@ -828,8 +865,8 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     final subtitle = isRenewal
         ? 'Select a plan below to renew your membership or switch to a different tier.'
         : (owned != null
-            ? 'Add seats or switch plans. Applies right away.'
-            : 'Pick how many riders you host. Each plan lasts 30 days.');
+            ? 'An upgrade starts now and credits your unused days. Fewer seats start when your plan ends.'
+            : 'Ride solo for free, or pick how many riders you host. Each plan lasts 30 days.');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -844,7 +881,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
               ),
               if (owned == null)
                 const Text(
-                  'Mandatory Payments',
+                  'Community is free',
                   style: TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.w600),
                 ),
             ],
@@ -859,7 +896,77 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
         for (final cat in categories) ...[
           _buildCategoryCard(cat, owned, isRenewal: isRenewal),
         ],
+        if (listed.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 14),
+            child: Text(
+              'Group plans show here when you are online.',
+              key: Key('membership_catalog_offline'),
+              style: TextStyle(color: Colors.white60, fontSize: 12),
+            ),
+          ),
       ],
+    );
+  }
+
+  /// Community: free for every rider, never bought. No button: it is simply what every rider has.
+  Widget _buildCommunityCard(MembershipCategory cat, UserMembership? owned) {
+    final yours = owned == null || owned.isExpired;
+    return Container(
+      key: const Key('membership_community_card'),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: yours ? Colors.lightGreenAccent.withValues(alpha: 0.6) : Colors.white12, width: yours ? 1.5 : 1.0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(cat.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              const Text('Free', style: TextStyle(color: Colors.lightGreenAccent, fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.person_rounded, color: Colors.white60, size: 16),
+              const SizedBox(width: 6),
+              Text(
+                yours ? 'Your plan · solo rides' : 'Every rider has it · solo rides',
+                style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          if (cat.description.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(cat.description, style: const TextStyle(color: Colors.white60, fontSize: 13, height: 1.35)),
+          ],
+          if (cat.features.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            for (final feat in cat.features)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle_outline_rounded, color: Colors.lightGreenAccent, size: 14),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(feat, style: const TextStyle(color: Colors.white70, fontSize: 12))),
+                  ],
+                ),
+              ),
+          ],
+          const SizedBox(height: 6),
+          const Text(
+            'Talk, messages and hosting a group come with Small Group or Large Group.',
+            style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.3),
+          ),
+        ],
+      ),
     );
   }
 
@@ -868,6 +975,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     UserMembership? owned, {
     bool isRenewal = false,
   }) {
+    if (cat.isCommunity) return _buildCommunityCard(cat, owned);
     final isCurrent = owned != null && owned.category == cat.id;
     final isPopular = cat.id == 'group_small';
     final isExpired = owned != null && owned.isExpired;
@@ -882,8 +990,10 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     } else if (owned != null) {
       if (cat.capacity > owned.capacity) {
         buttonLabel = 'Upgrade to ${cat.name} (₹${cat.priceRupees})';
-      } else {
+      } else if (isExpired) {
         buttonLabel = 'Switch to ${cat.name} (₹${cat.priceRupees})';
+      } else {
+        buttonLabel = 'Switch to ${cat.name} (₹${cat.priceRupees}) when this plan ends';
       }
     } else {
       buttonLabel = 'Select & Pay ₹${cat.priceRupees}';
@@ -986,609 +1096,6 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Mandatory Payment Checkout Bottom Sheet
-class _PaymentCheckoutSheet extends StatefulWidget {
-  final MembershipCategory category;
-  final void Function(UserMembership mem, String paymentId) onSuccess;
-
-  const _PaymentCheckoutSheet({
-    required this.category,
-    required this.onSuccess,
-  });
-
-  @override
-  State<_PaymentCheckoutSheet> createState() => _PaymentCheckoutSheetState();
-}
-
-class _PaymentCheckoutSheetState extends State<_PaymentCheckoutSheet> {
-  late Razorpay _razorpay;
-  String? _lastCreatedOrderId;
-  final TextEditingController _offerCtrl = TextEditingController();
-  final TextEditingController _upiVpaCtrl = TextEditingController();
-
-  String _paymentMethod = 'upi_instant'; // 'upi_instant', 'upi_custom', 'card_netbanking'
-  bool _isProcessing = false;
-  // Coupon state: nothing applied until the rider enters a code and the server accepts it.
-  String? _appliedCode;
-  int _discountInr = 0;
-  // True only when the server said the applied code makes this plan free (₹0 activation).
-  bool _serverConfirmsFree = false;
-  String? _promoMessage;
-  String? _checkoutError;
-
-  @override
-  void initState() {
-    super.initState();
-    _razorpay = Razorpay();
-    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
-    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
-    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
-  }
-
-  @override
-  void dispose() {
-    _razorpay.clear();
-    _offerCtrl.dispose();
-    _upiVpaCtrl.dispose();
-    super.dispose();
-  }
-
-  void _openRazorpayCheckout({
-    required String orderId,
-    required String keyId,
-    required int amountInPaise,
-  }) {
-    final auth = context.read<AuthService?>();
-    final options = <String, dynamic>{
-      'key': keyId,
-      'amount': amountInPaise,
-      'name': 'CoRoute Membership',
-      'description': '${widget.category.name} (${widget.category.capacity} riders)',
-      'order_id': orderId,
-      'prefill': {
-        'contact': auth?.phone ?? '',
-        'email': auth?.currentUserEmail ?? '',
-        'name': auth?.currentUserName ?? '',
-      },
-      'theme': {
-        'color': '#FF5722',
-      },
-    };
-
-    try {
-      _razorpay.open(options);
-    } catch (e) {
-      setState(() {
-        _isProcessing = false;
-        _checkoutError = 'Could not launch payment gateway: $e';
-      });
-    }
-  }
-
-  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
-    final ms = context.read<MembershipService>();
-    final orderId = response.orderId ?? _lastCreatedOrderId;
-    final paymentId = response.paymentId ?? '';
-    final signature = response.signature ?? '';
-
-    if (orderId == null || orderId.isEmpty) {
-      setState(() {
-        _isProcessing = false;
-        _checkoutError = 'Missing order reference from payment gateway.';
-      });
-      return;
-    }
-
-    final mem = await ms.verifyPayment(
-      orderId: orderId,
-      paymentId: paymentId,
-      signature: signature,
-    );
-
-    if (!mounted) return;
-    if (mem != null) {
-      widget.onSuccess(mem, paymentId);
-    } else {
-      setState(() {
-        _isProcessing = false;
-        _checkoutError = ms.lastError ?? 'Payment signature verification failed.';
-      });
-    }
-  }
-
-  void _handlePaymentError(PaymentFailureResponse response) {
-    if (!mounted) return;
-    setState(() {
-      _isProcessing = false;
-      _checkoutError = response.message ?? 'Payment cancelled or failed (Code: ${response.code}).';
-    });
-  }
-
-  void _handleExternalWallet(ExternalWalletResponse response) {
-    // External wallet handler
-  }
-
-  Future<void> _applyPromoCode() async {
-    final code = _offerCtrl.text.trim().toUpperCase();
-    if (code.isEmpty) {
-      setState(() {
-        _clearCoupon();
-        _checkoutError = null;
-      });
-      return;
-    }
-
-    setState(() {
-      _isProcessing = true;
-      _checkoutError = null;
-    });
-
-    final ms = context.read<MembershipService>();
-    final val = await ms.validateCoupon(code: code, categoryId: widget.category.id);
-    if (!mounted) return;
-
-    setState(() {
-      _isProcessing = false;
-      if (val != null && val['valid'] == true) {
-        _appliedCode = code;
-        _discountInr = couponDiscountRupees(val, widget.category.priceRupees);
-        _serverConfirmsFree = couponServerConfirmsFree(val);
-        _promoMessage = val['message']?.toString() ?? 'Coupon applied: -₹$_discountInr';
-        _checkoutError = null;
-      } else {
-        _clearCoupon(keepText: true);
-        final reason = val?['reason']?.toString() ?? ms.lastErrorReason;
-        _checkoutError = couponErrorMessage(reason) ??
-            val?['error']?.toString() ??
-            val?['message']?.toString() ??
-            ms.lastError ??
-            "This code can't be used";
-      }
-    });
-  }
-
-  /// Forgets the applied code (call inside setState).
-  void _clearCoupon({bool keepText = false}) {
-    if (!keepText) _offerCtrl.clear();
-    _appliedCode = null;
-    _discountInr = 0;
-    _serverConfirmsFree = false;
-    _promoMessage = null;
-  }
-
-  /// The server refused the code at checkout: drop it so the rider can pay the normal price.
-  void _dropCoupon(String? message) {
-    _clearCoupon();
-    _checkoutError = '${message ?? "This code can't be used"}. The code was removed, so you can pay the normal price.';
-  }
-
-  Future<void> _submitPayment() async {
-    final ms = context.read<MembershipService>();
-    final basePrice = widget.category.priceRupees;
-    final netPayable = (basePrice - _discountInr).clamp(0, 999999);
-    final couponCode = _appliedCode;
-
-    setState(() {
-      _isProcessing = true;
-      _checkoutError = null;
-    });
-
-    try {
-      // 1. Zero-amount activation (₹0) without Razorpay, only when the server confirmed the
-      //    rider's code makes this plan free. The server checks the code again.
-      if (couponCode != null && _serverConfirmsFree && netPayable == 0) {
-        final mem = await ms.activateFreeMembership(
-          categoryId: widget.category.id,
-          couponCode: couponCode,
-        );
-        if (!mounted) return;
-        if (mem != null) {
-          widget.onSuccess(mem, 'FREE-${DateTime.now().millisecondsSinceEpoch}');
-        } else {
-          setState(() {
-            _isProcessing = false;
-            if (ms.lastErrorIsCouponRefusal) {
-              _dropCoupon(ms.lastError);
-            } else {
-              _checkoutError = ms.lastError ?? 'Free membership activation failed.';
-            }
-          });
-        }
-        return;
-      }
-
-      // 2. Monetary payment: Razorpay order (a code is sent only when the rider applied one)
-      final orderRes = await ms.createOrder(
-        categoryId: widget.category.id,
-        offerCode: couponCode,
-      );
-
-      if (orderRes == null) {
-        if (!mounted) return;
-        setState(() {
-          _isProcessing = false;
-          if (ms.lastErrorIsCouponRefusal) {
-            _dropCoupon(ms.lastError);
-          } else {
-            _checkoutError = ms.lastError ?? 'Failed to create payment order.';
-          }
-        });
-        return;
-      }
-
-      // The server priced the order at ₹0 itself and has already activated the membership.
-      if (orderRes['isFree'] == true) {
-        final raw = orderRes['membership'];
-        final mem = raw is Map ? UserMembership.fromJson(Map<String, dynamic>.from(raw)) : ms.ownedMembership;
-        if (!mounted) return;
-        if (mem != null) {
-          widget.onSuccess(mem, orderRes['orderId']?.toString() ?? 'FREE-${DateTime.now().millisecondsSinceEpoch}');
-        } else {
-          setState(() {
-            _isProcessing = false;
-            _checkoutError = 'Your membership is being activated. Check again in a moment.';
-          });
-        }
-        return;
-      }
-
-      final orderId = orderRes['orderId']?.toString() ?? '';
-      final keyId = orderRes['keyId']?.toString() ?? '';
-      final amountInPaise = orderRes['amountInPaise'] as int? ?? (netPayable * 100);
-
-      _lastCreatedOrderId = orderId;
-
-      if (keyId.isEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _isProcessing = false;
-          _checkoutError = 'Payments are not set up. Please contact support.';
-        });
-        return;
-      }
-
-      _openRazorpayCheckout(orderId: orderId, keyId: keyId, amountInPaise: amountInPaise);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isProcessing = false;
-        _checkoutError = 'Payment checkout error: $e';
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cat = widget.category;
-    final basePrice = cat.priceRupees;
-    final discountAmount = _discountInr;
-    final netPayable = (basePrice - discountAmount).clamp(0, 999999);
-
-    return Container(
-      padding: EdgeInsets.only(
-        top: 20,
-        left: 20,
-        right: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      decoration: BoxDecoration(
-        color: AppTheme.card,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 44,
-                height: 4,
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text('Membership Checkout', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                    SizedBox(height: 2),
-                    Text('Mandatory Payment & Instant Activation', style: TextStyle(color: Colors.white60, fontSize: 12)),
-                  ],
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close_rounded, color: Colors.white60),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Plan Summary Card
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.black26,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(cat.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                      Text('₹${cat.priceRupees} / mo', style: TextStyle(color: AppTheme.brand, fontWeight: FontWeight.bold, fontSize: 15)),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    cat.isIndividual
-                        ? '1 Solo Rider Seat · Essential Safety & GPS'
-                        : '${cat.capacity} seats · Group map and talk',
-                    style: const TextStyle(color: Colors.white60, fontSize: 12),
-                  ),
-                  const SizedBox(height: 8),
-                  const Divider(color: Colors.white10),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: const [
-                      Icon(Icons.shield_outlined, color: Colors.lightGreenAccent, size: 14),
-                      SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'Rides continue even if the plan ends.',
-                          style: TextStyle(color: Colors.lightGreenAccent, fontSize: 11),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // Promo Code Input
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _offerCtrl,
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: 'Enter coupon code',
-                      hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
-                      filled: true,
-                      fillColor: Colors.black26,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white12,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: _isProcessing ? null : _applyPromoCode,
-                  child: const Text('Apply', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                ),
-                if (_appliedCode != null) ...[
-                  const SizedBox(width: 6),
-                  OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.white24),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    onPressed: _isProcessing
-                        ? null
-                        : () {
-                            setState(() {
-                              _clearCoupon();
-                              _checkoutError = null;
-                            });
-                          },
-                    child: const Text('Remove', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  ),
-                ],
-              ],
-            ),
-            if (_promoMessage != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Icon(Icons.check_circle_rounded, color: Colors.lightGreenAccent, size: 14),
-                  const SizedBox(width: 6),
-                  Text(_promoMessage!, style: const TextStyle(color: Colors.lightGreenAccent, fontSize: 12, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ],
-            const SizedBox(height: 16),
-
-            // Price Breakdown
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.black26,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: Column(
-                children: [
-                  _priceRow('Base Membership Price', '₹$basePrice'),
-                  if (discountAmount > 0) ...[
-                    const SizedBox(height: 6),
-                    _priceRow('Coupon Discount ($_appliedCode)', '-₹$discountAmount', isDiscount: true),
-                  ],
-                  const SizedBox(height: 6),
-                  _priceRow('Goods & Services Tax (GST 18%)', 'Included in Price'),
-                  const Divider(color: Colors.white24, height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Total Amount Payable', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                      Text('₹$netPayable', style: TextStyle(color: AppTheme.brand, fontWeight: FontWeight.bold, fontSize: 18)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // Mandatory Payment Methods (Only shown when netPayable > 0)
-            if (netPayable > 0) ...[
-              const Text('Select Payment Method (Mandatory)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-              const SizedBox(height: 10),
-              _buildPaymentRadio('upi_instant', 'UPI Instant Pay', 'Google Pay, PhonePe, Paytm, BHIM', Icons.flash_on_rounded),
-              _buildPaymentRadio('upi_custom', 'Custom UPI ID / VPA', 'Pay via any UPI handle', Icons.account_balance_wallet_rounded),
-              if (_paymentMethod == 'upi_custom') ...[
-                Padding(
-                  padding: const EdgeInsets.only(left: 36, right: 8, bottom: 8),
-                  child: TextField(
-                    controller: _upiVpaCtrl,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                    decoration: InputDecoration(
-                      hintText: 'Enter UPI ID (e.g. rider@okaxis)',
-                      hintStyle: const TextStyle(color: Colors.white38),
-                      filled: true,
-                      fillColor: Colors.black38,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    ),
-                  ),
-                ),
-              ],
-              _buildPaymentRadio('card_netbanking', 'Cards & Net Banking', 'Visa, Mastercard, RuPay, All Banks', Icons.credit_card_rounded),
-              const SizedBox(height: 8),
-            ] else ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.teal.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.tealAccent.withValues(alpha: 0.3)),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.verified_rounded, color: Colors.tealAccent, size: 20),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Coupon covers it all. No payment needed.',
-                        style: TextStyle(color: Colors.tealAccent, fontSize: 12, fontWeight: FontWeight.w500),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-
-            if (_checkoutError != null) ...[
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.redAccent.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(_checkoutError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12))),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-
-            // Action Button
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.brand,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: _isProcessing ? null : _submitPayment,
-                child: _isProcessing
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                    : Text(
-                        netPayable > 0 ? 'Pay ₹$netPayable & Activate Membership' : 'Activate Free Membership (₹0)',
-                        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 14),
-                      ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _priceRow(String label, String value, {bool isDiscount = false}) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-        Text(
-          value,
-          style: TextStyle(
-            color: isDiscount ? Colors.lightGreenAccent : Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPaymentRadio(String value, String title, String subtitle, IconData icon) {
-    final isSelected = _paymentMethod == value;
-    return GestureDetector(
-      onTap: () => setState(() => _paymentMethod = value),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: isSelected ? AppTheme.brand.withValues(alpha: 0.15) : Colors.black26,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: isSelected ? AppTheme.brand : Colors.white12),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: isSelected ? AppTheme.brand : Colors.white60, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: TextStyle(color: Colors.white, fontWeight: isSelected ? FontWeight.bold : FontWeight.w500, fontSize: 13)),
-                  Text(subtitle, style: const TextStyle(color: Colors.white60, fontSize: 11)),
-                ],
-              ),
-            ),
-            Radio<String>(
-              value: value,
-              groupValue: _paymentMethod,
-              activeColor: AppTheme.brand,
-              onChanged: (val) => setState(() => _paymentMethod = val!),
-            ),
-          ],
-        ),
       ),
     );
   }

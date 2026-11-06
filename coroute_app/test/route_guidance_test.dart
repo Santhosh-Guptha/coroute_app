@@ -1,4 +1,3 @@
-import 'package:coroute_app/core/config/feature_gates.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -13,6 +12,7 @@ import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/models/route_model.dart';
 import 'package:coroute_app/data/models/stop_point_model.dart';
 import 'package:coroute_app/data/models/timeline_event_model.dart';
+import 'package:coroute_app/domain/navigation/nav_prompts.dart';
 import 'package:coroute_app/domain/notify/alert_policy.dart';
 import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/domain/route/off_route_detector.dart';
@@ -380,7 +380,7 @@ void main() {
     });
   });
 
-  group('RouteGuide (fixes -> detector -> route service -> personal route)', () {
+  group('RouteGuide (fixes -> off-route monitor -> route service -> personal route)', () {
     final planPts = straight(20000, stepM: 200);
     final plan = routeOf(planPts, durationS: 1200);
 
@@ -403,39 +403,48 @@ void main() {
     }
 
     // The personal route the fake service returns: 300 m east, then back to the destination.
-    final detour = routeOf([at(1400, 300), at(19000, 300), at(20000)], durationS: 1100);
+    final detour = routeOf([at(1000, 300), at(19000, 300), at(20000)], durationS: 1100);
 
     late List<List<(double, double)>> calls;
+    late List<double?> headings;
     late List<Completer<RouteModel?>> pending;
+    late List<NavPrompt> said;
     late RouteGuide g;
     late int notified;
     var t = 0;
 
     setUp(() {
       calls = [];
+      headings = [];
       pending = [];
+      said = [];
       notified = 0;
       t = 0;
-      g = RouteGuide(fetchRoute: (wp) {
-        calls.add(wp);
-        final c = Completer<RouteModel?>();
-        pending.add(c);
-        return c.future;
-      });
+      g = RouteGuide(
+        fetchRoute: (wp) => throw StateError('the headed fetcher is used'),
+        fetchRouteHeaded: (wp, heading) {
+          calls.add(wp);
+          headings.add(heading);
+          final c = Completer<RouteModel?>();
+          pending.add(c);
+          return c.future;
+        },
+        onPrompt: said.add,
+      );
       g.addListener(() => notified++);
       g.setConvoy(convoy(), 'me');
     });
     tearDown(() => g.dispose());
 
-    void fix(double north, [double east = 0, double speed = 40, bool online = true, bool lowData = false, double acc = 10]) {
+    void fix(double north, [double east = 0, double speed = 40, bool online = true, bool auto = true, double acc = 10]) {
       final (la, ln) = at(north, east);
-      g.onFix(lat: la, lng: ln, speedKmh: speed, accuracyM: acc, nowMs: t, online: online, lowData: lowData);
+      g.onFix(lat: la, lng: ln, speedKmh: speed, accuracyM: acc, nowMs: t, online: online, lowData: false, autoReroute: auto);
       t += 5000;
     }
 
     Future<void> settle() => Future<void>.delayed(Duration.zero);
 
-    /// On the route to 1 km, then 300 m east until the guide asks for a route.
+    /// On the route to 1 km, then 300 m east (off at once: beyond 120 m).
     void leave() {
       for (var n = 0.0; n <= 1000; n += 100) {
         fix(n);
@@ -454,24 +463,51 @@ void main() {
       expect(g.eta!.inSeconds, closeTo(900, 2), reason: '15 of 20 km at 20 km per 1200 s');
       expect(g.statusLine, isNull);
       expect(calls, isEmpty);
+      expect(said, isEmpty);
       expect(g.active!.matched!.alongM, closeTo(5000, 5));
     });
 
-    test('leaving the route fetches a personal route from here through what is left; no popups, one status line', () async {
+    test('GPS jitter of 20-35 m around the route at speed: never off, never a request, never a word', () {
+      for (var n = 0.0; n <= 8000; n += 50) {
+        fix(n, (n ~/ 50).isEven ? 35 : -20);
+      }
+      expect(calls, isEmpty);
+      expect(said, isEmpty);
+      expect(g.statusLine, isNull);
+    });
+
+    test('leaving the route: one line, a personal route from here in my direction, then "New route ready."', () async {
       leave();
       expect(calls.length, 1);
-      expect(calls.single.first, at(1500, 300), reason: 'from where I am');
+      expect(calls.single.first, at(1100, 300), reason: 'from where I am');
       expect(calls.single.last, planPts.last);
       expect(calls.single.length, 2, reason: 'no stops: me and the destination');
+      expect(headings.single, closeTo(71.6, 2), reason: 'the direction I moved in (100 m north, 300 m east)');
+      expect(said, [NavPrompt.offRouteFinding]);
       expect(g.statusLine, 'Off the planned route, finding a new route');
+      // More fixes while it is on its way: no second request, no second line.
+      fix(1200, 300);
+      fix(1300, 300);
+      expect(calls.length, 1);
+      expect(said.length, 1);
       pending.single.complete(detour);
       await settle();
       expect(g.hasPersonalRoute, isTrue);
       expect(g.statusLine, 'New route, 19 km');
       expect(g.activeRoute, same(detour));
-      expect(g.remainingM, lessThan(detour.distanceM));
+      expect(said, [NavPrompt.offRouteFinding, NavPrompt.rerouteReady]);
+      // The map and the ETA follow the new line.
+      expect(g.active!.points.length, detour.points.length);
+      expect(g.routeVersion, greaterThan(0));
       // The group plan itself is untouched.
       expect(g.plan!.points.length, planPts.length);
+      // Riding the new route: quiet.
+      for (var n = 1400.0; n <= 4000; n += 100) {
+        fix(n, 300);
+      }
+      expect(said.length, 2);
+      expect(calls.length, 1);
+      expect(g.remainingM, lessThan(detour.distanceM));
     });
 
     test('back on the planned route drops the personal route', () async {
@@ -488,40 +524,58 @@ void main() {
       expect(g.statusLine, 'Back on the planned route');
       expect(g.active, same(g.plan));
       expect(g.remainingM, closeTo(15700, 10));
+      expect(calls.length, 1, reason: 'riding back onto the plan is not leaving the new route');
       // The notice goes away by itself on a later fix (no timer).
       t += RouteConstants.backOnRouteNoticeFor.inMilliseconds;
       fix(4400, 3);
       expect(g.statusLine, isNull);
     });
 
-    test('throttled: one request at a time, one a minute, back-off after failures', () async {
+    test('failures: one request at a time, 15 s apart, then 30 s; after 3 one line and the original route stays', () async {
       leave();
       final first = t - 5000;
-      for (var n = 1600.0; n <= 2400; n += 100) {
-        fix(n, 300);
-      }
-      expect(calls.length, 1, reason: 'in flight');
       pending.single.complete(null); // failed
       await settle();
       expect(g.statusLine, 'Off the planned route');
-      while (t - first < 60000) {
-        fix(2500, 300 + t / 1000);
+      while (t - first <= 15000) {
+        fix(1500, 300 + t / 1000);
       }
-      expect(calls.length, 1, reason: 'not within a minute of the first');
-      fix(2500, 300 + t / 1000);
-      expect(calls.length, 2);
+      expect(calls.length, 2, reason: 'the next fix 15 s after the first request');
       final second = t - 5000;
-      pending.last.complete(null); // failed again: the wait doubles
+      expect(second - first, 15000);
+      pending.last.complete(null);
       await settle();
-      while (t - second < 120000) {
-        fix(2500, 300 + t / 1000);
+      while (t - second <= 30000) {
+        fix(1500, 300 + t / 1000);
       }
-      expect(calls.length, 2, reason: '2 minutes after a second failure');
-      fix(2500, 300 + t / 1000);
-      expect(calls.length, 3);
+      expect(calls.length, 3, reason: '30 s after a second failure');
+      expect(t - 5000 - second, 30000);
+      pending.last.complete(null);
+      await settle();
+      expect(said, [NavPrompt.offRouteFinding, NavPrompt.rerouteFailed]);
+      expect(g.statusLine, "Couldn't find a new route. Follow the group.");
+      expect(g.hasPersonalRoute, isFalse);
+      expect(g.active, same(g.plan), reason: 'the group route stays on the map');
+      for (var i = 0; i < 40; i++) {
+        fix(1500, 300 + t / 1000);
+      }
+      expect(calls.length, 3, reason: 'gave up');
+      expect(said.length, 2);
     });
 
-    test('offline: no request, the status says it; data saver: one per 3 minutes', () async {
+    test('no answer within 20 s: counts as a failure, the late answer is ignored', () async {
+      leave();
+      for (var i = 0; i < 5; i++) {
+        fix(1200 + i * 100.0, 300);
+      }
+      expect(calls.length, 2, reason: 'timed out, then asked again');
+      pending.first.complete(detour);
+      await settle();
+      expect(g.hasPersonalRoute, isFalse);
+      expect(g.reroute.scheduler.failures, 1);
+    });
+
+    test('offline: no request, one line and the status say it; asks when the network is back', () async {
       for (var n = 0.0; n <= 1000; n += 100) {
         fix(n);
       }
@@ -529,20 +583,49 @@ void main() {
         fix(n, 300, 40, false);
       }
       expect(calls, isEmpty);
-      expect(g.statusLine, 'Off the planned route');
-      fix(2100, 300, 40, true, true);
+      expect(said, [NavPrompt.offRouteNoSignal]);
+      expect(g.statusLine, 'Off the planned route, no signal for a new route');
+      fix(2100, 300);
       expect(calls.length, 1);
-      pending.single.complete(null);
+      expect(said.length, 1, reason: 'already told');
+      pending.single.complete(detour);
       await settle();
-      final start = t - 5000;
-      while (t - start < 170000) {
-        fix(2200, 300 + t / 1000, 40, true, true);
+      expect(g.hasPersonalRoute, isTrue);
+      expect(said.last, NavPrompt.rerouteReady);
+    });
+
+    test('auto re-route off: "Off route." once, no request, the plan stays', () {
+      for (var n = 0.0; n <= 1000; n += 100) {
+        fix(n);
       }
-      expect(calls.length, 1);
-      while (t - start < 185000) {
-        fix(2200, 300 + t / 1000, 40, true, true);
+      for (var n = 1100.0; n <= 5000; n += 100) {
+        fix(n, 300, 40, true, false);
       }
-      expect(calls.length, 2);
+      expect(calls, isEmpty);
+      expect(said, [NavPrompt.offRoute]);
+      expect(g.statusLine, 'Off the planned route');
+    });
+
+    test('weaving on and off the route for 10 minutes: at most one off-route line per 2 minutes', () async {
+      for (var n = 0.0; n <= 1000; n += 100) {
+        fix(n);
+      }
+      var n = 1000.0;
+      while (t < 600000) {
+        for (var i = 0; i < 2; i++) {
+          fix(n += 100, 200); // off
+        }
+        for (var i = 0; i < 3; i++) {
+          fix(n += 100, 2); // back
+        }
+        for (final c in pending) {
+          if (!c.isCompleted) c.complete(null);
+        }
+        await settle();
+      }
+      final lines = said.where((p) => p.isOffRoute).length;
+      expect(lines, lessThanOrEqualTo(5));
+      expect(lines, greaterThanOrEqualTo(1));
     });
 
     test('before reaching the planned route (riding to the start) nothing is purged or fetched', () {
@@ -552,6 +635,7 @@ void main() {
       expect(g.started, isFalse);
       expect(g.remainingM, isNull);
       expect(calls, isEmpty);
+      expect(said, isEmpty);
     });
 
     test('a paused ride or an approximate plan never reroutes', () {
@@ -563,6 +647,7 @@ void main() {
         fix(n, 300);
       }
       expect(calls, isEmpty);
+      expect(said, isEmpty);
       expect(g.handlesOffRoute, isFalse);
     });
 
@@ -574,6 +659,24 @@ void main() {
       expect(g.hasPersonalRoute, isTrue);
       g.setConvoy(convoy(route: routeOf(straight(21000, stepM: 200))), 'me');
       expect(g.hasPersonalRoute, isFalse);
+    });
+
+    test('the lead sets a new group route while my request is on its way: it is dropped, I follow the new route', () async {
+      leave();
+      final newPlan = routeOf([for (var n = 0.0; n <= 20000; n += 200) at(n, 300)]);
+      g.setConvoy(convoy(route: newPlan), 'me');
+      pending.single.complete(detour);
+      await settle();
+      expect(g.hasPersonalRoute, isFalse);
+      // On the new group route (300 m east): on it, quiet.
+      for (var n = 1500.0; n <= 3000; n += 100) {
+        fix(n, 300);
+      }
+      expect(g.active, same(g.plan));
+      expect(g.plan!.points.first.$2, closeTo(at(0, 300).$2, 1e-5));
+      expect(calls.length, 1);
+      expect(g.statusLine, isNull);
+      expect(g.remainingM, closeTo(17000, 20));
     });
 
     test('a result that arrives after the rider came back, or after dispose, is ignored', () async {
@@ -682,8 +785,6 @@ void main() {
   });
 
   group('Meet here sheet', () {
-    setUp(() => FeatureGates.forceAllUnlocked = true);
-    tearDown(() => FeatureGates.forceAllUnlocked = false);
     Future<MeetHereResult?> open(WidgetTester tester, Future<String?> Function() name, {double scale = 1.0}) async {
       AppTheme.use(AppPalette.dark);
       tester.view.physicalSize = const Size(320, 640);

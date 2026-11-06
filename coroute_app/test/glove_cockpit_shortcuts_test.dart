@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
@@ -55,7 +54,6 @@ void main() {
     intercom.setMicMuted(false);
 
     bool screenOn = false;
-    bool autoFollow = true;
     final toggles = <String, bool>{};
 
     await tester.pumpWidget(
@@ -68,9 +66,7 @@ void main() {
                 settingsService: settings,
                 intercomService: intercom,
                 keepScreenOn: screenOn,
-                autoFollow: autoFollow,
                 onToggleKeepScreenOn: () => screenOn = !screenOn,
-                onToggleAutoFollow: () => autoFollow = !autoFollow,
                 onSettingToggled: (name, state) => toggles[name] = state,
               );
             },
@@ -83,10 +79,10 @@ void main() {
     await tester.tap(find.text('Open Settings Modal'));
     await tester.pumpAndSettle();
 
-    // Verify the 4 essential in-flight settings exist
+    // The 4 in-ride quick settings: voice, night map, battery saver, screen on
     expect(find.byKey(const Key('quick_setting_voice_alerts')), findsOneWidget);
-    expect(find.byKey(const Key('quick_setting_sunlight_mode')), findsOneWidget);
-    expect(find.byKey(const Key('quick_setting_battery_conserve')), findsOneWidget);
+    expect(find.byKey(const Key('quick_setting_night_map')), findsOneWidget);
+    expect(find.byKey(const Key('quick_setting_battery_saver')), findsOneWidget);
     expect(find.byKey(const Key('quick_setting_screen_always_on')), findsOneWidget);
 
     // Verify touch target dimensions are glove-friendly (>= 56 dp)
@@ -96,17 +92,19 @@ void main() {
     // Toggle Voice Alerts
     await tester.tap(find.byKey(const Key('quick_setting_voice_alerts')));
     await tester.pump();
-    expect(toggles['Voice Alerts'], isFalse);
+    expect(toggles['Voice'], isFalse);
+    expect(settings.voiceWarnings, isFalse);
 
     // Toggle Screen Always On
     await tester.tap(find.byKey(const Key('quick_setting_screen_always_on')));
     await tester.pump();
     expect(screenOn, isTrue);
 
-    // Toggle Battery Conserve
-    await tester.tap(find.byKey(const Key('quick_setting_battery_conserve')));
+    // Toggle Battery saver (the same switch as in Settings)
+    await tester.tap(find.byKey(const Key('quick_setting_battery_saver')));
     await tester.pump();
-    expect(toggles['Battery Conserve'], isTrue);
+    expect(toggles['Battery saver'], isTrue);
+    expect(settings.batterySaver, isTrue);
 
     // Close with Done
     await tester.ensureVisible(find.byKey(const Key('quick_settings_done')));
@@ -148,8 +146,6 @@ void main() {
 
 
   testWidgets('GloveQuickSettingsModal renders Guardian and Fuel action buttons', (tester) async {
-    FeatureGates.activeTier = SubscriptionTier.proRider;
-    addTearDown(() => FeatureGates.activeTier = SubscriptionTier.community);
     final settings = SettingsService();
     await settings.load();
 
@@ -165,9 +161,7 @@ void main() {
                 ctx,
                 settingsService: settings,
                 keepScreenOn: false,
-                autoFollow: true,
                 onToggleKeepScreenOn: () {},
-                onToggleAutoFollow: () {},
                 onOpenGuardian: () => guardianOpened = true,
                 onOpenFuel: () => fuelOpened = true,
               );

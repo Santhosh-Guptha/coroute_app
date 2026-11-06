@@ -1,4 +1,3 @@
-import 'package:coroute_app/core/config/feature_gates.dart';
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
@@ -337,8 +336,6 @@ void main() {
 
   group('Boundary Condition 5: Simultaneous PTT Audio Collisions & Priority Preemption', () {
     test('Floor arbitration drops concurrent casual packet but Road Captain preempts and ducks', () async {
-      FeatureGates.forceAllUnlocked = true;
-      addTearDown(() => FeatureGates.forceAllUnlocked = false);
       final rt = _TestRealtime();
       final ic = IntercomService(rt);
 

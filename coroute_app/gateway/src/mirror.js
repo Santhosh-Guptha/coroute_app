@@ -27,6 +27,8 @@
  *   HB / HBA      heartbeat / its echo         LU  riders with a live socket here (on change)
  *   U             personal message for a rider whose socket is on the peer
  *   binary 0x02   voice START/FRAME/END (frames only while the peer has sockets in that room)
+ *   XS            state of a registered extension (src/public_ride.js 'pr'), after the rooms, before SNAP_END;
+ *                 its changes travel as EV with g '' and x = {k, op} (same ordering, ack and resend as rooms)
  * Events are applied idempotently: a receiver ignores an EV whose seq is not above the last one seen from
  * that origin. Events not yet acknowledged are kept (bounded) and sent again after a reconnect, before the
  * snapshot; the snapshot then merges both sides (newest meta, freshest telemetry per rider, membership by the
@@ -168,6 +170,7 @@ class Mirror {
     this.posLast = new Map(); this.posPending = new Map();
     this.lastMeta = new Map();
     this.told = new Map();
+    this.exts = new Map(); // name -> { exportState(), importState(s), applyRemote(op) } (public ride)
     this.lastLU = '';
     this.state = this.enabled && this.role === 'live' ? 'syncing' : 'serving';
     this.startedAt = now();
@@ -187,6 +190,15 @@ class Mirror {
   }
 
   attach(hub) { this.hub = hub; hub.mirror = this; this.convoys.mirror = this; }
+
+  /** Registers replicated state that is not a room (public ride index, blocks, requests, road warnings). */
+  register(name, handler) { this.exts.set(name, handler); handler.mirror = this; }
+
+  /** One change of a registered extension to the peer (an EV without a room). */
+  ext(name, op) {
+    if (!this.enabled) return;
+    this._sendEvent({ g: '', d: {}, x: { k: name, op } }, { prio: 1 });
+  }
 
   /** Starts listening and dialing (no-op on a single node). Resolves once the listener is bound. */
   async start() {
@@ -559,6 +571,7 @@ class Mirror {
       case 'HBA': this.lagMs = Math.max(0, now() - Number(m.at || 0)); return;
       case 'LU': if (this.peer) this.peer.live = new Set(Array.isArray(m.u) ? m.u : []); return;
       case 'SNAP': for (const r of m.rooms || []) { try { this._mergeRoom(r); } catch (e) { this.log.warn('[mirror] snapshot room failed', e.message); } } return;
+      case 'XS': { const h = this.exts.get(m.k); if (h) { try { h.importState(m.s); } catch (e) { this.log.warn('[mirror] extension state failed', e.message); } } return; }
       case 'SNAP_END':
         this.snapshotApplied = true;
         if (this.state === 'syncing') this._serving('snapshot applied');
@@ -600,6 +613,9 @@ class Mirror {
       this.lastMeta.set(room.groupId, JSON.stringify(room.meta));
     }
     for (let i = 0; i < rooms.length; i += SNAP_CHUNK) this._json(link, { t: 'SNAP', rooms: rooms.slice(i, i + SNAP_CHUNK) }, 0);
+    for (const [k, h] of this.exts) {
+      try { this._json(link, { t: 'XS', k, s: h.exportState() }, 0); } catch (e) { this.log.warn('[mirror] extension snapshot failed', k, e.message); }
+    }
     this._json(link, { t: 'SNAP_END', n: rooms.length }, 0);
   }
 
@@ -625,6 +641,10 @@ class Mirror {
     } else {
       this.lastSeen.set(m.o, m.s);
       try { this._apply(String(m.g || ''), m.d || {}, m.w, m.wc); this.stats.applied++; } catch (e) { this.log.warn('[mirror] event failed', e.message); }
+      if (m.x && typeof m.x === 'object') {
+        const h = this.exts.get(m.x.k);
+        if (h) { try { h.applyRemote(m.x.op); } catch (e) { this.log.warn('[mirror] extension event failed', e.message); } }
+      }
     }
     if (m.a && this.link) this._json(this.link, { t: 'EA', s: m.s }, 0);
   }

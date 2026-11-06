@@ -47,7 +47,7 @@ test('geo proxy: cached, spaced out, identifies itself', async () => {
   assert.equal(b[0].name, 'Kurnool');
   assert.equal(log.length, 2);
   assert.ok(log[1].at - log[0].at >= 140, 'upstream calls are spaced out');
-  assert.match(log[0].ua, /^CoRoute\/3\.1 /);
+  assert.match(log[0].ua, /^CoRoute\/\d+\.\d+(\.\d+)? \(\+https?:\/\/[^;]+; [^)]+\)$/, 'one User-Agent from config: version, origin, contact');
 
   // Same place (within ~11 m) and same query come from the cache.
   assert.equal(await geo.reverse(17.24049, 78.42981), 'HP Petrol Pump, Shamshabad');

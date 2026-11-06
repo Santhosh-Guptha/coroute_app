@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/constants/emergency_nav_constants.dart';
+import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
@@ -237,7 +239,7 @@ class AssistSheetBody extends StatelessWidget {
         const SizedBox(height: Space.s16),
         OutlinedButton.icon(
           style: dial(color: AppTheme.sos, fontSize: 15),
-          onPressed: () => dialNumber(context, '112'),
+          onPressed: () => dialNumber(context, SafetyConstants.emergencyNumber),
           icon: const Icon(Icons.local_hospital_outlined),
           label: Text(L10n.t('assist.call112'), maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
@@ -247,7 +249,7 @@ class AssistSheetBody extends StatelessWidget {
             Expanded(
               child: OutlinedButton.icon(
                 style: dial(color: AppTheme.sos, height: 52, fontSize: 12),
-                onPressed: () => dialNumber(context, '108'),
+                onPressed: () => dialNumber(context, SafetyConstants.ambulanceNumber),
                 icon: const Icon(Icons.local_hospital_outlined, size: 18),
                 label: const Text('Call 108 (Ambulance)', maxLines: 2, textAlign: TextAlign.center),
               ),
@@ -256,7 +258,7 @@ class AssistSheetBody extends StatelessWidget {
             Expanded(
               child: OutlinedButton.icon(
                 style: dial(color: AppTheme.sos, height: 52, fontSize: 12),
-                onPressed: () => dialNumber(context, '100'),
+                onPressed: () => dialNumber(context, SafetyConstants.policeNumber),
                 icon: const Icon(Icons.local_police_outlined, size: 18),
                 label: const Text('Call 100 (Police)', maxLines: 2, textAlign: TextAlign.center),
               ),
@@ -266,7 +268,7 @@ class AssistSheetBody extends StatelessWidget {
         const SizedBox(height: Space.s8),
         OutlinedButton.icon(
           style: dial(color: AppTheme.warnText, height: 48, fontSize: 12),
-          onPressed: () => dialNumber(context, '1073'),
+          onPressed: () => dialNumber(context, SafetyConstants.highwayHelpline),
           icon: const Icon(Icons.emergency_outlined, size: 18),
           label: const Text('Call 1073 (NHAI Highway Helpline)', maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
@@ -275,7 +277,9 @@ class AssistSheetBody extends StatelessWidget {
           style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
           onPressed: () => SmsSender.launchSmsIntent(
             to: '',
-            body: 'Emergency Assist at Lat:${a.lat.toStringAsFixed(5)}, Lng:${a.lng.toStringAsFixed(5)}. Maps: https://maps.google.com/?q=${a.lat.toStringAsFixed(5)},${a.lng.toStringAsFixed(5)} NHAI: 1073. ERSS: 112',
+            body: 'Emergency Assist at Lat:${a.lat.toStringAsFixed(5)}, Lng:${a.lng.toStringAsFixed(5)}. '
+                'Maps: ${AppConstants.mapsLink(a.lat, a.lng, digits: 5)} '
+                'NHAI: ${SafetyConstants.highwayHelpline}. ERSS: ${SafetyConstants.emergencyNumber}',
           ),
           icon: const Icon(Icons.sms_outlined, size: 18),
           label: const Text('Send Emergency SMS (No Permission Required)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13)),

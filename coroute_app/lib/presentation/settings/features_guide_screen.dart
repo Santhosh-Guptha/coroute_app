@@ -2,20 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
-import '../account/appearance_sheet.dart';
 import '../account/edit_profile_screen.dart';
 import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../garage/garage_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../ride/fuel_sheet.dart';
-import '../safety/safety_settings_screen.dart';
-import '../safety/safety_settings_sheet.dart';
 import '../subscription/membership_dashboard_screen.dart';
 import '../trip_planner/offline_map_manager_screen.dart';
-import '../widgets/data_saver_tile.dart';
 import 'feature_catalog.dart';
+import 'settings_screen.dart';
 
-/// Profile > Help > Features guide: every feature in plain words, grouped,
+/// Settings > Help > Features guide: every feature in plain words, grouped,
 /// searchable, one expandable tile each (what it does, when it works, what it
 /// uses, what it shares) with a shortcut to its switch. Content lives in
 /// [featureCatalog].
@@ -145,22 +142,12 @@ Future<void> openFeatureSettings(BuildContext context, SettingsTarget target) as
   switch (target) {
     case SettingsTarget.none:
       return;
-    case SettingsTarget.riderSettings:
-      push(const SafetySettingsScreen());
-    case SettingsTarget.rideSafety:
-      await SafetySettingsSheet.show(context);
+    case SettingsTarget.settings:
+      push(const SettingsScreen());
     case SettingsTarget.permissions:
       push(const PermissionsScreen());
-    case SettingsTarget.nightMode:
-      await AppearanceSheet.show(context);
     case SettingsTarget.fuel:
       await showFuelSheet(context, configure: true);
-    case SettingsTarget.dataSaver:
-      await showAppSheet<void>(
-        context,
-        title: DataSaverTile.title,
-        builder: (_) => const DataSaverTile(divider: false),
-      );
     case SettingsTarget.offlineMaps:
       push(const OfflineMapManagerScreen());
     case SettingsTarget.garage:

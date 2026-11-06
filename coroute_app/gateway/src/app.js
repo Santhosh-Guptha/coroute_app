@@ -11,7 +11,7 @@ const config = require('./config');
 const { SodaClient } = require('./oracle/soda');
 const { MemorySoda } = require('./oracle/memory_soda');
 const { Repo } = require('./oracle/repo');
-const { AuthService, UserGate } = require('./auth');
+const { AuthService, UserGate, requireAuth, requireAdmin } = require('./auth');
 const { ConvoyManager } = require('./convoys');
 const { Hub } = require('./ws');
 const { Retention } = require('./retention');
@@ -21,9 +21,11 @@ const { seedDefaultCoupons } = require('./subscription_routes');
 const { TrackStore } = require('./tracks');
 const { GeoProxy } = require('./geo');
 const { EssentialsService, OverpassPlacesProvider } = require('./essentials');
+const { PoiCellService } = require('./poi_cells');
 const { TimelineEngine } = require('./timeline');
 const { SafetyNetwork } = require('./safety_network');
 const { Discovery } = require('./discovery');
+const { PublicRides, publicRideAdminRouter } = require('./public_ride');
 const { SafetyAudit } = require('./safety_audit');
 const { RouteIndexCache, gridSize } = require('./net_geo');
 const { loadSite, isHiddenPath, SITE_PAGES, SITEMAP } = require('./pages');
@@ -95,6 +97,8 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     places: process.env.ESSENTIALS_OVERPASS_URL ? new OverpassPlacesProvider({ url: process.env.ESSENTIALS_OVERPASS_URL, ...(geoFetch ? { fetchImpl: geoFetch } : {}) }) : null,
     routing: (wp) => essentialsGeo.route(wp),
   });
+  // Map places: proxy + cache only (memory LRU + geo_cache, 7 days); the phone does the rest.
+  const poiCells = new PoiCellService({ repo, logger, url: process.env.POI_OVERPASS_URL || process.env.ESSENTIALS_OVERPASS_URL || null, ...(geoFetch ? { fetchImpl: geoFetch } : {}) });
   convoys.router = (wp) => geo.route(wp);
   convoys.geo = geo; // 3.16: nearest hospital lookups (never awaited by the SOS path)
   const timeline = new TimelineEngine({ convoys, repo, tracks, geo, logger, ...(clock ? { clock } : {}) });
@@ -102,11 +106,15 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const routes = new RouteIndexCache({ simplifyM: config.netRouteSimplifyM, maxPoints: config.netRouteMaxPoints, G: gridSize(config.netGridMillideg) });
   const network = new SafetyNetwork({ convoys, geo, audit, logger, routes, emergencyGateway });
   const discovery = new Discovery({ convoys, network, audit, logger, routes });
+  // Public ride and road warnings: coarse positions only, its own state (mirrored as extension 'pr').
+  const publicRides = new PublicRides({ convoys, network, audit, soda, repo, logger, routes });
+  await publicRides.init();
+  convoys.on('telemetry', (gid, rider) => publicRides.onTelemetry(gid, rider));
   convoys.network = network;
   convoys.on('emergency', (gid, alert, kind, ctx) => network.onEmergency(gid, alert, kind, ctx));
   convoys.on('telemetry', (gid, rider) => network.onTelemetry(gid, rider));
   convoys.on('roomLoaded', (gid) => network.onRoomLoaded(gid));
-  convoys.on('roomEnded', (gid, room) => { network.onRoomEnded(gid, room); discovery.onRoomEnded(gid); });
+  convoys.on('roomEnded', (gid, room) => { network.onRoomEnded(gid, room); discovery.onRoomEnded(gid); publicRides.onRoomEnded(gid); });
 
   const app = express();
   app.disable('x-powered-by');
@@ -146,12 +154,14 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
 
   const server = http.createServer(app);
   const startedAt = Date.now();
-  const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate, network, discovery, emergencyGateway });
+  const hub = new Hub({ server, convoys, repo, tracks, timeline, logger, gate, network, discovery, emergencyGateway, publicRides });
   network.attach(hub);
   discovery.attach(hub);
+  publicRides.attach(hub);
   // Two-node live mirror (src/mirror.js): off unless MIRROR_LISTEN_HOST / MIRROR_PEER_URL are set (opts: tests).
   const mirror = new Mirror({ convoys, logger, node: nodeName, ...(mirrorOpts || {}) });
   mirror.attach(hub);
+  mirror.register('pr', publicRides);
   await mirror.start();
   let guardianPush = null;
   // Pilot is disabled by default; an explicit HTTPS origin prevents host-header links.
@@ -179,7 +189,18 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // Pages are assembled once at startup (shared header/footer partials, asset version); per request only
   // __ORIGIN__ (canonical, og:image, sitemap work for any domain) and __MAX_RIDERS__ are filled in.
   const site = loadSite(pub(''));
-  const pageVars = (req) => ({ __ORIGIN__: originOf(req), __MAX_RIDERS__: String(config.maxConvoyRiders) });
+  // "Up to N riders": the largest paid plan's seats in the membership catalog (admin-editable, 12 when
+  // the catalog says nothing), refreshed at most once a minute. MAX_CONVOY_RIDERS is only the server's
+  // safety ceiling: it caps the number but is never advertised.
+  const { siteMaxRiders: siteMaxRidersOf } = require('./plan_pricing');
+  let siteMaxRiders = siteMaxRidersOf(null, config.maxConvoyRiders);
+  let siteMaxReadAt = 0;
+  const refreshSiteMaxRiders = () => {
+    if (Date.now() - siteMaxReadAt < 60000) return;
+    siteMaxReadAt = Date.now();
+    repo.getMembershipCatalog().then((catalog) => { siteMaxRiders = siteMaxRidersOf(catalog, config.maxConvoyRiders); }).catch(() => {});
+  };
+  const pageVars = (req) => { refreshSiteMaxRiders(); return { __ORIGIN__: originOf(req), __MAX_RIDERS__: String(siteMaxRiders) }; };
   const sendPage = (res, html) => res.type('html').set('Cache-Control', 'public, max-age=300').send(html);
   const notFoundPage = (req, res) => res.status(404).type('html').set('Cache-Control', 'no-store').send(site.render('404.html', pageVars(req)));
 
@@ -290,7 +311,9 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   }));
   // Load balancer health for live traffic (VM1 primary / VM2 backup): 200 serving, 503 syncing / overloaded / shutdown.
   app.get('/api/health/live', (req, res) => { const h = mirror.health(); res.status(h.status).set('Cache-Control', 'no-store').json(h.body); });
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName }));
+  // Public ride safety review (reports with their conversation, contact log, suspensions): admins only.
+  app.use('/api/admin/public-ride', requireAuth(gate), requireAdmin, publicRideAdminRouter(publicRides));
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, poiCells, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -343,6 +366,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     timeline.stop();
     network.stop();
     discovery.stop();
+    publicRides.stop();
     audit.stop();
     // Final room state to the peer gateway, then RECONNECT {reason:'shutdown'} to every socket (src/mirror.js).
     await mirror.shutdown().catch(() => {});
@@ -356,7 +380,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, audit, routes, emergencyGateway, shutdown };
+  return { app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

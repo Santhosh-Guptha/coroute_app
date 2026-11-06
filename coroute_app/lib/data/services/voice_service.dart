@@ -9,7 +9,7 @@ import 'settings_service.dart';
 /// How urgent a spoken alert is. Critical (emergencies) interrupts whatever is
 /// being said; important (3.16: stopped rider, separation, stale update, low
 /// battery) and warning (hazards, directions) wait their turn. Important ones
-/// are also spoken after dark with "Speak more after dark" (see [VoiceService]).
+/// are also spoken after dark (see [VoiceService]).
 enum VoicePriority { critical, important, warning }
 
 /// The speech engine behind [VoiceService] (the phone's text-to-speech; a fake in tests).
@@ -115,7 +115,6 @@ class VoiceService extends ChangeNotifier {
         _clock = clock ?? _wallClock {
     _priorityManager = priorityManager ??
         AudioPriorityManager(
-          settings: _settings,
           engine: _engine,
           phoneCallService: _phoneCall,
           clock: _clock,
@@ -166,7 +165,7 @@ class VoiceService extends ChangeNotifier {
   bool get groupVoice => _groupVoice;
 
   /// After sunset (set by SafetyService from the ride's fixes): important alerts are
-  /// spoken too when "Speak more after dark" is on.
+  /// spoken too.
   void setNight(bool dark) => _night = dark;
 
   @visibleForTesting
@@ -179,22 +178,18 @@ class VoiceService extends ChangeNotifier {
   /// The settings used by this voice service.
   SettingsService get settings => _settings;
 
+  /// Emergencies are always spoken; after sunset important group alerts are spoken too.
   bool _allowed(VoicePriority p) => switch (p) {
-        VoicePriority.critical => _settings.voiceCritical,
+        VoicePriority.critical => true,
         VoicePriority.warning => _settings.voiceWarnings && _groupVoice,
-        VoicePriority.important =>
-          (_settings.voiceWarnings && _groupVoice) || (_settings.speakMoreAfterDark && _night && _settings.voiceCritical),
+        VoicePriority.important => (_settings.voiceWarnings && _groupVoice) || _night,
       };
 
   /// About how long the engine takes to say [text] (for the queue cap only).
   static int estimateMs(String text) => 600 + text.length * 70;
 
   /// Speaks [text] once. False when it was not spoken (setting off, duplicate key,
-  /// queue full, no engine, or audio congestion).
-  ///
-  /// Background voice guidance remains enabled across phone calls by default.
-  /// If the rider manually disables background voice via [SettingsService.backgroundVoiceEnabled],
-  /// ordinary alerts (P2-P5) are silenced while critical emergency alerts (P0/P1) ALWAYS speak.
+  /// queue full, no engine, or audio congestion). Emergency alerts always speak.
   Future<bool> speak(
     String text, {
     VoicePriority priority = VoicePriority.warning,
@@ -224,7 +219,7 @@ class VoiceService extends ChangeNotifier {
   /// P0: Immediate emergency alert (SOS, crash, vehicle collision).
   Future<bool> speakEmergency(String text, {String? dedupeKey, Duration? ttl}) {
     final t = text.trim();
-    if (t.isEmpty || !_settings.voiceCritical || _failed) return Future.value(false);
+    if (t.isEmpty || _failed) return Future.value(false);
     return _priorityManager.submit(
       text: t,
       priority: AudioPriority.p0CriticalEmergency,

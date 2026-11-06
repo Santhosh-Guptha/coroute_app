@@ -71,11 +71,16 @@ class GeoService {
   }
 
   /// Driving route through 2 to 25 waypoints (lat, lng), or null when unavailable.
-  Future<RouteModel?> route(List<(double, double)> waypoints) async {
+  /// With [startHeadingDeg] (my direction of travel, a new route from where I
+  /// am) the route leaves the first point in that direction when it can, so
+  /// it does not start with a U-turn.
+  Future<RouteModel?> route(List<(double, double)> waypoints, {double? startHeadingDeg}) async {
     if (waypoints.length < 2) return null;
+    final h = startHeadingDeg;
     try {
       final res = await _api.post('/geo/route', {
         'waypoints': [for (final (lat, lng) in waypoints) {'lat': lat, 'lng': lng}],
+        if (h != null && h.isFinite) 'startBearing': ((h % 360) + 360).round() % 360,
       }, const Duration(seconds: 15));
       if (res is! Map) return null;
       return await RouteModel.fromJsonAsync(Map<String, dynamic>.from(res));

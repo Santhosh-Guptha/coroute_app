@@ -56,14 +56,14 @@ class RiderStatusSheet {
   static IconData getStatusIcon(String code) => statusIcons[code] ?? Icons.info_outline_rounded;
   static String getStatusLabel(String code) => getStatusInfo(code)['label'] ?? code;
 
-  static void show(
+  static Future<void> show(
     BuildContext context, {
     ConvoyService? convoyService,
     required String userId,
   }) {
     final activeService = convoyService ?? context.read<ConvoyService>();
     final current = activeService.activeConvoy?.riders[userId]?.statusReason ?? '';
-    showAppSheet<void>(
+    return showAppSheet<void>(
       context,
       title: 'Why are you stopped?',
       isScrollControlled: true,

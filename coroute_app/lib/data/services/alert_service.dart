@@ -9,7 +9,6 @@ import '../models/timeline_event_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'alarm_notifier.dart';
 import 'convoy_service.dart';
-import 'settings_service.dart';
 import 'timeline_service.dart';
 import 'voice_service.dart';
 
@@ -26,14 +25,12 @@ import 'voice_service.dart';
 ///
 /// 3.16: spoken lines come in the voice's language ([VoiceService.speechLang]);
 /// SOS lines are critical, group alerts (stopped, separated, no update, low battery,
-/// behind the sweeper) and accident warnings are important (spoken after dark too
-/// when "Speak more after dark" is on), the rest are warnings. A language change
-/// re-words the alerts on screen; nothing is spoken again.
+/// behind the sweeper) and accident warnings are important (spoken after dark too),
+/// the rest are warnings. A language change re-words the alerts on screen; nothing is spoken again.
 class AlertService with WidgetsBindingObserver {
-  AlertService(this._convoys, this._timeline, {FlutterLocalNotificationsPlugin? plugin, AlertPolicy? policy, this._voice, SettingsService? settings})
+  AlertService(this._convoys, this._timeline, {FlutterLocalNotificationsPlugin? plugin, AlertPolicy? policy, this._voice})
       : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
-        _policy = policy ?? AlertPolicy(),
-        _explicitSettings = settings {
+        _policy = policy ?? AlertPolicy() {
     _timeline.addListener(_onTimeline);
     _convoys.addListener(_onConvoy);
     L10n.changes.addListener(_onLanguage);
@@ -45,8 +42,6 @@ class AlertService with WidgetsBindingObserver {
   final FlutterLocalNotificationsPlugin _plugin;
   final AlertPolicy _policy;
   final VoiceService? _voice;
-  final SettingsService? _explicitSettings;
-  SettingsService? get _settings => _explicitSettings ?? _voice?.settings ?? _convoys.settings;
 
   bool _ready = false;
   bool _foreground = true;
@@ -60,6 +55,12 @@ class AlertService with WidgetsBindingObserver {
   int _networkRevision = -1;
   bool? _groupVoice;
   Future<void>? _restoreFuture;
+
+  /// Android (Agent 4): posts another rider's SOS natively, over the lock screen with a
+  /// full-screen intent (a heads-up notification when Android 14+ denies full-screen alerts).
+  /// Same id and channel as below, so cancelling works as before. Null in tests and off
+  /// Android; when it returns false (or fails) the plugin posts the alert as before.
+  static Future<bool> Function(int id, String channelId, String title, String body)? urgentPoster;
 
   static String _spokenKey(String gid) => 'coroute_alerts_spoken_$gid';
   static String _shownKey(String gid) => 'coroute_alerts_shown_$gid';
@@ -301,14 +302,13 @@ class AlertService with WidgetsBindingObserver {
   void _speak(Iterable<AlertSpec> specs) {
     final voice = _voice;
     if (voice == null) return;
-    final announceAll = _settings?.voiceAnnounceAllAlerts ?? true;
     var changed = false;
     for (final a in specs) {
-      String? line = a.speech;
-      if ((line == null || line.trim().isEmpty) && announceAll) {
-        line = a.body.isNotEmpty ? '${a.title}. ${a.body}' : a.title;
-      }
-      if (line == null || line.trim().isEmpty || !_spoken.add(a.key)) continue;
+      if (a.silent) continue;
+      // Alerts without their own spoken line are read out as title and body.
+      final own = a.speech;
+      final line = (own == null || own.trim().isEmpty) ? (a.body.isNotEmpty ? '${a.title}. ${a.body}' : a.title) : own;
+      if (line.trim().isEmpty || !_spoken.add(a.key)) continue;
       changed = true;
       voice.speak(line, priority: speechPriority(a), key: a.key).ignore();
     }
@@ -356,14 +356,24 @@ class AlertService with WidgetsBindingObserver {
       presentAlert: true,
       presentSound: !social,
       presentBadge: true,
-      interruptionLevel: sos ? InterruptionLevel.critical : InterruptionLevel.active,
+      // Time sensitive breaks through Focus on iOS 15+ (needs the Time Sensitive capability);
+      // critical alerts need an Apple entitlement CoRoute does not have.
+      interruptionLevel: sos ? InterruptionLevel.timeSensitive : InterruptionLevel.active,
     );
-    _plugin.show(
-      a.id,
-      a.title,
-      a.body.isEmpty ? null : a.body,
-      NotificationDetails(android: details, iOS: iosDetails),
-    ).ignore();
+    void post() => _plugin.show(
+          a.id,
+          a.title,
+          a.body.isEmpty ? null : a.body,
+          NotificationDetails(android: details, iOS: iosDetails),
+        ).ignore();
+    final urgent = urgentPoster;
+    if (sos && !update && urgent != null) {
+      urgent(a.id, channelId, a.title, a.body).then((ok) {
+        if (!ok) post();
+      }, onError: (Object _) => post()).ignore();
+    } else {
+      post();
+    }
     _shown[a.key] = a;
     if (_shownKeys.add(a.key)) {
       _persistShown();

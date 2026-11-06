@@ -68,6 +68,25 @@ class GarageService {
     _loaded = true;
   }
 
+  /// The active bike as saved on the phone, read only (never seeds a default).
+  static Future<BikeProfile?> readActiveBike() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final activeId = sp.getString(_keyActiveBike);
+      BikeProfile? first;
+      for (final item in sp.getStringList(_keyBikes) ?? const <String>[]) {
+        try {
+          final b = BikeProfile.fromJson(jsonDecode(item) as Map<String, dynamic>);
+          first ??= b;
+          if (b.id == activeId) return b;
+        } catch (_) {}
+      }
+      return first;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Sets the active motorcycle used for convoy rides and fuel calculations.
   Future<void> setActiveBike(String id) async {
     final bikes = bikesNotifier.value;

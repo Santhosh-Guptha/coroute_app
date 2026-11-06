@@ -7,6 +7,7 @@ import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../trip/trip_feedback_sheet.dart';
 import 'admin_ui.dart';
+import 'master_admin_dashboard.dart';
 
 /// Which reviews the moderation list shows.
 enum AdminReviewFilter { pending, changesRequested, approved, rejected, withdrawn, all }
@@ -188,10 +189,10 @@ class _AdminReviewsScreenState extends State<AdminReviewsScreen> {
     }
 
     return AdminShell(
-      title: 'Rider reviews',
+      title: 'Reviews',
       subtitle: _loaded ? '$pending waiting for approval' : 'Post-trip reviews',
-      onBack: () => Navigator.maybePop(context),
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
+      nav: adminNavItems(context, AdminSection.reviews),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 900),

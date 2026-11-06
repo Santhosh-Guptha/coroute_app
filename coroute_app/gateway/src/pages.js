@@ -69,8 +69,11 @@ function loadSite(publicDir) {
 
   // iPhone download blocks: <!--ios-->..<!--/ios--> shown only when an App Store / TestFlight / IPA link is
   // configured; <!--no-ios-->..<!--/no-ios--> shown otherwise (read once at startup).
+  // Google Play blocks: <!--play-->..<!--/play--> (with __PLAY_STORE_URL__ inside) only when PLAY_STORE_URL is an
+  // https link; <!--no-play-->..<!--/no-play--> otherwise.
   const cfg = require('./config');
   const iosAvailable = Boolean(cfg.appStoreUrl || cfg.iosTestFlightUrl || cfg.iosIpaUrl);
+  const playStoreUrl = cfg.playStoreUrl;
   const cache = new Map();
   for (const file of [...new Set([...Object.values(SITE_PAGES), ...SPECIAL_PAGES])]) {
     if (OPTIONAL_PAGES.has(file) && !fs.existsSync(path.join(publicDir, file))) continue;
@@ -80,7 +83,7 @@ function loadSite(publicDir) {
     });
     const page = (html.match(/<body\b[^>]*\bdata-page="([a-z0-9-]+)"/) || [])[1];
     if (page) html = html.replaceAll(`data-nav="${page}"`, `data-nav="${page}" aria-current="page"`);
-    html = applyPlatformBlocks(html, iosAvailable);
+    html = applyPlatformBlocks(html, iosAvailable, playStoreUrl);
     html = html.replaceAll('__ASSET_V__', assetVersion).replaceAll('__APP_VERSION__', appVersion);
     cache.set(file, versionAssets(html, file));
   }
@@ -102,11 +105,25 @@ function loadSite(publicDir) {
   };
 }
 
-/** Keeps or strips the <!--ios--> / <!--no-ios--> blocks of a page. */
-function applyPlatformBlocks(html, iosAvailable) {
+/** A Play Store link fit for an href: https only, no quotes or angle brackets; '' otherwise. */
+function safePlayUrl(url) {
+  const s = String(url || '').trim();
+  return /^https:\/\/[^\s"'<>]+$/i.test(s) ? s.replace(/&(?!amp;)/g, '&amp;') : '';
+}
+
+/**
+ * Keeps or strips the platform blocks of a page:
+ *   <!--ios-->..<!--/ios--> / <!--no-ios-->..<!--/no-ios-->     by iosAvailable;
+ *   <!--play-->..<!--/play--> / <!--no-play-->..<!--/no-play--> by a valid https playStoreUrl, which fills
+ *   __PLAY_STORE_URL__ (only ever inside play blocks).
+ */
+function applyPlatformBlocks(html, iosAvailable, playStoreUrl = '') {
+  const play = safePlayUrl(playStoreUrl);
   return html
     .replace(/<!--ios-->([\s\S]*?)<!--\/ios-->/g, (m, inner) => (iosAvailable ? inner : ''))
-    .replace(/<!--no-ios-->([\s\S]*?)<!--\/no-ios-->/g, (m, inner) => (iosAvailable ? '' : inner));
+    .replace(/<!--no-ios-->([\s\S]*?)<!--\/no-ios-->/g, (m, inner) => (iosAvailable ? '' : inner))
+    .replace(/<!--play-->([\s\S]*?)<!--\/play-->/g, (m, inner) => (play ? inner.replaceAll('__PLAY_STORE_URL__', play) : ''))
+    .replace(/<!--no-play-->([\s\S]*?)<!--\/no-play-->/g, (m, inner) => (play ? '' : inner));
 }
 
 /** True for paths that must never be served as static files (partials, templates, raw page sources). */
@@ -117,4 +134,4 @@ function isHiddenPath(rawPath) {
   return p.startsWith('/partials/') || p === '/partials' || /\/_[^/]*$/.test(p) || p.endsWith('.html');
 }
 
-module.exports = { loadSite, isHiddenPath, applyPlatformBlocks, SITE_PAGES, SITEMAP };
+module.exports = { loadSite, isHiddenPath, applyPlatformBlocks, safePlayUrl, SITE_PAGES, SITEMAP };

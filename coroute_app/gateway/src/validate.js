@@ -121,6 +121,8 @@ const TRIP_ID = /^[A-Za-z0-9_-]{4,80}$/;
 const TRIP_TEXT = { groupId: 40, tripName: 120, startLocationName: 120, destinationName: 120, createdByUserName: 40 };
 const TRIP_NUM = ['startTimeEpochMs', 'endTimeEpochMs', 'totalDistanceKm', 'topSpeedKmh', 'avgSpeedKmh', 'riderCount', 'stopCount', 'movingMs', 'restMs'];
 
+const CLIENT_STATS = ['v', 'distanceM', 'recordedDistanceM', 'gapDistanceM', 'movingMs', 'restMs', 'gapMs', 'maxKmh', 'avgMovingKmh', 'stops', 'longestStopMs', 'firstFixAt', 'lastFixAt', 'points', 'pieces'];
+
 function finite(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
 /** Keeps at most `max` points, evenly spread over the trail (first and last kept). */
@@ -129,7 +131,15 @@ function downsample(list, max) {
   if (max < 2) return list.slice(-max);
   const out = [];
   const step = (list.length - 1) / (max - 1);
-  for (let i = 0; i < max; i++) out.push(list[Math.round(i * step)]);
+  let prev = -1;
+  for (let i = 0; i < max; i++) {
+    const idx = Math.round(i * step);
+    let p = list[idx];
+    // A signal gap between the previous kept point and this one stays a gap (trip trails).
+    if (p && p.gap !== true) for (let j = prev + 1; j < idx; j++) if (list[j] && list[j].gap === true) { p = { ...p, gap: true }; break; }
+    out.push(p);
+    prev = idx;
+  }
   return out;
 }
 
@@ -153,7 +163,18 @@ function tripRecord(t, { maxPoints = config.tripMaxTrailPoints } = {}) {
     speedKmh: Math.max(0, Math.min(300, finite(p.speedKmh))),
     heading: ((finite(p.heading) % 360) + 360) % 360,
     timestamp: finite(p.timestamp),
+    // The first point after a signal gap: maps cut the line there.
+    ...(p.gap === true ? { gap: true } : {}),
   }));
+  // Numbers the phone computed from its own recorded track (the server uses them when it has no track).
+  if (t.clientStats && typeof t.clientStats === 'object' && !Array.isArray(t.clientStats)) {
+    const cs = {};
+    for (const k of CLIENT_STATS) {
+      const v = Number(t.clientStats[k]);
+      if (Number.isFinite(v) && v >= 0) cs[k] = v;
+    }
+    if (Object.keys(cs).length) out.clientStats = cs;
+  }
   return out;
 }
 

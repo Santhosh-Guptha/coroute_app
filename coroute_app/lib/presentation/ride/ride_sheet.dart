@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -17,17 +19,29 @@ import '../../core/ui/ui.dart';
 /// sheet is exactly as tall as it and never scrolls. [body] is shown when
 /// the rider drags the sheet up (or taps the header); only the expanded
 /// sheet scrolls.
+///
+/// Dragging: the sheet follows the finger 1:1 from anywhere on the header
+/// (and from the body once it is scrolled to the top). Its resting sizes
+/// (collapsed, half, expanded) never change while a finger is on it: a
+/// header re-measure or a layout change during a drag is applied when the
+/// finger lifts, so the sheet never re-snaps or jumps under the finger.
 class RideSheet extends StatefulWidget {
   final Widget header;
   final List<Widget> body;
 
   /// Called with the sheet's visible height in logical pixels (for placing
-  /// the SOS button and the map controls just above it).
+  /// the SOS button and the map controls just above it). Every frame of a
+  /// drag: listeners must stay cheap (a ValueNotifier, not a setState).
   final ValueChanged<double>? onTopChanged;
 
   /// Called with how far the sheet is open: 0 collapsed, 1 fully expanded
   /// (for fading the floating map controls out as it opens).
   final ValueChanged<double>? onExpansionChanged;
+
+  /// Called with the sheet's visible height once it is at rest (finger
+  /// lifted and the snap finished). For work too heavy for every frame of a
+  /// drag, such as moving the map camera clear of the sheet.
+  final ValueChanged<double>? onTopSettled;
 
   /// Largest share of the screen the expanded sheet takes.
   final double maxFraction;
@@ -40,6 +54,7 @@ class RideSheet extends StatefulWidget {
     required this.body,
     this.onTopChanged,
     this.onExpansionChanged,
+    this.onTopSettled,
     this.maxFraction = 0.85,
     this.minFraction,
   });
@@ -50,6 +65,9 @@ class RideSheet extends StatefulWidget {
 
   /// Widest the sheet content gets (tablets, landscape): centred beyond it.
   static const double maxContentWidth = 600;
+
+  /// How long the sheet must stay still before [onTopSettled] fires.
+  static const Duration settleDelay = Duration(milliseconds: 120);
 
   @override
   State<RideSheet> createState() => RideSheetState();
@@ -70,9 +88,18 @@ class RideSheetState extends State<RideSheet> {
   bool _reportScheduled = false;
   double _lastTop = -1;
   double _lastExpansion = -1;
+  double _lastSettledTop = -1;
+  Timer? _settleTimer;
+
+  /// Fingers on the sheet. While one is down the sheet's sizes are frozen
+  /// (see [RideSheet]); a change that arrived meanwhile waits in
+  /// [_pendingHeaderPx] / [_pendingResize] until the finger lifts.
+  int _pointers = 0;
+  double? _pendingHeaderPx;
+  bool _pendingResize = false;
 
   // Cached so the sheet is not told about "new" snap sizes on every rebuild
-  // (that re-snaps it and fights the rider's finger mid-drag).
+  // (a new list re-snaps it and cancels the rider's drag).
   (double, double)? _snapFor;
   List<double> _snapSizes = const <double>[];
 
@@ -83,6 +110,14 @@ class RideSheetState extends State<RideSheet> {
   /// Height of the collapsed sheet in logical pixels (header plus the bottom
   /// system inset), 0 before the first layout.
   double get collapsedHeight => _min * _available;
+
+  /// Whether a finger is on the sheet right now.
+  bool get isTouched => _pointers > 0;
+
+  /// The sizes the sheet is laid out with: collapsed, expanded and the extra
+  /// resting points between them (for tests: they must not change mid-drag).
+  @visibleForTesting
+  (double, double, List<double>) get debugSizes => (_min, _max, _snapSizes);
 
   /// Opens the sheet fully, or collapses it when it is open.
   void toggle() {
@@ -134,23 +169,63 @@ class RideSheetState extends State<RideSheet> {
       _lastExpansion = t;
       widget.onExpansionChanged?.call(t);
     }
+    if (_pointers == 0) _scheduleSettle();
+  }
+
+  /// [RideSheet.onTopSettled] once the sheet has not moved for
+  /// [RideSheet.settleDelay] and no finger is on it.
+  void _scheduleSettle() {
+    if (widget.onTopSettled == null) return;
+    _settleTimer?.cancel();
+    _settleTimer = Timer(RideSheet.settleDelay, () {
+      _settleTimer = null;
+      if (!mounted || _pointers > 0 || _available <= 0) return;
+      final top = _currentExtent * _available;
+      if ((top - _lastSettledTop).abs() < 0.5) return;
+      _lastSettledTop = top;
+      widget.onTopSettled?.call(top);
+    });
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    _pointers++;
+    _settleTimer?.cancel();
+    _settleTimer = null;
+  }
+
+  void _onPointerUp(PointerEvent event) {
+    if (_pointers > 0) _pointers--;
+    if (_pointers > 0 || !mounted) return;
+    // The finger lifted: apply what changed during the drag (the sheet then
+    // settles on the new sizes), and tell the screen once it is at rest.
+    final header = _pendingHeaderPx;
+    if (header != null || _pendingResize) {
+      _pendingHeaderPx = null;
+      _pendingResize = false;
+      setState(() {
+        if (header != null) _headerPx = header;
+      });
+    }
+    _scheduleSettle();
   }
 
   void _onHeaderSize(Size size) {
-    if (!mounted || (size.height - _headerPx).abs() < 1) return;
-    final wasCollapsed = !_expanded;
+    if (!mounted) return;
+    if (_pointers > 0) {
+      // Mid-drag: a new collapsed size now would re-snap the sheet under the
+      // finger and cancel the drag. Applied when the finger lifts.
+      _pendingHeaderPx = (size.height - _headerPx).abs() < 1 ? null : size.height;
+      return;
+    }
+    if ((size.height - _headerPx).abs() < 1) return;
+    // The build that follows moves a collapsed sheet to the new size and
+    // reports the new top edge.
     setState(() => _headerPx = size.height);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (wasCollapsed && _controller.isAttached && (_controller.size - _min).abs() > 0.0005) {
-        _controller.jumpTo(_min);
-      }
-      _report(_currentExtent);
-    });
   }
 
   @override
   void dispose() {
+    _settleTimer?.cancel();
     _controller.dispose();
     _bodyOpacity.dispose();
     super.dispose();
@@ -174,96 +249,113 @@ class RideSheetState extends State<RideSheet> {
       }
       final calculatedMin = widget.minFraction ?? ((_headerPx + bottomPad) / h);
       final min = calculatedMin.clamp(0.05, 0.8).toDouble();
-      final oldMin = _min;
-      _min = min;
-      // The collapsed size changed (header re-measured, navigation bar inset
-      // changed, rotation): a collapsed sheet follows it, once, after layout.
-      if ((min - oldMin).abs() > 0.0005 && _controller.isAttached && _controller.size <= oldMin + 0.05) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || !_controller.isAttached) return;
-          final size = _controller.size;
-          if ((size - _min).abs() > 0.0005 && size <= oldMin + 0.05) _controller.jumpTo(_min);
-        });
-      }
       // Always room to open: on very short windows (split screen, large text)
       // the body stays reachable even when that beats [maxFraction].
       final floor = (min + 0.25).clamp(min, 0.95).toDouble();
       final max = widget.maxFraction < floor ? floor : widget.maxFraction.clamp(min, 1.0).toDouble();
-      _max = max;
-      // Three resting points: collapsed, half and expanded (half only when
-      // it sits clearly between the other two).
       final key = (min, max);
-      if (_snapFor != key) {
+      if (_snapFor != null && _snapFor != key && _pointers > 0) {
+        // A finger is on the sheet: keep its current sizes (changing them
+        // re-snaps the sheet and cancels the drag); applied on release.
+        _pendingResize = true;
+      } else if (_snapFor != key) {
+        final oldMin = _min;
+        final firstLayout = _snapFor == null;
+        _min = min;
+        _max = max;
         _snapFor = key;
+        // Three resting points: collapsed, half and expanded (half only when
+        // it sits clearly between the other two).
         _snapSizes = (min + 0.08 < 0.5 && 0.5 < max - 0.08) ? <double>[0.5] : const <double>[];
+        // The collapsed size changed (header re-measured, navigation bar inset
+        // changed, rotation): a collapsed sheet follows it, once, after layout.
+        if (!firstLayout && (min - oldMin).abs() > 0.0005) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || !_controller.isAttached) return;
+            final size = _controller.size;
+            if (_pointers == 0 && (size - _min).abs() > 0.0005 && size <= oldMin + 0.05) _controller.jumpTo(_min);
+            _report(_currentExtent);
+          });
+        }
       }
-      return NotificationListener<DraggableScrollableNotification>(
-        onNotification: (n) {
-          _report(n.extent);
-          return false;
-        },
-        child: DraggableScrollableSheet(
-          controller: _controller,
-          initialChildSize: min,
-          minChildSize: min,
-          maxChildSize: max,
-          snap: true,
-          snapSizes: _snapSizes,
-          snapAnimationDuration: Motion.sheet,
-          builder: (context, scroll) {
-            _inner = scroll;
-            return Material(
-              color: AppTheme.card,
-              elevation: 8,
-              shadowColor: AppTheme.shadow,
-              shape: RoundedRectangleBorder(borderRadius: Radii.sheetTop, side: BorderSide(color: AppTheme.border, width: 2)),
-              clipBehavior: Clip.antiAlias,
-              child: ListView(
-                controller: scroll,
-                // The last rows scroll clear of the navigation bar and any side cutout.
-                padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: bottomPad),
-                children: [
-                  _MeasureSize(
-                    onChange: _onHeaderSize,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _Handle(onTap: toggle),
-                        Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: RideSheet.maxContentWidth),
-                            child: widget.header,
-                          ),
+      return RepaintBoundary(
+        child: NotificationListener<DraggableScrollableNotification>(
+          onNotification: (n) {
+            _report(n.extent);
+            return false;
+          },
+          child: DraggableScrollableSheet(
+            controller: _controller,
+            initialChildSize: _min,
+            minChildSize: _min,
+            maxChildSize: _max,
+            snap: true,
+            snapSizes: _snapSizes,
+            // No fixed snap duration: with one the sheet crawls the last few
+            // pixels at a constant speed and a fling is braked to that speed.
+            // Without it the snap keeps the fling's speed (at least 1600 dp/s).
+            builder: (context, scroll) {
+              _inner = scroll;
+              return Listener(
+                // Only counts fingers (never claims a gesture): the drag itself
+                // is the sheet's own scroll gesture.
+                onPointerDown: _onPointerDown,
+                onPointerUp: _onPointerUp,
+                onPointerCancel: _onPointerUp,
+                child: Material(
+                  color: AppTheme.card,
+                  elevation: 8,
+                  shadowColor: AppTheme.shadow,
+                  shape: RoundedRectangleBorder(borderRadius: Radii.sheetTop, side: BorderSide(color: AppTheme.border, width: 2)),
+                  clipBehavior: Clip.antiAlias,
+                  child: ListView(
+                    controller: scroll,
+                    // The last rows scroll clear of the navigation bar and any side cutout.
+                    padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: bottomPad),
+                    children: [
+                      _MeasureSize(
+                        onChange: _onHeaderSize,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _Handle(onTap: toggle),
+                            Center(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: RideSheet.maxContentWidth),
+                                child: widget.header,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                  ValueListenableBuilder<double>(
-                    valueListenable: _bodyOpacity,
-                    builder: (context, opacity, child) => Opacity(
-                      opacity: opacity,
-                      alwaysIncludeSemantics: true,
-                      child: child,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(RideSheet.hPad, 8, RideSheet.hPad, 28),
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: RideSheet.maxContentWidth),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: widget.body,
+                      ),
+                      ValueListenableBuilder<double>(
+                        valueListenable: _bodyOpacity,
+                        builder: (context, opacity, child) => Opacity(
+                          opacity: opacity,
+                          alwaysIncludeSemantics: true,
+                          child: child,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(RideSheet.hPad, 8, RideSheet.hPad, 28),
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: RideSheet.maxContentWidth),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: widget.body,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            );
-          },
+                ),
+              );
+            },
+          ),
         ),
       );
     });
@@ -456,10 +548,11 @@ class StoppedDetails extends StatelessWidget {
             if (reason.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: Space.s4),
-                child: Text('You told the group: $reason', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
+                child: Text(isSolo ? 'Your reason: $reason' : 'You told the group: $reason', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
               ),
             DsButton(
-              label: reason.isEmpty ? 'Tell the group why' : 'Change the reason',
+              // A solo ride (Community host) has no group to tell: plain "why you stopped" wording.
+              label: reason.isEmpty ? (isSolo ? 'Add why you stopped' : 'Tell the group why') : 'Change the reason',
               icon: Icons.chat_bubble_outline_rounded,
               tone: DsButtonTone.outline,
               height: 48,

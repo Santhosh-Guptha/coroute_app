@@ -10,6 +10,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../domain/tracking/battery_saver.dart';
 import '../../../domain/tracking/nav_motion.dart';
 
 /// Which way is up on the riding map.
@@ -56,9 +57,11 @@ class NavCameraController extends ChangeNotifier {
 
   static const String prefsKeyOrientation = 'cockpit_map_orientation_v1';
 
-  /// No camera motion faster than this (battery): 60 fps riding, 30 fps slow / saving.
-  static const Duration _frameRiding = Duration(microseconds: 16000);
-  static const Duration _frameRelaxed = Duration(microseconds: 33000);
+  /// No camera motion faster than this (battery): 30 fps riding, 15 fps in battery saver,
+  /// no frames at all once settled, in the background or with the screen off
+  /// ([BatterySaverProfile.cameraFrame]).
+  static const Duration _frameRiding = BatterySaverProfile.frameRiding;
+  static const Duration _frameRelaxed = BatterySaverProfile.frameSaver;
 
   /// Fixes older than this are not projected forward any further.
   static const double _maxExtrapolationSec = 1.5;
@@ -169,7 +172,7 @@ class NavCameraController extends ChangeNotifier {
     _syncCompass();
   }
 
-  /// Low battery / battery saver: at most 30 camera frames a second.
+  /// Low battery / battery saver: at most 15 camera frames a second.
   void setPowerSaving(bool value) => _powerSaving = value;
 
   /// Room taken by overlays (top bar, bottom sheet, side panel) in logical
@@ -409,7 +412,7 @@ class NavCameraController extends ChangeNotifier {
   void _onTick(Duration elapsed) {
     if (_disposed) return;
     final last = _lastTick;
-    final minFrame = (_powerSaving || _fixSpeedMps < 8 / 3.6) ? _frameRelaxed : _frameRiding;
+    final minFrame = _powerSaving ? _frameRelaxed : _frameRiding;
     if (last != null && elapsed - last < minFrame) return;
     final dt = last == null ? 1 / 60 : ((elapsed - last).inMicroseconds / 1e6).clamp(0.0, 0.25).toDouble();
     _lastTick = elapsed;

@@ -111,6 +111,7 @@ class _AdminGroupDetailScreenState extends State<AdminGroupDetailScreen> {
                 live ? 'Riding now' : 'Finished ${adminDate(g['endedAt'], time: true)}',
                 if ((g['createdByUserName']?.toString() ?? '').isNotEmpty) 'lead ${g['createdByUserName']}',
                 if ((g['destinationName']?.toString() ?? '').isNotEmpty) 'to ${g['destinationName']}',
+                if (g['hasStaff'] == true) 'staff on this ride',
               ].join(', '),
               style: AppText.body.copyWith(color: AppTheme.text2),
             ),
@@ -200,6 +201,7 @@ class _AdminGroupDetailScreenState extends State<AdminGroupDetailScreen> {
       title: name.isEmpty ? 'Rider' : name,
       subtitle: [
         adminCapitalize((m['role']?.toString() ?? 'PACK').toLowerCase()),
+        if (m['staff'] == true) 'staff',
         if (live) (m['online'] == true ? 'online' : 'not connected'),
         if (m['reachedDestination'] == true) 'arrived',
       ].join(', '),

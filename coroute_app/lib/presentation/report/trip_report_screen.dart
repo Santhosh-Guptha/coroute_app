@@ -7,8 +7,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
-import '../../core/config/feature_gates.dart';
-import '../../data/services/plan_subscription_service.dart';
 import '../../data/local/ride_stats_store.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../data/models/trip_history_model.dart';
@@ -26,6 +24,7 @@ import '../../data/services/gpx_service.dart';
 import 'ride_share_card.dart';
 import 'trip_route_map.dart';
 import '../trip/trip_feedback_sheet.dart';
+import '../review/app_review_prompt.dart';
 
 /// Full report of a finished trip, in two tabs:
 ///  * Summary: the key numbers first (shown at once from the saved trip, no
@@ -99,7 +98,12 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
         _canReview = res['canReview'] == true;
         _reviewChecked = true;
       });
-      _maybePromptReview();
+      if (_review != null || !_canReview) {
+        // No review sheet will open: the store-rating prompt may ask (its own rules decide).
+        _maybeAskAppRating(_review?.rating);
+      } else {
+        _maybePromptReview();
+      }
     } catch (_) {
       // Offline or not synced yet: the review button in the app bar still works.
     }
@@ -129,6 +133,15 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   Future<void> _openReview() async {
     final saved = await TripFeedbackSheet.show(context, tripId: _reviewTripId, tripName: widget.trip.tripName, existing: _review);
     if (saved != null && mounted) setState(() => _review = saved);
+    if (saved != null && mounted) _maybeAskAppRating(saved.rating);
+  }
+
+  /// The store-rating prompt after a recent ride's report opens or its review is sent.
+  void _maybeAskAppRating(int? rating) {
+    if (widget.adminView || !mounted) return;
+    final ended = widget.trip.endTimeEpochMs;
+    if (ended <= 0 || DateTime.now().millisecondsSinceEpoch - ended > reviewPromptWindow.inMilliseconds) return;
+    AppReviewPrompt.maybeShowAfterRide(context, tripId: widget.trip.tripId, groupId: widget.trip.groupId, rating: rating);
   }
 
   Future<void> _loadStats() async {
@@ -193,10 +206,6 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   }
 
   Future<void> _shareGpx() async {
-    if (!FeatureGates.isUnlocked(Feature.advancedTelemetryReplay)) {
-      FeatureGates.showUpgradeModal(context, Feature.advancedTelemetryReplay);
-      return;
-    }
     setState(() => _sharing = true);
     final api = context.read<ApiClient>();
     try {
@@ -250,9 +259,9 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
       try {
         final res = await api.get('/convoys/${Uri.encodeComponent(t.groupId)}/tracks?simplify=8', timeout: const Duration(seconds: 12));
         final list = (res is Map ? res['tracks'] : null) as List? ?? const [];
-        _tracks = list.whereType<Map>().map((m) => ReplayTrack.fromJson(Map<String, dynamic>.from(m))).where((x) => x.points.length >= 2).toList();
+        _tracks = list.whereType<Map>().map((m) => ReplayTrack.fromJson(Map<String, dynamic>.from(m), segmented: res is Map && res['segmented'] == true)).where((x) => x.points.length >= 2).toList();
       } catch (_) {
-        // No route: the planned line (or no sketch) is used instead.
+        // No recorded route: the card has no sketch (never the planned line).
       }
       if (!mounted) return;
       setState(() => _preparingCard = false);
@@ -267,6 +276,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
     final me = _memberFor(r, myId);
     final moving = me?.movingMs ?? t.movingMs;
     final hasTimes = me != null || moving > 0 || t.restMs > 0;
+    final sketch = _sketch(myId);
     return RideShareData(
       tripName: t.tripName,
       date: DateTime.fromMillisecondsSinceEpoch(t.startTimeEpochMs),
@@ -276,22 +286,24 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
       stops: me?.stops ?? t.stopCount,
       from: t.startLocationName,
       to: t.destinationName,
-      sketch: _sketchPoints(myId),
+      sketch: sketch.points,
+      sketchBreaks: sketch.breaks,
     );
   }
 
-  /// My recorded route (saved on the phone, else from the server), else the planned line.
-  List<LatLng> _sketchPoints(String? myId) {
-    final trail = RideShareData.cleanPoints(widget.trip.breadcrumbTrail.map((p) => LatLng(p.lat, p.lng)));
-    if (trail.length >= 2) return trail;
+  /// My recorded route (saved on the phone, else from the server), cut at
+  /// signal gaps. Never the planned line: a sketch of the plan would show
+  /// roads that were not ridden. Without a recorded route there is no sketch.
+  ({List<LatLng> points, Set<int> breaks}) _sketch(String? myId) {
+    final mine = TripBreadcrumbPoint.pieces(widget.trip.breadcrumbTrail);
+    final joined = RideShareData.joinPieces([for (final p in mine) [for (final q in p) LatLng(q.lat, q.lng)]]);
+    if (joined.points.length >= 2) return joined;
     for (final tr in _tracks ?? const <ReplayTrack>[]) {
       if (tr.userId != myId) continue;
-      final pts = RideShareData.cleanPoints(tr.points.map((p) => LatLng(p.lat, p.lng)));
-      if (pts.length >= 2) return pts;
+      final s = RideShareData.joinPieces([for (final p in tr.split().pieces) [for (final q in p) LatLng(q.lat, q.lng)]]);
+      if (s.points.length >= 2) return s;
     }
-    final planned = RideShareData.cleanPoints(TripRouteMap.plannedLineOf(_plan));
-    if (planned.length >= 2) return planned;
-    return trail; // 0 or 1 point: the painter draws nothing or one dot
+    return joined; // 0 or 1 point: the painter draws nothing or one dot
   }
 
   static MemberReport? _memberFor(TripReportModel? r, String? userId) {
@@ -316,7 +328,6 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
 
   @override
   Widget build(BuildContext context) {
-    context.watch<PlanSubscriptionService?>();
     final myId = context.read<AuthService>().currentUserId;
     return Scaffold(
       backgroundColor: AppTheme.bg,
@@ -354,16 +365,18 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             tooltip: '2D Replay & Scrubber',
             icon: Icon(
               Icons.slow_motion_video_rounded,
-              color: FeatureGates.isUnlocked(Feature.advancedTelemetryReplay)
-                  ? AppTheme.accentText
-                  : AppTheme.warnText,
+              color: AppTheme.accentText,
             ),
             onPressed: () {
-              if (!FeatureGates.isUnlocked(Feature.advancedTelemetryReplay)) {
-                FeatureGates.showUpgradeModal(context, Feature.advancedTelemetryReplay);
-                return;
+              final trail = widget.trip.breadcrumbTrail.where((p) => p.lat != 0 || p.lng != 0).toList();
+              // Where a recorded piece starts after a signal gap (not drawn as a ridden line).
+              final breaks = <int>{};
+              var at = 0;
+              for (final piece in TripBreadcrumbPoint.pieces(trail)) {
+                if (at > 0) breaks.add(at);
+                at += piece.length;
               }
-              final pts = widget.trip.breadcrumbTrail
+              final pts = trail
                   .map((p) => GpxTrackpoint(
                         latitude: p.lat,
                         longitude: p.lng,
@@ -377,6 +390,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
                   builder: (_) => RideReplayScreen(
                     rideTitle: widget.trip.tripName,
                     trackpoints: pts,
+                    breaks: breaks,
                   ),
                 ),
               );
@@ -446,7 +460,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
     final longest = me != null && me.longestStopMs > 0 ? me.longestStopMs : _longestFromEvents(myId);
     final avg = me?.avgMovingKmh ?? t.avgSpeedKmh;
     final hasTimes = me != null || moving > 0 || rest > 0;
-    final sketch = widget.adminView ? const <LatLng>[] : _sketchPoints(myId);
+    final sketch = widget.adminView ? (points: const <LatLng>[], breaks: const <int>{}) : _sketch(myId);
 
     final heroStats = <_HeroStat>[
       _HeroStat(label: 'Distance', value: formatDistance(me?.distanceM ?? t.totalDistanceKm * 1000)),
@@ -500,12 +514,13 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (sketch.length >= 2) ...[
+                    if (sketch.points.length >= 2) ...[
                       AspectRatio(
                         aspectRatio: 350 / 110,
                         child: CustomPaint(
                           painter: RouteSketchPainter(
-                            points: sketch,
+                            points: sketch.points,
+                            breaks: sketch.breaks,
                             lineColor: Colors.white.withValues(alpha: 0.9),
                             startColor: Colors.white,
                             endColor: Colors.white,
@@ -1043,6 +1058,10 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
   TripPlan? _lineFor;
   List<LatLng> _planned = const [];
 
+  /// The planned route is an optional, faint layer ("Planned"), off by default:
+  /// the map shows what was ridden.
+  bool _showPlanned = false;
+
   @override
   bool get wantKeepAlive => true; // keep the loaded routes when switching tabs
 
@@ -1064,7 +1083,7 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
     try {
       final res = await context.read<ApiClient>().get('/convoys/${widget.groupId}/tracks?simplify=8', timeout: const Duration(seconds: 25));
       final list = (res is Map ? res['tracks'] : null) as List? ?? const [];
-      final tracks = list.whereType<Map>().map((m) => ReplayTrack.fromJson(Map<String, dynamic>.from(m))).where((t) => t.points.length >= 2).toList();
+      final tracks = list.whereType<Map>().map((m) => ReplayTrack.fromJson(Map<String, dynamic>.from(m), segmented: res is Map && res['segmented'] == true)).where((t) => t.points.length >= 2).toList();
       if (!mounted) return;
       widget.onTracks?.call(tracks);
       setState(() {
@@ -1189,10 +1208,6 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
   }
 
   void _openReplay({TimelineEventModel? from}) {
-    if (!FeatureGates.isUnlocked(Feature.advancedTelemetryReplay)) {
-      FeatureGates.showUpgradeModal(context, Feature.advancedTelemetryReplay);
-      return;
-    }
     final e = from;
     Navigator.push(
       context,
@@ -1224,7 +1239,7 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
             plan: _plan,
             stops: _stops,
             deviations: _deviations,
-            plannedLine: _planned,
+            plannedLine: _showPlanned ? _planned : null,
             visible: _visible,
             highlightEvent: h,
             onStopTap: widget.onHighlight,
@@ -1241,6 +1256,13 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
           MapControl(icon: Icons.zoom_out_map_rounded, tooltip: 'Show the whole trip', onPressed: () => _mapKey.currentState?.showAll()),
           const SizedBox(height: Space.s8),
           MapControl(icon: Icons.people_alt_rounded, tooltip: 'Choose riders', active: _visible != null, onPressed: _tracks.length > 1 ? _pickRiders : null),
+          const SizedBox(height: Space.s8),
+          MapControl(
+            icon: Icons.alt_route_rounded,
+            tooltip: _showPlanned ? 'Hide the planned route' : 'Show the planned route',
+            active: _showPlanned,
+            onPressed: _planned.length >= 2 ? () => setState(() => _showPlanned = !_showPlanned) : null,
+          ),
           const SizedBox(height: Space.s8),
           MapControl(icon: Icons.help_outline_rounded, tooltip: 'Map key', onPressed: _showLegend),
         ]),

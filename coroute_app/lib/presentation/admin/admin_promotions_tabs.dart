@@ -68,8 +68,10 @@ StatusTextChip _windowChip({required bool active, required int startsAt, require
 
 /// `GET/POST/PATCH/DELETE /admin/offers[/:id]`. An offer is applied
 /// automatically at checkout (or with its coupon code) inside its dates.
+/// [embedded]: a section under the coupons (no scroll view of its own).
 class AdminOffersTab extends StatefulWidget {
-  const AdminOffersTab({super.key});
+  final bool embedded;
+  const AdminOffersTab({super.key, this.embedded = false});
 
   @override
   State<AdminOffersTab> createState() => _AdminOffersTabState();
@@ -130,12 +132,7 @@ class _AdminOffersTabState extends State<AdminOffersTab> with AutomaticKeepAlive
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return AdminTabBody(
-      loading: _loading,
-      hasData: _loaded,
-      error: _error,
-      onRefresh: _load,
-      children: [
+    final children = <Widget>[
         const SizedBox(height: 4),
         Text(
           'The best live offer for a plan is applied at checkout automatically; an offer with a coupon code only applies when the rider enters it. A coupon never stacks with an offer.',
@@ -152,10 +149,22 @@ class _AdminOffersTabState extends State<AdminOffersTab> with AutomaticKeepAlive
           rows: [
             for (var i = 0; i < _offers.length; i++) _offerRow(_offers[i], i == _offers.length - 1),
           ],
-          empty: Text('No offers yet.', style: AppText.caption),
+          empty: Text(
+            !_loaded && _error != null ? _error! : (!_loaded ? 'Loading offers...' : 'No offers yet.'),
+            style: AppText.caption.copyWith(color: !_loaded && _error != null ? AppTheme.sos : null),
+          ),
         ),
         const SizedBox(height: 24),
-      ],
+    ];
+    if (widget.embedded) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
+    }
+    return AdminTabBody(
+      loading: _loading,
+      hasData: _loaded,
+      error: _error,
+      onRefresh: _load,
+      children: children,
     );
   }
 
@@ -430,7 +439,7 @@ class _OfferEditorState extends State<_OfferEditor> {
 
 List<String> _stringList(Object? v) => v is List ? v.map((e) => e.toString()).toList() : const <String>[];
 
-/// `GET/POST/PATCH/DELETE /admin/coupons[/:code]`.
+/// `GET/POST/PATCH/DELETE /admin/coupons[/:code]`, with the automatic offers below the coupons.
 class AdminCouponsTab extends StatefulWidget {
   const AdminCouponsTab({super.key});
 
@@ -439,6 +448,7 @@ class AdminCouponsTab extends StatefulWidget {
 }
 
 class _AdminCouponsTabState extends State<AdminCouponsTab> with AutomaticKeepAliveClientMixin {
+  final GlobalKey<_AdminOffersTabState> _offers = GlobalKey<_AdminOffersTabState>();
   List<Map<String, dynamic>> _coupons = [];
   bool _loading = true;
   bool _loaded = false;
@@ -469,7 +479,8 @@ class _AdminCouponsTabState extends State<AdminCouponsTab> with AutomaticKeepAli
     if (mounted) setState(() => _loading = false);
   }
 
-
+  /// Pull to refresh: the coupons and the offers.
+  Future<void> _refresh() => Future.wait([_load(), _offers.currentState?._load() ?? Future<void>.value()]);
 
   Future<void> _edit([Map<String, dynamic>? coupon]) async {
     final saved = await showAppSheet<bool>(
@@ -488,7 +499,7 @@ class _AdminCouponsTabState extends State<AdminCouponsTab> with AutomaticKeepAli
       loading: _loading,
       hasData: _loaded,
       error: _error,
-      onRefresh: _load,
+      onRefresh: _refresh,
       children: [
         const SizedBox(height: 4),
         AdminTable(
@@ -504,6 +515,7 @@ class _AdminCouponsTabState extends State<AdminCouponsTab> with AutomaticKeepAli
           empty: Text('No coupons yet.', style: AppText.caption),
         ),
         const SizedBox(height: 24),
+        AdminOffersTab(key: _offers, embedded: true),
       ],
     );
   }
@@ -595,7 +607,7 @@ class _AdminCouponsTabState extends State<AdminCouponsTab> with AutomaticKeepAli
       case 'SCHEDULED':
         return StatusTextChip(icon: Icons.schedule_rounded, text: 'Starts ${adminDate(startsAt)}', color: AppTheme.brand);
       case 'USAGE_LIMIT_REACHED':
-        return StatusTextChip(icon: Icons.block_rounded, text: 'Limit Reached', color: AppTheme.sos);
+        return StatusTextChip(icon: Icons.block_rounded, text: 'Limit reached', color: AppTheme.sos);
       case 'EXPIRED':
         return StatusTextChip(icon: Icons.history_rounded, text: 'Expired', color: AppTheme.text2);
       case 'ARCHIVED':
@@ -950,7 +962,7 @@ class _CouponEditorState extends State<_CouponEditor> {
               // A saved binding to a plan that no longer exists stays visible so it can be removed.
               for (final t in _tiers.where((t) => _plansLoaded && !_planOptions.any((p) => p['id']?.toString() == t)).toList())
                 FilterChip(
-                  label: Text('$t (unknown)'),
+                  label: Text(adminPaidTierNames.contains(t) ? '${adminTierLabel(t)} (ignored)' : '$t (unknown)'),
                   selected: true,
                   onSelected: (_) => setState(() => _tiers.remove(t)),
                 ),

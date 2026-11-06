@@ -22,6 +22,7 @@
  *                   role and profile changes; listRiders() overlays the newer snapshot state on them.
  */
 const { identity, scrub, scrubConvoyMeta, mentions, FORMER_RIDER } = require('../anonymise');
+const { STAFF_ROLES, staffEmails, isStaffAccount } = require('../staff');
 
 const C = {
   users: 'users',
@@ -335,6 +336,23 @@ class Repo {
   }
   async countAdmins() {
     return (await this.soda.query(C.users, { role: 'MASTER_ADMIN' }, { limit: 1000 })).length;
+  }
+  /**
+   * userIds of the staff accounts (admin roles, BOOTSTRAP_ADMIN_EMAILS, STAFF_EMAILS; src/staff.js),
+   * which every rider / member / revenue count leaves out. Two indexed queries, not a scan of users.
+   */
+  async staffUserIds() {
+    const emails = [...staffEmails()];
+    const [byRole, byEmail] = await Promise.all([
+      this.soda.query(C.users, { role: { $in: STAFF_ROLES } }, { limit: 5000 }).catch(() => []),
+      emails.length ? this.soda.query(C.users, { email: { $in: emails } }, { limit: 5000 }).catch(() => []) : [],
+    ]);
+    const ids = new Set();
+    for (const r of [...byRole, ...byEmail]) {
+      const u = r.value || {};
+      if (u.userId && u.provider !== 'guest' && isStaffAccount(u)) ids.add(u.userId);
+    }
+    return ids;
   }
   async updateUser(key, patch) {
     const current = await this.soda.get(C.users, key);
@@ -1160,7 +1178,17 @@ class Repo {
     const ttlMs = 15 * 60 * 1000;
 
     // Fetch active reservations for this coupon
-    const allRedemptions = await this.listCouponRedemptions({ couponCode: coupon.code }, 1000);
+    let allRedemptions = await this.listCouponRedemptions({ couponCode: coupon.code }, 1000);
+    // A rider who closed the payment page and tries again must not be refused by their own earlier,
+    // unpaid hold of the same code: that hold is released (if the old order is paid after all, its
+    // confirmation still counts the redemption).
+    if (userId) {
+      const ownHolds = allRedemptions.filter((r) => r.userId === userId && r.status === 'RESERVED' && r.orderId !== orderId);
+      for (const r of ownHolds) {
+        await this.saveCouponRedemption({ ...r, status: 'CANCELLED', cancelledAt: now, cancelReason: 'SUPERSEDED' });
+      }
+      if (ownHolds.length) allRedemptions = allRedemptions.filter((r) => !ownHolds.includes(r));
+    }
     const activeReservations = allRedemptions.filter((r) => r.status === 'RESERVED' && r.expiresAt > now && r.orderId !== orderId);
 
     const totalInFlightOrUsed = (coupon.usageCount || 0) + activeReservations.length;
@@ -1389,14 +1417,21 @@ class Repo {
       if (to) endTime = Number(to);
     }
 
+    // Staff accounts (admins, STAFF_EMAILS) are left out of every figure; their paid orders are reported apart.
+    const staffIds = await this.staffUserIds().catch(() => new Set());
+    const isStaffId = (id) => !!id && staffIds.has(id);
     const allOrders = await this.listRazorpayOrders({}, 5000);
-    const allMemberships = await this.soda.query(C.memberships, {}, { limit: 5000 }).then((r) => r.map((x) => x.value)).catch(() => []);
-    const redemptions = await this.listCouponRedemptions({}, 5000);
+    const allMemberships = (await this.soda.query(C.memberships, {}, { limit: 5000 }).then((r) => r.map((x) => x.value)).catch(() => []))
+      .filter((m) => !isStaffId(m.ownerUserId));
+    const redemptions = (await this.listCouponRedemptions({}, 5000)).filter((r) => !isStaffId(r.userId));
 
-    const rangeOrders = allOrders.filter((o) => {
+    const inRange = (o) => {
       const ts = Number(o.paidAt || o.createdAt) || 0;
       return ts >= startTime && ts <= endTime;
-    });
+    };
+    const staffRangeOrders = allOrders.filter((o) => inRange(o) && isStaffId(o.userId));
+    const rangeOrders = allOrders.filter((o) => inRange(o) && !isStaffId(o.userId));
+    const staffPaid = staffRangeOrders.filter((o) => String(o.status || '').toUpperCase() === 'PAID' && (Number(o.amountInPaise) || 0) > 0);
 
     let grossSalesInr = 0;
     let discountsInr = 0;
@@ -1556,6 +1591,10 @@ class Repo {
         activeMemberships: totalActiveMembers,
         newMemberships: newMembershipsCount,
         averageOrderValueInr: averageOrderValue,
+        excludesStaff: true,
+        staffOrders: staffRangeOrders.length,
+        staffPaidOrders: staffPaid.length,
+        staffAmountInr: Math.round(staffPaid.reduce((s, o) => s + (Number(o.amountInPaise) || 0) / 100, 0) * 100) / 100,
       },
       activeMemberships: {
         individual: byPlan.individual.activeMembers,
@@ -1612,6 +1651,8 @@ class Repo {
         userName: u.name || o.userName || 'Rider',
         userEmail: u.email || o.userEmail || '',
         userPhone: u.phone || o.userPhone || '',
+        // Paid by a staff account (admin / STAFF_EMAILS): a checkout test, kept out of the analytics.
+        staff: !!o.userId && u.provider !== 'guest' && isStaffAccount(u),
         category: o.category || o.planTier || 'individual',
         categoryName: o.category
           ? (plans[o.category] ? plans[o.category].name : o.category)
@@ -1683,25 +1724,47 @@ class Repo {
   }
 
   // ---------- memberships & commercial entities ----------
+  /**
+   * The plans: Community (free for every rider, solo rides, not sold), Small Group and Large Group
+   * (paid; admin-editable price, seats, features, on sale). A stored catalog is read for those three
+   * ids only (a stored retired 'individual' entry is ignored); a plan missing from it falls back to
+   * its default. Community always stays free with one seat, whatever is stored.
+   */
   async getMembershipCatalog() {
+    const defaults = this._defaultMembershipCatalog();
     const r = await this.soda.findOne(C.subscriptionConfig, { k: 'membership_catalog' });
-    if (r?.value?.catalog) return r.value.catalog;
+    const stored = r?.value?.catalog;
+    if (!stored || typeof stored !== 'object') return defaults;
+    const out = {};
+    for (const id of Object.keys(defaults)) out[id] = stored[id] && typeof stored[id] === 'object' ? { ...stored[id], id } : defaults[id];
+    out.community = {
+      ...defaults.community,
+      ...out.community,
+      id: 'community', monthlyPriceInr: 0, capacity: 1, minCapacity: 1, maxCapacity: 1, purchasable: false, isActive: true,
+      entitlements: defaults.community.entitlements,
+    };
+    return out;
+  }
+
+  _defaultMembershipCatalog() {
     return {
-      individual: {
-        id: 'individual',
-        name: 'Individual Membership',
-        monthlyPriceInr: 9,
+      community: {
+        id: 'community',
+        name: 'Community',
+        monthlyPriceInr: 0,
         capacity: 1,
         minCapacity: 1,
         maxCapacity: 1,
         billingPeriodDays: 30,
-        features: ['essential_safety', 'basic_nav', 'personal_tracking', 'profile_settings'],
-        entitlements: { ptt: false, convoy: false, groupSafety: false, personalTracking: true, basicNav: true },
-        description: 'Personal safety-oriented capabilities for solo riders.',
+        purchasable: false,
+        isActive: true,
+        features: ['Solo rides with live tracking', 'Guardian live link', 'SOS, crash detection and emergency texts', 'Medical ID', 'Fuel, fatigue and speed alerts', 'Offline maps and re-routing', 'Trip history and reports', 'Join any group ride for free'],
+        entitlements: { ptt: false, convoy: false, groupSafety: false, personalTracking: true, basicNav: true, sharedTrip: false },
+        description: 'Free for every rider: ride solo with every safety feature, and join friends\' group rides.',
       },
       group_small: {
         id: 'group_small',
-        name: 'Group Membership (2–6)',
+        name: 'Small Group (2–6)',
         monthlyPriceInr: 49,
         capacity: 6,
         minCapacity: 2,
@@ -1713,7 +1776,7 @@ class Repo {
       },
       group_large: {
         id: 'group_large',
-        name: 'Group Membership (7–12)',
+        name: 'Large Group (7–12)',
         monthlyPriceInr: 99,
         capacity: 12,
         minCapacity: 7,
@@ -1913,13 +1976,14 @@ class Repo {
       };
     }
 
-    // 1. Registered riders
+    // 1. Registered riders (staff accounts are not riders; guests are counted as before)
     const users = await this.soda.query(C.users, {}, { limit: 100000, fields: 'id' }).catch(() => []);
-    const totalRiders = users.length;
+    const staffIds = await this.staffUserIds().catch(() => new Set());
+    const totalRiders = Math.max(0, users.length - staffIds.size);
 
     // 2. Active riders
     const activeTripsList = await this.soda.query(C.activeTrips, {}, { limit: 10000 }).catch(() => []);
-    const activeRiders = activeTripsList.length;
+    const activeRiders = activeTripsList.filter((r) => !staffIds.has(r.value?.userId)).length;
 
     // 3. Completed trips and total verified distance
     const trips = await this.soda.query(C.trips, {}, { limit: 50000 }).catch(() => []);

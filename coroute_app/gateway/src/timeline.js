@@ -25,6 +25,7 @@
 const crypto = require('crypto');
 const config = require('./config');
 const { haversine, distanceToPolyline, alongRoute, medianCentre, decodePolyline } = require('./geo_math');
+const { deviceStats } = require('./report');
 const { buildTripReport } = require('./report');
 const { scrub, mentions } = require('./anonymise');
 const { ConvoyError, sourceOf } = require('./convoys');
@@ -35,6 +36,8 @@ const GAP_RING = 10;
 const FRESH_MS = 2 * 60000;
 const HOLD_MS = 60000; // a condition must last this long before it becomes an entry
 const MAX_TS = Number.MAX_SAFE_INTEGER;
+/** Off-route is checked at most this often per rider (HOLD_MS decides anyway; the phone has its own check). */
+const OFF_ROUTE_CHECK_MS = 5000;
 
 const newId = () => `EV-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
 
@@ -61,6 +64,8 @@ class TimelineEngine {
     this.states = new Map(); // groupId -> state
     this.pending = new Set();
     this.rebuilds = new Map(); // groupId -> timer
+    this.rebuildUsers = new Map(); // groupId -> Set of riders whose track changed since the report
+    this.stats = { offRouteChecks: 0, offRouteFullScans: 0, reportBuilds: 0, reportRidersAnalysed: 0, reportRidersReused: 0 };
 
     convoys.on('telemetry', (gid, rider) => this._guard(this.onTelemetry(gid, rider)));
     convoys.on('event', (gid, payload) => this._guard(this.onConvoyEvent(gid, payload)));
@@ -77,10 +82,22 @@ class TimelineEngine {
     this.rebuilds.clear();
   }
 
-  /** A phone uploaded points after the report was built: rebuild it once uploads settle. */
-  scheduleRebuild(gid) {
+  /**
+   * A phone uploaded points after the report was built: rebuild it once uploads settle. With
+   * `userId` only that rider's part is redone (their track, stops, trip document); the other rows
+   * of the report are kept. Without it (unknown uploader) everything is rebuilt.
+   */
+  scheduleRebuild(gid, userId = null) {
     clearTimeout(this.rebuilds.get(gid));
-    const t = setTimeout(() => { this.rebuilds.delete(gid); this._guard(this.finishTrip(gid)); }, config.reportRebuildMs);
+    let users = this.rebuildUsers.get(gid);
+    if (!users) { users = new Set(); this.rebuildUsers.set(gid, users); }
+    users.add(userId || '*');
+    const t = setTimeout(() => {
+      this.rebuilds.delete(gid);
+      const set = this.rebuildUsers.get(gid) || new Set(['*']);
+      this.rebuildUsers.delete(gid);
+      this._guard(this.finishTrip(gid, { only: set.has('*') ? null : set }));
+    }, config.reportRebuildMs);
     if (t.unref) t.unref();
     this.rebuilds.set(gid, t);
   }
@@ -264,18 +281,25 @@ class TimelineEngine {
       await this._visit(gid, st, rs, rider, p, t, { key: 'DEST', lat: m.destinationLat, lng: m.destinationLng, name: m.destinationName || 'the destination', stopId: null });
     }
 
-    // Off route.
+    // Off route. At most every OFF_ROUTE_CHECK_MS per rider (fixes come every second; the entry
+    // needs HOLD_MS anyway), and near the rider's last route segment first: a full scan of a long
+    // route only when the rider is not near it there (see SERVER_LOAD.md).
     const route = this._route(st, m);
     const slotOff = `OFF_ROUTE:${rider.userId}`;
-    if (route) {
-      const r = distanceToPolyline(p, route);
+    if (route && (!rs.offCheckAt || t - rs.offCheckAt >= OFF_ROUTE_CHECK_MS || t < rs.offCheckAt)) {
+      rs.offCheckAt = t;
+      this.stats.offRouteChecks++;
       const limit = m.offRouteMeters || config.offRouteM;
-      if (r && r.dist > limit) {
+      const near = alongRoute(p, route, { fromIndex: rs.segIndex, maxLateralM: limit });
+      if (near) rs.segIndex = near.segIndex;
+      else this.stats.offRouteFullScans++;
+      if (!near) {
         if (!rs.offSince) rs.offSince = t;
         if (!st.open.has(slotOff) && t - rs.offSince >= HOLD_MS) {
-          await this._open(gid, st, slotOff, { ...who, type: 'OFF_ROUTE', startedAt: rs.offSince, lat: p.lat, lng: p.lng, data: { distanceM: Math.round(r.dist) } });
+          const r = distanceToPolyline(p, route);
+          await this._open(gid, st, slotOff, { ...who, type: 'OFF_ROUTE', startedAt: rs.offSince, lat: p.lat, lng: p.lng, data: { distanceM: Math.round(r ? r.dist : limit) } });
         }
-      } else if (r && r.dist < limit * 0.7) {
+      } else if (near.lateralM < limit * 0.7) {
         rs.offSince = 0;
         if (st.open.has(slotOff)) await this._close(gid, st, slotOff, t);
       }
@@ -1192,11 +1216,26 @@ class TimelineEngine {
   }
 
   // ------------------------------------------------------------- report
-  /** Builds the trip report from the full tracks and replaces live stops with exact ones. */
-  async finishTrip(gid) {
+  /**
+   * Builds the trip report from the full tracks and replaces live stops with exact ones. Runs once
+   * when the trip ends; after that only for late uploads, and then (`only`) just for the riders
+   * whose track changed. Riders without a track on the server fall back to the numbers their
+   * phone computed from its own track (sent with the trip), then to the live timeline.
+   */
+  async finishTrip(gid, { only = null } = {}) {
     const meta = await this.repo.getConvoyMeta(gid);
     if (!meta) return null;
-    const tracksByUser = this.tracks ? await this.tracks.load(gid) : new Map();
+    const incremental = !!(only && only.size && meta.report && Array.isArray(meta.report.members));
+    const onlySet = incremental ? only : null;
+    let tracksByUser = new Map();
+    if (this.tracks) {
+      if (onlySet) {
+        for (const uid of onlySet) {
+          const one = await this.tracks.load(gid, { userId: uid });
+          if (one.has(uid)) tracksByUser.set(uid, one.get(uid));
+        }
+      } else tracksByUser = await this.tracks.load(gid);
+    }
     // Only the points recorded while each rider was in the convoy count.
     for (const [uid, pts] of tracksByUser) {
       const m = meta.members?.[uid];
@@ -1206,7 +1245,27 @@ class TimelineEngine {
       tracksByUser.set(uid, pts.filter((p) => p.ts >= from && p.ts <= to));
     }
     const events = await this.repo.listEvents(gid, { limit: 20000 });
-    const { report, perMember } = buildTripReport({ meta, tracksByUser, events });
+    // Riders with no track on the server: the trip their phone saved (numbers + trail) if any.
+    const deviceTrips = new Map();
+    for (const m of Object.values(meta.members || {})) {
+      if (onlySet && !onlySet.has(m.userId)) continue;
+      if ((tracksByUser.get(m.userId) || []).length >= 2) continue;
+      const trip = await this.repo.getTrip(`TRIP-${String(gid).replace('GRP-', '')}-${m.userId}`).catch(() => null);
+      if (trip && trip.source === 'device' && trip.userId === m.userId) deviceTrips.set(m.userId, trip);
+    }
+    const deviceStatsByUser = new Map([...deviceTrips].map(([uid, trip]) => [uid, trip.clientStats]));
+    const { report, perMember } = buildTripReport({ meta, tracksByUser, events, deviceStatsByUser, only: onlySet, previous: onlySet ? meta.report : null });
+    this.stats.reportBuilds++;
+    for (const pm of perMember) {
+      if (pm.reused) { this.stats.reportRidersReused++; continue; }
+      this.stats.reportRidersAnalysed++;
+      // The phone's own trail and numbers stay when the server never got the track.
+      const dev = deviceTrips.get(pm.userId);
+      if (pm.tripDoc && dev && deviceStats(dev.clientStats)) {
+        pm.tripDoc.breadcrumbTrail = Array.isArray(dev.breadcrumbTrail) ? dev.breadcrumbTrail : [];
+        pm.tripDoc.statsSource = 'device';
+      }
+    }
 
     for (const pm of perMember) {
       if (!pm.analysis || pm.analysis.points.length < 2) continue; // no uploaded track (older app): keep live entries
@@ -1243,6 +1302,7 @@ class TimelineEngine {
     const rebuilt = !!fresh?.report; // a later rebuild after late uploads
     await this.repo.saveConvoyMeta({ ...fresh, report });
     for (const pm of perMember) {
+      if (!pm.tripDoc) continue; // kept from the previous report (incremental rebuild)
       if (!(await this.repo.findUserById(pm.userId))) continue; // never resurrect a deleted account
       if (rebuilt && !(await this.repo.getTrip(pm.tripDoc.tripId).catch(() => null))) continue; // the rider deleted this trip
       await this.repo.saveTrip(pm.tripDoc);

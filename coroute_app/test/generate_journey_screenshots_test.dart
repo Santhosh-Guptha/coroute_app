@@ -14,7 +14,6 @@ import 'package:coroute_app/data/services/auth_service.dart';
 import 'package:coroute_app/data/services/membership_service.dart';
 import 'package:coroute_app/presentation/subscription/membership_payment_screen.dart';
 import 'package:coroute_app/presentation/subscription/payment_success_screen.dart';
-import 'package:coroute_app/presentation/trip_planner/trip_creation_payment_alert_sheet.dart';
 import 'package:coroute_app/presentation/trip_planner/trip_review_sheet.dart';
 
 class _FakeApiClient extends ApiClient {
@@ -117,38 +116,6 @@ void main() {
       ),
     );
   }
-
-  testWidgets('Generate Stage 1: Trip Creation Payment Alert Sheet Screenshot', (tester) async {
-    tester.view.physicalSize = const Size(824, 1800);
-    tester.view.devicePixelRatio = 2.0;
-    addTearDown(tester.view.reset);
-
-    final repaintKey = GlobalKey();
-
-    await tester.pumpWidget(wrapWithTheme(
-      Builder(
-        builder: (context) => Center(
-          child: ElevatedButton(
-            onPressed: () {
-              TripCreationPaymentAlertSheet.show(
-                context,
-                category: testCategory,
-              );
-            },
-            child: const Text('Open Alert'),
-          ),
-        ),
-      ),
-      key: repaintKey,
-    ));
-
-    await tester.tap(find.text('Open Alert'));
-    await tester.pumpAndSettle();
-
-    await tester.binding.runAsync(() async {
-      await saveScreenshot(repaintKey, 'stage1_trip_creation_payment_alert.png');
-    });
-  });
 
   testWidgets('Generate Stage 2: Redesigned CoRoute Payment Screen Screenshot', (tester) async {
     tester.view.physicalSize = const Size(824, 1800);

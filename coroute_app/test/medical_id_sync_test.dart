@@ -10,25 +10,11 @@ void main() {
   });
 
   group('Lock-Screen First Responder ICE Card Sync Tests', () {
-    test('setMedicalIdOnLockScreen updates preference and flutter.medical_enabled', () async {
-      final prefs = await SharedPreferences.getInstance();
-      final settings = SettingsService(prefs);
-
-      expect(settings.medicalIdOnLockScreen, isFalse);
-
-      await settings.setMedicalIdOnLockScreen(true);
-      expect(settings.medicalIdOnLockScreen, isTrue);
-      expect(prefs.getBool('flutter.medical_enabled'), isTrue);
-
-      await settings.setMedicalIdOnLockScreen(false);
-      expect(settings.medicalIdOnLockScreen, isFalse);
-      expect(prefs.getBool('flutter.medical_enabled'), isFalse);
-    });
-
+    // Medical ID is always on (no switch): syncMedicalIdToLockScreen always sets the
+    // native flag (checked below).
     test('syncMedicalIdToLockScreen correctly persists all medical & ICE fields for native Quick Settings', () async {
       final prefs = await SharedPreferences.getInstance();
       final settings = SettingsService(prefs);
-      await settings.setMedicalIdOnLockScreen(true);
 
       await settings.syncMedicalIdToLockScreen(
         name: 'Kiran Kumar',

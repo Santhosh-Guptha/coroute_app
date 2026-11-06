@@ -2,8 +2,19 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import 'ui_tokens.dart';
 
+/// Scrim behind every pop-up (sheets, dialogs, in-cockpit panels): dims the
+/// map enough to show that the screen behind is inactive, and a tap on it
+/// closes the pop-up (except the few protected ones).
+abstract final class AppScrim {
+  /// 0xFF15232E (the cockpit's dark slate) at 55 %.
+  static const Color color = Color(0x8C15232E);
+}
+
 /// The one way to open a bottom sheet: same 44 x 5 handle, 28 dp top corners,
-/// 20 dp side padding, safe area, keyboard-aware, 230 ms open/close.
+/// 20 dp side padding, safe area, keyboard-aware, 230 ms open/close,
+/// the cockpit scrim behind it. A tap on the scrim, the back button and a
+/// drag down close it ([isDismissible] / [enableDrag]; keep both on unless an
+/// accidental dismissal is dangerous).
 ///
 /// [title] adds an [AppSheetHeader]. The [builder] content is placed in a
 /// Flexible, so a ListView inside it scrolls instead of overflowing. Use
@@ -32,6 +43,7 @@ Future<T?> showAppSheet<T>(
     enableDrag: enableDrag,
     showDragHandle: enableDrag,
     useSafeArea: true,
+    barrierColor: AppScrim.color,
     constraints: effectiveConstraints,
     backgroundColor: AppTheme.card,
     shape: const RoundedRectangleBorder(borderRadius: Radii.sheetTop),

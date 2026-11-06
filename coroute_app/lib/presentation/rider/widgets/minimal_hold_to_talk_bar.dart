@@ -175,7 +175,13 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
           if (!_pressed || _swipeCancelled || start == null || at == null) return;
           final dy = (e.position.dy - start.dy).abs();
           final dx = (e.position.dx - start.dx).abs();
-          if (dy > 24 && dy > dx * 1.5 && DateTime.now().difference(at) < const Duration(milliseconds: 350)) {
+          final vertical = dy > dx * 1.5;
+          final quick = DateTime.now().difference(at) < const Duration(milliseconds: 350);
+          // A quick vertical swipe, or a slow but long vertical drag (the ride
+          // sheet already follows the finger past the drag slop), is the rider
+          // moving the sheet, not holding to talk: the mic is let go. A press
+          // that stays put (or drifts sideways) keeps transmitting.
+          if (vertical && ((quick && dy > 24) || dy > 48)) {
             _swipeCancelled = true;
             if (ic.isTransmitting) ic.endTransmission();
           }

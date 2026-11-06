@@ -18,7 +18,6 @@ import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/presentation/subscription/membership_dashboard_screen.dart';
-import 'package:coroute_app/presentation/trip_planner/trip_creation_payment_alert_sheet.dart';
 import 'package:coroute_app/presentation/trip_planner/trip_planner_screen.dart';
 import 'package:coroute_app/presentation/trip_planner/trip_review_sheet.dart';
 
@@ -43,7 +42,7 @@ class _MockApiClient extends ApiClient {
     if (path == '/membership/catalog') {
       return {
         'categories': {
-          'individual': {'id': 'individual', 'name': 'Individual Solo Rider', 'monthlyPriceInr': 9, 'capacity': 1},
+          'community': {'id': 'community', 'name': 'Community', 'monthlyPriceInr': 0, 'capacity': 1, 'purchasable': false},
           'group_small': {'id': 'group_small', 'name': 'Group Membership (2–6)', 'monthlyPriceInr': 49, 'capacity': 6},
           'group_large': {'id': 'group_large', 'name': 'Extended Group (7–12)', 'monthlyPriceInr': 99, 'capacity': 12},
         },
@@ -350,8 +349,6 @@ void main() {
       await tester.tap(reviewButton);
       await tester.pumpAndSettle();
 
-      // Verify TripCreationPaymentAlertSheet is NOT prompted!
-      expect(find.byType(TripCreationPaymentAlertSheet), findsNothing);
       expect(find.text('Membership Required'), findsNothing);
 
       // Verify TripReviewSheet is shown directly!
@@ -389,7 +386,6 @@ void main() {
       await tester.pumpAndSettle();
 
       // No payment sheet
-      expect(find.byType(TripCreationPaymentAlertSheet), findsNothing);
       expect(find.text('Membership Required'), findsNothing);
 
       // Direct review sheet
@@ -427,7 +423,6 @@ void main() {
       await tester.pumpAndSettle();
 
       // No payment sheet
-      expect(find.byType(TripCreationPaymentAlertSheet), findsNothing);
       expect(find.text('Membership Required'), findsNothing);
 
       // Direct review sheet
@@ -467,12 +462,11 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify: Even with offline backend, cached entitlement allows trip creation directly!
-      expect(find.byType(TripCreationPaymentAlertSheet), findsNothing);
       expect(find.text('Membership Required'), findsNothing);
       expect(find.byType(TripReviewSheet), findsOneWidget);
     });
 
-    testWidgets('8. Expired membership triggers TripCreationPaymentAlertSheet on trip review', (tester) async {
+    testWidgets('8. Expired membership: the rider is on Community and starts a solo ride, no payment asked', (tester) async {
       tester.view.physicalSize = const Size(800, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -500,13 +494,12 @@ void main() {
       await tester.tap(find.text('Review'));
       await tester.pumpAndSettle();
 
-      // Expired membership MUST prompt with TripCreationPaymentAlertSheet
-      expect(find.byType(TripCreationPaymentAlertSheet), findsOneWidget);
-      expect(find.text('Membership Required'), findsOneWidget);
-      expect(find.text('Maybe Later'), findsOneWidget);
+      // Community is free: no payment prompt, straight to the trip review.
+      expect(find.text('Membership Required'), findsNothing);
+      expect(find.byType(TripReviewSheet), findsOneWidget);
     });
 
-    testWidgets('9. No membership triggers TripCreationPaymentAlertSheet on trip review', (tester) async {
+    testWidgets('9. No membership: Community starts a solo ride, no payment asked', (tester) async {
       tester.view.physicalSize = const Size(800, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -534,9 +527,9 @@ void main() {
       await tester.tap(find.text('Review'));
       await tester.pumpAndSettle();
 
-      // No membership MUST prompt with TripCreationPaymentAlertSheet
-      expect(find.byType(TripCreationPaymentAlertSheet), findsOneWidget);
-      expect(find.text('Membership Required'), findsOneWidget);
+      // Every rider has Community (free, solo rides): no payment prompt.
+      expect(find.text('Membership Required'), findsNothing);
+      expect(find.byType(TripReviewSheet), findsOneWidget);
     });
   });
 
@@ -608,7 +601,9 @@ void main() {
       await tester.tap(expansionTile);
       await tester.pumpAndSettle();
 
-      expect(find.text('Current Active Plan (Tap to Extend)'), findsOneWidget);
+      // The retired ₹9 Individual is honoured until it ends but not offered again; Community shows free.
+      expect(find.text('Current Active Plan (Tap to Extend)'), findsNothing);
+      expect(find.byKey(const Key('membership_community_card')), findsOneWidget);
       expect(find.text('Upgrade to Group Membership (2–6) (₹49)'), findsOneWidget);
       expect(find.text('Upgrade to Extended Group (7–12) (₹99)'), findsOneWidget);
     });
@@ -638,7 +633,9 @@ void main() {
       expect(find.text('EXPIRED'), findsOneWidget);
       expect(find.text('Reactivate Plan'), findsOneWidget);
       expect(find.text('Membership Expired'), findsOneWidget);
-      expect(find.text('Renew Current Plan (₹9 / mo)'), findsOneWidget);
+      // The retired Individual cannot be renewed: the banner offers the cheapest group plan.
+      expect(find.text('Renew Current Plan (₹9 / mo)'), findsNothing);
+      expect(find.text('Host a group from ₹49'), findsOneWidget);
       expect(find.text('Renew or Switch Plan'), findsOneWidget);
     });
   });
@@ -665,7 +662,8 @@ void main() {
       expect(mockApi.calledEndpoints, contains('/convoys/join'));
       expect(convoyService.activeConvoy?.groupId, 'GRP-TEST-100');
       // Invited rider joins and participates at ₹0 without requiring an owned paid plan
-      expect(ms.hasActivePlan, isFalse);
+      expect(ms.planAccess.isPaid, isFalse);
+      expect(ms.planAccess.source, 'community');
     });
   });
 }

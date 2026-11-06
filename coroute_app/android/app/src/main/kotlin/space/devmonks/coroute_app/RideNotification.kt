@@ -55,8 +55,10 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         const val MAP = "MAP"
         const val NAV_EMERGENCY = "NAV_EMERGENCY"
         const val ASSIST_ACCEPT = "ASSIST_ACCEPT"
+        const val TALK = "TALK"
+        const val END = "END"
 
-        private val ACTIVITY_ACTIONS = setOf(SOS, MAP, NAV_EMERGENCY, WAIT, ASSIST_ACCEPT, "FUEL")
+        private val ACTIVITY_ACTIONS = setOf(SOS, MAP, NAV_EMERGENCY, WAIT, ASSIST_ACCEPT, "FUEL", TALK, END)
         private val BROADCAST_ACTIONS = setOf(WAIT, ASSIST_ACCEPT, "VIEW_GROUP", "VIEW_FUEL")
 
         private const val RC_CONTENT = 7101
@@ -65,6 +67,11 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         private const val RC_MAP = 7104
         private const val RC_NAV = 7105
         private const val RC_ASSIST = 7106
+        private const val RC_TALK = 7110
+        private const val RC_END = 7111
+        private const val RC_MEDICAL = 7112
+        private const val RC_URGENT_CONTENT = 7113
+        private const val RC_URGENT_FULL = 7200
 
         private const val DEFAULT_ID = 1001
         private const val DEFAULT_CHANNEL = "coroute_convoy"
@@ -133,6 +140,11 @@ class RideNotification(private val activity: Activity, private val channel: Meth
                 result.success(if (args == null) false else show(args))
             }
             "ensure" -> result.success(ensure())
+            "showUrgent" -> {
+                val args = call.arguments as? Map<*, *>
+                result.success(if (args == null) false else showUrgent(args))
+            }
+            "canFullScreen" -> result.success(canFullScreen())
             "takeLaunchAction" -> {
                 val p = pendingLaunch
                 pendingLaunch = null
@@ -245,6 +257,13 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         return PendingIntent.getActivity(app, RC_SOS, i, immutable())
     }
 
+    /** The Medical ID card over the lock screen (MedicalIdActivity is showWhenLocked; no unlock). */
+    private fun medicalIntent(): PendingIntent {
+        val i = Intent(app, MedicalIdActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        return PendingIntent.getActivity(app, RC_MEDICAL, i, immutable())
+    }
+
     private fun broadcastIntent(action: String, ref: String, requestCode: Int): PendingIntent {
         val i = Intent(ACTION_BROADCAST)
             .setPackage(app.packageName)
@@ -330,6 +349,11 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         val lockScreenPublic = bool(args, "lockScreenPublic", true)
         val showSos = bool(args, "showSos", true)
         val showWait = bool(args, "showWait", true)
+        val showTalk = bool(args, "showTalk", false)
+        val showEnd = bool(args, "showEnd", false)
+        val talkLabel = str(args, "talkLabel").ifEmpty { "Talk" }
+        val endLabel = str(args, "endLabel").ifEmpty { "Leave" }
+        val medicalBadge = str(args, "medicalBadge")
         val emergency = mode == "GROUP_EMERGENCY" || mode == "ASSIST"
 
         val toneColor = when (tone) {
@@ -477,13 +501,18 @@ class RideNotification(private val activity: Activity, private val channel: Meth
             expanded.setViewVisibility(R.id.ride_notif_bead_wire, View.VISIBLE)
         }
 
-        // Glove-Friendly Pill Buttons [ ⏸ WAIT ]  [ 📍 MAP ]  [ ⚠️ SOS ]
-        val sosLabel = str(args, "sosLabel").let { if (it.isEmpty() || it == "SOS") "⚠️  SOS" else it }
+        // Agent 4: [ SOS (big, red) ] [ Talk | Wait ] [ End ride | Leave ]. Map only when there is
+        // no End button (emergency modes); the notification itself opens the map.
+        val sosLabel = str(args, "sosLabel").let { if (it.isEmpty() || it == "SOS") "SOS" else it }
         val waitLabel = str(args, "waitLabel").let { if (it.isEmpty() || it == "Wait for me") "⏸  WAIT" else it }
         val mapLabel = str(args, "mapLabel").let { if (it.isEmpty() || it == "Open map") "📍  MAP" else it }
-        setButton(expanded, R.id.ride_notif_btn_wait, showWait, waitLabel, waitLabel, broadcastIntent(WAIT, "", RC_WAIT))
-        setButton(expanded, R.id.ride_notif_btn_map, true, mapLabel, mapLabel, activityIntent(MAP, "", RC_MAP))
         setButton(expanded, R.id.ride_notif_btn_sos, showSos, sosLabel, "$sosLabel, opens the hold to send screen", sosIntent())
+        setButton(expanded, R.id.ride_notif_btn_talk, showTalk, talkLabel, "$talkLabel, opens hold to talk", activityIntent(TALK, "", RC_TALK))
+        setButton(expanded, R.id.ride_notif_btn_wait, showWait && !showTalk, waitLabel, waitLabel, broadcastIntent(WAIT, "", RC_WAIT))
+        setButton(expanded, R.id.ride_notif_btn_map, !showEnd, mapLabel, mapLabel, activityIntent(MAP, "", RC_MAP))
+        setButton(expanded, R.id.ride_notif_btn_end, showEnd, endLabel, "$endLabel, asks to confirm in the app", activityIntent(END, "", RC_END))
+        setOptionalText(expanded, R.id.ride_notif_medical, medicalBadge)
+        if (medicalBadge.isNotEmpty()) expanded.setOnClickPendingIntent(R.id.ride_notif_medical, medicalIntent())
         val contextIntent = when (context) {
             NAV_EMERGENCY -> activityIntent(NAV_EMERGENCY, contextRef, RC_NAV)
             ASSIST_ACCEPT -> if (contextRef.isEmpty()) null else broadcastIntent(ASSIST_ACCEPT, contextRef, RC_ASSIST)
@@ -541,6 +570,72 @@ class RideNotification(private val activity: Activity, private val channel: Meth
         if (Build.VERSION.SDK_INT >= 26) b.setColorized(false)
         if (Build.VERSION.SDK_INT >= 31) b.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
         return b.build()
+    }
+
+    /** Android 14+ can deny full-screen alerts (Settings > Apps > Special access). */
+    private fun canFullScreen(): Boolean {
+        if (Build.VERSION.SDK_INT < 34) return true
+        val nm = manager() ?: return false
+        return try {
+            nm.canUseFullScreenIntent()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun legacyMaxPriority(b: Notification.Builder) {
+        b.setPriority(Notification.PRIORITY_MAX)
+        b.setDefaults(Notification.DEFAULT_ALL)
+    }
+
+    /**
+     * Agent 4: an urgent alert (another rider's SOS) on the existing high-importance channel the
+     * app created ([args] channelId), over the lock screen: full-screen [UrgentAlertActivity] when
+     * Android allows it, else a heads-up notification (Android 14 without the full-screen
+     * permission). Public on the lock screen (the text has names only, never a position),
+     * insistent until seen. Same id as the app's own alert, so the app can still cancel it.
+     */
+    private fun showUrgent(args: Map<*, *>): Boolean {
+        if (Build.VERSION.SDK_INT < 24) return false
+        val nm = manager() ?: return false
+        return try {
+            if (!nm.areNotificationsEnabled()) return false
+            val id = (args["id"] as? Number)?.toInt() ?: return false
+            val channelId = (args["channelId"] as? String)?.takeIf { it.isNotEmpty() } ?: return false
+            if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(channelId) == null) return false
+            val title = str(args, "title")
+            val body = str(args, "body")
+            val wantFull = bool(args, "fullScreen", false)
+            val b = builder(channelId)
+                .setSmallIcon(app.applicationInfo.icon)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(Notification.BigTextStyle().bigText(body))
+                .setCategory(Notification.CATEGORY_ALARM)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setAutoCancel(true)
+                .setShowWhen(true)
+                .setColor(color(R.color.ride_notif_critical))
+                .setContentIntent(activityIntent(MAP, "", RC_URGENT_CONTENT))
+            if (Build.VERSION.SDK_INT < 26) legacyMaxPriority(b)
+            if (wantFull && canFullScreen()) {
+                val i = Intent(app, UrgentAlertActivity::class.java)
+                    .putExtra(UrgentAlertActivity.EXTRA_TITLE, title)
+                    .putExtra(UrgentAlertActivity.EXTRA_BODY, body)
+                    .putExtra(UrgentAlertActivity.EXTRA_ID, id)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION)
+                val full = PendingIntent.getActivity(app, RC_URGENT_FULL + (id and 0xff), i, immutable())
+                b.setFullScreenIntent(full, true)
+            }
+            val n = b.build()
+            n.flags = n.flags or Notification.FLAG_INSISTENT
+            nm.notify(id, n)
+            true
+        } catch (e: Exception) {
+            // SecurityException, a missing channel or anything else: Dart posts its own alert.
+            false
+        }
     }
 
     private fun setOptionalText(views: RemoteViews, id: Int, text: String) {

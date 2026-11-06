@@ -128,7 +128,7 @@ void main() {
     expect(noBrand.any((c) => c.key == 'oemGuide' || c.key == 'fullScreen'), isFalse, reason: 'not Android 14, not Android');
   });
 
-  testWidgets('helmet, licence and documents line: first in the sheet, gone when the setting is off (3.16)', (tester) async {
+  testWidgets('helmet, licence and documents line: always first in the sheet (3.16; no setting any more)', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await smallPhone(tester);
     final settings = SettingsService();
@@ -145,70 +145,38 @@ void main() {
     final line = tester.getTopLeft(find.text(PreRideChecklistSheet.documentsLine)).dy;
     final firstCheck = tester.getTopLeft(find.text(checks.first.title)).dy;
     expect(line, lessThan(firstCheck));
-    await settings.setDocumentsReminder(false);
-    await tester.pump();
-    expect(find.text(PreRideChecklistSheet.documentsLine), findsNothing);
-    await settings.setDocumentsReminder(true);
-    await tester.pump();
-    expect(find.text(PreRideChecklistSheet.documentsLine), findsOneWidget);
   });
 
-  testWidgets('crash detection and "Text the group" switches; switching texts on asks for SMS first', (tester) async {
+  // Crash detection shows its state here and can be turned on; turning it off (with a
+  // confirmation) and emergency texts are in Settings (see crash_alarm_screen_test).
+  testWidgets('crash detection: shown as on; when off, one tap turns it on; no switches here', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await smallPhone(tester);
     final settings = SettingsService();
     await settings.load();
-    final asked = <String>[];
-    var grant = false;
     final checks = PreRideChecklist.checksFrom(permissions: perms, batteryLevel: 80, hasEmergencyContact: true);
     await tester.pumpWidget(ChangeNotifierProvider<SettingsService>.value(
       value: settings,
-      child: host(Scaffold(
-        body: PreRideChecklistSheet(
-          checks: checks,
-          requestPermission: (key) async {
-            asked.add(key);
-            return grant;
-          },
-        ),
-      )),
+      child: host(Scaffold(body: PreRideChecklistSheet(checks: checks, requestPermission: (_) async => true))),
     ));
     await tester.pump();
     expect(tester.takeException(), isNull);
     final list = find.byType(Scrollable).first;
-    await tester.scrollUntilVisible(find.text(SafetyTexts.crashTitle), 60, scrollable: list);
+    await tester.scrollUntilVisible(find.byKey(const ValueKey('checklist_crash')), 60, scrollable: list);
     expect(find.text('Ride safety'), findsOneWidget);
+    expect(find.text(SafetyTexts.crashTitle), findsOneWidget);
     expect(find.textContaining('nothing is sent'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text(SafetyTexts.smsTitle), 60, scrollable: list);
-    expect(find.textContaining('up to 10'), findsOneWidget);
-    expect(find.textContaining('only during the ride'), findsOneWidget);
+    expect(find.text(SafetyTexts.smsTitle), findsNothing);
+    expect(find.byKey(const ValueKey('checklist_crash_on')), findsNothing);
 
-    await tester.tap(find.text(SafetyTexts.smsTitle));
+    await settings.setCrashDetection(false);
     await tester.pump();
-    expect(asked, ['sms']);
-    expect(settings.smsFallback, isFalse);
-    await tester.scrollUntilVisible(find.text(SafetyTexts.smsDenied), 60, scrollable: list);
-    expect(find.text(SafetyTexts.smsDenied), findsOneWidget);
-
-    grant = true;
-    await tester.scrollUntilVisible(find.text(SafetyTexts.smsTitle), -60, scrollable: list);
-    await tester.tap(find.text(SafetyTexts.smsTitle));
-    await tester.pump();
-    expect(settings.smsFallback, isTrue);
-
-    // Off again: no permission question.
-    await tester.tap(find.text(SafetyTexts.smsTitle));
-    await tester.pump();
-    expect(settings.smsFallback, isFalse);
-    expect(asked, ['sms', 'sms']);
-
-    await tester.scrollUntilVisible(find.text(SafetyTexts.crashTitle), -60, scrollable: list);
-    await tester.drag(list, const Offset(0, 150));
+    expect(find.text(PreRideChecklistSheet.crashOffLine), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('checklist_crash_on')));
+    await tester.tap(find.byKey(const ValueKey('checklist_crash_on')));
     await tester.pump();
     expect(settings.crashDetection, isTrue);
-    await tester.tap(find.text(SafetyTexts.crashTitle));
-    await tester.pump();
-    expect(settings.crashDetection, isFalse);
+    expect(find.byKey(const ValueKey('checklist_crash_on')), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

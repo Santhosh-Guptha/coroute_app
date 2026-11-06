@@ -1,4 +1,7 @@
+import '../places/fuel_match.dart';
+
 /// Represents a motorcycle in the rider's personal garage.
+/// Tank, reserve and mileage are in the unit of [fuelType] (L, kg or kWh).
 class BikeProfile {
   final String id;
   final String name;
@@ -14,6 +17,9 @@ class BikeProfile {
   final String notes;
   final bool isDefault;
 
+  /// What the bike runs on; stations are matched to it. Default petrol.
+  final BikeFuelType fuelType;
+
   const BikeProfile({
     required this.id,
     required this.name,
@@ -28,6 +34,7 @@ class BikeProfile {
     this.lastServiceOdometerKm = 0.0,
     this.notes = '',
     this.isDefault = false,
+    this.fuelType = BikeFuelType.petrol,
   });
 
   /// Theoretical maximum range on a full tank in kilometers.
@@ -62,6 +69,7 @@ class BikeProfile {
     double? lastServiceOdometerKm,
     String? notes,
     bool? isDefault,
+    BikeFuelType? fuelType,
   }) {
     return BikeProfile(
       id: id ?? this.id,
@@ -77,6 +85,7 @@ class BikeProfile {
       lastServiceOdometerKm: lastServiceOdometerKm ?? this.lastServiceOdometerKm,
       notes: notes ?? this.notes,
       isDefault: isDefault ?? this.isDefault,
+      fuelType: fuelType ?? this.fuelType,
     );
   }
 
@@ -94,6 +103,7 @@ class BikeProfile {
         'lastServiceOdometerKm': lastServiceOdometerKm,
         'notes': notes,
         'isDefault': isDefault,
+        'fuelType': fuelType.name,
       };
 
   factory BikeProfile.fromJson(Map<String, dynamic> json) {
@@ -114,6 +124,7 @@ class BikeProfile {
           (json['lastServiceOdometerKm'] as num?)?.toDouble() ?? 0.0,
       notes: json['notes'] as String? ?? '',
       isDefault: json['isDefault'] as bool? ?? false,
+      fuelType: BikeFuelTypeInfo.parse(json['fuelType']),
     );
   }
 

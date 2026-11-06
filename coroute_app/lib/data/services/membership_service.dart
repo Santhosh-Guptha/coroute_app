@@ -105,10 +105,19 @@ class MembershipService extends ChangeNotifier {
     }
   }
 
-  /// Authoritatively recognizes whether the rider has an active plan with valid capacity (ISSUE-10).
-  bool get hasActivePlan {
-    final owned = ownedMembership;
-    return owned != null && !owned.isExpired && owned.capacity >= 1;
+  /// Authoritatively recognizes whether the rider has an active plan with valid capacity (ISSUE-10):
+  /// a membership, or a legacy tier until its end date.
+  bool get hasActivePlan => planAccess.canStartTrip;
+
+  /// The rider's plan (the single source for hosting, seats and the home status line). Every rider
+  /// has at least Community (free, solo rides), also before the server answered.
+  PlanAccess get planAccess => _myOverview?.planAccess ?? PlanAccess.community;
+
+  /// The lowest price of a group plan on sale (for "Host a group from ₹49"), or null when unknown.
+  int? get groupFromPrice {
+    final groups = (_catalog?.categories ?? const <MembershipCategory>[]).where((c) => c.isGroup && c.priceRupees > 0);
+    if (groups.isEmpty) return null;
+    return groups.map((c) => c.priceRupees).reduce((a, b) => a < b ? a : b);
   }
 
   MembershipService(this._api, [this._prefs]) {
@@ -173,6 +182,21 @@ class MembershipService extends ChangeNotifier {
       await _prefs?.setString(AppConstants.keyMembershipCatalogCache, str);
     } catch (e) {
       debugPrint('[MembershipService] _saveCatalogToCache error: $e');
+    }
+  }
+
+  /// Sign-out: forgets this account's plan, payments and cached overview (the catalog stays).
+  Future<void> clearLocal() async {
+    _myOverview = null;
+    _paymentHistory = const [];
+    _lastError = null;
+    _lastErrorReason = null;
+    notifyListeners();
+    try {
+      _prefs ??= await SharedPreferences.getInstance();
+      await _prefs?.remove(AppConstants.keyMembershipCache);
+    } catch (e) {
+      debugPrint('[MembershipService] clearLocal error: $e');
     }
   }
 
@@ -342,6 +366,25 @@ class MembershipService extends ChangeNotifier {
       debugPrint('[MembershipService] fetchPaymentHistory error: $e');
     }
     return _paymentHistory;
+  }
+
+  /// The server's price of [categoryId] for this rider now, with [couponCode] when it applies
+  /// (GET /membership/quote): coupon, upgrade credit, what to pay and the new period. A refused code
+  /// comes back as [PlanQuote.couponRefused] with the full price, never as a failure. Null only when
+  /// the server cannot be reached or refuses the plan (lastError / lastErrorReason say why).
+  Future<PlanQuote?> fetchQuote({required String categoryId, String? couponCode}) async {
+    _lastError = null;
+    _lastErrorReason = null;
+    final code = couponCode?.trim().toUpperCase() ?? '';
+    final query = 'plan=${Uri.encodeQueryComponent(categoryId)}${code.isEmpty ? '' : '&coupon=${Uri.encodeQueryComponent(code)}'}';
+    try {
+      final res = await _api.get('/membership/quote?$query');
+      if (res is Map) return PlanQuote.fromJson(Map<String, dynamic>.from(res));
+    } catch (e) {
+      debugPrint('[MembershipService] fetchQuote error: $e');
+      _recordError(e, 'Could not get the price. Check your connection.');
+    }
+    return null;
   }
 
   /// Validate coupon against a membership category on backend.

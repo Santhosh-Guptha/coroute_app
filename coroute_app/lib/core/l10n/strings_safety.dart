@@ -1,6 +1,7 @@
 /// Safety texts owned by WP-SAFE (3.16): notification lines, rider prompts,
-/// fuel, dark and weather lines. Keys `notif.*`, `prompt.*`, `fuel.*`,
-/// `dark.*`, `weather.*`. Every key exists in en, hi and te (parity tested).
+/// fuel, dark, weather and short navigation lines. Keys `notif.*`, `prompt.*`,
+/// `fuel.*`, `dark.*`, `weather.*`, `nav.*`. Every key exists in en, hi and te
+/// (parity tested).
 /// Plain spoken language; numbers and units stay as digits + km / min.
 const Map<String, Map<String, String>> safetyStrings = {
   'en': {
@@ -36,6 +37,11 @@ const Map<String, Map<String, String>> safetyStrings = {
     'weather.off': 'Weather check skipped (data saver).',
     'weather.by': 'Weather data by Open-Meteo.com',
     'weather.start': 'the start',
+    'nav.offRoute': 'Off route.',
+    'nav.offRoute.finding': 'Off route. Finding a new route.',
+    'nav.offRoute.noSignal': 'Off route. No signal for a new route.',
+    'nav.reroute.ready': 'New route ready.',
+    'nav.reroute.failed': "Couldn't find a new route. Follow the group.",
   },
   'hi': {
     'notif.crash.title': 'शायद एक्सीडेंट हुआ है',
@@ -70,6 +76,11 @@ const Map<String, Map<String, String>> safetyStrings = {
     'weather.off': 'मौसम की जाँच नहीं की गई (डेटा सेवर चालू है)।',
     'weather.by': 'मौसम की जानकारी: Open-Meteo.com',
     'weather.start': 'शुरुआत',
+    'nav.offRoute': 'आप रूट से हट गए हैं।',
+    'nav.offRoute.finding': 'आप रूट से हट गए हैं। नया रूट ढूँढ रहे हैं।',
+    'nav.offRoute.noSignal': 'आप रूट से हट गए हैं। नए रूट के लिए सिग्नल नहीं है।',
+    'nav.reroute.ready': 'नया रूट तैयार है।',
+    'nav.reroute.failed': 'नया रूट नहीं मिला। ग्रुप के साथ चलें।',
   },
   'te': {
     'notif.crash.title': 'బహుశా ప్రమాదం జరిగినట్టుంది',
@@ -104,5 +115,10 @@ const Map<String, Map<String, String>> safetyStrings = {
     'weather.off': 'వాతావరణం చూడలేదు (డేటా సేవర్ ఆన్‌లో ఉంది).',
     'weather.by': 'వాతావరణ సమాచారం: Open-Meteo.com',
     'weather.start': 'ప్రారంభం',
+    'nav.offRoute': 'మీరు రూట్ నుండి పక్కకు వెళ్లారు.',
+    'nav.offRoute.finding': 'మీరు రూట్ నుండి పక్కకు వెళ్లారు. కొత్త రూట్ వెతుకుతున్నాం.',
+    'nav.offRoute.noSignal': 'మీరు రూట్ నుండి పక్కకు వెళ్లారు. కొత్త రూట్ కోసం సిగ్నల్ లేదు.',
+    'nav.reroute.ready': 'కొత్త రూట్ సిద్ధంగా ఉంది.',
+    'nav.reroute.failed': 'కొత్త రూట్ దొరకలేదు. గ్రూప్‌తో కలిసి వెళ్లండి.',
   },
 };

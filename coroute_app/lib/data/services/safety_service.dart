@@ -11,6 +11,8 @@ import '../../core/ui/ride_alert.dart';
 import '../../domain/safety/accel_bucket.dart';
 import '../../domain/safety/crash_detector.dart';
 import '../../domain/safety/fatigue_tracker.dart';
+import '../../domain/places/fuel_advisor.dart';
+import '../../domain/places/fuel_ahead.dart';
 import '../../domain/safety/fuel_range.dart';
 import '../../domain/safety/hard_brake_counter.dart';
 import '../../domain/safety/sms_plan.dart';
@@ -34,6 +36,7 @@ import 'auth_service.dart';
 import 'background_service.dart';
 import 'biometric_safety_bridge.dart';
 import 'convoy_service.dart';
+import 'fuel_economy_service.dart';
 import '../../core/config/feature_gates.dart';
 import 'safety_native.dart';
 import 'settings_service.dart';
@@ -183,7 +186,7 @@ class SmsFallbackStatus {
             ? 'No phone numbers to text. Call your emergency contact or 112.'
             : 'The texts could not be sent. Call your emergency contact or 112.';
       case SmsFallbackState.notAllowed:
-        return 'Texts cannot be sent from this phone. Check "Text the group" in Safety, or call your emergency contact or 112.';
+        return 'Texts cannot be sent from this phone. Check "Text the group" in Settings, or call your emergency contact or 112.';
       case SmsFallbackState.composer:
         return 'Your messages app is open with the SOS text for $total ${total == 1 ? 'person' : 'people'}. Press Send.';
       case SmsFallbackState.composerWaiting:
@@ -486,6 +489,17 @@ class SafetyService extends ChangeNotifier {
   final FatigueTracker _fatigue = FatigueTracker();
   final SoloCheckIn _checkIn = SoloCheckIn();
   FuelRangeTracker _fuel = FuelRangeTracker();
+
+  /// Learned mileage, riding style and "fill up here" warnings (on the phone only).
+  final FuelEconomyService fuelEconomy = FuelEconomyService();
+
+  /// Stations ahead on the route for this bike, from the map places on the phone
+  /// (set by the ride map). Called with each fix; null = range-only warnings.
+  FuelAheadView? Function(double lat, double lng, double? usableKm, double marginKm)? fuelAheadSource;
+  FuelAheadView? _fuelAhead;
+
+  /// What the last fuel check saw ahead (for the fuel capsule and sheets).
+  FuelAheadView? get fuelAhead => _fuelAhead;
   final HardBrakeCounter _brakes = HardBrakeCounter();
 
   StreamSubscription<TrackPoint>? _fixSub;
@@ -537,6 +551,12 @@ class SafetyService extends ChangeNotifier {
   Future<void> _fuelWrites = Future.value();
   bool fuelSaveFailed = false;
   int _brakesSaved = 0;
+
+  // This ride's own safety counts for "Your ride analytics" (RideStats, on the phone only).
+  int _rideBreaks = 0;
+  int _rideAlerts = 0;
+  bool _rideSos = false;
+  bool _rideCrash = false;
   String? _weatherDoneFor;
   String? _tilesDoneFor;
   int _overspeedSince = 0;
@@ -674,8 +694,8 @@ class SafetyService extends ChangeNotifier {
   double? get estimatedUsableKm {
     final p = _settings.fuelProfile;
     final explicit = _fuel.usableKm(p);
-    if (explicit != null) return explicit;
-    if (p.valid) return p.usableKm(p.rangeKm, _fuel.riddenM);
+    if (explicit != null) return fuelEconomy.adjust(p, baselineKm: _fuel.baselineKm!, riddenKm: _fuel.riddenM / 1000) ?? explicit;
+    if (p.valid) return fuelEconomy.adjust(p, baselineKm: p.rangeKm, riddenKm: _fuel.riddenM / 1000) ?? p.usableKm(p.rangeKm, _fuel.riddenM);
     if (_settings.fuelRangeKm > 0) {
       return math.max(0.0, _settings.fuelRangeKm - (_fuel.riddenM / 1000.0));
     }
@@ -684,7 +704,10 @@ class SafetyService extends ChangeNotifier {
   bool get fuelEstimateUncertain => _fuel.uncertain;
   int get fuelConfirmedAt => _fuel.lastFillAt;
   bool refuel({bool full = false, double? addedL, double? currentL, double? currentKm}) {
+    final sinceKm = _fuel.riddenM / 1000, reliable = !_fuel.uncertain;
     if (!_fuel.refuel(_settings.fuelProfile, _now(), full: full, addedL: addedL, currentL: currentL, currentKm: currentKm)) return false;
+    fuelEconomy.recordFill(kmSincePrev: sinceKm, amount: addedL, full: full, reliable: reliable,
+        ratedKmPerUnit: _settings.fuelProfile.mileageKmL, at: _now()).ignore();
     _fuelMutation++;
     _removePrompt(SafetyConstants.promptFuel, notify: false);
     _saveFuel(force: true);
@@ -713,7 +736,10 @@ class SafetyService extends ChangeNotifier {
 
   /// "Filled up" (quick action or the fuel prompt): the distance count starts again.
   void filledUp() {
+    final sinceKm = _fuel.riddenM / 1000, reliable = !_fuel.uncertain;
     if (!_fuel.refuel(_settings.fuelProfile, _now(), full: true)) _fuel.filledUp(_now());
+    fuelEconomy.recordFill(kmSincePrev: sinceKm, full: true, reliable: reliable,
+        ratedKmPerUnit: _settings.fuelProfile.mileageKmL, at: _now()).ignore();
     _fuelMutation++;
     _removePrompt(SafetyConstants.promptFuel, notify: false);
     _saveFuel(force: true);
@@ -840,6 +866,7 @@ class SafetyService extends ChangeNotifier {
         }
         _voice?.speakFatigueConfirmation('Safety confirmed. Continuing ride.', dedupeKey: 'fatigue_confirm_ok');
       } else {
+        if (_fatigue.stretchStart != null) _rideBreaks++;
         _fatigue.reset();
         if (wasEscalated) {
           _sendCheckInWith(CheckInResult.ok, context: CheckInContext.fatigue);
@@ -932,7 +959,10 @@ class SafetyService extends ChangeNotifier {
       _groupId = gid;
       _rideActive = active;
       _resetRide();
-      if (active && gid != null) _restoreFuel(gid).ignore();
+      if (active && gid != null) {
+        _restoreFuel(gid).ignore();
+        fuelEconomy.ensureLoaded(reload: true).ignore();
+      }
     }
     final status = convoy?.tripStatus;
     if (status != _tripStatus) {
@@ -942,6 +972,7 @@ class SafetyService extends ChangeNotifier {
         _startTiles().ignore();
       }
     }
+    if (_rideActive && _hasOpenSos) _rideSos = true;
     _watchPendingSos();
     _evalCheckIn();
     _evalFollowUp(convoy);
@@ -992,7 +1023,10 @@ class SafetyService extends ChangeNotifier {
       _updateSensor();
       return;
     }
-    if (_fatigue.onFix(p)) {
+    final wasRiding = _fatigue.stretchStart != null;
+    final remind = _fatigue.onFix(p);
+    if (wasRiding && _fatigue.stretchStart == null) _rideBreaks++; // a rest of 10 min or more
+    if (remind) {
       _triggerFatigueAlert();
     }
     _onFuelFix(p);
@@ -1085,10 +1119,16 @@ class SafetyService extends ChangeNotifier {
     _lastAwayM = null;
     _lastFix = null;
     _fuel = FuelRangeTracker();
+    fuelEconomy.startRide();
+    _fuelAhead = null;
     _fuelLoadedFor = null;
     _fuelSavedM = 0;
     _brakes.reset();
     _brakesSaved = 0;
+    _rideBreaks = 0;
+    _rideAlerts = 0;
+    _rideSos = false;
+    _rideCrash = false;
     _followUp = null;
     _lastImpactG = 0;
     _alarmExternal = null;
@@ -1161,6 +1201,7 @@ class SafetyService extends ChangeNotifier {
       lat = f?.lat ?? me?.lat ?? 0;
       lng = f?.lng ?? me?.lng ?? 0;
     }
+    if (_rideActive) _rideCrash = true;
     final seconds = SafetyConstants.crashCountdown.inSeconds;
     _alarmEvent = CrashEvent(
       impactAtMs: e.impactAtMs,
@@ -1346,6 +1387,7 @@ class SafetyService extends ChangeNotifier {
   /// Manually triggers an Emergency SOS event, recording it to local incident persistence
   /// and placing it into the durable priority event queue with critical priority.
   Future<void> triggerManualSos({String type = SosTypes.emergency}) async {
+    if (_rideActive) _rideSos = true;
     final now = _now();
     final f = _lastFix;
     final uid = _port.myUserId;
@@ -1435,6 +1477,7 @@ class SafetyService extends ChangeNotifier {
 
   // ------------------------------------------------------------------ prompts
   void _showPrompt(SafetyPrompt p, {required bool notifyAlways}) {
+    if (_rideActive && !_prompts.containsKey(p.key)) _rideAlerts++;
     _prompts[p.key] = p;
     notifyListeners();
     if (_native && (notifyAlways || _inBackground)) AlarmNotifier.showPrompt(p).ignore();
@@ -1560,53 +1603,77 @@ class SafetyService extends ChangeNotifier {
   // ------------------------------------------------------------------ fuel range (item 2)
   void _onFuelFix(TrackPoint p) {
     _fuel.onFix(p);
+    fuelEconomy.onFix(p);
     final range = _settings.fuelRangeKm;
     final useProfile = _settings.hasFuelProfile;
 
     if (useProfile) {
       final usableKm = estimatedUsableKm;
-      final tier = _fuel.evaluateAlertTier(usableKm: usableKm);
+      final profile = _settings.fuelProfile;
+      // Stations ahead for this bike's fuel type, matched on the phone from the
+      // map places along the route (null without a route: range-only warnings).
+      FuelAheadView? ahead;
+      try {
+        ahead = fuelAheadSource?.call(p.lat, p.lng, usableKm, profile.marginKm);
+      } catch (_) {
+        ahead = null;
+      }
+      _fuelAhead = ahead;
+      final warning = decideFuelWarning(usableKm: usableKm, marginKm: profile.marginKm, fullRangeKm: profile.rangeKm, ahead: ahead);
 
+      // "Fill up here" before a long stretch without fuel: once per station per fill.
+      if (warning.kind == FuelWarningKind.longGap) {
+        if (fuelEconomy.claimLongGap(warning.stationId ?? '')) {
+          _voice?.speak(warning.voice);
+          HapticFeedback.heavyImpact();
+          _showPrompt(
+            SafetyPrompt(
+              key: SafetyConstants.promptFuel,
+              kind: SafetyPromptKind.fuel,
+              title: warning.title,
+              message: warning.message,
+              primaryLabel: 'Route to Bunk',
+              secondaryLabel: L10n.t('fuel.filled'),
+            ),
+            notifyAlways: true,
+          );
+          _saveFuel(force: true);
+        } else {
+          _saveFuel();
+        }
+        return;
+      }
+
+      final tier = switch (warning.kind) {
+        FuelWarningKind.critical => FuelAlertTier.critical,
+        FuelWarningKind.urgent => FuelAlertTier.urgent,
+        FuelWarningKind.low => FuelAlertTier.warning,
+        FuelWarningKind.rangeRisk => FuelAlertTier.rangeRisk,
+        _ => FuelAlertTier.none,
+      };
+
+      // One pipeline, one prompt key: a new or higher tier replaces the prompt, never adds one.
       if (_fuel.shouldTriggerAlert(tier)) {
-        final kmLeft = usableKm != null ? usableKm.floor() : 0;
-        final String alertTitle;
-        final String alertMessage;
-
         switch (tier) {
           case FuelAlertTier.critical:
-            alertTitle = 'CRITICAL FUEL';
-            alertMessage = 'Only $kmLeft km range left! Stop at nearest bunk immediately.';
-            _voice?.speak('Critical warning: Only $kmLeft kilometers range left! Stop at nearest station immediately.');
             HapticFeedback.vibrate();
             break;
           case FuelAlertTier.urgent:
-            alertTitle = 'URGENT FUEL';
-            alertMessage = 'Only $kmLeft km remaining. Approaching fuel stop.';
-            _voice?.speak('Urgent: $kmLeft kilometers fuel range remaining. Approach fuel stop.');
-            HapticFeedback.heavyImpact();
-            break;
           case FuelAlertTier.warning:
-            alertTitle = 'LOW FUEL';
-            alertMessage = 'About $kmLeft km range remaining. Routing to nearest bunk.';
-            _voice?.speak('Warning: Fuel low, $kmLeft kilometers remaining. Auto-routing to nearest bunk.');
-            HapticFeedback.heavyImpact();
-            break;
           case FuelAlertTier.rangeRisk:
-            alertTitle = 'RANGE RISK';
-            alertMessage = 'Next fuel station exceeds estimated range. Consider turning back.';
-            _voice?.speak('Warning: Next fuel station exceeds estimated range. Consider turning back.');
             HapticFeedback.heavyImpact();
             break;
           case FuelAlertTier.none:
             return;
         }
+        _voice?.speak(warning.voice);
 
         _showPrompt(
           SafetyPrompt(
             key: SafetyConstants.promptFuel,
             kind: SafetyPromptKind.fuel,
-            title: alertTitle,
-            message: alertMessage,
+            title: warning.title,
+            message: warning.message,
             primaryLabel: 'Route to Bunk',
             secondaryLabel: L10n.t('fuel.filled'),
           ),
@@ -1677,14 +1744,22 @@ class SafetyService extends ChangeNotifier {
   // ------------------------------------------------------------------ hard stops (item 14)
   void _endRideStats() {
     if (_groupId == null || !_rideActive) return;
-    if (_brakes.count > 0) _saveRideStats(endedAt: _now());
+    _saveRideStats(endedAt: _now());
   }
 
   void _saveRideStats({required int endedAt}) {
     final gid = _groupId;
     if (gid == null) return;
     _brakesSaved = _brakes.count;
-    RideStatsStore.save(RideStats(groupId: gid, hardStops: _brakes.count, endedAt: endedAt)).ignore();
+    RideStatsStore.save(RideStats(
+      groupId: gid,
+      hardStops: _brakes.count,
+      endedAt: endedAt,
+      breaks: _rideBreaks,
+      alerts: _rideAlerts,
+      sos: _rideSos,
+      crashAlert: _rideCrash,
+    )).ignore();
   }
 
   // ------------------------------------------------------------------ follow-up (item 19)
@@ -1826,7 +1901,7 @@ class SafetyService extends ChangeNotifier {
     final convoy = _port.activeConvoy;
     final gid = convoy?.groupId;
     if (t == null || convoy == null || gid == null || _tilesDoneFor == gid) return;
-    if (!_settings.saveRouteMaps || _settings.lowData || t.running) return;
+    if (_settings.lowData || t.running) return;
     final route = convoy.route;
     if (route == null || route.approximate || route.points.length < 2) return;
     _tilesDoneFor = gid;

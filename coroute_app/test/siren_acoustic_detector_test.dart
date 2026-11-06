@@ -441,11 +441,9 @@ void main() {
 
   group('FEAT-03: HUD, Directional Guard & Entitlement Tests', () {
     test('TEST-HUD-01: Community tier has full access to FEAT-03 (Free core safety)', () {
-      FeatureGates.activeTier = SubscriptionTier.community;
-      FeatureGates.forceAllUnlocked = false;
 
       expect(FeatureGates.isUnlocked(Feature.sirenAcousticDetector), isTrue);
-      expect(FeatureGates.requiredTier(Feature.sirenAcousticDetector), equals(SubscriptionTier.community));
+      expect(FeatureGates.accessOf(Feature.sirenAcousticDetector), equals(FeatureAccess.safety));
     });
 
     test('TEST-HUD-02: Alert text guards BEHIND unless direction is reliably verified', () {

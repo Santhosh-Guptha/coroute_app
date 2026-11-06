@@ -15,15 +15,15 @@ import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/geo_service.dart';
+import '../../data/services/map_places_service.dart';
+import '../map_places/map_places_layer.dart';
+import '../map_places/place_chips.dart';
 import '../map_picker/map_picker_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
 import 'trip_review_sheet.dart';
 import '../../data/services/tile_cache_service.dart';
-import '../../data/models/membership_model.dart';
 import '../../data/services/membership_service.dart';
-import '../subscription/membership_payment_screen.dart';
-import 'trip_creation_payment_alert_sheet.dart';
 
 /// Plan a ride on one screen, map first: name, start, destination, stops
 /// (picked on the map or by long-pressing it), then Review and Start Ride.
@@ -60,7 +60,6 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   String? _nameError;
   int _speedLimit = 0;
   int _routeRequest = 0;
-  bool _membershipJustActivated = false;
   String? _loadingMessage;
 
   @override
@@ -273,85 +272,11 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     });
     FocusScope.of(context).unfocus();
     try {
-      // Stage 1: Authoritative membership entitlement recognition (ISSUE-10)
+      // Every rider can start a ride: Community (free) rides solo, a group plan hosts a group. The
+      // plan only decides the seats, which the gateway sets; there is nothing to pay here. The plan
+      // is refreshed in the background so the home line and the ride sheet read right.
       final ms = context.read<MembershipService?>();
-      if (ms != null && ms.paymentsEnabled) {
-        var owned = ms.ownedMembership;
-        // Authoritatively check if an active plan already covers the trip
-        final hasActivePlan = owned != null && !owned.isExpired && owned.capacity >= 1;
-
-        if (!hasActivePlan) {
-          // If no active entitlement currently in memory, sync with backend
-          await ms.fetchMyMembership();
-          owned = ms.ownedMembership;
-        } else {
-          // If user already has an active plan covering the trip, trigger background refresh
-          // without blocking the user or prompting for payment
-          ms.fetchMyMembership().ignore();
-        }
-
-        // Needs payment only if user genuinely has no valid, unexpired plan with capacity >= 1
-        final needsPayment = owned == null || owned.isExpired || owned.capacity < 1;
-
-        if (needsPayment && mounted) {
-          setState(() => _loadingMessage = null);
-          // Resolve applicable category
-          MembershipCategory category = const MembershipCategory(
-            id: 'individual',
-            name: 'Individual Membership',
-            priceRupees: 9,
-            capacity: 1,
-          );
-          if (ms.catalog != null && ms.catalog!.categories.isNotEmpty) {
-            for (final c in ms.catalog!.categories) {
-              if (c.id == 'individual') {
-                category = c;
-                break;
-              }
-            }
-          } else {
-            final catRes = await ms.fetchCatalog();
-            if (catRes != null && catRes.categories.isNotEmpty) {
-              for (final c in catRes.categories) {
-                if (c.id == 'individual') {
-                  category = c;
-                  break;
-                }
-              }
-            }
-          }
-
-          if (!mounted) return;
-
-          // Stage 1: Show Trip Creation Payment Alert Bottom Sheet
-          final proceed = await TripCreationPaymentAlertSheet.show(
-            context,
-            category: category,
-          );
-
-          if (proceed != true || !mounted) {
-            // User chose "Maybe Later" or dismissed: retain trip configuration and stay on planner
-            return;
-          }
-
-          // Stage 2 & 3: Navigate to Payment Screen and Success Confirmation
-          final activated = await MembershipPaymentScreen.push(
-            context,
-            category: category,
-            isTripCreationFlow: true,
-          );
-
-          if (activated != true || !mounted) {
-            // Payment cancelled or incomplete: retain trip configuration
-            return;
-          }
-
-          // Stage 4: Refresh membership eligibility from backend
-          if (mounted) setState(() => _loadingMessage = 'Checking trip details...');
-          await ms.fetchMyMembership();
-          _membershipJustActivated = true;
-        }
-      }
+      if (ms != null && ms.paymentsEnabled) ms.fetchMyMembership().ignore();
 
       if (!mounted) return;
 
@@ -374,11 +299,9 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         startLng: _start?.lng,
         destinationLat: _destination?.lat,
         destinationLng: _destination?.lng,
-        membershipActivated: _membershipJustActivated,
         confirmLabel: 'Confirm and Create Trip',
       );
 
-      _membershipJustActivated = false;
       if (limit == null || !mounted) return;
       setState(() => _speedLimit = limit);
 
@@ -616,6 +539,10 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
                       ),
                     ),
                   ),
+                  if (_placesService() case final places?) ...[
+                    PlacesMapButton(service: places),
+                    const SizedBox(width: 8),
+                  ],
                   DecoratedBox(
                     decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: dsFloatingShadow()),
                     child: DsRoundButton(
@@ -632,6 +559,11 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         ),
       ),
     );
+  }
+
+  MapPlacesService? _placesService() {
+    final api = context.read<ApiClient?>();
+    return api == null ? null : MapPlacesService.shared(api);
   }
 
   Widget _mapView() {
@@ -651,6 +583,8 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       children: [
         appTileLayer(),
         if (line.length >= 2) PolylineLayer(polylines: [Polyline(points: line, strokeWidth: 6, color: AppTheme.brand)]),
+        // Map places along the planned route and on screen (zoom 12+), from the phone's cache first.
+        if (_placesService() case final places?) MapPlacesLayer(service: places, routeLine: _route?.points, browse: true),
         MarkerLayer(markers: [
           if (_start != null)
             Marker(

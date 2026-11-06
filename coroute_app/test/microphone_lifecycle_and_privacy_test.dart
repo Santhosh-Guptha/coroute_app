@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:coroute_app/data/services/intercom_service.dart';
 import 'package:coroute_app/data/services/realtime_service.dart';
-import 'package:coroute_app/core/config/feature_gates.dart';
 
 class _TestRt extends RealtimeService {
   bool connected = true;
@@ -34,11 +33,9 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
-    FeatureGates.forceAllUnlocked = true;
   });
 
   tearDown(() {
-    FeatureGates.forceAllUnlocked = false;
   });
 
   group('Microphone Lifecycle and Privacy Tests (ISSUE-8 & ISSUE-14)', () {

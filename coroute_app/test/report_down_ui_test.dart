@@ -1,4 +1,3 @@
-import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -59,10 +58,8 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
-    FeatureGates.forceAllUnlocked = true;
   });
   tearDown(() {
-    FeatureGates.forceAllUnlocked = false;
     L10n.setLanguage(AppLanguage.system);
     AppTheme.use(AppPalette.dark);
   });

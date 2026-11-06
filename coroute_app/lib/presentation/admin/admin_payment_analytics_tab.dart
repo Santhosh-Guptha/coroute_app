@@ -37,11 +37,11 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
 
   static const List<(String, String)> _rangeOptions = [
     ('today', 'Today'),
-    ('7d', 'Last 7 Days'),
-    ('30d', 'Last 30 Days'),
-    ('this_month', 'This Month'),
-    ('last_month', 'Previous Month'),
-    ('custom', 'Custom Range'),
+    ('7d', 'Last 7 days'),
+    ('30d', 'Last 30 days'),
+    ('this_month', 'This month'),
+    ('last_month', 'Last month'),
+    ('custom', 'Pick dates'),
   ];
 
   @override
@@ -158,7 +158,7 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
         children: [
           Icon(Icons.calendar_month_outlined, size: 20, color: AppTheme.accentText),
           const SizedBox(width: 10),
-          Text('Time Window:', style: AppText.caption.copyWith(fontWeight: FontWeight.w800)),
+          Text('Period', style: AppText.caption.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(width: 12),
           Expanded(
             child: SingleChildScrollView(
@@ -188,7 +188,7 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
             ),
           ),
           IconButton.filledTonal(
-            tooltip: 'Refresh analytics',
+            tooltip: 'Refresh',
             icon: const Icon(Icons.refresh_rounded, size: 18),
             onPressed: _load,
           ),
@@ -213,37 +213,37 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
     return AdminKpiGrid(
       tiles: [
         AdminKpiTile(
-          label: 'Gross Sales',
+          label: 'Gross sales',
           value: adminInr(gross),
-          delta: 'Catalog value',
+          delta: 'At list price',
           valueColor: AppTheme.accentText,
         ),
         AdminKpiTile(
-          label: 'Total Discounts',
+          label: 'Discounts',
           value: adminInr(discount),
-          delta: 'Promotional savings',
+          delta: 'Coupons and offers',
           valueColor: AppTheme.warnText,
         ),
         AdminKpiTile(
-          label: 'Net Revenue',
+          label: 'Net revenue',
           value: adminInr(net),
-          delta: 'Net collected',
+          delta: 'Collected',
           valueColor: AppTheme.brand,
         ),
         AdminKpiTile(
-          label: 'Paid Orders',
+          label: 'Paid orders',
           value: '$paid / $total',
-          delta: 'AOV ${adminInr(aov)}',
+          delta: 'Average ${adminInr(aov)}',
           valueColor: AppTheme.accentText,
         ),
         AdminKpiTile(
-          label: 'Free Activations',
+          label: 'Free plans',
           value: '$freeActivations',
-          delta: '₹0 promo memberships',
-          valueColor: Colors.tealAccent,
+          delta: 'Fully covered by a coupon',
+          valueColor: AppTheme.accentText,
         ),
         AdminKpiTile(
-          label: 'Active Members',
+          label: 'Active members',
           value: '$activeMem',
           delta: '+$newMem in period',
           valueColor: AppTheme.brand,
@@ -270,16 +270,16 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
             children: [
               Icon(Icons.auto_graph_rounded, size: 20, color: AppTheme.accentText),
               const SizedBox(width: 10),
-              Text('Net Revenue Trend (Daily)', style: AppText.title.copyWith(fontSize: 16)),
+              Text('Net revenue per day', style: AppText.title.copyWith(fontSize: 16)),
               const Spacer(),
-              Text('${timeline.length} days plotted', style: AppText.caption),
+              Text('${timeline.length} days', style: AppText.caption),
             ],
           ),
           const SizedBox(height: 16),
           if (timeline.isEmpty)
             const SizedBox(
               height: 140,
-              child: Center(child: Text('No daily transaction data recorded in this range.')),
+              child: Center(child: Text('No payments in this period.')),
             )
           else
             SizedBox(
@@ -307,12 +307,12 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
     ];
 
     return AdminTable(
-      title: 'Performance by Membership Plan',
+      title: 'By plan',
       rows: [
         for (var i = 0; i < plans.length; i++)
           _planRow(plans[i], i == plans.length - 1),
       ],
-      empty: Text('No plan transactions recorded.', style: AppText.caption),
+      empty: Text('No plan sold in this period.', style: AppText.caption),
     );
   }
 
@@ -331,7 +331,7 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
         color: AppTheme.accentText,
       ),
       title: name,
-      subtitle: '$units units sold in period · $active currently active members',
+      subtitle: '$units sold in this period · $active active now',
       detail: 'Gross: ${adminInr(gross)} · Subsidy: -${adminInr(disc)} · Net: ${adminInr(net)}',
       status: StatusTextChip(
         icon: Icons.payments_rounded,
@@ -347,7 +347,7 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
     final topCoupons = adminMapList(couponAnalytics['topCoupons']);
 
     return AdminTable(
-      title: 'Promotional Coupon ROI & Adoption (${topCoupons.length})',
+      title: 'Coupons used (${topCoupons.length})',
       rows: [
         for (var i = 0; i < topCoupons.length; i++)
           _couponRoiRow(topCoupons[i], i == topCoupons.length - 1),
@@ -355,7 +355,7 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
       empty: Padding(
         padding: const EdgeInsets.symmetric(vertical: 20),
         child: Center(
-          child: Text('No promotional coupons redeemed in this period.', style: AppText.caption),
+          child: Text('No coupon used in this period.', style: AppText.caption),
         ),
       ),
     );

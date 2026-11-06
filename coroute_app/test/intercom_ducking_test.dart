@@ -44,8 +44,6 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
-    FeatureGates.forceAllUnlocked = true;
-    FeatureGates.activeTier = SubscriptionTier.roadCaptain;
   });
 
   group('Road Captain Priority Voice Ducking - Audio Math (-18 dB)', () {

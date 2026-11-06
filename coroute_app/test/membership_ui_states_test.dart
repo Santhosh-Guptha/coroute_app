@@ -89,11 +89,12 @@ void main() {
   final testCatalog = MembershipCatalog(
     categories: const [
       MembershipCategory(
-        id: 'individual',
-        name: 'Individual Solo Rider',
-        priceRupees: 9,
+        id: 'community',
+        name: 'Community',
+        priceRupees: 0,
         capacity: 1,
-        description: 'Essential personal safety and solo tracking.',
+        purchasable: false,
+        description: 'Free for every rider: solo rides with every safety feature.',
         features: ['Solo Ride Tracking', 'Essential Safety & Crash SOS'],
       ),
       MembershipCategory(
@@ -211,7 +212,8 @@ void main() {
 
       // After expanding, options appear
       expect(find.text('Current Active Plan (Tap to Extend)'), findsOneWidget);
-      expect(find.text('Switch to Individual Solo Rider (₹9)'), findsOneWidget);
+      expect(find.byKey(const Key('membership_community_card')), findsOneWidget);
+      expect(find.textContaining('₹9)'), findsNothing, reason: 'the retired ₹9 Individual plan is not offered');
       expect(find.text('Upgrade to Extended Group (7–12) (₹99)'), findsOneWidget);
     });
 
@@ -296,7 +298,7 @@ void main() {
       // 3. Verify prominent renewal catalog section
       expect(find.text('Renew or Switch Plan'), findsOneWidget);
       expect(find.text('Renew Current Plan (₹49)'), findsOneWidget);
-      expect(find.text('Switch to Individual Solo Rider (₹9)'), findsOneWidget);
+      expect(find.byKey(const Key('membership_community_card')), findsOneWidget);
     });
 
     testWidgets('State 4: No Membership displays catalog selection cards with Select & Pay', (tester) async {
@@ -320,7 +322,10 @@ void main() {
 
       // 2. Verify Catalog selection cards with Select & Pay
       expect(find.text('Select Membership Plan'), findsOneWidget);
-      expect(find.text('Select & Pay ₹9'), findsOneWidget);
+      // Community is free (no button); the paid plans are bought.
+      expect(find.byKey(const Key('membership_community_card')), findsOneWidget);
+      expect(find.text('Your plan · solo rides'), findsOneWidget);
+      expect(find.text('Select & Pay ₹9'), findsNothing);
       expect(find.text('Select & Pay ₹49'), findsOneWidget);
       expect(find.text('Select & Pay ₹99'), findsOneWidget);
     });

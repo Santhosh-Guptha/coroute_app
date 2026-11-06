@@ -1,30 +1,17 @@
 import 'dart:convert';
-import 'dart:io' show Platform;
 import '../../domain/safety/fuel_profile.dart';
 import 'package:flutter/foundation.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
-import 'background_service.dart';
-import 'safety_native.dart';
 
-/// Runtime status of rider safety systems (FEAT-UI-02 / FEAT-SAFETY-01).
-enum SafetyRuntimeStatus {
-  active('Active'),
-  limited('Limited'),
-  permissionRequired('Permission Required'),
-  unsupported('Unsupported'),
-  notAvailable('Not Available');
-
-  final String label;
-  const SafetyRuntimeStatus(this.label);
-}
-
-/// Rider settings kept on the phone: data saver ("low data") mode and the ride
-/// safety switches.
+/// Rider settings kept on the phone: only the choices a rider really makes.
+/// Everything else is decided by the app (emergency voice, after-dark voice,
+/// the rich ride notification, saving route maps on Wi-Fi, the helmet and
+/// documents line, tunnel mode and how long a map alert stays are always on).
+/// The one Settings screen (SettingsScreen) shows these.
 ///
 /// Data saver halves the intercom data (8 kHz instead of 16 kHz), sends the
 /// position every 5 seconds instead of every 2.5, loads fewer map tiles and
@@ -35,9 +22,9 @@ enum SafetyRuntimeStatus {
 /// and the "Are you OK?" check-in (both on), and whether the brand battery
 /// guide was seen.
 ///
-/// 3.16: language (safety screens and spoken alerts), tank range for the fuel
-/// reminder, "speak more after dark", medical ID on the lock screen during an SOS,
-/// the helmet and documents reminder, and saving route maps on Wi-Fi.
+/// 3.16: language (safety screens and spoken alerts) and the tank range for the
+/// fuel reminder. Medical ID is always on the lock screen during an SOS (riders
+/// control it by editing their medical info).
 class SettingsService extends ChangeNotifier {
   SettingsService([this._prefs]);
 
@@ -50,14 +37,10 @@ class SettingsService extends ChangeNotifier {
   bool _oemGuideSeen = false;
   bool _loaded = false;
 
-  // 3.15: voice, accident warnings, ride notification, nearby riders consent.
-  static const String keyBackgroundVoiceEnabled = 'coroute_background_voice_enabled';
-  bool _backgroundVoiceEnabled = true;
-  bool _voiceCritical = true;
+  // 3.15: voice, accident warnings, lock screen, nearby riders consent.
   bool _voiceWarnings = true;
   bool _hazardAlerts = true;
   bool _rideOnLockScreen = true;
-  bool _richNotification = true;
   bool _netConsentSeen = false;
   int _netConsentPrompts = 0;
 
@@ -108,21 +91,10 @@ class SettingsService extends ChangeNotifier {
     _fuelProfile = profile;
     notifyListeners();
   }
-  bool _speakMoreAfterDark = true;
-  bool _medicalIdOnLockScreen = false;
-  bool _documentsReminder = true;
-  bool _saveRouteMaps = true;
-  bool _voiceAnnounceAllAlerts = true;
-  int _mapAlertDismissSeconds = 5;
+  bool _batterySaver = false;
   bool _hardwarePtt = false;
   int _speedLimitWarningKmh = 0;
-  bool _airbagVestBridge = true;
-  bool _smartwatchVitals = true;
-  bool _emergencySirenAlert = false;
-  bool _tunnelDeadReckoning = true;
-  bool _helmetVoiceHotwords = false;
-  bool _intercomAudioDucking = true;
-  bool _emergencyWhatsApp = true;
+  bool _autoReroute = true;
 
   bool get lowData => _lowData;
   bool get crashDetection => _crashDetection;
@@ -132,27 +104,15 @@ class SettingsService extends ChangeNotifier {
   bool get oemGuideSeen => _oemGuideSeen;
   bool get isLoaded => _loaded;
 
-  /// Background voice guidance enabled (on by default; rider can disable ordinary voice, but critical P0/P1 alerts remain audible).
-  bool get backgroundVoiceEnabled => _backgroundVoiceEnabled;
-
-  /// Speak emergency alerts (on by default).
-  bool get voiceCritical => _voiceCritical;
-
-  /// Speak warnings and directions (on by default; also needs the group's voice switch).
+  /// Spoken alerts: warnings, directions and announcements (on by default; also needs
+  /// the group's voice switch). Emergency alerts are always spoken.
   bool get voiceWarnings => _voiceWarnings;
 
   /// Accident warnings on my route (on by default).
   bool get hazardAlerts => _hazardAlerts;
 
-  /// Single master switch for road hazard, nav & convoy audio alerts.
-  bool get voiceAlertsMaster =>
-      _voiceCritical || _voiceWarnings || _hazardAlerts || _voiceAnnounceAllAlerts;
-
   /// Show the ride on the lock screen (on by default).
   bool get rideOnLockScreen => _rideOnLockScreen;
-
-  /// Large ride notification (on by default; off = the plain one-line notification).
-  bool get richNotification => _richNotification;
 
   /// The nearby riders consent sheet was answered with Continue.
   bool get netConsentSeen => _netConsentSeen;
@@ -166,133 +126,17 @@ class SettingsService extends ChangeNotifier {
   /// Tank range in km for the fuel reminder; 0 = off.
   int get fuelRangeKm => _fuelRangeKm;
 
-  /// After sunset, important group alerts are spoken too (on by default).
-  bool get speakMoreAfterDark => _speakMoreAfterDark;
-
-  /// Blood group, allergies and emergency contact on the lock screen during my own SOS (off by default).
-  bool get medicalIdOnLockScreen => _medicalIdOnLockScreen;
-
-  /// "Helmet on, licence and documents with you?" line in the pre-ride checklist (on by default).
-  bool get documentsReminder => _documentsReminder;
-
-  /// Save map tiles along the planned route on Wi-Fi before the ride (on by default).
-  bool get saveRouteMaps => _saveRouteMaps;
-
-  /// Announce all notifications and alerts via voice TTS (on by default).
-  bool get voiceAnnounceAllAlerts => _voiceAnnounceAllAlerts;
-
-  /// Auto-dismiss map overlay alert after seconds (default 5; 0 for manual).
-  int get mapAlertDismissSeconds => _mapAlertDismissSeconds;
+  /// Battery saver switched on by the rider (it also turns itself on at 20 % or less).
+  bool get batterySaver => _batterySaver;
 
   /// Hardware button (volume down / media button on Bluetooth headset or handlebar remote) acts as PTT.
   bool get hardwarePtt => _hardwarePtt;
+
+  /// My own speed warning in km/h (0 = use the group limit, off if none).
   int get speedLimitWarningKmh => _speedLimitWarningKmh;
 
-  /// Smart Airbag Vest Bridge (Auto-detects In&motion, Tech-Air, Helite).
-  bool get airbagVestBridge => _airbagVestBridge;
-
-  /// Smartwatch Vitals (Monitors pulse & escalates trauma alerts).
-  bool get smartwatchVitals => _smartwatchVitals;
-
-  /// Emergency Siren Alert (Ducks intercom when ambulances approach).
-  bool get emergencySirenAlert => _emergencySirenAlert;
-
-  /// Tunnel Dead Reckoning (Keeps moving through GPS-dead mountain tunnels).
-  bool get tunnelDeadReckoning => _tunnelDeadReckoning;
-
-  /// Helmet Voice Hotwords ("CoRoute I'm OK", "CoRoute Emergency").
-  bool get helmetVoiceHotwords => _helmetVoiceHotwords;
-
-  /// Intercom Audio Ducking (Lowers background chatter when Road Captain or sirens speak).
-  bool get intercomAudioDucking => _intercomAudioDucking;
-
-  /// Emergency Contacts WhatsApp notifications.
-  bool get emergencyWhatsApp => _emergencyWhatsApp;
-
-  /// Evaluates real-time operational status for mandatory safety features.
-  /// (FEAT-UI-02 / FEAT-SAFETY-01)
-  static Future<SafetyRuntimeStatus> evaluateCrashDetectionStatus({
-    bool? hasAccelOverride,
-    bool? sensorUnavailableOverride,
-  }) async {
-    if (kIsWeb) return SafetyRuntimeStatus.unsupported;
-    if (sensorUnavailableOverride == true) return SafetyRuntimeStatus.notAvailable;
-
-    if (Platform.isAndroid) {
-      final info = await SafetyNative.deviceInfo();
-      final hasAccel = hasAccelOverride ?? info.hasAccel;
-      if (!hasAccel) return SafetyRuntimeStatus.unsupported;
-
-      final locStatus = await Permission.locationWhenInUse.status;
-      if (!locStatus.isGranted) return SafetyRuntimeStatus.permissionRequired;
-
-      final ignoringBattery = await BackgroundService.isIgnoringBatteryOptimizations();
-      if (!ignoringBattery) return SafetyRuntimeStatus.limited;
-
-      return SafetyRuntimeStatus.active;
-    } else if (Platform.isIOS) {
-      final locStatus = await Permission.locationWhenInUse.status;
-      if (!locStatus.isGranted) return SafetyRuntimeStatus.permissionRequired;
-      return SafetyRuntimeStatus.active;
-    }
-    if (hasAccelOverride == false) return SafetyRuntimeStatus.unsupported;
-    return SafetyRuntimeStatus.active;
-  }
-
-  static Future<SafetyRuntimeStatus> evaluateGpsMonitoringStatus() async {
-    if (kIsWeb) return SafetyRuntimeStatus.unsupported;
-    final locStatus = await Permission.locationWhenInUse.status;
-    if (!locStatus.isGranted) return SafetyRuntimeStatus.permissionRequired;
-
-    if (Platform.isAndroid || Platform.isIOS) {
-      final alwaysStatus = await Permission.locationAlways.status;
-      if (!alwaysStatus.isGranted) return SafetyRuntimeStatus.limited;
-    }
-    return SafetyRuntimeStatus.active;
-  }
-
-  static Future<SafetyRuntimeStatus> evaluateEmergencySosStatus({
-    required String? contactPhone,
-    bool smsFallbackEnabled = false,
-  }) async {
-    final phone = (contactPhone ?? '').trim();
-    if (phone.length < 7) return SafetyRuntimeStatus.limited;
-
-    // Emergency texts open the messages app (no SEND_SMS permission in the Play build), so
-    // there is no SMS permission to ask for here.
-    return SafetyRuntimeStatus.active;
-  }
-
-  static Future<SafetyRuntimeStatus> evaluateEmergencyResponseStatus({
-    required bool hasVitals,
-    bool isAirbagConnected = false,
-    bool isSmartwatchConnected = false,
-  }) async {
-    if (isAirbagConnected || isSmartwatchConnected) return SafetyRuntimeStatus.active;
-    if (hasVitals) return SafetyRuntimeStatus.active;
-    return SafetyRuntimeStatus.limited;
-  }
-
-  static Future<SafetyRuntimeStatus> evaluateOfflineSafetyStatus({
-    required bool hasTileCache,
-    bool isLowBattery = false,
-  }) async {
-    if (!hasTileCache) return SafetyRuntimeStatus.notAvailable;
-    if (isLowBattery) return SafetyRuntimeStatus.limited;
-    return SafetyRuntimeStatus.active;
-  }
-
-  static Future<SafetyRuntimeStatus> evaluateBackgroundMonitoringStatus() async {
-    if (kIsWeb) return SafetyRuntimeStatus.unsupported;
-    final notifStatus = await Permission.notification.status;
-    if (!notifStatus.isGranted) return SafetyRuntimeStatus.permissionRequired;
-
-    if (Platform.isAndroid) {
-      final ignoring = await BackgroundService.isIgnoringBatteryOptimizations();
-      if (!ignoring) return SafetyRuntimeStatus.limited;
-    }
-    return SafetyRuntimeStatus.active;
-  }
+  /// Auto re-route: a new route from where I am when I leave the planned one (on by default).
+  bool get autoReroute => _autoReroute;
 
   Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
 
@@ -306,12 +150,9 @@ class SettingsService extends ChangeNotifier {
       _fatigueReminder = prefs.getBool(SafetyConstants.keyFatigueReminder) ?? true;
       _soloCheckIn = prefs.getBool(SafetyConstants.keySoloCheckIn) ?? true;
       _oemGuideSeen = prefs.getBool(SafetyConstants.keyOemGuideSeen) ?? false;
-      _backgroundVoiceEnabled = prefs.getBool(keyBackgroundVoiceEnabled) ?? true;
-      _voiceCritical = prefs.getBool(NetworkConstants.keyVoiceCritical) ?? true;
       _voiceWarnings = prefs.getBool(NetworkConstants.keyVoiceWarnings) ?? true;
       _hazardAlerts = prefs.getBool(NetworkConstants.keyHazardAlerts) ?? true;
       _rideOnLockScreen = prefs.getBool(NetworkConstants.keyRideOnLockScreen) ?? true;
-      _richNotification = prefs.getBool(NetworkConstants.keyRichNotification) ?? true;
       _netConsentSeen = prefs.getBool(NetworkConstants.keyNetConsentSeen) ?? false;
       _netConsentPrompts = prefs.getInt(NetworkConstants.keyNetConsentPrompts) ?? 0;
       _language = AppLanguage.fromCode(prefs.getString(NetworkConstants.keyLanguage));
@@ -325,21 +166,10 @@ class SettingsService extends ChangeNotifier {
         _fuelProfile = p?.valid == true ? p : null;
       } catch (_) { _fuelProfile = null; }
       }
-      _speakMoreAfterDark = prefs.getBool(NetworkConstants.keySpeakAfterDark) ?? true;
-      _medicalIdOnLockScreen = prefs.getBool(NetworkConstants.keyMedicalIdLock) ?? false;
-      _documentsReminder = prefs.getBool(NetworkConstants.keyDocsReminder) ?? true;
-      _saveRouteMaps = prefs.getBool(NetworkConstants.keySaveRouteMaps) ?? true;
-      _voiceAnnounceAllAlerts = prefs.getBool(NetworkConstants.keyVoiceAnnounceAllAlerts) ?? true;
-      _mapAlertDismissSeconds = prefs.getInt(NetworkConstants.keyMapAlertDismissSeconds) ?? 5;
-      _hardwarePtt = prefs.getBool('hardware_ptt_v1') ?? false;
+      _batterySaver = prefs.getBool(keyBatterySaver) ?? false;
+      _hardwarePtt = prefs.getBool(keyHardwarePtt) ?? false;
       _speedLimitWarningKmh = prefs.getInt(SafetyConstants.keySpeedLimitWarningKmh) ?? 0;
-      _airbagVestBridge = prefs.getBool('airbag_vest_bridge_v1') ?? true;
-      _smartwatchVitals = prefs.getBool('smartwatch_vitals_v1') ?? true;
-      _emergencySirenAlert = prefs.getBool('emergency_siren_alert_v2') ?? false;
-      _tunnelDeadReckoning = prefs.getBool('tunnel_dead_reckoning_v1') ?? true;
-      _helmetVoiceHotwords = prefs.getBool('helmet_voice_hotwords_v2') ?? false;
-      _intercomAudioDucking = prefs.getBool('intercom_audio_ducking_v1') ?? true;
-      _emergencyWhatsApp = prefs.getBool('emergency_whatsapp_v1') ?? true;
+      _autoReroute = prefs.getBool(keyAutoReroute) ?? true;
     } catch (e) {
       debugPrint('settings load note: $e');
     }
@@ -395,37 +225,11 @@ class SettingsService extends ChangeNotifier {
     await _save(SafetyConstants.keySoloCheckIn, value);
   }
 
-  Future<void> setBackgroundVoiceEnabled(bool value) async {
-    if (value == _backgroundVoiceEnabled) return;
-    _backgroundVoiceEnabled = value;
-    notifyListeners();
-    await _save(keyBackgroundVoiceEnabled, value);
-  }
-
-  Future<void> setVoiceCritical(bool value) async {
-    if (value == _voiceCritical) return;
-    _voiceCritical = value;
-    notifyListeners();
-    await _save(NetworkConstants.keyVoiceCritical, value);
-  }
-
   Future<void> setVoiceWarnings(bool value) async {
     if (value == _voiceWarnings) return;
     _voiceWarnings = value;
     notifyListeners();
     await _save(NetworkConstants.keyVoiceWarnings, value);
-  }
-
-  Future<void> setVoiceAlertsMaster(bool value) async {
-    _voiceCritical = value;
-    _voiceWarnings = value;
-    _hazardAlerts = value;
-    _voiceAnnounceAllAlerts = value;
-    notifyListeners();
-    await _save(NetworkConstants.keyVoiceCritical, value);
-    await _save(NetworkConstants.keyVoiceWarnings, value);
-    await _save(NetworkConstants.keyHazardAlerts, value);
-    await _save(NetworkConstants.keyVoiceAnnounceAllAlerts, value);
   }
 
   Future<void> setHazardAlerts(bool value) async {
@@ -440,13 +244,6 @@ class SettingsService extends ChangeNotifier {
     _rideOnLockScreen = value;
     notifyListeners();
     await _save(NetworkConstants.keyRideOnLockScreen, value);
-  }
-
-  Future<void> setRichNotification(bool value) async {
-    if (value == _richNotification) return;
-    _richNotification = value;
-    notifyListeners();
-    await _save(NetworkConstants.keyRichNotification, value);
   }
 
   Future<void> markNetConsentSeen() async {
@@ -497,20 +294,16 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
-  Future<void> setSpeakMoreAfterDark(bool value) async {
-    if (value == _speakMoreAfterDark) return;
-    _speakMoreAfterDark = value;
-    notifyListeners();
-    await _save(NetworkConstants.keySpeakAfterDark, value);
-  }
+  static const String keyBatterySaver = 'coroute_battery_saver_v1';
+  static const String keyHardwarePtt = 'hardware_ptt_v1';
+  static const String keyAutoReroute = 'auto_reroute_v1';
 
-  Future<void> setMedicalIdOnLockScreen(bool value) async {
-    if (value == _medicalIdOnLockScreen) return;
-    _medicalIdOnLockScreen = value;
+  /// Battery saver on (always) or automatic (on at 20 % or less, see BatterySaverPolicy).
+  Future<void> setBatterySaver(bool value) async {
+    if (value == _batterySaver) return;
+    _batterySaver = value;
     notifyListeners();
-    await _save(NetworkConstants.keyMedicalIdLock, value);
-    final p = await SharedPreferences.getInstance();
-    await p.setBool('flutter.medical_enabled', value);
+    await _save(keyBatterySaver, value);
   }
 
   /// Synchronizes First Responder ICE card info (Blood group, allergies, conditions, contacts)
@@ -531,41 +324,8 @@ class SettingsService extends ChangeNotifier {
     await p.setString('flutter.medical_notes', medicalNotes);
     await p.setString('flutter.medical_contact_name', contactName);
     await p.setString('flutter.medical_contact_phone', contactPhone);
-    await p.setBool('flutter.medical_enabled', _medicalIdOnLockScreen);
-  }
-
-  Future<void> setDocumentsReminder(bool value) async {
-    if (value == _documentsReminder) return;
-    _documentsReminder = value;
-    notifyListeners();
-    await _save(NetworkConstants.keyDocsReminder, value);
-  }
-
-  Future<void> setSaveRouteMaps(bool value) async {
-    if (value == _saveRouteMaps) return;
-    _saveRouteMaps = value;
-    notifyListeners();
-    await _save(NetworkConstants.keySaveRouteMaps, value);
-  }
-
-  Future<void> setVoiceAnnounceAllAlerts(bool value) async {
-    if (value == _voiceAnnounceAllAlerts) return;
-    _voiceAnnounceAllAlerts = value;
-    notifyListeners();
-    await _save(NetworkConstants.keyVoiceAnnounceAllAlerts, value);
-  }
-
-  Future<void> setMapAlertDismissSeconds(int seconds) async {
-    final v = seconds < 0 ? 0 : seconds;
-    if (v == _mapAlertDismissSeconds) return;
-    _mapAlertDismissSeconds = v;
-    notifyListeners();
-    try {
-      final prefs = await _p();
-      await prefs.setInt(NetworkConstants.keyMapAlertDismissSeconds, v);
-    } catch (e) {
-      debugPrint('settings save note: $e');
-    }
+    // Always available (no switch): the tile and the lock-screen card read this.
+    await p.setBool('flutter.medical_enabled', true);
   }
 
   Future<void> markOemGuideSeen() async {
@@ -579,11 +339,11 @@ class SettingsService extends ChangeNotifier {
     if (value == _hardwarePtt) return;
     _hardwarePtt = value;
     notifyListeners();
-    await _save('hardware_ptt_v1', value);
+    await _save(keyHardwarePtt, value);
   }
 
   Future<void> setSpeedLimitWarningKmh(int kmh) async {
-    final v = kmh.clamp(0, 200);
+    final v = kmh.clamp(0, SafetyConstants.speedWarningMaxKmh);
     if (v == _speedLimitWarningKmh) return;
     _speedLimitWarningKmh = v;
     notifyListeners();
@@ -595,52 +355,10 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
-  Future<void> setAirbagVestBridge(bool value) async {
-    if (value == _airbagVestBridge) return;
-    _airbagVestBridge = value;
+  Future<void> setAutoReroute(bool value) async {
+    if (value == _autoReroute) return;
+    _autoReroute = value;
     notifyListeners();
-    await _save('airbag_vest_bridge_v1', value);
-  }
-
-  Future<void> setSmartwatchVitals(bool value) async {
-    if (value == _smartwatchVitals) return;
-    _smartwatchVitals = value;
-    notifyListeners();
-    await _save('smartwatch_vitals_v1', value);
-  }
-
-  Future<void> setEmergencySirenAlert(bool value) async {
-    if (value == _emergencySirenAlert) return;
-    _emergencySirenAlert = value;
-    notifyListeners();
-    await _save('emergency_siren_alert_v2', value);
-  }
-
-  Future<void> setTunnelDeadReckoning(bool value) async {
-    if (value == _tunnelDeadReckoning) return;
-    _tunnelDeadReckoning = value;
-    notifyListeners();
-    await _save('tunnel_dead_reckoning_v1', value);
-  }
-
-  Future<void> setHelmetVoiceHotwords(bool value) async {
-    if (value == _helmetVoiceHotwords) return;
-    _helmetVoiceHotwords = value;
-    notifyListeners();
-    await _save('helmet_voice_hotwords_v2', value);
-  }
-
-  Future<void> setIntercomAudioDucking(bool value) async {
-    if (value == _intercomAudioDucking) return;
-    _intercomAudioDucking = value;
-    notifyListeners();
-    await _save('intercom_audio_ducking_v1', value);
-  }
-
-  Future<void> setEmergencyWhatsApp(bool value) async {
-    if (value == _emergencyWhatsApp) return;
-    _emergencyWhatsApp = value;
-    notifyListeners();
-    await _save('emergency_whatsapp_v1', value);
+    await _save(keyAutoReroute, value);
   }
 }

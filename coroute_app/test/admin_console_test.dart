@@ -81,6 +81,7 @@ void main() {
         'status': u['status'] ?? 'ACTIVE',
         'tier': 'community',
         'guest': false,
+        'staff': u['role'] == 'MASTER_ADMIN',
         'trips': 3,
         'km': 120.5,
         'ridingHours': 4.2,
@@ -101,6 +102,8 @@ void main() {
           final st = qp['status'] ?? '';
           if (st.isNotEmpty) rows = rows.where((r) => r['status'] == st).toList();
           if (qp['riding'] == '1') rows = rows.where((r) => r['riding'] != null).toList();
+          // Staff (admins) only with staff=1, never in the rider list or its total otherwise.
+          rows = rows.where((r) => r['staff'] == (qp['staff'] == '1')).toList();
           final q = (qp['q'] ?? '').toLowerCase();
           if (q.isNotEmpty) rows = rows.where((r) => '${r['name']} ${r['email']} ${r['phone']}'.toLowerCase().contains(q)).toList();
           final cursor = int.tryParse(qp['cursor'] ?? '0') ?? 0;
@@ -184,7 +187,8 @@ void main() {
       expect(find.text('1 account on hold'), findsOneWidget);
       expect(find.text('Riders online'), findsOneWidget);
       expect(find.text('Open SOS'), findsOneWidget);
-      expect(find.text('Accounts'), findsOneWidget);
+      // Riders from the server's account list: the admin (staff) and nobody else is left out.
+      expect(find.text('Riders (excl. staff)'), findsOneWidget);
       expect(find.text('Emergency, 1 SOS'), findsOneWidget); // status in words on the ride row
 
       // What needs attention comes first.
@@ -248,6 +252,61 @@ void main() {
       AdminUsersScreen.queryFor(q: '', filter: AdminUserFilter.riding, tier: '', sort: AdminRiderSort.lastSeen),
       {'riding': '1', 'sort': 'lastSeen', 'limit': '50', 'cursor': '0'},
     );
+  });
+
+  test('the Staff filter asks the gateway for staff accounts only', () {
+    expect(
+      AdminUsersScreen.queryFor(q: '', filter: AdminUserFilter.staff, tier: '', sort: AdminRiderSort.name),
+      {'staff': '1', 'sort': 'name', 'limit': '50', 'cursor': '0'},
+    );
+    expect(AdminUsersScreen.queryFor(q: '', filter: AdminUserFilter.all, tier: '', sort: AdminRiderSort.name).containsKey('staff'), isFalse);
+  });
+
+  test('staff: the gateway flag wins, an admin role counts when the flag is missing', () {
+    expect(AdminUsersScreen.isStaff({'staff': true, 'role': 'RIDER'}), isTrue); // STAFF_EMAILS
+    expect(AdminUsersScreen.isStaff({'staff': false, 'role': 'RIDER'}), isFalse);
+    expect(AdminUsersScreen.isStaff({'role': 'MASTER_ADMIN'}), isTrue);
+    expect(AdminUsersScreen.isStaff({'role': 'RIDER'}), isFalse);
+  });
+
+  test('home rider counts come from the server; an older gateway is counted without staff or guests', () {
+    final server = MasterAdminDashboard.userCounts({
+      'users': [
+        {'userId': 'a', 'role': 'MASTER_ADMIN'},
+      ],
+      'counts': {'accounts': 9, 'riders': 6, 'staff': 2, 'guests': 1, 'onHold': 3},
+    });
+    expect(server, (riders: 6, staff: 2, onHold: 3)); // never recounted from the list
+    final legacy = MasterAdminDashboard.userCounts({
+      'users': [
+        {'userId': 'a', 'role': 'MASTER_ADMIN', 'status': 'ACTIVE'},
+        {'userId': 'b', 'role': 'RIDER', 'staff': true, 'status': 'ON_HOLD'},
+        {'userId': 'c', 'role': 'RIDER', 'status': 'ON_HOLD'},
+        {'userId': 'd', 'provider': 'guest', 'email': 'guest_1@guest.coroute.local'},
+        {'userId': 'e', 'role': 'RIDER'},
+      ],
+    });
+    expect(legacy, (riders: 2, staff: 2, onHold: 2));
+    expect(MasterAdminDashboard.userCounts(null), (riders: 0, staff: 0, onHold: 0));
+  });
+
+  testWidgets('riders list leaves the admin out; the Staff filter shows it with a Staff badge', (tester) async {
+    final calls = <http.Request>[];
+    await render(tester, size: const Size(400, 800), scale: 1.0, palette: AppPalette.dark, child: const AdminUsersScreen(), calls: calls);
+    expect(find.text('Bala'), findsOneWidget);
+    expect(find.text('Admin'), findsNothing);
+    expect(find.text('3 riders (excl. staff)'), findsOneWidget);
+    await tester.tap(find.byTooltip('Filter'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Staff').last);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(calls.lastWhere((r) => r.url.path.endsWith('/admin/analytics/riders')).url.queryParameters['staff'], '1');
+    expect(find.text('Admin'), findsOneWidget);
+    expect(find.text('Bala'), findsNothing);
+    expect(find.text('Staff, admin'), findsOneWidget);
+    expect(find.text('1 staff'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('"Load more" asks for the next page with the cursor', (tester) async {
