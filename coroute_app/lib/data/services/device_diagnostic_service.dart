@@ -212,7 +212,7 @@ class DeviceDiagnosticService extends ChangeNotifier {
       final net = await netF;
       final canCompose = await composeF;
       final dialed = await dialF;
-      final canDialOut = android ? (nat['canDial'] is bool ? nat['canDial'] as bool : null) : dialed;
+      final canDialOut = (android || probe.isIOS) ? (nat['canDial'] is bool ? nat['canDial'] as bool : null) : dialed;
       final compass = await compassF;
 
       final deviceInfo = DiagnosticDeviceInfo(
@@ -221,9 +221,9 @@ class DeviceDiagnosticService extends ChangeNotifier {
             : (!kIsWeb ? Platform.operatingSystem : 'Web'),
         model: safetyInfo.model.isNotEmpty
             ? safetyInfo.model
-            : (!kIsWeb ? (Platform.isAndroid ? 'Android Device' : Platform.operatingSystemVersion) : 'Browser'),
+            : (!kIsWeb ? (probe.isAndroid ? 'Android Device' : (probe.isIOS ? 'iPhone' : Platform.operatingSystemVersion)) : 'Browser'),
         osVersion: safetyInfo.release.isNotEmpty
-            ? 'Android ${safetyInfo.release}'
+            ? (probe.isIOS ? 'iOS ${safetyInfo.release}' : 'Android ${safetyInfo.release}')
             : (!kIsWeb ? '${Platform.operatingSystem} ${Platform.operatingSystemVersion}' : 'Web'),
         apiLevel: safetyInfo.sdkInt,
         appVersion: pkg.version.isNotEmpty ? pkg.version : '3.53.18',
@@ -298,27 +298,26 @@ class DeviceDiagnosticService extends ChangeNotifier {
       ]);
 
       // ---- Motion sensors
-      final accelPresent = android ? (nat['accelPresent'] as bool? ?? safetyInfo.hasAccel) : !probe.isIOS;
+      final hasNativeSensors = android || probe.isIOS;
+      final accelPresent = hasNativeSensors ? (nat['accelPresent'] as bool? ?? safetyInfo.hasAccel) : true;
       final accelHz = _num(nat['accelHz']);
       final probed = nat.isNotEmpty;
       categories['accelerometer'] = _category('accelerometer', 'Motion sensor', 'The motion sensor streams data.', [
         _item(
           'accel_hardware',
           'Motion sensor (accelerometer)',
-          accelPresent ? DiagnosticStatus.supported : (probe.isIOS ? DiagnosticStatus.limited : DiagnosticStatus.unsupported),
+          accelPresent ? DiagnosticStatus.supported : DiagnosticStatus.unsupported,
           accelPresent
               ? 'Found.'
-              : (probe.isIOS
-                  ? 'Crash detection runs on Android only for now. Use the SOS button if you need help.'
-                  : 'This phone has no accelerometer. Crash detection cannot run; the SOS button still works.'),
+              : 'This device has no accelerometer. Crash detection cannot run; the SOS button still works.',
         ),
-        if (android && accelPresent) _rateItem('accel_stream', 'Motion data', accelHz, probed, critical: true),
+        if (hasNativeSensors && accelPresent) _rateItem('accel_stream', 'Motion data', accelHz, probed, critical: true),
       ]);
 
-      final gyroPresent = android ? (nat['gyroPresent'] as bool? ?? safetyInfo.hasGyro) : !probe.isIOS;
-      final magPresent = android ? (nat['magPresent'] as bool? ?? true) : (compass ?? !probe.isIOS);
+      final gyroPresent = hasNativeSensors ? (nat['gyroPresent'] as bool? ?? safetyInfo.hasGyro) : true;
+      final magPresent = hasNativeSensors ? (nat['magPresent'] as bool? ?? true) : (compass ?? true);
       categories['gyroscope'] = _category('gyroscope', 'Rotation & compass', 'Gyroscope and compass work.', [
-        if (gyroPresent && android)
+        if (gyroPresent && hasNativeSensors)
           _rateItem('gyro_stream', 'Gyroscope', _num(nat['gyroHz']), probed)
         else
           _item(
@@ -332,13 +331,13 @@ class DeviceDiagnosticService extends ChangeNotifier {
           'Compass',
           magPresent ? DiagnosticStatus.ready : DiagnosticStatus.limited,
           magPresent
-              ? (android && _num(nat['magHz']) > 0 ? 'Works.' : 'Found.')
+              ? (hasNativeSensors && _num(nat['magHz']) > 0 ? 'Works.' : 'Found.')
               : 'No compass. The map turns with your direction of travel instead.',
         ),
       ]);
 
       // ---- Crash detection (needs the motion sensor streaming and the setting on)
-      final accelOk = accelPresent && (!android || !probed || accelHz >= _minHz);
+      final accelOk = accelPresent && (!hasNativeSensors || !probed || accelHz >= _minHz);
       categories['crash_detection'] = _category('crash_detection', 'Crash detection', 'Crash detection is on and ready.', [
         _item(
           'crash_setting',
@@ -745,13 +744,13 @@ class DeviceDiagnosticService extends ChangeNotifier {
     }
   }
 
-  /// Network kind (Android only) and whether the CoRoute server answers.
+  /// Network kind and whether the CoRoute server answers.
   Future<({String kind, bool gateway, bool online})> _network() async {
     try {
-      final kind = await SafetyNative.networkKind(); // 'none' off Android
+      final kind = await SafetyNative.networkKind();
       var gateway = false;
       final client = _apiClient;
-      if (client != null && (kind != 'none' || !probe.isAndroid)) {
+      if (client != null && (kind != 'none' || !probe.isMobile)) {
         try {
           final res = await client.get('/health', timeout: const Duration(seconds: 4));
           gateway = res is Map;
@@ -759,8 +758,8 @@ class DeviceDiagnosticService extends ChangeNotifier {
           gateway = false;
         }
       }
-      final online = probe.isAndroid ? kind != 'none' : (gateway || !probe.isMobile);
-      return (kind: probe.isAndroid ? kind : '', gateway: gateway, online: online);
+      final online = probe.isMobile ? kind != 'none' : (gateway || !probe.isMobile);
+      return (kind: probe.isMobile ? kind : '', gateway: gateway, online: online);
     } catch (_) {
       return (kind: '', gateway: false, online: false);
     }
@@ -893,9 +892,9 @@ class GpsReading {
 class PhoneProbe {
   const PhoneProbe();
 
-  bool get isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-  bool get isAndroid => !kIsWeb && Platform.isAndroid;
-  bool get isIOS => !kIsWeb && Platform.isIOS;
+  bool get isMobile => !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+  bool get isAndroid => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  bool get isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   Future<bool> locationServiceEnabled() async {
     try {
