@@ -144,9 +144,6 @@ class GloveQuickSettingsModal extends StatelessWidget {
           if (intercom != null) {
             intercom.setMicMuted(!next);
             intercom.setDeafened(!next);
-            if (next) {
-              intercom.setMode(IntercomMode.vox);
-            }
           }
           onSettingToggled?.call('Voice & Intercom', next);
           onSettingToggled?.call('Voice Alerts', next);
@@ -178,7 +175,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
         label: 'Battery Conserve',
         subtitle: batteryConserveOn
             ? 'Endurance low-data & throttled sync'
-            : 'Standard live telemetry & sync rate',
+            : 'Normal data use',
         icon: Icons.battery_saver_rounded,
         isActive: batteryConserveOn,
         isLocked: false,

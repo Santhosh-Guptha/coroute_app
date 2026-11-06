@@ -31,6 +31,21 @@ const { RoadHazardRegistry } = require('./road_hazards');
 
 const VOICE_START = 0x01, VOICE_FRAME = 0x02, VOICE_END = 0x03;
 
+const envInt = (k, d) => { const n = parseInt(process.env[k] || '', 10); return Number.isFinite(n) && n >= 0 ? n : d; };
+/** Position fan-out for large rooms: above this many sockets each rider's RIDER_UPDATE is throttled to one
+ * per WS_COALESCE_MS (leading edge goes out at once; updates inside the window are coalesced, latest wins,
+ * and flushed at the window's end), so a 100-rider convoy never multiplies bursts or stale positions. */
+const POS_COALESCE_ABOVE = envInt('WS_COALESCE_ABOVE', 20);
+const POS_COALESCE_MS = Math.max(50, envInt('WS_COALESCE_MS', 500));
+/** A peer with this much unsent data gets no more positions (the next one supersedes them anyway). */
+const POS_DROP_BYTES = envInt('WS_POSITION_DROP_BYTES', 256 * 1024);
+/** A peer this far behind is a dead or hopeless link: closed (the app reconnects and gets a SNAPSHOT). */
+const MAX_BUFFERED_BYTES = Math.max(POS_DROP_BYTES * 2, envInt('WS_MAX_BUFFERED_BYTES', 4 * 1024 * 1024));
+/** Open sockets one account may hold at a time. */
+const MAX_SOCKETS_PER_USER = Math.max(2, envInt('WS_MAX_SOCKETS_PER_USER', 8));
+/** Voice frames per second a single stream may relay (20 ms frames are 50/s). */
+const VOICE_MAX_FPS = envInt('VOICE_MAX_FPS', 100);
+
 /** Intercom sample rates: 16 kHz, and 8 kHz from phones in data saver mode. */
 const VOICE_RATES = new Set([8000, 16000]);
 
@@ -98,6 +113,10 @@ class Hub {
     this.admins = new Set();
     this.voice = new Map();
     this.roadHazards = new RoadHazardRegistry(); // groupId -> { group: stream|null, private: Map<from, stream> }
+    this.posPending = new Map(); // groupId -> Map<userId, RIDER_UPDATE json> (large rooms, coalesced)
+    this.posTimers = new Map(); // groupId -> flush timer
+    this.posSentAt = new Map(); // groupId -> Map<userId, last fan-out time> (large rooms)
+    this.stats = { posIn: 0, posOut: 0, posDropped: 0, posCoalesced: 0, slowKicked: 0 };
     this.wss = new WebSocketServer({ server, path, maxPayload: 256 * 1024 });
     this.wss.on('connection', (ws, req) => this._onConnection(ws, req));
 
@@ -107,6 +126,8 @@ class Hub {
     convoys.featureAnalytics?.on('change', () => this._scheduleFleet());
     // 3.15: room messages only 3.15 apps understand (EMERGENCY_UPDATE).
     convoys.on('capEvent', (groupId, cap, payload) => this.broadcastCap(groupId, cap, payload));
+    // An ended ride: no queued positions or voice floor survive it.
+    convoys.on('roomEnded', (groupId) => this._dropRoomState(groupId));
 
     this.heartbeat = setInterval(() => {
       for (const ws of this.wss.clients) {
@@ -122,7 +143,86 @@ class Hub {
   close() {
     // Sockets closed by a restart are not "no signal": presence is left as it was.
     this.closing = true;
-    clearInterval(this.heartbeat); clearInterval(this.fleetTimer); this.wss.close();
+    clearInterval(this.heartbeat); clearInterval(this.fleetTimer);
+    for (const t of this.posTimers.values()) clearTimeout(t);
+    this.posTimers.clear(); this.posPending.clear();
+    this.wss.close();
+  }
+
+  _dropRoomState(groupId) {
+    const t = this.posTimers.get(groupId);
+    if (t) clearTimeout(t);
+    this.posTimers.delete(groupId); this.posPending.delete(groupId); this.posSentAt.delete(groupId);
+    this.voice.delete(groupId);
+  }
+
+  /** The room for a live-position message, or null (once per socket: ERROR 409 RIDE_ENDED) when the ride ended. */
+  async _liveRoom(ws, gid) {
+    const room = await this.convoys.getRoom(gid);
+    if (room.meta.tripStatus !== 'ENDED') return room;
+    if (!ws.rideEndedSent) { ws.rideEndedSent = true; this.sendError(ws, 409, 'This ride has ended.', 'RIDE_ENDED'); }
+    return null;
+  }
+
+  /**
+   * Position fan-out with backpressure. Small rooms: at once to every other socket. Large rooms
+   * (> WS_COALESCE_ABOVE sockets): the rider's latest update is queued and flushed with everyone
+   * else's every WS_COALESCE_MS. Either way a peer whose send buffer is over WS_POSITION_DROP_BYTES
+   * skips positions (stale ones are worthless) and one over WS_MAX_BUFFERED_BYTES is closed.
+   */
+  _fanoutPosition(gid, fromWs, rider) {
+    const set = this.rooms.get(gid);
+    this.stats.posIn++;
+    if (!set || !rider) return;
+    const msg = JSON.stringify({ type: 'RIDER_UPDATE', rider: publicRider(rider), ts: Date.now() });
+    if (set.size > POS_COALESCE_ABOVE) {
+      const t = Date.now();
+      let sentAt = this.posSentAt.get(gid);
+      if (!sentAt) { sentAt = new Map(); this.posSentAt.set(gid, sentAt); }
+      let pending = this.posPending.get(gid);
+      if (!pending) { pending = new Map(); this.posPending.set(gid, pending); }
+      if (!pending.has(rider.userId) && t - (sentAt.get(rider.userId) || 0) >= POS_COALESCE_MS) {
+        sentAt.set(rider.userId, t);
+        return this._sendPosition(set, msg, null, fromWs);
+      }
+      if (pending.has(rider.userId)) this.stats.posCoalesced++;
+      pending.set(rider.userId, msg);
+      if (!this.posTimers.has(gid)) {
+        const timer = setTimeout(() => this._flushPositions(gid), POS_COALESCE_MS);
+        if (timer.unref) timer.unref();
+        this.posTimers.set(gid, timer);
+      }
+      return;
+    }
+    this._sendPosition(set, msg, null, fromWs);
+  }
+
+  _flushPositions(gid) {
+    this.posTimers.delete(gid);
+    const pending = this.posPending.get(gid);
+    this.posPending.delete(gid);
+    const set = this.rooms.get(gid);
+    const room = this.convoys.rooms.get(gid);
+    if (!pending || !set || !room) return;
+    const sentAt = this.posSentAt.get(gid);
+    const t = Date.now();
+    // A rider who left while queued is never brought back by a late position.
+    for (const [uid, msg] of pending) {
+      if (!room.riders.has(uid)) { if (sentAt) sentAt.delete(uid); continue; }
+      if (sentAt) sentAt.set(uid, t);
+      this._sendPosition(set, msg, uid, null);
+    }
+  }
+
+  _sendPosition(set, msg, fromUid, exceptWs) {
+    for (const peer of set) {
+      if (peer === exceptWs || peer.readyState !== WebSocket.OPEN) continue;
+      if (fromUid && peer.user && peer.user.userId === fromUid) continue;
+      if (peer.bufferedAmount > MAX_BUFFERED_BYTES) { this.stats.slowKicked++; this._kick(peer, 1013, 'SLOW_LINK'); continue; }
+      if (peer.bufferedAmount > POS_DROP_BYTES) { this.stats.posDropped++; continue; }
+      peer.send(msg);
+      this.stats.posOut++;
+    }
   }
 
   // ------------------------------------------------------------- helpers
@@ -167,6 +267,13 @@ class Hub {
     if (!uid) return;
     let set = this.byUser.get(uid);
     if (!set) { set = new Set(); this.byUser.set(uid, set); }
+    // Sockets per account are bounded: the oldest (usually a dead link not yet reaped by the
+    // heartbeat after a reconnect) makes room, so one token cannot hold hundreds of sockets.
+    while (set.size >= MAX_SOCKETS_PER_USER) {
+      const oldest = set.values().next().value;
+      set.delete(oldest);
+      this._kick(oldest, 1008, 'TOO_MANY_SOCKETS');
+    }
     set.add(ws);
   }
   _unindex(ws) {
@@ -357,10 +464,12 @@ class Hub {
     const gid = ws.groupId;
     if (!gid) return;
     if (!this._allow(ws, 'telemetry', 3)) return; // silently drop bursts
-    const room = await this.convoys.getRoom(gid);
+    const room = await this._liveRoom(ws, gid);
+    if (!room) return;
     const tsOffset = buf.readUInt32BE(1);
     const lat = buf.readInt32BE(5) / 1e6;
     const lng = buf.readInt32BE(9) / 1e6;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return; // corrupt frame: never moves the rider
     const speedKmh = buf.readUInt16BE(13) / 10;
     const heading = buf.readUInt16BE(15) / 10;
     const batByte = buf.readUInt8(17);
@@ -389,20 +498,9 @@ class Hub {
       patch.statusReason = 'OFF_ROUTE';
     }
     const rider = this.convoys.patchRider(room, ws.user.userId, patch, { emit: false });
-
-    // Relay to room peers
-    const set = this.rooms.get(gid);
-    if (set) {
-      const jsonMsg = JSON.stringify({ type: 'RIDER_UPDATE', rider: publicRider(rider), ts: Date.now() });
-      for (const peer of set) {
-        if (peer === ws || peer.readyState !== WebSocket.OPEN) continue;
-        if (peer.caps && peer.caps.has('bin1')) {
-          peer.send(buf);
-        } else {
-          peer.send(jsonMsg);
-        }
-      }
-    }
+    // Relayed as JSON RIDER_UPDATE: the raw 24-byte frame carries no sender id, so a peer could
+    // not tell whose position it is (and the sender could not be trusted to say).
+    this._fanoutPosition(gid, ws, rider);
   }
 
   async _onJson(ws, data) {
@@ -447,6 +545,7 @@ class Hub {
 
       case 'JOIN': {
         const groupId = String(msg.groupId || '');
+        if (groupId.length > 64) throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER');
         if (!(await this.convoys.isMember(groupId, u.userId))) throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER');
         this._bind(ws, groupId);
         ws.byeReason = null;
@@ -482,10 +581,11 @@ class Hub {
       case 'TELEMETRY': {
         const gid = this._requireRoom(ws);
         if (!this._allow(ws, 'telemetry', 3)) return; // silently drop bursts
-        const room = await this.convoys.getRoom(gid);
+        const room = await this._liveRoom(ws, gid);
+        if (!room) return;
         // Only telemetry fields are applied (never role or profile); see ConvoyManager.patchRider.
         const rider = this.convoys.patchRider(room, u.userId, msg, { emit: false });
-        return this.broadcast(gid, { type: 'RIDER_UPDATE', rider: publicRider(rider), ts: Date.now() }, { except: ws });
+        return this._fanoutPosition(gid, ws, rider);
       }
       case 'STATUS': return this._once(ws, cid, 'STATUS', async () => {
         const gid = this._requireRoom(ws);
@@ -630,42 +730,12 @@ class Hub {
         await this.convoys.setTripStatus(gid, status);
         return;
       }
-      case 'REGROUP_SET': {
-        const gid = this._requireRoom(ws);
-        const room = await this.convoys.getRoom(gid);
-        const rider = room.riders.get(u.userId);
-        if (!rider || (rider.role !== 'LEAD' && rider.role !== 'SWEEPER' && room.meta.createdByUserId !== u.userId && u.role !== ROLE_ADMIN)) {
-          throw new ConvoyError('Only the lead or sweeper can initiate a regroup.', 403);
-        }
-        const regroupData = {
-          stopId: msg.stopId ? String(msg.stopId) : null,
-          lat: Number(msg.lat) || 0,
-          lng: Number(msg.lng) || 0,
-          name: String(msg.name || 'Regroup Point').slice(0, 120),
-          targetKmh: Number(msg.targetKmh) || 40,
-          suggestedByUserId: u.userId,
-          suggestedByName: u.name,
-          targetAction: String(msg.targetAction || 'PULL_OVER_AND_WAIT'),
-          createdAt: Date.now(),
-        };
-        room.meta.regroup = regroupData;
-        this.broadcast(gid, { type: 'REGROUP_ACTIVE', regroup: regroupData, ts: Date.now() });
-        if (this.timeline) {
-          await this.timeline.onActivity(gid, {
-            type: 'REGROUP_INITIATED',
-            user: u,
-            regroup: regroupData,
-            lat: regroupData.lat,
-            lng: regroupData.lng,
-          });
-        }
-        return;
-      }
       case 'LAST_GASP_BEACON': {
         const gid = this._requireRoom(ws);
-        const room = await this.convoys.getRoom(gid);
-        const lat = Number(msg.lat) || 0;
-        const lng = Number(msg.lng) || 0;
+        const room = await this._liveRoom(ws, gid);
+        if (!room) return;
+        const lat = Math.max(-90, Math.min(90, Number(msg.lat) || 0));
+        const lng = Math.max(-180, Math.min(180, Number(msg.lng) || 0));
         const fuelKm = Number(msg.fuelKm ?? msg.usableFuelKm) || 0;
         const speedKmh = Number(msg.speedKmh) || 0;
         const batteryLevel = Math.min(100, Math.max(0, Number(msg.batteryLevel ?? 5)));
@@ -900,6 +970,9 @@ class Hub {
     if (pkt.kind === VOICE_FRAME) {
       if (t - stream.startedAt > config.voiceMaxStreamMs) return this._endStream(gid, stream, 'max-duration');
       if (pkt.payload.length === 0 || pkt.payload.length > config.voiceMaxFrameBytes) return;
+      // Frame budget per stream: a flooding client cannot multiply audio across the whole room.
+      if (!stream.rateAt || t - stream.rateAt >= 1000) { stream.rateAt = t; stream.rateN = 0; }
+      if (++stream.rateN > VOICE_MAX_FPS) return;
       stream.lastAt = t; stream.frames++;
       this._relay(gid, stream, VOICE_FRAME, { ...this._hdr(stream), seq: pkt.header.seq | 0 }, pkt.payload);
       return;

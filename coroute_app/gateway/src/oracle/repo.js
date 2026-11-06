@@ -46,6 +46,7 @@ const C = {
   memberships: 'memberships',
   activeTrips: 'active_trips',
   organizations: 'organizations',
+  diagnostics: 'device_diagnostics',
 };
 
 /** Alert fields that live in memory only (filled by the safety network) and are never stored. */
@@ -111,6 +112,8 @@ class Repo {
     await idx(C.broadcasts, 'broadcasts_ts_ix', [{ path: 'timestamp', datatype: 'number' }]);
     await idx(C.pageviews, 'pageviews_day_path_ux', ['day', 'path'], true);
     await idx(C.feedback, 'feedback_ts_ix', [{ path: 'createdAt', datatype: 'number' }]);
+    await idx(C.feedback, 'feedback_trip_user_ix', ['tripId', 'userId']);
+    await idx(C.feedback, 'feedback_status_ix', ['status', { path: 'submittedAt', datatype: 'number' }]);
     await idx(C.trackChunks, 'tracks_group_user_seq_ux', ['groupId', 'userId', { path: 'seq', datatype: 'number' }], true);
     await idx(C.trackChunks, 'tracks_group_ts_ix', ['groupId', { path: 'startTs', datatype: 'number' }]);
     await idx(C.trackChunks, 'tracks_end_ix', [{ path: 'endTs', datatype: 'number' }]);
@@ -127,6 +130,10 @@ class Repo {
     await idx(C.activeTrips, 'active_trips_user_ux', ['userId'], true);
     await idx(C.activeTrips, 'active_trips_group_ix', ['groupId']);
     await idx(C.organizations, 'organizations_id_ux', ['organizationId'], true);
+    await idx(C.diagnostics, 'diag_id_ux', ['diagnosticId'], true);
+    await idx(C.diagnostics, 'diag_user_ix', ['riderId', { path: 'timestamp', datatype: 'number' }]);
+    await idx(C.diagnostics, 'diag_mfg_ix', [{ path: 'deviceInfo.manufacturer', datatype: 'string' }]);
+    await idx(C.diagnostics, 'diag_status_ix', ['lifecycleStatus', { path: 'timestamp', datatype: 'number' }]);
   }
 
   // ---------- users ----------
@@ -153,6 +160,22 @@ class Repo {
     const key = await this.soda.insert(C.users, doc);
     return { key, ...doc };
   }
+  /** Every row of `coll` matching filter, read in pages of 1000 (the SODA REST page size). */
+  async _allRows(coll, filter) {
+    const out = [];
+    for (let offset = 0; ; offset += 1000) {
+      const rows = await this.soda.query(coll, filter, { limit: 1000, offset });
+      out.push(...rows);
+      if (rows.length < 1000) return out;
+    }
+  }
+
+  /** The review photo store (config.reviewPhotoDir); created on first use. */
+  _reviewPhotoStore() {
+    if (!this._photos) this._photos = require('../review_photos').createPhotoStore(require('../config').reviewPhotoDir);
+    return this._photos;
+  }
+
   /** Every groupId the rider ever appeared in (trips, memberships, timeline, convoys, chat, SOS). */
   async groupsOfUser(user) {
     const uid = user.userId;
@@ -200,19 +223,20 @@ class Repo {
     const groups = await this.groupsOfUser(user);
 
     await this.soda.removeWhere(C.guardianConsents, { userId: uid });
-    // Remove guardian credentials and dependent sessions before erasing the owner.
-    for (;;) {
-      const grants = await this.soda.query(C.guardianGrants, { creatorId: uid }, { limit: 100 });
-      if (!grants.length) break;
-      for (const { key, value } of grants) {
+    // Remove guardian credentials and dependent sessions before erasing the owner. Every grant is
+    // read first (all pages, not only the first 100), then each one and its dependants go.
+    const grants = await this._allRows(C.guardianGrants, { creatorId: uid });
+    for (const { key, value } of grants) {
+      if (value && value.grantId) {
         await this.soda.removeWhere(C.guardianSessions, { grantId: value.grantId });
         await this.soda.removeWhere(C.guardianSubscriptions, { grantId: value.grantId });
         await this.soda.removeWhere(C.guardianJobs, { grantId: value.grantId });
         await this.soda.removeWhere(C.guardianPauses, { grantId: value.grantId });
         await this.soda.removeWhere(C.guardianRevocations, { grantId: value.grantId });
-        await this.soda.remove(C.guardianGrants, key);
       }
+      await this.soda.remove(C.guardianGrants, key);
     }
+    await this.soda.removeWhere(C.guardianGrants, { creatorId: uid }); // any written meanwhile
     // The rider's own records.
     await this.soda.removeWhere(C.riders, { userId: uid });
     await this.soda.removeWhere(C.trips, { userId: uid });
@@ -223,7 +247,17 @@ class Repo {
     await this.soda.removeWhere(C.alerts, { userId: uid });
     await this.soda.removeWhere(C.voiceLog, { from: uid });
     await this.soda.removeWhere(C.voiceLog, { to: uid });
+    // Trip reviews (public stories go with them) and their uploaded photo files on disk.
+    const feedback = [
+      ...(user.email ? await this._allRows(C.feedback, { email: user.email }) : []),
+      ...await this._allRows(C.feedback, { userId: uid }),
+    ];
+    const photos = this._reviewPhotoStore();
+    for (const { value } of feedback) {
+      for (const meta of (Array.isArray(value && value.uploads) ? value.uploads : [])) await photos.remove(meta);
+    }
     if (user.email) await this.soda.removeWhere(C.feedback, { email: user.email });
+    await this.soda.removeWhere(C.feedback, { userId: uid });
     // The safety log is not kept for deleted accounts (3.15).
     await this.soda.removeWhere(C.audit, { actorId: uid });
     await this.soda.removeWhere(C.audit, { subjectId: uid });
@@ -254,9 +288,16 @@ class Repo {
     return { groups: groups.size };
   }
 
+  /** Newest first, up to `limit`, read in pages of 1000 (the SODA REST page size). */
   async listUsers(limit = 500) {
-    const rows = await this.soda.query(C.users, {}, { orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }], limit });
-    return rows.map((r) => ({ ...r.value, key: r.key }));
+    const out = [];
+    for (let offset = 0; offset < limit; offset += 1000) {
+      const want = Math.min(1000, limit - offset);
+      const rows = await this.soda.query(C.users, {}, { orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }], limit: want, offset });
+      for (const r of rows) out.push({ ...r.value, key: r.key });
+      if (rows.length < want) break;
+    }
+    return out;
   }
   /** Users on a paid tier (the sweeper's working set); expired-but-not-rolled-back documents included. */
   async listPaidSubscribers(limit = 2000) {
@@ -319,7 +360,6 @@ class Repo {
     if (!row || row.value.leaseOwner !== owner) return false;
     return this.soda.compareAndReplace(C.guardianJobs, row.key, row.value, { ...doc, leaseOwner: null, leaseUntil: 0 });
   }
-  async saveGuardianJob(doc) { await this.soda.upsertBy(C.guardianJobs, { jobId: doc.jobId }, doc); }
   async getGuardianSubscription(subscriptionId) {
     return (await this.soda.findOne(C.guardianSubscriptions, { subscriptionId }))?.value || null;
   }
@@ -441,10 +481,6 @@ class Repo {
   async listRiders(groupId) {
     const rows = await this.soda.query(C.riders, { groupId }, { limit: 500 });
     return rows.map((r) => ({ ...r.value, key: r.key }));
-  }
-  async getRider(groupId, userId) {
-    const r = await this.soda.findOne(C.riders, { groupId, userId });
-    return r ? { ...r.value, key: r.key } : null;
   }
   async upsertRider(groupId, rider) {
     const doc = { ...rider, groupId, userId: rider.userId };
@@ -757,9 +793,16 @@ class Repo {
     await this.soda.replace(C.subscriptionConfig, r.key, next);
     return next;
   }
+  /** Ledger orders matching `filter`, up to `limit`, read in pages of 1000 (the SODA REST page size). */
   async listRazorpayOrders(filter = {}, limit = 200) {
-    const rows = await this.soda.query(C.subscriptionConfig, { ...filter, k: 'rzp_order' }, { limit });
-    return rows.map((r) => r.value);
+    const out = [];
+    for (let offset = 0; offset < limit; offset += 1000) {
+      const want = Math.min(1000, limit - offset);
+      const rows = await this.soda.query(C.subscriptionConfig, { ...filter, k: 'rzp_order' }, { limit: want, offset });
+      for (const r of rows) out.push(r.value);
+      if (rows.length < want) break;
+    }
+    return out;
   }
   async findRazorpayOrderByPaymentId(paymentId) {
     if (!paymentId) return null;
@@ -1021,7 +1064,7 @@ class Repo {
       userEmail: userDoc?.email || '',
       userPhone: userDoc?.phone || '',
       category: category || 'individual',
-      categoryName: categoryName || (category === 'group_large' ? 'Group (7–12)' : category === 'group_small' ? 'Group (2–6)' : 'Individual'),
+      categoryName: categoryName || category || 'individual',
       originalPrice: Number(originalPrice) || 0,
       discountAmount: Number(discountAmount) || 0,
       finalAmount: Number(finalAmount) || 0,
@@ -1061,6 +1104,7 @@ class Repo {
         const coupon = await this.findCoupon(rzp.offerCode);
         if (coupon) {
           const discountAmt = Number(rzp.discountAmount) || 0;
+          const plans = await this._membershipPlanMeta();
           existing = {
             redemptionId: `red_${Date.now().toString(36)}_${require('crypto').randomBytes(4).toString('hex')}`,
             couponCode: coupon.code,
@@ -1070,9 +1114,9 @@ class Repo {
             userEmail: userDoc?.email || '',
             userPhone: userDoc?.phone || '',
             category: rzp.category || 'individual',
-            categoryName: rzp.category === 'group_large' ? 'Group (7–12)' : rzp.category === 'group_small' ? 'Group (2–6)' : 'Individual',
-            originalPrice: rzp.category === 'group_large' ? 99 : rzp.category === 'group_small' ? 49 : 9,
-            discountAmount: discountAmt,
+            categoryName: plans[rzp.category] ? plans[rzp.category].name : (rzp.category || 'individual'),
+            originalPrice: this._orderOriginalPrice(rzp, plans),
+            discountAmount: discountAmt || (rzp.isFree ? this._orderOriginalPrice(rzp, plans) : 0),
             finalAmount: (Number(rzp.amountInPaise) || 0) / 100,
             orderId,
             status: 'SUCCESS',
@@ -1166,6 +1210,33 @@ class Repo {
 
   // ---------- payments analytics & searchable transaction history ----------
 
+  /**
+   * Name, monthly price and seat capacity of every membership plan, from the stored catalog
+   * (or its built-in defaults when an admin never saved one). Prices are never hard-coded here.
+   */
+  async _membershipPlanMeta() {
+    const catalog = await this.getMembershipCatalog().catch(() => ({}));
+    const out = {};
+    for (const [id, c] of Object.entries(catalog || {})) {
+      if (!c || typeof c !== 'object') continue;
+      out[id] = { id, name: c.name || id, priceInr: Number(c.monthlyPriceInr) || 0, capacity: Number(c.capacity) || 1 };
+    }
+    return out;
+  }
+
+  /**
+   * The pre-discount price of an order in rupees: recorded on the order, else amount + recorded
+   * discount, else the plan's current catalog price, else what was charged.
+   */
+  _orderOriginalPrice(o, plans) {
+    if (Number(o.originalPrice) > 0) return Number(o.originalPrice);
+    const amountInr = (Number(o.amountInPaise) || 0) / 100;
+    const discount = Number(o.discountAmount) || 0;
+    if (discount > 0) return amountInr + discount;
+    const plan = o.category ? plans[o.category] : null;
+    return plan ? plan.priceInr : amountInr;
+  }
+
   async getMembershipPaymentAnalytics({ range = '30d', from, to } = {}) {
     const now = Date.now();
     let startTime = now - 30 * 86400000;
@@ -1213,11 +1284,13 @@ class Repo {
     let refundedAmountInr = 0;
     let refundedOrdersCount = 0;
 
-    const byPlan = {
-      individual: { id: 'individual', name: 'Individual Membership', priceInr: 9, units: 0, grossInr: 0, discountsInr: 0, netInr: 0, activeMembers: 0 },
-      group_small: { id: 'group_small', name: 'Group Membership (2–6)', priceInr: 49, units: 0, grossInr: 0, discountsInr: 0, netInr: 0, activeMembers: 0 },
-      group_large: { id: 'group_large', name: 'Group Membership (7–12)', priceInr: 99, units: 0, grossInr: 0, discountsInr: 0, netInr: 0, activeMembers: 0 },
-    };
+    const plans = await this._membershipPlanMeta();
+    const byPlan = {};
+    // The three standard plans always appear (the dashboard reads them); any extra catalog plan is added.
+    for (const id of new Set(['individual', 'group_small', 'group_large', ...Object.keys(plans)])) {
+      const p = plans[id] || { id, name: id, priceInr: 0 };
+      byPlan[id] = { id, name: p.name, priceInr: p.priceInr, units: 0, grossInr: 0, discountsInr: 0, netInr: 0, activeMembers: 0 };
+    }
 
     // Calculate active members per plan, seat utilization, and MRR
     let totalMRR = 0;
@@ -1230,19 +1303,10 @@ class Repo {
         if (byPlan[cat]) {
           byPlan[cat].activeMembers++;
         }
-        if (cat === 'individual') {
-          totalMRR += (m.priceInr || 9);
-          totalSeatsAllocated += 1;
-          totalSeatsOccupied += 1;
-        } else if (cat === 'group_small') {
-          totalMRR += (m.priceInr || 49);
-          totalSeatsAllocated += (m.capacity || 6);
-          totalSeatsOccupied += (1 + Object.keys(m.members || {}).length);
-        } else if (cat === 'group_large') {
-          totalMRR += (m.priceInr || 99);
-          totalSeatsAllocated += (m.capacity || 12);
-          totalSeatsOccupied += (1 + Object.keys(m.members || {}).length);
-        }
+        const plan = plans[cat];
+        totalMRR += Number(m.priceInr) || (plan ? plan.priceInr : 0);
+        totalSeatsAllocated += Number(m.capacity) || (plan ? plan.capacity : 1);
+        totalSeatsOccupied += 1 + Object.keys(m.members || {}).length;
       }
     }
 
@@ -1261,9 +1325,8 @@ class Repo {
       const amountPaise = Number(o.amountInPaise) || 0;
       const orderAmountInr = amountPaise / 100;
       const isFreeOrder = Boolean(o.isFree) || orderAmountInr === 0;
-      const cat = o.category || 'individual';
-      const planMeta = byPlan[cat] || byPlan.individual;
-      const catalogPrice = planMeta.priceInr;
+      const cat = o.category || null;
+      const catalogPrice = this._orderOriginalPrice(o, plans);
       const discount = Number(o.discountAmount) || Math.max(0, catalogPrice - orderAmountInr);
 
       if (status === 'FAILED' || status === 'SIGNATURE_MISMATCH') {
@@ -1412,6 +1475,8 @@ class Repo {
     const orders = await this.listRazorpayOrders({}, 5000);
     const users = await this.soda.query(C.users, {}, { limit: 5000 }).then((r) => r.map((x) => x.value)).catch(() => []);
     const userMap = new Map(users.map((u) => [u.userId, u]));
+    const plans = await this._membershipPlanMeta();
+    const subscriptionPricing = await this.getSubscriptionPricing().catch(() => null);
 
     let list = orders.map((o) => {
       const u = userMap.get(o.userId) || {};
@@ -1425,10 +1490,12 @@ class Repo {
         userName: u.name || o.userName || 'Rider',
         userEmail: u.email || o.userEmail || '',
         userPhone: u.phone || o.userPhone || '',
-        category: o.category || 'individual',
-        categoryName: o.category === 'group_large' ? 'Group (7–12)' : o.category === 'group_small' ? 'Group (2–6)' : 'Individual',
+        category: o.category || o.planTier || 'individual',
+        categoryName: o.category
+          ? (plans[o.category] ? plans[o.category].name : o.category)
+          : (o.planTier ? ((subscriptionPricing && subscriptionPricing[o.planTier] && subscriptionPricing[o.planTier].label) || o.planTier) : 'Individual'),
         amountInr,
-        originalPrice: o.originalPrice || (o.category === 'group_large' ? 99 : o.category === 'group_small' ? 49 : 9),
+        originalPrice: this._orderOriginalPrice(o, plans),
         discountAmount: Number(o.discountAmount) || 0,
         offerCode: o.offerCode || null,
         status: String(o.status || 'CREATED').toUpperCase(),
@@ -1554,8 +1621,16 @@ class Repo {
 
   async findMembershipByOwner(ownerUserId) {
     if (!ownerUserId) return null;
-    const rows = await this.soda.query(C.memberships, { ownerUserId: String(ownerUserId), status: 'ACTIVE' }, { limit: 1 });
-    return rows.length ? { ...rows[0].value, key: rows[0].key } : null;
+    const rows = await this.soda.query(C.memberships, { ownerUserId: String(ownerUserId) }, { limit: 50 });
+    if (!rows || !rows.length) return null;
+    const now = Date.now();
+    // Prefer ACTIVE membership where validUntil > now, sorted by validUntil DESC
+    const active = rows.map((r) => ({ ...r.value, key: r.key }))
+      .filter((m) => m.status === 'ACTIVE' && (Number(m.validUntil) || 0) > now)
+      .sort((a, b) => (Number(b.validUntil) || 0) - (Number(a.validUntil) || 0));
+    if (active.length) return active[0];
+
+    return null;
   }
 
   async findMembershipsForUser(userId) {
@@ -1652,11 +1727,6 @@ class Repo {
     };
   }
 
-  async deleteMembership(membershipId) {
-    if (!membershipId) return false;
-    return this.soda.removeWhere(C.memberships, { membershipId: String(membershipId) });
-  }
-
   // ---------- single active trip lock registry ----------
   async getActiveTrip(userId) {
     if (!userId) return null;
@@ -1685,26 +1755,6 @@ class Repo {
   async releaseAllActiveTripsForGroup(groupId) {
     if (!groupId) return 0;
     return this.soda.removeWhere(C.activeTrips, { groupId: String(groupId) });
-  }
-
-  // ---------- B2B organizations ----------
-  async findOrganizationById(organizationId) {
-    if (!organizationId) return null;
-    const r = await this.soda.findOne(C.organizations, { organizationId: String(organizationId) });
-    return r ? { ...r.value, key: r.key } : null;
-  }
-
-  async listOrganizations(limit = 100) {
-    const rows = await this.soda.query(C.organizations, {}, { limit });
-    return rows.map((r) => ({ ...r.value, key: r.key }));
-  }
-
-  async saveOrganization(org) {
-    if (!org?.organizationId) throw new Error('organizationId required');
-    const doc = { ...org, organizationId: String(org.organizationId), updatedAt: Date.now() };
-    delete doc.key;
-    await this.soda.upsertBy(C.organizations, { organizationId: doc.organizationId }, doc);
-    return doc;
   }
 
   // ---------- public community stats & website metrics ----------
@@ -1805,39 +1855,261 @@ class Repo {
   }
 
   // ---------- post-trip feedback & community stories ----------
+  // Trip reviews share the `feedback` collection with website contact messages; reviews are
+  // the documents with a feedbackId. Rules (who may review, consent, moderation) live in
+  // src/trip_reviews.js; this layer only stores and reads.
   async addTripFeedback(doc) {
     const feedbackId = doc.feedbackId || `FB-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    const photos = Array.isArray(doc.photos) ? doc.photos.slice(0, 5) : (doc.photoUrl ? [doc.photoUrl] : []);
     const entry = {
       ...doc,
       feedbackId,
+      photos,
+      photoUrl: photos[0] || null,
       status: doc.status || 'PENDING_REVIEW',
       submittedAt: doc.submittedAt || Date.now(),
       reviewHistory: doc.reviewHistory || [],
     };
+    delete entry.key;
     await this.soda.upsertBy(C.feedback, { feedbackId }, entry);
     return entry;
   }
 
-  async listTripFeedback(limit = 200) {
-    const rows = await this.soda.query(C.feedback, {}, {
+  async getTripFeedback(feedbackId) {
+    const r = await this.soda.findOne(C.feedback, { feedbackId: String(feedbackId) });
+    return r ? { ...r.value, key: r.key } : null;
+  }
+
+  /** The rider's review of a trip (one per rider per trip), or null. */
+  async findTripFeedbackFor(tripId, userId) {
+    const rows = await this.soda.query(C.feedback, { tripId: String(tripId), userId: String(userId) }, { limit: 5 });
+    const found = rows.map((r) => ({ ...r.value, key: r.key })).filter((v) => v.feedbackId);
+    found.sort((a, b) => (b.updatedAt || b.submittedAt || 0) - (a.updatedAt || a.submittedAt || 0));
+    return found[0] || null;
+  }
+
+  /** Trip reviews (not website contact messages), newest first; optional exact status. */
+  async listTripFeedback(limit = 200, status = null) {
+    const filter = status ? { status: String(status), feedbackId: { $exists: true } } : { feedbackId: { $exists: true } };
+    const rows = await this.soda.query(C.feedback, filter, {
       orderBy: [{ path: 'submittedAt', datatype: 'number', order: 'desc' }],
       limit,
     }).catch(() => []);
     return rows.map((r) => ({ ...r.value, key: r.key }));
   }
 
-  async updateTripFeedbackReview(feedbackId, { action, adminNotes, by }) {
+  /**
+   * Approved reviews as stored (newest submission first). Never invented: an empty list
+   * when nothing is approved. Consent checks and the public shape are in trip_reviews.js.
+   */
+  async listApprovedStories(limit = 10) {
+    const rows = await this.soda.query(C.feedback, { status: 'APPROVED', feedbackId: { $exists: true } }, {
+      orderBy: [{ path: 'submittedAt', datatype: 'number', order: 'desc' }],
+      limit,
+    }).catch(() => []);
+    return rows.map((r) => r.value || {}).filter((v) => v.feedbackId);
+  }
+
+  /**
+   * Applies an admin decision. [patch] holds the already validated values; [historyEntry]
+   * is appended to reviewHistory (the audit trail kept with the review).
+   */
+  async updateTripFeedbackReview(feedbackId, patch = {}, historyEntry = null) {
+    // Older callers passed { action, adminNotes, formattedText, templateLayout, selectedPhotos, by }.
+    if (patch && patch.action && !historyEntry) {
+      const map = { APPROVE: 'APPROVED', REJECT: 'REJECTED', REQUEST_CLARIFICATION: 'CHANGES_REQUESTED', REQUEST_CHANGES: 'CHANGES_REQUESTED', WITHDRAW: 'WITHDRAWN' };
+      const { action, adminNotes, by, ...rest } = patch;
+      historyEntry = { action, adminNotes: adminNotes || '', by: by || 'admin', at: Date.now() };
+      patch = { ...rest };
+      if (map[action]) patch.status = map[action];
+      for (const k of Object.keys(patch)) if (patch[k] === undefined) delete patch[k];
+    }
     const r = await this.soda.findOne(C.feedback, { feedbackId: String(feedbackId) });
     if (!r) return null;
     const current = r.value;
-    let newStatus = current.status;
-    if (action === 'APPROVE') newStatus = 'APPROVED';
-    else if (action === 'REJECT') newStatus = 'REJECTED';
-    else if (action === 'REQUEST_CLARIFICATION') newStatus = 'NEEDS_CLARIFICATION';
-    else if (action === 'WITHDRAW') newStatus = 'WITHDRAWN';
+    const next = {
+      ...current,
+      ...patch,
+      reviewHistory: historyEntry ? [...(current.reviewHistory || []), historyEntry].slice(-100) : (current.reviewHistory || []),
+      updatedAt: Date.now(),
+    };
+    delete next.key;
+    await this.soda.replace(C.feedback, r.key, next);
+    return next;
+  }
 
+  // ---------- device diagnostics & compatibility ----------
+  async submitDiagnostic(doc) {
+    const diagnosticId = doc.diagnosticId || `DIAG-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    // Safe retry / idempotency check: if report with same diagnosticId already exists, return existing status
+    const existing = await this.soda.findOne(C.diagnostics, { diagnosticId });
+    if (existing) {
+      return { ok: true, diagnosticId, status: existing.value?.lifecycleStatus || 'Submitted' };
+    }
+
+    // Rate limiting: max 5 submissions/day/rider
+    const riderId = doc.riderId || doc.riderEmail;
+    if (riderId) {
+      const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      const recent = await this.soda.query(C.diagnostics, { riderId }, { limit: 50 }).catch(() => []);
+      const countLast24h = recent.filter((r) => (r.value?.timestamp || r.value?.createdAt || 0) > dayAgo).length;
+      if (countLast24h >= 5) {
+        const err = new Error('Rate limit exceeded: max 5 diagnostic submissions per day per rider.');
+        err.statusCode = 429;
+        throw err;
+      }
+    }
+
+    const entry = {
+      ...doc,
+      diagnosticId,
+      lifecycleStatus: doc.lifecycleStatus || 'Submitted',
+      submittedAt: Date.now(),
+      createdAt: doc.createdAt || doc.timestamp || Date.now(),
+      updatedAt: Date.now(),
+      reviewHistory: doc.reviewHistory || [],
+    };
+    await this.soda.upsertBy(C.diagnostics, { diagnosticId }, entry);
+    return { ok: true, diagnosticId, status: entry.lifecycleStatus };
+  }
+
+  async getDiagnostic(diagnosticId) {
+    const r = await this.soda.findOne(C.diagnostics, { diagnosticId: String(diagnosticId) });
+    return r ? { ...r.value, key: r.key } : null;
+  }
+
+  async listDiagnostics({ page = 1, limit = 20, manufacturer, overallStatus, status, search } = {}) {
+    const lim = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    const p = Math.max(1, parseInt(page, 10) || 1);
+    const rows = await this.soda.query(C.diagnostics, {}, {
+      orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }],
+      limit: 1000,
+    }).catch(() => []);
+
+    let items = rows.map((r) => ({ ...r.value, key: r.key }));
+
+    if (manufacturer) {
+      const mfgLower = String(manufacturer).toLowerCase();
+      items = items.filter((d) => (d.deviceInfo?.manufacturer || '').toLowerCase().includes(mfgLower));
+    }
+    if (overallStatus) {
+      const ovLower = String(overallStatus).toLowerCase();
+      items = items.filter((d) => (d.overallResult || '').toLowerCase() === ovLower);
+    }
+    if (status) {
+      const stLower = String(status).toLowerCase();
+      items = items.filter((d) => (d.lifecycleStatus || '').toLowerCase() === stLower);
+    }
+    if (search) {
+      const q = String(search).toLowerCase();
+      items = items.filter((d) =>
+        (d.riderEmail || '').toLowerCase().includes(q) ||
+        (d.riderId || '').toLowerCase().includes(q) ||
+        (d.diagnosticId || '').toLowerCase().includes(q) ||
+        (d.deviceInfo?.manufacturer || '').toLowerCase().includes(q) ||
+        (d.deviceInfo?.model || '').toLowerCase().includes(q)
+      );
+    }
+
+    const total = items.length;
+    const totalPages = Math.ceil(total / lim) || 1;
+    const offset = (p - 1) * lim;
+    const paginated = items.slice(offset, offset + lim);
+
+    return {
+      reports: paginated,
+      pagination: {
+        total,
+        page: p,
+        limit: lim,
+        totalPages,
+      },
+    };
+  }
+
+  async getDiagnosticStats() {
+    const rows = await this.soda.query(C.diagnostics, {}, { limit: 2000 }).catch(() => []);
+    const reports = rows.map((r) => r.value || {});
+    const totalReports = reports.length;
+
+    let fullySupportedCount = 0;
+    const mfgCounts = new Map();
+    const failureCatCounts = new Map();
+    const statusCounts = {
+      Created: 0,
+      Completed: 0,
+      'Pending Submission': 0,
+      Submitted: 0,
+      Failed: 0,
+      Reviewed: 0,
+      Resolved: 0,
+    };
+
+    for (const rep of reports) {
+      if (rep.overallResult === 'Fully supported') fullySupportedCount++;
+      const mfg = rep.deviceInfo?.manufacturer || 'Unknown';
+      mfgCounts.set(mfg, (mfgCounts.get(mfg) || 0) + 1);
+
+      const st = rep.lifecycleStatus || 'Submitted';
+      if (statusCounts[st] !== undefined) statusCounts[st]++;
+      else statusCounts[st] = 1;
+
+      if (rep.categories && typeof rep.categories === 'object') {
+        for (const [catKey, catVal] of Object.entries(rep.categories)) {
+          if (catVal && ['Failed', 'Unsupported', 'Limited', 'Permission Required'].includes(catVal.status)) {
+            failureCatCounts.set(catKey, (failureCatCounts.get(catKey) || 0) + 1);
+          }
+        }
+      }
+    }
+
+    const fullySupportedPercent = totalReports > 0
+      ? Math.round((fullySupportedCount / totalReports) * 1000) / 10
+      : 0;
+
+    const topManufacturers = Array.from(mfgCounts.entries())
+      .map(([manufacturer, count]) => ({
+        manufacturer,
+        count,
+        percent: totalReports > 0 ? Math.round((count / totalReports) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    const topFailureCategories = Array.from(failureCatCounts.entries())
+      .map(([category, failureCount]) => ({
+        category,
+        failureCount,
+        percent: totalReports > 0 ? Math.round((failureCount / totalReports) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.failureCount - a.failureCount)
+      .slice(0, 10);
+
+    return {
+      totalReports,
+      fullySupportedCount,
+      fullySupportedPercent,
+      topManufacturers,
+      topFailureCategories,
+      statusCounts,
+    };
+  }
+
+  async updateDiagnosticStatus(diagnosticId, { status, adminNotes, by }) {
+    const r = await this.soda.findOne(C.diagnostics, { diagnosticId: String(diagnosticId) });
+    if (!r) return null;
+
+    const current = r.value || {};
+    const validStatuses = ['Created', 'Completed', 'Pending Submission', 'Submitted', 'Failed', 'Reviewed', 'Resolved'];
+    if (status && !validStatuses.includes(status)) {
+      const err = new Error(`Invalid lifecycle status '${status}'. Valid statuses: ${validStatuses.join(', ')}`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const nextStatus = status || current.lifecycleStatus || 'Submitted';
     const historyEntry = {
-      action,
+      action: nextStatus,
       adminNotes: adminNotes || '',
       by: by || 'admin',
       at: Date.now(),
@@ -1845,11 +2117,13 @@ class Repo {
 
     const next = {
       ...current,
-      status: newStatus,
+      lifecycleStatus: nextStatus,
+      adminNotes: adminNotes !== undefined ? String(adminNotes).slice(0, 5000) : current.adminNotes,
       reviewHistory: [...(current.reviewHistory || []), historyEntry],
       updatedAt: Date.now(),
     };
-    await this.soda.replace(C.feedback, r.key, next);
+
+    await this.soda.replace(C.diagnostics, r.key, next);
     return next;
   }
 }

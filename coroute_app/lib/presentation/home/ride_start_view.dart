@@ -15,9 +15,14 @@ import '../account/edit_profile_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../rider/rider_home_screen.dart';
 import '../trip_planner/trip_planner_screen.dart';
+import '../trip/trip_feedback_sheet.dart';
+import '../widgets/emergency_sos_sheet.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
 import '../../core/config/feature_gates.dart';
+import '../../data/services/membership_service.dart';
 import '../../data/services/plan_subscription_service.dart';
+import '../../data/services/device_diagnostic_service.dart';
+import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../subscription/plan_selector_screen.dart';
 import '../garage/garage_screen.dart';
 
@@ -77,7 +82,7 @@ class RideStartView extends StatelessWidget {
             SnackBar(
               backgroundColor: AppTheme.card,
               content: Text(
-                'Active convoy exceeds your plan limit ($maxAllowed riders max). Please upgrade to continue.',
+                'This group is bigger than your plan allows ($maxAllowed riders). Upgrade to continue.',
                 style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w700),
               ),
             ),
@@ -86,12 +91,76 @@ class RideStartView extends StatelessWidget {
         }
         return;
       }
+      final diagService = context.read<DeviceDiagnosticService?>();
+      if (diagService != null) {
+        final check = await diagService.checkShouldRunDiagnostic();
+        if (!context.mounted) return;
+        if (check.shouldRun) {
+          final proceed = await Navigator.push<bool>(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PreRidePhoneCheckScreen(
+                autoRun: true,
+                triggerReason: check.description,
+              ),
+            ),
+          );
+          if (proceed != true || !context.mounted) return;
+        }
+      }
+
+      if (!context.mounted) return;
       await Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const TripPlannerScreen()),
       );
     } finally {
       _isStartingRide = false;
+    }
+  }
+
+  static bool _isStartingSolo = false;
+
+  /// "Ride solo without internet" (3.54): crash detection and the local SOS (messages app, call)
+  /// on this phone alone, with no convoy and no data connection.
+  static Future<void> startOfflineSolo(BuildContext context) async {
+    if (_isStartingSolo) return;
+    final safety = context.read<SafetyService?>();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (safety == null) {
+      messenger?.showSnackBar(const SnackBar(content: Text('Crash detection is not available on this phone.')));
+      return;
+    }
+    _isStartingSolo = true;
+    try {
+      if (!await PermissionsScreen.ensure(context)) return;
+      if (!context.mounted) return;
+      final hasContact = (context.read<AuthService>().emergencyContact ?? '').trim().isNotEmpty;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Ride solo without internet?'),
+          content: Text(
+            'Crash detection runs on this phone once you ride (from about 12 km/h). If it senses a crash '
+            'and you do not answer within 15 seconds, your messages app opens with an SOS text and your '
+            'location for your emergency contact, and you can call them or 112.'
+            '${hasContact ? '' : '\n\nAdd an emergency contact in your profile first, so there is someone to text.'}',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Start solo ride')),
+          ],
+        ),
+      );
+      if (ok != true || !context.mounted) return;
+      final settings = context.read<SettingsService?>();
+      if (settings != null && !settings.crashDetection) await settings.setCrashDetection(true);
+      final started = safety.startOfflineSoloRide();
+      messenger?.showSnackBar(SnackBar(
+        content: Text(started ? 'Solo ride started. Crash detection is on.' : 'A ride is already running.'),
+      ));
+    } finally {
+      _isStartingSolo = false;
     }
   }
 
@@ -102,18 +171,61 @@ class RideStartView extends StatelessWidget {
     return 'Good evening';
   }
 
+  /// SOS while the phone is still re-joining a ride it was in (restarted without signal): asks once,
+  /// then raises it through SafetyService (queued for that ride and sent the moment it reconnects).
+  static Future<void> _sosWhileReconnecting(BuildContext context) async {
+    final safety = context.read<SafetyService?>();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (safety == null) {
+      messenger?.showSnackBar(const SnackBar(content: Text('SOS is not available right now. Call 112.')));
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Send SOS?'),
+        content: const Text('Your group and emergency contact are alerted as soon as the phone reconnects.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Send SOS')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await safety.triggerManualSos();
+    messenger?.showSnackBar(const SnackBar(content: Text('SOS queued. It goes out the moment the phone reconnects. Call 112 if you can.')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
+    final convoys = context.watch<ConvoyService?>();
+    final reconnecting = convoys != null && convoys.activeConvoy == null && convoys.hasUnconfirmedRide;
     final needsProfile = _needsProfile(auth);
     Widget? alert;
-    if (needsProfile) {
+    if (reconnecting) {
+      alert = RideAlert(
+        tier: AlertTier.critical,
+        title: 'Reconnecting to your ride…',
+        message: 'No signal yet. Your group sees you again as soon as the phone reconnects.',
+        actionLabel: 'SOS',
+        onAction: () => _sosWhileReconnecting(context),
+      );
+    } else if (needsProfile) {
       alert = RideAlert(
         tier: AlertTier.important,
         title: 'Add your safety details',
         message: 'Your group needs your phone number and an emergency contact before you ride.',
         actionLabel: 'Add details',
         onAction: () => openProfile(context),
+      );
+    } else if (convoys != null && convoys.rideEndedNotice) {
+      // The gateway answered "This ride has ended" (409 RIDE_ENDED): the end was missed offline.
+      alert = RideAlert(
+        tier: AlertTier.normal,
+        title: 'This ride has ended',
+        message: 'It ended while you were offline. Your trip is in Trips.',
+        onDismiss: convoys.clearRideEndedNotice,
       );
     } else if (showRideSaved) {
       alert = RideAlert(
@@ -136,15 +248,20 @@ class RideStartView extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 680),
             child: ListView(
-              padding: dsScreenPadding,
+              // Extra bottom room so a floating SnackBar above the nav bar
+              // never hides the last bike status row.
+              padding: dsScreenPadding.copyWith(bottom: 88),
               physics: const BouncingScrollPhysics(),
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               children: [
                 _Greeting(name: name),
-                const SizedBox(height: 22),
-                if (a != null) ...[a, const SizedBox(height: 18)],
+                const SizedBox(height: Space.s24),
+                if (a != null) ...[a, const SizedBox(height: Space.s16)],
+                // Inline and dismissible (was a SnackBar from the login screen
+                // that floated over the bike status list). Still at most one alert.
+                if (a == null && auth.isGuest) const _GuestNotice(),
                 const _NoRideHero(),
-                const SizedBox(height: 22),
+                const SizedBox(height: Space.s16),
                 IntrinsicHeight(
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -157,22 +274,27 @@ class RideStartView extends StatelessWidget {
                           onTap: () => startRide(context),
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: Space.s12),
                       Expanded(
                         child: _ActionTile(
                           icon: Icons.key_rounded,
                           title: 'Join Ride',
-                          caption: 'Join with code',
+                          caption: 'Enter the code from your group',
                           onTap: () => showJoinRideSheet(context),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: Space.s12),
+                const _OfflineSoloCard(),
+                const SizedBox(height: Space.s24),
                 const DsSectionHeader('Bike status'),
-                const SizedBox(height: 10),
+                const SizedBox(height: Space.s12),
                 const _BikeStatusCard(),
+                // After a ride the cockpit did not close itself (the lead ended it, or "Leave" from the
+                // notification): asks once for the post-trip review. Renders nothing.
+                const PendingTripReviewCheck(),
               ],
             ),
           ),
@@ -391,7 +513,7 @@ class _NoRideHero extends StatelessWidget {
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(
-                          'Convoy limit: Max $maxRiders bikes ($tierLabel)',
+                          'Up to $maxRiders riders ($tierLabel)',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -419,7 +541,10 @@ class _NoRideHero extends StatelessWidget {
   }
 }
 
-/// One of the two quick-action tiles: teal icon on top, title at the bottom.
+/// One of the two quick-action tiles. Both tiles are stretched to the same
+/// height by the parent [IntrinsicHeight] row; the content is top-aligned
+/// (icon badge, title, caption) so the two tiles line up exactly whatever
+/// the caption length or text scale.
 class _ActionTile extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -438,34 +563,64 @@ class _ActionTile extends StatelessWidget {
     return DsCard(
       onTap: onTap,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 92),
+        constraints: const BoxConstraints(minHeight: 112),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisAlignment: MainAxisAlignment.start,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 26, color: AppTheme.accentText),
-            const SizedBox(height: 10),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.title.copyWith(fontSize: 15),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  caption,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.caption,
-                ),
-              ],
+            Container(
+              width: 44,
+              height: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppTheme.tint,
+                borderRadius: Radii.mdAll,
+              ),
+              child: Icon(icon, size: 24, color: AppTheme.accentText),
+            ),
+            const SizedBox(height: Space.s12),
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.title.copyWith(fontSize: 15),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              caption,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.caption.copyWith(color: AppTheme.text2),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// "Riding as a guest" notice: inline on Home instead of a SnackBar, so it
+/// never covers content. Dismissed once per app session.
+class _GuestNotice extends StatefulWidget {
+  const _GuestNotice();
+
+  static bool _dismissed = false;
+
+  @override
+  State<_GuestNotice> createState() => _GuestNoticeState();
+}
+
+class _GuestNoticeState extends State<_GuestNotice> {
+  @override
+  Widget build(BuildContext context) {
+    if (_GuestNotice._dismissed) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.s16),
+      child: RideAlert(
+        tier: AlertTier.normal,
+        title: 'Riding in Guest Mode',
+        message: 'Connect an account anytime to save your ride history.',
+        onDismiss: () => setState(() => _GuestNotice._dismissed = true),
       ),
     );
   }
@@ -522,6 +677,8 @@ class _BikeStatusCard extends StatelessWidget {
             icon: Icons.shield_outlined,
             label: 'Crash detection',
             value: crash,
+            // Amber when the crash alarm is not armed: a safety gap worth noticing before a long ride.
+            valueColor: crash == 'On' ? null : AppTheme.warnText,
           ),
           DsListRow(
             icon: Icons.headset_mic_outlined,
@@ -531,8 +688,8 @@ class _BikeStatusCard extends StatelessWidget {
           ),
           DsListRow(
             icon: Icons.two_wheeler_rounded,
-            label: 'Motorcycle Garage',
-            value: 'Manage & service →',
+            label: 'Motorcycle',
+            value: 'Garage & service',
             divider: false,
             onTap: () {
               if (_isOpeningGarage) return;
@@ -541,6 +698,124 @@ class _BikeStatusCard extends StatelessWidget {
                   .push(MaterialPageRoute(builder: (_) => const GarageScreen()))
                   .then((_) => _isOpeningGarage = false);
             },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Offline solo ride (3.54): the entry when none runs, and its status, SOS and End while it runs.
+class _OfflineSoloCard extends StatelessWidget {
+  const _OfflineSoloCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final safety = context.watch<SafetyService?>();
+    if (safety == null) return const SizedBox.shrink();
+    if (!safety.offlineSoloActive) {
+      return DsCard(
+        onTap: () => RideStartView.startOfflineSolo(context),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: AppTheme.tint, borderRadius: Radii.mdAll),
+              child: Icon(Icons.signal_cellular_off_rounded, size: 24, color: AppTheme.accentText),
+            ),
+            const SizedBox(width: Space.s12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Ride solo without internet', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 15)),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Crash detection and SOS by text on this phone. No group or data needed.',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.caption.copyWith(color: AppTheme.text2),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: AppTheme.text2),
+          ],
+        ),
+      );
+    }
+    final crashOn = context.select<SettingsService?, bool>((s) => s?.crashDetection ?? false);
+    final sos = safety.offlineSoloSos;
+    final smsLine = safety.smsStatus?.text ?? '';
+    final String status;
+    if (!crashOn) {
+      status = 'Crash detection is off. Turn it on in Safety settings.';
+    } else if (safety.isSensorUnavailable) {
+      status = 'This phone has no motion sensor: crash detection cannot run. SOS still works.';
+    } else if (safety.detectorArmed) {
+      status = 'Crash detection is watching.';
+    } else {
+      status = 'Crash detection starts once you ride (from about 12 km/h).';
+    }
+    return DsCard(
+      accent: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.shield_outlined, color: AppTheme.accentText),
+              const SizedBox(width: Space.s8),
+              Expanded(child: Text('Solo ride (offline)', style: AppText.title)),
+            ],
+          ),
+          const SizedBox(height: Space.s8),
+          Semantics(
+            liveRegion: true,
+            child: Text(status, style: AppText.body.copyWith(color: crashOn ? AppTheme.text2 : AppTheme.warnText)),
+          ),
+          if (sos != null) ...[
+            const SizedBox(height: Space.s8),
+            Text(
+              smsLine.isNotEmpty ? smsLine : 'SOS open on this phone.',
+              style: AppText.label.copyWith(color: AppTheme.sos),
+            ),
+            const SizedBox(height: Space.s8),
+            DsButton(
+              label: 'Text my emergency contact',
+              icon: Icons.sms_outlined,
+              tone: DsButtonTone.outline,
+              fontSize: 15,
+              onPressed: safety.smsAvailable ? () => safety.sendSmsNow() : null,
+            ),
+            const SizedBox(height: Space.s8),
+            DsButton(
+              label: "I'm safe now",
+              icon: Icons.check_rounded,
+              tone: DsButtonTone.outline,
+              fontSize: 15,
+              onPressed: safety.resolveOfflineSoloSos,
+            ),
+          ],
+          const SizedBox(height: Space.s12),
+          DsButton(
+            label: 'SOS',
+            icon: Icons.sos_rounded,
+            tone: DsButtonTone.sos,
+            onPressed: () {
+              final f = safety.lastFix;
+              EmergencySosSheet.show(context, lat: f?.lat ?? 0, lng: f?.lng ?? 0);
+            },
+          ),
+          const SizedBox(height: Space.s8),
+          DsButton(
+            label: 'End solo ride',
+            icon: Icons.stop_rounded,
+            tone: DsButtonTone.outline,
+            fontSize: 15,
+            onPressed: safety.stopOfflineSoloRide,
           ),
         ],
       ),
@@ -667,27 +942,32 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
     );
     if (!mounted) return;
     if (joined != null) {
-      final planService = context.read<PlanSubscriptionService?>();
-      final maxAllowed = planService?.maxConvoyMembers ?? FeatureGates.maxConvoyMembers();
-      final currentMembers = joined.riders.length;
-      if (currentMembers > maxAllowed) {
-        await convoyService.leaveActiveConvoy(rider.userId);
-        if (!mounted) return;
-        setState(() {
-          _busy = false;
-          _error = 'Convoy has $currentMembers riders. Your current plan (${FeatureGates.tierLabel(planService?.currentTier ?? FeatureGates.activeTier)}) allows up to $maxAllowed riders.';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppTheme.card,
-            content: Text(
-              'Convoy exceeds plan limit ($maxAllowed riders max). Upgrade your plan to join larger convoys.',
-              style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w700),
+      final memService = context.read<MembershipService?>();
+      if (memService == null) {
+        // Legacy fallback only when MembershipService is absent.
+        // Under CoRoute Membership, invited riders join trips at ₹0 without paying.
+        final planService = context.read<PlanSubscriptionService?>();
+        final maxAllowed = planService?.maxConvoyMembers ?? FeatureGates.maxConvoyMembers();
+        final currentMembers = joined.riders.length;
+        if (currentMembers > maxAllowed) {
+          await convoyService.leaveActiveConvoy(rider.userId);
+          if (!mounted) return;
+          setState(() {
+            _busy = false;
+            _error = 'This group has $currentMembers riders. Your current plan (${FeatureGates.tierLabel(planService?.currentTier ?? FeatureGates.activeTier)}) allows up to $maxAllowed riders.';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppTheme.card,
+              content: Text(
+                'This group is bigger than your plan allows ($maxAllowed riders). Upgrade to join.',
+                style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.w700),
+              ),
             ),
-          ),
-        );
-        FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
-        return;
+          );
+          FeatureGates.showUpgradeModal(context, Feature.unlimitedConvoyCapacity);
+          return;
+        }
       }
       Navigator.pop(context, true);
     } else {

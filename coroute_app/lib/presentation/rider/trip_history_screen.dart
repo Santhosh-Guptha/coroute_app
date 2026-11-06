@@ -553,6 +553,9 @@ class _TripReplayDetailScreenState extends State<TripReplayDetailScreen> {
           key: ValueKey('trail-${points.length}'),
           mapController: _map,
           options: MapOptions(
+          minZoom: 3.0,
+          maxZoom: 19.0,
+          cameraConstraint: const CameraConstraint.containLatitude(),
             initialCenter: center,
             initialZoom: points.isEmpty ? 5 : 13.0,
             initialCameraFit: bounds == null ? null : CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)),

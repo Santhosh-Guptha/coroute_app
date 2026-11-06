@@ -1,11 +1,27 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import '../../domain/safety/fuel_profile.dart';
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
+import 'background_service.dart';
+import 'safety_native.dart';
+
+/// Runtime status of rider safety systems (FEAT-UI-02 / FEAT-SAFETY-01).
+enum SafetyRuntimeStatus {
+  active('Active'),
+  limited('Limited'),
+  permissionRequired('Permission Required'),
+  unsupported('Unsupported'),
+  notAvailable('Not Available');
+
+  final String label;
+  const SafetyRuntimeStatus(this.label);
+}
 
 /// Rider settings kept on the phone: data saver ("low data") mode and the ride
 /// safety switches.
@@ -192,6 +208,91 @@ class SettingsService extends ChangeNotifier {
 
   /// Emergency Contacts WhatsApp notifications.
   bool get emergencyWhatsApp => _emergencyWhatsApp;
+
+  /// Evaluates real-time operational status for mandatory safety features.
+  /// (FEAT-UI-02 / FEAT-SAFETY-01)
+  static Future<SafetyRuntimeStatus> evaluateCrashDetectionStatus({
+    bool? hasAccelOverride,
+    bool? sensorUnavailableOverride,
+  }) async {
+    if (kIsWeb) return SafetyRuntimeStatus.unsupported;
+    if (sensorUnavailableOverride == true) return SafetyRuntimeStatus.notAvailable;
+
+    if (Platform.isAndroid) {
+      final info = await SafetyNative.deviceInfo();
+      final hasAccel = hasAccelOverride ?? info.hasAccel;
+      if (!hasAccel) return SafetyRuntimeStatus.unsupported;
+
+      final locStatus = await Permission.locationWhenInUse.status;
+      if (!locStatus.isGranted) return SafetyRuntimeStatus.permissionRequired;
+
+      final ignoringBattery = await BackgroundService.isIgnoringBatteryOptimizations();
+      if (!ignoringBattery) return SafetyRuntimeStatus.limited;
+
+      return SafetyRuntimeStatus.active;
+    } else if (Platform.isIOS) {
+      final locStatus = await Permission.locationWhenInUse.status;
+      if (!locStatus.isGranted) return SafetyRuntimeStatus.permissionRequired;
+      return SafetyRuntimeStatus.active;
+    }
+    if (hasAccelOverride == false) return SafetyRuntimeStatus.unsupported;
+    return SafetyRuntimeStatus.active;
+  }
+
+  static Future<SafetyRuntimeStatus> evaluateGpsMonitoringStatus() async {
+    if (kIsWeb) return SafetyRuntimeStatus.unsupported;
+    final locStatus = await Permission.locationWhenInUse.status;
+    if (!locStatus.isGranted) return SafetyRuntimeStatus.permissionRequired;
+
+    if (Platform.isAndroid || Platform.isIOS) {
+      final alwaysStatus = await Permission.locationAlways.status;
+      if (!alwaysStatus.isGranted) return SafetyRuntimeStatus.limited;
+    }
+    return SafetyRuntimeStatus.active;
+  }
+
+  static Future<SafetyRuntimeStatus> evaluateEmergencySosStatus({
+    required String? contactPhone,
+    bool smsFallbackEnabled = false,
+  }) async {
+    final phone = (contactPhone ?? '').trim();
+    if (phone.length < 7) return SafetyRuntimeStatus.limited;
+
+    // Emergency texts open the messages app (no SEND_SMS permission in the Play build), so
+    // there is no SMS permission to ask for here.
+    return SafetyRuntimeStatus.active;
+  }
+
+  static Future<SafetyRuntimeStatus> evaluateEmergencyResponseStatus({
+    required bool hasVitals,
+    bool isAirbagConnected = false,
+    bool isSmartwatchConnected = false,
+  }) async {
+    if (isAirbagConnected || isSmartwatchConnected) return SafetyRuntimeStatus.active;
+    if (hasVitals) return SafetyRuntimeStatus.active;
+    return SafetyRuntimeStatus.limited;
+  }
+
+  static Future<SafetyRuntimeStatus> evaluateOfflineSafetyStatus({
+    required bool hasTileCache,
+    bool isLowBattery = false,
+  }) async {
+    if (!hasTileCache) return SafetyRuntimeStatus.notAvailable;
+    if (isLowBattery) return SafetyRuntimeStatus.limited;
+    return SafetyRuntimeStatus.active;
+  }
+
+  static Future<SafetyRuntimeStatus> evaluateBackgroundMonitoringStatus() async {
+    if (kIsWeb) return SafetyRuntimeStatus.unsupported;
+    final notifStatus = await Permission.notification.status;
+    if (!notifStatus.isGranted) return SafetyRuntimeStatus.permissionRequired;
+
+    if (Platform.isAndroid) {
+      final ignoring = await BackgroundService.isIgnoringBatteryOptimizations();
+      if (!ignoring) return SafetyRuntimeStatus.limited;
+    }
+    return SafetyRuntimeStatus.active;
+  }
 
   Future<SharedPreferences> _p() async => _prefs ??= await SharedPreferences.getInstance();
 

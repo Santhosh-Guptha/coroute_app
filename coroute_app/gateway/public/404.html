@@ -7,13 +7,13 @@
 <title>Page not found | Coroute</title>
 <meta name="description" content="This page is not on the Coroute site. Head back to the home page, or see the features, safety tools and download.">
 <meta name="theme-color" content="#0B0D0E">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
-<script>document.documentElement.classList.add('js')</script>
+<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
 <script src="/assets/site.js" defer></script>
 <style>
   .nf{min-height:calc(100svh - var(--header-h));display:flex;flex-direction:column;padding-top:clamp(48px,8vw,104px)}

@@ -129,3 +129,57 @@ test('retention removes SOS coordinates after the track retention period', async
   assert.equal(alert.lng, null);
   assert.equal(alert.userId, A.user.userId, 'who and when are kept');
 });
+
+test('deleting an account removes its review photo files, every guardian grant (past 100) and its SOS live links', async () => {
+  const fs = require('fs');
+  const config = require('../src/config');
+  const { createPhotoStore } = require('../src/review_photos');
+  const repo = t.gw.repo;
+  const lead = await t.register('Link Lead', 'linklead@coroute.test');
+  const G = await t.register('Grant Gone', 'grantgone@coroute.test');
+  const uid = G.user.userId;
+
+  // Two reviews with uploaded photo files on disk (one review also keyed by email only).
+  const store = createPhotoStore(config.reviewPhotoDir);
+  const metas = [];
+  for (let i = 0; i < 3; i++) metas.push(await store.save({ mime: 'image/png', ext: 'png', data: Buffer.from(`png-${i}`) }));
+  await repo.addTripFeedback({ tripId: 'trip_photo_1', userId: uid, rating: 5, photos: [metas[0].id, metas[1].id], uploads: [metas[0], metas[1]] });
+  await repo.addTripFeedback({ tripId: 'trip_photo_2', email: G.user.email, rating: 4, photos: [metas[2].id], uploads: [metas[2]] });
+  // Someone else's photo stays.
+  const keep = await store.save({ mime: 'image/png', ext: 'png', data: Buffer.from('keep') });
+  await repo.addTripFeedback({ tripId: 'trip_photo_3', userId: lead.user.userId, rating: 5, photos: [keep.id], uploads: [keep] });
+  for (const m of [...metas, keep]) assert.ok(fs.existsSync(store.fileOf(m)));
+
+  // 150 guardian grants, each with a session (more than one page of 100).
+  for (let i = 0; i < 150; i++) {
+    await repo.createGuardianGrant({ grantId: `grant_${i}`, tokenHash: `tok_${i}`, creatorId: uid, groupId: 'g1', createdAt: Date.now() });
+    await repo.createGuardianSession({ sessionHash: `sess_${i}`, grantId: `grant_${i}` });
+  }
+
+  // An SOS with a public live link, and a standalone SMS-gateway link.
+  const c = (await t.api('POST', '/convoys', { name: 'Link ride' }, lead.token)).json;
+  assert.equal((await t.api('POST', '/convoys/join', { code: c.joinCode }, G.token)).status, 200);
+  const wl = await t.joinRoom(lead.token, c.groupId);
+  const wg = await t.joinRoom(G.token, c.groupId);
+  wg.sendJson({ type: 'SOS', lat: 17.385, lng: 78.4867, alertType: 'CRASH_OR_EMERGENCY', clientId: 'erase-link-1' });
+  const alert = (await wl.next((m) => m.type === 'ALERT')).alert;
+  const made = await t.api('POST', `/convoys/${c.groupId}/alerts/${alert.alertId}/live-link`, {}, G.token);
+  assert.equal(made.status, 200, JSON.stringify(made.json));
+  const view = (tok) => fetch(`${t.origin}/api/public/live/${tok}`).then((r) => r.status);
+  assert.equal(await view(made.json.token), 200);
+  const smsUrl = t.gw.convoys.emergencyGateway.generateTrackingUrl({ tripId: c.groupId, riderId: uid, riderName: 'Grant Gone', lat: 17.38, lng: 78.48 });
+  const smsToken = smsUrl.split('/e/')[1];
+  assert.equal(await view(smsToken), 200);
+
+  assert.equal((await t.api('DELETE', '/me', null, G.token)).status, 200);
+  await wg.closed;
+  wl.close();
+
+  for (const m of metas) assert.ok(!fs.existsSync(store.fileOf(m)), `photo ${m.id} deleted`);
+  assert.ok(fs.existsSync(store.fileOf(keep)), 'another rider\'s photo stays');
+  assert.equal((await repo.soda.query('guardian_grants', {}, { limit: 1000 })).filter((r) => r.value.creatorId === uid).length, 0);
+  assert.equal((await t.api('GET', '/public/live/' + made.json.token)).status, 410);
+  assert.equal(await view(smsToken), 410);
+  assert.ok(![...t.gw.convoys.liveLinks.values()].some((ref) => ref.alertId === alert.alertId), 'live link index entry gone');
+  for (const [coll, json] of everything()) assert.ok(!json.includes(uid), `${coll} still mentions the rider`);
+});

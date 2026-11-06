@@ -125,11 +125,31 @@ test('CoRoute Payment Security, Zero-Amount Activation & Idempotency Suite', asy
     assert.equal(paymentsRes.json.payments.length, 1, 'Only 1 record should exist in payment history');
   });
 
-  await t.test('5. Legitimate upgrade updates tier immediately and records upgradeHistory', async () => {
+  await t.test('5. RIDERFREE is once per rider; a legitimate upgrade (another free coupon) updates tier and records upgradeHistory', async () => {
+    // Changed with the coupon hardening: RIDERFREE used to be a hard-coded shortcut that the same
+    // rider could redeem again and again, for any plan. It is now a seeded coupon record with a
+    // per-rider limit of 1, so this rider's second redemption (here for an upgrade) is refused.
+    const reuse = await env.api('POST', '/membership/activate-free', {
+      category: 'group_small',
+      couponCode: 'RIDERFREE',
+    }, riderToken);
+    assert.equal(reuse.status, 400);
+    assert.equal(reuse.json.reason, 'PER_USER_LIMIT_REACHED');
+
+    // The upgrade itself is still exercised, paid for by an admin-made 100% coupon bound to group_small.
+    const cRes = await env.api('POST', '/admin/coupons', {
+      code: 'GROUPFREE',
+      discountType: 'free',
+      applicablePlans: ['group_small'],
+      maxUsageTotal: 5,
+      maxUsagePerUser: 1,
+    }, adminToken);
+    assert.equal(cRes.status, 201);
+
     // Upgrade from individual (1) to group_small (6)
     const upgRes = await env.api('POST', '/membership/activate-free', {
       category: 'group_small',
-      couponCode: 'RIDERFREE',
+      couponCode: 'GROUPFREE',
     }, riderToken);
 
     assert.equal(upgRes.status, 201);

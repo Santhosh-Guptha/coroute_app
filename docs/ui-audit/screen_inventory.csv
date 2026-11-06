@@ -1,0 +1,85 @@
+Screen_ID,Component_Name,Navigation_Path,User_Role,States_to_Capture,Capture_Status
+SCR-001,SplashScreen,App Launch,All Riders,"Initial load, logo pulse",Captured
+SCR-002,OnboardingScreen,/onboarding,Unauthenticated,"Slide 1 (Convoy Tracking), Slide 2 (Offline Maps), Slide 3 (Safety SOS)",Captured
+SCR-003,PermissionsScreen,/permissions,All Riders,"Permission checklist, runtime location/bluetooth/audio access requests",Captured
+SCR-004,LoginScreen,/login,Unauthenticated,"Default empty, input active, validation errors",Captured
+SCR-005,ForgotPasswordSheet,/login -> Forgot Password,Unauthenticated,"Phone/email input modal, OTP confirmation trigger",Captured
+SCR-006,RegisterScreen,/register,Unauthenticated,"Default registration, form field errors, vehicle profile input",Captured
+SCR-007,AccessGateScreen,/gate,Unauthenticated,"Access verification gate, maintenance notice, account status block",Captured
+SCR-008,RiderHomeScreen,Main Navigation Tab 0,All Riders,"Rider home dashboard, recent routes, convoy quick actions",Captured
+SCR-009,RideStartView,Home -> Start Ride,All Riders,"Pre-ride destination prompt, route selection overlay",Captured
+SCR-010,AlertsTab,Home -> Alerts Tab,All Riders,"System alerts, trip invites, roadside emergency notices",Captured
+SCR-011,JoinRideSheet,Home -> Join Convoy,All Riders,"6-digit invite code PIN entry, QR code scanner launcher",Captured
+SCR-012,TripPlannerScreen,/trip/plan,Trip Head / Owner,"Start point, destination search, waypoint list, offline toggle",Captured
+SCR-013,RouteStopsPanel,Trip Planner -> Route Stops,Trip Head / Owner,"Draggable reorderable stop list, fuel/rest/scenic category tags",Captured
+SCR-014,TripReviewSheet,Trip Planner -> Review,Trip Head / Owner,"Summary overview, estimated duration, total distance, convoy start button",Captured
+SCR-015,OfflineTileVerificationScreen,Trip Planner -> Download Tiles,All Riders,"Tile cache status, zoom levels 8-15 download progress, storage gauge",Captured
+SCR-016,TripFeedbackSheet,Post-Ride Prompt,All Riders,"Star rating, road surface comments, hazard alerts, trip rating submission",Captured
+SCR-017,LiveCockpitMapScreen (Solo Collapsed),/ride/active (Solo),Solo Rider,"Collapsed HUD, speed gauge, speed limit, next turn pill",Captured
+SCR-018,LiveCockpitMapScreen (Solo Expanded),/ride/active (Solo),Solo Rider,"Expanded cockpit, fuel range bubble, route stats, pause/end controls",Captured
+SCR-019,LiveCockpitMapScreen (Group Lead Collapsed),/ride/active (Group),Trip Head / Owner,"Collapsed group cockpit, convoy spread indicator, lead SOS pill",Captured
+SCR-020,LiveCockpitMapScreen (Group Lead Expanded Top),/ride/active (Group),Trip Head / Owner,"Convoy spread hero, talk-to-all button, riding order ladder",Captured
+SCR-021,LiveCockpitMapScreen (Group Lead Expanded Bottom),/ride/active (Group),Trip Head / Owner,"Invite code card, intercom options, group settings, pause/end actions",Captured
+SCR-022,LiveCockpitMapScreen (Pack Rider Expanded),/ride/active (Group),Ordinary Rider,"Pack rider roster, sweep status, fuel status, personal stop reason",Captured
+SCR-023,LiveCockpitMapScreen (Paused State),/ride/active -> Pause,All Riders,"Paused trip overlay, resume button, time paused counter, end ride option",Captured
+SCR-024,LiveCockpitMapScreen (Night Mode),/ride/active -> Auto Dark,All Riders,"High-contrast dark palette, red-tinted night HUD, low-glare map layer",Captured
+SCR-025,RiderManagementSheet,Cockpit -> Roster,Trip Head / Owner,"Rider list, promote to sweep/lead, remove rider, callsign tags",Captured
+SCR-026,RiderCardSheet,Cockpit -> Tap Rider,All Riders,"Rider speed, battery percentage, GPS accuracy, call, message actions",Captured
+SCR-027,GroupSettingsSheet,Cockpit -> Group Settings,Trip Head / Owner,"Convoy name, speed limit cap, stagger formation distance, auto-regroup radius",Captured
+SCR-028,ConvoyBeadWireWidget,Cockpit -> Bead Wire,All Riders,"Linear convoy formation bead wire, inter-rider gaps in meters/seconds",Captured
+SCR-029,LiveTimelineScreen,/ride/timeline,All Riders,"Real-time chronological events, departures, fuel stops, SOS logs, speed alerts",Captured
+SCR-030,MapPickerScreen,Trip Planner / Stop -> Pick on Map,All Riders,"Interactive crosshair pin picker, coordinate reverse-geocoding, confirm button",Captured
+SCR-031,OfflineMapManagerScreen,/settings/maps,All Riders,"Downloaded bounding regions, cache purge, storage usage indicator",Captured
+SCR-032,IntercomDockWidget,Cockpit -> Intercom Bar,All Riders,"Muted state, push-to-talk button, VOX threshold indicator, active speaker tag",Captured
+SCR-033,IntercomOptionsSheet,Cockpit -> Intercom Options,All Riders,"Mic mute toggle, VOX sensitivity slider, priority audio ducking, BT PTT pairing",Captured
+SCR-034,MessagesSheet,Cockpit -> Quick Messages,All Riders,"Pre-canned tactical rider messages, voice note transcription list, custom chat",Captured
+SCR-035,SafetySettingsScreen,/settings/safety,All Riders,"Crash detection sensitivity, SOS contacts, live guardian sharing switches",Captured
+SCR-036,SafetySettingsSheet,Cockpit -> Safety Quick Sheet,All Riders,"Quick safety controls modal, emergency contact shortcut, emergency beacon",Captured
+SCR-037,SosHoldScreen,Cockpit -> SOS Button (Hold),All Riders,"3-second countdown ring, haptic trigger, cancel gesture, instant broadcast",Captured
+SCR-038,CrashAlarmScreen,Hardware Trigger / Sensor Alert,All Riders,"Full-screen red flashing strobe, loud audible siren, emergency auto-dial countdown",Captured
+SCR-039,LocalCrashCountdownDialog,Cockpit -> Impact Detected,All Riders,"15-second false alarm cancel dialog, 'I'm OK' button, 'Need Help' override",Captured
+SCR-040,IceMedicalCard,Profile -> Medical Info,All Riders,"Blood group, allergies, medications, emergency contacts, organ donor status",Captured
+SCR-041,PreRidePhoneCheckScreen,/diagnostics/phone,All Riders,"Battery health, GPS signal test, background battery optimization status, sensors",Captured
+SCR-042,OemBatteryGuide,/safety/oem-guide,All Riders,"Manufacturer-specific background kill prevention (Xiaomi, OnePlus, Samsung, Vivo)",Captured
+SCR-043,EmergencySosSheet,Cockpit -> Active SOS,All Riders,"Dispatched SOS state, responders en route, GPS coordinates, 112 direct call",Captured
+SCR-044,GarageScreen,/garage,All Riders,"Motorcycle profile, engine displacement, fuel tank size, average consumption",Captured
+SCR-045,MembershipDashboardScreen,/membership,All Riders,"Active tier (Free/Pro/Club/Fleet), renewal date, seat limits, plan upgrade cards",Captured
+SCR-046,PlanSelectorScreen,/membership/plans,All Riders,"Pricing tier comparison, monthly vs annual billing toggle, benefit bullet points",Captured
+SCR-047,PaymentCheckoutModal,Plan -> Checkout,All Riders,"Razorpay checkout modal, UPI payment handles, credit card form, summary breakdown",Captured
+SCR-048,PaymentSuccessScreen,Checkout -> Success,All Riders,"Order confirmation ID, animated checkmark, transaction receipt, pro unlock banner",Captured
+SCR-049,PaymentHistoryScreen,/membership/history,All Riders,"Invoice history, date, amount, payment method, tax invoice PDF download",Captured
+SCR-050,SubscriptionExpiryBanner,Cockpit / Home Banner,Expired Member,"Expiring subscription warning pill, renewal CTA, grace period countdown",Captured
+SCR-051,TripCreationPaymentAlertSheet,Trip Planner -> Gate Trigger,Free / Expired Member,"Convoy rider limit modal, 'Upgrade to Pro for 100 Riders' upsell sheet",Captured
+SCR-052,AccountScreen,/account,All Riders,"User avatar, profile details, theme toggle, privacy policy, logout button",Captured
+SCR-053,EditProfileScreen,/account/edit,All Riders,"Full name, mobile number, emergency contact phone, bike callsign input",Captured
+SCR-054,ChangePasswordScreen,/account/password,All Riders,"Current password, new password, confirm password, password strength indicator",Captured
+SCR-055,AppearanceSheet,/account/appearance,All Riders,"Dark, Light, System, Sensor-based auto day/night switching options",Captured
+SCR-056,MasterAdminDashboard,/admin/dashboard,Master Admin,"Fleet overview map, live active convoys count, registered users, open SOS panel",Captured
+SCR-057,AdminMobileDashboardScreen,/admin/mobile,Master Admin,"5-screen mobile console: Overview, Payments, Coupons, Members, Settings",Captured
+SCR-058,AdminUsersScreen,/admin/users,Master Admin,"Searchable registered user list, filter by status (active, on hold, blocked, riding)",Captured
+SCR-059,AdminUserDetailsScreen,/admin/users/:id,Master Admin,"User audit dossier, membership tier, past ride logs, account freeze/delete buttons",Captured
+SCR-060,AdminConvoyInspector,/admin/convoy/:id,Master Admin,"Real-time convoy telemetry inspector, live positions, dissolve convoy action",Captured
+SCR-061,AdminPlansPricingScreen,/admin/pricing,Master Admin,"Subscription catalog management, dynamic INR pricing modifiers, tier seat limits",Captured
+SCR-062,AdminPromotionsTabs,/admin/promotions,Master Admin,"Promotional campaigns, banner announcements, discount code generator",Captured
+SCR-063,AdminDeviceCompatibilityScreen,/admin/diagnostics,Master Admin,"Fleet device hardware matrix, Android OEM compatibility, crash false-positive rates",Captured
+SCR-064,AdminEmergenciesPanel,/admin/emergencies,Master Admin,"Live dispatch desk, active SOS alerts across all convoys, responder assignment",Captured
+SCR-065,AdminPaymentAnalyticsTab,/admin/analytics/payments,Master Admin,"Razorpay transaction success rate, revenue trend charts, refund logs",Captured
+SCR-066,AdminCouponUsageTab,/admin/coupons/usage,Master Admin,"Coupon redemption analytics, discount value generated, rider retention rates",Captured
+SCR-067,FeatureAnalyticsView,/admin/analytics/features,Master Admin,"Feature adoption heatmaps: Intercom usage, Crash detection, Live Guardian links",Captured
+SCR-068,QuickStopReasonModal,Cockpit -> Tell Why You Stopped,All Riders,"Preset stop reasons (Fuel, Rest, Flat Tire, Breakdown, Traffic, Medical), Custom text",Captured
+SCR-069,MeetHereSheet,Map Long-Press -> Meet Here,Trip Head / Owner,"Coordinate place name lookup, 'Meet here', 'Add stop', 'Report rider down'",Captured
+SCR-070,IncidentSheet,Alert -> Tap Incident,All Riders,"Incident details, victim callsign, ETA to victim, 'I am responding' button, hospital route",Captured
+SCR-071,AssistSheet,Nearby Alert -> Request Assistance,All Riders,"Inter-convoy cross assistance sheet, mutual aid alert, responder navigation link",Captured
+SCR-072,PreRideChecklistSheet,Trip Start -> Pre-Ride Safety,All Riders,"Pre-ride checklist: Helmet, Tire pressure, Chain, Fuel, Offline tiles, Permissions",Captured
+SCR-073,ConnectionBanner,Global Ride State,All Riders,"Offline warning banner, pending outbox sync counter, server reconnect status",Captured
+SCR-074,DataSaverTile,/settings/network,All Riders,"Low-data mode switch, position interval throttling (2.5s vs 5.0s), voice compression",Captured
+SCR-075,ForceUpdateScreen,App Version Gate,All Riders,"Mandatory version upgrade blocker, change notes, Play Store update CTA",Captured
+SCR-076,TripReportScreen,/trip/report/:id,All Riders,"Post-ride telemetry analysis, top speed, average speed, elevation curve, GPX export",Captured
+SCR-077,RideReplayScreen,/trip/replay/:id,All Riders,"Interactive 2D animated breadcrumb scrubber, momentary speedometer, playback speed",Captured
+SCR-078,TacticalRideShareCard,Trip Report -> Share,All Riders,"High-contrast tactical ride summary graphic for social media sharing",Captured
+SCR-079,SmartAirbagHudPill,Cockpit Top HUD,All Riders,"Bluetooth smart airbag status pill, armed state, telemetry battery %",Captured
+SCR-080,RazorpayGatewayCallbackSheet,/payment/callback,All Riders,"Razorpay Webhook/Payment handler sheet (Live callback simulation)",Inaccessible (Hardware/Secret Gated)
+SCR-081,BleHandlebarPttScreen,/settings/ptt-hardware,All Riders,"Physical Bluetooth Low Energy handlebar PTT pairing wizard",Inaccessible (Physical BLE Gated)
+SCR-082,SatelliteSosBridgeView,/safety/satellite-bridge,All Riders,"Iridium/Garmin inReach satellite SOS uplink bridge UI",Inaccessible (Hardware Gated)
+SCR-083,LivePolice112DispatchView,/safety/emergency-dispatch,Emergency Responders,"Government ERSS 112 emergency service dispatch API view",Inaccessible (System-Gated / Live Auth Gated)
+

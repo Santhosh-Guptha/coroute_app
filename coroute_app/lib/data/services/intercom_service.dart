@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 import 'package:record/record.dart';
 import '../../core/config/app_config.dart';
@@ -64,17 +65,22 @@ class ActiveSpeakerInfo {
 /// * PTT (hold to talk) or VOX (open mic that only transmits while you speak,
 ///   so the radio stays idle, and the battery lasts, while you are quiet).
 /// * Mute (don't transmit) and Deafen (don't play) switches.
-class IntercomService extends ChangeNotifier {
+class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   IntercomService(
     this._rt, {
     this.settings,
     bool isRoadCaptain = false,
     String? userRole,
+    AudioRecorder? recorder,
   })  : _myRole = userRole,
+        _recorderInstance = recorder,
         _isRoadCaptain = isRoadCaptain || userRole == 'LEAD' {
     _voiceSub = _rt.voice.listen(_onVoicePacket);
     _eventSub = _rt.events.listen(_onEvent);
     _setupHardwareKeyboard();
+    try {
+      WidgetsBinding.instance.addObserver(this);
+    } catch (_) {}
   }
 
   final RealtimeService _rt;
@@ -94,16 +100,27 @@ class IntercomService extends ChangeNotifier {
   AudioRecorder? _recorderInstance;
   // Created on first use so constructing the service never touches the platform (keeps tests and web safe).
   AudioRecorder get _recorder => _recorderInstance ??= AudioRecorder();
+
+  @visibleForTesting
+  set recorder(AudioRecorder rec) {
+    _recorderInstance = rec;
+  }
   StreamSubscription<VoicePacket>? _voiceSub;
   StreamSubscription<Map<String, dynamic>>? _eventSub;
   StreamSubscription<Uint8List>? _micSub;
 
+  /// Optional listener for raw microphone PCM chunks (e.g. for siren acoustic detection).
+  /// Only invoked while microphone capture is legitimately active (PTT or VOX).
+  void Function(Uint8List chunk)? onMicChunk;
+
   // ---- transmit state ----
-  bool _micMuted = true;
+  bool _micMuted = false;
   bool _deafened = false;
   bool _transmitting = false; // a stream is open to the gateway
   bool _micOpen = false; // recorder is running (VOX keeps it open)
   bool _pausedByPhoneCall = false; // automatically paused when rider receives/makes a phone call
+  bool _microphoneRevoked = false;
+  bool get isMicrophoneRevoked => _microphoneRevoked;
   IntercomMode _mode = IntercomMode.ptt;
   IntercomChannel _channel = IntercomChannel.all;
   String? _talkTargetUserId; // null == everyone
@@ -219,6 +236,7 @@ class IntercomService extends ChangeNotifier {
     if (v) {
       if (_transmitting) endTransmission();
       if (_mode == IntercomMode.vox) stopVox();
+      _closeMic();
     }
     _rt.send({'type': 'MIC_STATE', 'muted': v});
     notifyListeners();
@@ -228,6 +246,20 @@ class IntercomService extends ChangeNotifier {
     _deafened = v;
     if (v) _resetPlayback(clearSpeaker: true);
     notifyListeners();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      // Never maintain a continuous recording session in the background in PTT mode.
+      if (_mode == IntercomMode.ptt && (_transmitting || _micOpen)) {
+        endTransmission();
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      verifyPermission().ignore();
+    }
   }
 
   // ------------------------------------------------------------- transmit
@@ -258,9 +290,93 @@ class IntercomService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Explicitly halts active audio capture, sets mode to PTT, mutes mic, and releases recording hardware when the ride/trip ends.
+  Future<void> stopCaptureOnTripEnd() async {
+    if (_transmitting) _endStream();
+    if (_mode == IntercomMode.vox) {
+      _voxSilenceTimer?.cancel();
+    }
+    await _closeMic();
+    _micMuted = true;
+    _mode = IntercomMode.ptt;
+    _resetPlayback(clearSpeaker: true);
+    notifyListeners();
+  }
+
+  /// Explicitly stops any open group intercom sessions (transmitting, receiving, or VOX open mic),
+  /// mutes the microphone (microphone remains OFF by default), and clears active speaker.
+  Future<void> stopGroupIntercomSession() async {
+    _voxSilenceTimer?.cancel();
+    _rxIdleTimer?.cancel();
+    _busyTimer?.cancel();
+    if (_transmitting) _endStream();
+    await _closeMic();
+    _micMuted = true;
+    _mode = IntercomMode.ptt;
+    audioLevel.value = 0.0;
+    activeSpeakerNotifier.value = null;
+    _talkTargetUserId = null;
+    _talkTargetName = null;
+    _channel = IntercomChannel.all;
+    _speakingRiders.clear();
+    _mutedRiders.clear();
+    _riderRoles.clear();
+    _activeIsLead = false;
+    _isPriorityDucked = false;
+    _resetPlayback(clearSpeaker: true);
+    _rt.send({'type': 'MIC_STATE', 'muted': true});
+    notifyListeners();
+  }
+
+  /// Explicitly disables hands-free (VOX) mode and returns to push-to-talk (PTT) mode,
+  /// releasing all microphone capture resources immediately.
+  Future<void> disableHandsFree() async {
+    _mode = IntercomMode.ptt;
+    await stopVox();
+    notifyListeners();
+  }
+
+  /// Handles runtime microphone permission revocation during an active ride.
+  /// Stops recording, terminates transmission, and resets VOX mode to PTT.
+  Future<void> onMicrophoneRevoked() async {
+    _microphoneRevoked = true;
+    _micMuted = true;
+    _voxSilenceTimer?.cancel();
+    if (_transmitting) _endStream();
+    if (_micOpen) await _closeMic();
+    if (_mode == IntercomMode.vox) {
+      _mode = IntercomMode.ptt;
+    }
+    notifyListeners();
+  }
+
+  /// Alias for test compliance and clarity.
+  Future<void> handlePermissionRevoked() => onMicrophoneRevoked();
+
+  /// Verifies whether microphone permission is granted. If revoked, stops capture immediately.
+  Future<bool> verifyPermission() async {
+    final granted = await _ensurePermission();
+    if (!granted) {
+      if (_micOpen || _transmitting || isVoxArmed) {
+        await onMicrophoneRevoked();
+      }
+      return false;
+    } else if (_microphoneRevoked) {
+      onMicrophoneRestored();
+    }
+    return true;
+  }
+
+  /// Restores microphone availability when permission is re-granted.
+  void onMicrophoneRestored() {
+    if (!_microphoneRevoked) return;
+    _microphoneRevoked = false;
+    notifyListeners();
+  }
+
   /// PTT: call on press. Opens the mic and a stream to the chosen target.
   Future<bool> beginTransmission() async {
-    if (_micMuted || _transmitting || !_rt.isConnected || _pausedByPhoneCall) return false;
+    if (_micMuted || _transmitting || !_rt.isConnected || _pausedByPhoneCall || _microphoneRevoked) return false;
     if (!await _ensurePermission()) return false;
     if (!await _openMic()) return false;
     _startStream();
@@ -275,7 +391,7 @@ class IntercomService extends ChangeNotifier {
 
   /// VOX: arm the open mic. Transmits only while sound exceeds the threshold.
   Future<bool> startVox() async {
-    if (_micMuted || !_rt.isConnected || _pausedByPhoneCall) return false;
+    if (_micMuted || !_rt.isConnected || _pausedByPhoneCall || _microphoneRevoked) return false;
     if (!await _ensurePermission()) return false;
     _mode = IntercomMode.vox;
     final ok = await _openMic();
@@ -304,7 +420,14 @@ class IntercomService extends ChangeNotifier {
       ));
       _micOpen = true;
       _micRate = rate;
-      _micSub = stream.listen(_onMicData, onError: (e) => debugPrint('mic error: $e'), onDone: () => _micOpen = false);
+      _micSub = stream.listen(
+        _onMicData,
+        onError: (e) {
+          debugPrint('mic error: $e');
+          onMicrophoneRevoked();
+        },
+        onDone: () => _micOpen = false,
+      );
       notifyListeners();
       return true;
     } catch (e) {
@@ -367,6 +490,8 @@ class IntercomService extends ChangeNotifier {
       if (audioLevel.value != 0.0) audioLevel.value = 0.0;
       return;
     }
+
+    onMicChunk?.call(chunk);
 
     final rms = _rms(chunk);
     if (_mode == IntercomMode.vox) {
@@ -583,6 +708,13 @@ class IntercomService extends ChangeNotifier {
     if (_deafened) return;
     final isLead = _isRoadCaptainPacket(p);
     final duckingEnabled = FeatureGates.isUnlocked(Feature.priorityIntercomDucking);
+    final isEmergency = p.header['emergency'] == true ||
+        p.header['isEmergency'] == true ||
+        p.header['type'] == 'SOS' ||
+        p.header['sos'] == true;
+
+    // Pause casual intercom during active phone call; emergency broadcasts cut through
+    if (_pausedByPhoneCall && !isEmergency) return;
 
     switch (p.kind) {
       case VoiceKind.start:
@@ -763,16 +895,18 @@ class IntercomService extends ChangeNotifier {
       }
     } else if (e['type'] == 'RIDER_LEFT' && e['userId'] == _talkTargetUserId) {
       setTalkTarget(); // our private partner left → back to everyone
+    } else if (e['type'] == 'TRIP_STATUS' &&
+        (e['status']?.toString().toUpperCase() == 'ENDED' ||
+            e['tripStatus']?.toString().toUpperCase() == 'ENDED')) {
+      stopCaptureOnTripEnd();
     } else if (e['type'] == 'DISSOLVED' || e['type'] == 'LEFT') {
-      reset();
+      stopCaptureOnTripEnd();
     }
   }
 
   /// Called when leaving a convoy: nothing may carry over to the next group.
   Future<void> reset() async {
-    _voxSilenceTimer?.cancel();
-    if (_transmitting) _endStream();
-    await _closeMic();
+    await stopCaptureOnTripEnd();
     audioLevel.value = 0.0;
     activeSpeakerNotifier.value = null;
     _talkTargetUserId = null;
@@ -783,7 +917,6 @@ class IntercomService extends ChangeNotifier {
     _riderRoles.clear();
     _activeIsLead = false;
     _isPriorityDucked = false;
-    _resetPlayback(clearSpeaker: true);
   }
 
   void _setupHardwareKeyboard() {
@@ -852,8 +985,21 @@ class IntercomService extends ChangeNotifier {
     return false;
   }
 
+  bool _disposed = false;
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) {
+      super.notifyListeners();
+    }
+  }
+
   @override
   void dispose() {
+    _disposed = true;
+    try {
+      WidgetsBinding.instance.removeObserver(this);
+    } catch (_) {}
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     audioLevel.dispose();
     activeSpeakerNotifier.dispose();
@@ -863,13 +1009,22 @@ class IntercomService extends ChangeNotifier {
     _voxSilenceTimer?.cancel();
     _rxIdleTimer?.cancel();
     _busyTimer?.cancel();
+    if (_transmitting) {
+      _transmitting = false;
+      try {
+        _rt.sendVoice(VoiceKind.end, {'to': _talkTargetUserId});
+      } catch (_) {}
+    }
+    _closeMic().ignore();
     try {
       _recorderInstance?.dispose().catchError((_) {});
     } catch (_) {}
+    _recorderInstance = null;
     if (_playerReady) {
       try {
         FlutterPcmSound.release().catchError((_) {});
       } catch (_) {}
+      _playerReady = false;
     }
     super.dispose();
   }

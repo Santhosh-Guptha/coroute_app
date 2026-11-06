@@ -133,8 +133,6 @@ void main() {
               TripCreationPaymentAlertSheet.show(
                 context,
                 category: testCategory,
-                activeOfferCode: 'RIDERFREE',
-                discountPercent: 100,
               );
             },
             child: const Text('Open Alert'),

@@ -219,7 +219,11 @@ void main() {
       expect(auth.currentUserName, 'FalconOne');
     });
 
-    testWidgets('Authenticated Master Admin boot routes directly to MasterAdminDashboard', (tester) async {
+    testWidgets('Authenticated Master Admin boot routes directly to MasterAdminDashboard on desktop', (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
       SharedPreferences.setMockInitialValues({
         AppConstants.keyUserId: 'usr_admin',
         AppConstants.keyUserRole: AppConstants.adminRole,
@@ -276,6 +280,69 @@ void main() {
       expect(auth.isAuthenticated, isTrue);
       expect(auth.isMasterAdmin, isTrue);
     });
+
+    testWidgets('Authenticated Master Admin boot routes to the one admin console on mobile too', (tester) async {
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      SharedPreferences.setMockInitialValues({
+        AppConstants.keyUserId: 'usr_admin',
+        AppConstants.keyUserRole: AppConstants.adminRole,
+        AppConstants.keyUserEmail: 'santhoshbukka5@gmail.com',
+        AppConstants.keyUserName: 'Santhosh (Admin)',
+      });
+      final storage = const FlutterSecureStorage();
+      await storage.write(key: 'coroute_jwt', value: 'admin-token');
+
+      final mockHttp = MockClient((req) async {
+        if (req.url.path.endsWith('/me')) {
+          return http.Response(jsonEncode({
+            'userId': 'usr_admin',
+            'name': 'Santhosh (Admin)',
+            'email': 'santhoshbukka5@gmail.com',
+            'role': AppConstants.adminRole,
+          }), 200);
+        }
+        if (req.url.path.endsWith('/convoys/active')) {
+          return http.Response(jsonEncode({'convoy': null}), 200);
+        }
+        return http.Response('{}', 200);
+      });
+
+      final api = ApiClient(httpClient: mockHttp, storage: storage);
+      final auth = AuthService(api);
+      final rt = RealtimeService();
+      final meta = MetaService(api);
+      final trips = TripStorageService(api);
+      final timeline = TimelineService(api, rt);
+      final queue = MemoryTrackQueue();
+      final recorder = TrackRecorder(queue, TrackUploader(api, queue));
+      final convoy = ConvoyService(api, rt, trips, recorder: recorder, timeline: timeline);
+      final intercom = IntercomService(rt);
+
+      await tester.pumpWidget(buildAppHarness(
+        apiClient: api,
+        authService: auth,
+        realtimeService: rt,
+        convoyService: convoy,
+        metaService: meta,
+        tripStorageService: trips,
+        timelineService: timeline,
+        trackRecorder: recorder,
+        intercomService: intercom,
+        child: const SplashScreen(),
+      ));
+
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 800));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byType(MasterAdminDashboard), findsOneWidget);
+      expect(auth.isAuthenticated, isTrue);
+      expect(auth.isMasterAdmin, isTrue);
+    });
+
   });
 
   group('Application Level E2E: Session Expiry, Update Gate & Deep Links', () {

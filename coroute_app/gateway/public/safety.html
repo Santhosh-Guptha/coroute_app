@@ -3,24 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Safety | Coroute</title>
-<meta name="description" content="What Coroute does when a rider crashes or sends an SOS: who is told, how guardians and emergency SMS work, when nearby riders can help, and what it cannot promise.">
+<title>Motorcycle crash detection and SOS for group rides | Coroute</title>
+<meta name="description" content="How CoRoute looks after riders on long trips: crash detection with a 15 second cancel window, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
 <link rel="canonical" href="__ORIGIN__/safety">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Coroute">
-<meta property="og:title" content="Safety | Coroute">
-<meta property="og:description" content="What Coroute does when a rider crashes or sends an SOS: who is told, how guardians and emergency SMS work, when nearby riders can help, and what it cannot promise.">
+<meta property="og:site_name" content="CoRoute">
+<meta property="og:title" content="Motorcycle crash detection and SOS for group rides | Coroute">
+<meta property="og:description" content="How CoRoute looks after riders on long trips: crash detection with a 15 second cancel window, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
 <meta property="og:url" content="__ORIGIN__/safety">
 <meta property="og:image" content="__ORIGIN__/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Safety | Coroute">
-<meta name="twitter:description" content="What Coroute does when a rider crashes or sends an SOS: who is told, how guardians and emergency SMS work, when nearby riders can help, and what it cannot promise.">
+<meta name="twitter:title" content="Motorcycle crash detection and SOS for group rides | Coroute">
+<meta name="twitter:description" content="How CoRoute looks after riders on long trips: crash detection with a 15 second cancel window, hold-to-send SOS, guardians who follow live, emergency links and honest limits. Call 112 first.">
 <meta name="twitter:image" content="__ORIGIN__/og-image.png">
 <meta name="theme-color" content="#0B0D0E">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -28,8 +28,7 @@
 <link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
 <link rel="stylesheet" href="/assets/pages.css">
-<link rel="stylesheet" href="/assets/home.css">
-<script>document.documentElement.classList.add('js')</script>
+<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
 <script src="/assets/site.js" defer></script>
 </head>
 <body data-page="safety">
@@ -39,30 +38,40 @@
   <section class="hm-hero hm-hero--page topo" aria-labelledby="hero-title">
     <div class="container">
       <div class="hm-hero__inner">
-        <p class="eyebrow">Safety</p>
+        <p class="eyebrow eyebrow--safety">Safety</p>
         <h1 id="hero-title">Look out for each other.</h1>
-        <p class="t-lead">Coroute helps your group and nearby riders know when something is wrong. It does not replace emergency services.</p>
+        <p class="t-lead">On a long ride, help can be hours away. CoRoute makes sure your group and the people at home know quickly when something goes wrong. It complements emergency services; it does not replace them.</p>
         <p class="hm-call"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg>In an emergency in India, call 112 first.</p>
+        <nav class="pg-jump" aria-label="On this page">
+          <a href="#crash">Crash</a>
+          <a href="#sos">Who is told</a>
+          <a href="#guardian">Guardians</a>
+          <a href="#false-alarms">False alarms</a>
+        </nav>
       </div>
     </div>
   </section>
 
+  <!-- Crash detection -->
   <section class="section section--surface" id="crash" aria-labelledby="crash-title">
     <div class="container">
       <div class="hm-head">
-        <p class="cluster cluster--8"><span class="eyebrow">Automatic crash detection</span><span class="badge badge--new">New in 3.15</span></p>
+        <p class="eyebrow">Crash detection</p>
         <h2 id="crash-title">What happens on a crash.</h2>
-        <p>If the phone detects a hard fall, a countdown starts. If you do not cancel, your group gets an alarm with your position, your guardians get a notification, and, if you switched it on, an emergency text goes from your SIM. Riders of other Coroute groups on the same road may be asked to help.</p>
+        <p>Crash detection runs on your phone for the whole ride, even with the screen locked. Motion data is not sent to us and not stored. You can switch it off in the app.</p>
       </div>
-      <ol class="hm-steps" role="list" data-reveal>
-        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg><h3>The phone notices</h3><p>The motion sensor reads a hard impact during a ride. A full-screen countdown opens, even over the lock screen.</p></li>
-        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg><h3>You can cancel</h3><p>Dropped the phone? Tap cancel. Nothing is sent and nobody is told.</p></li>
-        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg><h3>The alarm goes out</h3><p>Your group hears it and sees a route to you. Guardians get a notification and a live link. The SMS goes if you enabled it.</p></li>
-        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><h3>Someone resolves it</h3><p>You or a rider who reached you marks it resolved. Everyone who was told sees that too.</p></li>
+      <ol class="hm-steps" role="list">
+        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg><h3>1. A hard fall is noticed</h3><p>The phone's motion sensors read a hard impact followed by a fall. Ordinary bumps, potholes and braking do not look like that.</p></li>
+        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg><h3>2. 15 seconds to cancel</h3><p>A loud alarm and a full-screen countdown open over the lock screen. Dropped the phone while getting off? Tap cancel and nobody is told.</p></li>
+        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg><h3>3. Your group is alerted</h3><p>Riders in your group hear a distinct alarm and get a route back to your position.</p></li>
+        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg><h3>4. Guardians are notified</h3><p>The family members you added as guardians get a notification and can follow your position on their link.</p></li>
+        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg><h3>5. A text, if there is no internet</h3><p>If the alert cannot go over the internet, CoRoute opens a ready-to-send text with your location to your emergency contact, from your own SIM.</p></li>
+        <li class="hm-step"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-heart"/></svg><h3>6. Hospital and resolution</h3><p>The alert can show the nearest hospital from OpenStreetMap. When the situation is handled, marking it resolved tells everyone who was alerted.</p></li>
       </ol>
     </div>
   </section>
 
+  <!-- Who gets told -->
   <section class="section" id="sos" aria-labelledby="who-title">
     <div class="container">
       <div class="hm-head">
@@ -70,23 +79,69 @@
         <h2 id="who-title">Who gets told.</h2>
         <p>The same people are told whether the alarm is automatic or you hold the SOS button yourself.</p>
       </div>
-      <ul class="hm-features" role="list" data-reveal>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></div><h3>Your group</h3><p>An alarm, your position, and a route to you by road.</p></li>
-        <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></div><h3>Your guardians</h3><p>Family you added get a push notification and a live link.</p></li>
-        <li class="hm-feature hm-feature--safety"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg></div><h3>Your emergency contact, by SMS</h3><p>If you switched it on, a text with your position from your own SIM.</p></li>
-        <li class="hm-feature hm-feature--talk"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-network"/></svg></div><h3>Nearby riders</h3><p>Riders of other Coroute groups already on your road, if you allow it.</p></li>
+      <ul class="hm-features" role="list">
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg></div><h3>Your ride group</h3><p>An alarm tone, your position, and a route to you. Your own group is always alerted first.</p></li>
+        <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></div><h3>Your guardians</h3><p>Family members you added get a notification and can follow on their private link.</p></li>
+        <li class="hm-feature hm-feature--safety"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg></div><h3>Emergency contact by text</h3><p>When the internet is down, a ready-to-send text with your location, from your own SIM.</p></li>
+        <li class="hm-feature hm-feature--talk"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-network"/></svg></div><h3>Nearby riders</h3><p>Riders of other CoRoute groups already on your road, if you allow it. See below.</p></li>
       </ul>
     </div>
   </section>
 
+  <!-- Solo -->
+  <section class="section section--surface" id="solo-safety" aria-labelledby="solo-title">
+    <div class="container">
+      <div class="hm-head">
+        <p class="eyebrow">Riding alone</p>
+        <h2 id="solo-title">Solo rides get the same safety.</h2>
+        <p>Riding to the start point alone, or touring solo? Group controls step aside, and every safety feature stays on.</p>
+      </div>
+      <dl class="hm-facts">
+        <div><dt>Crash detection</dt><dd>Always on during a ride<span>It needs no group to work.</span></dd></div>
+        <div><dt>Guardian links</dt><dd>Family can follow your solo ride<span>In any browser, without an account or an app.</span></dd></div>
+        <div><dt>Maps without signal</dt><dd>Saved for your route<span>So the map still shows on empty stretches.</span></dd></div>
+        <div><dt>Break reminders</dt><dd>After about two hours of riding<span>Solo riders are the ones nobody else reminds.</span></dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- Permission protection -->
+  <section class="section" id="permissions-protection" aria-labelledby="perm-prot-title">
+    <div class="container">
+      <div class="hm-head">
+        <p class="eyebrow">During the ride</p>
+        <h2 id="perm-prot-title">If your phone changes a setting mid-ride, you will know.</h2>
+        <p>Battery savers and accidental taps can switch off location or notifications. CoRoute does not fail silently:</p>
+      </div>
+      <div class="philosophy-grid">
+        <div class="philosophy-card">
+          <div class="philosophy-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-alert"/></svg></div>
+          <h3>A clear warning on the ride screen</h3>
+          <p>The ride keeps going, and a high-contrast banner tells you what stopped working.</p>
+        </div>
+        <div class="philosophy-card">
+          <div class="philosophy-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-up-right"/></svg></div>
+          <h3>One tap to fix it</h3>
+          <p>Tap the banner to open the right Android settings screen, even with gloves on.</p>
+        </div>
+        <div class="philosophy-card">
+          <div class="philosophy-card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic-off"/></svg></div>
+          <h3>The microphone stays off</h3>
+          <p>Fixing a permission never turns the microphone on. Voice goes out only while you hold Talk.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Nearby Rider Assist -->
   <section class="section section--surface" id="nearby" aria-labelledby="nearby-title">
     <div class="container">
       <div class="hm-head">
-        <p class="cluster cluster--8"><span class="eyebrow">Coroute Safety Network</span><span class="badge badge--new">New in 3.15</span></p>
+        <p class="cluster cluster--8"><span class="eyebrow">CoRoute safety network</span><span class="badge badge--new">New in 3.15</span></p>
         <h2 id="nearby-title">What if another rider can reach you first?</h2>
         <p>Nearby help works only when other Coroute groups are riding on the same road at that moment. On many roads there will be nobody. Do not count on it.</p>
       </div>
-      <dl class="hm-facts" data-reveal>
+      <dl class="hm-facts">
         <div><dt>Before they agree</dt><dd>They see only the road and the distance<span>No name, no exact position, no group details.</span></dd></div>
         <div><dt>If they tap "I can help"</dt><dd>They get a route to you<span>Your group sees that help is on the way.</span></dd></div>
         <div><dt>Your choice</dt><dd>You can opt out<span>Switch off nearby help in the app at any time. Your group is still told.</span></dd></div>
@@ -94,45 +149,55 @@
     </div>
   </section>
 
+  <!-- Guardians and Live links -->
   <section class="section" id="guardian" aria-labelledby="guardian-title">
     <div class="container">
       <div class="hm-head">
         <p class="eyebrow">Guardians and live links</p>
-        <h2 id="guardian-title">Keep family close without an app.</h2>
-        <p>Add guardians in the app. They follow the ride in a browser through a link you share, and are notified on a crash, an SOS, a long unexpected stop, or when you go offline for a while. Links stop working when the ride ends.</p>
+        <h2 id="guardian-title">Keep family close, without an app.</h2>
+        <p>Add guardians in the app. They follow the ride in a browser through a PIN-protected link you share, and are notified on a crash, an SOS, a long unexpected stop, or when you go offline for a while. You choose what each link shows, and you can pause or revoke it at any time. Links stop working when the ride ends.</p>
       </div>
+      <dl class="hm-facts">
+        <div><dt>Basic</dt><dd>Progress only<span>How the ride is going, without exact positions.</span></dd></div>
+        <div><dt>Live</dt><dd>Your position during the ride<span>Only while a ride is active.</span></dd></div>
+        <div><dt>Emergency</dt><dd>Position only during an alert<span>Nothing is shown until an SOS or crash alert is open.</span></dd></div>
+        <div><dt>Never shown</dt><dd>Other riders, chat, medical details<span>Guardians see you, not your group.</span></dd></div>
+      </dl>
     </div>
   </section>
 
-    <section class="section" id="new-316" aria-labelledby="new-316-title">
+  <!-- Emergency link & nearest hospital -->
+  <section class="section section--surface" id="new-316" aria-labelledby="new-316-title">
     <div class="container">
       <div class="hm-head">
         <p class="cluster cluster--8"><span class="eyebrow">Live link and nearest hospital</span><span class="badge badge--new">New in 3.16</span></p>
         <h2 id="new-316-title">Help from outside the app.</h2>
-        <p>During an open SOS, the rider or the lead can share a live emergency link with anyone, for example family or the emergency services. It opens a plain web page with the rider's first name, last position, the time of that position and a Call 112 button. Nothing else. When an SOS or crash alert opens, the incident sheet can also show the nearest hospital from OpenStreetMap, with its distance and a Navigate button.</p>
+        <p>During an open SOS, the rider or the lead can share a live emergency link with anyone, for example family or the emergency services. It opens a plain web page with the rider's first name, last position, the time of that position and a Call 112 button. Nothing else. It stops working after 30 minutes or when the alert is closed. The alert can also show the nearest hospital from OpenStreetMap, with its distance and a Navigate button.</p>
       </div>
     </div>
   </section>
 
-<section class="section section--surface" id="false-alarms" aria-labelledby="fa-title">
+  <!-- False alarms -->
+  <section class="section" id="false-alarms" aria-labelledby="fa-title">
     <div class="container">
       <div class="hm-head">
         <p class="eyebrow">False alarms</p>
         <h2 id="fa-title">Mistakes happen. Say so.</h2>
         <p>Cancel during the countdown and nothing goes out. If an alarm did go out, mark it resolved and everyone who was told sees that. Speed warnings and accident warnings from other groups are advisory only.</p>
       </div>
-      <div class="hm-notice" data-reveal>
+      <div class="hm-notice">
         <strong>Coroute complements emergency services. It does not replace them.</strong> In an emergency in India, call 112. Elsewhere, call your local emergency number. Coroute cannot promise that anyone will respond.
       </div>
     </div>
   </section>
 
+  <!-- CTA -->
   <section class="section section--tight">
     <div class="container">
-      <div class="hm-cta" data-reveal>
-        <div><h2>Set it up before the first ride.</h2><p>Emergency contact, medical ID and guardians take two minutes.</p></div>
+      <div class="hm-cta">
+        <div><h2>Set it up before the first long ride.</h2><p>Emergency contact, medical ID and guardians take a few minutes at home.</p></div>
         <div class="cluster cluster--16">
-          <a class="btn btn--primary" href="/get">Get the app</a>
+          <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
           <a class="link-arrow" href="/privacy"><span>Who sees what</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
         </div>
       </div>

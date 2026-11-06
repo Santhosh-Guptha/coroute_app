@@ -18,6 +18,10 @@ import '../../domain/safety/solo_check_in.dart';
 import '../../domain/safety/sun_helper.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../../domain/tracking/track_point.dart';
+import '../../domain/safety/crash_incident.dart';
+import '../../domain/sync/durable_event.dart';
+import '../local/durable_event_queue.dart';
+import '../local/local_incident_store.dart';
 import '../local/ride_stats_store.dart';
 import '../models/convoy_model.dart';
 import '../models/emergency_roster.dart';
@@ -27,12 +31,14 @@ import '../models/safety_wire.dart';
 import 'accel_source.dart';
 import 'alarm_notifier.dart';
 import 'auth_service.dart';
+import 'background_service.dart';
 import 'biometric_safety_bridge.dart';
 import 'convoy_service.dart';
 import '../../core/config/feature_gates.dart';
 import 'safety_native.dart';
 import 'settings_service.dart';
 import 'sms_sender.dart';
+import 'solo_fix_source.dart';
 import 'tile_cache_service.dart';
 import 'voice_service.dart';
 import 'weather_service.dart';
@@ -129,7 +135,7 @@ class CrashAlarmState {
       );
 }
 
-enum SmsFallbackState { idle, sending, sent, partly, failed, notAllowed }
+enum SmsFallbackState { idle, sending, sent, partly, failed, notAllowed, composer, composerWaiting }
 
 /// What the emergency texts did, for the SOS sheet. Counts only, never numbers.
 class SmsFallbackStatus {
@@ -177,7 +183,11 @@ class SmsFallbackStatus {
             ? 'No phone numbers to text. Call your emergency contact or 112.'
             : 'The texts could not be sent. Call your emergency contact or 112.';
       case SmsFallbackState.notAllowed:
-        return 'Texts are not allowed on this phone. Turn on "Text the group" and allow SMS.';
+        return 'Texts cannot be sent from this phone. Check "Text the group" in Safety, or call your emergency contact or 112.';
+      case SmsFallbackState.composer:
+        return 'Your messages app is open with the SOS text for $total ${total == 1 ? 'person' : 'people'}. Press Send.';
+      case SmsFallbackState.composerWaiting:
+        return 'No internet. Open CoRoute and tap the text button on the SOS screen to send the SOS by text.';
     }
   }
 }
@@ -357,9 +367,10 @@ class ConvoySafetyPort implements SafetyPort, SafetySourcePort, SafetyCheckInPor
 /// check-in. 3.16 adds the fuel reminder, the hard-stop count (rider only), the
 /// post-crash follow-up, the night flag for spoken alerts, the weather check and
 /// the route map prefetch at ride start, and the wearable impact hook.
-/// Battery: the accelerometer runs only during a ride, only while the
-/// rider was faster than 25 km/h in the last 30 s (or an impact is being
-/// checked), and only with crash detection on. No timer runs while idle: the
+/// Battery: the accelerometer runs only during a ride (a convoy ride or an offline solo ride,
+/// see [startOfflineSoloRide]), only while the detector is armed (12 km/h or more for 10 s, or
+/// above 25 km/h; disarmed after 3 min parked) or an impact is being checked, and only with
+/// crash detection on. No timer runs while idle: the
 /// alarm countdown, the SMS wait and the check-in answer wait are one-shot or
 /// alarm-only timers; everything new in 3.16 rides on fixes and convoy changes.
 class SafetyService extends ChangeNotifier {
@@ -391,8 +402,11 @@ class SafetyService extends ChangeNotifier {
     VoiceService? voice,
     WeatherService? weather,
     TilePrefetcher? tiles,
+    LocalIncidentStore? incidentStore,
+    DurableEventQueue? eventQueue,
+    Stream<TrackPoint> Function()? soloFixes,
   }) : this._(ConvoySafetyPort(convoys, auth), settings, accel ?? NativeAccelSource(), sms ?? NativeSmsSender(), null, true,
-            voice: voice, weather: weather, tiles: tiles);
+            voice: voice, weather: weather, tiles: tiles, incidentStore: incidentStore, eventQueue: eventQueue, soloFixes: soloFixes);
 
   @visibleForTesting
   SafetyService.forTest(
@@ -405,7 +419,12 @@ class SafetyService extends ChangeNotifier {
     WeatherService? weather,
     TilePrefetcher? tiles,
     Future<String> Function()? networkKind,
-  }) : this._(port, settings, accel, sms, clock, false, voice: voice, weather: weather, tiles: tiles, networkKind: networkKind);
+    LocalIncidentStore? incidentStore,
+    DurableEventQueue? eventQueue,
+    Stream<TrackPoint> Function()? soloFixes,
+  }) : this._(port, settings, accel, sms, clock, false,
+            voice: voice, weather: weather, tiles: tiles, networkKind: networkKind, incidentStore: incidentStore, eventQueue: eventQueue,
+            soloFixes: soloFixes);
 
   SafetyService._(
     this._port,
@@ -418,7 +437,11 @@ class SafetyService extends ChangeNotifier {
     this._weather,
     this._tiles,
     Future<String> Function()? networkKind,
-  })  : _networkKind = networkKind ?? SafetyNative.networkKind {
+    this._incidentStore,
+    this._eventQueue,
+    Stream<TrackPoint> Function()? soloFixes,
+  })  : _networkKind = networkKind ?? SafetyNative.networkKind,
+        _soloFixSource = soloFixes ?? nativeSoloFixes {
     _port.addListener(_onConvoy);
     _settings.addListener(_onSettings);
     _fixSub = _port.myFixes.listen(_onFix, onError: (Object _) {});
@@ -441,6 +464,23 @@ class SafetyService extends ChangeNotifier {
   final WeatherService? _weather;
   final TilePrefetcher? _tiles;
   final Future<String> Function() _networkKind;
+  final LocalIncidentStore? _incidentStore;
+  final DurableEventQueue? _eventQueue;
+  String? _activeIncidentId;
+
+  // Offline solo ride (3.54): crash detection and a local SOS without a convoy or internet.
+  final Stream<TrackPoint> Function() _soloFixSource;
+  StreamSubscription<TrackPoint>? _soloFixSub;
+  bool _soloActive = false;
+  int _soloStartedAt = 0;
+  PendingSos? _soloSos;
+
+  /// The group id of an SOS raised during an offline solo ride (never sent to the server).
+  static const String offlineSoloGroupId = 'offline-solo';
+
+  LocalIncidentStore? get incidentStore => _incidentStore;
+  DurableEventQueue? get eventQueue => _eventQueue;
+  CrashDetector get detector => _detector;
 
   final CrashDetector _detector = CrashDetector();
   final FatigueTracker _fatigue = FatigueTracker();
@@ -506,6 +546,105 @@ class SafetyService extends ChangeNotifier {
 
   int _now() => _clock?.call() ?? DateTime.now().millisecondsSinceEpoch;
 
+  /// A convoy ride or an offline solo ride is running.
+  bool get _rideOn => _port.rideActive || _soloActive;
+
+  /// Only the offline solo ride is running (no convoy to send an SOS to).
+  bool get _soloOnly => _soloActive && !_port.rideActive;
+
+  bool get _hasOpenSos => _port.hasOpenSos || _soloSos != null;
+
+  /// The SOS waiting for delivery: the convoy's, or the offline solo ride's.
+  PendingSos? get _pendingSos => _port.pendingSos ?? _soloSos;
+
+  // ------------------------------------------------------------------ offline solo ride
+  /// An offline solo ride is running (3.54): no convoy and no internet needed. Crash detection
+  /// runs on the phone's own GPS and accelerometer; an SOS opens the messages app with the text
+  /// for the emergency contact, and the alarm screen offers a call to the contact or 112.
+  bool get offlineSoloActive => _soloActive;
+
+  /// When the offline solo ride started (epoch ms), 0 when none runs.
+  int get offlineSoloStartedAt => _soloActive ? _soloStartedAt : 0;
+
+  /// The SOS of the offline solo ride, while it is open (until [resolveOfflineSoloSos] or the end).
+  PendingSos? get offlineSoloSos => _soloSos;
+
+  /// My last fix during a ride (convoy or offline solo), for the SOS sheet's position.
+  TrackPoint? get lastFix => _lastFix;
+
+  /// Starts an offline solo ride. False when a convoy ride is active (it has crash detection
+  /// already), one is running, or the service is disposed.
+  bool startOfflineSoloRide() {
+    if (_disposed || _soloActive || _port.rideActive) return false;
+    _soloActive = true;
+    _soloStartedAt = _now();
+    _soloSos = null;
+    _lastFix = null;
+    _detector.reset();
+    _soloFixSub = _soloFixSource().listen(_onFix, onError: (Object _) {});
+    // The foreground service keeps GPS and the sensor alive with the screen off.
+    if (_native) BackgroundService.start(convoyName: 'Solo ride (offline)', riderCount: 1).ignore();
+    _updateSensor();
+    notifyListeners();
+    return true;
+  }
+
+  /// Ends the offline solo ride (sensor and GPS off, the foreground service stopped).
+  void stopOfflineSoloRide() => _endSolo(stopService: true);
+
+  /// "Help reached me" / "False alarm" for the solo ride's SOS: closes it on the phone.
+  void resolveOfflineSoloSos() {
+    if (_soloSos == null) return;
+    _soloSos = null;
+    notifyListeners();
+  }
+
+  void _endSolo({required bool stopService}) {
+    if (!_soloActive) return;
+    _soloActive = false;
+    _soloStartedAt = 0;
+    _soloFixSub?.cancel();
+    _soloFixSub = null;
+    _soloSos = null;
+    if (!_port.rideActive) {
+      _detector.reset();
+      _lastFix = null;
+      if (stopService && _native) BackgroundService.stop().ignore();
+    }
+    _updateSensor();
+    notifyListeners();
+  }
+
+  /// The crash SOS of an offline solo ride: kept on the phone, and the emergency text goes out at
+  /// once (the messages app when the phone is in hand; there is no server to wait for).
+  void _raiseSoloSos({
+    required String type,
+    required double lat,
+    required double lng,
+    required EmergencySource source,
+    double? speedBeforeKmh,
+    double? impactG,
+    int? occurredAtMs,
+    bool auto = true,
+    bool manual = false,
+  }) {
+    final now = _now();
+    _soloSos ??= PendingSos(
+      clientId: 'solo-${_port.myUserId ?? 'rider'}-$now',
+      groupId: offlineSoloGroupId,
+      lat: lat,
+      lng: lng,
+      type: type,
+      createdAt: occurredAtMs ?? now,
+      auto: auto,
+      speedBeforeKmh: speedBeforeKmh,
+      impactG: impactG,
+      source: source,
+    );
+    notifyListeners();
+    _smsRound(manual: manual).ignore();
+  }
+
   // ------------------------------------------------------------------ public API
   CrashAlarmState? get alarm => _alarm;
   bool get isOverspeedActive => _isOverspeedActive;
@@ -521,8 +660,8 @@ class SafetyService extends ChangeNotifier {
 
   /// "Text the group now" can be used: texts allowed, an SOS is waiting and was not texted yet.
   bool get smsAvailable {
-    final p = _port.pendingSos;
-    return _settings.smsFallback && p != null && !_smsRounds.contains(p.clientId) && !_smsBusy;
+    final p = _pendingSos;
+    return (_settings.smsFallback || p?.groupId == offlineSoloGroupId) && p != null && !_smsRounds.contains(p.clientId) && !_smsBusy;
   }
 
   /// Metres ridden since the last fill (item 2), for the ride sheet line.
@@ -586,7 +725,7 @@ class SafetyService extends ChangeNotifier {
   /// the SOS then carries source WEARABLE. Ignored outside a ride, with crash detection
   /// off, while an alarm or my SOS is open, or without a finite [g].
   void externalImpact({required ExternalImpactSource source, required double g, required int atMs}) {
-    if (_disposed || !_port.rideActive || !_settings.crashDetection || _alarm != null || _port.hasOpenSos) return;
+    if (_disposed || !_rideOn || !_settings.crashDetection || _alarm != null || _hasOpenSos) return;
     if (!g.isFinite || g <= 0) return;
     final f = _lastFix;
     final uid = _port.myUserId;
@@ -621,6 +760,10 @@ class SafetyService extends ChangeNotifier {
     _alarmEvent = null;
     _detector.cooldown(_now());
     _endAlarmNative();
+    if (_activeIncidentId != null) {
+      _incidentStore?.updateStatus(_activeIncidentId!, IncidentStatus.confirmedOk, resolvedAt: _now(), syncToQueue: false).ignore();
+      _activeIncidentId = null;
+    }
     // A real impact answered with "I'm OK": ask once more at the next stop or in 20 min.
     if (e != null && _alarmExternal != ExternalImpactSource.developer) {
       _lastImpactG = e.impactG;
@@ -646,6 +789,10 @@ class SafetyService extends ChangeNotifier {
     _alarmTimer = null;
     _alarm = null;
     _alarmEvent = null;
+    if (_activeIncidentId != null) {
+      _incidentStore?.updateStatus(_activeIncidentId!, IncidentStatus.resolved, resolvedAt: _now(), syncToQueue: false).ignore();
+      _activeIncidentId = null;
+    }
     notifyListeners();
   }
 
@@ -756,6 +903,12 @@ class SafetyService extends ChangeNotifier {
   /// "Text the group now" from the SOS sheet: the same round as the automatic one.
   Future<void> sendSmsNow() => _smsRound(manual: true);
 
+  /// Tests replace how the messages app is opened (default [SmsComposer.open]).
+  @visibleForTesting
+  static Future<bool> Function(List<String> to, String body)? smsComposerOverride;
+
+  static Future<bool> _openComposer(List<String> to, String body) => SmsComposer.open(to: to, body: body);
+
   /// Test hook: opens the alarm as if the detector had fired.
   @visibleForTesting
   void debugRaiseCrash(CrashEvent e) => _openAlarm(e);
@@ -763,6 +916,9 @@ class SafetyService extends ChangeNotifier {
   // ------------------------------------------------------------------ inputs
   void _onConvoy() {
     if (_disposed) return;
+    // A convoy ride took over from an offline solo ride (it has its own crash detection and SOS);
+    // the foreground service now belongs to the convoy, so it keeps running.
+    if (_soloActive && _port.rideActive) _endSolo(stopService: false);
     final convoy = _port.activeConvoy;
     final gid = convoy?.groupId;
     final active = _port.rideActive;
@@ -823,13 +979,18 @@ class SafetyService extends ChangeNotifier {
   }
 
   void _onFix(TrackPoint p) {
-    if (_disposed || !_port.rideActive) return;
+    if (_disposed || !_rideOn) return;
     _lastFix = p;
     if (_settings.crashDetection) {
       final ev = _detector.onFix(p);
       // Hard stops are judged only while the detector is armed (the sensor runs then anyway).
       if (_detector.armedAt(p.ts)) _brakes.onFix(p);
       if (ev != null) _openAlarm(ev);
+    }
+    if (_soloOnly) {
+      // Offline solo ride: crash detection only (no convoy for check-ins, fuel or route data).
+      _updateSensor();
+      return;
     }
     if (_fatigue.onFix(p)) {
       _triggerFatigueAlert();
@@ -955,13 +1116,18 @@ class SafetyService extends ChangeNotifier {
     if (hadPrompts) notifyListeners();
   }
 
-  /// Sensor on only while needed (battery hard rule).
+  /// Sensor on only while needed (battery hard rule). Also while a crash alarm counts down: the
+  /// native sensor session holds the partial wake lock, so the 15 s countdown (a Dart timer) is
+  /// not frozen by a sleeping CPU when the screen stays off (full-screen alarm denied, Android 14+).
+  /// The first bucket after the alarm is answered switches it off again.
   void _updateSensor() {
+    final alarm = _alarm;
+    final counting = alarm != null && !alarm.sent;
     final want = !_disposed &&
         !_accelUnavailable &&
         _settings.crashDetection &&
-        _port.rideActive &&
-        _detector.wantsSensor;
+        _rideOn &&
+        (_detector.wantsSensor || counting);
     if (want && _accelSub == null) {
       _accelSub = _accel.buckets().listen(_onAccel, onError: (Object e) {
         // No accelerometer (or the sensor failed): stop asking for it during this ride.
@@ -983,7 +1149,7 @@ class SafetyService extends ChangeNotifier {
   // ------------------------------------------------------------------ crash alarm
   void _openAlarm(CrashEvent e) {
     final now = _now();
-    if (_alarm != null || _port.hasOpenSos || !_settings.crashDetection) {
+    if (_alarm != null || _hasOpenSos || !_settings.crashDetection) {
       _detector.cooldown(now);
       return;
     }
@@ -996,8 +1162,42 @@ class SafetyService extends ChangeNotifier {
       lng = f?.lng ?? me?.lng ?? 0;
     }
     final seconds = SafetyConstants.crashCountdown.inSeconds;
-    _alarmEvent = CrashEvent(impactAtMs: e.impactAtMs, impactG: e.impactG, speedBeforeKmh: e.speedBeforeKmh, lat: lat, lng: lng);
+    _alarmEvent = CrashEvent(
+      impactAtMs: e.impactAtMs,
+      impactG: e.impactG,
+      speedBeforeKmh: e.speedBeforeKmh,
+      lat: lat,
+      lng: lng,
+      hasRotationOrTilt: e.hasRotationOrTilt,
+      isSlideFall: e.isSlideFall,
+      scenario: e.scenario,
+      confidence: e.confidence,
+      peakJerkGPerS: e.peakJerkGPerS,
+      movementState: e.movementState,
+    );
     final bioSnap = BiometricSafetyBridge().isActive ? BiometricSafetyBridge().snapshot : null;
+    final incId = 'crash-${e.impactAtMs}-$now';
+    _activeIncidentId = incId;
+    final incident = CrashIncident(
+      incidentId: incId,
+      timestamp: e.impactAtMs,
+      lat: lat,
+      lng: lng,
+      impactG: e.impactG,
+      speedBeforeKmh: e.speedBeforeKmh,
+      peakGyroRadS: 0.0,
+      tiltDeg: 0.0,
+      isSlideFall: e.isSlideFall,
+      scenario: e.scenario,
+      confidence: e.confidence,
+      peakJerkGPerS: e.peakJerkGPerS,
+      source: _alarmExternal != null ? 'WEARABLE' : 'CRASH_AUTO',
+      status: IncidentStatus.countdownActive,
+      idempotencyKey: 'crash_$incId',
+      groupId: _port.activeConvoy?.groupId,
+    );
+    _incidentStore?.recordIncident(incident, syncToQueue: false).ignore();
+
     _alarm = CrashAlarmState(
       startedAtMs: now,
       secondsLeft: seconds,
@@ -1071,7 +1271,17 @@ class SafetyService extends ChangeNotifier {
     }
 
     final port = _port;
-    if (port is SafetySourcePort) {
+    if (_soloOnly) {
+      _raiseSoloSos(
+        type: alertType,
+        lat: e.lat,
+        lng: e.lng,
+        source: external ? EmergencySource.wearable : source,
+        speedBeforeKmh: e.speedBeforeKmh,
+        impactG: e.impactG,
+        occurredAtMs: e.impactAtMs,
+      );
+    } else if (port is SafetySourcePort) {
       (port as SafetySourcePort).raiseSosFrom(
         external ? EmergencySource.wearable : source,
         type: alertType,
@@ -1096,6 +1306,29 @@ class SafetyService extends ChangeNotifier {
       );
     }
     final isUnresponsive = source == EmergencySource.crashAuto;
+    if (_activeIncidentId != null) {
+      _incidentStore?.updateStatus(_activeIncidentId!, IncidentStatus.dispatched, syncToQueue: true).ignore();
+      if (_eventQueue != null) {
+        _eventQueue.enqueue(DurableEvent(
+          eventId: 'evt_$_activeIncidentId',
+          idempotencyKey: 'crash_$_activeIncidentId',
+          eventType: DurableEventType.crashIncident,
+          priority: EventPriority.critical,
+          groupId: _port.activeConvoy?.groupId ?? '',
+          payload: {
+            'incidentId': _activeIncidentId,
+            'lat': e.lat,
+            'lng': e.lng,
+            'impactG': e.impactG,
+            'speedBeforeKmh': e.speedBeforeKmh,
+            'source': source.wire,
+            'alertType': alertType,
+            'auto': true,
+          },
+          createdAt: e.impactAtMs,
+        )).ignore();
+      }
+    }
     _alarm = a.copyWith(
       sent: true,
       secondsLeft: 0,
@@ -1108,6 +1341,55 @@ class SafetyService extends ChangeNotifier {
       _startBystanderSiren();
     }
     notifyListeners();
+  }
+
+  /// Manually triggers an Emergency SOS event, recording it to local incident persistence
+  /// and placing it into the durable priority event queue with critical priority.
+  Future<void> triggerManualSos({String type = SosTypes.emergency}) async {
+    final now = _now();
+    final f = _lastFix;
+    final uid = _port.myUserId;
+    final me = uid == null ? null : _port.activeConvoy?.riders[uid];
+    final lat = f?.lat ?? me?.lat ?? 0.0;
+    final lng = f?.lng ?? me?.lng ?? 0.0;
+    final incId = 'sos-$now-${math.Random().nextInt(0xffff)}';
+
+    final incident = CrashIncident(
+      incidentId: incId,
+      timestamp: now,
+      lat: lat,
+      lng: lng,
+      impactG: 0.0,
+      speedBeforeKmh: f?.speedKmh ?? 0.0,
+      source: EmergencySource.manual.wire,
+      status: IncidentStatus.dispatched,
+      idempotencyKey: 'sos_$incId',
+      groupId: _port.activeConvoy?.groupId,
+    );
+    await _incidentStore?.recordIncident(incident, syncToQueue: true);
+
+    await _eventQueue?.enqueue(DurableEvent(
+      eventId: 'evt_$incId',
+      idempotencyKey: 'sos_$incId',
+      eventType: DurableEventType.sos,
+      priority: EventPriority.critical,
+      groupId: _port.activeConvoy?.groupId ?? '',
+      payload: incident.toJson(),
+      createdAt: now,
+    ));
+
+    if (_soloOnly) {
+      // Offline solo ride: no convoy to send to. The messages app opens for the emergency contact.
+      _raiseSoloSos(type: type, lat: lat, lng: lng, source: EmergencySource.manual, occurredAtMs: now, auto: false, manual: true);
+      return;
+    }
+    _port.raiseSos(
+      type: type,
+      lat: lat,
+      lng: lng,
+      auto: false,
+      occurredAtMs: now,
+    );
   }
 
   void _startBystanderSiren() {
@@ -1600,10 +1882,13 @@ class SafetyService extends ChangeNotifier {
   }
 
   Future<void> _smsRound({required bool manual}) async {
-    final p = _port.pendingSos;
+    final p = _pendingSos;
     if (p == null || _smsBusy || _smsRounds.contains(p.clientId)) return;
     final now = _now();
-    if (!_settings.smsFallback) {
+    // An offline solo ride has no group to reach: the text to the emergency contact is the SOS
+    // itself, so it does not wait for the "Text the group" opt-in.
+    final solo = p.groupId == offlineSoloGroupId;
+    if (!_settings.smsFallback && !solo) {
       if (manual) _setSms(SmsFallbackStatus(state: SmsFallbackState.notAllowed, sent: 0, total: 0, capped: 0, at: now), p.clientId);
       return;
     }
@@ -1611,12 +1896,17 @@ class SafetyService extends ChangeNotifier {
     try {
       final cap = await _sms.capability();
       if (_disposed) return;
-      if (!cap.hasTelephony || !cap.permission) {
-        _setSms(SmsFallbackStatus(state: SmsFallbackState.notAllowed, sent: 0, total: 0, capped: 0, at: _now()), p.clientId);
+      // The Play build has no SEND_SMS permission: the texts then go through the messages app,
+      // opened with the SOS text and every recipient filled in (the rider or a bystander presses
+      // Send). Android does not let an app open another app from the background, so the automatic
+      // round only says so and "Text the group now" opens it once the phone is in hand.
+      final viaComposer = !cap.permission || !cap.hasTelephony;
+      if (viaComposer && !manual && _inBackground) {
+        _setSms(SmsFallbackStatus(state: SmsFallbackState.composerWaiting, sent: 0, total: 0, capped: 0, at: _now()), p.clientId);
         return;
       }
       // Still not delivered? (It may have gone through while we checked.)
-      final still = _port.pendingSos;
+      final still = _pendingSos;
       if (still == null || still.clientId != p.clientId) return;
       final log = await _SmsLog.load();
       if (_disposed) return;
@@ -1657,9 +1947,28 @@ class SafetyService extends ChangeNotifier {
         await log.save(p.clientId, _now());
         return;
       }
-      if (!cap.simReady) {
+      if (cap.hasTelephony && !cap.simReady) {
         _setSms(SmsFallbackStatus(state: SmsFallbackState.failed, sent: 0, total: total, capped: plan.capped, at: _now()), p.clientId);
         await log.save(p.clientId, _now());
+        return;
+      }
+      if (viaComposer) {
+        final open = smsComposerOverride ?? _openComposer;
+        final opened = await open([for (final r in plan.recipients) r.phone], body);
+        if (_disposed) return;
+        // Not sent by this app: no budget is used, nothing is logged as texted, and the rider can
+        // open it again with "Text the group now" (for example after closing the messages app).
+        _smsRounds.remove(p.clientId);
+        _setSms(
+          SmsFallbackStatus(
+            state: opened ? SmsFallbackState.composer : SmsFallbackState.notAllowed,
+            sent: 0,
+            total: opened ? total : 0,
+            capped: plan.capped,
+            at: _now(),
+          ),
+          p.clientId,
+        );
         return;
       }
       var sent = 0;
@@ -1712,6 +2021,8 @@ class SafetyService extends ChangeNotifier {
     _port.removeListener(_onConvoy);
     _settings.removeListener(_onSettings);
     _fixSub?.cancel();
+    _soloFixSub?.cancel();
+    _soloFixSub = null;
     _accelSub?.cancel();
     _accelSub = null;
     _alarmTimer?.cancel();

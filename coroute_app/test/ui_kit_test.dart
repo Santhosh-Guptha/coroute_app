@@ -52,12 +52,9 @@ void main() {
       expect(formatDistance(double.nan), 'Unknown');
     });
 
-    test('rounded distance and ahead/behind text', () {
+    test('rounded distance', () {
       expect(formatDistanceRounded(349), '350 m');
       expect(formatDistanceRounded(1840), '1.8 km');
-      expect(describeDistance(800, ahead: true), '800 m ahead');
-      expect(describeDistance(349, ahead: false), '350 m behind');
-      expect(describeDistance(1840), '1.8 km away');
     });
 
     test('duration and ago', () {
@@ -243,7 +240,6 @@ void main() {
                   Flexible(child: RiderStatusChip(status: RiderStatus.disconnected, detail: 'last seen 6 min ago')),
                 ],
               ),
-              const DistanceIndicator(meters: 3400, ahead: false, warn: true),
               RideAlert(
                 tier: AlertTier.critical,
                 title: 'SOS: Venkata Subramaniam Ramakrishnan needs help',
@@ -258,18 +254,6 @@ void main() {
                 alignment: Alignment.centerLeft,
                 child: MapControl(icon: Icons.my_location_rounded, tooltip: 'Centre on me', onPressed: () {}, active: true),
               ),
-              const StopCard(
-                kind: StopKind.fuel,
-                name: 'Hotel Haritha Restaurant and Rest Area, Dornala',
-                subtitle: '12 km ahead, planned stop for 20 min',
-                trailing: Text('12 km'),
-              ),
-              const TripProgress(stops: [
-                TripProgressStop(name: 'Start, Hyderabad', done: true),
-                TripProgressStop(name: 'Fuel at Kalwakurthy', kind: StopKind.fuel, done: true),
-                TripProgressStop(name: 'Breakfast at Hotel Haritha, Dornala', kind: StopKind.food, kmFromMe: 42.5),
-                TripProgressStop(name: 'Srisailam', kind: StopKind.meeting, kmFromMe: 118),
-              ]),
               RouteSummary(
                 distanceKm: 214.6,
                 duration: const Duration(hours: 5, minutes: 40),
@@ -298,8 +282,6 @@ void main() {
         palette: p,
       );
       expect(tester.takeException(), isNull);
-      expect(find.text('You are here'), findsOneWidget);
-      expect(find.byIcon(Icons.check_circle_rounded), findsNWidgets(2));
       expect(find.text('Start Ride'), findsOneWidget);
     });
   }

@@ -43,14 +43,18 @@ npm install --omit=dev
 
 # 5. Environment configuration
 echo "[5/7] Writing /etc/coroute/gateway.env..."
-cat > /etc/coroute/gateway.env << 'EOF'
+# Secrets are never stored in this script. Export them before running, e.g.
+#   sudo ORACLE_PASSWORD=... JWT_SECRET="$(openssl rand -base64 48)" bash <this script>
+: "${ORACLE_PASSWORD:?Set ORACLE_PASSWORD in the environment}"
+: "${JWT_SECRET:?Set JWT_SECRET in the environment (openssl rand -base64 48)}"
+cat > /etc/coroute/gateway.env << EOF
 NODE_ENV=production
 HOST=0.0.0.0
 PORT=3000
 ORACLE_SODA_URL=https://gfe473165e66472-coroutedb.adb.ap-hyderabad-1.oraclecloudapps.com/ords/coroute/soda/latest
 ORACLE_USER=COROUTE
-ORACLE_PASSWORD=DevMonks#Adp2026!Ride
-JWT_SECRET=0oFOo4EZMkqdTYW2CcdM3ZUqZUv2NqY8IMCH9UqOJki23ENaBnmFZ/c1CbUbYU65
+ORACLE_PASSWORD=${ORACLE_PASSWORD}
+JWT_SECRET=${JWT_SECRET}
 JWT_TTL_DAYS=30
 GOOGLE_CLIENT_IDS=87798956679-ivggpbpote5cf2cvi8mtg8gja3r1sfve.apps.googleusercontent.com
 BOOTSTRAP_ADMIN_EMAILS=santhoshbukka5@gmail.com

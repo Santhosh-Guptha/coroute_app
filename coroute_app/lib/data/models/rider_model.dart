@@ -1,4 +1,5 @@
 import '../../core/constants/network_constants.dart';
+import '../../domain/safety/communication_hierarchy.dart';
 import 'safety_wire.dart';
 
 enum TrackingConfidence {
@@ -96,6 +97,53 @@ class RiderModel {
   /// Timestamp in epoch ms when last seen over P2P mesh (0 when none).
   final int lastMeshEpochMs;
 
+  /// GPS or sensor horizontal accuracy in meters (null or 999 when unknown).
+  final double? accuracy;
+
+  double? get accuracyM => accuracy;
+
+  /// Evaluates location freshness status (Live vs Stale indicator).
+  /// Strict Invariant: "Never show stale as live."
+  /// Telemetry is considered LIVE if:
+  /// 1. lastSeenEpochMs > 0 and age [nowMs - lastSeenEpochMs] is non-negative and <= [threshold.inMilliseconds].
+  /// 2. Has valid, non-zero coordinates (lat != 0.0 || lng != 0.0) and finite.
+  /// 3. Accuracy is acceptable (if present, <= 200m).
+  /// 4. Presence is not explicitly disconnected ('NO_SIGNAL', 'APP_CLOSED', 'DISCONNECTED').
+  LocationFreshnessStatus freshnessStatus([
+    int? nowEpochMs,
+    Duration threshold = const Duration(seconds: 60),
+  ]) {
+    final now = nowEpochMs ?? DateTime.now().millisecondsSinceEpoch;
+    final ageMs = now - lastSeenEpochMs;
+
+    if (lastSeenEpochMs <= 0 || ageMs < 0 || ageMs > threshold.inMilliseconds) {
+      return LocationFreshnessStatus.stale;
+    }
+    if (!lat.isFinite || !lng.isFinite || (lat == 0.0 && lng == 0.0)) {
+      return LocationFreshnessStatus.stale;
+    }
+    final normPresence = presence.trim().toUpperCase();
+    if (normPresence == 'NO_SIGNAL' ||
+        normPresence == 'APP_CLOSED' ||
+        normPresence == 'DISCONNECTED' ||
+        normPresence == 'OFFLINE') {
+      return LocationFreshnessStatus.stale;
+    }
+    if (accuracy != null && (!accuracy!.isFinite || accuracy! > 200.0)) {
+      return LocationFreshnessStatus.stale;
+    }
+    return LocationFreshnessStatus.live;
+  }
+
+  bool isLocationLive([int? nowEpochMs, Duration threshold = const Duration(seconds: 60)]) =>
+      freshnessStatus(nowEpochMs, threshold).isLive;
+
+  bool isLocationStale([int? nowEpochMs, Duration threshold = const Duration(seconds: 60)]) =>
+      freshnessStatus(nowEpochMs, threshold).isStale;
+
+  bool get isLive => isLocationLive();
+  bool get isStale => isLocationStale();
+
   RiderModel({
     this.fuelUsableKm,
     this.fuelUpdatedAt = 0,
@@ -128,6 +176,7 @@ class RiderModel {
     this.isMeshPeer = false,
     this.meshHops = 0,
     this.lastMeshEpochMs = 0,
+    this.accuracy,
   });
 
   RiderModel copyWith({
@@ -160,6 +209,7 @@ class RiderModel {
     bool? isMeshPeer,
     int? meshHops,
     int? lastMeshEpochMs,
+    double? accuracy,
   }) {
     return RiderModel(
       fuelUsableKm: fuelUsableKm,
@@ -193,10 +243,11 @@ class RiderModel {
       isMeshPeer: isMeshPeer ?? this.isMeshPeer,
       meshHops: meshHops ?? this.meshHops,
       lastMeshEpochMs: lastMeshEpochMs ?? this.lastMeshEpochMs,
+      accuracy: accuracy ?? this.accuracy,
     );
   }
 
-  Map<String, dynamic> toJson() {
+  Map<String, dynamic> toJson([int? nowMs]) {
     return {
       if (fuelUsableKm != null) 'fuelEstimate': {'usableKm': fuelUsableKm, 'updatedAt': fuelUpdatedAt},
       'userId': userId,
@@ -205,6 +256,8 @@ class RiderModel {
       'vehicleColor': vehicleColor,
       'lat': lat,
       'lng': lng,
+      if (accuracy != null) 'accuracy': accuracy,
+      'freshness': freshnessStatus(nowMs).wire,
       'speedKmh': speedKmh,
       'heading': heading,
       'batteryLevel': batteryLevel,
@@ -241,6 +294,7 @@ class RiderModel {
       vehicleColor: json['vehicleColor'] ?? 'Black',
       lat: (json['lat'] as num?)?.toDouble() ?? 0.0,
       lng: (json['lng'] as num?)?.toDouble() ?? 0.0,
+      accuracy: (json['accuracy'] ?? json['accuracyM'] as num?)?.toDouble(),
       speedKmh: (json['speedKmh'] as num?)?.toDouble() ?? 0.0,
       heading: (json['heading'] as num?)?.toDouble() ?? 0.0,
       batteryLevel: (json['batteryLevel'] as num?)?.toInt() ?? 100,

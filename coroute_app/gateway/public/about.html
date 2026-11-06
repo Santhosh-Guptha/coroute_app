@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>About | Coroute</title>
-<meta name="description" content="Coroute is a group motorcycle ride app made by riders at DevMonks. Free to start, no ads, no sale of data and no tracking SDKs. Paid plans fund the servers.">
+<meta name="description" content="CoRoute is a group motorcycle touring safety app made by riders at DevMonks. No ads, no trackers, no sale of data, real rider reviews only, and honest about what an app can and cannot do.">
 <link rel="canonical" href="__ORIGIN__/about">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Coroute">
+<meta property="og:site_name" content="CoRoute">
 <meta property="og:title" content="About | Coroute">
-<meta property="og:description" content="Coroute is a group motorcycle ride app made by riders at DevMonks. Free to start, no ads, no sale of data and no tracking SDKs. Paid plans fund the servers.">
+<meta property="og:description" content="CoRoute is a group motorcycle touring safety app made by riders at DevMonks. No ads, no trackers, no sale of data, real rider reviews only, and honest about what an app can and cannot do.">
 <meta property="og:url" content="__ORIGIN__/about">
 <meta property="og:image" content="__ORIGIN__/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -17,10 +17,10 @@
 <meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="About | Coroute">
-<meta name="twitter:description" content="Coroute is a group motorcycle ride app made by riders at DevMonks. Free to start, no ads, no sale of data and no tracking SDKs. Paid plans fund the servers.">
+<meta name="twitter:description" content="CoRoute is a group motorcycle touring safety app made by riders at DevMonks. No ads, no trackers, no sale of data, real rider reviews only, and honest about what an app can and cannot do.">
 <meta name="twitter:image" content="__ORIGIN__/og-image.png">
 <meta name="theme-color" content="#0B0D0E">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -28,8 +28,7 @@
 <link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
 <link rel="stylesheet" href="/assets/pages.css">
-<link rel="stylesheet" href="/assets/home.css">
-<script>document.documentElement.classList.add('js')</script>
+<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
 <script src="/assets/site.js" defer></script>
 </head>
 <body data-page="about">
@@ -41,7 +40,7 @@
       <div class="hm-hero__inner">
         <p class="eyebrow">About</p>
         <h1 id="hero-title">Built because riders needed it.</h1>
-        <p class="t-lead">Coroute is made by riders at DevMonks. It keeps a group connected on the road and helps it look out for each other.</p>
+        <p class="t-lead">CoRoute is made by riders at DevMonks. It started with a simple problem every touring group knows: on a long ride, somebody always falls behind, the signal goes, and nobody is sure where they are.</p>
         <div class="hm-hero__cta">
           <a class="btn btn--primary btn--lg" href="/get">Get the app</a>
           <a class="link-arrow" href="/#feedback"><span>Send feedback</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
@@ -50,44 +49,47 @@
     </div>
   </section>
 
+  <!-- Principles -->
   <section class="section section--surface" aria-labelledby="oss-title">
     <div class="container">
       <div class="hm-head">
         <p class="eyebrow">Principles</p>
         <h2 id="oss-title">Clear and open by design.</h2>
       </div>
-      <ul class="hm-features" role="list" data-reveal>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-free"/></svg></div><h3>Free to start</h3><p>Community Rider costs nothing. Paid plans fund the servers.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-no-ads"/></svg></div><h3>No ads, no trackers</h3><p>No advertising and no tracking SDKs in the app or this site.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg></div><h3>No sale of data</h3><p>Your location goes to your group only, while you ride.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic-off"/></svg></div><h3>No voice recording</h3><p>The intercom is relayed live and discarded.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></div><h3>Honest about limits</h3><p>Coroute helps people know. It cannot promise that anyone comes.</p></li>
-        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-code"/></svg></div><h3>Made by riders</h3><p>Built and tested on real group rides by DevMonks.</p></li>
+      <ul class="hm-features" role="list">
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-free"/></svg></div><h3>Free to join a ride</h3><p>Invited riders join free of charge. Memberships for the rider who hosts a ride pay for running the service and for safety work.</p></li>
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-no-ads"/></svg></div><h3>No ads, no trackers</h3><p>No advertising and no third-party analytics or tracking SDKs, in the app or on this website.</p></li>
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg></div><h3>No sale of data</h3><p>Your location goes to your ride group during the ride, and to the guardians you choose. It is never sold.</p></li>
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic-off"/></svg></div><h3>Microphone off by default</h3><p>The intercom transmits only while push-to-talk is held. Voice is never stored.</p></li>
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg></div><h3>Honest about limits</h3><p>CoRoute complements emergency services; it does not replace them. In an emergency in India, call 112 first.</p></li>
+        <li class="hm-feature"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-message"/></svg></div><h3>Real reviews only</h3><p>Rider stories on this site come from completed trips and are checked by the CoRoute team before they appear. We never write our own.</p></li>
       </ul>
     </div>
   </section>
 
+  <!-- Status -->
   <section class="section" aria-labelledby="status-title">
     <div class="container">
       <div class="hm-head">
         <p class="eyebrow">Status</p>
-        <h2 id="status-title">An early project. Honestly.</h2>
+        <h2 id="status-title">Where things stand.</h2>
       </div>
-      <dl class="hm-facts" data-reveal>
+      <dl class="hm-facts">
         <div><dt>Platform</dt><dd>Android only<span>Version 6.0 or newer. No iOS version yet.</span></dd></div>
-        <div><dt>Current version</dt><dd>__APP_VERSION__. <span>The offline mesh, nearby rider assist and guardian links are recent, so treat them with care.</span></dd></div>
-        <div><dt>Accounts and data</dt><dd>Oracle Cloud<span>Accounts, rides and payments are stored in Oracle Autonomous Database, reachable only through the Coroute gateway.</span></dd></div>
-        <div><dt>Payments</dt><dd>UPI through Razorpay<span>Chosen and paid for in the app. See the <a class="link" href="/terms">terms</a>.</span></dd></div>
+        <div><dt>Current version</dt><dd>__APP_VERSION__. <span>The newest build is always on the <a class="link" href="/get">download page</a>, and the app tells you when an update is needed.</span></dd></div>
+        <div><dt>Accounts and data</dt><dd>Stored in India<span>Accounts and rides are kept in a data centre in Hyderabad, reachable only through the signed-in CoRoute service. Connections are encrypted.</span></dd></div>
+        <div><dt>Payments</dt><dd>UPI through Razorpay<span>Chosen and activated in the app. See the <a class="link" href="/terms">terms</a>.</span></dd></div>
       </dl>
     </div>
   </section>
 
+  <!-- CTA -->
   <section class="section section--tight">
     <div class="container">
-      <div class="hm-cta" data-reveal>
+      <div class="hm-cta">
         <div><h2>Tell us what to improve.</h2><p>Bugs, ideas, or something that felt wrong on a ride.</p></div>
         <div class="cluster cluster--16">
-          <a class="btn btn--primary" href="/#feedback">Send feedback</a>
+          <a class="btn btn--primary btn--lg" href="/#feedback">Send feedback</a>
           <a class="link-arrow" href="/privacy"><span>Privacy policy</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
         </div>
       </div>

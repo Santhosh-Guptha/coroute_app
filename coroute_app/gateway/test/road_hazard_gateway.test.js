@@ -5,7 +5,7 @@ process.env.RIDER_PERSIST_INTERVAL_MS = '20';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { RoadHazardRegistry, haversineM, angleDiff } = require('../src/road_hazards');
+const { RoadHazardRegistry } = require('../src/road_hazards');
 
 test('RoadHazardRegistry: 100m spatial deduplication merges close observations', () => {
   const registry = new RoadHazardRegistry({ deduplicationRadiusM: 100.0 });

@@ -8,11 +8,9 @@ import 'package:coroute_app/data/models/timeline_event_model.dart';
 import 'package:coroute_app/domain/notify/alert_policy.dart';
 import 'package:coroute_app/domain/notify/alert_priority.dart';
 import 'package:coroute_app/domain/ride/ride_facts.dart';
-import 'package:coroute_app/domain/route/lost_rider_recovery_coordinator.dart';
 import 'package:coroute_app/domain/route/route_plan.dart';
 import 'package:coroute_app/domain/route/route_progress.dart';
 import 'package:coroute_app/domain/tracking/geo_math.dart';
-import 'package:coroute_app/domain/tracking/track_point.dart';
 
 void main() {
   group('Scenario Convoy Dynamics and Regroup Verification', () {
@@ -585,77 +583,5 @@ void main() {
       expect(leadClearedAlerts, isEmpty, reason: 'Alert automatically clears once incident is resolved');
     });
 
-    test('REQ-14: Lost rider offline homing vectors, closest route point intercept, and sweeper/backtrack recovery', () {
-      // Rider gets separated in hilly terrain off NH44 at lat 13.160, lng 77.625
-      const lostLat = 13.160;
-      const lostLng = 77.625;
-
-      // Mode 1: Intercept calculation to the nearest point on the route polyline
-      final routeRecovery = LostRiderRecoveryCoordinator.computeRecovery(
-        riderLat: lostLat,
-        riderLng: lostLng,
-        compassHeading: 270.0,
-        speedKmh: 35.0,
-        plannedRoute: highwayPoints,
-      );
-
-      expect(routeRecovery, isNotNull);
-      expect(routeRecovery!.targetType, RecoveryTargetType.routeLine);
-      expect(routeRecovery.usingGpsCourse, isFalse);
-      expect(routeRecovery.distanceMeters, greaterThan(2500));
-      expect(routeRecovery.distanceMeters, lessThan(3000));
-      // Closest point on the north-south route (lng 77.600) from east (lng 77.625) is West
-      expect(routeRecovery.cardinalDirection, 'W');
-      expect(routeRecovery.instruction, contains('Rejoin Route: Head West'));
-
-      // Mode 2: Homing to Sweeper position when route polyline is absent
-      final sweeperRecovery = LostRiderRecoveryCoordinator.computeRecovery(
-        riderLat: lostLat,
-        riderLng: lostLng,
-        speedKmh: 45.0,
-        gpsHeading: 220.0,
-        sweeperLat: 13.120,
-        sweeperLng: 77.600,
-      );
-
-      expect(sweeperRecovery, isNotNull);
-      expect(sweeperRecovery!.targetType, RecoveryTargetType.sweeper);
-      expect(sweeperRecovery.usingGpsCourse, isTrue); // moving > 4 km/h with no compass heading
-      expect(sweeperRecovery.distanceMeters, greaterThan(4500));
-      expect(sweeperRecovery.instruction, contains('Homing to Sweeper'));
-      expect(sweeperRecovery.cardinalDirection, anyOf('SW', 'S'));
-
-      // Mode 3: Backtrack along breadcrumbs when off route with recorded trail
-      final breadcrumbs = <TrackPoint>[
-        const TrackPoint(lat: 13.155, lng: 77.610, speedKmh: 40, ts: t0 - 120000),
-        const TrackPoint(lat: 13.156, lng: 77.613, speedKmh: 40, ts: t0 - 90000),
-        const TrackPoint(lat: 13.158, lng: 77.617, speedKmh: 38, ts: t0 - 60000),
-        const TrackPoint(lat: 13.159, lng: 77.620, speedKmh: 35, ts: t0 - 30000),
-        const TrackPoint(lat: 13.160, lng: 77.625, speedKmh: 30, ts: t0),
-      ];
-
-      final backtrackRecovery = LostRiderRecoveryCoordinator.computeRecovery(
-        riderLat: lostLat,
-        riderLng: lostLng,
-        compassHeading: 180.0,
-        speedKmh: 0.0,
-        breadcrumbs: breadcrumbs,
-      );
-
-      expect(backtrackRecovery, isNotNull);
-      expect(backtrackRecovery!.targetType, RecoveryTargetType.backtrackFork);
-      expect(backtrackRecovery.targetLat, equals(13.155));
-      expect(backtrackRecovery.targetLng, equals(77.610));
-      expect(backtrackRecovery.instruction, contains('Backtrack along trail'));
-
-      // Mode 4: Invalid coordinates return null safely
-      expect(
-        LostRiderRecoveryCoordinator.computeRecovery(
-          riderLat: double.nan,
-          riderLng: 77.600,
-        ),
-        isNull,
-      );
-    });
   });
 }

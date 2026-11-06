@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/theme/app_theme.dart';
@@ -24,6 +25,23 @@ class CorouteOrbitControl extends StatefulWidget {
   /// Shown as a solid red "Emergency SOS" button at the bottom of the panel
   /// when given.
   final VoidCallback? onSosTap;
+  final bool isSolo;
+
+  /// Visible height of the ride sheet from the bottom of the screen. The
+  /// button is kept above it (plus [sheetClearance]) so it never covers the
+  /// sheet, the SOS button or the map controls riding on the sheet's edge.
+  final ValueListenable<double>? sheetHeight;
+
+  /// How far the ride sheet is open (0 collapsed, 1 expanded). The closed
+  /// button fades out as the sheet opens, like the other floating controls.
+  final ValueListenable<double>? sheetExpansion;
+
+  /// Extra room kept free between the sheet's top edge and the button.
+  final double sheetClearance;
+
+  /// Space taken on the left by a side panel (landscape ride sheet): the
+  /// button snaps to the right of it instead of over it.
+  final double leftInset;
 
   const CorouteOrbitControl({
     super.key,
@@ -34,6 +52,11 @@ class CorouteOrbitControl extends StatefulWidget {
     required this.onGuardianTap,
     required this.onMoreTap,
     this.onSosTap,
+    this.isSolo = false,
+    this.sheetHeight,
+    this.sheetExpansion,
+    this.sheetClearance = 0,
+    this.leftInset = 0,
   });
 
   @override
@@ -52,6 +75,10 @@ class _CorouteOrbitControlState extends State<CorouteOrbitControl>
   Offset? _position;
   bool _isOpen = false;
   bool _isDragging = false;
+
+  /// Where the button was last drawn (its stored position pushed up above the
+  /// sheet when needed); a drag starts from here so it never feels stuck.
+  double? _shownTop;
 
   @override
   void initState() {
@@ -102,31 +129,58 @@ class _CorouteOrbitControlState extends State<CorouteOrbitControl>
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final padding = MediaQuery.paddingOf(context);
-    final maxX = (size.width - _fabSize - _edgeGap).clamp(12.0, double.infinity);
+    final leftEdge = widget.leftInset + _edgeGap;
+    final minX = (widget.leftInset + 12.0).clamp(12.0, double.infinity).toDouble();
+    final maxX = (size.width - padding.right - _fabSize - _edgeGap).clamp(minX, double.infinity).toDouble();
 
     // Default initial position on the left edge, above the middle of the screen (canvas: top 320).
-    _position ??= Offset(_edgeGap, (size.height * 0.38).clamp(160.0, (size.height - 260).clamp(160.0, double.infinity)));
+    _position ??= Offset(leftEdge, (size.height * 0.38).clamp(160.0, (size.height - 260).clamp(160.0, double.infinity)));
+    // Keep it on screen after a rotation or a side panel appearing.
+    if (_position!.dx < minX || _position!.dx > maxX) {
+      _position = Offset(_position!.dx.clamp(minX, maxX).toDouble(), _position!.dy);
+    }
 
-    final onLeft = _position!.dx < size.width / 2;
+    final onLeft = _position!.dx < (widget.leftInset + size.width) / 2;
+
+    // Quick-access panel beside the button: 280 to 360 dp wide, and kept on
+    // screen on narrow phones (it may then overlap the button a little).
+    final maxPanelW = (size.width - widget.leftInset - padding.right - 24).clamp(200.0, double.infinity).toDouble();
+    final panelW = (size.width - widget.leftInset - padding.right - _fabSize - _edgeGap * 2 - 16)
+        .clamp(280.0, 360.0)
+        .toDouble()
+        .clamp(0.0, maxPanelW)
+        .toDouble();
+    final panelLeft = (leftEdge + _fabSize + 16)
+        .clamp(widget.leftInset + 12, (size.width - padding.right - 12 - panelW).clamp(widget.leftInset + 12, double.infinity))
+        .toDouble();
+    final panelRight = (_edgeGap + padding.right + _fabSize + 16)
+        .clamp(padding.right + 12, (size.width - widget.leftInset - 12 - panelW).clamp(padding.right + 12, double.infinity))
+        .toDouble();
     final ringColor = _isOpen ? AppTheme.warnText : AppTheme.accentText;
 
     final orbitFab = GestureDetector(
       key: const Key('coroute_orbit_fab_button'),
       onPanStart: (_) {
-        setState(() => _isDragging = true);
+        setState(() {
+          _isDragging = true;
+          final shown = _shownTop;
+          if (shown != null) _position = Offset(_position!.dx, shown);
+        });
       },
       onPanUpdate: (details) {
         setState(() {
-          final newX = (_position!.dx + details.delta.dx).clamp(12.0, maxX);
-          final newY = (_position!.dy + details.delta.dy)
-              .clamp(100.0, (size.height - 220).clamp(100.0, double.infinity));
+          final newX = (_position!.dx + details.delta.dx).clamp(minX, maxX);
+          var maxY = (size.height - 220).clamp(100.0, double.infinity).toDouble();
+          final aboveSheet = _sheetMaxTop(size);
+          if (aboveSheet < maxY) maxY = aboveSheet < 100.0 ? 100.0 : aboveSheet;
+          final newY = (_position!.dy + details.delta.dy).clamp(100.0, maxY);
           _position = Offset(newX, newY);
         });
       },
       onPanEnd: (_) {
         // Magnetic snap to the nearest edge.
         HapticFeedback.lightImpact();
-        final snapX = (_position!.dx < size.width / 2) ? _edgeGap : maxX;
+        final snapX = (_position!.dx < (widget.leftInset + size.width) / 2) ? leftEdge.clamp(minX, maxX).toDouble() : maxX;
         setState(() {
           _isDragging = false;
           _position = Offset(snapX, _position!.dy);
@@ -206,10 +260,10 @@ class _CorouteOrbitControlState extends State<CorouteOrbitControl>
         // Floating quick-access panel beside the button.
         if (_isOpen)
           Positioned(
-            left: onLeft ? _edgeGap + _fabSize + 16 : null,
-            right: onLeft ? null : _edgeGap + _fabSize + 16,
-            width: (size.width - _fabSize - _edgeGap * 2 - 16).clamp(280.0, 360.0),
-            top: (_position!.dy - 70).clamp(padding.top + 12, (size.height - 400).clamp(padding.top + 12, double.infinity)),
+            left: onLeft ? panelLeft : null,
+            right: onLeft ? null : panelRight,
+            width: panelW,
+            top: ((_shownTop ?? _position!.dy) - 70).clamp(padding.top + 12, (size.height - 400).clamp(padding.top + 12, double.infinity)),
             child: AnimatedBuilder(
               animation: _animController,
               builder: (context, child) {
@@ -223,6 +277,7 @@ class _CorouteOrbitControlState extends State<CorouteOrbitControl>
                 );
               },
               child: _OrbitQuickAccessCard(
+                isSolo: widget.isSolo,
                 onIntercomTap: () {
                   _closePopup();
                   widget.onIntercomTap();
@@ -258,12 +313,47 @@ class _CorouteOrbitControlState extends State<CorouteOrbitControl>
           ),
 
         // The draggable floating button.
-        Positioned(
-          left: _position!.dx,
-          top: _position!.dy,
-          child: orbitFab,
-        ),
+        if (widget.sheetHeight == null && widget.sheetExpansion == null)
+          Positioned(
+            left: _position!.dx,
+            top: _position!.dy,
+            child: orbitFab,
+          )
+        else
+          ListenableBuilder(
+            listenable: Listenable.merge(<Listenable?>[widget.sheetHeight, widget.sheetExpansion]),
+            builder: (context, _) => _sheetAwareFab(size, padding, orbitFab),
+          ),
       ],
+    );
+  }
+
+  /// Lowest top the button may have to stay clear of the ride sheet (and the
+  /// controls riding on its edge); unbounded without a sheet.
+  double _sheetMaxTop(Size size) {
+    final sheet = widget.sheetHeight?.value ?? 0;
+    if (sheet <= 0) return double.infinity;
+    return size.height - sheet - widget.sheetClearance - _fabSize - 12;
+  }
+
+  /// The button kept above the ride sheet and faded out while the sheet is
+  /// open (never while the rider is dragging it or its panel is open).
+  Widget _sheetAwareFab(Size size, EdgeInsets padding, Widget fab) {
+    var top = _position!.dy;
+    final maxTop = _sheetMaxTop(size);
+    if (top > maxTop) top = maxTop;
+    final minTop = padding.top + 72;
+    if (top < minTop) top = minTop;
+    _shownTop = top;
+    final t = widget.sheetExpansion?.value ?? 0;
+    final opacity = (_isOpen || _isDragging) ? 1.0 : (1.0 - (t - 0.12) / 0.18).clamp(0.0, 1.0).toDouble();
+    return Positioned(
+      left: _position!.dx,
+      top: top,
+      child: IgnorePointer(
+        ignoring: opacity < 0.5,
+        child: Opacity(opacity: opacity, child: fab),
+      ),
     );
   }
 }
@@ -323,6 +413,7 @@ class _OrbitQuickAccessCard extends StatelessWidget {
   final VoidCallback onGuardianTap;
   final VoidCallback onMoreTap;
   final VoidCallback? onSosTap;
+  final bool isSolo;
 
   const _OrbitQuickAccessCard({
     required this.onIntercomTap,
@@ -332,6 +423,7 @@ class _OrbitQuickAccessCard extends StatelessWidget {
     required this.onGuardianTap,
     required this.onMoreTap,
     this.onSosTap,
+    this.isSolo = false,
   });
 
   @override
@@ -375,25 +467,43 @@ class _OrbitQuickAccessCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(child: _OrbitTile(icon: Icons.mic_rounded, label: 'Intercom', onTap: onIntercomTap)),
-              const SizedBox(width: 10),
-              Expanded(child: _OrbitTile(icon: Icons.group_outlined, label: 'Group', onTap: onGroupTap)),
-              const SizedBox(width: 10),
-              Expanded(child: _OrbitTile(icon: Icons.local_gas_station_outlined, label: 'Fuel', onTap: onFuelTap)),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(child: _OrbitTile(icon: Icons.route_outlined, label: 'Route', onTap: onRouteTap)),
-              const SizedBox(width: 10),
-              Expanded(child: _OrbitTile(icon: Icons.verified_user_outlined, label: 'Guardian', onTap: onGuardianTap)),
-              const SizedBox(width: 10),
-              Expanded(child: _OrbitTile(icon: Icons.grid_view_rounded, label: 'More', onTap: onMoreTap)),
-            ],
-          ),
+          if (isSolo) ...[
+            Row(
+              children: [
+                Expanded(child: _OrbitTile(icon: Icons.local_gas_station_outlined, label: 'Fuel', onTap: onFuelTap)),
+                const SizedBox(width: 10),
+                Expanded(child: _OrbitTile(icon: Icons.route_outlined, label: 'Route', onTap: onRouteTap)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(child: _OrbitTile(icon: Icons.verified_user_outlined, label: 'Guardian', onTap: onGuardianTap)),
+                const SizedBox(width: 10),
+                Expanded(child: _OrbitTile(icon: Icons.grid_view_rounded, label: 'More', onTap: onMoreTap)),
+              ],
+            ),
+          ] else ...[
+            Row(
+              children: [
+                Expanded(child: _OrbitTile(icon: Icons.mic_rounded, label: 'Intercom', onTap: onIntercomTap)),
+                const SizedBox(width: 10),
+                Expanded(child: _OrbitTile(icon: Icons.group_outlined, label: 'Group', onTap: onGroupTap)),
+                const SizedBox(width: 10),
+                Expanded(child: _OrbitTile(icon: Icons.local_gas_station_outlined, label: 'Fuel', onTap: onFuelTap)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(child: _OrbitTile(icon: Icons.route_outlined, label: 'Route', onTap: onRouteTap)),
+                const SizedBox(width: 10),
+                Expanded(child: _OrbitTile(icon: Icons.verified_user_outlined, label: 'Guardian', onTap: onGuardianTap)),
+                const SizedBox(width: 10),
+                Expanded(child: _OrbitTile(icon: Icons.grid_view_rounded, label: 'More', onTap: onMoreTap)),
+              ],
+            ),
+          ],
           if (onSosTap != null) ...[
             const SizedBox(height: 14),
             DsButton(

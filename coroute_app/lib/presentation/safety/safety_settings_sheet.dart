@@ -15,6 +15,7 @@ import '../../data/services/plan_subscription_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/settings_service.dart';
 import '../../data/services/smart_airbag_bridge_service.dart';
+import '../../data/services/tile_cache_service.dart';
 import '../ride/fuel_sheet.dart';
 import '../subscription/plan_selector_screen.dart';
 import 'safety_settings_screen.dart';
@@ -130,17 +131,15 @@ class SafetySettingsSheet extends StatefulWidget {
 }
 
 class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
-  bool _smsDenied = false;
   int _titleTaps = 0;
+  bool _smsDenied = false;
 
   Future<void> _setSms(SettingsService s, bool on) async {
     if (!on) {
       await s.setSmsFallback(false);
       return;
     }
-    final ok = await (widget.requestPermission ?? PermissionsService.request)(
-      'sms',
-    );
+    final ok = await (widget.requestPermission ?? PermissionsService.request)('sms');
     if (!mounted) return;
     if (ok) {
       setState(() => _smsDenied = false);
@@ -148,6 +147,55 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
     } else {
       setState(() => _smsDenied = true);
     }
+  }
+
+  SafetyRuntimeStatus _crashStatus = SafetyRuntimeStatus.limited;
+  SafetyRuntimeStatus _gpsStatus = SafetyRuntimeStatus.limited;
+  SafetyRuntimeStatus _sosStatus = SafetyRuntimeStatus.limited;
+  SafetyRuntimeStatus _responseStatus = SafetyRuntimeStatus.limited;
+  SafetyRuntimeStatus _offlineStatus = SafetyRuntimeStatus.limited;
+  SafetyRuntimeStatus _backgroundStatus = SafetyRuntimeStatus.limited;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _evaluateStatuses());
+  }
+
+  Future<void> _evaluateStatuses() async {
+    if (!mounted) return;
+    final auth = context.read<AuthService?>();
+    final s = context.read<SettingsService?>();
+    final safety = context.read<SafetyService?>();
+    final prefetcher = context.read<TilePrefetcher?>();
+
+    final crash = await SettingsService.evaluateCrashDetectionStatus(
+      sensorUnavailableOverride: safety?.isSensorUnavailable,
+    );
+    final gps = await SettingsService.evaluateGpsMonitoringStatus();
+    final sos = await SettingsService.evaluateEmergencySosStatus(
+      contactPhone: auth?.emergencyContact,
+      smsFallbackEnabled: s?.smsFallback ?? false,
+    );
+    final response = await SettingsService.evaluateEmergencyResponseStatus(
+      hasVitals: (auth?.bloodGroup.isNotEmpty == true) || (auth?.medicalNotes.isNotEmpty == true),
+      isAirbagConnected: SmartAirbagBridgeService.instance.connectionState == AirbagConnectionState.connected,
+    );
+    final offline = await SettingsService.evaluateOfflineSafetyStatus(
+      hasTileCache: TileCache.instance != null,
+      isLowBattery: prefetcher?.isLowBattery ?? false,
+    );
+    final bg = await SettingsService.evaluateBackgroundMonitoringStatus();
+
+    if (!mounted) return;
+    setState(() {
+      _crashStatus = crash;
+      _gpsStatus = gps;
+      _sosStatus = sos;
+      _responseStatus = response;
+      _offlineStatus = offline;
+      _backgroundStatus = bg;
+    });
   }
 
   Future<void> _saveNet(
@@ -207,16 +255,16 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
     String tierSummary;
     switch (currentTier) {
       case SubscriptionTier.community:
-        tierSummary = 'Max convoy: $maxRiders bikes · Standard Telemetry · Essential SOS';
+        tierSummary = 'Up to $maxRiders riders';
         break;
       case SubscriptionTier.proRider:
-        tierSummary = 'Max convoy: $maxRiders bikes · Live Guardian Share · Full Telemetry';
+        tierSummary = 'Up to $maxRiders riders · Guardian links';
         break;
       case SubscriptionTier.roadCaptain:
-        tierSummary = 'Max convoy: $maxRiders bikes · Priority Audio Ducking · Regroup Waypoints';
+        tierSummary = 'Up to $maxRiders riders · Lead voice first';
         break;
       case SubscriptionTier.tourOperator:
-        tierSummary = 'Max convoy: $maxRiders bikes · Fleet Matrix & Compliance Exports';
+        tierSummary = 'Up to $maxRiders riders · Fleet tools';
         break;
     }
 
@@ -275,7 +323,7 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Switch to distraction-free gloved settings view',
+                          'Big buttons for gloves',
                           style: AppText.caption.copyWith(color: AppTheme.text),
                         ),
                       ],
@@ -381,17 +429,51 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
             ),
           ),
 
-          // Primary Safety Engines (All default pre-armed)
+          // Mandatory Core Safety Systems (Read-Only Runtime Status)
           _group([
-            SafetySwitch(
+            SafetyStatusRow(
               icon: Icons.car_crash_outlined,
               title: SafetyTexts.crashTitle,
-              subtitle: SafetyTexts.crashExplain,
-              value: s.crashDetection,
-              onChanged: (v) => s.setCrashDetection(v),
+              subtitle: 'Senses a crash during a ride and alerts your group.',
+              status: _crashStatus,
             ),
+            SafetyStatusRow(
+              icon: Icons.location_on_outlined,
+              title: 'GPS & Trip Monitoring',
+              subtitle: 'Shares your location with your group.',
+              status: _gpsStatus,
+            ),
+            SafetyStatusRow(
+              icon: Icons.contact_emergency_outlined,
+              title: 'SOS ready',
+              subtitle: 'Alerts by internet, SMS or nearby phones.',
+              status: _sosStatus,
+            ),
+            SafetyStatusRow(
+              icon: Icons.shield_outlined,
+              title: 'Emergency Response',
+              subtitle: 'Medical info for people who help you.',
+              status: _responseStatus,
+            ),
+            SafetyStatusRow(
+              icon: Icons.offline_pin_outlined,
+              title: 'Offline Safety',
+              subtitle: 'Maps and alerts without signal.',
+              status: _offlineStatus,
+            ),
+            SafetyStatusRow(
+              icon: Icons.security_update_good_outlined,
+              title: 'Runs in background',
+              subtitle: 'Keeps working with the screen off.',
+              status: _backgroundStatus,
+              divider: false,
+            ),
+          ]),
+
+          _section('Safety Reminders'),
+          _group([
             SafetySwitch(
-              icon: Icons.sms_outlined,
+              icon: Icons.sms_rounded,
               title: SafetyTexts.smsTitle,
               subtitle: SafetyTexts.smsExplain,
               value: s.smsFallback,
@@ -491,14 +573,14 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
             SafetySwitch(
               icon: Icons.volume_up_rounded,
               title: 'Background voice guidance',
-              subtitle: 'Voice alerts remain enabled during phone calls (critical emergency alerts always remain audible)',
+              subtitle: 'Keep voice alerts during calls. Emergencies always speak.',
               value: s.backgroundVoiceEnabled,
               onChanged: (v) => s.setBackgroundVoiceEnabled(v),
             ),
             SafetySwitch(
               icon: Icons.record_voice_over_outlined,
               title: 'Announce all alerts',
-              subtitle: 'Read out all notifications and alerts via voice',
+              subtitle: 'Read out all alerts',
               value: s.voiceAnnounceAllAlerts,
               onChanged: (v) => s.setVoiceAnnounceAllAlerts(v),
             ),
@@ -553,8 +635,8 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
                             ),
                             Text(
                               s.speedLimitWarningKmh == 0
-                                  ? 'Uses convoy limit (or off if no group limit)'
-                                  : 'Warns via voice and notification above ${s.speedLimitWarningKmh} km/h',
+                                  ? 'Uses the group limit (off if none)'
+                                  : 'Warns you above ${s.speedLimitWarningKmh} km/h',
                               style: AppText.caption,
                             ),
                           ],
@@ -569,7 +651,7 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
                     children: [
                       for (final kmh in const [0, 50, 60, 80, 100, 120])
                         ChoiceChip(
-                          label: Text(kmh == 0 ? 'Convoy limit' : '$kmh km/h'),
+                          label: Text(kmh == 0 ? 'Group limit' : '$kmh km/h'),
                           selected: s.speedLimitWarningKmh == kmh,
                           onSelected: (_) => s.setSpeedLimitWarningKmh(kmh),
                         ),
@@ -608,7 +690,7 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
                             Text(
                               s.mapAlertDismissSeconds == 0
                                   ? 'Manual dismissal only on map'
-                                  : 'Dismisses from map after ${s.mapAlertDismissSeconds} seconds (saved in notifications)',
+                                  : 'Leaves the map after ${s.mapAlertDismissSeconds} s',
                               style: AppText.caption,
                             ),
                           ],
@@ -731,13 +813,13 @@ class _SafetySettingsSheetState extends State<SafetySettingsSheet> {
                 ),
                 leading: Icon(Icons.security_rounded, color: AppTheme.neonCyan),
                 title: Text(
-                  'Airbag Vest: Simulate BLE Pyrotechnic Deployment',
+                  'Test: airbag vest crash',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: AppText.body.copyWith(fontWeight: FontWeight.w700),
                 ),
                 subtitle: Text(
-                  'FEAT-06: Instant sub-150ms wearable impact escalation to emergency safety pipeline.',
+                  'Opens the crash alarm as if the vest went off.',
                   maxLines: 4,
                   overflow: TextOverflow.ellipsis,
                   style: AppText.caption,
@@ -993,5 +1075,136 @@ class SafetySwitch extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// A read-only safety status row with an icon, title, subtitle, and runtime status badge.
+/// Used for mandatory safety systems (FEAT-UI-02 / FEAT-SAFETY-01).
+class SafetyStatusRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final SafetyRuntimeStatus status;
+  final VoidCallback? onTap;
+  final bool divider;
+
+  const SafetyStatusRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.status,
+    this.onTap,
+    this.divider = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Color bg;
+    Color border;
+    Color textColor;
+    bool hasDot;
+
+    switch (status) {
+      case SafetyRuntimeStatus.active:
+        bg = const Color(0xFF0D2E24);
+        border = const Color(0xFF1B6B54);
+        textColor = const Color(0xFF34D399);
+        hasDot = true;
+        break;
+      case SafetyRuntimeStatus.limited:
+        bg = const Color(0xFF2E220D);
+        border = const Color(0xFF6B511B);
+        textColor = const Color(0xFFFBBF24);
+        hasDot = true;
+        break;
+      case SafetyRuntimeStatus.permissionRequired:
+        bg = const Color(0xFF0F2B33);
+        border = const Color(0xFF194C59);
+        textColor = const Color(0xFF5CCAD3);
+        hasDot = true;
+        break;
+      case SafetyRuntimeStatus.unsupported:
+        bg = const Color(0xFF1E2328);
+        border = const Color(0xFF2D353C);
+        textColor = const Color(0xFF7A8B99);
+        hasDot = false;
+        break;
+      case SafetyRuntimeStatus.notAvailable:
+        bg = const Color(0xFF2E1111);
+        border = const Color(0xFF6B2222);
+        textColor = const Color(0xFFF87171);
+        hasDot = false;
+        break;
+    }
+
+    final row = Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        border: divider ? Border(bottom: BorderSide(color: AppTheme.border)) : null,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(icon, color: AppTheme.accentText, size: 22),
+          const SizedBox(width: Space.s16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: border, width: 1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (hasDot) ...[
+                  Container(
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(color: textColor, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 5),
+                ],
+                Text(
+                  status.label.toUpperCase(),
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return onTap == null ? row : InkWell(onTap: onTap, child: row);
   }
 }

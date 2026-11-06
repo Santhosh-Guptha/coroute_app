@@ -32,4 +32,5 @@ qa_screenshots/
 release/**/*.apk
 .env
 *.env
+coroute_app/_to_delete/
 

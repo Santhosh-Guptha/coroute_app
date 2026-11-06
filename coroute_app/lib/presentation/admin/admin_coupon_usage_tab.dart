@@ -28,6 +28,9 @@ class _AdminCouponUsageTabState extends State<AdminCouponUsageTab> with Automati
   Map<String, dynamic> _summary = {};
   List<Map<String, dynamic>> _redemptions = [];
 
+  /// The server plan catalog (`/admin/coupons/plan-options`) for the plan filter's names and prices.
+  List<Map<String, dynamic>> _planOptions = [];
+
   String _searchQuery = '';
   final String _selectedCoupon = '';
   String _selectedTier = 'all';
@@ -69,7 +72,16 @@ class _AdminCouponUsageTabState extends State<AdminCouponUsageTab> with Automati
       }
 
       final queryStr = queryParams.isEmpty ? '' : '?${Uri(queryParameters: queryParams).query}';
-      final res = await context.read<ApiClient>().get('/admin/coupons/usage$queryStr');
+      final api = context.read<ApiClient>();
+      final res = await api.get('/admin/coupons/usage$queryStr');
+      if (_planOptions.isEmpty) {
+        try {
+          final opts = await api.get('/admin/coupons/plan-options');
+          _planOptions = adminMapList(opts is Map ? opts['plans'] : null);
+        } catch (_) {
+          // An older gateway: the filter shows plan names without prices.
+        }
+      }
 
       if (res is Map) {
         _summary = Map<String, dynamic>.from(res['summary'] as Map? ?? {});
@@ -225,11 +237,10 @@ class _AdminCouponUsageTabState extends State<AdminCouponUsageTab> with Automati
                 _FilterDropdown(
                   label: 'Tier',
                   value: _selectedTier,
-                  items: const [
-                    DropdownMenuItem(value: 'all', child: Text('All Plans')),
-                    DropdownMenuItem(value: 'individual', child: Text('Individual (₹9)')),
-                    DropdownMenuItem(value: 'group_small', child: Text('Small Group (₹49)')),
-                    DropdownMenuItem(value: 'group_large', child: Text('Large Group (₹99)')),
+                  items: [
+                    const DropdownMenuItem(value: 'all', child: Text('All Plans')),
+                    for (final id in {...adminMembershipPlanIds(_planOptions), if (_selectedTier != 'all') _selectedTier})
+                      DropdownMenuItem(value: id, child: Text(adminPlanLabel(id, _planOptions, perMonth: false))),
                   ],
                   onChanged: (v) {
                     setState(() => _selectedTier = v ?? 'all');

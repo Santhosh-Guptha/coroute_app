@@ -50,6 +50,53 @@ abstract class SmsSender {
   }
 }
 
+/// The phone's messages app, opened with the SOS text and every recipient filled in.
+/// Play builds have no SEND_SMS permission, so this is how emergency texts go out without
+/// internet: the rider (or a bystander) presses Send. Never throws.
+class SmsComposer {
+  SmsComposer._();
+
+  /// Opens the composer for [to] (one or more numbers). False when no messages app opened.
+  static Future<bool> open({required List<String> to, required String body}) async {
+    final numbers = <String>[
+      for (final n in to)
+        if (n.replaceAll(RegExp(r'[^0-9+]'), '').isNotEmpty) n.replaceAll(RegExp(r'[^0-9+]'), ''),
+    ];
+    if (numbers.isEmpty) return false;
+    if (numbers.length == 1) return SmsSender.launchSmsIntent(to: numbers.first, body: body);
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        final ok = await const MethodChannel('coroute/sms').invokeMethod<bool>(
+          'launchSmsIntent',
+          <String, dynamic>{'toList': numbers, 'body': body},
+        );
+        return ok == true;
+      } catch (_) {
+        return false;
+      }
+    }
+    // iOS: sms:/open?addresses=a,b opens Messages with several recipients (falls back to the first).
+    final uri = Uri.parse('sms:/open?addresses=${numbers.join(',')}&body=${Uri.encodeComponent(body)}');
+    try {
+      if (await canLaunchUrl(uri)) return await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+    return SmsSender.launchSmsIntent(to: numbers.first, body: body);
+  }
+
+  /// True when this phone has a messages app to open (Android: telephony feature; iOS: sms: URL).
+  static Future<bool> available() async {
+    if (kIsWeb) return false;
+    try {
+      if (Platform.isAndroid) {
+        final m = await const MethodChannel('coroute/sms').invokeMapMethod<String, dynamic>('capability');
+        return m?['hasTelephony'] == true;
+      }
+      if (Platform.isIOS) return await canLaunchUrl(Uri(scheme: 'sms', path: '112'));
+    } catch (_) {}
+    return false;
+  }
+}
+
 /// Android SmsManager through the `coroute/sms` MethodChannel (SmsChannel.kt):
 /// default SMS SIM, multipart, result after the last part or 20 s.
 class NativeSmsSender implements SmsSender {

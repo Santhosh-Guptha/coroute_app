@@ -5,12 +5,24 @@ class SafetyConstants {
   SafetyConstants._();
 
   // ---------------------------------------------------------------- crash detector
-  /// The detector is armed only while a fix in the last [crashArmWindow] was faster than this.
-  static const double crashArmSpeedKmh = 25;
+  /// Arming (3.54, was "a fix above 25 km/h in the last 30 s"): the detector arms after the
+  /// rider kept at least [crashArmSpeedKmh] for [crashArmSustain] (slow city traffic counts, so a
+  /// low-speed tip-over is no longer missed), or at once on a fix above [crashInstantArmKmh].
+  /// Hysteresis: once armed it stays armed through stop-and-go traffic and only disarms after
+  /// [crashDisarmAfter] without a fix at riding pace ([crashLowSpeedArmKmh]), i.e. parked or walking.
+  /// [crashArmSpeedKmh] is also the "was the phone at riding speed?" line of the impact check.
+  static const double crashArmSpeedKmh = 12;
+  static const Duration crashArmSustain = Duration(seconds: 10);
+  static const double crashInstantArmKmh = 25;
+  static const Duration crashDisarmAfter = Duration(minutes: 3);
+
+  /// Window of the low-speed fall check (a fix at [crashLowSpeedArmKmh] or more this recently),
+  /// and the longest GPS gap that still counts as one sustained run.
   static const Duration crashArmWindow = Duration(seconds: 30);
 
-  /// Low-speed threshold for detecting intersection drops / low-speed tip-overs (km/h).
-  static const double crashLowSpeedArmKmh = 15;
+  /// Low-speed falls (intersection drops / tip-overs) are armed by a fix at or above this
+  /// in the arm window: faster than walking or jogging, so a phone dropped on foot is ignored.
+  static const double crashLowSpeedArmKmh = 10;
 
   /// A one-second bucket with a raw peak at or above this (in g) is a possible impact.
   static const double crashImpactG = 4.0;
@@ -29,6 +41,23 @@ class SafetyConstants {
 
   /// Minimum impact impulse duration (ms) to reject sub-sample impulses like pebble hits.
   static const double crashMinDurationMs = 25.0;
+
+  /// Jerk (da/dt) threshold in g/s to evaluate abrupt shock impact transitions.
+  static const double crashPeakJerkGPerS = 35.0;
+
+  /// High-side crash angular snap rotation threshold (rad/s).
+  static const double crashHighsideRotationRadS = 2.5;
+
+  /// High-side crash orientation tilt inversion threshold (degrees).
+  static const double crashHighsideTiltDeg = 55.0;
+
+  /// Low-speed drop tilt threshold (degrees).
+  static const double crashLowSpeedDropTiltDeg = 45.0;
+
+  /// Pothole and speed-breaker discrimination parameters.
+  static const double crashPotholeMaxDurationMs = 35.0;
+  static const double crashPotholeMaxRotationRadS = 0.8;
+  static const double crashPotholeMaxTiltDeg = 15.0;
 
   /// After the impact the phone must stop (<= [crashStopSpeedKmh]) within this time...
   static const Duration crashStopWithin = Duration(seconds: 10);
@@ -176,7 +205,10 @@ class SafetyConstants {
   static const double wearableImpactG = 6.0;
 
   // ---------------------------------------------------------------- map tiles (3.16)
-  static const int tileCacheMaxBytes = 200 * 1024 * 1024;
+  /// Configurable offline tile cache budget range (300 MB to 500 MB, default 400 MB).
+  static const int tileCacheMinBudgetBytes = 300 * 1024 * 1024;
+  static const int tileCacheMaxBudgetBytes = 500 * 1024 * 1024;
+  static const int tileCacheMaxBytes = 400 * 1024 * 1024;
   static const int tileMaxAgeDays = 30;
   static const List<int> prefetchZooms = [11, 12, 13, 14, 15, 16];
   static const List<int> prefetchZoomsHighDetail = [11, 12, 13, 14, 15, 16, 17];

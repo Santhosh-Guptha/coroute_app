@@ -167,9 +167,27 @@ class GuardianService {
     if (!validToken(secret)) throw new GuardianError();
     const grant = await this.repo.guardianGrant({ tokenHash: hash(secret) });
     const access = await this._access(grant);
-    if (grant.pinHash && (typeof pin !== 'string' || !/^[0-9]{4,8}$/.test(pin) || !await bcrypt.compare(pin, grant.pinHash))) {
-      const error = new GuardianError('Enter the correct PIN supplied by the rider.', 401);
-      error.code = 'GUARDIAN_PIN_REQUIRED'; throw error;
+    if (grant.pinHash) {
+      // Wrong PINs per link, whatever IP or token spelling they come from: 10 per 15 minutes, and 50 over
+      // the link's life (then the rider makes a new link), so a 4-digit PIN cannot be enumerated.
+      const fails = this.pinFails || (this.pinFails = new Map());
+      const now = this.clock();
+      const f = fails.get(grant.grantId);
+      if (f && (f.total >= 50 || (now - f.at < 15 * 60000 && f.n >= 10))) {
+        const error = new GuardianError(f.total >= 50 ? 'Too many wrong PINs. Ask the rider for a new link.' : 'Too many wrong PINs. Try again in 15 minutes.', 429);
+        error.code = 'GUARDIAN_PIN_LOCKED'; throw error;
+      }
+      if (typeof pin !== 'string' || !/^[0-9]{4,8}$/.test(pin) || !await bcrypt.compare(pin, grant.pinHash)) {
+        if (typeof pin === 'string' && pin) {
+          const cur = f && now - f.at < 15 * 60000 ? f : { n: 0, at: now, total: f ? f.total : 0 };
+          cur.n++; cur.total = (cur.total || 0) + 1;
+          fails.set(grant.grantId, cur);
+          if (fails.size > 10000) fails.delete(fails.keys().next().value);
+        }
+        const error = new GuardianError('Enter the correct PIN supplied by the rider.', 401);
+        error.code = 'GUARDIAN_PIN_REQUIRED'; throw error;
+      }
+      fails.delete(grant.grantId);
     }
     const credential = token();
     const session = { sessionHash: hash(credential), grantId: grant.grantId,

@@ -90,7 +90,9 @@ class SafetyNetwork extends EventEmitter {
       if (gw && !alert.clientSentSms && !alert.serverDispatchedByGateway) {
         gw.dispatchForSos({
           groupId: gid,
-          user: ctx.owner || { userId: alert.userId, name: alert.userName },
+          // ctx.owner holds assistance settings only (no userId): the subject is always the alert's rider,
+          // otherwise the gateway found no contact, marked the alert dispatched and no SMS ever went out.
+          user: { userId: alert.userId, name: alert.userName },
           alert,
         }).catch((err) => this.log.warn('[safety_network] emergency gateway auto-dispatch failed', err.message));
       }

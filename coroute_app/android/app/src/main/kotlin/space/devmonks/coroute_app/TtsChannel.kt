@@ -105,7 +105,16 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
                 val text = (call.argument<String>("text") ?: "").take(MAX_CHARS)
                 val id = call.argument<String>("id") ?: "coroute"
                 val interrupt = call.argument<Boolean>("interrupt") == true
-                result.success(speak(text, id, interrupt))
+                val isEmergency = call.argument<Boolean>("isEmergency") == true || call.argument<Boolean>("emergency") == true
+                result.success(speak(text, id, interrupt, isEmergency))
+            }
+            "requestEmergencyFocus" -> {
+                requestFocus()
+                result.success(hasFocus)
+            }
+            "abandonEmergencyFocus" -> {
+                abandonFocus()
+                result.success(null)
             }
             "stop" -> {
                 stop()
@@ -215,10 +224,25 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
         for (r in results) r.success(reply)
     }
 
-    private fun speak(text: String, id: String, interrupt: Boolean): Boolean {
+    private fun isInPhoneCall(): Boolean {
+        val amMode = audio?.mode ?: AudioManager.MODE_NORMAL
+        return amMode == AudioManager.MODE_IN_CALL ||
+               amMode == AudioManager.MODE_IN_COMMUNICATION ||
+               amMode == AudioManager.MODE_RINGTONE
+    }
+
+    private fun speak(text: String, id: String, interrupt: Boolean, isEmergency: Boolean = false): Boolean {
         val engine = tts
         if (!ready || !ok || engine == null || text.isBlank()) return false
-        requestFocus()
+        // Do not interfere with phone calls unless it is a genuine emergency alert
+        if (isInPhoneCall() && !isEmergency) return false
+
+        // In normal riding: Do NOT continuously hold exclusive audio focus or duck/mute
+        // music or navigation audio from other apps.
+        // Only genuine emergency alerts temporarily request AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK.
+        if (isEmergency) {
+            requestFocus()
+        }
         if (interrupt) active.clear() // the flushed ones report onStop; nothing waits for them
         val code = try {
             engine.speak(text, if (interrupt) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, Bundle(), id)

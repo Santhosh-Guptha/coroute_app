@@ -226,6 +226,9 @@ class TripRouteMapState extends State<TripRouteMap> {
     return FlutterMap(
       mapController: _map,
       options: MapOptions(
+          minZoom: 3.0,
+          maxZoom: 19.0,
+          cameraConstraint: const CameraConstraint.containLatitude(),
         initialCenter: initial ?? _bounds?.center ?? fallback ?? const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng),
         initialZoom: initial != null ? 15 : (_bounds == null && fallback == null ? 5 : 13),
         initialCameraFit: (initial == null && _bounds != null) ? CameraFit.bounds(bounds: _bounds!, padding: const EdgeInsets.all(48)) : null,

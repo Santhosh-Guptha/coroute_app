@@ -31,3 +31,20 @@ npm test
 ```
 
 See `deploy/RUNBOOK.md` for production deployment on the OCI VM.
+
+## Deploy notes
+* Every setting is an environment variable read by `src/config.js`; `deploy/.env.example` lists
+  them all (secrets left empty). Copy it to `/etc/coroute/gateway.env` (chmod 600) and fill it in.
+* `REVIEW_PHOTO_DIR`: private folder for photos riders attach to trip reviews. It must be outside
+  `public/`, persistent and backed up. Unset, it is `<gateway>/data/review-photos`, which is inside
+  the service's `ReadWritePaths`; a folder elsewhere must be added to `ReadWritePaths=` in
+  `deploy/coroute-gateway.service` (the unit runs with `ProtectSystem=strict`). Deleting an account
+  deletes that rider's review photo files too.
+* Emergency SMS providers (`TELEPHONY_*`, `TWILIO_*`, `WHATSAPP_*`, `INFOBIP_*`, `AWS_SNS_*`) stay
+  disabled while their keys are empty.
+* `PAYMENTS_ENABLED` defaults to on in production; set it to `false` only on a staging box.
+* Coupons: the launch coupons `WELCOME50`, `CAPTAIN100` and `RIDERFREE` are created once in the
+  coupon store on first start (bound to plans, once per rider, with a total limit and an end date)
+  and are then managed like any other coupon in the admin console; pausing, editing or archiving
+  one is never undone by a restart.
+* Passwords are hashed with bcrypt cost 12; older hashes are upgraded at the rider's next sign-in.

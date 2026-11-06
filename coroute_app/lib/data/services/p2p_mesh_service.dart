@@ -61,6 +61,7 @@ class P2pMeshService extends ChangeNotifier {
 
   int _txSeq = 0;
   MeshTelemetryPacket? _latestMyTelemetry;
+  bool _lowBattery = false;
 
   final Map<String, MeshPeer> _peers = {};
   final Set<String> _seenPackets = <String>{};
@@ -73,10 +74,34 @@ class P2pMeshService extends ChangeNotifier {
   Stream<MeshTelemetryPacket> get onSosReceived => _sosStream.stream;
 
   bool get isRunning => transport.isRunning;
+  bool get isLowBattery => _lowBattery;
   String? get activeJoinCode => _activeJoinCode;
   int get peerCount => _peers.length;
   List<MeshPeer> get activePeers => _peers.values.toList();
   bool get hasActiveSos => _peers.values.any((p) => p.isSos);
+
+  /// Configures low battery mode (< 20%) to throttle mesh transmission cadence
+  /// and eliminate aggressive radio channel contention.
+  void setLowBatteryMode(bool lowBattery) {
+    if (_lowBattery == lowBattery) return;
+    _lowBattery = lowBattery;
+    _scheduleNextBroadcast();
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  int computeBroadcastIntervalMs() {
+    if (_latestMyTelemetry?.isSos == true) {
+      return 500;
+    } else if (_lowBattery) {
+      final moving = (_latestMyTelemetry?.speedKmh ?? 0) > 3.0;
+      return moving ? 6000 : 15000;
+    } else if ((_latestMyTelemetry?.speedKmh ?? 0) > 3.0) {
+      return 1500;
+    } else {
+      return 4000;
+    }
+  }
 
   P2pMeshService({MeshTransport? transport})
       : transport = transport ?? UdpBroadcastMeshTransport();
@@ -158,6 +183,10 @@ class P2pMeshService extends ChangeNotifier {
     } else if (_latestMyTelemetry?.isSos == true) {
       // High-frequency emergency pulse
       nextInterval = 500;
+    } else if (_lowBattery) {
+      // Low battery (< 20%): aggressively throttle mesh packets to conserve power
+      final moving = (_latestMyTelemetry?.speedKmh ?? 0) > 3.0;
+      nextInterval = moving ? 6000 + _random.nextInt(1000) : 15000 + _random.nextInt(3000);
     } else if ((_latestMyTelemetry?.speedKmh ?? 0) > 3.0) {
       // Moving: 1.5s interval with +/- 150ms jitter to prevent sync collisions
       nextInterval = 1350 + _random.nextInt(300);

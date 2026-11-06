@@ -45,6 +45,11 @@ class _LoginScreenState extends State<LoginScreen>
   bool _isLoading = false;
   String? _errorMessage;
 
+  /// Why the previous session ended (server said: blocked, deleted, signed in
+  /// elsewhere). Shown once as a neutral, dismissible notice, not as a form
+  /// error, and cleared as soon as the rider starts signing in.
+  String? _sessionNotice;
+
   bool _isRegPillion = false;
   String _selectedVehicle = 'Motorcycle (Adv)';
   bool _acceptedTerms = false;
@@ -62,13 +67,18 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    // A form error from one tab means nothing on the other one.
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging || !mounted) return;
+      if (_errorMessage != null) setState(() => _errorMessage = null);
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       try {
         final auth = context.read<AuthService>();
         final reason = auth.lastSignOutReason;
         if (reason != null && reason.isNotEmpty) {
-          setState(() => _errorMessage = reason);
+          setState(() => _sessionNotice = reason);
           auth.clearSignOutReason();
         }
       } on ProviderNotFoundException catch (_) {
@@ -129,7 +139,7 @@ class _LoginScreenState extends State<LoginScreen>
         child: Text(
           'If you registered with Google, use "Sign In with Google".\n\n'
           'Otherwise e-mail ${support.isNotEmpty ? support : 'the CoRoute team'} from the address you registered with. '
-          'An administrator will issue a temporary password, and the app will ask you to set a new one when you sign in.',
+          'An admin will give you a temporary password. You set a new one when you sign in.',
           style: AppText.body.copyWith(color: AppTheme.text2),
         ),
       ),
@@ -149,6 +159,7 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _sessionNotice = null;
     });
 
     final auth = context.read<AuthService>();
@@ -174,6 +185,7 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _sessionNotice = null;
     });
 
     final auth = context.read<AuthService>();
@@ -183,14 +195,9 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _isLoading = false);
 
     if (res['success'] == true) {
+      // No SnackBar here: it floated over the Home bike status list. Home
+      // shows an inline, dismissible "Riding in Guest Mode" notice instead.
       ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Riding in Guest Mode. Connect an account anytime to save your ride history.'),
-          backgroundColor: AppTheme.brand,
-          duration: const Duration(seconds: 3),
-        ),
-      );
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const RiderHomeScreen()),
@@ -230,11 +237,11 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
     if (phone.length < 7) {
-      setState(() => _errorMessage = 'Please provide your mobile phone number for ride coordination.');
+      setState(() => _errorMessage = 'Enter your mobile number so your group can call you.');
       return;
     }
     if (!_isRegPillion && vehicleNo.length < 3) {
-      setState(() => _errorMessage = 'Bike registration number is mandatory for riders (or select Pillion Rider).');
+      setState(() => _errorMessage = 'Enter your bike number, or choose Pillion.');
       return;
     }
     if (emergencyName.length < 2) {
@@ -253,6 +260,7 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _sessionNotice = null;
     });
 
     final auth = context.read<AuthService>();
@@ -290,6 +298,7 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _sessionNotice = null;
     });
 
     final auth = context.read<AuthService>();
@@ -359,18 +368,30 @@ class _LoginScreenState extends State<LoginScreen>
                       unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                       overlayColor: const WidgetStatePropertyAll(Colors.transparent),
                       tabs: const [
-                        Tab(height: 44, icon: Icon(Icons.login_rounded, size: 18), iconMargin: EdgeInsets.only(bottom: 2), text: 'Sign In'),
-                        Tab(height: 44, icon: Icon(Icons.person_add_alt_1_rounded, size: 18), iconMargin: EdgeInsets.only(bottom: 2), text: 'Register Account'),
+                        Tab(height: 52, icon: Icon(Icons.login_rounded, size: 18), iconMargin: EdgeInsets.only(bottom: 2), text: 'Sign In'),
+                        Tab(height: 52, icon: Icon(Icons.person_add_alt_1_rounded, size: 18), iconMargin: EdgeInsets.only(bottom: 2), text: 'Register Account'),
                       ],
                     ),
                   ),
 
                   const SizedBox(height: 16),
 
+                  // Previous session ended (stale token on launch, block, delete):
+                  // neutral and dismissible, so a fresh launch does not open on an error.
+                  if (_sessionNotice != null && _errorMessage == null) ...[
+                    RideAlert(
+                      tier: AlertTier.normal,
+                      title: _sessionNotice!,
+                      message: 'You were signed out. Sign in or create an account to continue.',
+                      onDismiss: () => setState(() => _sessionNotice = null),
+                    ),
+                    const SizedBox(height: Space.s12),
+                  ],
+
                   // Error Display Banner
                   if (_errorMessage != null) ...[
                     RideAlert(tier: AlertTier.important, title: _errorMessage!),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: Space.s12),
                   ],
 
                   // Form Container Card
@@ -440,7 +461,7 @@ class _LoginScreenState extends State<LoginScreen>
         ),
         const SizedBox(height: 2),
         Text(
-          'Motorcycle convoy intelligence & safety',
+          'Ride together. Ride safe.',
           textAlign: TextAlign.center,
           style: AppText.label.copyWith(color: AppTheme.muted, fontSize: 12),
         ),
@@ -500,7 +521,7 @@ class _LoginScreenState extends State<LoginScreen>
       children: [
         Text('Welcome back', style: AppText.title.copyWith(fontSize: 18)),
         const SizedBox(height: 2),
-        Text('Sign in to ride with your convoy.', style: AppText.label),
+        Text('Sign in to ride with your group.', style: AppText.label),
 
         const SizedBox(height: 18),
 
@@ -509,6 +530,9 @@ class _LoginScreenState extends State<LoginScreen>
         TextField(
           controller: _loginIdentifierController,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxEmailLength)],
+          textInputAction: TextInputAction.next,
+          autofillHints: const [AutofillHints.username, AutofillHints.email],
+          autocorrect: false,
           style: AppText.body,
           decoration: _dec(hint: 'e.g. Maverick or rider@example.com', icon: Icons.person_outline_rounded),
         ),
@@ -520,6 +544,11 @@ class _LoginScreenState extends State<LoginScreen>
         TextField(
           controller: _loginPasswordController,
           obscureText: _obscureLoginPassword,
+          textInputAction: TextInputAction.done,
+          autofillHints: const [AutofillHints.password],
+          onSubmitted: (_) {
+            if (!_isLoading) _handleSignIn();
+          },
           style: AppText.body,
           decoration: _dec(
             hint: 'Enter your password',
@@ -533,8 +562,8 @@ class _LoginScreenState extends State<LoginScreen>
           child: TextButton(
             onPressed: _showForgotPassword,
             style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
-              minimumSize: const Size(48, 36),
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+              minimumSize: const Size(48, 48),
             ),
             child: Text('Forgot password?', style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700)),
           ),
@@ -607,7 +636,7 @@ class _LoginScreenState extends State<LoginScreen>
         Center(
           child: TextButton(
             onPressed: () => _tabController.animateTo(1),
-            style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
             child: Text(
               "Don't have an account? Register as New Rider",
               textAlign: TextAlign.center,
@@ -634,7 +663,7 @@ class _LoginScreenState extends State<LoginScreen>
           ],
         ),
         const SizedBox(height: 2),
-        Text('Details used for group coordination & emergency contacts.', style: AppText.label),
+        Text('Used by your group and in emergencies.', style: AppText.label),
 
         const SizedBox(height: 16),
 
@@ -780,7 +809,7 @@ class _LoginScreenState extends State<LoginScreen>
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Pillion Rider: You will participate in convoys without requiring a bike registration number.',
+                    'Pillion: you ride along, no bike number needed.',
                     style: AppText.caption.copyWith(color: AppTheme.warnText, fontWeight: FontWeight.w700),
                   ),
                 ),
@@ -791,27 +820,24 @@ class _LoginScreenState extends State<LoginScreen>
         const SizedBox(height: 16),
 
         _fieldLabel('Emergency Contact *', color: AppTheme.sos),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _regEmergencyNameController,
-                inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxContactNameLength)],
-                style: AppText.body,
-                decoration: _dec(hint: 'Name (e.g. Brother)', icon: Icons.person_pin_rounded, iconColor: AppTheme.sos),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: TextField(
-                controller: _regEmergencyPhoneController,
-                inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
-                keyboardType: TextInputType.phone,
-                style: AppText.body,
-                decoration: _dec(hint: 'Emergency Phone', icon: Icons.phone_in_talk_rounded, iconColor: AppTheme.sos),
-              ),
-            ),
-          ],
+        // Stacked (same field order as before) so name and number are each
+        // full width and readable at 360 dp and large text sizes.
+        TextField(
+          controller: _regEmergencyNameController,
+          inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxContactNameLength)],
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          style: AppText.body,
+          decoration: _dec(hint: 'Name (e.g. Brother)', icon: Icons.person_pin_rounded, iconColor: AppTheme.sos),
+        ),
+        const SizedBox(height: Space.s8),
+        TextField(
+          controller: _regEmergencyPhoneController,
+          inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
+          keyboardType: TextInputType.phone,
+          textInputAction: TextInputAction.done,
+          style: AppText.body,
+          decoration: _dec(hint: 'Emergency Phone', icon: Icons.phone_in_talk_rounded, iconColor: AppTheme.sos),
         ),
 
         const SizedBox(height: 14),
@@ -864,7 +890,7 @@ class _LoginScreenState extends State<LoginScreen>
         Center(
           child: TextButton(
             onPressed: () => _tabController.animateTo(0),
-            style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
             child: Text('Already have an account? Sign In', style: AppText.label.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.w700)),
           ),
         ),

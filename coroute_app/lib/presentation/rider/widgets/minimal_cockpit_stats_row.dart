@@ -115,32 +115,36 @@ class MinimalCockpitStatsRow extends StatelessWidget {
                 color: guardianOn ? AppTheme.accentText : AppTheme.muted,
               ),
               const SizedBox(width: 3),
-              Text(
-                guardianOn ? 'Guardian on' : 'Guardian off',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppText.caption.copyWith(
-                  color: guardianOn ? AppTheme.accentText : AppTheme.muted,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 12,
+              Flexible(
+                child: Text(
+                  guardianOn ? 'Guardian on' : 'Guardian off',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption.copyWith(
+                    color: guardianOn ? AppTheme.accentText : AppTheme.muted,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
                 ),
               ),
               if (meshPeersCount != null && meshPeersCount! > 0) ...[
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Icon(
                   Icons.hub_outlined,
                   size: 13,
                   color: AppTheme.accentText,
                 ),
                 const SizedBox(width: 3),
-                Text(
-                  '$meshPeersCount mesh',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.caption.copyWith(
-                    color: AppTheme.accentText,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
+                Flexible(
+                  child: Text(
+                    '$meshPeersCount nearby',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.caption.copyWith(
+                      color: AppTheme.accentText,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
               ],

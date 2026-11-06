@@ -1,8 +1,10 @@
 import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/telemetry_utils.dart';
 import '../../core/theme/app_theme.dart';
@@ -34,11 +36,16 @@ class AdminConvoyInspector extends StatefulWidget {
 class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
   final _map = MapController();
 
-  Future<void> _confirmDissolveConvoy(BuildContext context, ConvoyService convoyService, ConvoyModel convoy) async {
+  Future<void> _confirmDissolveConvoy(
+    BuildContext context,
+    ConvoyService convoyService,
+    ConvoyModel convoy,
+  ) async {
     final ok = await confirmAction(
       context,
       title: 'End this ride for everyone?',
-      message: 'This ends "${convoy.name}" (code ${convoy.joinCode}) for all riders. Their live location sharing stops.',
+      message:
+          'This ends "${convoy.name}" (code ${convoy.joinCode}) for all riders. Their live location sharing stops.',
       confirmLabel: 'End ride',
       destructive: true,
     );
@@ -47,7 +54,9 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
     final messenger = ScaffoldMessenger.of(context);
     Navigator.pop(context); // close the inspector
     messenger.clearSnackBars();
-    messenger.showSnackBar(SnackBar(content: Text('Ride ${convoy.name} ended.')));
+    messenger.showSnackBar(
+      SnackBar(content: Text('Ride ${convoy.name} ended.')),
+    );
   }
 
   void _focus(double lat, double lng) {
@@ -63,7 +72,11 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
     final now = DateTime.now().millisecondsSinceEpoch;
     final detail = riderStatusDetail(r, status, nowMs: now);
     final reason = riderReasonText(r);
-    final vehicle = [r.vehicleType, r.vehicleColor, r.vehicleNo].where((s) => s.trim().isNotEmpty).join(', ');
+    final vehicle = [
+      r.vehicleType,
+      r.vehicleColor,
+      r.vehicleNo,
+    ].where((s) => s.trim().isNotEmpty).join(', ');
     final hasFix = r.lat != 0 || r.lng != 0;
     showAppSheet<void>(
       context,
@@ -77,14 +90,24 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
           children: [
             Row(
               children: [
-                RiderAvatar(name: r.name, color: color, status: status, size: 48),
+                RiderAvatar(
+                  name: r.name,
+                  color: color,
+                  status: status,
+                  size: 48,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(r.name.isEmpty ? 'Rider' : r.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+                      Text(
+                        r.name.isEmpty ? 'Rider' : r.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.title,
+                      ),
                       Text(adminRoleLabel(r.role), style: AppText.label),
                     ],
                   ),
@@ -92,24 +115,57 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
               ],
             ),
             const SizedBox(height: 12),
-            Align(alignment: AlignmentDirectional.centerStart, child: RiderStatusChip(status: status, detail: detail)),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: RiderStatusChip(status: status, detail: detail),
+            ),
             const SizedBox(height: 16),
             Row(
               children: [
-                Expanded(child: DsStatCell(label: 'Speed', value: '${r.speedKmh.toStringAsFixed(0)} km/h')),
+                Expanded(
+                  child: DsStatCell(
+                    label: 'Speed',
+                    value: '${r.speedKmh.toStringAsFixed(0)} km/h',
+                  ),
+                ),
                 const SizedBox(width: 8),
-                Expanded(child: DsStatCell(label: 'Heading', value: '${r.heading.round()}° ${TelemetryUtils.getCardinalDirection(r.heading)}')),
+                Expanded(
+                  child: DsStatCell(
+                    label: 'Heading',
+                    value:
+                        '${r.heading.round()}° ${TelemetryUtils.getCardinalDirection(r.heading)}',
+                  ),
+                ),
                 const SizedBox(width: 8),
-                Expanded(child: DsStatCell(label: r.isCharging ? 'Battery, charging' : 'Battery', value: '${r.batteryLevel}%')),
+                Expanded(
+                  child: DsStatCell(
+                    label: r.isCharging ? 'Battery, charging' : 'Battery',
+                    value: '${r.batteryLevel}%',
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 16),
             Text(
-              r.lastSeenEpochMs > 0 ? 'Last update ${formatAgo(Duration(milliseconds: now - r.lastSeenEpochMs))}' : 'No update yet',
+              r.lastSeenEpochMs > 0
+                  ? 'Last update ${formatAgo(Duration(milliseconds: now - r.lastSeenEpochMs))}'
+                  : 'No update yet',
               style: AppText.label,
             ),
-            if (reason.isNotEmpty) Text('Said: $reason', maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
-            if (vehicle.isNotEmpty) Text(vehicle, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+            if (reason.isNotEmpty)
+              Text(
+                'Said: $reason',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.label,
+              ),
+            if (vehicle.isNotEmpty)
+              Text(
+                vehicle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.caption,
+              ),
             if (hasFix) ...[
               const SizedBox(height: 16),
               DsButton(
@@ -130,18 +186,23 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
   @override
   Widget build(BuildContext context) {
     final convoyService = context.watch<ConvoyService>();
-    final current = convoyService.allConvoys[widget.convoy.groupId] ?? widget.convoy;
+    final current =
+        convoyService.allConvoys[widget.convoy.groupId] ?? widget.convoy;
     final now = DateTime.now().millisecondsSinceEpoch;
     final colors = MemberColors.assign(current.riders.keys);
     final status = <String, RiderStatus>{
-      for (final r in current.riders.values) r.userId: riderStatusOf(r, current, isMe: false, nowMs: now),
+      for (final r in current.riders.values)
+        r.userId: riderStatusOf(r, current, isMe: false, nowMs: now),
     };
     final riders = current.riders.values.toList()
       ..sort((a, b) {
-        final p = (status[b.userId]?.priority ?? 0).compareTo(status[a.userId]?.priority ?? 0);
+        final p = (status[b.userId]?.priority ?? 0).compareTo(
+          status[a.userId]?.priority ?? 0,
+        );
         return p != 0 ? p : a.name.compareTo(b.name);
       });
-    final sos = current.activeAlerts.where((a) => !a.resolved).toList()..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final sos = current.activeAlerts.where((a) => !a.resolved).toList()
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     final metrics = TelemetryUtils.calculateConvoyMetrics(riders);
 
     final located = riders.where((r) => r.lat != 0 || r.lng != 0).toList();
@@ -151,7 +212,10 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
     } else if (current.destinationLat != 0.0 || current.destinationLng != 0.0) {
       center = LatLng(current.destinationLat, current.destinationLng);
     } else {
-      center = const LatLng(AppConstants.defaultMapLat, AppConstants.defaultMapLng);
+      center = const LatLng(
+        AppConstants.defaultMapLat,
+        AppConstants.defaultMapLng,
+      );
     }
 
     final alerts = <Widget>[
@@ -160,10 +224,14 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
           padding: const EdgeInsets.only(bottom: 10),
           child: RideAlert(
             tier: AlertTier.critical,
-            title: 'SOS: ${a.userName.isEmpty ? 'a rider' : a.userName} needs help',
-            message: '${adminCapitalize(TimelineText.reason(a.alertType))}, ${formatAgo(Duration(milliseconds: math.max(0, now - a.timestamp)))}',
+            title:
+                'SOS: ${a.userName.isEmpty ? 'a rider' : a.userName} needs help',
+            message:
+                '${adminCapitalize(TimelineText.reason(a.alertType))}, ${formatAgo(Duration(milliseconds: math.max(0, now - a.timestamp)))}',
             actionLabel: (a.lat != 0 || a.lng != 0) ? 'Show on map' : null,
-            onAction: (a.lat != 0 || a.lng != 0) ? () => _focus(a.lat, a.lng) : null,
+            onAction: (a.lat != 0 || a.lng != 0)
+                ? () => _focus(a.lat, a.lng)
+                : null,
           ),
         ),
     ];
@@ -173,7 +241,13 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
       child: SizedBox.expand(
         child: FlutterMap(
           mapController: _map,
-          options: MapOptions(initialCenter: center, initialZoom: located.isEmpty ? 5 : 14.5),
+          options: MapOptions(
+            minZoom: 3.0,
+            maxZoom: 19.0,
+            cameraConstraint: const CameraConstraint.containLatitude(),
+            initialCenter: center,
+            initialZoom: located.isEmpty ? 5 : 14.5,
+          ),
           children: [
             appTileLayer(),
             MarkerLayer(
@@ -188,7 +262,11 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
                       color: colors[r.userId],
                       status: status[r.userId],
                       size: 40,
-                      onTap: () => _showRider(r, status[r.userId] ?? RiderStatus.offline, colors[r.userId]),
+                      onTap: () => _showRider(
+                        r,
+                        status[r.userId] ?? RiderStatus.offline,
+                        colors[r.userId],
+                      ),
                     ),
                   ),
               ],
@@ -201,21 +279,37 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
     final spreadColor = metrics.spreadKm >= 6
         ? AppTheme.sos
         : metrics.spreadKm >= 3
-            ? AppTheme.warnText
-            : AppTheme.accentText;
+        ? AppTheme.warnText
+        : AppTheme.accentText;
     final facts = [
       if (current.joinCode.isNotEmpty) 'Code ${current.joinCode}',
-      if (current.createdByUserName.isNotEmpty) 'lead ${current.createdByUserName}',
-      if (current.destinationName.trim().isNotEmpty) 'to ${current.destinationName}',
+      if (current.createdByUserName.isNotEmpty)
+        'lead ${current.createdByUserName}',
+      if (current.destinationName.trim().isNotEmpty)
+        'to ${current.destinationName}',
     ].join(', ');
     final numbers = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         AdminKpiGrid(
           tiles: [
-            AdminKpiTile(label: 'Riders', value: '${riders.length}', delta: '${metrics.movingRiderCount} moving'),
-            AdminKpiTile(label: 'Spread', value: formatDistance(metrics.spreadKm * 1000), valueColor: spreadColor, delta: metrics.status, deltaColor: spreadColor),
-            AdminKpiTile(label: 'Avg speed', value: '${metrics.averageSpeedKmh.toStringAsFixed(0)} km/h', delta: 'Top ${metrics.maxSpeedKmh.toStringAsFixed(0)} km/h'),
+            AdminKpiTile(
+              label: 'Riders',
+              value: '${riders.length}',
+              delta: '${metrics.movingRiderCount} moving',
+            ),
+            AdminKpiTile(
+              label: 'Spread',
+              value: formatDistance(metrics.spreadKm * 1000),
+              valueColor: spreadColor,
+              delta: metrics.status,
+              deltaColor: spreadColor,
+            ),
+            AdminKpiTile(
+              label: 'Avg speed',
+              value: '${metrics.averageSpeedKmh.toStringAsFixed(0)} km/h',
+              delta: 'Top ${metrics.maxSpeedKmh.toStringAsFixed(0)} km/h',
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -224,10 +318,19 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              StatusLine(icon: Icons.groups_rounded, text: 'Formation: ${metrics.status}', color: AppTheme.text),
+              StatusLine(
+                icon: Icons.groups_rounded,
+                text: 'Formation: ${metrics.status}',
+                color: AppTheme.text,
+              ),
               if (facts.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text(facts, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                Text(
+                  facts,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption,
+                ),
               ],
             ],
           ),
@@ -239,21 +342,40 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
       AdminSectionLabel('Riders (${riders.length})'),
       AdminTable(
         columns: const ['Rider', 'Status'],
-        empty: Text('Nobody has joined yet.', style: AppText.body.copyWith(color: AppTheme.text2)),
+        empty: Text(
+          'Nobody has joined yet.',
+          style: AppText.body.copyWith(color: AppTheme.text2),
+        ),
         rows: [
           for (var i = 0; i < riders.length; i++)
             AdminRow(
               key: ValueKey(riders[i].userId),
-              leading: RiderAvatar(name: riders[i].name, color: colors[riders[i].userId], status: status[riders[i].userId]),
+              leading: RiderAvatar(
+                name: riders[i].name,
+                color: colors[riders[i].userId],
+                status: status[riders[i].userId],
+              ),
               title: riders[i].name.isEmpty ? 'Rider' : riders[i].name,
-              subtitle: [adminRoleLabel(riders[i].role), riders[i].vehicleType].where((s) => s.isNotEmpty).join(', '),
-              detail: '${riders[i].speedKmh.toStringAsFixed(0)} km/h, heading ${riders[i].heading.round()}° ${TelemetryUtils.getCardinalDirection(riders[i].heading)}',
+              subtitle: [
+                adminRoleLabel(riders[i].role),
+                riders[i].vehicleType,
+              ].where((s) => s.isNotEmpty).join(', '),
+              detail:
+                  '${riders[i].speedKmh.toStringAsFixed(0)} km/h, heading ${riders[i].heading.round()}° ${TelemetryUtils.getCardinalDirection(riders[i].heading)}',
               status: RiderStatusChip(
                 status: status[riders[i].userId] ?? RiderStatus.offline,
-                detail: riderStatusDetail(riders[i], status[riders[i].userId] ?? RiderStatus.offline, nowMs: now),
+                detail: riderStatusDetail(
+                  riders[i],
+                  status[riders[i].userId] ?? RiderStatus.offline,
+                  nowMs: now,
+                ),
               ),
               divider: i < riders.length - 1,
-              onTap: () => _showRider(riders[i], status[riders[i].userId] ?? RiderStatus.offline, colors[riders[i].userId]),
+              onTap: () => _showRider(
+                riders[i],
+                status[riders[i].userId] ?? RiderStatus.offline,
+                colors[riders[i].userId],
+              ),
             ),
         ],
       ),
@@ -262,7 +384,10 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
     final more = PopupMenuButton<String>(
       tooltip: 'More options',
       color: AppTheme.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: AppTheme.border, width: 2)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: AppTheme.border, width: 2),
+      ),
       onSelected: (v) {
         if (v == 'end') _confirmDissolveConvoy(context, convoyService, current);
       },
@@ -270,17 +395,30 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
         PopupMenuItem<String>(
           value: 'end',
           height: 48,
-          child: Row(children: [
-            Icon(Icons.stop_circle_rounded, color: AppTheme.sos),
-            const SizedBox(width: 12),
-            Flexible(child: Text('End ride for everyone', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
-          ]),
+          child: Row(
+            children: [
+              Icon(Icons.stop_circle_rounded, color: AppTheme.sos),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(
+                  'End ride for everyone',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
       child: Container(
         width: 44,
         height: 44,
-        decoration: BoxDecoration(shape: BoxShape.circle, color: AppTheme.card, border: Border.all(color: AppTheme.border, width: 2)),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppTheme.card,
+          border: Border.all(color: AppTheme.border, width: 2),
+        ),
         child: Icon(Icons.more_horiz_rounded, color: AppTheme.text, size: 22),
       ),
     );
@@ -295,7 +433,9 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
           label: 'Live timeline',
           onTap: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => LiveTimelineScreen(groupId: current.groupId)),
+            MaterialPageRoute(
+              builder: (_) => LiveTimelineScreen(groupId: current.groupId),
+            ),
           ),
         ),
         AdminIconAction(
@@ -303,49 +443,63 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
           label: 'Replay and routes',
           onTap: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => ReplayScreen(groupId: current.groupId, title: '${current.name}: Replay')),
+            MaterialPageRoute(
+              builder: (_) => ReplayScreen(
+                groupId: current.groupId,
+                title: '${current.name}: Replay',
+              ),
+            ),
           ),
         ),
         more,
       ],
-      body: LayoutBuilder(builder: (context, c) {
-        if (c.maxWidth >= adminWideBreakpoint) {
+      body: LayoutBuilder(
+        builder: (context, c) {
+          if (c.maxWidth >= adminWideBreakpoint) {
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: adminMaxContentWidth,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 8, 0, 32),
+                        child: map,
+                      ),
+                    ),
+                    SizedBox(
+                      width: (c.maxWidth * 0.4).clamp(360.0, 480.0).toDouble(),
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 24, 32),
+                        children: [...alerts, numbers, ...roster],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          final mapHeight = (c.maxHeight * 0.45).clamp(200.0, 320.0).toDouble();
           return Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
                 children: [
-                  Expanded(child: Padding(padding: const EdgeInsets.fromLTRB(24, 8, 0, 32), child: map)),
-                  SizedBox(
-                    width: (c.maxWidth * 0.4).clamp(360.0, 480.0).toDouble(),
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 24, 32),
-                      children: [...alerts, numbers, ...roster],
-                    ),
-                  ),
+                  ...alerts,
+                  SizedBox(height: mapHeight, child: map),
+                  const SizedBox(height: 16),
+                  numbers,
+                  ...roster,
                 ],
               ),
             ),
           );
-        }
-        final mapHeight = (c.maxHeight * 0.45).clamp(200.0, 320.0).toDouble();
-        return Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: adminMaxContentWidth),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
-              children: [
-                ...alerts,
-                SizedBox(height: mapHeight, child: map),
-                const SizedBox(height: 16),
-                numbers,
-                ...roster,
-              ],
-            ),
-          ),
-        );
-      }),
+        },
+      ),
     );
   }
 }

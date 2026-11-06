@@ -51,8 +51,8 @@ class CockpitDualStateBanner extends StatelessWidget {
         : AppTheme.hyperAmber.withValues(alpha: 0.25);
 
     final semanticText = isPackActive
-        ? 'Offline mode: Offline pack active, $peerCount peer-to-peer mesh peers connected'
-        : 'Warning: Offline mode, corridor terrain uncached';
+        ? 'Offline: map saved, $peerCount riders nearby'
+        : 'Offline: no map saved here';
 
     return Semantics(
       container: true,
@@ -147,7 +147,7 @@ class CockpitDualStateBanner extends StatelessWidget {
               const SizedBox(width: Space.s8),
               Flexible(
                 child: Text(
-                  '$peerCount P2P Peers',
+                  '$peerCount nearby',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textScaler: TextScaler.noScaling,

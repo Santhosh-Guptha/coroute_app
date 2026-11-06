@@ -63,6 +63,15 @@ class MinimalCockpitTopBar extends StatelessWidget {
   /// Whether the handlebar BLE remote is paired.
   final bool isRemotePaired;
 
+  /// Whether the app is operating in offline mode (traffic/weather unavailable).
+  final bool isOfflineMode;
+
+  /// Optional tap handler for offline mode indicator.
+  final VoidCallback? onOfflineModeTap;
+
+  /// Whether the trip has only 1 participant (solo trip).
+  final bool isSolo;
+
   const MinimalCockpitTopBar({
     super.key,
     required this.title,
@@ -81,6 +90,9 @@ class MinimalCockpitTopBar extends StatelessWidget {
     this.riderCount,
     this.isAirbagPaired = false,
     this.isRemotePaired = false,
+    this.isOfflineMode = false,
+    this.onOfflineModeTap,
+    this.isSolo = false,
   });
 
   @override
@@ -92,172 +104,260 @@ class MinimalCockpitTopBar extends StatelessWidget {
     final overLimit = speed != null && limit > 0 && speed > limit;
     final sub = subtitle;
     final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
+    final hasSecondaryPills = isAirbagPaired || isRemotePaired || isTunnelCoasting || isOfflineMode;
 
     return Container(
-      constraints: const BoxConstraints(minHeight: 56),
-      padding: const EdgeInsets.all(12),
+      constraints: const BoxConstraints(minHeight: 48),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: AppTheme.card,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         border: overLimit
             ? Border.all(color: AppTheme.sos, width: isSunlightHud ? 3 : 2)
-            : (isSunlightHud ? Border.all(color: AppTheme.border.withOpacity(0.9), width: 2) : null),
+            : (isSunlightHud ? Border.all(color: AppTheme.border.withValues(alpha: 0.9), width: 2) : null),
         boxShadow: dsFloatingShadow(),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (back != null)
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppTheme.card,
-                border: Border.all(
-                  color: isSunlightHud ? AppTheme.text : AppTheme.border,
-                  width: isSunlightHud ? 2.5 : 2,
-                ),
-              ),
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(Icons.chevron_left_rounded, color: AppTheme.text, size: 28),
-                tooltip: 'Back',
-                onPressed: back,
-              ),
-            )
-          else
-            GestureDetector(
-              key: const Key('top_bar_navigation_action'),
-              onTap: onNavigationTap,
-              child: Container(
-                width: 60,
-                height: 60,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: emergencyRoute ? AppTheme.sos : AppTheme.brand,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(
-                  emergencyRoute ? Icons.emergency_rounded : Icons.navigation_rounded,
-                  color: Colors.white,
-                  size: 32,
-                ),
-              ),
-            ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Primary: destination / next stop / convoy name
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.headline,
-                ),
-                if (roadName != null && roadName!.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                          decoration: BoxDecoration(
-                            color: AppTheme.brand.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: AppTheme.brand.withValues(alpha: 0.4), width: 1),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.edit_road_rounded, size: 12, color: AppTheme.brand),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  roadName!,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppText.caption.copyWith(
-                                    color: AppTheme.brand,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.2,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+          Row(
+            children: [
+              if (back != null)
+                Tooltip(
+                  message: 'Back',
+                  child: InkWell(
+                    onTap: back,
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppTheme.card,
+                        border: Border.all(
+                          color: isSunlightHud ? AppTheme.text : AppTheme.border,
+                          width: isSunlightHud ? 2.0 : 1.5,
                         ),
                       ),
-                      if (sub != null && sub.isNotEmpty) ...[
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            sub,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppText.label,
+                      child: Icon(Icons.chevron_left_rounded, color: AppTheme.text, size: 24),
+                    ),
+                  ),
+                )
+              else
+                GestureDetector(
+                  key: const Key('top_bar_navigation_action'),
+                  onTap: onNavigationTap,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: emergencyRoute ? AppTheme.sos : AppTheme.brand,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      emergencyRoute ? Icons.emergency_rounded : Icons.navigation_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Primary: Destination & total distance
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.title.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        letterSpacing: -0.2,
+                        height: 1.15,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (roadName != null && roadName!.isNotEmpty) ...[
+                          // Flexible (it used to be flex 0): a long road name ellipsizes
+                          // instead of overflowing the top bar on narrow phones.
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              margin: const EdgeInsets.only(right: 6),
+                              decoration: BoxDecoration(
+                                color: AppTheme.brand.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(5),
+                                border: Border.all(color: AppTheme.brand.withValues(alpha: 0.4), width: 1),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.edit_road_rounded, size: 11, color: AppTheme.brand),
+                                  const SizedBox(width: 3),
+                                  Flexible(
+                                    child: Text(
+                                      roadName!,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: AppText.caption.copyWith(
+                                        color: AppTheme.brand,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
+                        if (sub != null && sub.isNotEmpty) ...[
+                          Flexible(
+                            child: Text(
+                              sub,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.caption.copyWith(
+                                color: AppTheme.textMuted,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        // Live rider count badge (hidden for solo trips)
+                        if (!isSolo && (riderCount ?? 1) > 1)
+                          Flexible(
+                            child: _StatusPill(
+                              key: const Key('cockpit_pill_live_riders'),
+                              iconDot: connection != null ? const Color(0xFFFF9100) : const Color(0xFF00E676),
+                              label: connection != null
+                                  ? connection!
+                                  : '${riderCount ?? 1} Riders',
+                              ellipsize: true,
+                            ),
+                          )
+                        else if (connection != null)
+                          Flexible(
+                            child: _StatusPill(
+                              key: const Key('cockpit_pill_live_riders'),
+                              iconDot: const Color(0xFFFF9100),
+                              label: connection!,
+                              ellipsize: true,
+                            ),
+                          ),
                       ],
-                    ],
-                  ),
-                ] else if (sub != null && sub.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
-                ],
-                // Minimal status pills across top status bar:
-                // [ 🟢 Live · N Riders ] [ 🦺 Airbag ] [ 🔘 Remote ] [ 🚇 Tunnel Mode ]
-                const SizedBox(height: 5),
-                CockpitStatusPillsBar(
-                  riderCount: riderCount,
-                  isLive: connection == null,
-                  connectionStatus: connection,
-                  isAirbagPaired: isAirbagPaired,
-                  isRemotePaired: isRemotePaired,
-                  isTunnelMode: isTunnelCoasting,
+                    ),
+                  ],
                 ),
-                if (hasRoute && !isTunnelCoasting) ...[
-                  const SizedBox(height: 3),
-                  _StatusRow(
-                    icon: emergencyRoute ? Icons.emergency_rounded : Icons.alt_route_rounded,
-                    label: routeStatus!,
-                    color: emergencyRoute ? AppTheme.sos : AppTheme.accentText,
+              ),
+              const SizedBox(width: 8),
+              // Right: Speed readout or GPS dot
+              if (speed != null)
+                CockpitSpeedometer(
+                  speedKmh: speed,
+                  speedLimitKmh: speedLimitKmh,
+                  fontSize: 24,
+                  showUnit: true,
+                  showLimitBadge: limit > 0,
+                )
+              else
+                _GpsDot(gps: gps),
+              if (onStopNavigation != null) ...[
+                const SizedBox(width: 6),
+                Tooltip(
+                  message: 'Stop navigation',
+                  child: InkWell(
+                    onTap: onStopNavigation,
+                    borderRadius: BorderRadius.circular(18),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isSunlightHud ? AppTheme.card : AppTheme.card.withValues(alpha: 0.9),
+                        border: Border.all(
+                          color: isSunlightHud ? AppTheme.sos : AppTheme.border,
+                          width: isSunlightHud ? 2.0 : 1.5,
+                        ),
+                      ),
+                      child: Icon(Icons.close_rounded,
+                          color: isSunlightHud ? AppTheme.sos : AppTheme.text, size: 20),
+                    ),
                   ),
-                ],
+                ),
               ],
-            ),
+            ],
           ),
-          const SizedBox(width: 10),
-          // Right: Big bold speed readout in high-contrast neon white/orange
-          if (speed != null)
-            CockpitSpeedometer(
-              speedKmh: speed,
-              speedLimitKmh: speedLimitKmh,
-            )
-          else
-            _GpsDot(gps: gps),
-          if (onStopNavigation != null) ...[
-            const SizedBox(width: 6),
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isSunlightHud ? AppTheme.card : AppTheme.card.withOpacity(0.9),
-                border: Border.all(
-                  color: isSunlightHud ? AppTheme.sos : AppTheme.border,
-                  width: isSunlightHud ? 2.5 : 2,
-                ),
+          // Secondary status pills tray in disciplined vertical flow
+          if (hasSecondaryPills) ...[
+            const SizedBox(height: 6),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isAirbagPaired) ...[
+                    _StatusPill(
+                      key: const Key('cockpit_pill_airbag'),
+                      icon: Icons.shield_rounded,
+                      iconColor: const Color(0xFFFF9100),
+                      label: 'Airbag',
+                      accentColor: const Color(0xFFFF9100).withValues(alpha: 0.4),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  if (isRemotePaired) ...[
+                    _StatusPill(
+                      key: const Key('cockpit_pill_remote'),
+                      icon: Icons.radio_button_checked_rounded,
+                      iconColor: const Color(0xFF00E5FF),
+                      label: 'Remote',
+                      accentColor: const Color(0xFF00E5FF).withValues(alpha: 0.4),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  if (isTunnelCoasting) ...[
+                    _StatusPill(
+                      key: const Key('cockpit_pill_tunnel_mode'),
+                      icon: Icons.alt_route_rounded,
+                      iconColor: const Color(0xFFFFB300),
+                      label: 'Tunnel Mode',
+                      accentColor: const Color(0xFFFFB300).withValues(alpha: 0.5),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  if (isOfflineMode) ...[
+                    _StatusPill(
+                      key: const Key('cockpit_pill_offline_mode'),
+                      icon: Icons.cloud_off_rounded,
+                      iconColor: const Color(0xFFFFB300),
+                      label: 'Offline Mode',
+                      accentColor: const Color(0xFFFFB300).withValues(alpha: 0.5),
+                      onTap: onOfflineModeTap,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                ],
               ),
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(Icons.close_rounded, color: isSunlightHud ? AppTheme.sos : AppTheme.text, size: 26),
-                tooltip: 'Stop navigation',
-                onPressed: onStopNavigation,
-              ),
+            ),
+          ],
+          if (hasRoute && !isTunnelCoasting) ...[
+            const SizedBox(height: 4),
+            _StatusRow(
+              icon: emergencyRoute ? Icons.emergency_rounded : Icons.alt_route_rounded,
+              label: routeStatus!,
+              color: emergencyRoute ? AppTheme.sos : AppTheme.accentText,
             ),
           ],
         ],
@@ -333,117 +433,6 @@ class _GpsDot extends StatelessWidget {
 // CockpitStatusPillsBar
 // ---------------------------------------------------------------------------
 
-/// Minimal status pills across the top status bar for motorcycle cockpit glancability.
-/// Displays:
-/// - [ 🟢 Live · N Riders ]
-/// - [ 🦺 Airbag ] (when paired)
-/// - [ 🔘 Remote ] (when paired)
-/// - [ 🚇 Tunnel Mode ] (when dead-reckoning)
-class CockpitStatusPillsBar extends StatelessWidget {
-  final int? riderCount;
-  final bool isLive;
-  final String? connectionStatus;
-  final bool isAirbagPaired;
-  final bool isRemotePaired;
-  final bool isTunnelMode;
-  final bool forceShowAll;
-  final VoidCallback? onRidersTap;
-  final VoidCallback? onAirbagTap;
-  final VoidCallback? onRemoteTap;
-  final VoidCallback? onTunnelTap;
-
-  const CockpitStatusPillsBar({
-    super.key,
-    this.riderCount,
-    this.isLive = true,
-    this.connectionStatus,
-    this.isAirbagPaired = false,
-    this.isRemotePaired = false,
-    this.isTunnelMode = false,
-    this.forceShowAll = false,
-    this.onRidersTap,
-    this.onAirbagTap,
-    this.onRemoteTap,
-    this.onTunnelTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final pills = <Widget>[];
-
-    // 1. [ Live · N Riders ]
-    final count = riderCount ?? 1;
-    final countText = count == 1 ? '1 Rider' : '$count Riders';
-    final liveText = connectionStatus != null ? connectionStatus! : 'Live · $countText';
-    final liveColor = connectionStatus != null ? const Color(0xFFFF9100) : const Color(0xFF00E676);
-
-    pills.add(
-      _StatusPill(
-        key: const Key('cockpit_pill_live_riders'),
-        iconDot: liveColor,
-        label: liveText,
-        onTap: onRidersTap,
-      ),
-    );
-
-    // 2. [ Airbag ] (when paired or forced)
-    if (isAirbagPaired || forceShowAll) {
-      pills.add(
-        _StatusPill(
-          key: const Key('cockpit_pill_airbag'),
-          icon: Icons.shield_rounded,
-          iconColor: const Color(0xFFFF9100),
-          label: 'Airbag',
-          accentColor: const Color(0xFFFF9100).withOpacity(0.4),
-          onTap: onAirbagTap,
-        ),
-      );
-    }
-
-    // 3. [ Remote ] (when paired or forced)
-    if (isRemotePaired || forceShowAll) {
-      pills.add(
-        _StatusPill(
-          key: const Key('cockpit_pill_remote'),
-          icon: Icons.radio_button_checked_rounded,
-          iconColor: const Color(0xFF00E5FF),
-          label: 'Remote',
-          accentColor: const Color(0xFF00E5FF).withOpacity(0.4),
-          onTap: onRemoteTap,
-        ),
-      );
-    }
-
-    // 4. [ Tunnel Mode ] (when dead-reckoning or forced)
-    if (isTunnelMode || forceShowAll) {
-      pills.add(
-        _StatusPill(
-          key: const Key('cockpit_pill_tunnel_mode'),
-          icon: Icons.alt_route_rounded,
-          iconColor: const Color(0xFFFFB300),
-          label: 'Tunnel Mode',
-          accentColor: const Color(0xFFFFB300).withOpacity(0.5),
-          onTap: onTunnelTap,
-        ),
-      );
-    }
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (int i = 0; i < pills.length; i++) ...[
-            if (i > 0) const SizedBox(width: 6),
-            pills[i],
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _StatusPill extends StatelessWidget {
   final Color? iconDot;
   final IconData? icon;
@@ -451,6 +440,11 @@ class _StatusPill extends StatelessWidget {
   final String label;
   final Color? accentColor;
   final VoidCallback? onTap;
+
+  /// Shrinks and ellipsizes the label when its parent gives it a bounded
+  /// width (a Flexible in a row). Leave false inside horizontal scrollers,
+  /// where the width is unbounded.
+  final bool ellipsize;
 
   const _StatusPill({
     super.key,
@@ -460,7 +454,15 @@ class _StatusPill extends StatelessWidget {
     required this.label,
     this.accentColor,
     this.onTap,
+    this.ellipsize = false,
   });
+
+  static const TextStyle _labelStyle = TextStyle(
+    color: Colors.white,
+    fontSize: 11,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.2,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -503,15 +505,17 @@ class _StatusPill extends StatelessWidget {
                 Icon(icon, size: 12, color: iconColor ?? AppTheme.text),
                 const SizedBox(width: 4),
               ],
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.2,
-                ),
-              ),
+              if (ellipsize)
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _labelStyle,
+                  ),
+                )
+              else
+                Text(label, style: _labelStyle),
             ],
           ),
         ),
@@ -524,158 +528,9 @@ class _StatusPill extends StatelessWidget {
 // MinimalRideStatsBar
 // ---------------------------------------------------------------------------
 
-/// The collapsed sheet handle area: the 4 key ride numbers as stat cells on
-/// a floating card. Tapping anywhere opens the full sheet.
-class MinimalRideStatsBar extends StatelessWidget {
-  final String? remainingText;
-  final String etaText;
-  final int ridingCount;
-  final int totalCount;
-  final String? spreadText;
-  final VoidCallback onTap;
-
-  const MinimalRideStatsBar({
-    super.key,
-    required this.remainingText,
-    required this.etaText,
-    required this.ridingCount,
-    required this.totalCount,
-    required this.spreadText,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.card,
-          borderRadius: BorderRadius.circular(Radii.xl),
-          border: isSunlightHud ? Border.all(color: AppTheme.border.withOpacity(0.9), width: 1.5) : null,
-          boxShadow: dsFloatingShadow(),
-        ),
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 44,
-              height: 5,
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(color: AppTheme.border2, borderRadius: BorderRadius.circular(3)),
-            ),
-            Row(
-              children: [
-                Expanded(child: DsStatCell(label: 'Left', value: remainingText ?? '-')),
-                const SizedBox(width: 8),
-                Expanded(child: DsStatCell(label: 'ETA', value: etaText)),
-                const SizedBox(width: 8),
-                Expanded(child: DsStatCell(label: 'Riding', value: '$ridingCount/$totalCount')),
-                const SizedBox(width: 8),
-                Expanded(child: DsStatCell(label: 'Spread', value: spreadText ?? '-')),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
 // MinimalStoppedBar
 // ---------------------------------------------------------------------------
-
-/// Shown instead of MinimalRideStatsBar while the rider is stopped. Shows
-/// how long stopped and a compact "tell why" prompt.
-class MinimalStoppedBar extends StatelessWidget {
-  final Duration stoppedFor;
-  final int nearbyCount;
-  final VoidCallback onTap;
-  final VoidCallback onTellWhy;
-
-  const MinimalStoppedBar({
-    super.key,
-    required this.stoppedFor,
-    required this.nearbyCount,
-    required this.onTap,
-    required this.onTellWhy,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final mins = stoppedFor.inMinutes;
-    final dur = mins < 1 ? 'just stopped' : 'stopped ${mins}m';
-    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.card,
-          borderRadius: BorderRadius.circular(Radii.xl),
-          border: Border.all(color: AppTheme.warnBorder, width: isSunlightHud ? 2.5 : 2),
-          boxShadow: dsFloatingShadow(),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 10, 12, 14),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 44,
-              height: 5,
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(color: AppTheme.warnBorder, borderRadius: BorderRadius.circular(3)),
-            ),
-            Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(color: AppTheme.warnTint, borderRadius: BorderRadius.circular(12)),
-                  child: Icon(Icons.pause_rounded, color: AppTheme.warnText, size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        dur,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppText.title.copyWith(color: AppTheme.warnText),
-                      ),
-                      Text(
-                        nearbyCount > 0 ? '$nearbyCount riders nearby' : 'Group riding ahead',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppText.label,
-                      ),
-                    ],
-                  ),
-                ),
-                TextButton(
-                  onPressed: onTellWhy,
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.warnText,
-                    backgroundColor: AppTheme.warnTint,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    minimumSize: const Size(64, 48),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: const Text('Tell why', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 // ---------------------------------------------------------------------------
 // MinimalSpeedAlert
@@ -729,122 +584,6 @@ class MinimalSpeedAlert extends StatelessWidget {
 // MapSideControls
 // ---------------------------------------------------------------------------
 
-/// Vertical strip of 3 round card buttons on the right edge of the map:
-/// screen-on, re-centre, and sheet-open chevron. They fade out when the
-/// sheet is fully expanded.
-class MapSideControls extends StatelessWidget {
-  final bool keepScreenOn;
-  final bool autoFollow;
-  final VoidCallback onToggleKeepScreenOn;
-  final VoidCallback onCentre;
-  final VoidCallback onOpenSheet;
-  final bool visible;
-
-  const MapSideControls({
-    super.key,
-    required this.keepScreenOn,
-    required this.autoFollow,
-    required this.onToggleKeepScreenOn,
-    required this.onCentre,
-    required this.onOpenSheet,
-    required this.visible,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      ignoring: !visible,
-      child: AnimatedOpacity(
-        opacity: visible ? 1 : 0,
-        duration: const Duration(milliseconds: 180),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _SideControl(
-              icon: keepScreenOn ? Icons.light_mode_rounded : Icons.brightness_low_rounded,
-              tooltip: keepScreenOn ? 'Screen stays on' : 'Keep screen on',
-              active: keepScreenOn,
-              activeTint: AppTheme.warnText,
-              onTap: onToggleKeepScreenOn,
-            ),
-            const SizedBox(height: 12),
-            _SideControl(
-              icon: Icons.my_location_rounded,
-              tooltip: 'Centre on me',
-              active: autoFollow,
-              onTap: onCentre,
-            ),
-            const SizedBox(height: 12),
-            _SideControl(
-              icon: Icons.keyboard_arrow_up_rounded,
-              tooltip: 'Open ride sheet',
-              onTap: onOpenSheet,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 56 dp round card button with a 2-2.5 px border; the active state uses the
-/// accent ring and tint (canvas "round button"). Ergonomically upscaled to 56x56 dp
-/// for effortless motorcycle leather glove operation on vibrating handlebars.
-class _SideControl extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final bool active;
-  final Color? activeTint;
-  final VoidCallback onTap;
-
-  const _SideControl({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-    this.active = false,
-    this.activeTint,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = activeTint ?? AppTheme.accentText;
-    final isSunlightHud = FeatureGates.isUnlocked(Feature.sunlightHudMode);
-    return Semantics(
-      button: true,
-      label: tooltip,
-      selected: active,
-      child: Tooltip(
-        message: tooltip,
-        child: GestureDetector(
-          onTap: onTap,
-          child: Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: active
-                  ? (isSunlightHud ? accent.withOpacity(0.24) : accent.withOpacity(0.14))
-                  : AppTheme.card,
-              border: Border.all(
-                color: active ? accent : (isSunlightHud ? AppTheme.border.withOpacity(0.9) : AppTheme.border),
-                width: isSunlightHud ? 2.5 : 2,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.shadow.withOpacity(AppTheme.isLight ? 0.16 : 0.5),
-                  blurRadius: isSunlightHud ? 14 : 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Icon(icon, size: 26, color: active ? accent : AppTheme.text),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
 // CockpitSpeedometer
 // ---------------------------------------------------------------------------
@@ -865,7 +604,7 @@ class CockpitSpeedometer extends StatelessWidget {
     super.key,
     required this.speedKmh,
     this.speedLimitKmh,
-    this.fontSize = 38,
+    this.fontSize = 28,
     this.showUnit = true,
     this.showLimitBadge = true,
     this.alignment = Alignment.centerRight,
@@ -964,8 +703,6 @@ class CockpitSpeedometer extends StatelessWidget {
   }
 }
 
-typedef MinimalCockpitSpeedometer = CockpitSpeedometer;
-
 // ---------------------------------------------------------------------------
 // CockpitSosButton (Glove-Friendly SOS Button)
 // ---------------------------------------------------------------------------
@@ -1045,7 +782,7 @@ class _CockpitSosButtonState extends State<CockpitSosButton> with SingleTickerPr
       container: true,
       button: true,
       label: 'Emergency SOS, press and hold',
-      hint: 'Press and hold to send SOS to convoy',
+      hint: 'Press and hold to send SOS to your group',
       excludeSemantics: true,
       onLongPress: _trigger,
       child: GestureDetector(
@@ -1124,5 +861,3 @@ class _CockpitSosButtonState extends State<CockpitSosButton> with SingleTickerPr
   }
 }
 
-typedef GloveFriendlySosButton = CockpitSosButton;
-typedef MinimalCockpitSosButton = CockpitSosButton;

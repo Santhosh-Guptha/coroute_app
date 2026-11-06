@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 
 /// Classifications of road anomalies detected through inertial and kinematic sensors.
 enum RoadHazardClassification {
@@ -69,33 +68,6 @@ enum RoadHazardSeverity {
         return high;
     }
   }
-}
-
-/// A high-frequency inertial sensor reading containing 3-axis acceleration and gyro angular rates.
-class KinematicSample {
-  final int timestampMs;
-  final double ax;
-  final double ay;
-  final double az;
-  final double gx;
-  final double gy;
-  final double gz;
-
-  const KinematicSample({
-    required this.timestampMs,
-    required this.ax,
-    required this.ay,
-    required this.az,
-    this.gx = 0.0,
-    this.gy = 0.0,
-    this.gz = 0.0,
-  });
-
-  /// Total acceleration magnitude in m/s^2.
-  double get totalAccel => math.sqrt(ax * ax + ay * ay + az * az);
-
-  /// Total acceleration magnitude in g (1g = 9.80665 m/s^2).
-  double get totalAccelG => totalAccel / 9.80665;
 }
 
 /// An accepted, validated observation of a road surface hazard tagged with telemetry.

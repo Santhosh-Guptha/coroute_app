@@ -333,3 +333,192 @@
   .pg-notice{grid-template-columns:1fr}
   .pg-eta dd{font-size:1.125rem}
 }
+
+/* ---------- Transparent Pricing & Maintenance Philosophy (Shared) ---------- */
+.philosophy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: var(--sp-20);
+  margin-top: var(--sp-32);
+}
+.philosophy-card {
+  background: var(--c-surface-1);
+  border: var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-24);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  transition: border-color var(--d-fast), transform var(--d-fast);
+}
+.philosophy-card:hover {
+  border-color: rgba(255, 111, 46, 0.3);
+  transform: translateY(-2px);
+}
+.philosophy-card__icon {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--r-sm);
+  background: var(--c-surface-2);
+  border: var(--border);
+  display: grid;
+  place-items: center;
+  color: var(--c-accent);
+}
+.philosophy-card__icon .icon {
+  width: 20px;
+  height: 20px;
+}
+.philosophy-card h3 {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  color: var(--c-text);
+  margin: 0;
+}
+.philosophy-card p {
+  font-size: var(--fs-small);
+  color: var(--c-text-2);
+  line-height: var(--lh-snug);
+  margin: 0;
+}
+.philosophy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--tr-label);
+  padding: 3px 8px;
+  border-radius: var(--r-xs);
+  background: rgba(255, 111, 46, 0.12);
+  color: var(--c-accent);
+  width: fit-content;
+}
+.philosophy-guarantee {
+  margin-top: var(--sp-24);
+  padding: var(--sp-20) var(--sp-24);
+  background: rgba(0, 230, 118, 0.05);
+  border: 1px solid rgba(0, 230, 118, 0.2);
+  border-radius: var(--r-md);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-16);
+}
+.philosophy-guarantee .icon {
+  width: 24px;
+  height: 24px;
+  color: var(--c-green);
+  flex-shrink: 0;
+}
+.philosophy-guarantee p {
+  font-size: var(--fs-small);
+  color: var(--c-text);
+  margin: 0;
+}
+.philosophy-guarantee strong {
+  color: var(--c-green);
+}
+
+/* ==========================================================================
+   Product page building blocks (moved here from home.css so the homepage
+   stylesheet is homepage-only). Used by /features /safety /how-it-works /about /get.
+   ========================================================================== */
+
+/* Page hero: buttons row */
+.hm-hero__cta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-12) var(--sp-24); margin-top: var(--sp-24); }
+.hm-hero--page .eyebrow { margin-bottom: var(--sp-12); }
+
+/* In-page section jump list under a hero */
+.pg-jump a { min-height: 44px; }
+
+/* Group heading with a small sub line (features page) */
+.hm-group__title { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-4) var(--sp-12); font-size: var(--fs-h2); margin-bottom: var(--sp-32); }
+.hm-group__title small { font-family: var(--font-body); font-weight: 400; font-size: var(--fs-body); color: var(--c-text-2); letter-spacing: 0; }
+
+.hm-head--center { text-align: center; margin-left: auto; margin-right: auto; }
+.hm-head--center > p { margin-left: auto; margin-right: auto; }
+
+/* Feature tile accents */
+.hm-feature--safety .hm-feature__icon { background: var(--c-red-soft); color: var(--c-red); }
+.hm-feature--talk .hm-feature__icon { background: var(--c-nav-soft); color: var(--c-nav); }
+
+/* Numbered steps */
+.hm-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--sp-16); counter-reset: none; }
+.hm-step {
+  background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-md);
+  padding: var(--sp-24); display: flex; flex-direction: column; gap: var(--sp-8);
+}
+.hm-step > .icon { width: 28px; height: 28px; color: var(--c-brand); margin-bottom: var(--sp-8); }
+.hm-step h3 { font-size: var(--fs-h4); }
+.hm-step p { font-size: var(--fs-small); color: var(--c-text-2); line-height: var(--lh-snug); }
+
+/* Facts list (label, value, explanation) */
+.hm-facts { display: grid; gap: 1px; background: var(--c-border); border: 1px solid var(--c-border); border-radius: var(--r-md); overflow: hidden; }
+.hm-facts > div { background: var(--c-surface); padding: var(--sp-16) var(--sp-24); }
+.hm-facts dt { color: var(--c-text-3); font-size: var(--fs-xs); font-weight: 700; letter-spacing: var(--tr-label); text-transform: uppercase; }
+.hm-facts dd { margin-top: 4px; font-weight: 600; color: var(--c-text); }
+.hm-facts dd span { display: block; font-weight: 400; color: var(--c-text-2); font-size: var(--fs-small); margin-top: 2px; }
+@media (min-width: 768px) { .hm-facts { grid-template-columns: repeat(2, 1fr); } }
+
+/* Important notice */
+.hm-notice {
+  padding: var(--sp-24); border-radius: var(--r-md); background: var(--c-surface);
+  border: 1px solid var(--c-border); border-left: 4px solid var(--c-danger); color: var(--c-text-2); max-width: 60em;
+}
+.hm-notice strong { color: var(--c-text); display: block; margin-bottom: var(--sp-4); }
+
+/* Closing call to action band */
+.hm-cta {
+  display: grid; gap: var(--sp-24); align-items: center;
+  padding: clamp(28px, 5vw, 56px); border-radius: var(--r-lg);
+  background: var(--c-brand-dark); color: #FFFFFF;
+}
+.hm-cta h2 { color: #FFFFFF; font-size: var(--fs-h2); }
+.hm-cta p { color: rgba(255, 255, 255, 0.88); margin-top: var(--sp-8); max-width: 40em; }
+.hm-cta .btn--primary { background: #FFFFFF; color: #174D37 !important; }
+.hm-cta .btn--primary:hover { background: #E7F2EB; }
+.hm-cta .btn--secondary, .hm-cta .btn--outline { background: transparent; border-color: rgba(255, 255, 255, 0.6); color: #FFFFFF !important; }
+.hm-cta .link-arrow { color: #FFFFFF; min-height: 44px; }
+@media (min-width: 1024px) { .hm-cta { grid-template-columns: 1fr auto; } }
+
+/* Simple card icon (download page) */
+.card__icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--r-sm); background: var(--c-brand-light); color: var(--c-brand); margin-bottom: var(--sp-12); }
+.card h3 { font-size: var(--fs-h4); margin-bottom: var(--sp-8); }
+.card p { color: var(--c-text-2); font-size: var(--fs-small); }
+.card p + p { margin-top: var(--sp-8); }
+
+/* Download page hero */
+.page-hero {
+  position: relative; overflow: hidden;
+  padding-top: clamp(32px, 5vw, 64px); padding-bottom: clamp(40px, 5vw, 64px);
+  background: linear-gradient(180deg, var(--c-surface) 0%, var(--c-bg) 100%);
+  border-bottom: 1px solid var(--c-border);
+}
+.page-hero:has(.page-hero__route) { padding-bottom: clamp(72px, 9vw, 120px); }
+.page-hero__inner { display: flex; flex-direction: column; gap: var(--sp-16); }
+.page-hero__inner h1 { font-size: var(--fs-h1); line-height: var(--lh-tight); }
+.page-hero__inner .eyebrow { margin-bottom: 0; }
+.page-hero__route { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: clamp(60px, 9vw, 120px); pointer-events: none; }
+.page-hero__route .road__edge { fill: none; stroke: var(--c-border-strong); stroke-width: 26; stroke-linecap: round; }
+.page-hero__route .road { fill: none; stroke: var(--c-surface-3); stroke-width: 22; stroke-linecap: round; }
+.page-hero__route .road__centre { fill: none; stroke: var(--c-surface); stroke-width: 2; stroke-dasharray: 10 12; }
+.page-hero__route .route-line { fill: none; stroke: var(--c-safety); stroke-width: 4; stroke-linecap: round; opacity: .9; }
+
+/* Small screens: never let wide rows push the page sideways */
+@media (max-width: 480px) {
+  .hm-hero__cta .btn, .page-hero .cluster .btn { width: 100%; }
+  .hm-cta .cluster { flex-direction: column; align-items: stretch; }
+  .hm-cta .cluster .btn { width: 100%; }
+}
+
+/* Page hero sits below the fixed header: .site-main already reserves the header height. */
+.hm-hero--page { padding-top: clamp(40px, 6vw, 80px); }
+
+.hm-hero--page .pg-jump { margin-top: var(--sp-24); }
+.hm-cta .btn--primary { color: #174D37 !important; }
+/* Section eyebrows keep their small label style inside .hm-head (its lead-paragraph rule is broader). */
+.hm-head > p.eyebrow { font-size: var(--fs-xs); color: var(--c-brand); margin-top: 0; max-width: none; line-height: var(--lh-body); }
+.hm-head > p.eyebrow--safety { color: var(--c-safety-ink); }
+.hm-head > p.cluster { margin-top: 0; margin-bottom: var(--sp-16); }
+.hm-head > p.cluster .eyebrow { margin-bottom: 0; }

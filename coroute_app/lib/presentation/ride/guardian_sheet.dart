@@ -263,7 +263,7 @@ class _GuardianSheetState extends State<_GuardianContent> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Guardians can view the information you share, but cannot control the ride. Fuel and contacts remain private.',
+                  'Guardians only see what you share. Fuel and contacts stay private.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.4, color: DsHeroCard.secondary),
                 ),
@@ -280,7 +280,7 @@ class _GuardianSheetState extends State<_GuardianContent> {
               value: _groupConsent,
               title: Text('Include me in Guardian group sharing', style: AppText.body.copyWith(fontSize: 16, fontWeight: FontWeight.w700)),
               subtitle: Text(
-                'Allow the lead to share my status, location and emergency updates through group links. Turning this off removes me from existing group links.',
+                'Let the Lead share my status and location in group links.',
                 style: AppText.caption,
               ),
               onChanged: _busy
@@ -335,7 +335,7 @@ class _GuardianSheetState extends State<_GuardianContent> {
           ),
           const SizedBox(height: 10),
           Text(
-            'Links expire at the selected time or 6 hours after the ride ends, whichever comes first. The lead can shorten the group limit. Browser alerts require support, server configuration and permission.',
+            'Links end at the time you pick, or 6 h after the ride.',
             style: AppText.caption,
           ),
           const SizedBox(height: 18),
@@ -377,7 +377,7 @@ class _GuardianSheetState extends State<_GuardianContent> {
             activeColor: AppTheme.brand,
             controlAffinity: ListTileControlAffinity.leading,
             title: Text(
-              'Anyone with this link can view the selected information until it expires or I revoke it.',
+              'Anyone with this link can see it until it ends or I stop it.',
               style: AppText.body.copyWith(fontSize: 14),
             ),
             onChanged: _busy
@@ -413,7 +413,7 @@ class _GuardianSheetState extends State<_GuardianContent> {
                       const SizedBox(width: Space.s8),
                       Expanded(
                         child: Text(
-                          'Share now. For privacy, the original link cannot be recovered after this sheet closes.',
+                          'Share it now. The link cannot be shown again later.',
                           style: AppText.body.copyWith(fontSize: 14, fontWeight: FontWeight.w700),
                         ),
                       ),

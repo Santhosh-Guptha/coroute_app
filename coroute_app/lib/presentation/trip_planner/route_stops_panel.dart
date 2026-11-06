@@ -24,16 +24,6 @@ class RouteStopsPanel extends StatefulWidget {
   final bool shrinkWrap;
   const RouteStopsPanel({super.key, required this.convoy, this.shrinkWrap = false});
 
-  /// Kept for one release for older callers; new code uses [StopKind].
-  static const Map<String, IconData> categoryIcons = {
-    'FUEL': Icons.local_gas_station_rounded,
-    'FOOD': Icons.restaurant_rounded,
-    'REST': Icons.airline_seat_recline_normal_rounded,
-    'SCENIC': Icons.landscape_rounded,
-    'TOLL': Icons.toll_rounded,
-    'OTHER': Icons.place_rounded,
-  };
-
   @override
   State<RouteStopsPanel> createState() => _RouteStopsPanelState();
 }

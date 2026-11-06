@@ -11,6 +11,8 @@ const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 const { toWire, toGpx, filterPoints, validateChunk, uploadPermission, TrackError } = require('./tracks');
 const { registerSubscriptionPublicRoutes, registerSubscriptionAuthRoutes } = require('./subscription_routes');
 const { registerMembershipPublicRoutes, registerMembershipAuthRoutes } = require('./membership_routes');
+const { registerAdminAnalyticsRoutes, registerPublicUsageRoutes, maxTripsFor } = require('./admin_analytics');
+const { adminGrantPlan, adminRevokePlan } = require('./subscription_routes');
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -31,6 +33,50 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
 
   const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many attempts, try again later.' } });
   const apiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 240, standardHeaders: 'draft-7', legacyHeaders: false });
+  const diagSubmitLimiter = rateLimit({
+    windowMs: 24 * 60 * 60 * 1000,
+    limit: 5,
+    skipFailedRequests: true,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: (req) => req.user?.userId || req.ip,
+    message: { error: 'Rate limit exceeded: max 5 diagnostic submissions per day.' },
+  });
+
+  const PROHIBITED_DIAGNOSTIC_KEYS = [
+    'imei',
+    'serial',
+    'serialnumber',
+    'contacts',
+    'contactlist',
+    'messages',
+    'smslist',
+    'audio',
+    'audiorecording',
+    'recordedvoice',
+    'password',
+    'token',
+    'refreshtoken',
+    'accesstoken',
+    'continuousgps',
+    'gpstraces',
+    'rawcoordinates',
+    'exactpath',
+  ];
+
+  function containsProhibitedDiagnosticKeys(obj) {
+    if (!obj || typeof obj !== 'object') return false;
+    for (const [k, v] of Object.entries(obj)) {
+      const cleanKey = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const p of PROHIBITED_DIAGNOSTIC_KEYS) {
+        if (cleanKey.includes(p)) return true;
+      }
+      if (v && typeof v === 'object') {
+        if (containsProhibitedDiagnosticKeys(v)) return true;
+      }
+    }
+    return false;
+  }
 
   // ---- public ----
   r.get('/health', wrap(async (req, res) => {
@@ -49,9 +95,11 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // App metadata: version gate + links. Public, cacheable.
   r.get('/meta', (req, res) => {
     const origin = config.publicOrigin || `${req.protocol}://${req.get('host')}`;
+    const pkgVersion = require('../package.json').version;
     res.set('Cache-Control', 'no-cache').json({
       minBuild: config.minAppBuild,
       latestBuild: config.latestAppBuild,
+      version: pkgVersion,
       downloadUrl: `${origin}/download`,
       privacyUrl: `${origin}/privacy`,
       termsUrl: `${origin}/terms`,
@@ -63,12 +111,19 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   });
 
   r.post('/auth/register', authLimiter, wrap(async (req, res) => res.status(201).json(await auth.register(req.body || {}))));
-  r.post('/auth/login', authLimiter, wrap(async (req, res) => res.json(await auth.login(req.body || {}))));
+  // Wrong passwords are also limited per account (an attacker rotating IPs), correct logins do not count.
+  const loginIdLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, limit: 10, skipSuccessfulRequests: true, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `login:${String(req.body?.identifier || '').trim().toLowerCase().slice(0, 120)}`,
+    message: { error: 'Too many attempts, try again later.' },
+  });
+  r.post('/auth/login', authLimiter, loginIdLimiter, wrap(async (req, res) => res.json(await auth.login(req.body || {}))));
   r.post('/auth/google', authLimiter, wrap(async (req, res) => res.json(await auth.loginWithGoogle(req.body || {}))));
   r.post('/auth/guest', authLimiter, wrap(async (req, res) => res.json(await auth.loginAsGuest(req.body || {}))));
 
   // ---- website endpoints (public, rate-limited, no cookies, no personal data stored for analytics) ----
   const siteLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false });
+  // /community-stories and /public/community-stories (approved rider reviews only) are in membership_routes.js.
   const feedbackLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many messages from this network. Please try again later.' } });
 
   r.post('/pv', siteLimiter, express.text({ type: '*/*', limit: '2kb' }), wrap(async (req, res) => {
@@ -114,12 +169,19 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // says anything about other links. Views are audited at most once per link per 5 minutes (no IP, no token).
   const liveLimiter = publicLiveLimiter || rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests.' } });
   const viewAudited = new Map(); // hash -> last audit time
-  r.get('/public/live/:token', liveLimiter, (req, res) => {
+  r.get('/public/live/:token', liveLimiter, wrap(async (req, res) => {
     res.set('Cache-Control', 'no-store').set('X-Robots-Tag', 'noindex').set('Referrer-Policy', 'no-referrer');
     const token = liveTokenOf(req.params.token);
     if (!token) return res.status(404).json({ error: 'Not found' });
     const hash = sha256(token);
-    const view = convoys.liveView(hash);
+    // The page /e/<token> also shows links made by the emergency SMS gateway: its 30 s refresh
+    // must find them here too (it used to get 410 and told the guardian the link had expired).
+    let view = await convoys.liveViewLoaded(hash);
+    if (!view && emergencyGateway && typeof emergencyGateway.liveView === 'function') {
+      const g = emergencyGateway.liveView(hash);
+      // Public: position and times only, never medical details.
+      if (g) view = { firstName: g.firstName, lat: g.lat, lng: g.lng, at: g.at, active: true, expiresAt: g.expiresAt };
+    }
     if (!view) return res.status(410).json({ error: 'This link has expired.' });
     const t = Date.now();
     if (audit && t - (viewAudited.get(hash) || 0) >= 5 * 60000) {
@@ -129,20 +191,31 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       if (viewAudited.size > 2000) for (const [k, at] of viewAudited) if (t - at >= 5 * 60000) viewAudited.delete(k);
     }
     res.json(view);
-  });
+  }));
 
   // Razorpay webhook endpoint (public, HMAC-signature authenticated)
   registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap });
   registerMembershipPublicRoutes({ r, repo, wrap });
+  // Aggregated, PII-free usage numbers for the website (cached 5 min).
+  registerPublicUsageRoutes({ r, repo, wrap });
 
   // ---- authenticated ----
   r.use(requireAuth(gate), apiLimiter);
+  // Sliding session on EVERY authenticated call (not only /me): a phone that stays on one long
+  // multi-day ride (sockets, telemetry, SOS) without reopening the app is never signed out by
+  // token age mid-ride. Signed from the database document (current role and password version).
+  r.use((req, res, next) => {
+    if (req.dbUser && req.tokenIssuedAt && Date.now() - req.tokenIssuedAt > config.tokenRefreshAfterHours * 3600000) {
+      try { res.set('X-CoRoute-Token', auth.issueToken(req.dbUser)); } catch { /* never in the way */ }
+    }
+    next();
+  });
 
   r.get('/me', wrap(async (req, res) => {
     const me = await auth.me(req.user.userId, { appBuild: parseInt(req.get('X-CoRoute-Build') || '0', 10) });
     // Sliding session: a rider who opens the app at least once a month is never signed out.
     // The new token is built from the database user, so role changes take effect too.
-    if (Date.now() - (req.tokenIssuedAt || 0) > config.tokenRefreshAfterHours * 3600000) {
+    if (!res.get('X-CoRoute-Token') && Date.now() - (req.tokenIssuedAt || 0) > config.tokenRefreshAfterHours * 3600000) {
       // Signed from the database document so the token carries the current password version.
       res.set('X-CoRoute-Token', auth.issueToken(req.dbUser || me));
     }
@@ -158,6 +231,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     if (hub) hub.disconnectUser(user.userId, 4401, 'ACCOUNT_GONE');
     // 3.15: out of every safety network incident (their own ones close; queued audit rows dropped).
     if (network) network.forgetUser(user.userId);
+    const gwSms = emergencyGateway || convoys?.emergencyGateway;
+    if (gwSms && typeof gwSms.revokeLinksFor === 'function') gwSms.revokeLinksFor(user.userId);
     await convoys.leaveAll(user.userId);
     if (timeline) await timeline.idle();
     const id = identity(user);
@@ -179,6 +254,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     if (req.user?.provider === 'guest' || (req.user?.userId || '').startsWith('guest_')) return;
     const u = req.dbUser || await repo.findUserById(req.user.userId);
     if (!u) return;
+    if (u.provider === 'guest') return; // guest ids are ordinary usr_ ids: the account says it is a guest
     const isPillion = (u.vehicleType || '').trim().toLowerCase() === 'pillion rider' || (u.vehicleNo || '').trim().toUpperCase() === 'PILLION';
     const complete = Boolean(
       (u.name || '').trim().length >= 2 &&
@@ -253,21 +329,29 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     res.json({ ok: true });
   }));
   // Server-Side Emergency SMS & WhatsApp Web Gateway (FEAT-08)
+  // Per account: an SOS plus a few retries; a phone retrying the same dispatch within a minute gets the first result.
+  const dispatchLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000, limit: 8, standardHeaders: 'draft-7', legacyHeaders: false,
+    keyGenerator: (req) => `sosx:${req.user.userId}`, message: { error: 'Too many emergency dispatches. Call 112 directly.', code: 'RATE_LIMITED' },
+  });
+  const recentDispatch = new Map(); // `${userId}|${numbers}` -> { at, out }
+  const SEVERITIES = new Set(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
   const dispatchExternalHandler = wrap(async (req, res) => {
     const gw = emergencyGateway || convoys?.emergencyGateway;
     if (!gw) {
       return res.status(503).json({ error: 'Emergency gateway service is unavailable.', code: 'GATEWAY_UNAVAILABLE' });
     }
     const b = req.body || {};
-    const riderId = String(b.riderId || req.user?.userId || '').trim();
-    const riderName = String(b.riderName || req.user?.name || 'CoRoute Rider').trim();
+    // Always the signed-in rider: a body riderId would read (and text) another account's emergency contact.
+    const riderId = req.user.userId;
+    const riderName = String(req.user?.name || b.riderName || 'CoRoute Rider').trim().slice(0, 60);
     const lat = Number(b.lat);
     const lng = Number(b.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
       return res.status(400).json({ error: 'Valid lat (-90..90) and lng (-180..180) are required.', code: 'INVALID_COORDINATES' });
     }
 
-    let contacts = Array.isArray(b.contacts) ? b.contacts : [];
+    let contacts = Array.isArray(b.contacts) ? b.contacts.slice(0, 10) : [];
     if (contacts.length === 0 && repo && riderId) {
       const u = await repo.findUserById(riderId).catch(() => null);
       if (u?.emergencyContact) {
@@ -279,23 +363,39 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       return res.status(400).json({ error: 'No emergency contacts provided or found on profile.', code: 'NO_CONTACTS' });
     }
 
+    const numbers = contacts.map((c) => String((c && (c.phone || c.number)) || '').replace(/[^0-9]/g, '').slice(-10)).filter(Boolean).sort().join(',');
+    const key = `${riderId}|${numbers}`;
+    const t = Date.now();
+    for (const [k, v] of recentDispatch) if (t - v.at >= 60000) recentDispatch.delete(k);
+    const prev = recentDispatch.get(key);
+    if (prev) return res.status(200).json({ ...prev.out, duplicate: true });
+    // Only a link to this server's own live page is put into the text (never a URL the client chose).
+    const own = `${originOf(req)}/e/`;
+    const trackingUrl = typeof b.trackingUrl === 'string' && b.trackingUrl.startsWith(own) && liveTokenOf(b.trackingUrl.slice(own.length)) ? b.trackingUrl : null;
+    const severity = SEVERITIES.has(String(b.severity || '').toUpperCase()) ? String(b.severity).toUpperCase() : 'CRITICAL';
     const out = await gw.dispatchExternal({
-      tripId: b.tripId || `trip-${Date.now()}`,
+      tripId: (typeof b.tripId === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(b.tripId)) ? b.tripId : `trip-${t}`,
       riderId,
       riderName,
       lat,
       lng,
-      speedKmh: Number(b.speedKmh) || 0,
+      speedKmh: Math.max(0, Math.min(300, Number(b.speedKmh) || 0)),
       contacts,
-      severity: b.severity || 'CRITICAL',
-      bloodGroup: b.bloodGroup || '',
-      trackingUrl: b.trackingUrl || null,
+      severity,
+      bloodGroup: typeof b.bloodGroup === 'string' ? b.bloodGroup.slice(0, 4) : '',
+      trackingUrl,
     });
+    if (out && out.dispatched) recentDispatch.set(key, { at: t, out });
 
     res.status(200).json(out);
   });
-  r.post('/v1/sos/dispatch-external', dispatchExternalHandler);
-  r.post('/sos/dispatch-external', dispatchExternalHandler);
+  // The rider is safe: every standalone tracking link the gateway made for them stops working.
+  r.delete('/v1/sos/live-links', wrap(async (req, res) => {
+    const gw = emergencyGateway || convoys?.emergencyGateway;
+    res.json({ revoked: gw && typeof gw.revokeLinksFor === 'function' ? gw.revokeLinksFor(req.user.userId) : 0 });
+  }));
+  r.post('/v1/sos/dispatch-external', dispatchLimiter, dispatchExternalHandler);
+  r.post('/sos/dispatch-external', dispatchLimiter, dispatchExternalHandler);
 
   r.post('/convoys/:groupId/leave', wrap(async (req, res) => { await convoys.leave(req.params.groupId, req.user.userId); res.json({ ok: true }); }));
 
@@ -352,10 +452,12 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     const existing = await repo.getTrip(t.tripId);
     if (existing && (existing.source === 'server' || existing.userId !== req.user.userId)) return res.status(200).json({ ok: true, kept: 'server' });
     if (!existing) {
+      // The admin can set a per-rider cap (PATCH /admin/users/:userId/config); otherwise the server default.
+      const cap = maxTripsFor(req.dbUser || await repo.findUserById(req.user.userId).catch(() => null));
       let count = 0;
-      try { count = await repo.countTripsForUser(req.user.userId, config.maxTripsPerUser); } catch { count = 0; }
-      if (count >= config.maxTripsPerUser) {
-        return res.status(409).json({ error: `You can keep up to ${config.maxTripsPerUser} trips. Delete old trips to save new ones.`, code: 'TOO_MANY_TRIPS' });
+      try { count = await repo.countTripsForUser(req.user.userId, Math.max(cap, 1)); } catch { count = 0; }
+      if (count >= cap) {
+        return res.status(409).json({ error: `You can keep up to ${cap} trips. Delete old trips to save new ones.`, code: 'TOO_MANY_TRIPS' });
       }
     }
     const trip = { ...t, source: 'device', userId: req.user.userId, savedAt: Date.now() };
@@ -662,6 +764,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       approved: items.filter((f) => f.status === 'APPROVED').length,
       rejected: items.filter((f) => f.status === 'REJECTED').length,
       withdrawn: items.filter((f) => f.status === 'WITHDRAWN').length,
+      changesRequested: items.filter((f) => f.status === 'CHANGES_REQUESTED' || f.status === 'NEEDS_CLARIFICATION').length,
       withPhotos: items.filter((f) => f.photoUrl && f.photoUrl.length > 0).length,
     };
     res.json({ summary, feedback: items });
@@ -817,13 +920,86 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   r.post('/admin/users/:userId/reset-password', requireAdmin, wrap(async (req, res) => res.json(await auth.adminResetPassword(req.user, req.params.userId))));
   r.delete('/admin/convoys/:groupId', requireAdmin, wrap(async (req, res) => { await convoys.adminDissolve(req.params.groupId); res.json({ ok: true, groupId: req.params.groupId }); }));
 
+  // ---- FEAT-DIAG-02: Diagnostic Report Submission ----
+  r.post('/diagnostics/submit', diagSubmitLimiter, wrap(async (req, res) => {
+    // 1. Check prohibited information
+    if (containsProhibitedDiagnosticKeys(req.body)) {
+      return res.status(400).json({ error: 'Prohibited information detected in diagnostic report.' });
+    }
+
+    // 2. Validate payload schema & consent
+    if (req.body.consentGiven !== true) {
+      return res.status(400).json({ error: 'Explicit rider consent is required to submit diagnostic reports.' });
+    }
+    if (!req.body.diagnosticId || typeof req.body.diagnosticId !== 'string') {
+      return res.status(400).json({ error: 'diagnosticId string is required.' });
+    }
+    if (!req.body.deviceInfo || typeof req.body.deviceInfo !== 'object') {
+      return res.status(400).json({ error: 'deviceInfo object is required.' });
+    }
+    if (!req.body.categories || typeof req.body.categories !== 'object') {
+      return res.status(400).json({ error: 'categories object is required.' });
+    }
+    if (!req.body.overallResult || typeof req.body.overallResult !== 'string') {
+      return res.status(400).json({ error: 'overallResult string is required.' });
+    }
+
+    const payload = {
+      ...req.body,
+      riderId: req.user?.userId || req.body.riderId,
+      riderEmail: req.user?.email || req.body.riderEmail,
+    };
+
+    try {
+      const result = await repo.submitDiagnostic(payload);
+      res.json(result);
+    } catch (err) {
+      if (err.statusCode === 429) {
+        return res.status(429).json({ error: err.message });
+      }
+      throw err;
+    }
+  }));
+
+  // ---- FEAT-DIAG-03: Admin Device Compatibility Dashboard ----
+  r.get('/admin/diagnostics', requireAdmin, wrap(async (req, res) => {
+    const stats = await repo.getDiagnosticStats();
+    const { reports, pagination } = await repo.listDiagnostics(req.query);
+    res.json({ ok: true, stats, reports, pagination });
+  }));
+
+  r.get('/admin/diagnostics/:id', requireAdmin, wrap(async (req, res) => {
+    const report = await repo.getDiagnostic(req.params.id);
+    if (!report) return res.status(404).json({ error: 'Diagnostic report not found' });
+    res.json({ ok: true, report });
+  }));
+
+  r.patch('/admin/diagnostics/:id', requireAdmin, wrap(async (req, res) => {
+    const updated = await repo.updateDiagnosticStatus(req.params.id, {
+      status: req.body?.status,
+      adminNotes: req.body?.adminNotes,
+      by: req.user?.email || req.user?.userId,
+    });
+    if (!updated) return res.status(404).json({ error: 'Diagnostic report not found' });
+    res.json({ ok: true, report: updated });
+  }));
+
   // Subscription and Razorpay UPI-only payment routes (including admin pricing & coupon management)
   registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin });
   registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin });
+  // Admin analytics (overview, riders, groups) and per-rider configuration (role, status, plan, limits).
+  registerAdminAnalyticsRoutes({
+    r, repo, convoys, auth, hub, gate, wrap, requireAdmin,
+    plans: {
+      grant: ({ req, userDoc, planTier, days, reason }) => adminGrantPlan({ repo, auth, hub, req, userDoc, planTier, days, reason }),
+      revoke: ({ req, userDoc, note }) => adminRevokePlan({ repo, auth, hub, req, userDoc, reason: note }),
+    },
+  });
 
   // Errors
   // eslint-disable-next-line no-unused-vars
   r.use((err, req, res, next) => {
+    if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) return res.status(err.statusCode).json({ error: err.message });
     if (err instanceof AuthError) return res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
     if (err instanceof ValidationError) return res.status(err.status).json({ error: err.message, code: err.code, fields: err.fields });
     if (err instanceof ConvoyError) return res.status(err.status).json({ error: err.message, ...(err.reason ? { code: err.reason, reason: err.reason } : {}) });

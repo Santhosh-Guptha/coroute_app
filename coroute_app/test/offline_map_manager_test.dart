@@ -153,7 +153,7 @@ void main() {
       await tester.pump();
 
       expect(find.textContaining('Z 12.0'), findsOneWidget);
-      expect(find.text('Regional corridor overview'), findsOneWidget);
+      expect(find.text('Route area'), findsOneWidget);
 
       // Tap Z17 Junctions
       await tester.tap(find.text('Z17 Junctions'));
@@ -176,7 +176,7 @@ void main() {
       expect(find.text('Offline Map Packs'), findsOneWidget);
       expect(find.text('Local Map Cache Storage'), findsOneWidget);
       expect(find.textContaining('of 200 MB used'), findsOneWidget);
-      expect(find.text('No Downloaded Corridors'), findsOneWidget);
+      expect(find.text('No offline maps yet'), findsOneWidget);
     });
 
     testWidgets('renders downloaded map packs with Verify and Delete actions', (tester) async {

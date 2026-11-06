@@ -254,14 +254,12 @@ void main() {
       ic.dispose();
     });
 
-    test('FeatureGates entitlement check prevents ducking when feature is locked', () async {
+    test('FeatureGates entitlement check verifies ducking is unlocked in single plan', () async {
       final rt = _TestRt();
       final ic = IntercomService(rt);
 
-      // Lock the feature
-      FeatureGates.forceAllUnlocked = false;
-      FeatureGates.activeTier = SubscriptionTier.community;
-      expect(FeatureGates.isUnlocked(Feature.priorityIntercomDucking), isFalse);
+      // In single plan, all features are unlocked for all riders
+      expect(FeatureGates.isUnlocked(Feature.priorityIntercomDucking), isTrue);
 
       // Casual chatter starts
       rt.emitVoice(VoicePacket(
@@ -272,7 +270,7 @@ void main() {
       await pumpEventQueue();
       expect(ic.activeSpeakerName, equals('Rider 1'));
 
-      // Lead transmits, but ducking entitlement is locked
+      // Lead transmits and preempts casual chatter
       rt.emitVoice(VoicePacket(
         VoiceKind.start,
         {'streamId': 'l1', 'from': 'lead1', 'fromName': 'Lead Rider', 'role': 'LEAD', 'sampleRate': 16000},
@@ -280,9 +278,9 @@ void main() {
       ));
       await pumpEventQueue();
 
-      // Casual chatter is NOT preempted because priorityIntercomDucking is locked
-      expect(ic.activeSpeakerName, equals('Rider 1'));
-      expect(ic.activeSpeakerIsLead, isFalse);
+      // Casual chatter is preempted by lead priority stream
+      expect(ic.activeSpeakerName, equals('Lead Rider'));
+      expect(ic.activeSpeakerIsLead, isTrue);
 
       ic.dispose();
     });

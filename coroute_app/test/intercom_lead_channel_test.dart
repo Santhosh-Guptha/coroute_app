@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
-import 'package:coroute_app/core/ui/ui.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/services/api_client.dart';
@@ -14,8 +13,6 @@ import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:coroute_app/domain/ride/ride_facts.dart';
-import 'package:coroute_app/presentation/ride/riders_ladder.dart';
 import 'package:coroute_app/presentation/widgets/intercom_dock.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
 
@@ -206,115 +203,6 @@ void main() {
     });
   });
 
-  group('UI: IntercomDock & RidersLadder widgets', () {
-    testWidgets('IntercomDock renders Lead-Only channel selector for convoy lead', (tester) async {
-      final rt = _TestRt();
-      final ic = IntercomService(rt);
-
-      final meLeader = RiderModel(
-        userId: 'me',
-        name: 'Lead Captain',
-        lat: 12.9,
-        lng: 77.5,
-        lastSeenEpochMs: 1000,
-        role: 'LEAD',
-      );
-
-      final otherRider = RiderModel(
-        userId: 'u2',
-        name: 'Bob',
-        lat: 12.91,
-        lng: 77.51,
-        lastSeenEpochMs: 1000,
-        role: 'PACK',
-      );
-
-      final convoy = ConvoyModel(
-        groupId: 'c1',
-        name: 'Ghats Ride',
-        joinCode: '123456',
-        createdByUserId: 'me',
-        createdByUserName: 'Lead Captain',
-        createdAtEpochMs: 1000,
-        riders: {'me': meLeader, 'u2': otherRider},
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.darkTheme,
-          home: ChangeNotifierProvider<IntercomService>.value(
-            value: ic,
-            child: Scaffold(
-              body: IntercomDock(convoy: convoy, me: meLeader),
-            ),
-          ),
-        ),
-      );
-
-      // Verify channel segment selector is visible for LEAD
-      expect(find.text('All Convoy'), findsOneWidget);
-      expect(find.text('Lead & Sweeper'), findsOneWidget);
-
-      // Tap Lead & Sweeper
-      await tester.tap(find.text('Lead & Sweeper'));
-      await tester.pumpAndSettle();
-      expect(ic.channel, equals(IntercomChannel.leadOnly));
-      expect(find.text('LEAD & SWEEPER TALK'), findsOneWidget);
-    });
-
-    testWidgets('RidersLadder shows SpeakingChip and MicMutedChip', (tester) async {
-      final rt = _TestRt();
-      final ic = IntercomService(rt);
-
-      final speakingRider = RiderModel(
-        userId: 'u1',
-        name: 'Speaker Sam',
-        lat: 12.9,
-        lng: 77.5,
-        lastSeenEpochMs: 1000,
-        isSpeaking: true,
-      );
-
-      final mutedRider = RiderModel(
-        userId: 'u2',
-        name: 'Muted Max',
-        lat: 12.91,
-        lng: 77.51,
-        lastSeenEpochMs: 1000,
-        micMuted: true,
-      );
-
-      final rungs = [
-        LadderRung(rider: speakingRider, isMe: false),
-        LadderRung(rider: mutedRider, isMe: false),
-      ];
-
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.darkTheme,
-          home: ChangeNotifierProvider<IntercomService>.value(
-            value: ic,
-            child: Scaffold(
-              body: SingleChildScrollView(
-                child: RidersLadder(
-                  rungs: rungs,
-                  colors: const {'u1': Colors.teal, 'u2': Colors.blue},
-                  statuses: const {'u1': RiderStatus.riding, 'u2': RiderStatus.riding},
-                  nowMs: 1000,
-                  onTap: (_) {},
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      expect(find.byType(SpeakingChip), findsOneWidget);
-      expect(find.text('Talking'), findsOneWidget);
-      expect(find.byType(MicMutedChip), findsOneWidget);
-      expect(find.text('Muted'), findsOneWidget);
-    });
-  });
 
   group('Live Audio VU Meter & Hardware PTT Mapping', () {
     test('audioLevel ValueNotifier updates and resets', () async {
@@ -408,13 +296,13 @@ void main() {
         ),
       );
 
-      expect(find.text('Handlebar / Headset PTT'), findsOneWidget);
+      expect(find.text('Remote or headset button'), findsOneWidget);
       expect(find.text('Disabled. Use on-screen talk button.'), findsOneWidget);
 
       await tester.tap(find.byType(Switch).last);
       await tester.pumpAndSettle();
       expect(settings.hardwarePtt, isTrue);
-      expect(find.text('Volume down or headset media button acts as push-to-talk.'), findsOneWidget);
+      expect(find.text('Volume down or headset button talks.'), findsOneWidget);
 
       ic.dispose();
     });

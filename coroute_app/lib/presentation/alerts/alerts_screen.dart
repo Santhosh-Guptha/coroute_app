@@ -184,7 +184,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
   }
 }
 
-/// Canvas filter pill: 38 px, fully round, 2 px border; selected = solid teal.
+/// Canvas filter pill: 48 px, fully round, 2 px border; selected = solid teal.
 class _FilterPill extends StatelessWidget {
   final String label;
   final IconData? icon;
@@ -205,8 +205,9 @@ class _FilterPill extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           child: Container(
-            constraints: const BoxConstraints(minHeight: 44),
-            padding: const EdgeInsets.symmetric(horizontal: 14),
+            // 48 dp: tapped with riding gloves.
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -379,7 +380,7 @@ class _AlertsList extends StatelessWidget {
       return EmptyState(
         icon: Icons.check_circle_outline_rounded,
         title: 'All clear',
-        message: 'Nothing needs your attention. Every event of this ride is in the timeline.',
+        message: 'All clear. See the timeline for ride events.',
         primaryLabel: 'Open timeline',
         onPrimary: onOpenTimeline,
       );
@@ -553,7 +554,7 @@ class _AlertCard extends StatelessWidget {
                             TextButton.icon(
                               onPressed: onCall,
                               style: TextButton.styleFrom(
-                                minimumSize: const Size(48, 44),
+                                minimumSize: const Size(48, 48),
                                 padding: const EdgeInsets.symmetric(horizontal: 8),
                                 foregroundColor: AppTheme.accentText,
                               ),

@@ -18,7 +18,7 @@ process.env.TIMELINE_TICK_MS = '3600000';
 process.env.RIDER_PERSIST_INTERVAL_MS = '20';
 process.env.BOOTSTRAP_ADMIN_EMAILS = 'privacyadmin@coroute.test';
 
-const { netBoot, line, E_LAT, sleep } = require('./_net_helpers');
+const { netBoot, line, E_LAT } = require('./_net_helpers');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');

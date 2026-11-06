@@ -4,8 +4,6 @@ class AppConstants {
 
   // DevMonks.space branding
   static const String brandName = 'devmonks.space';
-  static const String brandUrl = 'https://devmonks.space';
-  static const String brandTagline = 'Engineered by devmonks.space';
 
   // Roles are assigned by the server (stored in the database), never decided in the app.
   static const String adminRole = 'MASTER_ADMIN';
@@ -29,6 +27,9 @@ class AppConstants {
   static const String keyEmergencyContact = 'coroute_emergency_contact';
   static const String keyEmergencyName = 'coroute_emergency_name';
   static const String keyActiveGroupId = 'coroute_active_group_id';
+  /// Convoys this phone left while offline: the leave is sent again later, so the server
+  /// releases the single-active-trip lock and the next ride can be created or joined.
+  static const String keyPendingLeaves = 'coroute_pending_leaves';
   static const String keyTripHistory = 'coroute_trip_history_v3';
   /// An SOS the convoy has not confirmed yet (sent again after reconnecting).
   static const String keyPendingSos = 'coroute_pending_sos';
@@ -37,6 +38,9 @@ class AppConstants {
   /// Pre-ride checklist: "do not show again until" (epoch ms).
   static const String keyChecklistSkipUntil = 'coroute_checklist_skip_until';
   static const Duration checklistSkipFor = Duration(hours: 24);
+  /// Durable offline membership cache keys (ISSUE-10)
+  static const String keyMembershipCache = 'coroute_membership_cache_v1';
+  static const String keyMembershipCatalogCache = 'coroute_membership_catalog_cache_v1';
   /// Below this battery level the pre-ride checklist suggests charging first.
   static const int lowBatteryPercent = 30;
 

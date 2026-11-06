@@ -29,8 +29,6 @@ const { buildTripReport } = require('./report');
 const { scrub, mentions } = require('./anonymise');
 const { ConvoyError, sourceOf } = require('./convoys');
 
-const INTERVAL_TYPES = new Set(['STOPPED', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'SOS', 'CORIDE', 'MOVING', 'STOP_REACHED', 'DESTINATION_REACHED', 'OVERSPEED', 'POSSIBLE_INCIDENT', 'NO_REPLY',
-  'STALE_UPDATE', 'LOW_BATTERY', 'BEHIND_SWEEPER', 'CONVOY_SPLIT', 'REGROUP', 'SWEEPER_DISTRESS']);
 /** Stale rule: gaps longer than this are dead zones, not the rider's rhythm; ring of the last GAP_RING gaps. */
 const GAP_MAX_S = 300;
 const GAP_RING = 10;
@@ -1264,4 +1262,4 @@ function median(list) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-module.exports = { TimelineEngine, visibleWindow, eventVisible, publicEvent, INTERVAL_TYPES };
+module.exports = { TimelineEngine, visibleWindow, eventVisible, publicEvent };

@@ -113,7 +113,7 @@ class _RideFeatureSummaryState extends State<RideFeatureSummary> {
             ),
           const SizedBox(height: 10),
           Text(
-            'Sharing counts exclude stale estimates. Disabled features do not disable emergency actions.',
+            'Turning features off never turns off SOS.',
             style: AppText.caption,
           ),
         ],

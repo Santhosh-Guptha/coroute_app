@@ -104,6 +104,24 @@ class BleRemoteService extends ChangeNotifier {
   int? get batteryLevel => batteryLevelNotifier.value;
   BleRemoteEvent? get lastEvent => lastEventNotifier.value;
 
+  bool _bluetoothRevoked = false;
+  bool get isBluetoothRevoked => _bluetoothRevoked;
+
+  /// Handles runtime Bluetooth permission revocation during an active ride.
+  void onBluetoothRevoked() {
+    _bluetoothRevoked = true;
+    statusNotifier.value = BleRemoteStatus.disconnected;
+    notifyListeners();
+  }
+
+  /// Restores Bluetooth remote listening when permission is re-granted.
+  void onBluetoothRestored() {
+    if (!_bluetoothRevoked) return;
+    _bluetoothRevoked = false;
+    statusNotifier.value = BleRemoteStatus.listening;
+    notifyListeners();
+  }
+
   // Multi-press timing engine
   int _pressCount = 0;
   Timer? _multiClickTimer;

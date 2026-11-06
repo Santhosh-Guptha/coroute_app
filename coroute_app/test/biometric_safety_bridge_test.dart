@@ -20,12 +20,12 @@ void main() {
 
   group('FEAT-04: BiometricSafetyBridge Core Logic & Gating', () {
     test('TEST-BIO-01: Pro & Road Captain Tier Entitlement Gating', () {
-      // Community: locked
+      // In single-plan architecture, all features are unlocked for all riders
       expect(
         FeatureGates.isUnlocked(Feature.biometricTraumaPulse, SubscriptionTier.community),
-        isFalse,
+        isTrue,
       );
-      expect(FeatureGates.requiredTier(Feature.biometricTraumaPulse), equals(SubscriptionTier.proRider));
+      expect(FeatureGates.requiredTier(Feature.biometricTraumaPulse), equals(SubscriptionTier.community));
 
       // Pro Rider: unlocked
       expect(

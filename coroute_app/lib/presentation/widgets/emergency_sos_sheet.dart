@@ -83,9 +83,9 @@ class EmergencySosSheet extends StatelessWidget {
   static (String, String) textFor(SosSheetStatus status) {
     switch (status) {
       case SosSheetStatus.delivered:
-        return ('SOS delivered to your convoy', 'Your convoy can see where you are. You can also call or text your emergency contact.');
+        return ('SOS sent to your group', 'Your group can see where you are. You can also call or text your contact.');
       case SosSheetStatus.sending:
-        return ('Sending your SOS to the convoy...', 'Keep the app open. You can also call or text your emergency contact below.');
+        return ('Sending your SOS to your group...', 'Keep the app open. You can also call or text your emergency contact below.');
       case SosSheetStatus.waitingForSignal:
         return (
           'No signal. SOS not sent yet',
@@ -135,12 +135,14 @@ class EmergencySosSheet extends StatelessWidget {
       if (known != null && known != convoyService.myOpenSosAlertId) convoyService.resolveSosAlert(known, reason: reason);
       convoyService.cancelMySos(reason: reason);
     }
+    // An offline solo ride's SOS lives on the phone only (3.54).
+    Provider.of<SafetyService?>(context, listen: false)?.resolveOfflineSoloSos();
     onResolved?.call();
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (context.mounted) Navigator.pop(context);
     messenger?.clearSnackBars();
     messenger?.showSnackBar(SnackBar(
-      content: Text(reason == ResolveReason.falseAlarm ? 'SOS cancelled. Your convoy sees that it was a false alarm.' : 'SOS closed. Your convoy sees that help reached you.'),
+      content: Text(reason == ResolveReason.falseAlarm ? 'SOS cancelled. Your group sees it was a false alarm.' : 'SOS closed. Your group sees help reached you.'),
     ));
   }
 
@@ -216,7 +218,9 @@ class EmergencySosSheet extends StatelessWidget {
       (s) => (s?.smsStatus, s?.smsAvailable ?? false),
     );
     final smsLine = smsStatus?.text ?? '';
-    final showSmsButton = smsOn && pending && status != SosSheetStatus.delivered;
+    // 3.54: an offline solo ride's SOS has no group; the button opens the text to the emergency contact.
+    final soloSos = context.select<SafetyService?, bool>((s) => s?.offlineSoloSos != null);
+    final showSmsButton = (smsOn && pending && status != SosSheetStatus.delivered) || soloSos;
     final (netLine, netPositive) = context.select<ConvoyService?, (String?, bool)>(networkLineOf);
     // 3.16: the nearest hospital of my open alert, and the live link for it (3.16 gateway only).
     final hospital = context.select<ConvoyService?, NearbyPlace?>(hospitalOf);
@@ -390,7 +394,7 @@ class EmergencySosSheet extends StatelessWidget {
             ],
             if (showSmsButton) ...[
               DsButton(
-                label: 'Text the group now',
+                label: soloSos ? 'Text my emergency contact' : 'Text the group now',
                 icon: Icons.sms_outlined,
                 tone: DsButtonTone.outline,
                 fontSize: 15,
@@ -473,7 +477,7 @@ class EmergencySosSheet extends StatelessWidget {
                         backgroundColor: AppTheme.card,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         title: const Text('Cancel SOS?'),
-                        content: const Text('Confirm that help has reached you and your distress beacon can be turned off.'),
+                        content: const Text('Has help reached you? Your SOS will turn off.'),
                         actions: [
                           TextButton(
                             onPressed: () {
@@ -512,7 +516,7 @@ class EmergencySosSheet extends StatelessWidget {
                         backgroundColor: AppTheme.card,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         title: const Text('Cancel as False Alarm?'),
-                        content: const Text('Confirm that this SOS was triggered accidentally and you are safe.'),
+                        content: const Text('Was this SOS a mistake and you are safe?'),
                         actions: [
                           TextButton(
                             onPressed: () {

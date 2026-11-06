@@ -196,7 +196,7 @@ Future<void> showDiscoverySheet(BuildContext context, Encounter e, {required Voi
               line(Icons.groups_rounded, DiscoveryTexts.size(e)),
               line(Icons.alt_route_rounded, DiscoveryTexts.how(e)),
               if (meet != null) line(Icons.schedule_rounded, meet),
-              Text('A public riding group that also chose to be seen. Only its name and rider count are shared, never positions.', style: AppText.caption),
+              Text('A public group nearby. Only name and rider count, never positions.', style: AppText.caption),
               const SizedBox(height: Space.s16),
               DsButton(
                 icon: Icons.waving_hand_rounded,

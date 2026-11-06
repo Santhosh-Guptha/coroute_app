@@ -138,7 +138,12 @@ class DsSectionHeader extends StatelessWidget {
     if (trailing == null) return label;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [label, trailing!],
+      children: [
+        // Flexible so a long header or a large text scale wraps instead of overflowing.
+        Flexible(child: label),
+        const SizedBox(width: Space.s8),
+        trailing!,
+      ],
     );
   }
 }
@@ -165,7 +170,8 @@ class DsScreenHeader extends StatelessWidget {
     return Row(
       children: [
         if (onBack != null) ...[
-          DsRoundButton(icon: Icons.chevron_left_rounded, label: backLabel, onTap: onBack!),
+          // 48 dp: the back button is pressed with gloves on.
+          DsRoundButton(icon: Icons.chevron_left_rounded, label: backLabel, onTap: onBack!, size: 48),
           const SizedBox(width: 12),
         ],
         Expanded(
@@ -471,8 +477,21 @@ class DsListRow extends StatelessWidget {
             const SizedBox(width: 12),
           ],
           Expanded(child: Text(label, style: AppText.body.copyWith(fontWeight: FontWeight.w700))),
-          if (value != null)
-            Text(value!, style: AppText.body.copyWith(fontWeight: FontWeight.w800, color: valueColor ?? AppTheme.accentText)),
+          if (value != null) ...[
+            const SizedBox(width: Space.s8),
+            // Capped so a long value ("Manage & service") at a large text
+            // scale wraps on the right instead of overflowing the row.
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 150),
+              child: Text(
+                value!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.end,
+                style: AppText.body.copyWith(fontWeight: FontWeight.w800, color: valueColor ?? AppTheme.accentText),
+              ),
+            ),
+          ],
           ?trailing,
           if (onTap != null) Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
         ],
@@ -573,6 +592,9 @@ class DsSegment<T> extends StatelessWidget {
                   child: Center(
                     child: Text(
                       label(values[i]),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         color: values[i] == selected ? Colors.white : AppTheme.text,
                         fontSize: 15,

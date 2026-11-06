@@ -111,7 +111,7 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
                         child: Text(
                           'If you have an accident, CoRoute can also ask one to three riders from other groups who are already riding towards you, '
                           'when they may reach you faster than your own group. They see only where you are and how far. '
-                          'Your name and vehicle are shared only after one of them accepts. Your phone number is never shared.',
+                          'Name and bike are shared only after one accepts. Never your phone number.',
                           style: AppText.body,
                         ),
                       ),

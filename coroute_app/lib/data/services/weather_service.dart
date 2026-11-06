@@ -86,12 +86,24 @@ class WeatherService extends ChangeNotifier {
   Future<WeatherSummary?>? _inFlight;
   String? _inFlightKey;
   bool _checking = false;
+  bool _weatherUnavailable = false;
 
   /// The latest answer (the ride sheet shows its line while [WeatherSummary.rain]).
   WeatherSummary? get last => _last;
 
   /// A request is on its way ("Checking weather...").
   bool get checking => _checking;
+
+  /// True when weather information could not be retrieved (e.g. offline, network drop, or error).
+  bool get isUnavailable => _weatherUnavailable;
+
+  /// Allows setting or mocking the unavailable state directly.
+  void setUnavailable(bool val) {
+    if (_weatherUnavailable != val) {
+      _weatherUnavailable = val;
+      notifyListeners();
+    }
+  }
 
   /// Samples: the start, up to [max] - 2 points spread along the route (named after a
   /// planned stop within [SafetyConstants.weatherStopNearM], else ''), and the destination.
@@ -206,8 +218,10 @@ class WeatherService extends ChangeNotifier {
         out = summarise(pts, readings, fetchedAt: _clock(), attribution: attribution);
       }
     } on ApiException catch (e) {
+      _weatherUnavailable = true;
       debugPrint('weather note: ${e.statusCode} ${e.code ?? ''}');
     } catch (e) {
+      _weatherUnavailable = true;
       debugPrint('weather note: ${e.runtimeType}');
     } finally {
       _checking = false;
@@ -215,8 +229,11 @@ class WeatherService extends ChangeNotifier {
       _inFlightKey = null;
     }
     if (out != null) {
+      _weatherUnavailable = false;
       _last = out;
       _lastKey = key;
+    } else {
+      _weatherUnavailable = true;
     }
     notifyListeners();
     return out;

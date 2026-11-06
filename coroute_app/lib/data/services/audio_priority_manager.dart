@@ -341,9 +341,10 @@ class AudioPriorityManager extends ChangeNotifier {
         ? item.text.substring(0, NotifConstants.voiceMaxChars)
         : item.text;
 
+    final isEmergency = item.priority == AudioPriority.p0CriticalEmergency;
     bool success = false;
     try {
-      success = await _engine.speak(said, interrupt: interrupt, id: item.id);
+      success = await _engine.speak(said, interrupt: interrupt, id: item.id, isEmergency: isEmergency);
     } catch (_) {
       success = false;
     }

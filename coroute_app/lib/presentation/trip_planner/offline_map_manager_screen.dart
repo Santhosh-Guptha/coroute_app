@@ -59,7 +59,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text('Delete Map Pack?', style: AppText.headline),
           content: Text(
-            'Delete "${pack.name}"? Cached tiles will be removed to free storage.',
+            'Delete "${pack.name}"? This frees space.',
             style: AppText.body,
           ),
           actions: [
@@ -114,7 +114,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text('Clear All Offline Map Packs?', style: AppText.headline),
           content: Text(
-            'This will purge all downloaded corridor map packs and wipe cached tiles.',
+            'This deletes all offline maps from your phone.',
             style: TextStyle(color: AppTheme.text2),
           ),
           actions: [
@@ -178,7 +178,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
               Icons.add_circle_outline_rounded,
               color: AppTheme.accentText,
             ),
-            tooltip: 'Download Corridor Pack',
+            tooltip: 'Download route map',
             onPressed: _onDownloadNewPack,
           ),
           if (_packs.isNotEmpty || tileCount > 0)
@@ -308,10 +308,10 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
                       children: [
                         Icon(Icons.offline_pin_outlined, size: 48, color: AppTheme.muted),
                         const SizedBox(height: 12),
-                        Text('No Downloaded Corridors', style: AppText.headline.copyWith(fontSize: 16)),
+                        Text('No offline maps yet', style: AppText.headline.copyWith(fontSize: 16)),
                         const SizedBox(height: 6),
                         Text(
-                          'Plan a route in Trip Planner to download offline map packs with sharp street names, junction labels, and landmarks.',
+                          'Plan a route in Trip planner to download its map.',
                           textAlign: TextAlign.center,
                           style: AppText.caption,
                         ),
@@ -368,7 +368,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Saved on $dateStr · ${pack.tileCount} tiles (~${pack.sizeMb} MB)',
+                      'Saved $dateStr · about ${pack.sizeMb} MB',
                       style: AppText.caption,
                     ),
                   ],

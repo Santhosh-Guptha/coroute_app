@@ -28,12 +28,41 @@ class _PlanControllers {
   final TextEditingController monthly = TextEditingController();
   final TextEditingController annual = TextEditingController();
 
+  /// One feature per line (shown to riders on the plan card).
+  final TextEditingController features = TextEditingController();
+
+  /// On sale: when off, checkout refuses new orders for this plan.
+  bool active = true;
+
   void dispose() {
     label.dispose();
     monthly.dispose();
     annual.dispose();
+    features.dispose();
   }
 }
+
+/// One membership plan of the catalog being edited.
+class _MemControllers {
+  final TextEditingController name = TextEditingController();
+  final TextEditingController price = TextEditingController();
+  final TextEditingController capacity = TextEditingController();
+  final TextEditingController days = TextEditingController();
+  final TextEditingController features = TextEditingController();
+  bool active = true;
+
+  void dispose() {
+    name.dispose();
+    price.dispose();
+    capacity.dispose();
+    days.dispose();
+    features.dispose();
+  }
+}
+
+/// Lines of [text] as a list of features (blank lines dropped, at most 20).
+List<String> _featureLines(String text) =>
+    text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).take(20).toList();
 
 class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAliveClientMixin {
   final Map<String, _PlanControllers> _form = {for (final t in adminPaidTierNames) t: _PlanControllers()};
@@ -45,16 +74,9 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
   String? _problem;
   int _updatedAt = 0;
   String _updatedBy = '';
-  final Map<String, TextEditingController> _memPrices = {
-    'individual': TextEditingController(),
-    'group_small': TextEditingController(),
-    'group_large': TextEditingController(),
-  };
-  final Map<String, TextEditingController> _memCapacities = {
-    'individual': TextEditingController(),
-    'group_small': TextEditingController(),
-    'group_large': TextEditingController(),
-  };
+  /// The membership catalog as stored (every field kept on save) and its form.
+  Map<String, Map<String, dynamic>> _catalog = {};
+  final Map<String, _MemControllers> _mem = {};
   Map<String, dynamic>? _membershipAnalytics;
   bool _savingMembership = false;
 
@@ -72,10 +94,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
     for (final c in _form.values) {
       c.dispose();
     }
-    for (final c in _memPrices.values) {
-      c.dispose();
-    }
-    for (final c in _memCapacities.values) {
+    for (final c in _mem.values) {
       c.dispose();
     }
     super.dispose();
@@ -96,6 +115,9 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
           c.label.text = p['label']?.toString() ?? adminTierLabel(t);
           c.monthly.text = adminNumOrNull(p['monthly'])?.toInt().toString() ?? '';
           c.annual.text = adminNumOrNull(p['annual'])?.toInt().toString() ?? '';
+          final f = p['features'];
+          c.features.text = f is List ? f.map((x) => x.toString()).join('\n') : '';
+          c.active = p['isActive'] != false;
         }
         _history = adminMapList(res['history']);
         _updatedAt = adminEpoch(res['updatedAt']);
@@ -105,27 +127,24 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
         if (!mounted) return;
         final api = context.read<ApiClient>();
         final memRes = await api.get('/admin/membership/catalog');
-        if (memRes is Map) {
-          final catsRaw = memRes['catalog'] ?? memRes['categories'];
-          final Iterable<dynamic> catList = (catsRaw is Map)
-              ? catsRaw.values
-              : (catsRaw is List ? catsRaw : const []);
-          for (final cat in catList) {
-            if (cat is Map) {
-              final id = cat['id']?.toString();
-              if (id != null) {
-                final price = (cat['monthlyPriceInr'] as num?)?.toInt() ??
-                    (cat['priceRupees'] as num?)?.toInt();
-                if (price != null) {
-                  _memPrices[id]?.text = price.toString();
-                }
-                final cap = (cat['capacity'] as num?)?.toInt();
-                if (cap != null) {
-                  _memCapacities[id]?.text = cap.toString();
-                }
-              }
-            }
+        final catsRaw = memRes is Map ? memRes['catalog'] : null;
+        if (catsRaw is Map) {
+          final next = <String, Map<String, dynamic>>{};
+          for (final e in catsRaw.entries) {
+            if (e.value is! Map) continue;
+            final id = e.key.toString();
+            final cat = Map<String, dynamic>.from(e.value as Map);
+            next[id] = cat;
+            final c = _mem.putIfAbsent(id, _MemControllers.new);
+            c.name.text = cat['name']?.toString() ?? id;
+            c.price.text = adminNumOrNull(cat['monthlyPriceInr'])?.toString() ?? '';
+            c.capacity.text = adminNumOrNull(cat['capacity'])?.toInt().toString() ?? '1';
+            c.days.text = adminNumOrNull(cat['billingPeriodDays'])?.toInt().toString() ?? '30';
+            final f = cat['features'];
+            c.features.text = f is List ? f.map((x) => x.toString()).join('\n') : '';
+            c.active = cat['isActive'] != false;
           }
+          _catalog = next;
         }
         final analyticsRes = await api.get('/admin/membership/analytics');
         if (analyticsRes is Map) {
@@ -154,10 +173,18 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
       setState(() => _problem = problem);
       return;
     }
-    final plans = planPricingPayload(drafts, {
+    final base = planPricingPayload(drafts, {
       for (final e in _form.entries)
         if (e.value.label.text.trim().isNotEmpty) e.key: e.value.label.text.trim(),
     });
+    final plans = <String, dynamic>{
+      for (final e in base.entries)
+        e.key: <String, dynamic>{
+          ...Map<String, dynamic>.from(e.value as Map),
+          'features': _featureLines(_form[e.key]?.features.text ?? ''),
+          'isActive': _form[e.key]?.active ?? true,
+        },
+    };
     final ok = await confirmAction(
       context,
       title: 'Publish new prices?',
@@ -255,39 +282,46 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
   }
 
   Future<void> _saveMembership() async {
+    // Every plan keeps its stored fields (entitlements, description...); the form changes
+    // the name, price, capacity, duration, features and whether it is on sale.
+    final catalog = <String, dynamic>{};
+    for (final e in _catalog.entries) {
+      final c = _mem[e.key];
+      if (c == null) continue;
+      final price = num.tryParse(c.price.text.trim());
+      final cap = int.tryParse(c.capacity.text.trim());
+      final days = int.tryParse(c.days.text.trim());
+      final name = c.name.text.trim();
+      String? problem;
+      if (name.isEmpty) problem = 'Every plan needs a name.';
+      if (price == null || price < 0) problem = '$name: the price must be ₹0 or more.';
+      if (cap == null || cap < 1) problem = '$name: the capacity must be 1 or more.';
+      if (days == null || days < 1 || days > 3660) problem = '$name: the duration must be 1 to 3660 days.';
+      if (problem != null) {
+        adminSnack(context, problem, error: true);
+        return;
+      }
+      final current = e.value;
+      catalog[e.key] = <String, dynamic>{
+        ...current,
+        'id': current['id'] ?? e.key,
+        'name': name,
+        'monthlyPriceInr': price,
+        'capacity': cap,
+        if (current['maxCapacity'] != null) 'maxCapacity': cap,
+        'billingPeriodDays': days,
+        'features': _featureLines(c.features.text),
+        'isActive': c.active,
+      };
+    }
+    if (catalog.isEmpty) return;
     setState(() => _savingMembership = true);
     try {
-      final categories = [
-        {
-          'id': 'individual',
-          'name': 'Individual',
-          'priceRupees': int.tryParse(_memPrices['individual']?.text ?? '9') ?? 9,
-          'capacity': int.tryParse(_memCapacities['individual']?.text ?? '1') ?? 1,
-          'description': 'Solo rider safety, personal navigation, tracking & profile',
-          'features': ['Solo Ride Tracking', 'Essential Safety', 'Basic Navigation', 'Emergency Alert Routing'],
-        },
-        {
-          'id': 'group_small',
-          'name': 'Small Group',
-          'priceRupees': int.tryParse(_memPrices['group_small']?.text ?? '49') ?? 49,
-          'capacity': int.tryParse(_memCapacities['group_small']?.text ?? '6') ?? 6,
-          'description': 'Convoy tracking, live group safety coordination & PTT for up to 6 riders',
-          'features': ['Convoy & Group Tracking', 'Up to 6 Group Members', 'Shared Trip Coordination', 'PTT & Intercom Access', 'Safety Escalations'],
-        },
-        {
-          'id': 'group_large',
-          'name': 'Large Group',
-          'priceRupees': int.tryParse(_memPrices['group_large']?.text ?? '99') ?? 99,
-          'capacity': int.tryParse(_memCapacities['group_large']?.text ?? '12') ?? 12,
-          'description': 'Convoy tracking, live group safety coordination & PTT for up to 12 riders',
-          'features': ['Convoy & Group Tracking', 'Up to 12 Group Members', 'Shared Trip Coordination', 'PTT & Intercom Access', 'Safety Escalations'],
-        },
-      ];
-      await context.read<ApiClient>().put('/admin/membership/catalog', {'catalog': categories, 'categories': categories});
-      if (mounted) adminSnack(context, 'Membership catalog updated successfully.');
+      await context.read<ApiClient>().put('/admin/membership/catalog', {'catalog': catalog});
+      if (mounted) adminSnack(context, 'Membership plans saved.');
       _load();
     } catch (e) {
-      if (mounted) adminSnack(context, 'Failed to update membership catalog.', error: true);
+      if (mounted) adminSnack(context, adminErrorOf(e), error: true);
     } finally {
       if (mounted) setState(() => _savingMembership = false);
     }
@@ -295,56 +329,81 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
 
   Widget _buildMembershipSection() {
     return AdminTitledCard(
-      title: 'CoRoute Membership & Group Seat Capacities',
+      title: 'Membership plans',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Configurable pricing and capacities for Individual and Group memberships. The owner purchases the capacity, not individual seats.',
+            'Price, how many riders a plan covers, how long it lasts, what it includes and whether it is on sale. Plans that are off sale are hidden from riders and refused at checkout.',
             style: AppText.caption,
           ),
-          const SizedBox(height: 16),
-          _memCategoryRow('individual', 'Individual (Solo Rider)', _memPrices['individual']!, _memCapacities['individual']!, fixedCapacity: 1),
-          const SizedBox(height: 16),
-          _memCategoryRow('group_small', 'Small Group', _memPrices['group_small']!, _memCapacities['group_small']!),
-          const SizedBox(height: 16),
-          _memCategoryRow('group_large', 'Large Group', _memPrices['group_large']!, _memCapacities['group_large']!),
+          if (_catalog.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text('No membership plans loaded.', style: AppText.body.copyWith(color: AppTheme.text2)),
+            ),
+          for (final id in _catalog.keys)
+            if (_mem[id] != null) ...[
+              const SizedBox(height: 16),
+              _memCategoryRow(id, _mem[id]!),
+            ],
           const SizedBox(height: 16),
           DsButton(
-            label: _savingMembership ? 'Saving...' : 'Save Membership Catalog',
+            label: _savingMembership ? 'Saving...' : 'Save membership plans',
             icon: Icons.save_rounded,
-            onPressed: _savingMembership ? null : _saveMembership,
+            onPressed: _savingMembership || _catalog.isEmpty ? null : _saveMembership,
           ),
         ],
       ),
     );
   }
 
-  Widget _memCategoryRow(String id, String title, TextEditingController priceCtrl, TextEditingController capCtrl, {int? fixedCapacity}) {
+  Widget _memCategoryRow(String id, _MemControllers c) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(title, style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800)),
+        DsSwitchRow(
+          label: c.name.text.isEmpty ? id : c.name.text,
+          subtitle: c.active ? 'On sale' : 'Off sale',
+          value: c.active,
+          onChanged: (v) => setState(() => c.active = v),
+          divider: false,
+        ),
+        TextField(controller: c.name, decoration: adminInput('Name shown to riders')),
         const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
               child: TextField(
-                controller: priceCtrl,
-                keyboardType: TextInputType.number,
-                decoration: adminInput('Price INR', prefix: 'INR '),
+                controller: c.price,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: adminInput('Price a month', prefix: '₹ '),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: TextField(
-                controller: capCtrl,
-                readOnly: fixedCapacity != null,
+                controller: c.capacity,
                 keyboardType: TextInputType.number,
-                decoration: adminInput(fixedCapacity != null ? 'Capacity (Fixed)' : 'Max Capacity', prefix: 'Riders: '),
+                decoration: adminInput('Riders'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: c.days,
+                keyboardType: TextInputType.number,
+                decoration: adminInput('Days'),
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: c.features,
+          minLines: 2,
+          maxLines: 6,
+          decoration: adminInput('Features', helper: 'One per line.'),
         ),
       ],
     );
@@ -423,8 +482,13 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(adminTierLabel(tier), style: AppText.label.copyWith(color: AppTheme.text, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 8),
+        DsSwitchRow(
+          label: adminTierLabel(tier),
+          subtitle: c.active ? 'On sale' : 'Off sale: checkout refuses new orders',
+          value: c.active,
+          onChanged: (v) => setState(() => c.active = v),
+          divider: false,
+        ),
         TextField(controller: c.label, decoration: adminInput('Name shown to riders')),
         const SizedBox(height: 8),
         Row(
@@ -454,6 +518,13 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
               ? 'Annual is lower than monthly: fix before publishing.'
               : (pct > 0 ? 'Annual saves riders $pct% (${adminInr(PlanSubscriptionService.annualSaving(m, a))} a year).' : 'No annual saving.'),
           style: AppText.caption.copyWith(color: a > 0 && m > 0 && a < m ? AppTheme.sos : AppTheme.accentText, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: c.features,
+          minLines: 2,
+          maxLines: 6,
+          decoration: adminInput('Features', helper: 'One per line, shown to riders.'),
         ),
       ],
     );

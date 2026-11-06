@@ -10,6 +10,9 @@ class RidePowerPolicy {
   /// Battery governor operating stage.
   BatteryGovernorStage get stage => governor.stage;
 
+  /// True when battery is strictly below 20% and not charging.
+  bool get isLowBattery => governor.isLowBattery;
+
   /// Hysteresis avoids switching profiles repeatedly around 15%.
   void updateBattery(int percent, {required bool charging}) {
     governor.updateBattery(percent, charging: charging);

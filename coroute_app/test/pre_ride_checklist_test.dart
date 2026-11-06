@@ -66,7 +66,7 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Before you ride'), findsOneWidget);
     expect(find.text('Start the ride'), findsOneWidget, reason: 'the start button is always visible');
-    expect(find.text('Fix'), findsWidgets);
+    expect(find.text('Fix Permission'), findsWidgets);
     final list = find.byType(Scrollable).first;
     for (final item in [...PreRideChecklist.manualItems, 'Do not show for 24 hours']) {
       await tester.scrollUntilVisible(find.text(item), 60, scrollable: list);

@@ -10,6 +10,7 @@ import '../../data/services/permissions_service.dart';
 import '../../data/services/safety_native.dart';
 import '../../data/services/settings_service.dart';
 import '../account/edit_profile_screen.dart';
+import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../ride/network_consent_sheet.dart';
 import '../safety/oem_battery_guide.dart';
 import '../safety/safety_settings_sheet.dart';
@@ -100,7 +101,7 @@ class PreRideChecklist {
         AutoCheck(
           key: 'locationAlways',
           title: 'Location "Allow all the time"',
-          okText: 'Your convoy sees you with the screen off.',
+          okText: 'Your group sees you with the screen off.',
           problemText: 'Without it your position stops when the screen is off.',
           ok: always.granted,
           fix: 'locationAlways',
@@ -224,7 +225,7 @@ class PreRideChecklistSheet extends StatefulWidget {
   State<PreRideChecklistSheet> createState() => _PreRideChecklistSheetState();
 }
 
-class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
+class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> with WidgetsBindingObserver {
   late List<AutoCheck> _checks;
   final Set<int> _ticked = {};
   bool _skip24h = false;
@@ -235,7 +236,44 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checks = List.of(widget.checks);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // User returned from Android permission settings or a system dialog:
+      // immediately re-check actual permission state from the OS.
+      _recheckAllPermissions();
+    }
+  }
+
+  Future<void> _recheckAllPermissions() async {
+    try {
+      final permissions = await PermissionsService.status();
+      if (!mounted) return;
+      setState(() {
+        for (var i = 0; i < _checks.length; i++) {
+          final c = _checks[i];
+          final fix = c.fix;
+          if (fix != null && fix != 'profile' && fix != 'oemGuide') {
+            for (final p in permissions) {
+              if (p.key == fix) {
+                _checks[i] = c.withOk(p.granted);
+                break;
+              }
+            }
+          }
+        }
+      });
+    } catch (_) {}
   }
 
   Future<void> _fix(int index) async {
@@ -252,7 +290,9 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
       await OemBatteryGuide.show(context);
       ok = true;
     } else {
-      ok = await _request(fix);
+      await _request(fix);
+      // Immediately re-check actual permission state from OS; never assume granted
+      ok = await PermissionsService.isPermissionGranted(fix);
     }
     if (!mounted) return;
     setState(() => _checks[index] = c.withOk(ok));
@@ -268,6 +308,14 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
     if (!mounted) return;
     setState(() => _smsDenied = !ok);
     if (ok) await s.setSmsFallback(true);
+  }
+
+  /// The full phone check (about 10 s: GPS fix, sensors, sound, battery, SOS reach). Optional.
+  Future<void> _openPhoneCheck() async {
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const PreRidePhoneCheckScreen(autoRun: true)),
+    );
   }
 
   Future<void> _start() async {
@@ -314,6 +362,14 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
                     ),
                   ),
                 for (var i = 0; i < _checks.length; i++) _autoRow(i),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.phonelink_setup_rounded, size: 18),
+                    label: const Text('Full phone check (GPS, sensors, sound)'),
+                    onPressed: _openPhoneCheck,
+                  ),
+                ),
                 ..._safetyRows(),
                 const Divider(),
                 for (var i = 0; i < PreRideChecklist.manualItems.length; i++)
@@ -424,8 +480,13 @@ class _PreRideChecklistSheetState extends State<PreRideChecklistSheet> {
                 child: InkWell(
                   onTap: () => _fix(i),
                   child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Center(child: Text('Fix', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800))),
+                    padding: EdgeInsets.symmetric(horizontal: 14),
+                    child: Center(
+                      child: Text(
+                        'Fix Permission',
+                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800),
+                      ),
+                    ),
                   ),
                 ),
               ),

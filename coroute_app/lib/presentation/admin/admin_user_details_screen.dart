@@ -6,9 +6,11 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/api_client.dart';
+import '../../data/services/auth_service.dart';
 import '../../data/services/convoy_service.dart';
 import '../report/trip_report_screen.dart';
 import 'admin_convoy_inspector.dart';
+import 'admin_rider_insights.dart';
 import 'admin_ui.dart';
 
 /// Master admin: one user. Profile, account status with hold, block and
@@ -49,6 +51,9 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
   String? _error;
   bool _isActionInProgress = false;
 
+  /// Bumped on every reload so the riding numbers below reload with the profile.
+  int _reloadTick = 0;
+
   @override
   void initState() {
     super.initState();
@@ -60,6 +65,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _reloadTick++;
     });
     String? error;
     try {
@@ -291,6 +297,13 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
           ],
           const AdminSectionLabel('Profile'),
           _profile(u),
+          // Riding numbers, plan and access, payments, devices (and the edits of plan, trip limit and role).
+          AdminRiderInsights(
+            key: ValueKey('insights-${widget.userId}-$_reloadTick'),
+            userId: widget.userId,
+            isSelf: context.watch<AuthService>().currentUserId == widget.userId,
+            onChanged: widget.onChanged,
+          ),
           if (!isMasterAdmin) ...[
             const AdminSectionLabel('Account'),
             _actions(status),

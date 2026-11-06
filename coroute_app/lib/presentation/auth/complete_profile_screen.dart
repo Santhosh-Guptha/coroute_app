@@ -74,7 +74,7 @@ class CompleteProfileScreen extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   isGoogleUser
-                                      ? 'One more step. Your group needs a way to reach you and your family in an emergency.'
+                                      ? 'One more step: how to reach you and your family in an emergency.'
                                       : 'Your group needs a way to reach you and your family in an emergency.',
                                   style: AppText.body,
                                 ),

@@ -18,7 +18,7 @@ class DataSaverTile extends StatelessWidget {
   const DataSaverTile({super.key, this.dense = false, this.divider = true});
 
   static const String title = 'Data saver';
-  static const String subtitle = 'Intercom uses half the data. Positions are sent every 5 seconds instead of every 2.5.';
+  static const String subtitle = 'Uses less mobile data for talk and map.';
 
   @override
   Widget build(BuildContext context) {

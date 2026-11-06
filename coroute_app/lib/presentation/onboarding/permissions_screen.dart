@@ -105,7 +105,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
                   const SizedBox(height: 18),
                   Text(
                     widget.gate
-                        ? 'Before the ride starts, CoRoute needs a few permissions. Each one is used only during an active ride.'
+                        ? 'CoRoute needs a few permissions. Each is used only during a ride.'
                         : 'Each permission is used only during an active ride.',
                     style: AppText.body.copyWith(color: AppTheme.text2),
                   ),
@@ -183,8 +183,8 @@ class _PermissionRow extends StatelessWidget {
                   if (!p.granted) ...[
                     const SizedBox(height: Space.s12),
                     SizedBox(
-                      width: 140,
-                      child: DsButton(label: 'Allow', height: 48, fontSize: 15, onPressed: onAllow),
+                      width: 160,
+                      child: DsButton(label: 'Fix Permission', height: 48, fontSize: 14, onPressed: onAllow),
                     ),
                   ],
                 ],

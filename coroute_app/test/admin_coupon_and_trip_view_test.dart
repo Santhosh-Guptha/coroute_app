@@ -15,6 +15,7 @@ import 'package:coroute_app/data/services/auth_service.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
 import 'package:coroute_app/presentation/admin/admin_coupon_usage_tab.dart';
 import 'package:coroute_app/presentation/admin/admin_payment_analytics_tab.dart';
+import 'package:coroute_app/presentation/admin/admin_payments_logic.dart';
 import 'package:coroute_app/presentation/admin/admin_plans_pricing_screen.dart';
 import 'package:coroute_app/presentation/rider/trip_history_screen.dart';
 
@@ -77,6 +78,15 @@ void main() {
   });
 
   group('Admin Console Coupon Usage & Analytics Views', () {
+    // The server plan catalog (GET /api/admin/coupons/plan-options), with prices an admin set.
+    const planOptions = [
+      {'id': 'proRider', 'label': 'CoRoute Pro', 'kind': 'subscription', 'monthlyInr': 199, 'annualInr': 1999, 'isActive': true},
+      {'id': 'individual', 'label': 'Individual Membership', 'kind': 'membership', 'monthlyInr': 9, 'annualInr': null, 'isActive': true},
+      {'id': 'group_small', 'label': 'Small Group (2–6)', 'kind': 'membership', 'monthlyInr': 59, 'annualInr': null, 'isActive': true},
+      {'id': 'group_large', 'label': 'Large Group (7–12)', 'kind': 'membership', 'monthlyInr': 119, 'annualInr': null, 'isActive': true},
+      {'id': 'family', 'label': 'Family Pack', 'kind': 'membership', 'monthlyInr': 149, 'annualInr': null, 'isActive': true},
+    ];
+
     testWidgets('AdminCouponUsageTab displays KPIs, filters, and redemptions log', (tester) async {
       final client = MockClient((req) async {
         if (req.url.path.contains('/admin/coupons/usage')) {
@@ -178,14 +188,7 @@ void main() {
                   'netInr': 292,
                   'activeMembers': 6,
                 },
-                'group_large': {
-                  'name': 'Large Group 7–12 (₹99/mo)',
-                  'units': 5,
-                  'grossInr': 495,
-                  'discountsInr': 50,
-                  'netInr': 445,
-                  'activeMembers': 4,
-                },
+                // 3.54: no group_large sales in the period: its row comes from the plan catalog.
               },
               'couponAnalytics': {
                 'topCoupons': [
@@ -208,6 +211,9 @@ void main() {
             200,
             headers: {'content-type': 'application/json'},
           );
+        }
+        if (req.url.path.contains('/admin/coupons/plan-options')) {
+          return http.Response(jsonEncode({'plans': planOptions}), 200, headers: {'content-type': 'application/json'});
         }
         return http.Response('{}', 404);
       });
@@ -235,9 +241,45 @@ void main() {
       expect(find.text('Net Revenue'), findsOneWidget);
       expect(find.text('Paid Orders'), findsOneWidget);
       expect(find.text('Free Activations'), findsOneWidget);
+      // Names of plans with sales come from the analytics; a plan without sales gets its name and
+      // price from the server plan catalog (an admin changed it to ₹119), never a hard-coded ₹99.
       expect(find.text('Individual Membership (₹9/mo)'), findsOneWidget);
       expect(find.text('Small Group 2–6 (₹49/mo)'), findsOneWidget);
-      expect(find.text('Large Group 7–12 (₹99/mo)'), findsOneWidget);
+      expect(find.text('Large Group (7–12) (₹119/mo)'), findsOneWidget);
+      expect(find.textContaining('₹99'), findsNothing);
+    });
+
+    test('plan labels use the server catalog price, and no price when the server has none', () {
+      expect(adminPlanLabel('group_small', planOptions), 'Small Group (2–6) (₹59/mo)');
+      expect(adminPlanLabel('group_small', planOptions, perMonth: false), 'Small Group (2–6) (₹59)');
+      expect(adminPlanLabel('group_large', const []), 'Large Group (7–12)');
+      expect(adminPlanLabel('individual', const []), 'Individual Membership');
+      expect(adminMembershipPlanIds(planOptions), ['individual', 'group_small', 'group_large', 'family']);
+    });
+
+    testWidgets('coupon usage plan filter lists the server catalog prices', (tester) async {
+      final client = MockClient((req) async {
+        if (req.url.path.contains('/admin/coupons/usage')) {
+          return http.Response(jsonEncode({'summary': {}, 'redemptions': []}), 200, headers: {'content-type': 'application/json'});
+        }
+        if (req.url.path.contains('/admin/coupons/plan-options')) {
+          return http.Response(jsonEncode({'plans': planOptions}), 200, headers: {'content-type': 'application/json'});
+        }
+        return http.Response('{}', 404);
+      });
+      await tester.pumpWidget(MaterialApp(
+        home: MultiProvider(
+          providers: [ChangeNotifierProvider<ApiClient>.value(value: ApiClient(httpClient: client))],
+          child: const Scaffold(body: AdminCouponUsageTab()),
+        ),
+      ));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('All Plans'));
+      await tester.pumpAndSettle();
+      expect(find.text('Small Group (2–6) (₹59)'), findsWidgets);
+      expect(find.text('Family Pack (₹149)'), findsWidgets);
+      expect(find.textContaining('₹49'), findsNothing);
     });
 
     testWidgets('AdminPlansPricingScreen features the required 7 navigation entries', (tester) async {

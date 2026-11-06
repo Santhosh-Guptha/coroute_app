@@ -521,40 +521,19 @@ class SirenAcousticDetector extends ChangeNotifier {
       return true;
     }
 
-    // Hardware microphone permission verification
-    try {
-      final hasPerm = await _recorder.hasPermission();
-      if (!hasPerm) {
-        stateNotifier.value = SirenDetectorState.unavailable;
-        notifyListeners();
-        return false;
-      }
-
-      final stream = await _recorder.startStream(const RecordConfig(
-        encoder: AudioEncoder.pcm16bits,
-        sampleRate: 16000,
-        numChannels: 1,
-        echoCancel: false,
-        noiseSuppress: false,
-        autoGain: false,
-      ));
-
-      _isRunning = true;
-      _micSub = stream.listen(
-        _onPcmData,
-        onError: (e) => _onMicError(e),
-        onDone: () => stop(),
-      );
-
-      stateNotifier.value = SirenDetectorState.inactive;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('SirenAcousticDetector start note: $e');
-      stateNotifier.value = SirenDetectorState.unavailable;
-      notifyListeners();
-      return false;
+    // FEAT-MIC-01: Microphone privacy compliance:
+    // Continuous background microphone capture is eliminated.
+    // Microphone must remain OFF by default at all times and is never activated
+    // merely because a cockpit, trip, or background service is active.
+    // In normal operation, acoustic frames are ingested via processPcmChunk
+    // exclusively when the rider legitimately activates microphone (PTT or VOX).
+    _isRunning = true;
+    if (intercomService != null) {
+      intercomService!.onMicChunk = processPcmChunk;
     }
+    stateNotifier.value = SirenDetectorState.inactive;
+    notifyListeners();
+    return true;
   }
 
   /// Processes raw 16-bit PCM mono bytes from the microphone.
@@ -611,6 +590,9 @@ class SirenAcousticDetector extends ChangeNotifier {
   /// Stops detection, releases microphone, and restores ducked audio.
   Future<void> stop() async {
     _isRunning = false;
+    if (intercomService?.onMicChunk == processPcmChunk) {
+      intercomService?.onMicChunk = null;
+    }
     await _micSub?.cancel();
     _micSub = null;
 
@@ -633,6 +615,9 @@ class SirenAcousticDetector extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     _isRunning = false;
+    if (intercomService?.onMicChunk == processPcmChunk) {
+      intercomService?.onMicChunk = null;
+    }
     _micSub?.cancel();
     _micSub = null;
     try {

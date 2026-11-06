@@ -155,7 +155,7 @@ class HelmetVoiceMatcher {
           hotword: HelmetVoiceHotword.fuel,
           matchedPhrase: p,
           confidence: clean == p ? 1.0 : 0.85,
-          confirmationSpeech: 'Fuel stop requested to convoy lead.',
+          confirmationSpeech: 'Fuel stop asked from the Lead.',
         );
       }
     }
@@ -167,7 +167,7 @@ class HelmetVoiceMatcher {
           hotword: HelmetVoiceHotword.regroup,
           matchedPhrase: p,
           confidence: clean == p ? 1.0 : 0.85,
-          confirmationSpeech: 'Regroup wait request sent to convoy.',
+          confirmationSpeech: 'Asked the group to wait.',
         );
       }
     }

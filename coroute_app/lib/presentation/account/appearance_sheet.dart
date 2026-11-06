@@ -44,9 +44,9 @@ class AppearanceSheet extends StatelessWidget {
       (ThemePreference.auto, Icons.wb_twilight_outlined, 'Automatic', 'Light from sunrise to sunset where you are. Works offline.'),
       if (t.sensorSupported)
         (ThemePreference.lightSensor, Icons.wb_sunny_outlined, 'Light sensor',
-            'Follows the light around you. Waits 30 seconds, so tunnels and shade do not flip it.'),
+            'Follows the light around you.'),
       (ThemePreference.light, Icons.light_mode_outlined, 'Light', 'Easier to read in bright sunlight.'),
-      (ThemePreference.dark, Icons.dark_mode_outlined, 'Dark', 'Easier on the eyes at night and saves battery on most phones.'),
+      (ThemePreference.dark, Icons.dark_mode_outlined, 'Dark', 'Easier on the eyes at night. Saves battery.'),
       (ThemePreference.system, Icons.phone_android_outlined, 'Same as the phone', 'Uses your phone\'s dark mode setting.'),
     ];
 
@@ -107,7 +107,7 @@ class AppearanceSheet extends StatelessWidget {
                                     child: Text(
                                       s.mapAlertDismissSeconds == 0
                                           ? 'Manual dismissal only on map'
-                                          : 'Alerts dismiss from map HUD after ${s.mapAlertDismissSeconds}s (kept in notifications)',
+                                          : 'Alerts leave the map after ${s.mapAlertDismissSeconds}s',
                                       style: AppText.body.copyWith(fontWeight: FontWeight.w700),
                                     ),
                                   ),

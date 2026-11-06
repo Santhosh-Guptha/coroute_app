@@ -71,10 +71,44 @@ void main() {
         {'userId': 'u9', 'name': 'Admin', 'email': 'admin@example.com', 'role': 'MASTER_ADMIN', 'status': 'ACTIVE'},
       ];
 
+  /// One account as a row of `GET /api/admin/analytics/riders` (3.54).
+  Map<String, dynamic> riderRow(Map<String, dynamic> u) => {
+        'userId': u['userId'],
+        'name': u['name'],
+        'email': u['email'] ?? '',
+        'phone': u['phone'] ?? '',
+        'role': u['role'] ?? 'RIDER',
+        'status': u['status'] ?? 'ACTIVE',
+        'tier': 'community',
+        'guest': false,
+        'trips': 3,
+        'km': 120.5,
+        'ridingHours': 4.2,
+        'sos': 0,
+        'lastSeenAt': now - 3600000,
+        'createdAt': now - 30 * 86400000,
+        'riding': u['isInActiveConvoy'] == true ? {'groupId': 'GRP-1', 'name': 'Sunday ride to Srisailam'} : null,
+      };
+
   /// Fake gateway. Records every request so tests can check the API calls.
-  MockClient fakeApi(List<http.Request> calls) => MockClient((req) async {
+  MockClient fakeApi(List<http.Request> calls, {List<Map<String, dynamic>>? accounts}) => MockClient((req) async {
         calls.add(req);
         final p = req.url.path;
+        if (p.endsWith('/admin/analytics/riders')) {
+          // Filters, search and paging on the "server", like gateway/src/admin_analytics.js.
+          final qp = req.url.queryParameters;
+          var rows = [for (final u in accounts ?? users()) riderRow(u)];
+          final st = qp['status'] ?? '';
+          if (st.isNotEmpty) rows = rows.where((r) => r['status'] == st).toList();
+          if (qp['riding'] == '1') rows = rows.where((r) => r['riding'] != null).toList();
+          final q = (qp['q'] ?? '').toLowerCase();
+          if (q.isNotEmpty) rows = rows.where((r) => '${r['name']} ${r['email']} ${r['phone']}'.toLowerCase().contains(q)).toList();
+          final cursor = int.tryParse(qp['cursor'] ?? '0') ?? 0;
+          final limit = int.tryParse(qp['limit'] ?? '50') ?? 50;
+          final page = rows.skip(cursor).take(limit).toList();
+          final next = cursor + page.length < rows.length ? cursor + page.length : null;
+          return http.Response(jsonEncode({'ok': true, 'riders': page, 'total': rows.length, 'nextCursor': next}), 200);
+        }
         if (p.endsWith('/admin/fleet')) return http.Response(jsonEncode({'convoys': [fleetConvoy()]}), 200);
         if (p.endsWith('/admin/users')) return http.Response(jsonEncode({'users': users()}), 200);
         if (p.endsWith('/admin/users/u2/details')) {
@@ -86,13 +120,19 @@ void main() {
         return http.Response('{}', 200);
       });
 
-  Future<void> render(WidgetTester tester, {required Size size, required double scale, required AppPalette palette, required Widget child, required List<http.Request> calls}) async {
+  Future<void> render(WidgetTester tester,
+      {required Size size,
+      required double scale,
+      required AppPalette palette,
+      required Widget child,
+      required List<http.Request> calls,
+      List<Map<String, dynamic>>? accounts}) async {
     AppTheme.use(palette);
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    final api = ApiClient(httpClient: fakeApi(calls), storage: const FlutterSecureStorage());
+    final api = ApiClient(httpClient: fakeApi(calls, accounts: accounts), storage: const FlutterSecureStorage());
     final auth = AuthService(api);
     final rt = RealtimeService();
     final trips = TripStorageService(api);
@@ -173,24 +213,65 @@ void main() {
       expect(find.text('Blocked'), findsOneWidget);
       expect(find.text('Riding in Sunday ride to Srisailam'), findsOneWidget);
 
-      // Filter: one compact button that opens a menu.
+      // 3.54: the list comes from the server-side rider analytics, with the rider numbers.
+      expect(calls.any((r) => r.url.path.endsWith('/admin/analytics/riders')), isTrue);
+      expect(find.textContaining('3 trips'), findsWidgets);
+
+      // Filter: one compact button that opens a menu; the status filter runs on the gateway.
       await tester.tap(find.byTooltip('Filter'));
       await tester.pump(); // the route animation starts on this frame
       await tester.pump(const Duration(milliseconds: 400));
-      await tester.tap(find.text('On hold (1)'));
+      await tester.tap(find.text('On hold').last); // the menu item (the row chip says the same)
       await tester.pump(const Duration(milliseconds: 400));
       expect(tester.takeException(), isNull);
+      expect(calls.lastWhere((r) => r.url.path.endsWith('/admin/analytics/riders')).url.queryParameters['status'], 'ON_HOLD');
       expect(find.text('Bala'), findsOneWidget);
       expect(find.text('Chitra'), findsNothing);
 
-      // Search with no match shows an empty state with a way back.
+      // Search (debounced, sent as q) with no match shows an empty state with a way back.
       await tester.enterText(find.byType(TextField), 'zzz');
+      await tester.pump(const Duration(milliseconds: 400));
       await tester.pump();
+      expect(calls.lastWhere((r) => r.url.path.endsWith('/admin/analytics/riders')).url.queryParameters['q'], 'zzz');
       expect(find.text('No matching users'), findsOneWidget);
       expect(find.text('Show all'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }
+
+  test('the rider list query: search, status, plan, riding, sort and cursor go to the gateway', () {
+    expect(
+      AdminUsersScreen.queryFor(q: ' bala ', filter: AdminUserFilter.onHold, tier: 'proRider', sort: AdminRiderSort.km, cursor: 50),
+      {'q': 'bala', 'status': 'ON_HOLD', 'tier': 'proRider', 'sort': 'km', 'limit': '50', 'cursor': '50'},
+    );
+    expect(
+      AdminUsersScreen.queryFor(q: '', filter: AdminUserFilter.riding, tier: '', sort: AdminRiderSort.lastSeen),
+      {'riding': '1', 'sort': 'lastSeen', 'limit': '50', 'cursor': '0'},
+    );
+  });
+
+  testWidgets('"Load more" asks for the next page with the cursor', (tester) async {
+    final calls = <http.Request>[];
+    final many = [
+      for (var i = 0; i < 60; i++) {'userId': 'x$i', 'name': 'Rider ${i.toString().padLeft(2, '0')}', 'email': 'r$i@example.com', 'status': 'ACTIVE'},
+    ];
+    await render(tester, size: const Size(400, 800), scale: 1.0, palette: AppPalette.dark, child: const AdminUsersScreen(), calls: calls, accounts: many);
+    final more = find.text('Load more (10 left)');
+    await tester.scrollUntilVisible(more, 400, scrollable: find.byType(Scrollable).last);
+    await tester.tap(more);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final pages = calls.where((r) => r.url.path.endsWith('/admin/analytics/riders')).toList();
+    expect(pages.last.url.queryParameters['cursor'], '50');
+    expect(find.textContaining('Load more'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  test('an older gateway list (no analytics endpoint) still shows who is riding', () {
+    final row = AdminUsersScreen.rowFromLegacy({'userId': 'u1', 'isInActiveConvoy': true, 'activeGroup': {'groupId': 'G', 'name': 'Ride'}});
+    expect(row['riding'], {'groupId': 'G', 'name': 'Ride'});
+    expect(AdminUsersScreen.rowFromLegacy({'userId': 'u2'})['riding'], isNull);
+  });
 
   testWidgets('home "Review" opens the users list filtered to accounts on hold', (tester) async {
     final calls = <http.Request>[];
@@ -230,7 +311,8 @@ void main() {
     );
     // Bala is on hold: releasing needs no form.
     expect(find.text('Release hold'), findsOneWidget);
-    await tester.ensureVisible(find.text('Release hold'));
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -200));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Release hold'));
     await tester.pump(const Duration(milliseconds: 300));
     final release = calls.where((r) => r.method == 'PATCH').toList();
@@ -240,7 +322,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
 
     // Block opens the form sheet (no AlertDialog) and sends the reason.
-    await tester.ensureVisible(find.text('Block'));
+    expect(find.text('Block'), findsOneWidget);
     await tester.tap(find.text('Block'));
     await tester.pump(); // the route animation starts on this frame
     await tester.pump(const Duration(milliseconds: 300));

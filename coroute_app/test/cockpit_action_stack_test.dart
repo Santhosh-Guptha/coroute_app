@@ -156,6 +156,13 @@ void main() {
     });
 
     testWidgets('Multiple stop suggestions constrain to 1 primary action capsule with swipe/tap to view next', (tester) async {
+      final rahul = RiderModel(
+        userId: 'user_rahul',
+        name: 'Rahul Sharma',
+        lat: 12.9720,
+        lng: 77.5950,
+        lastSeenEpochMs: 1000,
+      );
       final convoy = ConvoyModel(
         groupId: 'grp_1',
         name: 'Bangalore Riders',
@@ -163,7 +170,7 @@ void main() {
         createdByUserId: 'user_me',
         createdByUserName: 'Me',
         createdAtEpochMs: 1000,
-        riders: {'user_me': me},
+        riders: {'user_me': me, 'user_rahul': rahul},
         stopPoints: [
           StopPointModel(
             stopId: 'stop_food',

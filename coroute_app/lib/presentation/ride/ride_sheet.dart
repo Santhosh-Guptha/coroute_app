@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 
@@ -24,6 +25,10 @@ class RideSheet extends StatefulWidget {
   /// the SOS button and the map controls just above it).
   final ValueChanged<double>? onTopChanged;
 
+  /// Called with how far the sheet is open: 0 collapsed, 1 fully expanded
+  /// (for fading the floating map controls out as it opens).
+  final ValueChanged<double>? onExpansionChanged;
+
   /// Largest share of the screen the expanded sheet takes.
   final double maxFraction;
 
@@ -34,9 +39,17 @@ class RideSheet extends StatefulWidget {
     required this.header,
     required this.body,
     this.onTopChanged,
+    this.onExpansionChanged,
     this.maxFraction = 0.85,
     this.minFraction,
   });
+
+  /// Horizontal padding shared by the collapsed header and the expanded body
+  /// so every section of the sheet lines up on the same edges.
+  static const double hPad = 16;
+
+  /// Widest the sheet content gets (tablets, landscape): centred beyond it.
+  static const double maxContentWidth = 600;
 
   @override
   State<RideSheet> createState() => RideSheetState();
@@ -44,22 +57,82 @@ class RideSheet extends StatefulWidget {
 
 class RideSheetState extends State<RideSheet> {
   final DraggableScrollableController _controller = DraggableScrollableController();
+
+  /// Opacity of the body: hidden while collapsed (the strip under the header
+  /// that sits behind the system navigation bar), shown as soon as it opens.
+  final ValueNotifier<double> _bodyOpacity = ValueNotifier<double>(0);
   double _headerPx = 196;
   double _available = 0;
   double _min = 0.3;
+  double _max = 0.85;
+  double _bottomPad = 0;
+  ScrollController? _inner;
+  bool _reportScheduled = false;
+  double _lastTop = -1;
+  double _lastExpansion = -1;
+
+  // Cached so the sheet is not told about "new" snap sizes on every rebuild
+  // (that re-snaps it and fights the rider's finger mid-drag).
+  (double, double)? _snapFor;
+  List<double> _snapSizes = const <double>[];
 
   bool get _expanded => _controller.isAttached && _controller.size > _min + 0.05;
+
+  double get _currentExtent => _controller.isAttached ? _controller.size : _min;
+
+  /// Height of the collapsed sheet in logical pixels (header plus the bottom
+  /// system inset), 0 before the first layout.
+  double get collapsedHeight => _min * _available;
 
   /// Opens the sheet fully, or collapses it when it is open.
   void toggle() {
     if (!_controller.isAttached) return;
-    final target = _expanded ? _min : widget.maxFraction.clamp(_min, 1.0).toDouble();
+    if (_expanded) {
+      collapse();
+      return;
+    }
+    final target = _max.clamp(_min, 1.0).toDouble();
     _controller.animateTo(target, duration: Motion.sheet, curve: Motion.curve);
   }
 
   void collapse() {
     if (_controller.isAttached && _expanded) {
+      // Back to the top of the list first, or the collapsed sheet would show
+      // the middle of the body instead of the header.
+      final inner = _inner;
+      if (inner != null && inner.hasClients && inner.positions.length == 1 && inner.offset > 0) {
+        inner.jumpTo(0);
+      }
       _controller.animateTo(_min, duration: Motion.sheet, curve: Motion.curve);
+    }
+  }
+
+  /// Tells the screen where the sheet's top edge is and how far it is open.
+  /// Never while the tree is being built or laid out (the listeners rebuild
+  /// widgets): then it waits for the end of the frame.
+  void _report(double extent) {
+    if (!mounted || _available <= 0) return;
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      if (_reportScheduled) return;
+      _reportScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _reportScheduled = false;
+        if (mounted) _report(_currentExtent);
+      });
+      return;
+    }
+    final top = extent * _available;
+    final span = _max - _min;
+    final t = span <= 0.001 ? 0.0 : ((extent - _min) / span).clamp(0.0, 1.0).toDouble();
+    // Fade the body in over the first 48 dp of dragging.
+    _bodyOpacity.value = (((extent - _min) * _available) / 48).clamp(0.0, 1.0).toDouble();
+    if ((top - _lastTop).abs() >= 0.5) {
+      _lastTop = top;
+      widget.onTopChanged?.call(top);
+    }
+    if ((t - _lastExpansion).abs() >= 0.002 || ((t == 0 || t == 1) && t != _lastExpansion)) {
+      _lastExpansion = t;
+      widget.onExpansionChanged?.call(t);
     }
   }
 
@@ -69,35 +142,64 @@ class RideSheetState extends State<RideSheet> {
     setState(() => _headerPx = size.height);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (wasCollapsed && _controller.isAttached) _controller.jumpTo(_min);
-      if (_available > 0) widget.onTopChanged?.call((_controller.isAttached ? _controller.size : _min) * _available);
+      if (wasCollapsed && _controller.isAttached && (_controller.size - _min).abs() > 0.0005) {
+        _controller.jumpTo(_min);
+      }
+      _report(_currentExtent);
     });
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _bodyOpacity.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final pad = MediaQuery.paddingOf(context);
     return LayoutBuilder(builder: (context, c) {
       final h = c.maxHeight;
       if (!h.isFinite || h <= 0) return const SizedBox.shrink();
-      if ((h - _available).abs() >= 1) {
+      // Room for the gesture / navigation bar under the collapsed header, so
+      // the talk bar is never hidden behind it.
+      final bottomPad = pad.bottom;
+      if ((h - _available).abs() >= 1 || (bottomPad - _bottomPad).abs() >= 1) {
         _available = h;
+        _bottomPad = bottomPad;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) widget.onTopChanged?.call((_controller.isAttached ? _controller.size : _min) * h);
+          if (mounted) _report(_currentExtent);
         });
       }
-      final calculatedMin = widget.minFraction ?? (_headerPx / h);
+      final calculatedMin = widget.minFraction ?? ((_headerPx + bottomPad) / h);
       final min = calculatedMin.clamp(0.05, 0.8).toDouble();
+      final oldMin = _min;
       _min = min;
-      final max = widget.maxFraction < min ? min : widget.maxFraction;
+      // The collapsed size changed (header re-measured, navigation bar inset
+      // changed, rotation): a collapsed sheet follows it, once, after layout.
+      if ((min - oldMin).abs() > 0.0005 && _controller.isAttached && _controller.size <= oldMin + 0.05) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !_controller.isAttached) return;
+          final size = _controller.size;
+          if ((size - _min).abs() > 0.0005 && size <= oldMin + 0.05) _controller.jumpTo(_min);
+        });
+      }
+      // Always room to open: on very short windows (split screen, large text)
+      // the body stays reachable even when that beats [maxFraction].
+      final floor = (min + 0.25).clamp(min, 0.95).toDouble();
+      final max = widget.maxFraction < floor ? floor : widget.maxFraction.clamp(min, 1.0).toDouble();
+      _max = max;
+      // Three resting points: collapsed, half and expanded (half only when
+      // it sits clearly between the other two).
+      final key = (min, max);
+      if (_snapFor != key) {
+        _snapFor = key;
+        _snapSizes = (min + 0.08 < 0.5 && 0.5 < max - 0.08) ? <double>[0.5] : const <double>[];
+      }
       return NotificationListener<DraggableScrollableNotification>(
         onNotification: (n) {
-          widget.onTopChanged?.call(n.extent * h);
+          _report(n.extent);
           return false;
         },
         child: DraggableScrollableSheet(
@@ -106,8 +208,10 @@ class RideSheetState extends State<RideSheet> {
           minChildSize: min,
           maxChildSize: max,
           snap: true,
+          snapSizes: _snapSizes,
           snapAnimationDuration: Motion.sheet,
           builder: (context, scroll) {
+            _inner = scroll;
             return Material(
               color: AppTheme.card,
               elevation: 8,
@@ -116,7 +220,8 @@ class RideSheetState extends State<RideSheet> {
               clipBehavior: Clip.antiAlias,
               child: ListView(
                 controller: scroll,
-                padding: EdgeInsets.zero,
+                // The last rows scroll clear of the navigation bar and any side cutout.
+                padding: EdgeInsets.only(left: pad.left, right: pad.right, bottom: bottomPad),
                 children: [
                   _MeasureSize(
                     onChange: _onHeaderSize,
@@ -124,20 +229,33 @@ class RideSheetState extends State<RideSheet> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const _Handle(),
-                        widget.header,
+                        _Handle(onTap: toggle),
+                        Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: RideSheet.maxContentWidth),
+                            child: widget.header,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 600),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: widget.body,
+                  ValueListenableBuilder<double>(
+                    valueListenable: _bodyOpacity,
+                    builder: (context, opacity, child) => Opacity(
+                      opacity: opacity,
+                      alwaysIncludeSemantics: true,
+                      child: child,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(RideSheet.hPad, 8, RideSheet.hPad, 28),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: RideSheet.maxContentWidth),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: widget.body,
+                          ),
                         ),
                       ),
                     ),
@@ -152,18 +270,30 @@ class RideSheetState extends State<RideSheet> {
   }
 }
 
+/// The grab handle: a full-width 32 dp strip (easy to hit with gloves) that
+/// drags the sheet like the rest of the header; a tap opens or closes it.
 class _Handle extends StatelessWidget {
-  const _Handle();
+  final VoidCallback? onTap;
+  const _Handle({this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 22,
-      child: Center(
-        child: Container(
-          width: 44,
-          height: 5,
-          decoration: BoxDecoration(color: AppTheme.border2, borderRadius: const BorderRadius.all(Radius.circular(3))),
+    return Semantics(
+      button: onTap != null,
+      label: 'Ride sheet',
+      hint: onTap == null ? null : 'Double tap to open or close',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          height: 32,
+          child: Center(
+            child: Container(
+              width: 44,
+              height: 5,
+              decoration: BoxDecoration(color: AppTheme.border2, borderRadius: const BorderRadius.all(Radius.circular(3))),
+            ),
+          ),
         ),
       ),
     );
@@ -226,14 +356,17 @@ class RidingMetrics extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+          // The sheet body already applies [RideSheet.hPad]; no second inset here.
+          padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(flex: 5, child: RideMetric(value: remVal, unit: remUnit, label: 'Remaining', emphasis: true, alignment: CrossAxisAlignment.center)),
               Expanded(flex: 4, child: RideMetric(value: eta, label: 'ETA', alignment: CrossAxisAlignment.center)),
-              Expanded(flex: 3, child: RideMetric(value: '$riding/$total', label: 'Riding', alignment: CrossAxisAlignment.center)),
-              Expanded(flex: 4, child: RideMetric(value: spVal, unit: spUnit, label: 'Spread', alignment: CrossAxisAlignment.center)),
+              if (total >= 2) ...[
+                Expanded(flex: 3, child: RideMetric(value: '$riding/$total', label: 'Riding', alignment: CrossAxisAlignment.center)),
+                Expanded(flex: 4, child: RideMetric(value: spVal, unit: spUnit, label: 'Spread', alignment: CrossAxisAlignment.center)),
+              ],
             ],
           ),
         ),
@@ -254,6 +387,7 @@ class StoppedDetails extends StatelessWidget {
   final String reason;
   final VoidCallback onTellWhy;
   final VoidCallback? onTap;
+  final bool isSolo;
 
   const StoppedDetails({
     super.key,
@@ -266,6 +400,7 @@ class StoppedDetails extends StatelessWidget {
     required this.reason,
     required this.onTellWhy,
     this.onTap,
+    this.isSolo = false,
   });
 
   @override
@@ -274,7 +409,9 @@ class StoppedDetails extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+        // Horizontal inset comes from the sheet header ([RideSheet.hPad]) so
+        // this lines up with the talk bar and the body below.
+        padding: const EdgeInsets.fromLTRB(0, 0, 0, 12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -305,12 +442,13 @@ class StoppedDetails extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: RideMetric(
-                    value: '$nearby',
-                    label: '${nearby == 1 ? 'Rider' : 'Riders'} within ${formatDistance(nearbyRadiusM)}',
+                if (!isSolo)
+                  Expanded(
+                    child: RideMetric(
+                      value: '$nearby',
+                      label: '${nearby == 1 ? 'Rider' : 'Riders'} within ${formatDistance(nearbyRadiusM)}',
+                    ),
                   ),
-                ),
                 Expanded(child: RideMetric(value: nVal, unit: nUnit, label: nextLabel)),
               ],
             ),
@@ -359,284 +497,6 @@ class SheetSectionTitle extends StatelessWidget {
   }
 }
 
-/// The small uppercase section header of the canvas ("RIDING ORDER"), with
-/// the same block rhythm as [SheetSectionTitle].
-class SheetOverline extends StatelessWidget {
-  final String text;
-  final Widget? trailing;
-  const SheetOverline(this.text, {super.key, this.trailing});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 18, bottom: 10),
-      child: Semantics(header: true, child: DsSectionHeader(text, trailing: trailing)),
-    );
-  }
-}
-
-/// The "Group" header at the top of the expanded sheet: title 22/800 and
-/// a muted subtitle ("Bangalore Highway Convoy · 3 riders").
-class SheetGroupHeader extends StatelessWidget {
-  final String title;
-  final String? subtitle;
-  final Widget? trailing;
-  const SheetGroupHeader({super.key, required this.title, this.subtitle, this.trailing});
-
-  @override
-  Widget build(BuildContext context) {
-    final sub = subtitle;
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Semantics(header: true, child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.headline)),
-              if (sub != null && sub.isNotEmpty) ...[
-                const SizedBox(height: 1),
-                Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label),
-              ],
-            ],
-          ),
-        ),
-        if (trailing != null) ...[const SizedBox(width: 12), trailing!],
-      ],
-    );
-  }
-}
-
-/// The teal hero card of the canvas "Group" screen: "CONVOY SPREAD ·
-/// 4.6 km · Lead to last rider" with a white "Talk to all" button that
-/// opens the intercom. [spreadM] null (or fewer than two riders) shows "-".
-class ConvoySpreadHero extends StatelessWidget {
-  final double? spreadM;
-  final VoidCallback? onTalkToAll;
-  final String talkLabel;
-  const ConvoySpreadHero({super.key, required this.spreadM, this.onTalkToAll, this.talkLabel = 'Talk to all'});
-
-  @override
-  Widget build(BuildContext context) {
-    final m = spreadM;
-    final value = m == null || !m.isFinite ? '-' : formatDistanceRounded(m);
-    return DsHeroCard(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('CONVOY SPREAD', style: TextStyle(color: DsHeroCard.overline, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1)),
-                const SizedBox(height: 2),
-                Text(value, maxLines: 1, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()])),
-                const SizedBox(height: 2),
-                const Text('Lead to last rider', style: TextStyle(color: DsHeroCard.secondary, fontSize: 13, fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ),
-          if (onTalkToAll != null) ...[
-            const SizedBox(width: 12),
-            SizedBox(
-              height: 48,
-              child: Material(
-                color: AppTheme.card,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: onTalkToAll,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.mic_none_rounded, size: 18, color: AppTheme.accentText),
-                        const SizedBox(width: 8),
-                        Text(talkLabel, style: TextStyle(color: AppTheme.accentText, fontSize: 14, fontWeight: FontWeight.w800)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// One of the two side-by-side outline buttons under the riding order
-/// ("Regroup stop" / "Share route"), 56 dp with a coloured icon.
-class SheetAction {
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final Color? iconColor;
-  const SheetAction({required this.icon, required this.label, required this.onTap, this.iconColor});
-}
-
-/// Two outline buttons in one row, 10 dp apart.
-class SheetActionPair extends StatelessWidget {
-  final SheetAction first;
-  final SheetAction second;
-  const SheetActionPair({super.key, required this.first, required this.second});
-
-  Widget _button(SheetAction a) {
-    return SizedBox(
-      height: 56,
-      child: Material(
-        color: AppTheme.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: AppTheme.border, width: 2)),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: a.onTap,
-          child: Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(a.icon, size: 20, color: a.iconColor ?? AppTheme.accentText),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    a.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: AppTheme.text, fontSize: 15, fontWeight: FontWeight.w800),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(child: _button(first)),
-        const SizedBox(width: 10),
-        Expanded(child: _button(second)),
-      ],
-    );
-  }
-}
-
-/// The dashed "INVITE CODE · BHC-482" card with a teal "Share" button and
-/// an optional copy action.
-class InviteCodeCard extends StatelessWidget {
-  final String code;
-  final VoidCallback? onShare;
-  final VoidCallback? onCopy;
-  const InviteCodeCard({super.key, required this.code, this.onShare, this.onCopy});
-
-  @override
-  Widget build(BuildContext context) {
-    return DsCard(
-      dashed: true,
-      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const DsSectionHeader('Invite code'),
-                const SizedBox(height: 2),
-                Text(
-                  code,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.metric.copyWith(fontSize: 24, letterSpacing: 4),
-                ),
-              ],
-            ),
-          ),
-          if (onCopy != null)
-            IconButton(
-              tooltip: 'Copy code',
-              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-              icon: Icon(Icons.copy_rounded, color: AppTheme.accentText),
-              onPressed: onCopy,
-            ),
-          if (onShare != null)
-            SizedBox(
-              height: 44,
-              child: Material(
-                color: AppTheme.brand,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: onShare,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Center(child: Text('Share', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800))),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A 56 dp row in the expanded sheet (Messages, Group settings, ...). With
-/// no [onTap] it is a plain information row (its [trailing] may still act).
-/// Canvas list row: teal 22 dp icon, 15/700 title, hairline divider.
-class SheetRow extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String? subtitle;
-  final VoidCallback? onTap;
-  final Widget? trailing;
-
-  const SheetRow({super.key, required this.icon, required this.title, this.subtitle, this.onTap, this.trailing});
-
-  @override
-  Widget build(BuildContext context) {
-    final sub = subtitle;
-    final hasSub = sub != null && sub.isNotEmpty;
-    final row = Container(
-      constraints: const BoxConstraints(minHeight: 56),
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: AppTheme.border))),
-      child: Row(
-        children: [
-          Icon(icon, size: 22, color: AppTheme.accentText),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
-                if (hasSub) ...[
-                  const SizedBox(height: 2),
-                  Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
-                ],
-              ],
-            ),
-          ),
-          if (trailing != null) ...[
-            const SizedBox(width: 8),
-            trailing!,
-          ] else if (onTap != null)
-            Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
-        ],
-      ),
-    );
-    if (onTap == null) return row;
-    return Semantics(button: true, child: InkWell(onTap: onTap, child: row));
-  }
-}
-
 /// One short line with an icon under the sheet title ("Rain likely after
 /// Warangal around 3 PM", "Dark in 40 min"). Static.
 class SheetLine extends StatelessWidget {
@@ -660,75 +520,3 @@ class SheetLine extends StatelessWidget {
   }
 }
 
-/// How the "Save route map" row reads (pure, for tests): idle, saving,
-/// saved or failed.
-enum SaveMapState { idle, running, saved, failed }
-
-SaveMapState saveMapStateOf({required bool running, required int done, required int total, String? error}) {
-  if (running) return SaveMapState.running;
-  if (error != null && error.isNotEmpty) return SaveMapState.failed;
-  if (total > 0 && done >= total) return SaveMapState.saved;
-  return SaveMapState.idle;
-}
-
-/// "Save route map" in the ride sheet and the review sheet (3.16, item 16):
-/// a button while idle, a progress line while the tiles download, "Route map
-/// saved" when done, and a retry when it failed. Tapping it is always
-/// allowed, whatever the network (the automatic prefetch waits for Wi-Fi).
-class SaveRouteMapRow extends StatelessWidget {
-  final bool running;
-  final int done;
-  final int total;
-  final String? error;
-  final VoidCallback? onSave;
-
-  const SaveRouteMapRow({super.key, required this.running, required this.done, required this.total, this.error, this.onSave});
-
-  static const String idleTitle = 'Save route map';
-  static const String savedTitle = 'Route map saved';
-  static const String failedTitle = 'Could not save the map right now';
-  static String progressTitle(int done, int total) => 'Saving route map: $done of $total';
-
-  @override
-  Widget build(BuildContext context) {
-    final state = saveMapStateOf(running: running, done: done, total: total, error: error);
-    switch (state) {
-      case SaveMapState.running:
-        return SheetRow(
-          icon: Icons.download_rounded,
-          title: progressTitle(done, total),
-          trailing: SizedBox(
-            width: 48,
-            child: Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accentText, value: total > 0 ? (done / total).clamp(0.0, 1.0) : null),
-              ),
-            ),
-          ),
-        );
-      case SaveMapState.saved:
-        return SheetRow(
-          icon: Icons.download_done_rounded,
-          title: savedTitle,
-          subtitle: 'Maps along the route work without signal.',
-          trailing: Icon(Icons.check_circle_rounded, color: AppTheme.accentText),
-        );
-      case SaveMapState.failed:
-        return SheetRow(
-          icon: Icons.download_rounded,
-          title: failedTitle,
-          subtitle: 'Tap to try again.',
-          onTap: onSave,
-        );
-      case SaveMapState.idle:
-        return SheetRow(
-          icon: Icons.download_rounded,
-          title: idleTitle,
-          subtitle: 'Map tiles along the route are kept on the phone for 30 days.',
-          onTap: onSave,
-        );
-    }
-  }
-}

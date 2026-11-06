@@ -7,17 +7,10 @@ import 'package:coroute_app/core/theme/app_palette.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/core/theme/sun_times.dart';
 import 'package:coroute_app/core/theme/theme_controller.dart';
-import 'package:coroute_app/core/widgets/cockpit_hud.dart';
-import 'package:coroute_app/data/models/convoy_model.dart';
-import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/models/timeline_event_model.dart';
-import 'package:coroute_app/data/services/intercom_service.dart';
-import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/presentation/account/appearance_sheet.dart';
 import 'package:coroute_app/presentation/timeline/member_colors.dart';
 import 'package:coroute_app/presentation/timeline/timeline_list.dart';
-import 'package:coroute_app/presentation/widgets/connection_banner.dart';
-import 'package:coroute_app/presentation/widgets/intercom_dock.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -84,16 +77,6 @@ void main() {
       'foldable 673x841': Size(673, 841),
     };
 
-    RiderModel rider(String id, String name) => RiderModel(userId: id, name: name, lat: 0, lng: 0, lastSeenEpochMs: 0);
-    final convoy = ConvoyModel(
-      groupId: 'GRP-TEST',
-      name: 'Sunday ride to Srisailam with the whole riding club',
-      joinCode: '123456',
-      createdByUserId: 'usr_me',
-      createdByUserName: 'Me',
-      createdAtEpochMs: 0,
-      riders: {'usr_me': rider('usr_me', 'Me'), 'usr_other': rider('usr_other', 'Venkata Subramaniam Ramakrishnan')},
-    );
     const t0 = 1800000000000;
     final events = [
       TimelineEventModel(eventId: '1', groupId: 'G', userId: 'a', userName: 'Venkata Subramaniam Ramakrishnan', type: 'STOPPED', startedAt: t0, durationMs: 1260000,
@@ -125,32 +108,9 @@ void main() {
         for (final p in [AppPalette.dark, AppPalette.light]) {
           final label = '${entry.key}, text x$scale, ${p.isLight ? 'light' : 'dark'}';
 
-          testWidgets('cockpit speed card: $label', (tester) async {
-            await render(tester, entry.value, scale, p,
-                const Align(alignment: Alignment.topLeft, child: CockpitHud(speedKmh: 124, heading: 271, batteryLevel: 100, isCharging: true, speedLimitKmh: 80)));
-            expect(tester.takeException(), isNull);
-            expect(find.text('Over the 80 limit'), findsOneWidget);
-          });
-
           testWidgets('timeline: $label', (tester) async {
             await render(tester, entry.value, scale, p,
                 TimelineList(events: events, colors: MemberColors.assign(['a', 'b', 'c']), memberNames: const {'a': 'Venkata Subramaniam Ramakrishnan', 'b': 'Bala', 'c': 'Chitra'}));
-            expect(tester.takeException(), isNull);
-          });
-
-          testWidgets('radio dock and connection banner: $label', (tester) async {
-            final rt = RealtimeService();
-            await render(
-              tester,
-              entry.value,
-              scale,
-              p,
-              Column(children: [const ConnectionBanner(), const Spacer(), IntercomDock(convoy: convoy, me: rider('usr_me', 'Me'))]),
-              providers: [
-                ChangeNotifierProvider<RealtimeService>.value(value: rt),
-                ChangeNotifierProvider(create: (_) => IntercomService(rt)),
-              ],
-            );
             expect(tester.takeException(), isNull);
           });
 

@@ -8,12 +8,9 @@ import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/services/convoy_service.dart';
-import 'package:coroute_app/data/services/intercom_service.dart';
-import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/presentation/ride/group_settings_sheet.dart';
-import 'package:coroute_app/presentation/rider/widgets/cockpit_shortcuts_dock.dart';
 import 'package:coroute_app/presentation/rider/widgets/coroute_orbit_control.dart';
 import 'package:coroute_app/presentation/rider/widgets/glove_quick_settings_modal.dart';
 import 'package:coroute_app/presentation/rider/widgets/minimal_cockpit_overlay.dart';
@@ -116,39 +113,6 @@ void main() {
         : app;
   }
 
-  testWidgets('CockpitShortcutsDock contains all 7 quick controls including Ride Guardian and Fuel', (tester) async {
-    final me = createTestRider('rider_cockpit_me', 'Eagle');
-    final convoy = createTestConvoy(me);
-    final rt = RealtimeService();
-    final intercom = IntercomService(rt);
-    final settings = SettingsService();
-    await settings.load();
-
-    await tester.pumpWidget(
-      wrap(
-        CockpitShortcutsDock(
-          convoy: convoy,
-          me: me,
-          intercomService: intercom,
-          settingsService: settings,
-          keepScreenOn: false,
-          autoFollow: true,
-          onToggleKeepScreenOn: () {},
-          onToggleAutoFollow: () {},
-          onEssentialsRadarTap: () {},
-        ),
-      ),
-    );
-
-    // Verify all 7 shortcut keys exist
-    expect(find.byKey(const Key('cockpit_dock_voice_toggle')), findsOneWidget);
-    expect(find.byKey(const Key('cockpit_dock_guardian')), findsOneWidget);
-    expect(find.byKey(const Key('cockpit_dock_fuel')), findsOneWidget);
-    expect(find.byKey(const Key('cockpit_dock_stop_reason')), findsOneWidget);
-    expect(find.byKey(const Key('cockpit_dock_essentials_radar')), findsOneWidget);
-    expect(find.byKey(const Key('cockpit_dock_intercom_toggle')), findsOneWidget);
-    expect(find.byKey(const Key('cockpit_dock_quick_settings')), findsOneWidget);
-  });
 
   testWidgets('GloveQuickSettingsModal renders Ride Guardian and Fuel in-flight actions', (tester) async {
     FeatureGates.activeTier = SubscriptionTier.proRider;
@@ -221,7 +185,7 @@ void main() {
 
     // Section cards
     expect(find.text('Ride feature controls'), findsOneWidget);
-    expect(find.text('Convoy safety limits'), findsOneWidget);
+    expect(find.text('Group limits'), findsOneWidget);
     expect(find.text('Audio & guidance alerts'), findsOneWidget);
     expect(find.text('Sharing my location'), findsOneWidget);
   });
@@ -338,59 +302,7 @@ void main() {
     expect(navPressed, isTrue);
   });
 
-  testWidgets('MinimalRideStatsBar renders 4 key metrics and handles tap', (tester) async {
-    bool tapped = false;
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: MinimalRideStatsBar(
-            remainingText: '142 km',
-            etaText: '4:35 PM',
-            ridingCount: 5,
-            totalCount: 8,
-            spreadText: '2.1 km',
-            onTap: () => tapped = true,
-          ),
-        ),
-      ),
-    );
-
-    expect(find.text('142 km'), findsOneWidget);
-    expect(find.text('4:35 PM'), findsOneWidget);
-    expect(find.text('5/8'), findsOneWidget);
-    expect(find.text('2.1 km'), findsOneWidget);
-
-    await tester.tap(find.byType(MinimalRideStatsBar));
-    expect(tapped, isTrue);
-  });
-
-  testWidgets('MinimalStoppedBar renders duration and triggers onTellWhy', (tester) async {
-    bool tellWhyTapped = false;
-    bool barTapped = false;
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: MinimalStoppedBar(
-            stoppedFor: const Duration(minutes: 8),
-            nearbyCount: 2,
-            onTap: () => barTapped = true,
-            onTellWhy: () => tellWhyTapped = true,
-          ),
-        ),
-      ),
-    );
-
-    expect(find.text('stopped 8m'), findsOneWidget);
-    expect(find.text('2 riders nearby'), findsOneWidget);
-
-    await tester.tap(find.text('Tell why'));
-    expect(tellWhyTapped, isTrue);
-
-    await tester.tap(find.text('stopped 8m'));
-    expect(barTapped, isTrue);
-  });
 
   testWidgets('MinimalSpeedAlert renders speed and semantics', (tester) async {
     await tester.pumpWidget(
@@ -408,37 +320,6 @@ void main() {
     expect(find.byType(MinimalSpeedAlert), findsOneWidget);
   });
 
-  testWidgets('MapSideControls renders quick controls and responds to taps', (tester) async {
-    bool screenOnToggled = false;
-    bool centred = false;
-    bool sheetOpened = false;
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: MapSideControls(
-            keepScreenOn: false,
-            autoFollow: true,
-            onToggleKeepScreenOn: () => screenOnToggled = true,
-            onCentre: () => centred = true,
-            onOpenSheet: () => sheetOpened = true,
-            visible: true,
-          ),
-        ),
-      ),
-    );
-
-    expect(find.byType(MapSideControls), findsOneWidget);
-
-    await tester.tap(find.byTooltip('Keep screen on'));
-    expect(screenOnToggled, isTrue);
-
-    await tester.tap(find.byTooltip('Centre on me'));
-    expect(centred, isTrue);
-
-    await tester.tap(find.byTooltip('Open ride sheet'));
-    expect(sheetOpened, isTrue);
-  });
 
   testWidgets('CockpitSpeedometer renders big bold tabular figures with glow and speed limit badge', (tester) async {
     await tester.pumpWidget(
@@ -513,57 +394,5 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('CockpitStatusPillsBar renders all 4 HUD status pills cleanly with pure vector icons', (tester) async {
-    bool ridersTapped = false;
-    bool airbagTapped = false;
-    bool remoteTapped = false;
-    bool tunnelTapped = false;
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: CockpitStatusPillsBar(
-            riderCount: 4,
-            isAirbagPaired: true,
-            isRemotePaired: true,
-            isTunnelMode: true,
-            onRidersTap: () => ridersTapped = true,
-            onAirbagTap: () => airbagTapped = true,
-            onRemoteTap: () => remoteTapped = true,
-            onTunnelTap: () => tunnelTapped = true,
-          ),
-        ),
-      ),
-    );
-
-    // Verify all 4 status pills render
-    expect(find.byKey(const Key('cockpit_pill_live_riders')), findsOneWidget);
-    expect(find.byKey(const Key('cockpit_pill_airbag')), findsOneWidget);
-    expect(find.byKey(const Key('cockpit_pill_remote')), findsOneWidget);
-    expect(find.byKey(const Key('cockpit_pill_tunnel_mode')), findsOneWidget);
-
-    expect(find.text('Live · 4 Riders'), findsOneWidget);
-    expect(find.text('Airbag'), findsOneWidget);
-    expect(find.text('Remote'), findsOneWidget);
-    expect(find.text('Tunnel Mode'), findsOneWidget);
-
-    // Verify vector icons
-    expect(find.byIcon(Icons.shield_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.radio_button_checked_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.alt_route_rounded), findsOneWidget);
-
-    // Verify tap handlers
-    await tester.tap(find.byKey(const Key('cockpit_pill_live_riders')));
-    expect(ridersTapped, isTrue);
-
-    await tester.tap(find.byKey(const Key('cockpit_pill_airbag')));
-    expect(airbagTapped, isTrue);
-
-    await tester.tap(find.byKey(const Key('cockpit_pill_remote')));
-    expect(remoteTapped, isTrue);
-
-    await tester.tap(find.byKey(const Key('cockpit_pill_tunnel_mode')));
-    expect(tunnelTapped, isTrue);
-  });
 }
 

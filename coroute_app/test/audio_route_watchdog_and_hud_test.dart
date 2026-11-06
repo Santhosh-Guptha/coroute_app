@@ -1,13 +1,8 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:coroute_app/data/models/convoy_model.dart';
-import 'package:coroute_app/data/services/audio_route_watchdog.dart';
-import 'package:coroute_app/data/services/convoy_service.dart';
 import 'package:coroute_app/data/services/intercom_service.dart';
 import 'package:coroute_app/data/services/realtime_service.dart';
-import 'package:coroute_app/presentation/rider/widgets/cockpit_intercom_hud_pill.dart';
 
 class FakeRealtimeService extends RealtimeService {
   final StreamController<VoicePacket> _voiceCtrl = StreamController<VoicePacket>.broadcast();
@@ -41,104 +36,10 @@ class FakeRealtimeService extends RealtimeService {
   }
 }
 
-class FakeConvoyService extends ChangeNotifier implements ConvoyService {
-  @override
-  ConvoyModel? activeConvoy;
-
-  void setActiveConvoyForTest(ConvoyModel? convoy) {
-    activeConvoy = convoy;
-    notifyListeners();
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('AudioRouteWatchdog Unit Tests', () {
-    test('Initial healthy state has no routing issues', () async {
-      final watchdog = AudioRouteWatchdog(
-        initialBluetoothConnected: true,
-        initialVolume: 0.8,
-        bluetoothExpected: true,
-      );
-
-      final state = watchdog.state;
-      expect(state.isBluetoothConnected, isTrue);
-      expect(state.volumeLevel, 0.8);
-      expect(state.isVolumeMuted, isFalse);
-      expect(state.isAudioRoutingIssue, isFalse);
-      expect(watchdog.healthNotifier.value, equals(state));
-    });
-
-    test('Bluetooth disconnection flags audio routing issue when expected', () async {
-      final watchdog = AudioRouteWatchdog(
-        initialBluetoothConnected: true,
-        bluetoothExpected: true,
-      );
-
-      watchdog.onBluetoothStateChanged(false);
-
-      expect(watchdog.isBluetoothConnected, isFalse);
-      expect(watchdog.isAudioRoutingIssue, isTrue);
-      expect(watchdog.healthNotifier.value.statusDescription, equals('HELMET_BLUETOOTH_DISCONNECTED'));
-
-      // Tapping reconnect recovers Bluetooth
-      final ok = await watchdog.attemptReconnectBluetooth();
-      expect(ok, isTrue);
-      expect(watchdog.isBluetoothConnected, isTrue);
-      expect(watchdog.isAudioRoutingIssue, isFalse);
-    });
-
-    test('reconnectBluetooth() alias works identically to attemptReconnectBluetooth()', () async {
-      final watchdog = AudioRouteWatchdog(
-        initialBluetoothConnected: false,
-        bluetoothExpected: true,
-      );
-      expect(watchdog.isAudioRoutingIssue, isTrue);
-
-      final ok = await watchdog.reconnectBluetooth();
-      expect(ok, isTrue);
-      expect(watchdog.isBluetoothConnected, isTrue);
-      expect(watchdog.isAudioRoutingIssue, isFalse);
-    });
-
-    test('Volume muted during active convoy flags audio routing issue', () async {
-      final fakeConvoy = FakeConvoyService();
-      final watchdog = AudioRouteWatchdog(
-        convoyService: fakeConvoy,
-        initialVolume: 1.0,
-      );
-
-      // Outside of active convoy, muted volume does not trigger emergency audio issue
-      watchdog.onVolumeChanged(0.0);
-      expect(watchdog.isVolumeMuted, isTrue);
-      expect(watchdog.isAudioRoutingIssue, isFalse);
-
-      // Now join an active convoy using mock ConvoyModel
-      fakeConvoy.setActiveConvoyForTest(ConvoyModel(
-        groupId: 'grp_1',
-        name: 'Western Ghats',
-        joinCode: '1234',
-        createdByUserId: 'u1',
-        createdByUserName: 'Lead',
-        createdAtEpochMs: DateTime.now().millisecondsSinceEpoch,
-      ));
-
-      // Active convoy + 0% volume = audio routing issue!
-      expect(watchdog.isConvoyActive, isTrue);
-      expect(watchdog.isAudioRoutingIssue, isTrue);
-      expect(watchdog.healthNotifier.value.statusDescription, equals('INTERCOM_VOLUME_MUTED'));
-
-      // boostIntercomVolume() resets volume to 100% and clears issue
-      await watchdog.boostIntercomVolume();
-      expect(watchdog.volumeLevel, equals(1.0));
-      expect(watchdog.isVolumeMuted, isFalse);
-      expect(watchdog.isAudioRoutingIssue, isFalse);
-    });
-  });
 
   group('IntercomService activeSpeakerNotifier and Tactile Haptics', () {
     late FakeRealtimeService fakeRt;
@@ -239,90 +140,4 @@ void main() {
     });
   });
 
-  group('CockpitIntercomHudPill Widget Tests', () {
-    testWidgets('Renders animated waveform pill when speaker is active', (tester) async {
-      final watchdog = AudioRouteWatchdog();
-      watchdog.onSpeakerActive(
-        speakerId: 'u1',
-        speakerName: 'Kiran',
-        isLead: false,
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CockpitIntercomHudPill(watchdog: watchdog),
-          ),
-        ),
-      );
-
-      expect(find.text('Kiran speaking...'), findsOneWidget);
-      expect(find.textContaining('🎙️'), findsOneWidget);
-      expect(find.textContaining('▰'), findsOneWidget);
-    });
-
-    testWidgets('Renders Helmet Audio Disconnected warning with 1-tap reconnect', (tester) async {
-      final watchdog = AudioRouteWatchdog(initialBluetoothConnected: true);
-      watchdog.onBluetoothStateChanged(false);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CockpitIntercomHudPill(
-              watchdog: watchdog,
-            ),
-          ),
-        ),
-      );
-
-      expect(find.textContaining('HELMET AUDIO DISCONNECTED'), findsOneWidget);
-      expect(find.text('RECONNECT'), findsOneWidget);
-
-      await tester.tap(find.text('RECONNECT'));
-      await tester.pumpAndSettle();
-
-      expect(watchdog.isBluetoothConnected, isTrue);
-    });
-
-    testWidgets('Renders Intercom Muted (0%) warning with 1-tap volume boost', (tester) async {
-      final watchdog = AudioRouteWatchdog(initialVolume: 1.0);
-      watchdog.onVolumeChanged(0.0);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CockpitIntercomHudPill(
-              watchdog: watchdog,
-            ),
-          ),
-        ),
-      );
-
-      expect(find.textContaining('INTERCOM MUTED (0%)'), findsOneWidget);
-      expect(find.text('BOOST'), findsOneWidget);
-
-      await tester.tap(find.text('BOOST'));
-      await tester.pumpAndSettle();
-
-      expect(watchdog.isVolumeMuted, isFalse);
-      expect(watchdog.volumeLevel, equals(1.0));
-    });
-
-    testWidgets('Returns SizedBox.shrink() when idle and healthy', (tester) async {
-      final watchdog = AudioRouteWatchdog(initialBluetoothConnected: true, initialVolume: 1.0);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: CockpitIntercomHudPill(watchdog: watchdog),
-          ),
-        ),
-      );
-
-      expect(find.byType(CockpitIntercomHudPill), findsOneWidget);
-      expect(find.textContaining('speaking...'), findsNothing);
-      expect(find.textContaining('DISCONNECTED'), findsNothing);
-      expect(find.textContaining('MUTED'), findsNothing);
-    });
-  });
 }

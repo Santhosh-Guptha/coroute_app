@@ -120,7 +120,7 @@ class FakePort extends ChangeNotifier implements SafetyPort, SafetySourcePort, S
 class CapturedVoiceEngine extends SilentEngine {
   final List<String> spoken = [];
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id}) async {
+  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
     spoken.add(text);
     return true;
   }
@@ -130,7 +130,7 @@ class SilentEngine implements VoiceEngine {
   @override
   Future<bool> init() async => true;
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id}) async => true;
+  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async => true;
   @override
   Future<void> stop() async {}
   @override
@@ -199,6 +199,7 @@ void main() {
   late FakeSms sms;
   late SettingsService settings;
   late SafetyService safety;
+  late StreamController<TrackPoint> soloFixes;
 
   Future<void> setUp0(WidgetTester tester, {Map<String, Object> prefs = const {}}) async {
     SharedPreferences.setMockInitialValues(prefs);
@@ -208,11 +209,13 @@ void main() {
     sms = FakeSms();
     settings = SettingsService();
     await settings.load();
-    safety = SafetyService.forTest(port, settings, accel: accel, sms: sms, clock: () => now);
+    soloFixes = StreamController<TrackPoint>.broadcast();
+    safety = SafetyService.forTest(port, settings, accel: accel, sms: sms, clock: () => now, soloFixes: () => soloFixes.stream);
   }
 
   Future<void> tearDown0(WidgetTester tester) async {
     safety.dispose();
+    await soloFixes.close();
     await port.fixes.close();
     port.dispose();
     await tester.pump();
@@ -232,7 +235,7 @@ void main() {
   const crash = CrashEvent(impactAtMs: t0 - 30000, impactG: 6.2, speedBeforeKmh: 58, lat: 12.97, lng: 77.59);
 
   group('sensor only when needed (battery)', () {
-    testWidgets('subscribed only during a ride, above 25 km/h, with crash detection on', (tester) async {
+    testWidgets('subscribed only during a ride, once armed (12 km/h for 10 s or above 25 km/h), with crash detection on', (tester) async {
       await setUp0(tester);
       port.fixes.add(fix(0, 60));
       await tester.pump();
@@ -252,11 +255,16 @@ void main() {
       expect(accel.running, isTrue);
       expect(safety.detectorArmed, isTrue);
 
-      // 31 s after the last fast fix the next bucket switches the sensor off.
-      accel.add(bucket(20));
-      await tester.pump();
-      expect(accel.running, isTrue);
+      // 3.54 hysteresis: stays on through stops shorter than 3 min (was 30 s, which turned the
+      // sensor off in every traffic jam); the first bucket more than 3 min after the last fix at
+      // riding pace switches it off.
       accel.add(bucket(33));
+      await tester.pump();
+      expect(accel.running, isTrue, reason: '31 s after the fast fix: still armed now');
+      accel.add(bucket(182));
+      await tester.pump();
+      expect(accel.running, isTrue, reason: '180 s after the last fix at riding pace');
+      accel.add(bucket(183));
       await tester.pump();
       expect(accel.running, isFalse);
       expect(safety.detectorArmed, isFalse);
@@ -325,6 +333,117 @@ void main() {
 
       expect(safety.isSensorUnavailable, isTrue);
       expect(accel.running, isFalse);
+      await tearDown0(tester);
+    });
+  });
+
+  // 3.54 (safety review): a ride started with no internet has no convoy, so it had no crash
+  // detection at all. The offline solo ride runs the detector on the phone's own GPS and sensor,
+  // and the SOS goes to the emergency contact by text (or the messages app) with call / 112 on screen.
+  group('offline solo ride (3.54)', () {
+    testWidgets('no convoy: a fall is detected on the solo fixes; no answer texts the emergency contact', (tester) async {
+      await setUp0(tester); // "Text the group" is not opted in: the solo SOS does not need it
+      expect(safety.startOfflineSoloRide(), isTrue);
+      expect(safety.offlineSoloActive, isTrue);
+      expect(accel.running, isFalse, reason: 'not riding yet: sensor off');
+      for (var s = 0; s <= 30; s++) {
+        soloFixes.add(fix(s, 55));
+        await tester.pump();
+        accel.add(bucket(s, peak: s == 30 ? 6.0 : 1.4, std: s == 30 ? 1.5 : 0.3));
+        await tester.pump();
+      }
+      expect(accel.running, isTrue);
+      soloFixes.add(fix(33, 0));
+      await tester.pump();
+      for (var s = 33; s <= 54; s++) {
+        accel.add(bucket(s, peak: 1.02, std: 0.02));
+        await tester.pump();
+      }
+      expect(safety.alarm, isNotNull);
+      expect(safety.alarm!.speedBeforeKmh, 55);
+      await wait(tester, SafetyConstants.crashCountdown + const Duration(seconds: 1));
+      await tester.pump();
+      await tester.pump();
+      expect(safety.alarm?.sent, isTrue);
+      expect(port.raised, isEmpty, reason: 'no convoy to raise it in');
+      expect(safety.offlineSoloSos, isNotNull);
+      expect(safety.offlineSoloSos!.type, SosTypes.crash);
+      expect(sms.sent.map((x) => x.$1).toList(), ['+919123456780']);
+      expect(sms.sent.single.$2, contains('https://maps.google.com/?q='));
+      expect(safety.smsStatus?.state, SmsFallbackState.sent);
+
+      safety.closeAlarm();
+      safety.resolveOfflineSoloSos();
+      expect(safety.offlineSoloSos, isNull);
+      safety.stopOfflineSoloRide();
+      await tester.pump();
+      expect(safety.offlineSoloActive, isFalse);
+      expect(accel.running, isFalse);
+      expect(accel.listens, accel.cancels);
+      await tearDown0(tester);
+    });
+
+    testWidgets('Play build (no SEND_SMS): a solo SOS opens the messages app for the emergency contact', (tester) async {
+      await setUp0(tester);
+      final opened = <List<String>>[];
+      SafetyService.smsComposerOverride = (to, body) async {
+        opened.add(to);
+        return true;
+      };
+      addTearDown(() => SafetyService.smsComposerOverride = null);
+      sms.cap = const SmsCapability(hasTelephony: true, permission: false, simReady: true);
+      safety.startOfflineSoloRide();
+      soloFixes.add(fix(0, 30));
+      await tester.pump();
+      await safety.triggerManualSos();
+      await tester.pump();
+      await tester.pump();
+      expect(port.raised, isEmpty);
+      expect(sms.sent, isEmpty, reason: 'nothing is sent silently');
+      expect(opened, [
+        ['+919123456780'],
+      ]);
+      expect(safety.smsStatus?.state, SmsFallbackState.composer);
+      expect(safety.smsAvailable, isTrue, reason: 'can open the messages app again');
+      safety.stopOfflineSoloRide();
+      await tearDown0(tester);
+    });
+
+    testWidgets('a convoy ride takes over; a solo ride cannot start during a convoy ride', (tester) async {
+      await setUp0(tester);
+      expect(safety.startOfflineSoloRide(), isTrue);
+      expect(safety.startOfflineSoloRide(), isFalse, reason: 'already running');
+      port.convoy = convoyWith({'me': RiderModel(userId: 'me', name: 'Kiran', lat: 12.97, lng: 77.59, lastSeenEpochMs: t0)});
+      port.changed();
+      await tester.pump();
+      expect(safety.offlineSoloActive, isFalse);
+      expect(safety.startOfflineSoloRide(), isFalse);
+      await tearDown0(tester);
+    });
+  });
+
+  group('slow traffic arming (3.54)', () {
+    testWidgets('12-20 km/h for 10 s turns the sensor on; a short stop keeps it; 3 min parked turns it off', (tester) async {
+      await setUp0(tester);
+      port.convoy = convoyWith({'me': RiderModel(userId: 'me', name: 'Kiran', lat: 12.97, lng: 77.59, lastSeenEpochMs: t0)});
+      port.changed();
+      await tester.pump();
+      for (var s = 0; s <= 9; s++) {
+        port.fixes.add(fix(s, 16));
+        await tester.pump();
+      }
+      expect(accel.running, isFalse, reason: '9 s of slow traffic: not armed yet');
+      port.fixes.add(fix(10, 14));
+      await tester.pump();
+      expect(accel.running, isTrue, reason: 'armed after 10 s at 12 km/h or more (was: never below 25 km/h)');
+      port.fixes.add(fix(30, 0));
+      await tester.pump();
+      accel.add(bucket(120));
+      await tester.pump();
+      expect(accel.running, isTrue, reason: 'stopped in the jam for 90 s');
+      accel.add(bucket(191));
+      await tester.pump();
+      expect(accel.running, isFalse, reason: 'parked for more than 3 min');
       await tearDown0(tester);
     });
   });
@@ -473,8 +592,10 @@ void main() {
       await tearDown0(tester);
     });
 
-    testWidgets('"Text the group now" sends the round at once; no permission says so', (tester) async {
+    testWidgets('"Text the group now" sends the round at once; no messages app says so', (tester) async {
       await setUp0(tester, prefs: {SafetyConstants.keySmsFallback: true});
+      SafetyService.smsComposerOverride = (to, body) async => false;
+      addTearDown(() => SafetyService.smsComposerOverride = null);
       await startRide(tester);
       sms.cap = const SmsCapability(hasTelephony: true, permission: false, simReady: true);
       sosWaiting();
@@ -488,6 +609,35 @@ void main() {
       await safety.sendSmsNow();
       await tester.pump();
       expect(sms.sent, hasLength(3));
+      await tearDown0(tester);
+    });
+
+    testWidgets('no SEND_SMS (Play build): the messages app opens with everyone, and can open again', (tester) async {
+      await setUp0(tester, prefs: {SafetyConstants.keySmsFallback: true});
+      final opened = <List<String>>[];
+      String? text;
+      SafetyService.smsComposerOverride = (to, body) async {
+        opened.add(to);
+        text = body;
+        return true;
+      };
+      addTearDown(() => SafetyService.smsComposerOverride = null);
+      await startRide(tester);
+      sms.cap = const SmsCapability(hasTelephony: true, permission: false, simReady: true);
+      sosWaiting();
+      await safety.sendSmsNow();
+      await tester.pump();
+      expect(sms.sent, isEmpty); // nothing sent silently
+      expect(opened, hasLength(1));
+      expect(opened.single, hasLength(3)); // contact + 2 riders, in one composer
+      expect(text, isNotEmpty);
+      expect(safety.smsStatus?.state, SmsFallbackState.composer);
+      expect(safety.smsStatus?.text, contains('Press Send'));
+      // Closed the messages app without sending: the button still works.
+      expect(safety.smsAvailable, isTrue);
+      await safety.sendSmsNow();
+      await tester.pump();
+      expect(opened, hasLength(2));
       await tearDown0(tester);
     });
 

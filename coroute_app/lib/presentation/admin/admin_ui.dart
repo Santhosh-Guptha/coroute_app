@@ -157,14 +157,31 @@ class StatusLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = color ?? AppTheme.text2;
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: c),
-        const SizedBox(width: 5),
-        Flexible(
-          child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: c, fontWeight: FontWeight.w700)),
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = constraints.maxWidth;
+        final hasBound = constraints.hasBoundedWidth;
+        if (hasBound && maxW <= 0) return const SizedBox.shrink();
+        final double iconSize;
+        final double gap;
+        if (hasBound && maxW < 24) {
+          iconSize = (maxW * 0.65).clamp(4.0, 16.0);
+          gap = (maxW - iconSize).clamp(0.0, 5.0);
+        } else {
+          iconSize = 16.0;
+          gap = 5.0;
+        }
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: iconSize, color: c),
+            if (gap > 0) SizedBox(width: gap),
+            Flexible(
+              child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption.copyWith(color: c, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -530,23 +547,6 @@ class AdminRowIcon extends StatelessWidget {
   }
 }
 
-/// Small rank tile ("1", "2", …) of the canvas "Top routes" list.
-class AdminRankTile extends StatelessWidget {
-  final int rank;
-  const AdminRankTile(this.rank, {super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 28,
-      height: 28,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(color: AppTheme.tint, borderRadius: BorderRadius.circular(8)),
-      child: Text('$rank', style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w800)),
-    );
-  }
-}
-
 /// A label, a count and a thin bar: the canvas "alerts by type" row.
 class AdminBarRow extends StatelessWidget {
   final String label;
@@ -632,18 +632,24 @@ class AdminFilterButton<T> extends StatelessWidget {
   final List<(T, String)> options;
   final ValueChanged<T> onSelected;
 
+  /// Tooltip and semantics name ("Filter" by default; a screen with several buttons names each).
+  final String tooltip;
+  final IconData icon;
+
   const AdminFilterButton({
     super.key,
     required this.value,
     required this.label,
     required this.options,
     required this.onSelected,
+    this.tooltip = 'Filter',
+    this.icon = Icons.filter_list_rounded,
   });
 
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<T>(
-      tooltip: 'Filter',
+      tooltip: tooltip,
       initialValue: value,
       onSelected: onSelected,
       color: AppTheme.card,
@@ -666,7 +672,7 @@ class AdminFilterButton<T> extends StatelessWidget {
       ],
       child: Semantics(
         button: true,
-        label: 'Filter: $label',
+        label: '$tooltip: $label',
         excludeSemantics: true,
         child: Container(
           constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
@@ -679,7 +685,7 @@ class AdminFilterButton<T> extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.filter_list_rounded, size: 20, color: AppTheme.accentText),
+              Icon(icon, size: 20, color: AppTheme.accentText),
               const SizedBox(width: 6),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 112),

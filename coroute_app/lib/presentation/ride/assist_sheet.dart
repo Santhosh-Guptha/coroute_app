@@ -346,7 +346,7 @@ Future<void> reportFalseAssist(BuildContext context, String incidentId) async {
   final ok = await confirmAction(
     context,
     title: 'Report a false alert?',
-    message: 'Tell CoRoute this request looks wrong. Do this only if you are sure there is no emergency.',
+    message: 'Only if you are sure there is no emergency.',
     confirmLabel: 'Report',
     destructive: true,
   );

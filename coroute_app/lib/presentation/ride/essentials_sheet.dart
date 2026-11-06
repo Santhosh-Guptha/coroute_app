@@ -180,11 +180,11 @@ class _EssentialsSheetState extends State<_EssentialsSheet> {
       followingKm: following?.roadDistanceM(service.progressM) == null ? null : following!.roadDistanceM(service.progressM)! / 1000,
       reliable: service.reliable && safety?.fuelEstimateUncertain == false);
     final adviceText = switch (advice) {
-      FuelAdvice.unknown => 'Not enough current information to assess skipping a station.',
-      FuelAdvice.withinEstimate => 'The following mapped station is within your estimate. Availability is unconfirmed.',
-      FuelAdvice.consider => 'Consider refuelling. The following option is near the estimate limit or not mapped in this window.',
-      FuelAdvice.recommended => 'Refuelling at the next mapped station is recommended.',
-      FuelAdvice.rangeRisk => 'Your estimated usable range may not reach the next mapped station.',
+      FuelAdvice.unknown => 'Not enough info to skip a station.',
+      FuelAdvice.withinEstimate => 'The next station is in range. Fuel there is not confirmed.',
+      FuelAdvice.consider => 'Think about refuelling. The next option is near your limit.',
+      FuelAdvice.recommended => 'Refuel at the next station.',
+      FuelAdvice.rangeRisk => 'You may not reach the next station.',
     };
     final adviceWarn = advice == FuelAdvice.recommended || advice == FuelAdvice.rangeRisk;
     final adviceColor = switch (advice) {
@@ -352,7 +352,7 @@ class _EssentialsSheetState extends State<_EssentialsSheet> {
       if (places.isEmpty && !service.loading)
         DsCard(
           dashed: true,
-          child: Text('No mapped options available in this view. This does not mean there are no services.', style: AppText.body.copyWith(color: AppTheme.text2)),
+          child: Text('Nothing on the map here. There may still be places.', style: AppText.body.copyWith(color: AppTheme.text2)),
         ),
       for (var i = 0; i < places.length; i++)
         Padding(

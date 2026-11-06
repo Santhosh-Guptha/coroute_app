@@ -90,12 +90,6 @@ function alongRoute(p, line, { fromIndex = null, maxLateralM = 300, window = 150
   return scan(0, last);
 }
 
-function polylineLength(line) {
-  let d = 0;
-  for (let i = 1; i < line.length; i++) d += haversine(line[i - 1].lat, line[i - 1].lng, line[i].lat, line[i].lng);
-  return d;
-}
-
 // ---- Google encoded polyline (precision 1e5) ----
 function encodeSigned(v) {
   let s = v < 0 ? ~(v << 1) : v << 1;
@@ -170,4 +164,4 @@ function medianCentre(points) {
   return { lat: med(points.map((p) => p.lat)), lng: med(points.map((p) => p.lng)) };
 }
 
-module.exports = { cumulative, haversine, pointToSegment, distanceToPolyline, alongRoute, polylineLength, encodePolyline, decodePolyline, simplify, medianCentre };
+module.exports = { cumulative, haversine, pointToSegment, distanceToPolyline, alongRoute, encodePolyline, decodePolyline, simplify, medianCentre };

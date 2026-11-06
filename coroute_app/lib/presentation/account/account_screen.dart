@@ -16,19 +16,19 @@ import '../../data/services/settings_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../admin/master_admin_dashboard.dart';
 import '../auth/access_gate_screen.dart';
+import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../rider/rider_home_screen.dart';
 import '../rider/trip_history_screen.dart';
 import '../safety/safety_settings_screen.dart';
+import '../settings/features_guide_screen.dart';
 import '../widgets/data_saver_tile.dart';
 import 'appearance_sheet.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
-import '../trip_planner/offline_map_manager_screen.dart';
 import '../subscription/payment_history_screen.dart';
 import '../subscription/membership_dashboard_screen.dart';
 import '../subscription/subscription_expiry_banner.dart';
-import '../../core/config/feature_gates.dart';
 import '../../data/services/plan_subscription_service.dart';
 import '../garage/garage_screen.dart';
 
@@ -86,7 +86,7 @@ class AccountScreen extends StatelessWidget {
       if (!auth.isPillion && plate.isNotEmpty) plate,
       if (auth.isPillion) 'No bike registration needed',
       if (settings != null && settings.fuelRangeKm > 0) '${settings.fuelRangeKm} km range',
-      'Multi-bike motorcycle garage',
+      'All your bikes',
     ];
 
     return Scaffold(
@@ -105,6 +105,7 @@ class AccountScreen extends StatelessWidget {
                   trailing: DsRoundButton(
                     icon: Icons.edit_rounded,
                     label: 'Edit profile',
+                    size: 48,
                     onTap: () => _push(context, const EditProfileScreen()),
                   ),
                 ),
@@ -195,9 +196,9 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: Space.s24),
                 const DsSectionHeader('My bike & Garage'),
-                const SizedBox(height: 10),
+                const SizedBox(height: Space.s12),
                 DsCard(
                   padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
                   onTap: () => _push(context, const GarageScreen()),
@@ -232,9 +233,9 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: Space.s24),
                 const DsSectionHeader('Emergency contact'),
-                const SizedBox(height: 10),
+                const SizedBox(height: Space.s12),
                 DsCard(
                   padding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
                   onTap: () => _push(context, const EditProfileScreen()),
@@ -295,21 +296,21 @@ class AccountScreen extends StatelessWidget {
                 ),
 
                 if (planService?.paymentsEnabled == true) ...[
-                  const SizedBox(height: 20),
+                  const SizedBox(height: Space.s24),
                   const DsSectionHeader('Membership & Plans'),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: Space.s12),
                   DsCard(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     child: Column(
                       children: [
                         _SettingsRow(
                           icon: Icons.card_membership_rounded,
-                          title: 'CoRoute Membership & Plans',
+                          title: 'Membership & plans',
                           subtitle: memService?.ownedMembership != null
                               ? '${memService!.ownedMembership!.name} · ₹${memService.ownedMembership!.priceRupees}/mo · ${memService.ownedMembership!.occupiedSeats}/${memService.ownedMembership!.capacity} Seats'
                               : (memService != null && memService.participating.isNotEmpty
-                                  ? 'Group Participant · Zero extra cost · Managed by Owner'
-                                  : 'Individual & Group plans · From ₹9/mo · Solo safety & Convoy seats'),
+                                  ? 'Group member · Free for you'
+                                  : 'Plans from ₹9/month'),
                           value: memService?.ownedMembership != null
                               ? (memService!.ownedMembership!.isExpired ? 'EXPIRED' : 'ACTIVE')
                               : (memService != null && memService.participating.isNotEmpty ? 'PARTICIPANT' : 'CHOOSE PLAN'),
@@ -320,50 +321,17 @@ class AccountScreen extends StatelessWidget {
                         _SettingsRow(
                           icon: Icons.receipt_long_rounded,
                           title: 'Payments & plan history',
-                          subtitle: 'Past plans, UPI payments and order status',
-                          divider: true,
-                          onTap: () => _push(context, const PaymentHistoryScreen()),
-                        ),
-                        _SettingsRow(
-                          icon: Icons.dashboard_customize_rounded,
-                          title: 'Fleet & Tour Dispatcher Matrix',
-                          subtitle: FeatureGates.isUnlocked(Feature.fleetAnalytics)
-                              ? 'Commercial live fleet map, emergency dispatch & analytics'
-                              : 'Commercial live fleet map, emergency dispatch & analytics',
-                          value: 'ACTIVE',
-                          color: FeatureGates.isUnlocked(Feature.fleetAnalytics) ? AppTheme.accentText : null,
+                          subtitle: 'Past plans and payments',
                           divider: false,
-                          onTap: () {
-                            if (!FeatureGates.isUnlocked(Feature.fleetAnalytics)) {
-                              FeatureGates.showUpgradeModal(context, Feature.fleetAnalytics);
-                              return;
-                            }
-                            _push(context, const MasterAdminDashboard());
-                          },
+                          onTap: () => _push(context, const PaymentHistoryScreen()),
                         ),
                       ],
                     ),
                   ),
-                ] else if (FeatureGates.isUnlocked(Feature.fleetAnalytics) || auth.isMasterAdmin) ...[
-                  const SizedBox(height: 20),
-                  const DsSectionHeader('Fleet Management'),
-                  const SizedBox(height: 10),
-                  DsCard(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: _SettingsRow(
-                      icon: Icons.dashboard_customize_rounded,
-                      title: 'Fleet & Tour Dispatcher Matrix',
-                      subtitle: 'Commercial live fleet map, emergency dispatch & analytics',
-                      value: 'ACTIVE',
-                      color: AppTheme.accentText,
-                      divider: false,
-                      onTap: () => _push(context, const MasterAdminDashboard()),
-                    ),
-                  ),
                 ],
-                const SizedBox(height: 20),
+                const SizedBox(height: Space.s24),
                 const DsSectionHeader('Riding'),
-                const SizedBox(height: 10),
+                const SizedBox(height: Space.s12),
                 DsCard(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Column(
@@ -371,9 +339,11 @@ class AccountScreen extends StatelessWidget {
                       if (settings != null)
                         _SettingsRow(
                           icon: Icons.health_and_safety_rounded,
-                          title: 'Ride cockpit & safety settings',
-                          subtitle: 'Crash detection, tunnel coasting, BLE remote & audio alerts',
-                          value: 'ARMED',
+                          title: 'Ride & safety settings',
+                          subtitle: 'Crash alerts, tunnels, remote, voice',
+                          // Reflect the real switch: "ARMED" while crash detection is off misled riders.
+                          value: settings.crashDetection ? 'ARMED' : 'OFF',
+                          color: settings.crashDetection ? null : AppTheme.warnText,
                           onTap: () => _push(context, const SafetySettingsScreen()),
                         ),
                       _SettingsRow(
@@ -382,14 +352,20 @@ class AccountScreen extends StatelessWidget {
                         subtitle: 'Location, microphone, notifications, battery and texts',
                         onTap: () => _push(context, const PermissionsScreen()),
                       ),
+                      _SettingsRow(
+                        icon: Icons.phonelink_setup_rounded,
+                        title: 'Phone check',
+                        subtitle: 'Test GPS and sensors before a ride',
+                        onTap: () => _push(context, const PreRidePhoneCheckScreen(autoRun: false)),
+                      ),
                       const DataSaverTile(divider: false),
                     ],
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: Space.s24),
                 const DsSectionHeader('Bike & map'),
-                const SizedBox(height: 10),
+                const SizedBox(height: Space.s12),
                 DsCard(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Column(
@@ -406,23 +382,15 @@ class AccountScreen extends StatelessWidget {
                         title: 'Night mode',
                         value: AppearanceSheet.summary(theme),
                         onTap: () => AppearanceSheet.show(context),
-                        divider: true,
-                      ),
-                      _SettingsRow(
-                        icon: Icons.offline_pin_rounded,
-                        title: 'Offline map packs',
-                        subtitle: 'Manage downloaded corridors and tile storage',
-                        value: FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks) ? 'UNLIMITED' : '1 PACK (FREE)',
-                        onTap: () => _push(context, const OfflineMapManagerScreen()),
                         divider: false,
                       ),
                     ],
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: Space.s24),
                 const DsSectionHeader('App'),
-                const SizedBox(height: 10),
+                const SizedBox(height: Space.s12),
                 DsCard(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Column(
@@ -438,6 +406,7 @@ class AccountScreen extends StatelessWidget {
                           icon: Icons.admin_panel_settings_rounded,
                           title: 'Admin',
                           subtitle: 'Live rides, history and users',
+                          // One admin console for phones and tablets (it adapts its layout).
                           onTap: () => _push(context, const MasterAdminDashboard()),
                           divider: false,
                         ),
@@ -445,13 +414,20 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: Space.s24),
                 const DsSectionHeader('Help'),
-                const SizedBox(height: 10),
+                const SizedBox(height: Space.s12),
                 DsCard(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Column(
                     children: [
+                      _SettingsRow(
+                        key: const Key('profile_features_guide'),
+                        icon: Icons.help_outline_rounded,
+                        title: 'Features guide',
+                        subtitle: 'What each feature does',
+                        onTap: () => _push(context, const FeaturesGuideScreen()),
+                      ),
                       _SettingsRow(
                         icon: Icons.bug_report_rounded,
                         title: 'Report a problem',
@@ -464,9 +440,9 @@ class AccountScreen extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: Space.s24),
                 const DsSectionHeader('Account'),
-                const SizedBox(height: 10),
+                const SizedBox(height: Space.s12),
                 DsCard(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Column(
@@ -526,7 +502,7 @@ class AccountScreen extends StatelessWidget {
     final go = await confirmAction(
       context,
       title: 'Delete your account?',
-      message: 'This permanently removes your account, profile, ride memberships and ride history. It cannot be undone.',
+      message: 'Your account, profile and ride history will be deleted. This cannot be undone.',
       confirmLabel: 'Continue',
       destructive: true,
     );
@@ -566,6 +542,7 @@ class _SettingsRow extends StatelessWidget {
   final bool divider;
 
   const _SettingsRow({
+    super.key,
     required this.icon,
     required this.title,
     this.subtitle,
@@ -612,7 +589,7 @@ class _SettingsRow extends StatelessWidget {
   }
 }
 
-/// 40 px square button on a soft fill (canvas "Edit bike").
+/// 48 px square button on a soft fill (canvas "Edit bike").
 class _SquareButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -630,7 +607,7 @@ class _SquareButton extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
-          child: SizedBox(width: 44, height: 44, child: Icon(icon, size: 18, color: AppTheme.text)),
+          child: SizedBox(width: 48, height: 48, child: Icon(icon, size: 20, color: AppTheme.text)),
         ),
       ),
     );
@@ -755,7 +732,7 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
                 DsScreenHeader(title: 'Report a problem', onBack: () => Navigator.maybePop(context)),
                 const SizedBox(height: 18),
                 Text(
-                  'What happened, what you expected, and which screen you were on. Your e-mail, app version and phone platform are attached so we can reply.',
+                  'Tell us what happened and on which screen. We add your e-mail and app version so we can reply.',
                   style: AppText.label,
                 ),
                 const SizedBox(height: Space.s12),

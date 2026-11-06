@@ -105,7 +105,7 @@ void main() {
       expect(d.evaluating, isFalse, reason: 'the candidate is dropped when no stop follows within 10 s');
     });
 
-    test('phone dropped while parked (8 g, never above 25 km/h): no crash, sensor not wanted', () {
+    test('phone dropped while parked (8 g, never at riding pace): no crash, sensor not wanted', () {
       final t = Trace();
       for (var s = 0; s <= 60; s++) {
         if (s % 5 == 0) t.fix(s, 0);
@@ -286,25 +286,93 @@ void main() {
   });
 
   group('arming and battery', () {
-    test('armed above 25 km/h, disarmed 30 s after the last fast fix; not armed at exactly 25', () {
+    // 3.54 (safety review): the old rule ("a fix above 25 km/h in the last 30 s") left the sensor off
+    // in slow traffic, so a low-speed tip-over was never seen. The rule is now: 12 km/h or more for
+    // 10 s (or one fix above 25 km/h), kept through stop-and-go, off after 3 min parked. Battery stays
+    // bounded: one fix never arms it below 25 km/h, walking pace never keeps it on, parking ends it.
+    TrackPoint at(int s, double kmh) => TrackPoint(ts: sec(s), lat: 12.97, lng: 77.59, speedKmh: kmh);
+    AccelBucket calm(int s) => AccelBucket(tMs: sec(s), peakG: 1.1, meanG: 1, stdG: 0.1);
+
+    test('arms after 10 s at 12 km/h or more; a dip to 11 km/h keeps the run; exactly 25 is not instant', () {
       final d = CrashDetector();
-      d.onFix(TrackPoint(ts: sec(0), lat: 12.97, lng: 77.59, speedKmh: 25));
-      expect(d.wantsSensor, isFalse);
-      d.onFix(TrackPoint(ts: sec(1), lat: 12.97, lng: 77.59, speedKmh: 26));
+      d.onFix(at(0, 25));
+      expect(d.wantsSensor, isFalse, reason: 'one fix at 25 km/h: not above the instant line, not sustained');
+      for (var s = 1; s <= 9; s++) {
+        d.onFix(at(s, s.isOdd ? 11 : 14));
+      }
+      expect(d.wantsSensor, isFalse, reason: '9 s of riding pace');
+      d.onFix(at(10, 13));
+      expect(d.wantsSensor, isTrue, reason: '10 s at 12 km/h or more (the 11 km/h dips are inside the hysteresis band)');
+    });
+
+    test('stays armed through 2.5 min of stop-and-go; disarmed 3 min after the last fix at riding pace', () {
+      final d = CrashDetector();
+      for (var s = 0; s <= 10; s++) {
+        d.onFix(at(s, 15));
+      }
       expect(d.wantsSensor, isTrue);
-      d.onAccel(AccelBucket(tMs: sec(30), peakG: 1.1, meanG: 1, stdG: 0.1));
-      expect(d.wantsSensor, isTrue, reason: '29 s after the fast fix');
-      d.onAccel(AccelBucket(tMs: sec(32), peakG: 1.1, meanG: 1, stdG: 0.1));
-      expect(d.wantsSensor, isFalse, reason: '31 s after the fast fix');
-      d.onFix(TrackPoint(ts: sec(40), lat: 12.97, lng: 77.59, speedKmh: 3));
-      expect(d.wantsSensor, isFalse, reason: 'parked');
+      d.onFix(at(20, 0)); // red light
+      d.onAccel(calm(160));
+      expect(d.wantsSensor, isTrue, reason: '150 s stopped: still armed (hysteresis)');
+      d.onFix(at(170, 4)); // walking pace does not keep it armed
+      d.onAccel(calm(190));
+      expect(d.wantsSensor, isTrue, reason: 'exactly 3 min after the last 15 km/h fix');
+      d.onAccel(calm(191));
+      expect(d.wantsSensor, isFalse, reason: 'parked for more than 3 min: sensor off (battery)');
+      d.onFix(at(200, 18));
+      expect(d.wantsSensor, isFalse, reason: 'after a disarm the next ride must arm again (10 s sustained)');
+      for (var s = 201; s <= 210; s++) {
+        d.onFix(at(s, 18));
+      }
+      expect(d.wantsSensor, isTrue);
+    });
+
+    test('a fix below 10 km/h restarts the run; one fix above 25 km/h arms at once', () {
+      final d = CrashDetector();
+      for (var s = 0; s <= 5; s++) {
+        d.onFix(at(s, 15));
+      }
+      d.onFix(at(6, 5));
+      for (var s = 7; s <= 15; s++) {
+        d.onFix(at(s, 15));
+      }
+      expect(d.wantsSensor, isFalse, reason: 'only 8 s since the run restarted at 7 s');
+      d.onFix(at(17, 15));
+      expect(d.wantsSensor, isTrue);
+
+      final fast = CrashDetector();
+      fast.onFix(at(0, 26));
+      expect(fast.wantsSensor, isTrue);
+    });
+
+    test('low-speed tip-over in slow traffic (15 km/h): the sensor is on and the fall is caught', () {
+      final t = Trace();
+      for (var s = 0; s <= 20; s++) {
+        t.fix(s, 15, northM: s * 4.2);
+        t.bucket(s, peak: 1.3, std: 0.2);
+      }
+      t.bucket(21, peak: 2.1, peakDyn: 1.9, gyro: 1.9, tilt: 52.0, durMs: 40.0, std: 0.9);
+      t.fix(22, 0, northM: 90);
+      for (var s = 23; s <= 50; s++) {
+        t.fix(s, 0, northM: 90);
+        t.bucket(s, peak: 1.02, std: 0.02, tilt: 60.0);
+      }
+      final d = CrashDetector();
+      final events = t.run(d);
+      expect(events, hasLength(1));
+      expect(events.single.$2.isSlideFall, isTrue);
     });
 
     test('an impact while not armed is ignored', () {
       final d = CrashDetector();
       d.onFix(TrackPoint(ts: sec(0), lat: 12.97, lng: 77.59, speedKmh: 60));
-      d.onAccel(AccelBucket(tMs: sec(40), peakG: 9, meanG: 2, stdG: 2));
-      expect(d.evaluating, isFalse);
+      d.onAccel(AccelBucket(tMs: sec(200), peakG: 9, meanG: 2, stdG: 2));
+      expect(d.evaluating, isFalse, reason: 'more than 3 min after the last fix at riding pace');
+
+      final slow = CrashDetector();
+      slow.onFix(TrackPoint(ts: sec(0), lat: 12.97, lng: 77.59, speedKmh: 18));
+      slow.onAccel(AccelBucket(tMs: sec(1), peakG: 9, meanG: 2, stdG: 2));
+      expect(slow.evaluating, isFalse, reason: 'one fix at 18 km/h does not arm the impact check');
     });
 
     test('while an impact is checked the sensor stays wanted even after the arming window', () {

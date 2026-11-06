@@ -82,7 +82,6 @@ class AppTheme {
       );
 
   static ThemeData get darkTheme => themeFor(AppPalette.dark);
-  static ThemeData get lightTheme => themeFor(AppPalette.light);
 
   static ThemeData themeFor(AppPalette p) {
     final base = p.isLight
@@ -219,7 +218,8 @@ class AppTheme {
       popupMenuTheme: PopupMenuThemeData(color: p.card),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: p.isLight ? const Color(0xFF15232E) : p.soft,
-        contentTextStyle: const TextStyle(color: Color(0xFFF8FAFC)),
+        // Manrope at w700 so the short confirmations read in direct sunlight.
+        contentTextStyle: const TextStyle(color: Color(0xFFF8FAFC), fontFamily: fontFamily, fontSize: 15, fontWeight: FontWeight.w700),
         behavior: SnackBarBehavior.floating,
         shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
       ),

@@ -139,7 +139,10 @@ class AuthService extends ChangeNotifier {
       (_vehicleNo ?? '').trim().toUpperCase() == 'PILLION';
 
   /// True if the user is in quick guest ride mode.
-  bool get isGuest => (_userId ?? '').startsWith('guest_');
+  /// Server guest accounts have ordinary `usr_` ids; their e-mail is on the guest domain.
+  bool get isGuest =>
+      (_userId ?? '').startsWith('guest_') ||
+      (_email ?? '').endsWith('@guest.coroute.local');
 
   /// Mandatory safety invariant:
   /// Every rider must have verified contact numbers, bike registration (or pillion status),
@@ -216,25 +219,31 @@ class AuthService extends ChangeNotifier {
     _emergencyContactName = u['emergencyContactName']?.toString() ?? '';
     _mustChangePassword = u['mustChangePassword'] == true;
     // Older gateways do not send these: keep what is known instead of clearing it.
-    if (u.containsKey('bloodGroup'))
+    if (u.containsKey('bloodGroup')) {
       _bloodGroup = u['bloodGroup']?.toString() ?? '';
-    if (u.containsKey('allergies'))
+    }
+    if (u.containsKey('allergies')) {
       _allergies = u['allergies']?.toString() ?? '';
-    if (u.containsKey('medicalNotes'))
+    }
+    if (u.containsKey('medicalNotes')) {
       _medicalNotes = u['medicalNotes']?.toString() ?? '';
+    }
     if (u.containsKey('smsOptOut')) _smsOptOut = u['smsOptOut'] == true;
-    if (u.containsKey('bloodGroup') || u.containsKey('smsOptOut'))
+    if (u.containsKey('bloodGroup') || u.containsKey('smsOptOut')) {
       _medicalLoaded = true;
+    }
     if (u.containsKey('assistHelp')) _assistHelp = u['assistHelp'] != false;
     if (u.containsKey('assistAsk')) _assistAsk = u['assistAsk'] != false;
-    if (u.containsKey('responderMedical'))
+    if (u.containsKey('responderMedical')) {
       _responderMedical = u['responderMedical'] == true;
+    }
     final consent = u['netConsentAt'];
     if (consent is num) _netConsentAt = consent.toInt();
     if (u.containsKey('assistHelp') ||
         u.containsKey('assistAsk') ||
-        u.containsKey('responderMedical'))
+        u.containsKey('responderMedical')) {
       _netLoaded = true;
+    }
     // Plan state travels with the profile; an expired paid tier arrives as community.
     _noteSubscriptionStatus(u['subscriptionStatus']);
 
@@ -281,8 +290,9 @@ class AuthService extends ChangeNotifier {
     await _api.setToken(res['token'].toString());
     await _applyUser(Map<String, dynamic>.from(res['user'] as Map));
     // Login replies may carry the plan beside the user rather than inside it.
-    if ((res['user'] as Map)['subscriptionStatus'] is! Map)
+    if ((res['user'] as Map)['subscriptionStatus'] is! Map) {
       _noteSubscriptionStatus(res['subscriptionStatus']);
+    }
     return _ok();
   }
 
@@ -344,8 +354,9 @@ class AuthService extends ChangeNotifier {
         await _googleSignIn.signOut();
       } catch (_) {}
       final account = await _googleSignIn.signIn();
-      if (account == null)
+      if (account == null) {
         return {'success': false, 'error': 'Google Sign-In cancelled.'};
+      }
       final gAuth = await account.authentication;
       final idToken = gAuth.idToken;
       if (idToken == null || idToken.isEmpty) {
@@ -393,10 +404,10 @@ class AuthService extends ChangeNotifier {
         _role = u['role'] as String? ?? AppConstants.riderRole;
         _vehicleType = u['vehicleType'] as String? ?? 'Motorcycle (Guest)';
         _vehicleNo = u['vehicleNo'] as String? ?? 'GUEST';
-        _phone = u['phone'] as String? ?? '9999999999';
-        _emergencyContact = u['emergencyContact'] as String? ?? '112112112';
-        _emergencyContactName =
-            u['emergencyContactName'] as String? ?? 'Emergency Services';
+        // Never a made-up number: an SOS must not text or show a placeholder contact.
+        _phone = u['phone'] as String? ?? '';
+        _emergencyContact = u['emergencyContact'] as String? ?? '';
+        _emergencyContactName = u['emergencyContactName'] as String? ?? '';
         _isLoading = false;
 
         final prefs = await SharedPreferences.getInstance();
@@ -488,8 +499,9 @@ class AuthService extends ChangeNotifier {
       if (smsOptOut != null) payload['smsOptOut'] = smsOptOut;
       if (assistHelp != null) payload['assistHelp'] = assistHelp;
       if (assistAsk != null) payload['assistAsk'] = assistAsk;
-      if (responderMedical != null)
+      if (responderMedical != null) {
         payload['responderMedical'] = responderMedical;
+      }
       if (netConsent == true) payload['netConsent'] = true;
       _lastProfileError = null;
       final res = await _api.patch('/me', payload);
@@ -628,6 +640,7 @@ class AuthService extends ChangeNotifier {
       AppConstants.keyUserName,
       AppConstants.keyVehicleType,
       AppConstants.keyActiveGroupId,
+      AppConstants.keyPendingLeaves,
       AppConstants.keyPhone,
       AppConstants.keyVehicleNo,
       AppConstants.keyEmergencyContact,

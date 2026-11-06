@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui.dart';
 import '../../data/services/garage_service.dart';
 import '../../domain/garage/bike_profile.dart';
 import '../../core/config/feature_gates.dart';
@@ -77,7 +78,7 @@ class _GarageScreenState extends State<GarageScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Enter the odometer reading when the service was performed:',
+              'Odometer reading at service:',
               style: TextStyle(color: AppTheme.text2, fontSize: 13),
             ),
             const SizedBox(height: 14),
@@ -138,6 +139,8 @@ class _GarageScreenState extends State<GarageScreen> {
         elevation: 0,
         title: Text(
           'GARAGE & MOTORCYCLES',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: AppTheme.text,
             fontSize: 16,
@@ -214,12 +217,14 @@ class _GarageScreenState extends State<GarageScreen> {
             valueListenable: _garageService.activeBikeNotifier,
             builder: (context, activeBike, _) {
               if (bikes.isEmpty) {
-                return Center(
-                  child: Text(
-                    'No motorcycles in your garage yet.\nTap + to add one.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppTheme.muted, fontSize: 14),
-                  ),
+                // Same empty state as the rest of the app, with a 56 dp action
+                // instead of pointing at the small + in the app bar.
+                return EmptyState(
+                  icon: Icons.two_wheeler_rounded,
+                  title: 'No motorcycles in your garage yet',
+                  message: 'Add your bike to track service and fuel range.',
+                  primaryLabel: 'Add motorcycle',
+                  onPrimary: _showAddBikeModal,
                 );
               }
 
@@ -227,7 +232,8 @@ class _GarageScreenState extends State<GarageScreen> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 680),
                   child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
+                    // Keep the last card's buttons above the system nav bar.
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom),
                     itemCount: bikes.length,
                     separatorBuilder: (ctx, idx) => const SizedBox(height: 16),
                     itemBuilder: (context, index) {
@@ -239,8 +245,18 @@ class _GarageScreenState extends State<GarageScreen> {
                         isActive: isActive,
                         onSelectActive: () => _garageService.setActiveBike(bike.id),
                         onRecordService: () => _showRecordServiceDialog(bike),
+                        // Confirm first: one stray gloved tap used to delete a bike.
                         onDelete: bikes.length > 1
-                            ? () => _garageService.deleteBike(bike.id)
+                            ? () async {
+                                final ok = await confirmAction(
+                                  context,
+                                  title: 'Remove ${bike.name}?',
+                                  message: 'Its service history and fuel settings will be removed.',
+                                  confirmLabel: 'Remove',
+                                  destructive: true,
+                                );
+                                if (ok) await _garageService.deleteBike(bike.id);
+                              }
                             : null,
                       );
                     },
@@ -288,7 +304,7 @@ class _BikeCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: isActive ? AppTheme.accentText : AppTheme.border,
-          width: isActive ? 2 : 1,
+          width: 2,
         ),
       ),
       child: Column(
@@ -360,8 +376,9 @@ class _BikeCard extends StatelessWidget {
                   TextButton(
                     onPressed: onSelectActive,
                     style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.text2,
+                      foregroundColor: AppTheme.accentText,
                       padding: const EdgeInsets.symmetric(horizontal: 12),
+                      minimumSize: const Size(48, 48),
                     ),
                     child: const Text('Set Active'),
                   ),
@@ -419,7 +436,7 @@ class _BikeCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Flexible(
+                Expanded(
                   child: Text(
                     serviceLabel,
                     maxLines: 1,
@@ -437,7 +454,7 @@ class _BikeCard extends StatelessWidget {
                   onTap: onRecordService,
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
-                    constraints: const BoxConstraints(minHeight: 44),
+                    constraints: const BoxConstraints(minHeight: 48),
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     alignment: Alignment.center,
                     child: Text(
@@ -452,13 +469,17 @@ class _BikeCard extends StatelessWidget {
                 ),
                 if (onDelete != null) ...[
                   const SizedBox(width: 6),
-                  InkWell(
-                    onTap: onDelete,
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      constraints: const BoxConstraints(minHeight: 44, minWidth: 44),
-                      alignment: Alignment.center,
-                      child: Icon(Icons.delete_outline, color: AppTheme.muted, size: 20),
+                  Semantics(
+                    button: true,
+                    label: 'Remove ${bike.name}',
+                    child: InkWell(
+                      onTap: onDelete,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+                        alignment: Alignment.center,
+                        child: Icon(Icons.delete_outline, color: AppTheme.muted, size: 22),
+                      ),
                     ),
                   ),
                 ],
@@ -545,6 +566,10 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
   final _mileageController = TextEditingController(text: '25.0');
   final _odometerController = TextEditingController(text: '0');
 
+  /// Shown under the name field when [SAVE TO GARAGE] is pressed without a name
+  /// (the button used to do nothing, with no feedback).
+  String? _nameError;
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -580,7 +605,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
             top: 20,
             left: 20,
             right: 20,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + MediaQuery.paddingOf(context).bottom + 20,
           ),
           child: SingleChildScrollView(
             child: Column(
@@ -600,6 +625,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                       ),
                     ),
                     IconButton(
+                      tooltip: 'Close',
                       icon: Icon(Icons.close, color: AppTheme.muted),
                       onPressed: () => Navigator.of(context).maybePop(),
                     ),
@@ -637,10 +663,16 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
             const SizedBox(height: 16),
             TextField(
               controller: _nameController,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.next,
+              onChanged: (_) {
+                if (_nameError != null) setState(() => _nameError = null);
+              },
               style: TextStyle(color: AppTheme.text),
               decoration: InputDecoration(
                 labelText: 'Bike Name (e.g. My Himalayan 450)',
                 labelStyle: TextStyle(color: AppTheme.muted),
+                errorText: _nameError,
               ),
             ),
             const SizedBox(height: 12),
@@ -675,7 +707,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                 Expanded(
                   child: TextField(
                     controller: _tankController,
-                    keyboardType: TextInputType.number,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
                       labelText: 'Tank (L)',
@@ -687,7 +719,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                 Expanded(
                   child: TextField(
                     controller: _reserveController,
-                    keyboardType: TextInputType.number,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
                       labelText: 'Reserve (L)',
@@ -699,7 +731,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                 Expanded(
                   child: TextField(
                     controller: _mileageController,
-                    keyboardType: TextInputType.number,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     style: TextStyle(color: AppTheme.text),
                     decoration: InputDecoration(
                       labelText: 'km/L',
@@ -722,11 +754,14 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
-              height: 48,
+              height: 56,
               child: ElevatedButton(
                 onPressed: () {
                   final name = _nameController.text.trim();
-                  if (name.isEmpty) return;
+                  if (name.isEmpty) {
+                    setState(() => _nameError = 'Give your bike a name');
+                    return;
+                  }
 
                   final tank = double.tryParse(_tankController.text.trim()) ?? 15.0;
                   final reserve = double.tryParse(_reserveController.text.trim()) ?? 3.0;

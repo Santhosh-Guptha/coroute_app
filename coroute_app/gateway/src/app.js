@@ -17,6 +17,7 @@ const { Hub } = require('./ws');
 const { Retention } = require('./retention');
 const { SubscriptionSweeper, expireIfDue } = require('./subscription_lifecycle');
 const { buildRouter } = require('./routes');
+const { seedDefaultCoupons } = require('./subscription_routes');
 const { TrackStore } = require('./tracks');
 const { GeoProxy } = require('./geo');
 const { EssentialsService, OverpassPlacesProvider } = require('./essentials');
@@ -28,6 +29,7 @@ const { RouteIndexCache, gridSize } = require('./net_geo');
 const { loadSite, isHiddenPath, SITE_PAGES, SITEMAP } = require('./pages');
 const rateLimit = require('express-rate-limit');
 const { liveTokenOf } = require('./validate');
+const { communityStories } = require('./trip_reviews');
 const { sha256 } = require('./convoys');
 const { GuardianService } = require('./guardians');
 const { GuardianPush } = require('./guardian_push');
@@ -41,7 +43,11 @@ function createSoda() {
 
 async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch } = {}) {
   const repo = new Repo(soda);
-  if (migrate) await repo.migrate();
+  if (migrate) {
+    await repo.migrate();
+    // The launch coupons are ordinary coupon records: created once when absent, then admin-managed.
+    await seedDefaultCoupons(repo).catch((e) => logger.warn(`[coupons] default coupon seed failed: ${e.message}`));
+  }
 
   const gate = new UserGate(repo);
   const auth = new AuthService(repo, { googleVerifier, gate });
@@ -193,11 +199,15 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // never indexed, no referrer leaves the page. A malformed token is a 404; a dead link the expired page (410).
   const publicLiveLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests.' } });
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  app.get('/e/:token', publicLiveLimiter, (req, res) => {
+  app.get('/e/:token', publicLiveLimiter, async (req, res, next) => {
     const token = liveTokenOf(req.params.token);
     if (!token) return notFoundPage(req, res);
     res.set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer').set('X-Robots-Tag', 'noindex');
-    const view = convoys.liveView(sha256(token)) || emergencyGateway.liveView(sha256(token));
+    let view;
+    try {
+      // After a gateway restart the room of an injured, offline rider may not be loaded yet.
+      view = (await convoys.liveViewLoaded(sha256(token))) || emergencyGateway.liveView(sha256(token));
+    } catch (e) { return next(e); }
     if (!view) {
       const html = site.has('live_expired.html') ? site.render('live_expired.html', pageVars(req)) : plainLivePage(null);
       return res.status(410).type('html').send(html);
@@ -212,6 +222,16 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // Android App Links verification (express.static ignores dot-directories, so serve it explicitly).
   app.get('/.well-known/assetlinks.json', (req, res) => res.type('application/json').set('Cache-Control', 'public, max-age=86400').sendFile(pub('.well-known/assetlinks.json')));
   app.get('/status', (req, res) => res.json({ service: 'CoRoute Gateway', version: require('../package.json').version, status: 'ONLINE' }));
+  // Legacy website path: the same approved, consented stories as /api/public/community-stories (a bare array).
+  const storiesLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests.' } });
+  app.get('/community-stories', storiesLimiter, async (req, res, next) => {
+    try {
+      res.set('Cache-Control', 'public, max-age=30');
+      res.json((await communityStories(repo, req.query.limit || 20)).stories);
+    } catch (err) {
+      next(err);
+    }
+  });
   // Partials, templates (_*.html) and raw page sources are never served directly: every page has a route above.
   app.use((req, res, next) => (!req.path.startsWith('/api/') && isHiddenPath(req.path) ? notFoundPage(req, res) : next()));
   app.use(express.static(pub(''), {

@@ -12,6 +12,7 @@ import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:url_launcher/url_launcher.dart';
 import 'core/constants/app_constants.dart';
 import 'core/l10n/l10n.dart';
+import 'core/constants/navigation_constants.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'core/ui/ui.dart';
@@ -26,6 +27,7 @@ import 'data/services/helmet_voice_service.dart';
 import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
 import 'data/services/app_version_service.dart';
+import 'data/services/device_diagnostic_service.dart';
 import 'data/services/plan_subscription_service.dart';
 import 'data/services/membership_service.dart';
 import 'data/local/ride_stats_store.dart';
@@ -42,6 +44,7 @@ import 'data/services/track_uploader.dart';
 import 'data/services/trip_storage_service.dart';
 import 'data/services/voice_service.dart';
 import 'data/services/weather_service.dart';
+import 'data/services/permission_revocation_safety_service.dart';
 import 'domain/notify/notification_snapshot.dart';
 import 'presentation/auth/access_gate_screen.dart';
 import 'presentation/ride/emergency_guidance.dart';
@@ -92,6 +95,7 @@ class CoRouteApp extends StatelessWidget {
         ChangeNotifierProvider<ThemeController>.value(value: theme),
         ChangeNotifierProvider<SettingsService>(create: (_) => settings ?? (SettingsService()..load())),
         ChangeNotifierProvider(create: (_) => ApiClient()),
+        ChangeNotifierProvider<DeviceDiagnosticService>(create: (ctx) => DeviceDiagnosticService(apiClient: ctx.read<ApiClient>())..loadCachedReport()),
         // Weather along the route (3.16): two small requests per ride through the gateway.
         ChangeNotifierProvider<WeatherService>(create: (ctx) => WeatherService(ctx.read<ApiClient>(), ctx.read<SettingsService>())),
         // Route map tiles saved before the ride (3.16): one bounded job, on Wi-Fi or by a tap.
@@ -202,6 +206,13 @@ class CoRouteApp extends StatelessWidget {
             voiceService: ctx.read<VoiceService>(),
           ),
         ),
+        ChangeNotifierProvider<PermissionRevocationSafetyService>(
+          lazy: false,
+          create: (ctx) => PermissionRevocationSafetyService(
+            convoyService: ctx.read<ConvoyService>(),
+            intercomService: ctx.read<IntercomService>(),
+          )..init(),
+        ),
         Provider<FuelSharingBinding>(
           lazy: false,
           create: (ctx) => FuelSharingBinding(ctx.read<ConvoyService>(), ctx.read<SettingsService>(), ctx.read<SafetyService>()),
@@ -270,6 +281,7 @@ class _App extends StatelessWidget {
     final theme = context.watch<ThemeController>();
     return MaterialApp(
       navigatorKey: appNavigatorKey,
+      navigatorObservers: [appRouteObserver],
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.themeFor(theme.palette),

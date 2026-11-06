@@ -7,6 +7,9 @@ import '../../data/models/membership_model.dart';
 ///
 /// Displayed when a rider configures a trip and proceeds toward the review stage
 /// without an active, server-verified CoRoute membership.
+///
+/// Shows the plan's normal price. An offer is shown only when the caller passes one the
+/// server advertises ([activeOfferCode] with a [discountPercent] above 0); no code is assumed.
 class TripCreationPaymentAlertSheet extends StatefulWidget {
   final MembershipCategory category;
   final String? activeOfferCode;
@@ -15,8 +18,8 @@ class TripCreationPaymentAlertSheet extends StatefulWidget {
   const TripCreationPaymentAlertSheet({
     super.key,
     required this.category,
-    this.activeOfferCode = 'RIDERFREE',
-    this.discountPercent = 100,
+    this.activeOfferCode,
+    this.discountPercent = 0,
   });
 
   /// Shows the payment alert sheet and returns true if the user proceeds to payment,
@@ -24,8 +27,8 @@ class TripCreationPaymentAlertSheet extends StatefulWidget {
   static Future<bool?> show(
     BuildContext context, {
     required MembershipCategory category,
-    String? activeOfferCode = 'RIDERFREE',
-    int discountPercent = 100,
+    String? activeOfferCode,
+    int discountPercent = 0,
   }) {
     return showModalBottomSheet<bool>(
       context: context,
@@ -48,7 +51,10 @@ class _TripCreationPaymentAlertSheetState extends State<TripCreationPaymentAlert
   Widget build(BuildContext context) {
     final cat = widget.category;
     final basePrice = cat.priceRupees;
-    final discountAmount = (basePrice * (widget.discountPercent / 100)).round();
+    final offerCode = widget.activeOfferCode?.trim() ?? '';
+    final pct = widget.discountPercent.clamp(0, 100);
+    final hasOffer = offerCode.isNotEmpty && pct > 0;
+    final discountAmount = hasOffer ? (basePrice * (pct / 100)).round() : 0;
     final netAmount = (basePrice - discountAmount).clamp(0, 999999);
 
     return Container(
@@ -131,7 +137,7 @@ class _TripCreationPaymentAlertSheetState extends State<TripCreationPaymentAlert
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'To create and host trips with live convoy telemetry, real-time group sync, and automated emergency SOS response, an active CoRoute membership is required.',
+                    'You need an active plan to host group rides.',
                     style: AppText.body.copyWith(fontSize: 13, height: 1.4),
                   ),
                 ),
@@ -200,25 +206,25 @@ class _TripCreationPaymentAlertSheetState extends State<TripCreationPaymentAlert
                       '₹$basePrice / month',
                       style: TextStyle(
                         color: AppTheme.text2,
-                        decoration: widget.discountPercent > 0 ? TextDecoration.lineThrough : null,
+                        decoration: hasOffer ? TextDecoration.lineThrough : null,
                         fontSize: 13,
                       ),
                     ),
                   ],
                 ),
-                if (widget.discountPercent > 0 && widget.activeOfferCode != null) ...[
+                if (hasOffer) ...[
                   const SizedBox(height: 6),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
                         child: Text(
-                          'Introductory Offer (${widget.activeOfferCode})',
+                          'Offer ($offerCode)',
                           style: TextStyle(color: Colors.lightGreenAccent.shade400, fontSize: 12, fontWeight: FontWeight.w600),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Text('-₹$discountAmount (100% OFF)', style: TextStyle(color: Colors.lightGreenAccent.shade400, fontSize: 12, fontWeight: FontWeight.w800)),
+                      Text('-₹$discountAmount ($pct% OFF)', style: TextStyle(color: Colors.lightGreenAccent.shade400, fontSize: 12, fontWeight: FontWeight.w800)),
                     ],
                   ),
                 ],
@@ -251,11 +257,11 @@ class _TripCreationPaymentAlertSheetState extends State<TripCreationPaymentAlert
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Column(
               children: [
-                _featureItem(Icons.emergency_rounded, 'Continuous Impact Crash Detection & Emergency SOS'),
+                _featureItem(Icons.emergency_rounded, 'Crash alerts and SOS'),
                 const SizedBox(height: 8),
-                _featureItem(Icons.map_rounded, 'Full Corridor Offline Maps (2.5 km Minkowski Corridor)'),
+                _featureItem(Icons.map_rounded, 'Offline maps along your route'),
                 const SizedBox(height: 8),
-                _featureItem(Icons.group_rounded, 'Convoy Ride Hosting with Live Leader & Sweeper Sync'),
+                _featureItem(Icons.group_rounded, 'Host group rides with Lead and Sweep'),
               ],
             ),
           ),

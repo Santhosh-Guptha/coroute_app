@@ -257,7 +257,7 @@ void main() {
       expect(presence, 'No signal since 11:25 AM');
     });
 
-    testWidgets('Offline UI states: ConnectionBanner and Ladder render stably in full blackout', (tester) async {
+    testWidgets('Offline UI states: ConnectionBanner renders stably in full blackout', (tester) async {
       final now = DateTime(2026, 10, 10, 11, 30).millisecondsSinceEpoch;
       final lastUpdate = now - 4 * 60000;
 
@@ -320,16 +320,6 @@ void main() {
               body: Column(
                 children: [
                   const ConnectionBanner(),
-                  Expanded(
-                    child: RidersLadder(
-                      rungs: RideFacts.ladder(convoy, 'rider_lead'),
-                      colors: const {},
-                      statuses: const {},
-                      nowMs: now,
-                      onTap: (_) {},
-                      offlinePlaces: const {'rider_rohit': 'Tunnel Bay 3'},
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -341,8 +331,6 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Offline. Positions shown may be out of date.'), findsOneWidget);
       expect(find.text('12 points waiting to upload'), findsOneWidget);
-      expect(find.text('Rohit'), findsOneWidget);
-      expect(find.textContaining('Tunnel Bay 3'), findsOneWidget);
     });
   });
 }

@@ -54,3 +54,4 @@ android/app/*.keystore*
 gateway/.env
 gateway/node_modules/
 Claude outputs/
+_to_delete/

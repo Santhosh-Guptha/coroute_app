@@ -1,19 +1,33 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Every permission and why: docs/PLAYSTORE_PERMISSIONS.md (keep both in step). -->
+    <!-- Convoy sync, SOS delivery, map tiles; network kind for the tile cache and the phone check. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- Live position for the group, crash/SOS location (precise needed for an SOS). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- "Allow all the time": only during an active ride, after an in-app prominent disclosure
+         (permissions screen and phone check). Needs the Play Console location declaration. -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <!-- Ride foreground service (flutter_foreground_task): type location, plus microphone while the
+         intercom is on. Android 14 needs the per-type permissions below. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <!-- Asked once from the phone check / checklist; OEMs kill long rides otherwise. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <!-- Android 13+: ride notification, crash alarm, SOS and group alerts. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Crash detection keeps the motion sensor running in deep sleep during a ride (AccelStream). -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Crash alarm and alert haptics. -->
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Push-to-talk intercom and the 1 s microphone test of the phone check (nothing is kept). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Route voice to a Bluetooth helmet headset (SCO). -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <!-- flutter_local_notifications: re-schedules plan expiry reminders after a reboot. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <!-- Rider safety: crash alarm over the lock screen. Direct SMS permission removed for Play compliance; emergency SOS uses SMS composer intent. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
@@ -25,6 +39,8 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config">
         <activity
@@ -148,6 +164,15 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="sms"/>
         </intent>
+        <!-- Emergency texts open the messages app (no SEND_SMS); the phone check looks for it. -->
+        <intent>
+            <action android:name="android.intent.action.SENDTO"/>
+            <data android:scheme="smsto"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="geo"/>
@@ -173,6 +198,11 @@
         <!-- Spoken ride alerts (3.15): Android 11+ hides text-to-speech engines without this. -->
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE"/>
+        </intent>
+        <!-- image_picker: group photo from the camera app (no CAMERA permission is declared, so the
+             camera app takes the picture; Android 11+ hides camera apps without this). -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE"/>
         </intent>
     </queries>
 </manifest>

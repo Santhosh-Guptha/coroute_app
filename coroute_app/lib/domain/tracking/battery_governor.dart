@@ -62,7 +62,13 @@ class BatteryGovernor {
   int _lastReportedLevel = 100;
   bool _isCharging = false;
 
+  /// Low battery threshold percentage (< 20%).
+  static const int lowBatteryThreshold = 20;
+
   void Function(LastGaspBeacon beacon)? onLastGaspBeacon;
+
+  /// Callback dispatched when low battery status changes (< 20%).
+  void Function(bool isLowBattery)? onLowBatteryChanged;
 
   BatteryGovernorStage get stage => _stage;
   bool get isConserving => _stage != BatteryGovernorStage.normal;
@@ -71,6 +77,12 @@ class BatteryGovernor {
   bool get lastGaspBeaconDispatched => _lastGaspBeaconDispatched;
   int get lastReportedLevel => _lastReportedLevel;
   bool get isCharging => _isCharging;
+
+  /// True when battery is strictly below 20% and not currently charging.
+  bool get isLowBattery => _lastReportedLevel < lowBatteryThreshold && !_isCharging;
+
+  /// Whether nonessential background sync/prefetching is permitted under current battery.
+  bool get isNonessentialTaskAllowed => !isLowBattery && _stage == BatteryGovernorStage.normal;
 
   /// Updates battery status and executes tiered governor transitions.
   BatteryGovernorStage updateBattery(
@@ -87,16 +99,16 @@ class BatteryGovernor {
       return _stage;
     }
 
+    final wasLow = isLowBattery;
     _lastReportedLevel = percent;
     _isCharging = charging;
 
+    BatteryGovernorStage result;
     if (charging) {
       _stage = BatteryGovernorStage.normal;
       _lastGaspBeaconDispatched = false;
-      return _stage;
-    }
-
-    if (percent <= 5) {
+      result = _stage;
+    } else if (percent <= 5) {
       _stage = BatteryGovernorStage.lastGasp;
       if (!_lastGaspBeaconDispatched) {
         _lastGaspBeaconDispatched = true;
@@ -113,45 +125,46 @@ class BatteryGovernor {
           onLastGaspBeacon?.call(beacon);
         }
       }
-      return _stage;
-    }
+      result = _stage;
+    } else {
+      if (percent > 5 && _lastGaspBeaconDispatched) {
+        _lastGaspBeaconDispatched = false;
+      }
 
-    if (percent > 5 && _lastGaspBeaconDispatched) {
-      _lastGaspBeaconDispatched = false;
-    }
-
-    if (percent <= 10) {
-      _stage = BatteryGovernorStage.extreme;
-      return _stage;
-    }
-
-    if (percent <= 15) {
-      if (_stage == BatteryGovernorStage.extreme) {
-        // Hysteresis holds extreme mode until above 15%
+      if (percent <= 10) {
         _stage = BatteryGovernorStage.extreme;
+        result = _stage;
+      } else if (percent <= 15) {
+        if (_stage == BatteryGovernorStage.extreme) {
+          // Hysteresis holds extreme mode until above 15%
+          _stage = BatteryGovernorStage.extreme;
+        } else {
+          _stage = BatteryGovernorStage.conserve;
+        }
+        result = _stage;
       } else {
-        _stage = BatteryGovernorStage.conserve;
+        // Above 15%
+        if (_stage == BatteryGovernorStage.extreme) {
+          // Exiting extreme mode moves to conserve up to 20%
+          _stage = BatteryGovernorStage.conserve;
+          result = _stage;
+        } else if (_stage == BatteryGovernorStage.conserve) {
+          // Hysteresis keeps conserve mode active below 20%
+          if (percent >= 20) {
+            _stage = BatteryGovernorStage.normal;
+          }
+          result = _stage;
+        } else {
+          _stage = BatteryGovernorStage.normal;
+          result = _stage;
+        }
       }
-      return _stage;
     }
 
-    // Above 15%
-    if (_stage == BatteryGovernorStage.extreme) {
-      // Exiting extreme mode moves to conserve up to 20%
-      _stage = BatteryGovernorStage.conserve;
-      return _stage;
+    if (wasLow != isLowBattery) {
+      onLowBatteryChanged?.call(isLowBattery);
     }
-
-    if (_stage == BatteryGovernorStage.conserve) {
-      // Hysteresis keeps conserve mode active below 20%
-      if (percent >= 20) {
-        _stage = BatteryGovernorStage.normal;
-      }
-      return _stage;
-    }
-
-    _stage = BatteryGovernorStage.normal;
-    return _stage;
+    return result;
   }
 
   /// Calculates telemetry reporting interval according to stage and emergency state.

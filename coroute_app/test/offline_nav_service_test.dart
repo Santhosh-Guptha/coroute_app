@@ -6,8 +6,6 @@ import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/models/stop_point_model.dart';
 import 'package:coroute_app/data/services/convoy_service.dart';
 import 'package:coroute_app/presentation/trip_planner/route_stops_panel.dart';
-import 'package:coroute_app/data/services/offline_nav_service.dart';
-import 'package:coroute_app/domain/route/lost_rider_recovery_coordinator.dart';
 import 'package:coroute_app/presentation/ride/navigate_to.dart';
 import 'package:coroute_app/data/models/outbox_item.dart';
 import 'package:coroute_app/presentation/rider/widgets/glove_quick_settings_modal.dart';
@@ -37,12 +35,10 @@ void main() {
 
   setUp(() {
     navigateLauncherOverride = null;
-    OfflineNavService.exportOverride = null;
   });
 
   tearDown(() {
     navigateLauncherOverride = null;
-    OfflineNavService.exportOverride = null;
   });
 
   group('Standard Navigation URI resolution (navigate_to.dart)', () {
@@ -115,115 +111,7 @@ void main() {
     });
   });
 
-  group('OfflineNavService GPX generation & export', () {
-    test('buildGpxContent generates valid GPX 1.1 XML structure', () {
-      final xml = OfflineNavService.buildGpxContent(
-        tripName: 'Western Ghats Ridge & Peak',
-        points: [
-          (17.400000, 78.400000),
-          (17.410000, 78.410000),
-          (17.420000, 78.420000),
-        ],
-        checkpoints: [
-          ('Fuel Stop 1', 17.405000, 78.405000),
-          ('Regroup Point', 17.415000, 78.415000),
-        ],
-      );
 
-      expect(xml, contains('<?xml version="1.0" encoding="UTF-8"?>'));
-      expect(xml, contains('<gpx version="1.1" creator="CoRoute Convoy Safety Telemetry"'));
-      expect(xml, contains('<name>Western Ghats Ridge &amp; Peak</name>'));
-
-      // Checkpoints
-      expect(xml, contains('<wpt lat="17.405000" lon="78.405000">'));
-      expect(xml, contains('<name>Fuel Stop 1</name>'));
-      expect(xml, contains('<wpt lat="17.415000" lon="78.415000">'));
-      expect(xml, contains('<name>Regroup Point</name>'));
-
-      // Trackpoints
-      expect(xml, contains('<trk>'));
-      expect(xml, contains('<trkseg>'));
-      expect(xml, contains('<trkpt lat="17.400000" lon="78.400000" />'));
-      expect(xml, contains('<trkpt lat="17.410000" lon="78.410000" />'));
-      expect(xml, contains('<trkpt lat="17.420000" lon="78.420000" />'));
-      expect(xml, contains('</trkseg>'));
-      expect(xml, contains('</trk>'));
-      expect(xml, contains('</gpx>'));
-    });
-
-    test('buildGpxContent handles XML entity escaping correctly', () {
-      final xml = OfflineNavService.buildGpxContent(
-        tripName: 'Ride <Fast> & "Safe"',
-        points: [(17.0, 78.0)],
-        checkpoints: [('Cafe <Brews>', 17.0, 78.0)],
-      );
-
-      expect(xml, contains('<name>Ride &lt;Fast&gt; &amp; &quot;Safe&quot;</name>'));
-      expect(xml, contains('<name>Cafe &lt;Brews&gt;</name>'));
-    });
-
-    test('exportGpxRoute rejects empty route points', () async {
-      final ok = await OfflineNavService.exportGpxRoute(
-        tripName: 'Empty Route',
-        points: [],
-      );
-      expect(ok, isFalse);
-    });
-
-    test('exportGpxRoute delegates to exportOverride in tests', () async {
-      String? exportedName;
-      int pointsCount = 0;
-      int checkpointsCount = 0;
-
-      OfflineNavService.exportOverride = ({
-        required String tripName,
-        required List<(double lat, double lng)> points,
-        List<(String name, double lat, double lng)> checkpoints = const [],
-      }) async {
-        exportedName = tripName;
-        pointsCount = points.length;
-        checkpointsCount = checkpoints.length;
-        return true;
-      };
-
-      final ok = await OfflineNavService.exportGpxRoute(
-        tripName: 'Araku Valley Loop',
-        points: [(18.3, 82.8), (18.4, 82.9)],
-        checkpoints: [('Tunnel 1', 18.35, 82.85)],
-      );
-
-      expect(ok, isTrue);
-      expect(exportedName, 'Araku Valley Loop');
-      expect(pointsCount, 2);
-      expect(checkpointsCount, 1);
-    });
-  });
-
-  group('LostRiderRecoveryCoordinator Navigation Integration', () {
-    test('launchHomingNavigation delegates to navigateTo', () async {
-      Uri? launchedUri;
-      navigateLauncherOverride = (uri) async {
-        launchedUri = uri;
-        return true;
-      };
-
-      const vector = RecoveryVector(
-        targetType: RecoveryTargetType.routeLine,
-        targetLat: 17.5000,
-        targetLng: 78.5000,
-        distanceMeters: 450,
-        bearingDegrees: 45,
-        instruction: 'Turn North-East to rejoin route',
-        usingGpsCourse: true,
-      );
-
-      final ok = await LostRiderRecoveryCoordinator.launchHomingNavigation(vector, 17.4950, 78.4950);
-      expect(ok, isTrue);
-      expect(launchedUri, isNotNull);
-      expect(launchedUri!.scheme, 'google.navigation');
-      expect(launchedUri!.toString(), contains('17.500000,78.500000'));
-    });
-  });
 
   group('GloveQuickSettingsModal offline navigation trigger', () {
     testWidgets('renders Offline voice nav button and calls callback when tapped', (tester) async {

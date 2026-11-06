@@ -18,15 +18,6 @@ String formatDistanceRounded(num meters) {
   return StatusText.roundedDistance(meters.abs().toDouble());
 }
 
-/// "350 m behind", "1.8 km ahead", or "350 m away" when the side is unknown.
-/// Uses [formatDistanceRounded].
-String describeDistance(num meters, {bool? ahead}) {
-  final d = formatDistanceRounded(meters);
-  if (ahead == true) return '$d ahead';
-  if (ahead == false) return '$d behind';
-  return '$d away';
-}
-
 /// "45 s", "8 min", "1 h", "1 h 12 min". Negative durations count as zero.
 String formatDuration(Duration d) => TimelineText.duration(d.isNegative ? Duration.zero : d);
 

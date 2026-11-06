@@ -28,7 +28,7 @@ class FakeEngine implements VoiceEngine, VoiceEngineLanguage {
   }
 
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id}) async {
+  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
     if (!speakResult) return false;
     spoken.add((text, interrupt));
     return true;

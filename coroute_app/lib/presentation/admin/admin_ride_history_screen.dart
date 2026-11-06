@@ -3,11 +3,8 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
-import '../../data/models/trip_history_model.dart';
 import '../../data/services/api_client.dart';
-import '../../data/services/convoy_service.dart';
-import '../report/trip_report_screen.dart';
-import 'admin_convoy_inspector.dart';
+import 'admin_group_detail_screen.dart';
 import 'admin_ui.dart';
 import 'master_admin_dashboard.dart';
 
@@ -85,32 +82,15 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
   static bool _isLive(Map<String, dynamic> c) =>
       c['isActive'] == true || c['tripStatus'] == 'STARTED' || c['tripStatus'] == 'PLANNING' || c['tripStatus'] == 'PAUSED';
 
-  void _openGroup(Map<String, dynamic> c, {bool isActive = false}) {
+  /// Opens the ride's numbers (members, distance, regroups, alerts); from there the
+  /// live view or the trip report.
+  Future<void> _openGroup(Map<String, dynamic> c) async {
     final groupId = c['groupId']?.toString() ?? '';
-    if (isActive) {
-      final convoyService = context.read<ConvoyService>();
-      final room = convoyService.allConvoys[groupId];
-      if (room != null) {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => AdminConvoyInspector(convoy: room)));
-        return;
-      }
-    }
-
-    final trip = TripHistoryModel(
-      tripId: '',
-      tripName: c['name']?.toString() ?? 'Ride',
-      startLocationName: c['startName']?.toString() ?? '',
-      destinationName: c['destinationName']?.toString() ?? '',
-      startTimeEpochMs: adminNum(c, 'startedAt').toInt(),
-      endTimeEpochMs: adminNum(c, 'endedAt').toInt(),
-      totalDistanceKm: adminNum(c, 'distanceM') / 1000,
-      topSpeedKmh: 0,
-      avgSpeedKmh: 0,
-      riderCount: adminNum(c, 'members').toInt(),
-      groupId: groupId,
-      source: 'server',
+    if (groupId.isEmpty) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => AdminGroupDetailScreen(groupId: groupId, initialName: c['name']?.toString() ?? '')),
     );
-    Navigator.push(context, MaterialPageRoute(builder: (_) => TripReportScreen(trip: trip, adminView: true)));
   }
 
   Future<void> _deleteGroupImmediately(Map<String, dynamic> c) async {
@@ -239,7 +219,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
                   ride: display[i],
                   live: _isLive(display[i]),
                   last: i == display.length - 1,
-                  onTap: () => _openGroup(display[i], isActive: _isLive(display[i])),
+                  onTap: () => _openGroup(display[i]),
                   onDelete: () => _deleteGroupImmediately(display[i]),
                 ),
             ],
@@ -253,8 +233,8 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
     }
 
     return AdminShell(
-      title: 'Ride history',
-      subtitle: 'Live and finished rides',
+      title: 'Groups and rides',
+      subtitle: 'Live and finished rides. Tap a ride for its numbers.',
       onBack: () => Navigator.maybePop(context),
       actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
       nav: adminNavItems(context, AdminSection.rides),

@@ -18,7 +18,7 @@ abstract class VoiceEngine {
   Future<bool> init();
 
   /// [interrupt] true drops anything queued or being said (QUEUE_FLUSH), else it is queued.
-  Future<bool> speak(String text, {required bool interrupt, required String id});
+  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false});
   Future<void> stop();
 
   /// Unbinds the engine (ride end).
@@ -58,9 +58,14 @@ class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
   }
 
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id}) async {
+  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
     try {
-      return (await _ch.invokeMethod<bool>('speak', {'text': text, 'id': id, 'interrupt': interrupt})) == true;
+      return (await _ch.invokeMethod<bool>('speak', {
+        'text': text,
+        'id': id,
+        'interrupt': interrupt,
+        'isEmergency': isEmergency,
+      })) == true;
     } catch (_) {
       return false;
     }

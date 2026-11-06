@@ -28,6 +28,7 @@ import sys
 import time
 import socket
 import subprocess
+import random
 from datetime import datetime
 
 # UTF-8 console output
@@ -60,13 +61,12 @@ ADB_ID = "ocid1.autonomousdatabase.oc1.ap-hyderabad-1.anuhsljr4ylewkaat3cu32stdg
 
 SHAPE = "VM.Standard.A1.Flex"
 BOOT_VOLUME_SIZE_GBS = 50  # 100% within remaining 100GB Always-Free storage
-RETRY_DELAY_SECONDS = 45
+RETRY_DELAY_SECONDS = 90
 
-# Target shape configurations to try alternatingly (all 100% Always-Free)
+# Target shape configurations within tenancy Always-Free limits (2 OCPU / 12 GB max)
 SHAPE_CANDIDATES = [
     {"ocpus": 2.0, "memory_in_gbs": 12.0, "label": "2 OCPUs / 12 GB RAM"},
     {"ocpus": 1.0, "memory_in_gbs": 6.0,  "label": "1 OCPU / 6 GB RAM"},
-    {"ocpus": 4.0, "memory_in_gbs": 24.0, "label": "4 OCPUs / 24 GB RAM"},
 ]
 
 DEFAULT_SSH_PUBLIC_KEY = (
@@ -448,19 +448,22 @@ def main():
             break
         except oci.exceptions.ServiceError as e:
             if "Out of host capacity" in str(e) or e.status == 500:
-                print("Out of host capacity.", flush=True)
+                delay = RETRY_DELAY_SECONDS + random.randint(5, 15)
+                print(f"Out of host capacity. Next attempt in {delay}s...", flush=True)
+                time.sleep(delay)
             elif e.status == 429 or "TooManyRequests" in str(e):
-                print("Rate limited (429).", flush=True)
+                backoff = 100 + random.randint(10, 25)
+                print(f"Rate limited (429). Backing off for {backoff}s...", flush=True)
+                time.sleep(backoff)
             else:
-                print(f"Error ({e.status}): {e.message}", flush=True)
-                if e.status == 400 and "Quota" in str(e.message):
-                    print("[!] Quota error encountered. Halting loop.", flush=True)
-                    sys.exit(1)
+                delay = RETRY_DELAY_SECONDS + random.randint(5, 15)
+                print(f"Notice ({e.status}): {e.message}. Retrying in {delay}s...", flush=True)
+                time.sleep(delay)
         except Exception as ex:
-            print(f"Exception: {ex}", flush=True)
+            print(f"Exception: {ex}. Retrying in 90s...", flush=True)
+            time.sleep(90)
 
         attempt += 1
-        time.sleep(RETRY_DELAY_SECONDS)
 
     # 1. Wait for RUNNING state
     print("\n[*] Waiting for Ampere instance to transition to RUNNING state...")

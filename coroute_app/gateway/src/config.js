@@ -47,6 +47,9 @@ const config = {
   adminEmails: list('BOOTSTRAP_ADMIN_EMAILS', list('ADMIN_EMAILS')),
   // Account gate: how long a users document is trusted before it is read again (status, role, password change).
   userGateTtlMs: int('USER_GATE_TTL_MS', 30000),
+  // bcrypt work factor for new password hashes (older, cheaper hashes are upgraded at the next sign-in).
+  // Fixed at 12 in production; the test suite uses the minimum so its many sign-ups stay fast.
+  bcryptCost: isTest ? 4 : 12,
 
   // Joining by code: failed attempts allowed per window, per rider and per network (brute-force guard).
   joinWindowMin: int('JOIN_WINDOW_MIN', 15),
@@ -258,7 +261,7 @@ const config = {
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
-  latestAppBuild: int('LATEST_APP_BUILD', 10014),
+  latestAppBuild: int('LATEST_APP_BUILD', 10017),
   supportEmail: (process.env.SUPPORT_EMAIL || 'santhoshbukka5@gmail.com').trim(),
 
   // Payment Screen & Subscription Gating Toggle
@@ -294,6 +297,12 @@ const config = {
   // only the display name shown in Razorpay Checkout.
   razorpayUpiOnly: true,
   upiMerchantName: 'CoRoute',
+
+  // Photos riders attach to post-trip reviews. A private data folder OUTSIDE public/: nothing in it is
+  // served as a static file; routes check consent and approval for every photo (src/review_photos.js).
+  reviewPhotoDir: (process.env.REVIEW_PHOTO_DIR || '').trim()
+    || (isTest ? require('path').join(require('os').tmpdir(), `coroute-review-photos-${process.pid}`)
+      : require('path').join(__dirname, '..', 'data', 'review-photos')),
 };
 
 if (!isTest && config.jwtSecret.length < 32) {

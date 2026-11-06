@@ -153,202 +153,205 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
     // (_SideFuelButton) on the right handlebar stack. No upper duplicate card is added to items.
     final isLowFuel = usableKm != null && (usableKm <= 60.0 || (fuelAheadKm != null && fuelAheadKm > usableKm));
 
-    // 1b. Remaining Convoy Members Alert: Display when a teammate is diverting for fuel
-    for (final rider in widget.convoy.riders.values) {
-      if (rider.userId == widget.me.userId) continue;
-      final isDivertingFuel = rider.statusReason == 'FUELING' ||
-          (rider.fuelUsableKm != null && rider.fuelUsableKm! > 0 && rider.fuelUsableKm! <= 30.0);
-      if (isDivertingFuel) {
-        final who = rider.name.split(' ').first;
-        final rangeNote = rider.fuelUsableKm != null ? ' (${rider.fuelUsableKm!.round()} km left)' : '';
+    if (!widget.convoy.isSolo) {
+  // 1b. Remaining Convoy Members Alert: Display when a teammate is diverting for fuel
+      for (final rider in widget.convoy.riders.values) {
+        if (rider.userId == widget.me.userId) continue;
+        final isDivertingFuel = rider.statusReason == 'FUELING' ||
+            (rider.fuelUsableKm != null && rider.fuelUsableKm! > 0 && rider.fuelUsableKm! <= 30.0);
+        if (isDivertingFuel) {
+          final who = rider.name.split(' ').first;
+          final rangeNote = rider.fuelUsableKm != null ? ' (${rider.fuelUsableKm!.round()} km left)' : '';
+          items.add(
+            _ActionPill(
+              icon: Icons.local_gas_station_rounded,
+              iconColor: Colors.white,
+              accentColor: AppTheme.warnText,
+              title: '$who DIVERTING FOR FUEL',
+              subtitle: rider.statusMessage.isNotEmpty
+                  ? '${rider.statusMessage} · Tap to locate'
+                  : 'Refueling$rangeNote · Tap to locate or regroup',
+              onTap: () {
+                HapticFeedback.lightImpact();
+                if (widget.onFocusLocation != null && rider.lat != 0 && rider.lng != 0) {
+                  widget.onFocusLocation!(rider.lat, rider.lng);
+                }
+              },
+            ),
+          );
+          break; // Display top diverting rider
+        }
+      }
+
+      // 1c. Group Separation Alert: Moving away from group range (> 1.0 km separation)
+      if (widget.me.role != 'LEAD') {
+        final leadRider = widget.convoy.riders.values.where((r) => r.role == 'LEAD').firstOrNull;
+        if (leadRider != null && leadRider.lat != 0 && widget.me.lat != 0) {
+          final gapM = GeoMath.haversine(widget.me.lat, widget.me.lng, leadRider.lat, leadRider.lng);
+          if (gapM > 1000) {
+            items.add(
+              _ActionPill(
+                icon: Icons.groups_rounded,
+                iconColor: Colors.white,
+                accentColor: AppTheme.warnText,
+                title: 'GROUP SEPARATION · ${formatDistanceRounded(gapM)}',
+                subtitle: 'Group is ahead · Tap to find the Lead',
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  if (widget.onFocusLocation != null) {
+                    widget.onFocusLocation!(leadRider.lat, leadRider.lng);
+                  }
+                },
+              ),
+            );
+          }
+        }
+      }
+
+      // 1d. Group Fuel Consensus (Tracks bottleneck motorcycle in the pack when alert is active)
+      final consensus = GroupFuelConsensus.evaluate(
+        convoy: widget.convoy,
+        upcomingStations: allFuel,
+        progressM: progressM,
+      );
+
+      if (consensus != null && (consensus.alertLead || consensus.lowestRangeKm <= 30.0) && consensus.bottleneckUserId != widget.me.userId) {
+        final who = consensus.bottleneckRiderName.split(' ').first;
+        final st = consensus.recommendedStation;
+        final distStr = consensus.distanceToStationKm != null ? ' in ${consensus.distanceToStationKm!.toStringAsFixed(1)} km' : '';
         items.add(
           _ActionPill(
             icon: Icons.local_gas_station_rounded,
             iconColor: Colors.white,
             accentColor: AppTheme.warnText,
-            title: '$who DIVERTING FOR FUEL',
-            subtitle: rider.statusMessage.isNotEmpty
-                ? '${rider.statusMessage} · Tap to locate'
-                : 'Refueling$rangeNote · Tap to locate or regroup',
+            title: 'GROUP FUEL · $who: ${consensus.lowestRangeKm.round()} km left',
+            subtitle: st != null
+                ? '${st.name}$distStr · Tap to add stop'
+                : 'Bottleneck rider needs fuel · Tap to search',
+            onTap: () {
+              HapticFeedback.mediumImpact();
+              _showFuelQuickSheet(
+                context,
+                usableKm: consensus.lowestRangeKm,
+                stations: allFuel.take(4).toList(),
+                progressM: progressM,
+                riderLat: widget.me.lat,
+                riderLng: widget.me.lng,
+                onAddStationStop: widget.onAddStationStop,
+                onOpenFuelSheet: widget.onOpenFuelSheet,
+              );
+            },
+          ),
+        );
+      }
+
+      // 2. Stop Suggestions from Convoy Members (Food, Coffee, Rest, etc.)
+      final suggestions = widget.convoy.suggestedStops;
+      for (final stop in suggestions.take(4)) {
+        final IconData stopIcon;
+        final Color stopColor;
+        switch (stop.category.toUpperCase()) {
+          case 'FOOD':
+            stopIcon = Icons.restaurant_rounded;
+            stopColor = AppTheme.warnText;
+            break;
+          case 'FUEL':
+            stopIcon = Icons.local_gas_station_rounded;
+            stopColor = AppTheme.sos;
+            break;
+          case 'SCENIC':
+            stopIcon = Icons.photo_camera_rounded;
+            stopColor = AppTheme.brand;
+            break;
+          default:
+            stopIcon = Icons.local_cafe_rounded;
+            stopColor = AppTheme.warnText;
+            break;
+        }
+
+        final who = stop.suggestedByName.split(' ').first;
+        final distM = (widget.me.lat != 0 && widget.me.lng != 0)
+            ? GeoMath.haversine(widget.me.lat, widget.me.lng, stop.lat, stop.lng)
+            : null;
+        final distText = distM != null ? ' · ${formatDistanceRounded(distM)}' : '';
+
+        items.add(
+          _ActionPill(
+            icon: stopIcon,
+            iconColor: Colors.white,
+            accentColor: stopColor,
+            title: '$who: ${stop.name.isEmpty ? stop.category : stop.name}',
+            subtitle: '${stop.category} stop suggested$distText · Tap to view',
             onTap: () {
               HapticFeedback.lightImpact();
-              if (widget.onFocusLocation != null && rider.lat != 0 && rider.lng != 0) {
-                widget.onFocusLocation!(rider.lat, rider.lng);
+              if (widget.onFocusLocation != null && stop.lat != 0 && stop.lng != 0) {
+                widget.onFocusLocation!(stop.lat, stop.lng);
+              }
+              if (widget.onOpenStopsSheet != null) {
+                widget.onOpenStopsSheet!();
               }
             },
           ),
         );
-        break; // Display top diverting rider
       }
-    }
 
-    // 1c. Group Separation Alert: Moving away from group range (> 1.0 km separation)
-    if (widget.me.role != 'LEAD') {
-      final leadRider = widget.convoy.riders.values.where((r) => r.role == 'LEAD').firstOrNull;
-      if (leadRider != null && leadRider.lat != 0 && widget.me.lat != 0) {
-        final gapM = GeoMath.haversine(widget.me.lat, widget.me.lng, leadRider.lat, leadRider.lng);
-        if (gapM > 1000) {
+      // 3. Lead Meeting Points / Meet Here
+      final meetingStops = widget.convoy.plannedStops.where((s) => s.category == RoutePlan.meetingCategory);
+      for (final meet in meetingStops.take(1)) {
+        final distM = (widget.me.lat != 0 && widget.me.lng != 0)
+            ? GeoMath.haversine(widget.me.lat, widget.me.lng, meet.lat, meet.lng)
+            : null;
+        final distText = distM != null ? ' · ${formatDistanceRounded(distM)}' : '';
+
+        items.add(
+          _ActionPill(
+            icon: Icons.flag_rounded,
+            iconColor: Colors.white,
+            accentColor: AppTheme.accentText,
+            title: 'MEET HERE · ${meet.name}',
+            subtitle: 'Group meeting point$distText · Tap to view',
+            onTap: () {
+              HapticFeedback.lightImpact();
+              if (widget.onFocusLocation != null && meet.lat != 0 && meet.lng != 0) {
+                widget.onFocusLocation!(meet.lat, meet.lng);
+              }
+            },
+          ),
+        );
+      }
+
+      // 4. Convoy Rider Stopped with Reason (e.g. Puncture, Rest, Breakdown)
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      for (final rider in widget.convoy.riders.values) {
+        if (rider.userId == widget.me.userId || !RideFacts.hasPosition(rider)) continue;
+        final isStopped = (nowMs - rider.lastSeenEpochMs < 300000) && rider.speedKmh < 5.0 && rider.statusReason.isNotEmpty;
+        if (isStopped) {
+          final who = rider.name.split(' ').first;
+          final reason = rider.statusReason;
+          final distM = (widget.me.lat != 0 && widget.me.lng != 0)
+              ? GeoMath.haversine(widget.me.lat, widget.me.lng, rider.lat, rider.lng)
+              : null;
+          final distText = distM != null ? ' · ${formatDistanceRounded(distM)} away' : '';
+
           items.add(
             _ActionPill(
-              icon: Icons.groups_rounded,
+              icon: Icons.warning_amber_rounded,
               iconColor: Colors.white,
               accentColor: AppTheme.warnText,
-              title: 'GROUP SEPARATION · ${formatDistanceRounded(gapM)}',
-              subtitle: 'Convoy pack is ahead · Tap to locate lead',
+              title: '$who stopped: $reason',
+              subtitle: 'Rider stopped$distText · Tap to locate',
               onTap: () {
                 HapticFeedback.lightImpact();
                 if (widget.onFocusLocation != null) {
-                  widget.onFocusLocation!(leadRider.lat, leadRider.lng);
+                  widget.onFocusLocation!(rider.lat, rider.lng);
                 }
               },
             ),
           );
+          break; // Only show 1 stopped rider alert at a time to prevent overflow
         }
       }
-    }
 
-    // 1d. Group Fuel Consensus (Tracks bottleneck motorcycle in the pack when <= 30 km)
-    final consensus = GroupFuelConsensus.evaluate(
-      convoy: widget.convoy,
-      upcomingStations: allFuel,
-      progressM: progressM,
-    );
-
-    if (consensus != null && consensus.lowestRangeKm <= 30.0 && consensus.bottleneckUserId != widget.me.userId) {
-      final who = consensus.bottleneckRiderName.split(' ').first;
-      final st = consensus.recommendedStation;
-      final distStr = consensus.distanceToStationKm != null ? ' in ${consensus.distanceToStationKm!.toStringAsFixed(1)} km' : '';
-      items.add(
-        _ActionPill(
-          icon: Icons.local_gas_station_rounded,
-          iconColor: Colors.white,
-          accentColor: AppTheme.warnText,
-          title: 'GROUP FUEL · $who: ${consensus.lowestRangeKm.round()} km left',
-          subtitle: st != null
-              ? '${st.name}$distStr · Tap to add stop'
-              : 'Bottleneck rider needs fuel · Tap to search',
-          onTap: () {
-            HapticFeedback.mediumImpact();
-            _showFuelQuickSheet(
-              context,
-              usableKm: consensus.lowestRangeKm,
-              stations: allFuel.take(4).toList(),
-              progressM: progressM,
-              riderLat: widget.me.lat,
-              riderLng: widget.me.lng,
-              onAddStationStop: widget.onAddStationStop,
-              onOpenFuelSheet: widget.onOpenFuelSheet,
-            );
-          },
-        ),
-      );
-    }
-
-    // 2. Stop Suggestions from Convoy Members (Food, Coffee, Rest, etc.)
-    final suggestions = widget.convoy.suggestedStops;
-    for (final stop in suggestions.take(4)) {
-      final IconData stopIcon;
-      final Color stopColor;
-      switch (stop.category.toUpperCase()) {
-        case 'FOOD':
-          stopIcon = Icons.restaurant_rounded;
-          stopColor = AppTheme.warnText;
-          break;
-        case 'FUEL':
-          stopIcon = Icons.local_gas_station_rounded;
-          stopColor = AppTheme.sos;
-          break;
-        case 'SCENIC':
-          stopIcon = Icons.photo_camera_rounded;
-          stopColor = AppTheme.brand;
-          break;
-        default:
-          stopIcon = Icons.local_cafe_rounded;
-          stopColor = AppTheme.warnText;
-          break;
-      }
-
-      final who = stop.suggestedByName.split(' ').first;
-      final distM = (widget.me.lat != 0 && widget.me.lng != 0)
-          ? GeoMath.haversine(widget.me.lat, widget.me.lng, stop.lat, stop.lng)
-          : null;
-      final distText = distM != null ? ' · ${formatDistanceRounded(distM)}' : '';
-
-      items.add(
-        _ActionPill(
-          icon: stopIcon,
-          iconColor: Colors.white,
-          accentColor: stopColor,
-          title: '$who: ${stop.name.isEmpty ? stop.category : stop.name}',
-          subtitle: '${stop.category} stop suggested$distText · Tap to view',
-          onTap: () {
-            HapticFeedback.lightImpact();
-            if (widget.onFocusLocation != null && stop.lat != 0 && stop.lng != 0) {
-              widget.onFocusLocation!(stop.lat, stop.lng);
-            }
-            if (widget.onOpenStopsSheet != null) {
-              widget.onOpenStopsSheet!();
-            }
-          },
-        ),
-      );
-    }
-
-    // 3. Lead Meeting Points / Meet Here
-    final meetingStops = widget.convoy.plannedStops.where((s) => s.category == RoutePlan.meetingCategory);
-    for (final meet in meetingStops.take(1)) {
-      final distM = (widget.me.lat != 0 && widget.me.lng != 0)
-          ? GeoMath.haversine(widget.me.lat, widget.me.lng, meet.lat, meet.lng)
-          : null;
-      final distText = distM != null ? ' · ${formatDistanceRounded(distM)}' : '';
-
-      items.add(
-        _ActionPill(
-          icon: Icons.flag_rounded,
-          iconColor: Colors.white,
-          accentColor: AppTheme.accentText,
-          title: 'MEET HERE · ${meet.name}',
-          subtitle: 'Group meeting point$distText · Tap to view',
-          onTap: () {
-            HapticFeedback.lightImpact();
-            if (widget.onFocusLocation != null && meet.lat != 0 && meet.lng != 0) {
-              widget.onFocusLocation!(meet.lat, meet.lng);
-            }
-          },
-        ),
-      );
-    }
-
-    // 4. Convoy Rider Stopped with Reason (e.g. Puncture, Rest, Breakdown)
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    for (final rider in widget.convoy.riders.values) {
-      if (rider.userId == widget.me.userId || !RideFacts.hasPosition(rider)) continue;
-      final isStopped = (nowMs - rider.lastSeenEpochMs < 300000) && rider.speedKmh < 5.0 && rider.statusReason.isNotEmpty;
-      if (isStopped) {
-        final who = rider.name.split(' ').first;
-        final reason = rider.statusReason;
-        final distM = (widget.me.lat != 0 && widget.me.lng != 0)
-            ? GeoMath.haversine(widget.me.lat, widget.me.lng, rider.lat, rider.lng)
-            : null;
-        final distText = distM != null ? ' · ${formatDistanceRounded(distM)} away' : '';
-
-        items.add(
-          _ActionPill(
-            icon: Icons.warning_amber_rounded,
-            iconColor: Colors.white,
-            accentColor: AppTheme.warnText,
-            title: '$who stopped: $reason',
-            subtitle: 'Rider stopped$distText · Tap to locate',
-            onTap: () {
-              HapticFeedback.lightImpact();
-              if (widget.onFocusLocation != null) {
-                widget.onFocusLocation!(rider.lat, rider.lng);
-              }
-            },
-          ),
-        );
-        break; // Only show 1 stopped rider alert at a time to prevent overflow
-      }
     }
 
     final fuelButton = _SideFuelButton(

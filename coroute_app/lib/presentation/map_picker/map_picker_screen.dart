@@ -370,6 +370,9 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         FlutterMap(
           mapController: _map,
           options: MapOptions(
+          minZoom: 3.0,
+          maxZoom: 19.0,
+          cameraConstraint: const CameraConstraint.containLatitude(),
             initialCenter: _center,
             initialZoom: widget.initial != null ? 15 : 12,
             onTap: (_, p) => _moveTo(p),
@@ -432,7 +435,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                         padding: const EdgeInsets.all(Space.s16),
                         child: Center(
                           child: Text(
-                            'No matching places found. Try entering coordinates or a town name.',
+                            'No matching places found. Try a town name.',
                             style: AppText.caption,
                             textAlign: TextAlign.center,
                           ),

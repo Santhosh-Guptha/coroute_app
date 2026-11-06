@@ -13,7 +13,11 @@ class ApiException implements Exception {
   /// Machine-readable cause sent by the gateway (for example SESSION_INVALID, ACCOUNT_GONE, NOT_MEMBER).
   /// Null when the response did not come from the gateway (captive portal, proxy, outage page).
   final String? code;
-  const ApiException(this.statusCode, this.message, [this.code]);
+
+  /// Why the gateway refused a request it understood (for example COUPON_EXPIRED,
+  /// PER_USER_LIMIT_REACHED, TIER_MISMATCH): the `reason` field of its error body.
+  final String? reason;
+  const ApiException(this.statusCode, this.message, [this.code, this.reason]);
 
   bool get isUnauthorized => statusCode == 401;
   bool get isOffline => statusCode == 0;
@@ -118,14 +122,22 @@ class ApiClient extends ChangeNotifier {
     if (res.statusCode >= 200 && res.statusCode < 300) return res.body;
     String? message;
     String? code;
+    String? reason;
     try {
       final d = jsonDecode(res.body);
       if (d is Map) {
         message = d['error']?.toString();
         code = d['code']?.toString();
+        reason = d['reason']?.toString();
       }
     } catch (_) {}
-    throw ApiException(res.statusCode, message ?? 'Request failed (${res.statusCode})', code);
+    final error = ApiException(res.statusCode, message ?? 'Request failed (${res.statusCode})', code, reason);
+    if (error.endsSession && hasToken) {
+      // Same rule as JSON calls: only the gateway saying so ends the session.
+      lastSessionEndMessage = error.message;
+      await setToken(null);
+    }
+    throw error;
   }
 
   Future<dynamic> post(String path, [Object? body, Duration timeout = const Duration(seconds: 12), bool auth = true]) =>
@@ -139,6 +151,54 @@ class ApiClient extends ChangeNotifier {
 
   Future<dynamic> delete(String path) =>
       _send(() => _http.delete(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers()), const Duration(seconds: 12));
+
+  // ---------- post-trip reviews ----------
+
+  static Map<String, dynamic> _asMap(Object? res) => res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
+
+  /// The signed-in rider's review of [tripId] (a trip id or a convoy groupId) and whether they
+  /// may review it: `{ok, canReview, code, feedback}`; `feedback` is null when there is none.
+  Future<Map<String, dynamic>> getTripReview(String tripId) async =>
+      _asMap(await get('/trips/${Uri.encodeComponent(tripId)}/feedback'));
+
+  /// Creates or updates the rider's review (one per rider per trip). It stays pending until an
+  /// admin approves it: `{ok, updated, feedback}`.
+  Future<Map<String, dynamic>> submitTripReview(String tripId, Map<String, dynamic> review) async =>
+      _asMap(await post('/trips/${Uri.encodeComponent(tripId)}/feedback', review, const Duration(seconds: 20)));
+
+  /// Takes the rider's review down (it leaves the website at once).
+  Future<Map<String, dynamic>> withdrawTripReview(String tripId) async =>
+      _asMap(await delete('/trips/${Uri.encodeComponent(tripId)}/feedback'));
+
+  /// Admin: trip reviews, optionally of one status (PENDING_REVIEW, APPROVED, REJECTED,
+  /// CHANGES_REQUESTED, WITHDRAWN): `{ok, summary, reviews}`.
+  Future<Map<String, dynamic>> adminListReviews({String? status}) async {
+    final q = status == null || status.isEmpty ? '' : '?status=${Uri.encodeQueryComponent(status)}';
+    return _asMap(await get('/admin/reviews$q', timeout: const Duration(seconds: 15)));
+  }
+
+  /// Admin: APPROVE, REJECT (needs `reason`), REQUEST_CHANGES (needs `reason`), WITHDRAW or EDIT,
+  /// with an optional `formattedText` (public excerpt) and `selectedPhotos`: `{ok, feedback}`.
+  Future<Map<String, dynamic>> adminModerateReview(String feedbackId, Map<String, dynamic> body) async =>
+      _asMap(await put('/admin/reviews/${Uri.encodeComponent(feedbackId)}', body));
+
+  /// Adds one photo (raw JPEG, PNG or WebP bytes, at most 2 MB) to the rider's review of [tripId].
+  /// The review must already be sent with the photo consent ticked: `{ok, photo, feedback}`.
+  Future<Map<String, dynamic>> uploadTripReviewPhoto(String tripId, Uint8List bytes, String contentType) async =>
+      _asMap(await _send(
+        () => _http.post(
+          Uri.parse('${AppConfig.apiUrl}/trips/${Uri.encodeComponent(tripId)}/feedback/photos'),
+          headers: {..._headers(), 'Content-Type': contentType},
+          body: bytes,
+        ),
+        const Duration(seconds: 60),
+      ));
+
+  /// Full address of a gateway path such as `/admin/reviews/<id>/photos/<photoId>`.
+  String apiUrlOf(String path) => '${AppConfig.apiUrl}$path';
+
+  /// Headers for an image the gateway only shows to the signed-in rider or an admin (Image.network).
+  Map<String, String> get authHeaders => {if (hasToken) 'Authorization': 'Bearer $_token'};
 
   Future<dynamic> _send(Future<http.Response> Function() call, Duration timeout) async {
     http.Response res;
@@ -173,7 +233,8 @@ class ApiClient extends ChangeNotifier {
             ? 'The server is not reachable right now. Try again in a moment.'
             : 'Request failed (${res.statusCode})';
     final code = (fromGateway && decoded is Map && decoded['code'] != null) ? decoded['code'].toString() : null;
-    final error = ApiException(res.statusCode, message, code);
+    final reason = (fromGateway && decoded is Map && decoded['reason'] != null) ? decoded['reason'].toString() : null;
+    final error = ApiException(res.statusCode, message, code, reason);
     if (error.endsSession && hasToken) {
       // Only the gateway saying so ends the session; bad networks never sign anyone out.
       lastSessionEndMessage = message;

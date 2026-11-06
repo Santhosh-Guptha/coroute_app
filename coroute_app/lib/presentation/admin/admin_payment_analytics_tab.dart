@@ -10,8 +10,9 @@ import 'admin_ui.dart';
 
 /// Admin Console: Payment Analytics Dashboard.
 ///
-/// Provides executive financial metrics, plan breakdown (Individual ₹9, Small Group ₹49, Large Group ₹99),
-/// promotional coupon ROI, and visual daily revenue trend charts across time ranges.
+/// Provides executive financial metrics, the plan breakdown (plan names and prices from the
+/// server plan catalog, never hard-coded), promotional coupon ROI, and visual daily revenue
+/// trend charts across time ranges.
 class AdminPaymentAnalyticsTab extends StatefulWidget {
   const AdminPaymentAnalyticsTab({super.key});
 
@@ -29,6 +30,10 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
   int? _customTo;
 
   Map<String, dynamic> _data = {};
+
+  /// The server plan catalog (`/admin/coupons/plan-options`): names and prices of plans that
+  /// have no sales in the period yet.
+  List<Map<String, dynamic>> _planOptions = [];
 
   static const List<(String, String)> _rangeOptions = [
     ('today', 'Today'),
@@ -62,7 +67,16 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
       }
 
       final queryStr = '?${Uri(queryParameters: params).query}';
-      final res = await context.read<ApiClient>().get('/admin/payments/analytics$queryStr');
+      final api = context.read<ApiClient>();
+      final res = await api.get('/admin/payments/analytics$queryStr');
+      if (_planOptions.isEmpty) {
+        try {
+          final opts = await api.get('/admin/coupons/plan-options');
+          _planOptions = adminMapList(opts is Map ? opts['plans'] : null);
+        } catch (_) {
+          // An older gateway: plans without sales show their names without a price.
+        }
+      }
 
       if (res is Map) {
         _data = Map<String, dynamic>.from(res);
@@ -279,10 +293,17 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
 
   Widget _buildPlanBreakdownTable(bool isWide) {
     final byPlan = _data['byPlan'] is Map ? Map<String, dynamic>.from(_data['byPlan'] as Map) : const <String, dynamic>{};
+    final ids = [
+      ...adminMembershipPlanIds(_planOptions),
+      for (final k in byPlan.keys)
+        if (!adminMembershipPlanNames.containsKey(k) && byPlan[k] is Map) k,
+    ];
     final plans = [
-      byPlan['individual'] is Map ? Map<String, dynamic>.from(byPlan['individual'] as Map) : {'id': 'individual', 'name': 'Individual Membership (₹9/mo)', 'units': 0, 'grossInr': 0, 'discountsInr': 0, 'netInr': 0, 'activeMembers': 0},
-      byPlan['group_small'] is Map ? Map<String, dynamic>.from(byPlan['group_small'] as Map) : {'id': 'group_small', 'name': 'Small Group 2–6 (₹49/mo)', 'units': 0, 'grossInr': 0, 'discountsInr': 0, 'netInr': 0, 'activeMembers': 0},
-      byPlan['group_large'] is Map ? Map<String, dynamic>.from(byPlan['group_large'] as Map) : {'id': 'group_large', 'name': 'Large Group 7–12 (₹99/mo)', 'units': 0, 'grossInr': 0, 'discountsInr': 0, 'netInr': 0, 'activeMembers': 0},
+      for (final id in ids.toSet())
+        if (byPlan[id] is Map)
+          {'id': id, ...Map<String, dynamic>.from(byPlan[id] as Map)}
+        else
+          {'id': id, 'name': adminPlanLabel(id, _planOptions), 'units': 0, 'grossInr': 0, 'discountsInr': 0, 'netInr': 0, 'activeMembers': 0},
     ];
 
     return AdminTable(
@@ -296,7 +317,8 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
   }
 
   Widget _planRow(Map<String, dynamic> p, bool last) {
-    final name = p['name']?.toString() ?? 'Plan';
+    final id = p['id']?.toString() ?? '';
+    final name = (p['name']?.toString() ?? '').trim().isNotEmpty ? p['name'].toString() : adminPlanLabel(id, _planOptions);
     final units = p['units'] ?? 0;
     final gross = adminNumOrNull(p['grossInr']) ?? 0;
     final disc = adminNumOrNull(p['discountsInr']) ?? 0;
@@ -305,7 +327,7 @@ class _AdminPaymentAnalyticsTabState extends State<AdminPaymentAnalyticsTab> wit
 
     return AdminRow(
       leading: AdminRowIcon(
-        name.contains('99') ? Icons.groups_3_rounded : (name.contains('49') ? Icons.group_rounded : Icons.person_rounded),
+        id == 'group_large' ? Icons.groups_3_rounded : (id == 'group_small' ? Icons.group_rounded : Icons.person_rounded),
         color: AppTheme.accentText,
       ),
       title: name,

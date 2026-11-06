@@ -256,7 +256,13 @@
       var m = msg.value.trim(), text = m.length < 20 ? 'Please write at least 20 characters.' : m.length > 2000 ? 'Please keep it under 2000 characters.' : '';
       setErr(msg, text); return !text;
     };
-    var validate = function () { var a = checkEmail(), b = checkMsg(); return a && b; };
+    var consent = $('fb-consent');
+    var checkConsent = function () {
+      if (!consent) return true;
+      setErr(consent, consent.checked ? '' : 'Please tick the box so we can store your message and reply.'); return consent.checked;
+    };
+    if (consent) consent.addEventListener('change', checkConsent);
+    var validate = function () { var a = checkEmail(), b = checkMsg(), c = checkConsent(); return a && b && c; };
     // Errors show on blur and clear while typing, so the layout settles before the submit click.
     email.addEventListener('blur', function () { if (email.value) checkEmail(); });
     msg.addEventListener('blur', function () { if (msg.value) checkMsg(); });
@@ -267,11 +273,11 @@
       if (form.getAttribute('data-state') === 'sending') return;
       if (!validate()) {
         setState('error', 'Please correct the highlighted fields.');
-        (email.getAttribute('aria-invalid') === 'true' ? email : msg).focus();
+        (email.getAttribute('aria-invalid') === 'true' ? email : msg.getAttribute('aria-invalid') === 'true' ? msg : consent || msg).focus();
         return;
       }
-      setState('sending', 'Sending…');
-      btn.disabled = true; btn.textContent = 'Sending…';
+      setState('sending', 'Sending...');
+      btn.disabled = true; btn.textContent = 'Sending...';
       var data = {};
       new FormData(form).forEach(function (v, k) { data[k] = v; });
       fetch(form.getAttribute('action') || '/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
@@ -300,66 +306,349 @@
     else fetch('/api/pv', { method: 'POST', body: payload, keepalive: true }).catch(function () {});
   } catch (e) { /* ignore */ }
 
-  /* ---------- Live Community Statistics ("CoRoute Community in Motion") ---------- */
-  var communityContainer = doc.getElementById('community-stats-container');
-  if (communityContainer) {
-    function formatNumber(n) {
-      if (typeof n !== 'number') return '--';
-      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-      return n.toLocaleString();
+  /* ---------- Rider reviews: approved post-trip stories only ----------
+     Source: GET /api/public/community-stories?limit=N -> { ok, stories: [...], summary: { count, averageRating } }.
+     Fallback: GET /community-stories (may be a bare array). Every value is rider-written text, so it is only ever
+     placed with textContent / setAttribute, never parsed as markup. Nothing is invented: no sample stories, no default rating. */
+  var reviewsBox = doc.getElementById('community-stories-container');
+  if (reviewsBox) {
+    var reviewsSummary = doc.getElementById('reviews-summary');
+    var reviewLimit = clamp(parseInt(reviewsBox.getAttribute('data-limit'), 10) || 6, 1, 24);
+    var SVGNS = 'http://www.w3.org/2000/svg';
+    var make = function (tag, cls, text) {
+      var n = doc.createElement(tag);
+      if (cls) n.className = cls;
+      if (text != null) n.textContent = String(text);
+      return n;
+    };
+    var str = function (v, max) {
+      if (v == null) return '';
+      var s = String(v).replace(/\s+\n/g, '\n').trim();
+      return max && s.length > max ? s.slice(0, max - 1).trim() + '...' : s;
+    };
+    var num = function (v) { var n = typeof v === 'string' ? parseFloat(v) : v; return typeof n === 'number' && isFinite(n) ? n : null; };
+    var toDate = function (v) {
+      if (v == null || v === '') return null;
+      var d = new Date(typeof v === 'string' && /^\d+$/.test(v) ? +v : v);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    // Photos: same-site paths or https only. Anything else (javascript:, protocol-relative, http) is dropped.
+    var safeSrc = function (u) {
+      var s = str(u);
+      return /^https:\/\/[^\s"'<>]+$/i.test(s) || /^\/(?!\/)[^\s"'<>]*$/.test(s) ? s : '';
+    };
+    var listOf = function (data) {
+      if (Array.isArray(data)) return data;
+      if (data && Array.isArray(data.stories)) return data.stories;
+      return null;
+    };
+    // Only real, moderated feedback: it has an id and words, and is not a seeded placeholder.
+    var isReal = function (s) {
+      if (!s || typeof s !== 'object') return false;
+      var id = str(s.feedbackId);
+      if (!id || /^(fb-)?(seed|demo|sample|test)\b/i.test(id)) return false;
+      return !!str(s.formattedText || s.writtenFeedback);
+    };
+    var stars = function (rating) {
+      var r = num(rating);
+      if (r === null) return null;
+      r = Math.round(clamp(r, 1, 5));
+      var wrap = make('p', 'rv-stars');
+      wrap.setAttribute('role', 'img');
+      wrap.setAttribute('aria-label', 'Rated ' + r + ' out of 5');
+      for (var i = 1; i <= 5; i++) {
+        var svg = doc.createElementNS(SVGNS, 'svg');
+        svg.setAttribute('viewBox', '0 0 20 20');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
+        svg.setAttribute('class', i <= r ? 'rv-star is-on' : 'rv-star');
+        var p = doc.createElementNS(SVGNS, 'path');
+        p.setAttribute('d', 'M10 1.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L10 14.9l-5.2 2.7 1-5.8L1.6 7.7l5.8-.8z');
+        svg.appendChild(p);
+        wrap.appendChild(svg);
+      }
+      return wrap;
+    };
+    var fact = function (dl, label, value) {
+      if (!value) return;
+      var d = make('div');
+      d.appendChild(make('dt', null, label));
+      d.appendChild(make('dd', null, value));
+      dl.appendChild(d);
+    };
+    // Card templates chosen by the admin (same ids as the gateway's TEMPLATES): how many photos each shows.
+    var TEMPLATES = { 'photo-left': [1, 1], 'photo-top': [1, 1], 'quote-card': [0, 0], 'gallery': [2, 3] };
+    var LEGACY = { 'text-left-pic-right': 'photo-left', 'pic-left-text-right': 'photo-left', 'pic-top-text-bottom': 'photo-top', 'multi-pic-grid': 'gallery', 'text-only': 'quote-card' };
+    // Same rule as the server: a template that needs more photos than the story has falls back to one that fits.
+    var templateFor = function (s, n) {
+      var t = str(s.template || s.templateLayout || s.layout);
+      t = TEMPLATES[t] ? t : (LEGACY[t] || '');
+      if (t) {
+        if (n >= TEMPLATES[t][0]) return t;
+        return t === 'gallery' && n >= 1 ? 'photo-top' : 'quote-card';
+      }
+      return n >= 2 ? 'gallery' : n === 1 ? 'photo-left' : 'quote-card';
+    };
+    var photoEl = function (src, size, alt, onGone) {
+      var img = doc.createElement('img');
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      var w = size && num(size.width), h = size && num(size.height);
+      img.width = w && w > 0 ? Math.round(w) : 480;
+      img.height = h && h > 0 ? Math.round(h) : 360;
+      img.alt = alt;
+      img.addEventListener('error', onGone);
+      img.src = src;
+      return img;
+    };
+    var renderCard = function (s) {
+      var trip = str(s.tripName, 90);
+      var from = str(s.routeFrom, 60), to = str(s.routeTo, 60);
+      var rider = str(s.riderLabel || s.anonymousRiderLabel, 60) || 'CoRoute rider';
+      var text = str(s.formattedText || s.writtenFeedback, 1800);
+      var srcs = (Array.isArray(s.photos) ? s.photos : Array.isArray(s.selectedPhotos) ? s.selectedPhotos : []);
+      var sizes = Array.isArray(s.photoSizes) ? s.photoSizes : [];
+      var photos = [];
+      srcs.forEach(function (u, i) { var src = safeSrc(u); if (src) photos.push({ src: src, size: sizes[i] || null }); });
+      var template = templateFor(s, photos.length);
+      photos = photos.slice(0, TEMPLATES[template][1]);
+      var outer = make('article', 'rv-card rv-card--' + template);
+      outer.setAttribute('data-template', template);
+      var card = make('div', 'rv-card__body');
+      var head = make('header', 'rv-card__head');
+      var st = stars(s.rating);
+      if (st) head.appendChild(st);
+      head.appendChild(make('h3', 'rv-card__trip', trip || (from && to ? from + ' to ' + to : 'A CoRoute trip')));
+      // The route line only adds something when the trip name is not already "<from> to <to>".
+      var routeText = from && to ? from + ' to ' + to : '';
+      if (routeText && trip && trip.toLowerCase() !== routeText.toLowerCase()) head.appendChild(make('p', 'rv-card__route', routeText));
+      card.appendChild(head);
+
+      var quote = make('blockquote', 'rv-card__quote');
+      var qp = make('p', null, text);
+      quote.appendChild(qp);
+      card.appendChild(quote);
+      if (text.length > 360) {
+        quote.classList.add('is-clamped');
+        var more = make('button', 'rv-card__more', 'Read the full story');
+        more.type = 'button';
+        more.setAttribute('aria-expanded', 'false');
+        more.addEventListener('click', function () {
+          var open = quote.classList.toggle('is-clamped') === false;
+          more.setAttribute('aria-expanded', open ? 'true' : 'false');
+          more.textContent = open ? 'Show less' : 'Read the full story';
+        });
+        card.appendChild(more);
+      }
+
+      // Photos: only the ones an admin selected for the website, laid out by the card's template.
+      if (photos.length) {
+        var altOf = function (i) { return 'Group photo' + (photos.length > 1 ? ' ' + (i + 1) : '') + ' from ' + (trip || 'this trip') + ', shared by ' + rider; };
+        var media;
+        if (template === 'gallery') {
+          media = make('ul', 'rv-card__photos rv-card__gallery');
+          media.setAttribute('role', 'list');
+          photos.forEach(function (p, i) {
+            var li = make('li');
+            li.appendChild(photoEl(p.src, p.size, altOf(i), function () {
+              li.remove();
+              if (!media.children.length) { media.remove(); outer.classList.add('is-photoless'); }
+            }));
+            media.appendChild(li);
+          });
+        } else {
+          media = make('figure', 'rv-card__media');
+          media.appendChild(photoEl(photos[0].src, photos[0].size, altOf(0), function () { media.remove(); outer.classList.add('is-photoless'); }));
+        }
+        outer.appendChild(media);
+      }
+
+      var dl = make('dl', 'rv-card__facts');
+      var km = num(s.distanceKm), days = num(s.durationDays);
+      if (km !== null && km > 0) fact(dl, 'Distance', Math.round(km).toLocaleString('en-IN') + ' km');
+      if (days !== null && days > 0) { days = Math.max(1, Math.round(days)); fact(dl, 'Duration', days + (days === 1 ? ' day' : ' days')); }
+      if (dl.children.length) card.appendChild(dl);
+
+      var foot = make('footer', 'rv-card__foot');
+      foot.appendChild(make('span', 'rv-card__rider', rider));
+      var badge = make('span', 'rv-card__badge', 'Completed trip, approved');
+      foot.appendChild(badge);
+      var when = toDate(s.approvedAt) || toDate(s.submittedAt);
+      if (when) {
+        var tm = make('time', 'rv-card__date', when.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }));
+        tm.setAttribute('datetime', when.toISOString().slice(0, 10));
+        foot.appendChild(tm);
+      }
+      card.appendChild(foot);
+      outer.appendChild(card);
+      return outer;
+    };
+    var setSummary = function (text) {
+      if (!reviewsSummary) return;
+      reviewsSummary.textContent = text || '';
+      reviewsSummary.hidden = !text;
+    };
+    var showMessage = function (kind) {
+      reviewsBox.textContent = '';
+      reviewsBox.setAttribute('data-state', kind);
+      var box = make('div', 'rv-empty' + (kind === 'error' ? ' rv-empty--error' : ''));
+      if (kind === 'error') {
+        box.appendChild(make('h3', 'rv-empty__title', 'Rider stories could not load right now.'));
+        box.appendChild(make('p', null, 'This does not affect the app or your rides. Please try again in a moment.'));
+        var retry = make('button', 'btn btn--outline', 'Try again');
+        retry.type = 'button';
+        retry.addEventListener('click', loadReviews);
+        box.appendChild(retry);
+      } else {
+        box.appendChild(make('h3', 'rv-empty__title', 'No published stories yet.'));
+        box.appendChild(make('p', null, 'Rider stories appear here after a ride and a moderation check. Finish your first convoy and share yours.'));
+        var cta = make('a', 'btn btn--primary', 'Get the app');
+        cta.href = '/get';
+        box.appendChild(cta);
+      }
+      reviewsBox.appendChild(box);
+      setSummary('');
+    };
+    var render = function (data) {
+      var list = (listOf(data) || []).filter(isReal).slice(0, reviewLimit);
+      reviewsBox.removeAttribute('aria-busy');
+      if (!list.length) return showMessage('empty');
+      reviewsBox.textContent = '';
+      reviewsBox.setAttribute('data-state', 'loaded');
+      var grid = make('div', 'rv-grid');
+      list.forEach(function (s) { grid.appendChild(renderCard(s)); });
+      reviewsBox.appendChild(grid);
+      // Summary: the server's numbers when it sends them, otherwise only what is on screen.
+      var sum = data && !Array.isArray(data) ? data.summary : null;
+      var count = sum ? num(sum.count) : null, avg = sum ? num(sum.averageRating) : null;
+      if (count && avg) {
+        setSummary('Average ' + avg.toFixed(1) + ' out of 5 from ' + count + (count === 1 ? ' approved story' : ' approved stories') + '.');
+      } else {
+        var rated = list.map(function (s) { return num(s.rating); }).filter(function (r) { return r !== null && r >= 1 && r <= 5; });
+        if (rated.length) {
+          var a = rated.reduce(function (x, y) { return x + y; }, 0) / rated.length;
+          setSummary('Average ' + a.toFixed(1) + ' out of 5 across the ' + (rated.length === 1 ? 'story' : rated.length + ' stories') + ' shown here.');
+        } else setSummary('');
+      }
+    };
+    var getJSON = function (url) {
+      return fetch(url, { headers: { Accept: 'application/json' }, credentials: 'omit' }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function (j) {
+        if (!listOf(j)) throw new Error('unexpected shape');
+        return j;
+      });
+    };
+    function loadReviews() {
+      reviewsBox.setAttribute('aria-busy', 'true');
+      reviewsBox.setAttribute('data-state', 'loading');
+      getJSON('/api/public/community-stories?limit=' + reviewLimit)
+        .catch(function () { return getJSON('/community-stories'); })
+        .then(render)
+        .catch(function () { reviewsBox.removeAttribute('aria-busy'); showMessage('error'); });
     }
-
-    function fetchCommunityStats() {
-      fetch('/api/public/community-stats')
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (!data || data.enabled === false) {
-            var block = doc.getElementById('community');
-            if (block && data.enabled === false) block.style.display = 'none';
-            return;
-          }
-          var ridersEl = doc.getElementById('stat-total-riders');
-          var activeEl = doc.getElementById('stat-active-riders');
-          var kmEl = doc.getElementById('stat-total-km');
-          var updateEl = doc.getElementById('community-last-updated');
-          var tripsList = doc.getElementById('longest-trips-list');
-
-          if (ridersEl) ridersEl.textContent = formatNumber(data.totalRiders || 0);
-          if (activeEl) activeEl.textContent = formatNumber(data.activeRiders || 0);
-          if (kmEl) kmEl.textContent = formatNumber(data.totalKilometers || 0) + ' km';
-          if (updateEl) {
-            var d = new Date(data.lastUpdated || Date.now());
-            updateEl.textContent = 'Last synced ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          }
-
-          if (tripsList && data.longestTrips && data.longestTrips.length > 0) {
-            tripsList.innerHTML = '';
-            data.longestTrips.forEach(function (trip) {
-              var row = doc.createElement('div');
-              row.className = 'longest-trip-row';
-              var rankClass = 'trip-rank-' + trip.rank;
-              row.innerHTML = 
-                '<div>' +
-                  '<span class="trip-rank-badge ' + rankClass + '">#' + trip.rank + '</span>' +
-                  '<span class="trip-rider-name">' + (trip.anonymousRiderLabel || 'Verified Rider') + '</span>' +
-                '</div>' +
-                '<div class="trip-metrics">' +
-                  '<span class="trip-distance">' + trip.distanceKm + ' km</span>' +
-                  '<span class="trip-duration">' + trip.durationFormatted + '</span>' +
-                '</div>';
-              tripsList.appendChild(row);
-            });
-          } else if (tripsList) {
-            tripsList.innerHTML = '<div class="trip-loading">Verified journeys are being compiled by the network...</div>';
-          }
-        })
-        .catch(function () {});
-    }
-
-    fetchCommunityStats();
-    setInterval(fetchCommunityStats, 60000);
+    if ('fetch' in win) {
+      // Load when the section comes near the screen: the first screen of the page needs no network.
+      if (hasIO) {
+        var rvIO = new IntersectionObserver(function (en) {
+          if (!en[0].isIntersecting) return;
+          rvIO.disconnect();
+          loadReviews();
+        }, { rootMargin: '600px 0px' });
+        rvIO.observe(reviewsBox);
+      } else loadReviews();
+    } else showMessage('error');
   }
+
+  /* ---------- CoRoute in numbers: real usage counts only ----------
+     Source: GET /api/public/usage-stats -> { ok, stats: { riders, ridesCompleted, kmRidden, groupsRidden, sosResolved,
+     avgRating (or null), updatedAt } }. Fallback when that is missing (404 on older servers): GET /api/public/community-stats
+     -> { enabled, totalRiders, totalKilometers }. The section stays hidden unless the numbers are real and large enough
+     to mean something (at least 10 completed rides); a small or missing number is left out, never shown as a boast. */
+  var usageBox = doc.querySelector('[data-usage-stats]');
+  var usageList = doc.getElementById('usage-stats-list');
+  if (usageBox && usageList && 'fetch' in win) {
+    var uNum = function (v) { var n = typeof v === 'string' ? parseFloat(v) : v; return typeof n === 'number' && isFinite(n) && n >= 0 ? n : null; };
+    var uFmt = function (n) { return Math.round(n).toLocaleString('en-IN'); };
+    var uGet = function (url) {
+      return fetch(url, { headers: { Accept: 'application/json' }, credentials: 'omit' }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+    };
+    var fromUsage = function (j) {
+      var st = j && j.stats;
+      if (!st || typeof st !== 'object') throw new Error('unexpected shape');
+      return {
+        riders: uNum(st.riders), rides: uNum(st.ridesCompleted), km: uNum(st.kmRidden), groups: uNum(st.groupsRidden),
+        sos: uNum(st.sosResolved), rating: uNum(st.avgRating), updatedAt: st.updatedAt, gate: uNum(st.ridesCompleted) !== null && uNum(st.ridesCompleted) >= 10,
+      };
+    };
+    var fromCommunity = function (j) {
+      if (!j || j.enabled === false) throw new Error('private');
+      var riders = uNum(j.totalRiders), km = uNum(j.totalKilometers);
+      // No completed-ride count here, so ask more of the numbers that are present.
+      return { riders: riders, rides: null, km: km, groups: null, sos: null, rating: null, updatedAt: j.lastUpdated, gate: riders !== null && riders >= 10 && km !== null && km >= 1000 };
+    };
+    var renderUsage = function (u) {
+      if (!u.gate) return;
+      var tiles = [];
+      if (u.rides !== null && u.rides >= 10) tiles.push(['Rides completed', uFmt(u.rides)]);
+      if (u.km !== null && u.km >= 100) tiles.push(['Kilometres ridden', uFmt(u.km)]);
+      if (u.riders !== null && u.riders >= 10) tiles.push(['Riders', uFmt(u.riders)]);
+      if (u.groups !== null && u.groups >= 3) tiles.push(['Group rides', uFmt(u.groups)]);
+      if (u.sos !== null && u.sos >= 1) tiles.push([u.sos === 1 ? 'SOS alert resolved' : 'SOS alerts resolved', uFmt(u.sos)]);
+      if (u.rating !== null && u.rating >= 1 && u.rating <= 5) tiles.push(['Average rider rating', u.rating.toFixed(1) + ' / 5']);
+      if (tiles.length < 2) return;
+      usageList.textContent = '';
+      tiles.forEach(function (t) {
+        var d = doc.createElement('div');
+        var dt = doc.createElement('dt'); dt.textContent = t[0];
+        var dd = doc.createElement('dd'); dd.textContent = t[1];
+        d.appendChild(dt); d.appendChild(dd);
+        usageList.appendChild(d);
+      });
+      var note = doc.getElementById('usage-stats-note');
+      var at = u.updatedAt ? new Date(typeof u.updatedAt === 'string' && /^\d+$/.test(u.updatedAt) ? +u.updatedAt : u.updatedAt) : null;
+      if (note) note.textContent = at && !isNaN(at.getTime()) ? 'Updated ' + at.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) + '.' : '';
+      usageBox.hidden = false;
+    };
+    var loadUsage = function () {
+      uGet('/api/public/usage-stats').then(fromUsage)
+        .catch(function () { return uGet('/api/public/community-stats').then(fromCommunity); })
+        .then(renderUsage)
+        .catch(function () { /* stays hidden: no numbers are better than wrong ones */ });
+    };
+    loadUsage();
+  }
+
+  /* ---------- Theme toggle (light / dark), remembered in this browser only ---------- */
+  var themeBtn = doc.getElementById('theme-toggle');
+  var savedTheme = null;
+  try { savedTheme = win.localStorage.getItem('coroute_theme'); } catch (e) { /* storage blocked */ }
+  if (savedTheme !== 'dark' && savedTheme !== 'light') savedTheme = mq('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  root.setAttribute('data-theme', savedTheme);
+  if (themeBtn) {
+    var syncThemeBtn = function () { themeBtn.setAttribute('aria-pressed', root.getAttribute('data-theme') === 'dark' ? 'true' : 'false'); };
+    syncThemeBtn();
+    themeBtn.addEventListener('click', function () {
+      var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      syncThemeBtn();
+      try { win.localStorage.setItem('coroute_theme', next); } catch (e) { /* storage blocked */ }
+    });
+  }
+
+  /* ---------- Accordion (FAQ buttons; <details> needs no script) ---------- */
+  $$('.accordion-trigger').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var expanded = btn.getAttribute('aria-expanded') === 'true';
+      var panel = btn.nextElementSibling;
+      btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+      if (panel) panel.hidden = expanded;
+    });
+  });
 
   /* ---------- Start ---------- */
   measureRoutes(doc);

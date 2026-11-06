@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Download for Android | Coroute</title>
-<meta name="description" content="Download Coroute for Android. Free to start, with no ads. A 32-bit build is available for older phones.">
+<meta name="description" content="Download CoRoute, the group motorcycle touring safety app, for Android 6.0 or newer. Free to start, no ads. What it asks for and why, in plain words. A 32-bit build is available for older phones.">
 <link rel="canonical" href="__ORIGIN__/get">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Coroute">
+<meta property="og:site_name" content="CoRoute">
 <meta property="og:title" content="Download for Android | Coroute">
-<meta property="og:description" content="Download Coroute for Android. Free to start, with no ads. A 32-bit build is available for older phones.">
+<meta property="og:description" content="Download CoRoute, the group motorcycle touring safety app, for Android 6.0 or newer. Free to start, no ads. What it asks for and why, in plain words. A 32-bit build is available for older phones.">
 <meta property="og:url" content="__ORIGIN__/get">
 <meta property="og:image" content="__ORIGIN__/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -17,10 +17,10 @@
 <meta property="og:image:alt" content="CoRoute logo with the words: keep your group together on every ride">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Download for Android | Coroute">
-<meta name="twitter:description" content="Download Coroute for Android. Free to start, with no ads. A 32-bit build is available for older phones.">
+<meta name="twitter:description" content="Download CoRoute, the group motorcycle touring safety app, for Android 6.0 or newer. Free to start, no ads. What it asks for and why, in plain words. A 32-bit build is available for older phones.">
 <meta name="twitter:image" content="__ORIGIN__/og-image.png">
 <meta name="theme-color" content="#0B0D0E">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -28,7 +28,7 @@
 <link rel="preload" href="/fonts/barlow-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/site.css">
 <link rel="stylesheet" href="/assets/pages.css">
-<script>document.documentElement.classList.add('js')</script>
+<script>(function (d) { d.classList.add('js'); try { var t = localStorage.getItem('coroute_theme'); if (t === 'dark' || t === 'light') d.setAttribute('data-theme', t); } catch (e) {} })(document.documentElement)</script>
 <script src="/assets/site.js" defer></script>
 </head>
 <body data-page="get">
@@ -39,9 +39,9 @@
     <div class="container">
       <div class="pg-dl">
         <div class="page-hero__inner">
-          <p class="eyebrow">Download</p>
-          <h1>Get Coroute for Android.</h1>
-          <p class="t-lead">Free to start. No ads. Up to __MAX_RIDERS__ riders in one ride group.</p>
+          <p class="eyebrow">Get the app</p>
+          <h1>Get CoRoute for Android.</h1>
+          <p class="t-lead">The group ride app for long-distance touring: live convoy map, push-to-talk, crash detection and guardians. Up to __MAX_RIDERS__ riders in one ride group.</p>
           <div class="cluster cluster--16">
             <a class="btn btn--primary btn--lg" href="/download"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
             <a class="btn btn--secondary btn--lg" href="/download/32bit">32-bit download</a>
@@ -90,8 +90,8 @@
         <div class="stack stack--16 pg-sticky" data-reveal>
           <p class="eyebrow">Permissions</p>
           <h2 class="t-h2" id="perm-title">What Coroute asks for, and why.</h2>
-          <p class="t-lead">In plain words. Location and microphone are used only while you are in an active ride.</p>
-          <p class="t-small t-muted">You can take any permission back in your phone's settings. Coroute then works in a limited way.</p>
+          <p class="t-lead">In plain words. Location and microphone are used only while you are in an active ride. Audio privacy is built in: microphone is OFF by default.</p>
+          <p class="t-small t-muted">If Android switches a permission off during a ride, a clear banner tells you and opens the right settings screen in one tap.</p>
         </div>
         <div class="pg-perms" data-reveal>
           <div class="pg-perm">
@@ -102,12 +102,12 @@
           <div class="pg-perm">
             <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-location"/></svg>
             <span class="pg-perm__name">Location in the background <span class="pg-tag pg-tag--req">Needed</span></span>
-            <span class="pg-perm__why">So your group still sees you with the phone in your pocket or the screen locked. Only during an active ride.</span>
+            <span class="pg-perm__why">So your group still sees you with the phone in your pocket or mounted to the handlebar. Only during an active ride.</span>
           </div>
           <div class="pg-perm">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic"/></svg>
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-mic-off"/></svg>
             <span class="pg-perm__name">Microphone</span>
-            <span class="pg-perm__why">For the intercom, only while you hold Talk or use hands-free talk. Never recorded.</span>
+            <span class="pg-perm__why">Off by default. Used only while you hold Talk, or after you switch on hands-free mode yourself. Voice is never recorded or stored.</span>
           </div>
           <div class="pg-perm">
             <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-bell"/></svg>
@@ -131,8 +131,8 @@
           </div>
           <div class="pg-perm">
             <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sms"/></svg>
-            <span class="pg-perm__name">Send SMS <span class="pg-tag">Only if you switch it on</span></span>
-            <span class="pg-perm__why">Used only to text for help when your SOS cannot be sent over the internet. Sent from your own SIM.</span>
+            <span class="pg-perm__name">Emergency text <span class="pg-tag">No permission needed</span></span>
+            <span class="pg-perm__why">If your SOS cannot go over the internet, CoRoute opens your messages app with a ready-to-send text and your location. You send it from your own SIM.</span>
           </div>
           <div class="pg-perm">
             <svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/pages/icons.svg#p-bluetooth"/></svg>
@@ -165,7 +165,7 @@
             <li><span>Open the downloaded file from the notification or your Downloads folder.</span></li>
             <li><span>If Android asks, allow your browser to install apps. You can switch this off again afterwards.</span></li>
             <li><span>Tap <strong>Install</strong>, then <strong>Open</strong>.</span></li>
-            <li><span>Sign up, add your emergency contact, and run the pre-ride checklist.</span></li>
+            <li><span>Sign up, add your emergency contact and guardians, and run the pre-ride checklist.</span></li>
           </ol>
         </div>
         <div class="stack stack--24" data-reveal>
@@ -178,7 +178,7 @@
           <div class="card">
             <div class="card__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></div>
             <h3>Privacy</h3>
-            <p>Your location is shared only with your ride group, only during the ride. Voice is never recorded. No ads, no trackers, no sale of data. Paid plans are chosen and paid for by UPI in the app.</p>
+            <p>Your location is shared only with your ride group and the guardians you choose, only during the ride. Voice is never recorded. No ads, no trackers, no sale of data. Memberships are chosen and paid for by UPI in the app.</p>
             <p><a class="link" href="/privacy">Read the privacy policy</a></p>
           </div>
         </div>
@@ -191,11 +191,11 @@
       <div class="pg-cta" data-reveal>
         <div>
           <h2>New here?</h2>
-          <p>See how a ride works, from the ride code to the trip report.</p>
+          <p>See how a ride works, from the ride code to the trip report, or read what other riders say.</p>
         </div>
         <div class="cluster cluster--16">
           <a class="btn btn--secondary" href="/how-it-works">How it works</a>
-          <a class="link-arrow" href="/features"><span>All features</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
+          <a class="link-arrow" href="/#reviews"><span>Rider reviews</span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-arrow-right"/></svg></a>
         </div>
       </div>
     </div>

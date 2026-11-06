@@ -20,7 +20,7 @@ class ConnectionBanner extends StatelessWidget {
   static List<String> lines({required bool connecting, required int pendingPoints, required bool sosWaiting, bool serverUnreachable = false}) => [
         serverUnreachable
             ? 'CoRoute server not reachable'
-            : (connecting ? 'Reconnecting to the convoy...' : 'Offline. Positions shown may be out of date.'),
+            : (connecting ? 'Reconnecting to your group...' : 'Offline. Positions shown may be out of date.'),
         if (pendingPoints > 0) '$pendingPoints ${pendingPoints == 1 ? 'point' : 'points'} waiting to upload',
         if (sosWaiting) 'SOS waiting to send',
       ];
@@ -59,7 +59,7 @@ class ConnectionBanner extends StatelessWidget {
       // Connected but the SOS is not confirmed yet: it is being sent.
       return _strip(
         icon: Icon(Icons.sos_rounded, size: 18, color: AppTheme.sos),
-        children: [_line('Sending your SOS to the convoy...', AppTheme.sos)],
+        children: [_line('Sending your SOS to your group...', AppTheme.sos)],
         critical: true,
       );
     }

@@ -193,7 +193,9 @@ class UserMembership {
   int get occupiedSeats => 1 + members.where((m) => m.status == 'ACCEPTED').length;
   int get availableSeats => capacity > occupiedSeats ? capacity - occupiedSeats : 0;
   bool get isExpired => validUntil > 0 && validUntil <= DateTime.now().millisecondsSinceEpoch;
-  bool get isActive => status == 'ACTIVE' && !isExpired;
+  bool get isActive => (status.toUpperCase() == 'ACTIVE' || status.isEmpty) && !isExpired;
+  bool get hasCapacity => capacity >= 1;
+  bool get isValidEntitlement => !isExpired && hasCapacity;
   bool isOwner(String uid) => ownerUserId == uid;
 
   factory UserMembership.fromJson(Map<String, dynamic> json) {
@@ -353,12 +355,22 @@ class MyMembershipOverview {
   });
 
   bool get hasActiveMembership => ownedMembership != null && ownedMembership!.isActive;
+  bool get hasValidEntitlement => ownedMembership != null && ownedMembership!.isValidEntitlement;
   bool get hasActiveTrip => activeTrip != null;
 
+  Map<String, dynamic> toJson() => {
+    if (ownedMembership != null) 'ownedMembership': ownedMembership!.toJson(),
+    'participating': participating.map((e) => e.toJson()).toList(),
+    if (activeTrip != null) 'activeTrip': activeTrip!.toJson(),
+    'effectiveEntitlements': effectiveEntitlements,
+    'paymentsEnabled': paymentsEnabled,
+  };
+
   factory MyMembershipOverview.fromJson(Map<String, dynamic> json) {
+    final ownedRaw = json['ownedMembership'] ?? json['owned'];
     return MyMembershipOverview(
-      ownedMembership: json['ownedMembership'] is Map
-          ? UserMembership.fromJson(Map<String, dynamic>.from(json['ownedMembership'] as Map))
+      ownedMembership: ownedRaw is Map
+          ? UserMembership.fromJson(Map<String, dynamic>.from(ownedRaw))
           : null,
       participating: (json['participating'] as List<dynamic>?)
               ?.whereType<Map>()

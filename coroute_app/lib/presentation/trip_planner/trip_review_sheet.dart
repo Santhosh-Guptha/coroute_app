@@ -7,10 +7,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/route_model.dart';
 import '../../data/services/settings_service.dart';
-import '../../data/services/tile_cache_service.dart';
 import '../../data/services/weather_service.dart';
 import '../../domain/safety/sun_helper.dart';
-import 'widgets/route_map_pack_card.dart';
 
 /// The last step before a ride starts: what the trip looks like (distance,
 /// estimated time, stops, riders, departure), the weather along the route
@@ -188,7 +186,6 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
     final r = widget.route;
     final hasDestination = (widget.destinationName ?? '').trim().isNotEmpty;
     final lowData = Provider.of<SettingsService?>(context)?.lowData ?? false;
-    final pf = Provider.of<TilePrefetcher?>(context);
     final weatherLine = _checking ? TripReviewSheet.checkingWeather : (lowData ? L10n.t('weather.off') : _weather?.line);
     final dark = TripReviewSheet.darkLine(
       now: widget.now ?? DateTime.now(),
@@ -197,7 +194,6 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
       destinationLng: widget.destinationLng,
       fmtTime: _clock,
     );
-    final canSaveMap = r != null && !r.approximate && r.points.length >= 2;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -251,7 +247,7 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                 _Note(
                   icon: Icons.route_rounded,
                   text: hasDestination
-                      ? 'Route preview is not available right now. It is worked out when the ride starts.'
+                      ? 'No route preview yet. It is made when the ride starts.'
                       : 'No destination yet. You can set it during the ride.',
                 ),
               if (r != null && !r.approximate) ...[
@@ -276,14 +272,6 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                 const SizedBox(height: Space.s12),
                 _Note(icon: Icons.nights_stay_outlined, text: dark, warning: true),
               ],
-              if (r != null && pf != null && canSaveMap)
-                Padding(
-                  padding: const EdgeInsets.only(top: Space.s8),
-                  child: RouteMapPackCard(
-                    route: r,
-                    tripName: widget.name,
-                  ),
-                ),
               const SizedBox(height: Space.s16),
               const _Note(
                 icon: Icons.group_add_outlined,
@@ -322,7 +310,7 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
               ),
               const SizedBox(height: Space.s8),
               Text(
-                'Riding over it for 10 seconds is logged and the group is told once. You can change it during the ride.',
+                'Over it for 10 s: the group is told once.',
                 style: AppText.caption,
               ),
             ],
@@ -339,8 +327,17 @@ class _TripReviewSheetState extends State<TripReviewSheet> {
                   setState(() => _isStarting = true);
                   Navigator.pop(context, _limit);
                 },
-          icon: const Icon(Icons.play_arrow_rounded),
-          label: Text(widget.confirmLabel, style: const TextStyle(fontWeight: FontWeight.w800)),
+          icon: _isStarting
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.play_arrow_rounded),
+          label: Text(
+            _isStarting ? 'Preparing your trip...' : widget.confirmLabel,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
           style: FilledButton.styleFrom(
             minimumSize: const Size.fromHeight(56),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),

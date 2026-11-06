@@ -1,11 +1,15 @@
 import '../../domain/tracking/ride_power_policy.dart';
+import '../../domain/tracking/location_cadence.dart';
+import '../../domain/tracking/battery_performance_monitor.dart';
 import '../../domain/safety/accel_bucket.dart';
 import '../../domain/tracking/dead_reckoning_engine.dart';
 import 'accel_source.dart';
 import '../../domain/mesh/mesh_telemetry_packet.dart';
 import 'p2p_mesh_service.dart';
+import 'tile_cache_service.dart';
 import '../models/ride_feature_policy.dart';
 import 'dart:async';
+import 'dart:convert' show jsonDecode, jsonEncode;
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'package:battery_plus/battery_plus.dart';
@@ -63,6 +67,7 @@ class ConvoyService extends ChangeNotifier {
     this.settings,
     this.mesh,
     this.planSubscription,
+    this.tilePrefetcher,
     this._accel,
     DeadReckoningEngine? deadReckoning,
     OutboxStore? outboxStore,
@@ -79,6 +84,7 @@ class ConvoyService extends ChangeNotifier {
     _rt.addListener(_onConnectionChanged);
     _initBatteryTracking();
     _loadPendingSos();
+    _loadPendingResolves();
     _outboxReady = _loadOutbox();
     _smsFallbackWas = _smsFallbackOn;
     settings?.addListener(_onSettingsChanged);
@@ -120,6 +126,19 @@ class ConvoyService extends ChangeNotifier {
   final RidePowerPolicy _power = RidePowerPolicy();
   bool get conservingBattery => _power.conserving;
 
+  /// Low battery detection (< 20%) state.
+  bool get isLowBattery => _power.isLowBattery || (_currentBatteryLevel < 20 && !_isCharging);
+
+  /// Monitors and computes battery drain per riding hour.
+  final BatteryPerformanceMonitor batteryMonitor = BatteryPerformanceMonitor();
+
+  /// Optional tile prefetcher for pausing during low battery states.
+  TilePrefetcher? tilePrefetcher;
+  void attachTilePrefetcher(TilePrefetcher prefetcher) {
+    tilePrefetcher = prefetcher;
+    if (isLowBattery) tilePrefetcher?.handleLowBattery(true);
+  }
+
   final ApiClient _api;
   final RealtimeService _rt;
   final TripStorageService _trips;
@@ -143,6 +162,9 @@ class ConvoyService extends ChangeNotifier {
   String? _myUserId;
   bool _isRealGpsActive = false;
   bool _gpsIdleProfile = false;
+
+  /// Speed band driving the GPS cadence (see [LocationCadence]); hysteresis inside.
+  final SpeedBandTracker _gpsBand = SpeedBandTracker();
   DateTime? _stationarySince;
   DateTime _lastTelemetryPush = DateTime.fromMillisecondsSinceEpoch(0);
   String? _systemBroadcastMessage;
@@ -233,6 +255,26 @@ class ConvoyService extends ChangeNotifier {
     notifyListeners();
   }
   bool get isRealGpsActive => _isRealGpsActive;
+  bool _locationRevoked = false;
+  bool get isLocationRevoked => _locationRevoked;
+
+  /// Called when location permission or GPS service is revoked/disabled during an active trip.
+  /// Stops real GPS tracking immediately without terminating the active trip.
+  void onLocationRevoked() {
+    _locationRevoked = true;
+    stopRealGpsTracking();
+  }
+
+  /// Called when location permission and GPS service are restored during an active trip.
+  void onLocationRestored() {
+    if (!_locationRevoked) return;
+    _locationRevoked = false;
+    final uid = _myUserId;
+    if (uid != null && activeConvoy != null) {
+      startRealGpsTracking(uid).ignore();
+    }
+    notifyListeners();
+  }
 
   /// Set when "Leave ride" was pressed on the notification (3.16): the UI asks "Leave the
   /// ride?" and calls [leaveActiveConvoy] on yes. Nothing leaves by itself.
@@ -273,7 +315,7 @@ class ConvoyService extends ChangeNotifier {
 
   /// Phone numbers for the no-internet SMS fallback of the active ride, or null.
   EmergencyRoster? get emergencyRoster {
-    final r = _roster, gid = _activeGroupId;
+    final r = _roster, gid = _activeGroupId ?? _unconfirmedRideGid;
     if (r == null || gid == null || !r.isValidFor(gid, _clock())) return null;
     return r;
   }
@@ -400,9 +442,13 @@ class ConvoyService extends ChangeNotifier {
     final cachedRoster = _smsFallbackOn ? await _rosterStore.load() : null;
     final rosterEpoch = _rosterEpoch;
     await _restoreActiveConvoy();
-    _killedLastTime = false;
-    _killedAliveAt = null;
-    final gid = _activeGroupId;
+    // An offline restart keeps the KILLED note for the re-join that follows when the link is back.
+    if (_unconfirmedRideGid == null) {
+      _killedLastTime = false;
+      _killedAliveAt = null;
+    }
+    // The ride not confirmed yet (no signal) keeps its SMS roster: it is needed exactly then.
+    final gid = _activeGroupId ?? _unconfirmedRideGid;
     if (cachedRoster != null) {
       if (gid != null && cachedRoster.isValidFor(gid, _clock())) {
         // Restored only for the same ride and while still valid (no internet after a restart).
@@ -455,6 +501,7 @@ class ConvoyService extends ChangeNotifier {
 
   /// Call on sign-out.
   Future<void> endSession() async {
+    _unconfirmedRideGid = null;
     if (_activeGroupId != null) _rt.sendBye('SIGN_OUT');
     _writeRideAlive(false);
     _clearPendingSos(); // never carried over to the next account on this phone
@@ -474,12 +521,29 @@ class ConvoyService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The ride this phone was on when the app last closed, while the server could not be asked
+  /// (restarted in a dead zone, server busy): kept, and asked again as soon as the link is back.
+  /// Without this an offline restart dropped the ride, its SMS roster and the re-join for good.
+  String? _unconfirmedRideGid;
+  bool _restoringRide = false;
+
   Future<void> _restoreActiveConvoy() async {
+    if (_restoringRide) return;
+    _restoringRide = true;
+    String? saved;
     try {
+      saved = (await SharedPreferences.getInstance()).getString(AppConstants.keyActiveGroupId);
+    } catch (_) {
+      saved = null;
+    }
+    try {
+      // A ride left without signal must not come back as "active" (the leave goes first).
+      await _flushPendingLeaves();
       final res = await _api.get('/convoys/active');
       final c = (res is Map) ? res['convoy'] : null;
       if (c is Map) {
         final convoy = ConvoyModel.fromJson(Map<String, dynamic>.from(c));
+        _unconfirmedRideGid = null;
         _activate(convoy);
         return;
       }
@@ -488,18 +552,43 @@ class ConvoyService extends ChangeNotifier {
       if (res is Map) {
         _clearPendingSos();
         _clearOutbox();
+        if (_activeGroupId == null && _roster != null) _clearRoster();
         if (_killedLastTime) _writeRideAlive(false);
       }
     } on ApiException catch (e) {
       debugPrint('restore active convoy note: ${e.message}');
+      // No answer from the gateway (offline, timeout, outage, rate limit): not "no ride".
+      if (e.isOffline || e.statusCode >= 500 || e.statusCode == 429) {
+        if (saved != null && saved.isNotEmpty && _activeGroupId == null) _unconfirmedRideGid = saved;
+        if (!_disposed) notifyListeners();
+        return;
+      }
     } catch (e) {
       debugPrint('restore active convoy note: $e');
+      if (saved != null && saved.isNotEmpty && _activeGroupId == null) _unconfirmedRideGid = saved;
+      if (!_disposed) notifyListeners();
+      return;
+    } finally {
+      _restoringRide = false;
     }
     // Nothing active on the server → clear any stale local pointer.
+    _unconfirmedRideGid = null;
     SharedPreferences.getInstance().then((p) => p.remove(AppConstants.keyActiveGroupId)).ignore();
   }
 
+  /// True while the phone was restarted during a ride without signal and the server has not
+  /// confirmed the ride yet (the UI can say "Reconnecting to your ride...").
+  bool get hasUnconfirmedRide => _activeGroupId == null && _unconfirmedRideGid != null;
+
   void _activate(ConvoyModel convoy) {
+    _unconfirmedRideGid = null;
+    _rideEndedNotice = false;
+    // Resolves restored after a restart belong to this ride: they survive its first activation.
+    if (_activeGroupId != convoy.groupId && _pendingResolvesGid != convoy.groupId) {
+      _pendingResolves.clear();
+      _pendingResolvesGid = null;
+      _savePendingResolves();
+    }
     // An SOS waiting for another (old) convoy can no longer be delivered there.
     if (_pendingSos != null && _pendingSos!.groupId != convoy.groupId) _clearPendingSos();
     _dropOutboxOfOtherGroups(convoy.groupId);
@@ -534,6 +623,103 @@ class ConvoyService extends ChangeNotifier {
       myUserName: myRider?.name ?? 'Rider',
     ).ignore();
     notifyListeners();
+  }
+
+  /// Explicitly refreshes group members from the server without restarting active tracking.
+  Future<bool> refreshGroupMembers({bool force = false}) async {
+    final gid = _activeGroupId;
+    if (gid == null) return false;
+    try {
+      final res = await _api.get('/convoys/$gid');
+      if (res is Map && res['convoy'] is Map) {
+        final serverConvoy = ConvoyModel.fromJson(Map<String, dynamic>.from(res['convoy'] as Map));
+        _mergeServerConvoy(serverConvoy);
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('refreshGroupMembers note: $e');
+    }
+    return false;
+  }
+
+  /// Restores server state completely on network recovery:
+  /// - Refreshes active trip and group members without restarting active tracking.
+  /// - Flushes queued outbox events safely without duplicates.
+  /// - Drains queued offline track points.
+  /// - Refreshes emergency roster and presence.
+  Future<void> restoreServerState() async {
+    final gid = _activeGroupId;
+    if (gid == null) return;
+    try {
+      final res = await _api.get('/convoys/active');
+      if (res is Map && res['convoy'] is Map) {
+        final serverConvoy = ConvoyModel.fromJson(Map<String, dynamic>.from(res['convoy'] as Map));
+        if (serverConvoy.groupId == gid) {
+          _mergeServerConvoy(serverConvoy);
+        }
+      }
+    } catch (e) {
+      debugPrint('restoreServerState API note: $e');
+    }
+
+    if (_rt.isConnected) {
+      _rt.joinRoom(gid);
+    }
+
+    recorder?.uploadNow();
+
+    if (_rosterWanted && _rosterStale) {
+      refreshEmergencyRoster(force: true).ignore();
+    }
+    notifyListeners();
+  }
+
+  void _mergeServerConvoy(ConvoyModel serverConvoy) {
+    final gid = serverConvoy.groupId;
+    final current = _allConvoys[gid];
+    final myId = _myUserId;
+
+    if (current != null && myId != null) {
+      final localMe = current.riders[myId];
+      final serverMe = serverConvoy.riders[myId];
+      // Keep local rider telemetry if local fix is fresher or active
+      if (localMe != null && (serverMe == null || localMe.lastSeenEpochMs >= serverMe.lastSeenEpochMs)) {
+        final mergedRiders = Map<String, RiderModel>.from(serverConvoy.riders)..[myId] = localMe;
+        _allConvoys[gid] = serverConvoy.copyWith(
+          riders: mergedRiders,
+          messages: _mergeMessages(current.messages, serverConvoy.messages),
+          activeAlerts: _mergeAlerts(current.activeAlerts, serverConvoy.activeAlerts),
+        );
+        _pushTelemetry(localMe);
+        return;
+      }
+    }
+    _allConvoys[gid] = serverConvoy;
+  }
+
+  static List<GroupMessageModel> _mergeMessages(List<GroupMessageModel> local, List<GroupMessageModel> server) {
+    final map = <String, GroupMessageModel>{};
+    for (final m in local) {
+      map[m.messageId] = m;
+    }
+    for (final m in server) {
+      map[m.messageId] = m;
+    }
+    final list = map.values.toList()..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    if (list.length > 300) list.removeRange(0, list.length - 300);
+    return list;
+  }
+
+  static List<SosAlertModel> _mergeAlerts(List<SosAlertModel> local, List<SosAlertModel> server) {
+    final map = <String, SosAlertModel>{};
+    for (final a in local) {
+      map[a.alertId] = a;
+    }
+    for (final a in server) {
+      map[a.alertId] = a;
+    }
+    return map.values.where((a) => !a.resolved).toList();
   }
 
   void _onMeshTelemetry(MeshTelemetryPacket packet) {
@@ -718,7 +904,17 @@ class ConvoyService extends ChangeNotifier {
     final up = _rt.isConnected && !_wasConnected;
     _wasConnected = _rt.isConnected;
     // Back online (HELLO, before the re-JOIN): the server sends again what is still open.
-    if (up) _markNetworkUnconfirmed();
+    if (up) {
+      _markNetworkUnconfirmed();
+      // A ride left without signal: tell the server now, so the group stops waiting for this rider.
+      if (_activeGroupId == null && _unconfirmedRideGid == null) _flushPendingLeaves().ignore();
+      if (_activeGroupId == null && _unconfirmedRideGid != null) {
+        // Restarted without signal during a ride: ask the server now and re-join it.
+        _restoreActiveConvoy().ignore();
+      } else {
+        restoreServerState().ignore();
+      }
+    }
     if (_rt.isConnected) {
       recorder?.uploadNow(); // send what was recorded in the dead zone
       // The roster could not be fetched before HELLO named the gateway's features, or it is
@@ -774,6 +970,10 @@ class ConvoyService extends ChangeNotifier {
       // to a rider who is offline) must never throw a rider out of their group.
       final reason = e['reason']?.toString();
       if (reason == 'NOT_MEMBER' || reason == 'CONVOY_GONE') _confirmMembershipOrDrop().ignore();
+      if (reason == 'RIDE_ENDED') {
+        _lastError = 'This ride has ended.';
+        _onRideEndedError().ignore();
+      }
       notifyListeners();
       return;
     }
@@ -794,11 +994,13 @@ class ConvoyService extends ChangeNotifier {
     switch (type) {
       case 'SNAPSHOT':
         if (e['convoy'] is Map) {
-          _allConvoys[gid] = ConvoyModel.fromJson(Map<String, dynamic>.from(e['convoy'] as Map));
+          final serverConvoy = ConvoyModel.fromJson(Map<String, dynamic>.from(e['convoy'] as Map));
+          _mergeServerConvoy(serverConvoy);
         }
         // Back in the room after a dead zone or a restart: send the SOS that is still waiting,
         // then the outbox in order (the server ignores repeats by clientId).
         _sendPendingSos();
+        _sendPendingResolves();
         _resetSendingItems();
         _flushOutbox();
         break;
@@ -855,7 +1057,8 @@ class ConvoyService extends ChangeNotifier {
       case 'MESSAGE':
         if (convoy == null || e['message'] is! Map) return;
         final msg = GroupMessageModel.fromJson(Map<String, dynamic>.from(e['message'] as Map));
-        if (convoy.messages.any((m) => m.messageId == msg.messageId)) return;
+        final cid = e['clientId']?.toString() ?? (e['message'] is Map ? e['message']['clientId']?.toString() : null);
+        if (convoy.messages.any((m) => m.messageId == msg.messageId || (cid != null && cid.isNotEmpty && m.messageId == cid))) return;
         final msgs = List<GroupMessageModel>.from(convoy.messages)..add(msg);
         if (msgs.length > 300) msgs.removeRange(0, msgs.length - 300);
         _allConvoys[gid] = convoy.copyWith(messages: msgs);
@@ -870,7 +1073,9 @@ class ConvoyService extends ChangeNotifier {
           _deliveredSosAlertId = alert.alertId;
           PendingSosStore.clear().ignore();
         }
-        final others = convoy.activeAlerts.where((a) => a.alertId != alert.alertId);
+        final others = convoy.activeAlerts.where((a) =>
+            a.alertId != alert.alertId &&
+            (alert.clientId.isEmpty || a.clientId != alert.clientId));
         final alerts = alert.resolved ? others.toList() : (List<SosAlertModel>.from(others)..add(alert));
         if (alert.resolved || alert.liveLinkRevokedAt > 0) _liveLinks.remove(alert.alertId);
         _allConvoys[gid] = convoy.copyWith(activeAlerts: alerts);
@@ -886,6 +1091,7 @@ class ConvoyService extends ChangeNotifier {
           }
         }
         if (resolvedId != null && resolvedId == _deliveredSosAlertId) _deliveredSosAlertId = null;
+        if (_pendingResolves.remove(resolvedId) != null) _savePendingResolves();
         _liveLinks.remove(resolvedId);
         _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != resolvedId).toList());
         _networkRevision++;
@@ -1083,6 +1289,42 @@ class ConvoyService extends ChangeNotifier {
     }
   }
 
+  /// The gateway answered 409 RIDE_ENDED (the end was missed: dead zone, killed app). Checked with the
+  /// server first (a late error from an earlier ride must not end this one); then ended like a normal
+  /// end (trip saved) and [rideEndedNotice] is set so Home can say "This ride has ended".
+  Future<void> _onRideEndedError() async {
+    final gid = _activeGroupId;
+    final convoy = gid == null ? null : _allConvoys[gid];
+    if (gid == null || convoy == null || _confirmingMembership) return;
+    _confirmingMembership = true;
+    try {
+      final res = await _api.get('/convoys/active');
+      final c = res is Map ? res['convoy'] : null;
+      if (c is Map && c['groupId'] == gid) {
+        _rt.joinRoom(gid); // still live: an unrelated late error
+        return;
+      }
+      if (_activeGroupId != gid || _disposed) return;
+      _rideEndedNotice = true;
+      _onTripEnded(convoy.copyWith(tripStatus: 'ENDED'));
+    } catch (_) {
+      // Offline: the next re-join answers it.
+    } finally {
+      _confirmingMembership = false;
+    }
+  }
+
+  bool _rideEndedNotice = false;
+
+  /// True after the gateway said the ride had already ended (shown once on Home).
+  bool get rideEndedNotice => _rideEndedNotice;
+
+  void clearRideEndedNotice() {
+    if (!_rideEndedNotice) return;
+    _rideEndedNotice = false;
+    notifyListeners();
+  }
+
   void _dropActiveConvoyLocally() {
     final gid = _activeGroupId;
     _clearPendingSos();
@@ -1105,6 +1347,11 @@ class ConvoyService extends ChangeNotifier {
 
   void _onTripEnded(ConvoyModel convoy) {
     _clearPendingSos();
+    if (_pendingResolves.isNotEmpty || _pendingResolvesGid != null) {
+      _pendingResolves.clear();
+      _pendingResolvesGid = null;
+      _savePendingResolves();
+    }
     _clearOutbox();
     _clearRoster();
     _clearNetwork();
@@ -1146,6 +1393,7 @@ class ConvoyService extends ChangeNotifier {
   }) async {
     final pos = await _getCurrentPosition();
     await _refreshBatteryLevel();
+    await _flushPendingLeaves();
     final res = await _api.post('/convoys', {
       'name': name.trim(),
       'startPoint': startPoint,
@@ -1182,6 +1430,7 @@ class ConvoyService extends ChangeNotifier {
     _lastError = null;
     try {
       await _refreshBatteryLevel();
+      await _flushPendingLeaves();
       final res = await _api.post('/convoys/join', {
         'code': code.trim().toUpperCase(),
         'rider': {
@@ -1243,9 +1492,65 @@ class ConvoyService extends ChangeNotifier {
     notifyListeners();
     try {
       await _api.post('/convoys/$gid/leave');
+    } on ApiException catch (e) {
+      debugPrint('leave note: $e');
+      // Not delivered (no signal, outage): the server would keep this rider in the ride and
+      // refuse their next ride with ACTIVE_TRIP_CONFLICT. Sent again before the next create/join.
+      if (e.isOffline || e.statusCode >= 500 || e.statusCode == 429) await _rememberPendingLeave(gid);
     } catch (e) {
       debugPrint('leave note: $e');
+      await _rememberPendingLeave(gid);
     }
+  }
+
+  Future<void> _rememberPendingLeave(String gid) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final list = p.getStringList(AppConstants.keyPendingLeaves) ?? <String>[];
+      if (!list.contains(gid)) list.add(gid);
+      await p.setStringList(AppConstants.keyPendingLeaves, list.length > 5 ? list.sublist(list.length - 5) : list);
+    } catch (_) {}
+  }
+
+  /// Sends the leaves this phone could not deliver earlier. Each one that the server answered
+  /// (ok, or any 4xx: the convoy is gone or the rider is no longer in it) is forgotten.
+  Future<void> _flushPendingLeaves() async {
+    SharedPreferences p;
+    List<String> list;
+    try {
+      p = await SharedPreferences.getInstance();
+      list = p.getStringList(AppConstants.keyPendingLeaves) ?? <String>[];
+    } catch (_) {
+      return;
+    }
+    if (list.isEmpty) return;
+    final left = <String>[];
+    var reachable = true;
+    for (final gid in list) {
+      if (gid == _activeGroupId) continue; // rejoined meanwhile: not left any more
+      if (!reachable) {
+        left.add(gid); // no signal: do not wait for each one in turn
+        continue;
+      }
+      try {
+        await _api.post('/convoys/$gid/leave', null, const Duration(seconds: 8));
+      } on ApiException catch (e) {
+        if (e.isOffline || e.statusCode >= 500 || e.statusCode == 429) {
+          left.add(gid);
+          reachable = false;
+        }
+      } catch (_) {
+        left.add(gid);
+        reachable = false;
+      }
+    }
+    try {
+      if (left.isEmpty) {
+        await p.remove(AppConstants.keyPendingLeaves);
+      } else {
+        await p.setStringList(AppConstants.keyPendingLeaves, left);
+      }
+    } catch (_) {}
   }
 
   /// Two-Role Trip Governance: Trip Owner assigns Trip Head.
@@ -1288,6 +1593,10 @@ class ConvoyService extends ChangeNotifier {
     } catch (e) {
       debugPrint('[convoy_service] updateTripStatus error: $e');
       if (e is ApiException) _lastError = e.message;
+      if (e is ApiException && e.statusCode == 409 && e.code == 'RIDE_ENDED') {
+        _lastError = 'This ride has ended.';
+        _onRideEndedError().ignore();
+      }
       notifyListeners();
       return false;
     }
@@ -1311,19 +1620,35 @@ class ConvoyService extends ChangeNotifier {
     }
   }
 
-  LocationSettings _settingsFor({required bool idle}) {
-    final filter = idle ? AppConfig.gpsDistanceFilterIdle : AppConfig.gpsDistanceFilterMoving;
-    final accuracy = idle ? LocationAccuracy.medium : LocationAccuracy.high;
+  /// The GPS subscription for the current state: navigation-grade, frequent fixes while riding
+  /// fast; gentler when slow, parked ([idle]) or on [lowBattery] ([LocationCadence]).
+  LocationSettings _settingsFor({required bool idle, bool lowBattery = false, SpeedBand? band}) {
+    final plan = LocationCadence.plan(band ?? _gpsBand.band, idle: idle, lowBattery: lowBattery);
+    final accuracy = switch (plan.precision) {
+      GpsPrecision.low => LocationAccuracy.low,
+      GpsPrecision.medium => LocationAccuracy.medium,
+      GpsPrecision.high => LocationAccuracy.high,
+      GpsPrecision.navigation => LocationAccuracy.bestForNavigation,
+    };
     if (!kIsWeb && Platform.isAndroid) {
       // Background access is granted by the app's foreground service (BackgroundService), so
       // geolocator does not need its own notification here.
       return AndroidSettings(
         accuracy: accuracy,
-        distanceFilter: filter,
-        intervalDuration: idle ? const Duration(seconds: 20) : const Duration(seconds: 2),
+        distanceFilter: plan.distanceFilterM,
+        intervalDuration: plan.interval,
       );
     }
-    return LocationSettings(accuracy: accuracy, distanceFilter: filter);
+    if (!kIsWeb && Platform.isIOS) {
+      // Riding: Core Location's vehicle navigation mode, and never paused by iOS mid-ride.
+      return AppleSettings(
+        accuracy: accuracy,
+        distanceFilter: plan.distanceFilterM,
+        activityType: ActivityType.automotiveNavigation,
+        pauseLocationUpdatesAutomatically: false,
+      );
+    }
+    return LocationSettings(accuracy: accuracy, distanceFilter: plan.distanceFilterM);
   }
 
   /// Starts adaptive GPS tracking: fine + frequent while moving, coarse + sparse when stopped.
@@ -1336,6 +1661,7 @@ class ConvoyService extends ChangeNotifier {
 
     _gpsIdleProfile = false;
     _stationarySince = null;
+    _gpsBand.reset();
     _subscribeGps();
     _isRealGpsActive = true;
     _lastGpsFixTime = DateTime.now().millisecondsSinceEpoch;
@@ -1365,7 +1691,9 @@ class ConvoyService extends ChangeNotifier {
 
   void _subscribeGps() {
     _gpsSub?.cancel();
-    _gpsSub = Geolocator.getPositionStream(locationSettings: _settingsFor(idle: _gpsIdleProfile)).listen(_onPosition, onError: (e) {
+    _gpsSub = Geolocator.getPositionStream(
+      locationSettings: _settingsFor(idle: _gpsIdleProfile, lowBattery: isLowBattery),
+    ).listen(_onPosition, onError: (e) {
       debugPrint('GPS stream note: $e');
     });
   }
@@ -1571,6 +1899,9 @@ class ConvoyService extends ChangeNotifier {
     final current = convoy.riders[userId];
     final now = position.timestamp.millisecondsSinceEpoch;
     final speedKmh = (position.speed.isFinite ? position.speed * 3.6 : 0.0).clamp(0.0, 300.0).toDouble();
+    // Speed-adaptive GPS cadence: the faster the ride, the more often and finer the fixes. The band
+    // has hysteresis and a dwell time, so the stream is re-subscribed only on a real change.
+    if (_gpsBand.update(speedKmh, _clock()) && _isRealGpsActive && !_gpsIdleProfile) _subscribeGps();
     final accuracy = position.accuracy.isFinite ? position.accuracy : 999.0;
     final gpsHeading = position.heading.isFinite ? position.heading.clamp(0.0, 360.0).toDouble() : 0.0;
     final hasActiveRoute = convoy.routeLine.length >= 2;
@@ -1699,9 +2030,13 @@ class ConvoyService extends ChangeNotifier {
       }
     } else {
       _stationarySince ??= DateTime.now();
-      if (!_gpsIdleProfile && DateTime.now().difference(_stationarySince!).inMinutes >= 3) {
+      // Throttle GPS polling when stationary: switch to idle profile after 30s (low battery) or 60s (normal)
+      final stationaryThreshold = isLowBattery ? const Duration(seconds: 30) : const Duration(seconds: 60);
+      if (!_gpsIdleProfile && DateTime.now().difference(_stationarySince!) >= stationaryThreshold) {
         _gpsIdleProfile = true;
         _subscribeGps();
+        // Sensor stream optimization: pause dead reckoning accelerometer while stationary
+        _unsubscribeAccelForDeadReckoning();
       }
     }
 
@@ -1740,7 +2075,15 @@ class ConvoyService extends ChangeNotifier {
     final movedFar = current == null ||
         Geolocator.distanceBetween(current.lat, current.lng, position.latitude, position.longitude) > 40;
     final critical = convoy.activeAlerts.isNotEmpty || assistRequests.isNotEmpty || hazards.isNotEmpty;
-    final interval = _power.telemetryInterval(moving: isMoving, lowData: settings?.lowData ?? false, critical: critical);
+    // Faster riders report more often (smooth markers for the group), never near the gateway's
+    // 3 TELEMETRY/s limit, and slower in big groups (fan-out), data saver or battery saving.
+    final interval = LocationCadence.telemetryInterval(
+      _gpsBand.band,
+      base: _power.telemetryInterval(moving: isMoving, lowData: settings?.lowData ?? false, critical: critical),
+      moving: isMoving,
+      lowData: (settings?.lowData ?? false) || _power.conserving || isLowBattery,
+      groupSize: convoy.riders.length,
+    );
     if (since >= interval || movedFar || shouldClearStatus) {
       _pushTelemetry(updated);
     }
@@ -1878,13 +2221,90 @@ class ConvoyService extends ChangeNotifier {
 
   Future<void> _refreshBatteryLevel() async {
     try {
+      final prevLevel = _currentBatteryLevel;
+      final prevLow = isLowBattery;
       _currentBatteryLevel = await _battery.batteryLevel;
       final state = await _battery.batteryState;
       _isCharging = state == BatteryState.charging || state == BatteryState.full;
       final before = _power.conserving;
       _power.updateBattery(_currentBatteryLevel, charging: _isCharging);
-      if (before != _power.conserving) notifyListeners();
+
+      final nowLow = isLowBattery;
+      if (nowLow != prevLow) {
+        _applyLowBatteryPolicy(nowLow);
+      }
+
+      // Record battery measurement for per-riding-hour tracking
+      final me = activeConvoy?.riders[_myUserId];
+      final isMoving = (me?.speedKmh ?? 0) > 1.0;
+      batteryMonitor.recordSample(
+        batteryLevel: _currentBatteryLevel,
+        isCharging: _isCharging,
+        isMoving: isMoving,
+        speedKmh: me?.speedKmh ?? 0.0,
+      );
+
+      if (before != _power.conserving || prevLow != nowLow || prevLevel != _currentBatteryLevel) {
+        notifyListeners();
+      }
     } catch (_) {}
+  }
+
+  void _applyLowBatteryPolicy(bool lowBattery) {
+    tilePrefetcher?.handleLowBattery(lowBattery);
+    mesh?.setLowBatteryMode(lowBattery);
+    if (_isRealGpsActive) {
+      _subscribeGps();
+    }
+  }
+
+  @visibleForTesting
+  void updateBatteryForTesting(int percent, {required bool isCharging}) {
+    final prevLow = isLowBattery;
+    _currentBatteryLevel = percent;
+    _isCharging = isCharging;
+    _power.updateBattery(percent, charging: isCharging);
+    final nowLow = isLowBattery;
+    if (nowLow != prevLow) {
+      _applyLowBatteryPolicy(nowLow);
+    }
+    final me = activeConvoy?.riders[_myUserId];
+    final isMoving = (me?.speedKmh ?? 0) > 1.0;
+    batteryMonitor.recordSample(
+      batteryLevel: percent,
+      isCharging: isCharging,
+      isMoving: isMoving,
+      speedKmh: me?.speedKmh ?? 0.0,
+    );
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  LocationSettings settingsForTesting({required bool idle, bool lowBattery = false, SpeedBand? band}) =>
+      _settingsFor(idle: idle, lowBattery: lowBattery, band: band);
+
+  /// The current GPS speed band (cadence), for diagnostics and tests.
+  SpeedBand get gpsSpeedBand => _gpsBand.band;
+
+  @visibleForTesting
+  bool get isGpsIdleProfile => _gpsIdleProfile;
+
+  @visibleForTesting
+  bool get isDeadReckoningAccelSubscribed => _deadReckoningAccelSub != null;
+
+  @visibleForTesting
+  void setStationarySinceForTesting(DateTime? dt) {
+    _stationarySince = dt;
+  }
+
+  @visibleForTesting
+  void handlePositionForTesting(Position pos) {
+    _onPosition(pos);
+  }
+
+  @visibleForTesting
+  void subscribeAccelForTesting() {
+    _subscribeAccelForDeadReckoning();
   }
 
   // --------------------------------------------------------------- actions
@@ -1980,6 +2400,19 @@ class ConvoyService extends ChangeNotifier {
     _rt.send({'type': 'TRIP_STATUS', 'status': state});
   }
 
+  /// Ends the trip locally while offline.
+  /// Preserves locally available trip and rider info, saves the trip into local history,
+  /// and queues synchronization to the outbox for safe upload once reconnected.
+  Future<void> endTripOffline() async {
+    final convoy = activeConvoy;
+    if (convoy == null) return;
+    if (_myUserId != null && convoy.riders.containsKey(_myUserId)) {
+      await _trips.saveTrip(buildTripHistory(convoy, userId: _myUserId), userId: _myUserId);
+    }
+    _enqueue('TRIP_STATUS', {'status': 'ENDED'});
+    _onTripEnded(convoy.copyWith(tripStatus: 'ENDED'));
+  }
+
   void updateStatusReason({required String userId, required String reason, String message = ''}) {
     final convoy = activeConvoy;
     final rider = convoy?.riders[userId];
@@ -2071,7 +2504,9 @@ class ConvoyService extends ChangeNotifier {
     Map<String, dynamic>? biometrics,
     String? traumaLevel,
   }) {
-    final gid = _activeGroupId;
+    // Restarted in a dead zone during a ride: the SOS is queued for that ride (sent after the
+    // re-join; the SMS fallback uses its cached roster meanwhile) instead of being refused.
+    final gid = _activeGroupId ?? _unconfirmedRideGid;
     if (gid == null) return SosDelivery.notInConvoy;
     final existing = _pendingSos;
     final now = _clock();
@@ -2504,6 +2939,8 @@ class ConvoyService extends ChangeNotifier {
   }
 
   /// Closes an SOS. The [reason] goes to a gateway with the safety network only.
+  /// Kept until the server confirms it (ALERT_RESOLVED), and sent again after the next re-join:
+  /// "I am safe" pressed in a dead zone used to vanish while the group kept responding.
   void resolveSosAlert(String alertId, {ResolveReason reason = ResolveReason.resolved}) {
     final gid = _activeGroupId;
     if (gid == null) return;
@@ -2513,7 +2950,71 @@ class ConvoyService extends ChangeNotifier {
       _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => a.alertId != alertId).toList());
       notifyListeners();
     }
+    _pendingResolves[alertId] = reason;
+    _pendingResolvesGid = gid;
+    _savePendingResolves();
     _rt.send({'type': 'SOS_RESOLVE', 'alertId': alertId, if (_netOn) 'reason': reason.wire});
+  }
+
+  /// Resolves not yet confirmed by the server (alertId -> reason), for the active ride only.
+  /// Persisted (with their ride) so "I'm safe" pressed in a dead zone survives an app restart.
+  final Map<String, ResolveReason> _pendingResolves = {};
+  String? _pendingResolvesGid;
+  static const _kPendingResolves = 'coroute_pending_resolves_v1';
+
+  void _savePendingResolves() {
+    final gid = _pendingResolvesGid;
+    final data = _pendingResolves.isEmpty || gid == null
+        ? null
+        : jsonEncode({'gid': gid, 'r': {for (final e in _pendingResolves.entries) e.key: e.value.wire}});
+    SharedPreferences.getInstance()
+        .then((p) => data == null ? p.remove(_kPendingResolves) : p.setString(_kPendingResolves, data))
+        .ignore();
+  }
+
+  Future<void> _loadPendingResolves() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_kPendingResolves);
+      if (raw == null || raw.isEmpty) return;
+      final d = jsonDecode(raw);
+      final gid = d is Map ? d['gid'] : null;
+      final r = d is Map ? d['r'] : null;
+      if (gid is! String || r is! Map || (_activeGroupId != null && _activeGroupId != gid)) {
+        await p.remove(_kPendingResolves);
+        return;
+      }
+      if (_pendingResolvesGid != null && _pendingResolvesGid != gid) return; // a newer ride's resolves won
+      _pendingResolvesGid = gid;
+      r.forEach((k, v) {
+        final reason = ResolveReason.fromWire(v?.toString());
+        if (k is String && k.isNotEmpty && reason != null) _pendingResolves.putIfAbsent(k, () => reason);
+      });
+      if (_disposed) return;
+      if (_activeGroupId == gid) _sendPendingResolves();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('pending resolves note: $e');
+    }
+  }
+
+  /// After a SNAPSHOT: alerts the server no longer has open are done; the others are sent again
+  /// (the server treats a repeat as the same resolve) and stay hidden on this phone meanwhile.
+  void _sendPendingResolves() {
+    if (_pendingResolves.isEmpty) return;
+    final gid = _activeGroupId;
+    if (gid == null) return;
+    final convoy = _allConvoys[gid];
+    if (convoy == null) return;
+    final open = {for (final a in convoy.activeAlerts) a.alertId};
+    final before = _pendingResolves.length;
+    _pendingResolves.removeWhere((id, _) => !open.contains(id));
+    if (_pendingResolves.length != before) _savePendingResolves();
+    if (_pendingResolves.isEmpty) return;
+    _allConvoys[gid] = convoy.copyWith(activeAlerts: convoy.activeAlerts.where((a) => !_pendingResolves.containsKey(a.alertId)).toList());
+    for (final entry in _pendingResolves.entries) {
+      _rt.send({'type': 'SOS_RESOLVE', 'alertId': entry.key, if (_netOn) 'reason': entry.value.wire});
+    }
   }
 
   // ------------------------------------------------- 3.15 safety network

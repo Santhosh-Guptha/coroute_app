@@ -2,7 +2,11 @@
 
 const crypto = require('crypto');
 
-const JWT_SECRET = '0oFOo4EZMkqdTYW2CcdM3ZUqZUv2NqY8IMCH9UqOJki23ENaBnmFZ/c1CbUbYU65';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('Set JWT_SECRET in the environment to run this verifier.');
+  process.exit(1);
+}
 const BASE_URL = 'https://coroute.duckdns.org';
 const WS_URL = 'wss://coroute.duckdns.org/ws';
 const INVITE_CODE = '612495';

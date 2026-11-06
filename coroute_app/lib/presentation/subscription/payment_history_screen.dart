@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/config/feature_gates.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
+import '../../data/models/membership_model.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/membership_service.dart';
 import '../../data/services/plan_subscription_service.dart';
@@ -35,6 +36,78 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  static const Duration _istOffset = Duration(hours: 5, minutes: 30);
+
+  /// Converts an epoch millisecond timestamp to a DateTime representing Asia/Kolkata (IST, UTC+05:30).
+  static DateTime _kolkataDateTime(int ms) {
+    final ist = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).add(_istOffset);
+    return DateTime(ist.year, ist.month, ist.day, ist.hour, ist.minute, ist.second, ist.millisecond);
+  }
+
+  /// Calculates whole days remaining on a plan or membership in Asia/Kolkata timezone.
+  static int _calculateDaysRemainingKolkata(int validUntilMs) {
+    if (validUntilMs <= 0) return 0;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (validUntilMs <= nowMs) return 0;
+    final diffMs = validUntilMs - nowMs;
+    return (diffMs / Duration.millisecondsPerDay).ceil();
+  }
+
+  /// Stable deduplication by paymentId / orderId.
+  /// If two records share an orderId or paymentId, merges them preserving richer fields.
+  static List<Map<String, dynamic>> _deduplicate(List<Map<String, dynamic>> items) {
+    final seenOrderIds = <String, int>{};
+    final seenPaymentIds = <String, int>{};
+    final result = <Map<String, dynamic>>[];
+
+    for (final raw in items) {
+      final item = Map<String, dynamic>.from(raw);
+      // Normalize common field aliases so cards can render them consistently
+      if (item['amount'] == null && item['amountInr'] != null) {
+        item['amount'] = item['amountInr'];
+      } else if (item['amountInr'] == null && item['amount'] != null) {
+        item['amountInr'] = item['amount'];
+      }
+      if (item['amountInPaise'] == null && item['amount'] is num) {
+        item['amountInPaise'] = ((item['amount'] as num) * 100).round();
+      }
+      if (item['planTier'] == null && item['category'] != null) {
+        item['planTier'] = item['category'];
+      }
+
+      final orderId = (item['orderId']?.toString() ?? '').trim();
+      final paymentId = (item['paymentId']?.toString() ?? '').trim();
+
+      int? existingIdx;
+      if (orderId.isNotEmpty && seenOrderIds.containsKey(orderId)) {
+        existingIdx = seenOrderIds[orderId];
+      } else if (paymentId.isNotEmpty && seenPaymentIds.containsKey(paymentId)) {
+        existingIdx = seenPaymentIds[paymentId];
+      }
+
+      if (existingIdx != null) {
+        // Merge into existing entry, preserving non-empty values
+        final existing = result[existingIdx];
+        for (final entry in item.entries) {
+          final existingVal = existing[entry.key];
+          final newVal = entry.value;
+          if (newVal != null && (existingVal == null || existingVal == '' || existingVal == 0)) {
+            existing[entry.key] = newVal;
+          }
+        }
+        if (orderId.isNotEmpty) seenOrderIds[orderId] = existingIdx;
+        if (paymentId.isNotEmpty) seenPaymentIds[paymentId] = existingIdx;
+      } else {
+        final idx = result.length;
+        result.add(item);
+        if (orderId.isNotEmpty) seenOrderIds[orderId] = idx;
+        if (paymentId.isNotEmpty) seenPaymentIds[paymentId] = idx;
+      }
+    }
+
+    return result;
   }
 
   static List<Map<String, dynamic>> _rows(dynamic list) {
@@ -90,11 +163,14 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
       List<Map<String, dynamic>> memOrders = const [];
       if (mem != null) {
         try {
+          mem.fetchMyMembership().ignore();
           final items = await mem.fetchPaymentHistory();
           memOrders = items.map((m) => {
             'orderId': m.orderId,
             'paymentId': m.paymentId,
             'amount': m.amountInr,
+            'amountInr': m.amountInr,
+            'amountInPaise': (m.amountInr * 100).round(),
             'planTier': m.category,
             'status': m.status,
             'isFree': m.isFree,
@@ -107,12 +183,24 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
         } catch (_) {}
       }
       if (!mounted) return;
-      final allOrders = [...memOrders, ..._rows(data['orders'])];
-      final allPayments = [...memOrders.where((m) => m['status'] == 'PAID'), ..._rows(data['history'])];
+      final combinedOrders = [
+        ...memOrders,
+        ..._rows(data['orders']),
+      ];
+      final combinedPayments = [
+        ...memOrders.where((m) => (m['status']?.toString().toUpperCase()) == 'PAID'),
+        ..._rows(data['history']),
+        ..._rows(data['orders']).where((o) => (o['status']?.toString().toUpperCase()) == 'PAID'),
+      ];
+
+      final dedupedOrders = _deduplicate(_newestFirst(combinedOrders, const ['createdAt', 'paidAt']));
+      final dedupedPayments = _deduplicate(_newestFirst(combinedPayments, const ['paidAt', 'createdAt', 'validFrom']));
+      final dedupedPeriods = _newestFirst(_rows(data['subscriptionHistory']), const ['endedAt', 'validUntil']);
+
       setState(() {
-        _payments = _newestFirst(allPayments, const ['paidAt', 'validFrom']);
-        _periods = _newestFirst(_rows(data['subscriptionHistory']), const ['endedAt', 'validUntil']);
-        _orders = _newestFirst(allOrders, const ['createdAt', 'paidAt']);
+        _payments = dedupedPayments;
+        _periods = dedupedPeriods;
+        _orders = dedupedOrders;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -133,7 +221,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
   static String _when(dynamic v, {bool time = true}) {
     final ms = _epoch(v);
     if (ms <= 0) return '—';
-    final d = DateTime.fromMillisecondsSinceEpoch(ms);
+    final d = _kolkataDateTime(ms);
     return (time ? _dateTime : _date).format(d);
   }
 
@@ -146,10 +234,14 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
 
   static String _tierName(dynamic v) {
     final name = v?.toString() ?? '';
+    if (name.isEmpty) return 'Plan';
     for (final t in SubscriptionTier.values) {
       if (t.name.toLowerCase() == name.toLowerCase()) return FeatureGates.tierLabel(t);
     }
-    return name.isEmpty ? 'Plan' : name;
+    if (name.toLowerCase() == 'individual') return 'Individual Solo';
+    if (name.toLowerCase() == 'group_small') return 'Group (2–6)';
+    if (name.toLowerCase() == 'group_large') return 'Group (7–12)';
+    return name.replaceAll('_', ' ').toUpperCase();
   }
 
   static String _cycle(dynamic v) {
@@ -191,6 +283,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final plan = context.watch<PlanSubscriptionService?>();
+    final mem = context.watch<MembershipService?>();
 
     Widget body;
     if (_loading) {
@@ -215,7 +308,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
               children: [
                 const SubscriptionExpiryBanner(),
-                if (plan != null) _CurrentPlanCard(plan: plan, periods: _periods),
+                if (plan != null || mem != null) _CurrentPlanCard(plan: plan, mem: mem, periods: _periods),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   DsCard(
@@ -280,7 +373,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
                   ],
                 const SizedBox(height: 20),
                 Text(
-                  'Amounts are in Indian rupees. Payments are processed by Razorpay; a pending order settles within a few minutes of a successful UPI transfer.',
+                  'Amounts in rupees. Paid via Razorpay. Pending payments clear in a few minutes.',
                   style: AppText.caption.copyWith(height: 1.4),
                 ),
               ],
@@ -324,41 +417,104 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
 }
 
 class _CurrentPlanCard extends StatelessWidget {
-  final PlanSubscriptionService plan;
+  final PlanSubscriptionService? plan;
+  final MembershipService? mem;
   final List<Map<String, dynamic>> periods;
-  const _CurrentPlanCard({required this.plan, required this.periods});
+  const _CurrentPlanCard({this.plan, this.mem, required this.periods});
 
   @override
   Widget build(BuildContext context) {
-    final tier = plan.currentTier;
-    final paid = tier != SubscriptionTier.community;
-    final expired = plan.isExpired;
-    final prev = plan.previousTier;
-    final days = plan.daysRemaining;
+    final owned = mem?.ownedMembership;
+
+    final participating = mem?.participating ?? const [];
+    final activeParticipating = participating.where((m) => m.isActive).toList();
+
+    String planName;
+    int validUntilMs = 0;
+    int daysRemaining = 0;
+    bool isPaid = false;
+    bool isExpired = false;
+    bool isExpiringSoon = false;
+    String? previousPlanName;
+    int expiredAtMs = 0;
+    bool isParticipatingMember = false;
+
+    if (owned != null && owned.isActive) {
+      planName = owned.name;
+      validUntilMs = owned.validUntil;
+      daysRemaining = _PaymentHistoryScreenState._calculateDaysRemainingKolkata(validUntilMs);
+      isPaid = true;
+      isExpired = false;
+      isExpiringSoon = daysRemaining > 0 && daysRemaining <= 7;
+    } else if (activeParticipating.isNotEmpty) {
+      final part = (List<UserMembership>.from(activeParticipating)
+            ..sort((a, b) => b.validUntil.compareTo(a.validUntil)))
+          .first;
+      planName = part.name;
+      validUntilMs = part.validUntil;
+      daysRemaining = _PaymentHistoryScreenState._calculateDaysRemainingKolkata(validUntilMs);
+      isPaid = true;
+      isExpired = false;
+      isExpiringSoon = daysRemaining > 0 && daysRemaining <= 7;
+      isParticipatingMember = true;
+    } else if (plan != null && plan!.currentTier != SubscriptionTier.community && !plan!.isExpired) {
+      planName = FeatureGates.tierLabel(plan!.currentTier);
+      validUntilMs = plan!.validUntil;
+      daysRemaining = _PaymentHistoryScreenState._calculateDaysRemainingKolkata(validUntilMs);
+      isPaid = true;
+      isExpired = false;
+      isExpiringSoon = daysRemaining > 0 && daysRemaining <= 7;
+    } else if (owned != null && (owned.isExpired || owned.status == 'EXPIRED')) {
+      planName = owned.name;
+      validUntilMs = owned.validUntil;
+      daysRemaining = 0;
+      isPaid = false;
+      isExpired = true;
+      isExpiringSoon = false;
+      previousPlanName = owned.name;
+      expiredAtMs = owned.validUntil;
+    } else if (plan != null && plan!.isExpired) {
+      final prev = plan!.previousTier;
+      planName = FeatureGates.tierLabel(prev ?? plan!.currentTier);
+      validUntilMs = plan!.validUntil;
+      daysRemaining = 0;
+      isPaid = false;
+      isExpired = true;
+      isExpiringSoon = false;
+      previousPlanName = prev != null ? FeatureGates.tierLabel(prev) : null;
+      expiredAtMs = plan!.expiredAt > 0 ? plan!.expiredAt : plan!.validUntil;
+    } else {
+      planName = FeatureGates.tierLabel(SubscriptionTier.community);
+      validUntilMs = 0;
+      daysRemaining = 0;
+      isPaid = false;
+      isExpired = false;
+      isExpiringSoon = false;
+    }
 
     final String statusText;
     final bool warn;
-    if (expired) {
+    if (isExpired) {
       statusText = 'Expired';
       warn = true;
-    } else if (paid && plan.expiringSoon) {
+    } else if (isPaid && isExpiringSoon) {
       statusText = 'Ends soon';
       warn = true;
-    } else if (paid) {
-      statusText = 'Active';
+    } else if (isPaid) {
+      statusText = isParticipatingMember ? 'Active (Member)' : 'Active';
       warn = false;
     } else {
       statusText = 'Free';
       warn = false;
     }
 
-    final validUntil = plan.validUntil > 0
-        ? _PaymentHistoryScreenState._when(plan.validUntil, time: false)
-        : (paid ? '—' : 'No expiry');
+    final validUntil = validUntilMs > 0
+        ? _PaymentHistoryScreenState._when(validUntilMs, time: false)
+        : (isPaid ? '—' : 'No expiry');
 
     return DsCard(
       radius: Radii.xl,
-      accent: paid && !expired,
+      accent: isPaid && !isExpired,
       warning: warn,
       padding: const EdgeInsets.all(18),
       child: Column(
@@ -379,7 +535,7 @@ class _CurrentPlanCard extends StatelessWidget {
                   children: [
                     Text('Current plan', style: AppText.overline),
                     const SizedBox(height: 2),
-                    Text(FeatureGates.tierLabel(tier), style: AppText.title.copyWith(fontSize: 18)),
+                    Text(planName, style: AppText.title.copyWith(fontSize: 18)),
                   ],
                 ),
               ),
@@ -394,33 +550,39 @@ class _CurrentPlanCard extends StatelessWidget {
               Expanded(
                 child: DsStatCell(
                   label: 'Days left',
-                  value: paid ? '$days' : '—',
+                  value: isPaid ? '$daysRemaining' : '—',
                   valueColor: warn ? AppTheme.warnText : null,
                 ),
               ),
             ],
           ),
-          if (expired && prev != null) ...[
+          if (isExpired && previousPlanName != null) ...[
             const SizedBox(height: 12),
             Text(
-              '${FeatureGates.tierLabel(prev)} ended ${plan.expiredAt > 0 ? 'on ${_PaymentHistoryScreenState._when(plan.expiredAt, time: false)}' : 'recently'}. '
-              'Renew to get ${PlanSubscriptionService.keyFeatureSummary(prev)} back.',
+              '$previousPlanName ended ${expiredAtMs > 0 ? 'on ${_PaymentHistoryScreenState._when(expiredAtMs, time: false)}' : 'recently'}. '
+              'Renew to get your group seats back.',
               style: AppText.caption.copyWith(height: 1.35),
             ),
           ],
-          if (paid || expired) ...[
+          if (isPaid || isExpired) ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: DsButton(
-                label: expired ? 'Renew ${FeatureGates.tierLabel(prev ?? tier)}' : 'Manage plan',
-                icon: expired ? Icons.autorenew_rounded : Icons.tune_rounded,
+                label: isExpired
+                    ? 'Renew ${previousPlanName ?? planName}'
+                    : (isParticipatingMember ? 'View plans' : 'Manage plan'),
+                icon: isExpired ? Icons.autorenew_rounded : Icons.tune_rounded,
                 height: 48,
                 fontSize: 14,
-                tone: expired ? DsButtonTone.brand : DsButtonTone.outline,
+                tone: isExpired ? DsButtonTone.brand : DsButtonTone.outline,
                 onPressed: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => PlanSelectorScreen(preselectTier: expired ? plan.renewTier : null)),
+                  MaterialPageRoute(
+                    builder: (_) => PlanSelectorScreen(
+                      preselectTier: isExpired && plan != null ? plan!.renewTier : null,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -501,7 +663,9 @@ class _PaymentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = payment;
-    final amount = p['amount'] is num ? p['amount'] as num : num.tryParse('${p['amount']}');
+    final amount = p['amount'] is num
+        ? p['amount'] as num
+        : (p['amountInr'] is num ? p['amountInr'] as num : num.tryParse('${p['amount'] ?? p['amountInr']}'));
     final plan = _PaymentHistoryScreenState._tierName(p['planTier']);
     final cycle = _PaymentHistoryScreenState._cycle(p['billingCycle']);
     final method = (p['method']?.toString() ?? '').toUpperCase();
@@ -592,7 +756,11 @@ class _OrderCard extends StatelessWidget {
     final paid = status == 'PAID' || status == 'VERIFIED' || status == 'SUCCESS';
     final failed = status == 'FAILED' || status == 'EXPIRED' || status == 'CANCELLED' || status == 'REJECTED';
     final paise = o['amountInPaise'] is num ? (o['amountInPaise'] as num) : num.tryParse('${o['amountInPaise']}');
-    final amount = paise == null ? null : paise / 100;
+    final amount = paise != null
+        ? paise / 100
+        : (o['amount'] is num
+            ? o['amount'] as num
+            : (o['amountInr'] is num ? o['amountInr'] as num : num.tryParse('${o['amount'] ?? o['amountInr']}')));
     final plan = _PaymentHistoryScreenState._tierName(o['planTier']);
     final cycle = _PaymentHistoryScreenState._cycle(o['billingCycle']);
     final orderId = o['orderId']?.toString() ?? '';
@@ -665,7 +833,7 @@ class _OrderCard extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppTheme.accentText,
                   side: BorderSide(color: AppTheme.accentText),
-                  minimumSize: const Size(0, 44),
+                  minimumSize: const Size(0, 48),
                   shape: const RoundedRectangleBorder(borderRadius: Radii.mdAll),
                 ),
                 icon: checking

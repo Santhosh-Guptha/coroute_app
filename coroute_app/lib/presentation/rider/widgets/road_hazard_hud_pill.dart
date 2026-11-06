@@ -85,12 +85,16 @@ class RoadHazardHudPill extends StatelessWidget {
                       const SizedBox(height: 2),
                       Row(
                         children: [
-                          Text(
-                            subtitle,
-                            style: TextStyle(
-                              color: AppTheme.text,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w800,
+                          Flexible(
+                            child: Text(
+                              subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppTheme.text,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
                           ),
                           if (hazard.classification == RoadHazardClassification.pothole) ...[

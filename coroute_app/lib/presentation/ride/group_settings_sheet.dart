@@ -173,7 +173,7 @@ class GroupSettingsView extends StatelessWidget {
           // 2. Ride Feature Controls
           SheetSectionTitle('Ride feature controls'),
           if (!service.supports(ProtocolFeatures.featurePolicy))
-            note('Connect to an updated gateway to change ride features.', color: AppTheme.warnText, icon: Icons.warning_amber_rounded),
+            note('Update the server to change ride features.', color: AppTheme.warnText, icon: Icons.warning_amber_rounded),
           if (!service.isOnline) note('Reconnect to change group settings.', color: AppTheme.warnText, icon: Icons.cloud_off_rounded),
           if (service.lastError != null) note(service.lastError!, color: AppTheme.sos, icon: Icons.error_outline_rounded),
           group([
@@ -221,16 +221,16 @@ class GroupSettingsView extends StatelessWidget {
                 ],
               ),
             ),
-          note('Changes apply after server confirmation. Rider consent and emergency safeguards remain in control of each rider.'),
+          note('Saved once the server confirms. Each rider keeps their own safety choices.'),
           if (!lead) note('Only the lead can change these.', icon: Icons.lock_outline_rounded),
           const SizedBox(height: 8),
 
           // 3. Convoy Safety Limits
-          SheetSectionTitle('Convoy safety limits'),
+          SheetSectionTitle('Group limits'),
           section(
             title: 'Too far behind after',
             value: formatDistance(convoy.distanceThresholdMeters),
-            help: 'A rider further than this from the group is flagged and told.',
+            help: 'Riders further away than this are told.',
             control: Slider(
               value: convoy.distanceThresholdMeters.clamp(500, 5000).toDouble(),
               min: 500,
@@ -243,7 +243,7 @@ class GroupSettingsView extends StatelessWidget {
           section(
             title: 'Stopped alert after',
             value: formatDuration(Duration(seconds: convoy.stopThresholdSeconds)),
-            help: 'After this long without moving, the rider is asked why they stopped.',
+            help: 'Then the rider is asked why they stopped.',
             control: Slider(
               value: convoy.stopThresholdSeconds.clamp(60, 600).toDouble(),
               min: 60,
@@ -257,7 +257,7 @@ class GroupSettingsView extends StatelessWidget {
             title: 'Group speed limit',
             value: convoy.speedLimitKmh > 0 ? '${convoy.speedLimitKmh} km/h' : 'Off',
             help: lead
-                ? 'When a rider stays over this speed for 10 seconds it is logged on the timeline and everyone is told once.'
+                ? 'Over this for 10 s: logged and the group is told once.'
                 : 'Riding over it is logged on the timeline and the group is told once.',
             control: Padding(
               padding: const EdgeInsets.symmetric(vertical: Space.s8),
@@ -319,11 +319,11 @@ class GroupSettingsView extends StatelessWidget {
           const SizedBox(height: 8),
 
           // Mid-Ride Dynamic Waypoint Push
-          SheetSectionTitle('Mid-ride dynamic waypoint push'),
+          SheetSectionTitle('Send stops during the ride'),
           group([
             DsSwitchRow(
-              label: 'Dynamic waypoint & regroup push',
-              subtitle: 'Lead broadcasts live route adjustments and regroup waypoints to all riders.',
+              label: 'Send stops and regroup points',
+              subtitle: 'The Lead sends route changes and regroup points to all.',
               value: FeatureGates.isUnlocked(Feature.dynamicWaypointPush),
               onChanged: (v) {
                 if (!FeatureGates.isUnlocked(Feature.dynamicWaypointPush)) {
@@ -353,8 +353,8 @@ class GroupSettingsView extends StatelessWidget {
                       divider: true,
                     ),
                     DsSwitchRow(
-                      label: 'Priority Voice Ducking (-18 dB)',
-                      subtitle: 'Lead speech automatically ducks convoy intercom chatter by -18 dB.',
+                      label: 'Lead voice first',
+                      subtitle: 'Other voices get quieter when the Lead speaks.',
                       value: FeatureGates.isUnlocked(Feature.priorityIntercomDucking),
                       onChanged: (v) {
                         if (!FeatureGates.isUnlocked(Feature.priorityIntercomDucking)) {
@@ -367,7 +367,7 @@ class GroupSettingsView extends StatelessWidget {
                     if (riderSettings != null)
                       DsSwitchRow(
                         label: 'Announce all alerts',
-                        subtitle: 'Read out all notifications and alerts via voice.',
+                        subtitle: 'Read out all alerts.',
                         value: riderSettings.voiceAnnounceAllAlerts,
                         onChanged: (v) => riderSettings.setVoiceAnnounceAllAlerts(v),
                         divider: false,
@@ -380,7 +380,7 @@ class GroupSettingsView extends StatelessWidget {
                     value: riderSettings.mapAlertDismissSeconds == 0 ? 'Manual' : '${riderSettings.mapAlertDismissSeconds}s',
                     help: riderSettings.mapAlertDismissSeconds == 0
                         ? 'Manual dismissal only on map HUD.'
-                        : 'Auto-dismisses from map after ${riderSettings.mapAlertDismissSeconds}s (remains in notifications).',
+                        : 'Leaves the map after ${riderSettings.mapAlertDismissSeconds}s.',
                     control: Padding(
                       padding: const EdgeInsets.symmetric(vertical: Space.s8),
                       child: Wrap(
@@ -489,11 +489,11 @@ class GroupNetworkSettings extends StatelessWidget {
   static const String visibilityTitle = 'Group visibility';
   static const String discoveryTitle = 'Nearby group discovery';
   static const String discoveryExplain =
-      'Only groups that are also Public with discovery on can see your group name and rider count. Never your positions.';
+      'Other public groups see your name and rider count. Never positions.';
   static const String privateExplain = 'Private: no other group can see this group. Emergency help still works.';
   static const String assistTitle = 'Ask nearby riders to help our riders by default';
   static const String assistExplain =
-      'In an accident, riders of other groups who may reach the rider faster can be asked to help. Each rider can change this for themselves.';
+      'In an accident, closer riders from other groups can be asked to help.';
 
   @override
   Widget build(BuildContext context) {

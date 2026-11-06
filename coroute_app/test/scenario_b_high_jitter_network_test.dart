@@ -275,7 +275,7 @@ void main() {
       );
       expect(sending, SosSheetStatus.sending);
       final (sendingTitle, _) = EmergencySosSheet.textFor(sending);
-      expect(sendingTitle, 'Sending your SOS to the convoy...');
+      expect(sendingTitle, 'Sending your SOS to your group...');
 
       // 3. Confirmed by server echo (pending is false, hasOpenAlert is true)
       final delivered = EmergencySosSheet.statusFor(
@@ -286,7 +286,7 @@ void main() {
       );
       expect(delivered, SosSheetStatus.delivered);
       final (deliveredTitle, _) = EmergencySosSheet.textFor(delivered);
-      expect(deliveredTitle, 'SOS delivered to your convoy');
+      expect(deliveredTitle, 'SOS sent to your group');
 
       // 4. Connection banner top bar states
       const now = 1700000000000;

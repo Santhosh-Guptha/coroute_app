@@ -353,7 +353,7 @@ class _FuelSheetState extends State<_FuelSheet> {
                 field(
                   'Keep aside (km)',
                   margin,
-                  help: 'We subtract this once from your estimate, so you can plan an earlier stop.',
+                  help: 'Kept aside so you stop a little earlier.',
                 ),
               ],
             ),
@@ -389,7 +389,7 @@ class _FuelSheetState extends State<_FuelSheet> {
             else
               Text(
                 !active
-                    ? 'Start a ride to track fuel. Then tell us if the tank is full or partly filled.'
+                    ? 'Start a ride to track fuel.'
                     : uncertain
                     ? 'Some riding distance was missed. Enter the fuel left to start again.'
                     : 'An estimate, not a fuel gauge. ${number(p.marginKm)} km is already kept aside.',
@@ -499,7 +499,7 @@ class _FuelSheetState extends State<_FuelSheet> {
             Padding(
               padding: const EdgeInsets.only(top: Space.s12),
               child: _warning(
-                'This estimate has not been saved. Keep the app open and update fuel again.',
+                'Not saved. Keep the app open and try again.',
               ),
             ),
         ],

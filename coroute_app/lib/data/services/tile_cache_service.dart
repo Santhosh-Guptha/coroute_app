@@ -3,6 +3,7 @@ import 'dart:convert' show base64Decode;
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -21,10 +22,51 @@ import '../models/saved_map_pack.dart';
 /// [SafetyConstants.tileMaxAgeDays] are dropped. Files live in the app's own
 /// cache folder (`<cacheDir>/tiles/<z>_<x>_<y>.png`); nothing leaves the phone.
 class TileCache {
-  TileCache._(this.dir, this._clock);
+  TileCache._(this.dir, this._clock, {int? maxBytesBudget})
+      : maxBytesBudget = maxBytesBudget ?? SafetyConstants.tileCacheMaxBytes;
+  int maxBytesBudget;
+  final Set<String> _activeTripTiles = {};
+
+  /// Sets the configurable cache budget in megabytes (clamped between 300 and 500 MB).
+  void configureBudgetMb(int mb) {
+    maxBytesBudget = (mb * 1024 * 1024).clamp(
+      SafetyConstants.tileCacheMinBudgetBytes,
+      SafetyConstants.tileCacheMaxBudgetBytes,
+    );
+  }
+
+  /// Pinned tiles belonging to the active trip. These are NEVER pruned.
+  Set<String> get activeTripTileKeys => Set.unmodifiable(_activeTripTiles);
+  int get activeTripTileCount => _activeTripTiles.length;
+
+  /// Registers tiles belonging to the active trip so they are protected from LRU pruning.
+  void setActiveTripTiles(Iterable<(int, int, int)> tiles) {
+    _activeTripTiles.clear();
+    for (final t in tiles) {
+      _activeTripTiles.add(nameOf(t.$1, t.$2, t.$3));
+    }
+  }
+
+  /// Appends tiles belonging to the active trip so they are protected from LRU pruning.
+  void registerActiveTripTiles(Iterable<(int, int, int)> tiles) {
+    for (final t in tiles) {
+      _activeTripTiles.add(nameOf(t.$1, t.$2, t.$3));
+    }
+  }
+
+  /// Clears active trip tile pins (e.g. when a trip concludes).
+  void clearActiveTripTiles() {
+    _activeTripTiles.clear();
+  }
+
+  /// Checks if a tile is currently pinned as part of the active trip.
+  bool isActiveTripTile(int z, int x, int y) => _activeTripTiles.contains(nameOf(z, x, y));
 
   /// Set once by main.dart after [open]; null means maps use the plain network provider.
   static TileCache? instance;
+
+  /// Long-lived HTTP client shared across tile requests to avoid connection thrashing.
+  static final http.Client sharedHttpClient = http.Client();
 
   final Directory dir;
   final int Function() _clock;
@@ -36,11 +78,11 @@ class TileCache {
 
   /// Opens (creates) the folder, indexes what is there and prunes. Null when the
   /// folder cannot be used; the caller then leaves [instance] null.
-  static Future<TileCache?> open(String dir, {int Function()? clock, bool syncScan = true}) async {
+  static Future<TileCache?> open(String dir, {int Function()? clock, bool syncScan = true, int? maxBytesBudget}) async {
     try {
       final d = Directory(dir);
       await d.create(recursive: true);
-      final c = TileCache._(d, clock ?? _wallClock);
+      final c = TileCache._(d, clock ?? _wallClock, maxBytesBudget: maxBytesBudget);
       if (syncScan) {
         await c._scan();
         await c.prune();
@@ -83,9 +125,11 @@ class TileCache {
   int get count => _index.length;
 
   /// Deletes a set of specific tiles from disk and the memory index.
-  Future<void> deleteTiles(Iterable<(int, int, int)> tiles) async {
+  Future<void> deleteTiles(Iterable<(int, int, int)> tiles, {bool force = false}) async {
     for (final t in tiles) {
-      await _delete(nameOf(t.$1, t.$2, t.$3));
+      final name = nameOf(t.$1, t.$2, t.$3);
+      if (!force && _activeTripTiles.contains(name)) continue;
+      await _delete(name);
     }
   }
 
@@ -115,27 +159,34 @@ class TileCache {
       final now = _clock();
       _index[name] = _TileEntry(size: bytes.length, storedAt: now, usedAt: now);
       _bytes += bytes.length;
-      if (_bytes > SafetyConstants.tileCacheMaxBytes + SafetyConstants.tileCacheMaxBytes ~/ 10) prune().ignore();
+      if (_bytes > maxBytesBudget + maxBytesBudget ~/ 10) prune(maxBytes: maxBytesBudget).ignore();
     } catch (e) {
       debugPrint('tile store note: ${e.runtimeType}');
     }
   }
 
   /// Drops tiles older than [maxAgeDays], then the least recently used until under [maxBytes].
-  Future<void> prune({int maxBytes = SafetyConstants.tileCacheMaxBytes, int maxAgeDays = SafetyConstants.tileMaxAgeDays}) async {
+  /// Active trip tiles pinned in [_activeTripTiles] are NEVER pruned.
+  Future<void> prune({int? maxBytes, int maxAgeDays = SafetyConstants.tileMaxAgeDays}) async {
     if (_pruning) return;
     _pruning = true;
     try {
+      final effectiveMaxBytes = maxBytes ?? maxBytesBudget;
       final now = _clock();
       final doomed = <String>[];
       _index.forEach((name, e) {
+        // Active trip tiles are never pruned regardless of age
+        if (_activeTripTiles.contains(name)) return;
         if (now - e.storedAt > maxAgeDays * 86400000) doomed.add(name);
       });
-      if (_bytes - _sizeOf(doomed) > maxBytes) {
-        final rest = _index.keys.where((n) => !doomed.contains(n)).toList()..sort((a, b) => _index[a]!.usedAt.compareTo(_index[b]!.usedAt));
+      if (_bytes - _sizeOf(doomed) > effectiveMaxBytes) {
+        final rest = _index.keys
+            .where((n) => !_activeTripTiles.contains(n) && !doomed.contains(n))
+            .toList()
+          ..sort((a, b) => _index[a]!.usedAt.compareTo(_index[b]!.usedAt));
         var bytes = _bytes - _sizeOf(doomed);
         for (final n in rest) {
-          if (bytes <= maxBytes) break;
+          if (bytes <= effectiveMaxBytes) break;
           doomed.add(n);
           bytes -= _index[n]!.size;
         }
@@ -186,8 +237,8 @@ class _TileEntry {
 class CachedTileProvider extends TileProvider {
   CachedTileProvider({TileCache? cache, http.Client? client, this.offlineOnly = false})
       : _cache = cache ?? TileCache.instance,
-        _client = client ?? http.Client(),
-        _ownsClient = client == null,
+        _client = client ?? TileCache.sharedHttpClient,
+        _ownsClient = client != null && client != TileCache.sharedHttpClient,
         super(headers: {'User-Agent': AppConstants.osmUserAgent});
 
   final TileCache? _cache;
@@ -237,7 +288,7 @@ class CachedTileImage extends ImageProvider<CachedTileImage> {
   final Map<String, String> headers;
   final bool offlineOnly;
 
-  static final Uint8List _transparentPng = base64Decode(
+  static final Uint8List transparentPngBytes = base64Decode(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
   );
 
@@ -259,15 +310,31 @@ class CachedTileImage extends ImageProvider<CachedTileImage> {
       }
     }
     if (offlineOnly) {
-      return await decode(await ui.ImmutableBuffer.fromUint8List(_transparentPng));
+      return await decode(await ui.ImmutableBuffer.fromUint8List(transparentPngBytes));
     }
-    final uri = Uri.parse(url);
-    final res = await client.get(uri, headers: headers).timeout(SafetyConstants.prefetchTimeout);
-    if (res.statusCode != 200 || res.bodyBytes.isEmpty) {
-      throw NetworkImageLoadException(statusCode: res.statusCode, uri: uri);
+    try {
+      final uri = Uri.parse(url);
+      final res = await client.get(uri, headers: headers).timeout(SafetyConstants.prefetchTimeout);
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        cache?.store(z, x, y, res.bodyBytes).ignore();
+        return await decode(await ui.ImmutableBuffer.fromUint8List(res.bodyBytes));
+      }
+    } catch (_) {}
+
+    // Fallback: Check if lower-resolution parent tile is in cache to prevent blank flashing
+    if (cache != null && z > 1) {
+      final parentTile = cache!.lookup(z - 1, x >> 1, y >> 1);
+      if (parentTile != null) {
+        try {
+          final parentBytes = await parentTile.readAsBytes();
+          if (parentBytes.isNotEmpty) {
+            return await decode(await ui.ImmutableBuffer.fromUint8List(parentBytes));
+          }
+        } catch (_) {}
+      }
     }
-    cache?.store(z, x, y, res.bodyBytes).ignore();
-    return decode(await ui.ImmutableBuffer.fromUint8List(res.bodyBytes));
+
+    return decode(await ui.ImmutableBuffer.fromUint8List(transparentPngBytes));
   }
 
   @override
@@ -286,7 +353,9 @@ class TilePrefetcher extends ChangeNotifier {
   TilePrefetcher(this._cache, {http.Client? client, int Function()? clock, Duration? spacing})
       : _client = client ?? http.Client(),
         _clock = clock ?? TileCache._wallClock,
-        _spacing = spacing ?? SafetyConstants.prefetchSpacing;
+        _spacing = spacing ?? SafetyConstants.prefetchSpacing {
+    TileCacheService.registerWorker(this);
+  }
 
   final TileCache? _cache;
   final http.Client _client;
@@ -295,6 +364,8 @@ class TilePrefetcher extends ChangeNotifier {
 
   bool _running = false;
   bool _cancel = false;
+  bool _paused = false;
+  bool _lowBattery = false;
   int _done = 0;
   int _total = 0;
   int _saved = 0;
@@ -307,6 +378,45 @@ class TilePrefetcher extends ChangeNotifier {
   bool get running => _running;
   int get done => _done;
   int get total => _total;
+
+  /// Whether prefetching is paused due to low battery or manual request.
+  bool get isPaused => _paused;
+
+  /// Whether low battery (< 20%) is detected and active.
+  bool get isLowBattery => _lowBattery;
+
+  /// Pauses active and background prefetching.
+  void pause({String reason = 'paused'}) {
+    _paused = true;
+    _error = reason;
+    if (_running) {
+      _cancel = true;
+    }
+    notifyListeners();
+  }
+
+  /// Resumes prefetching when normal power conditions return.
+  void resume() {
+    if (!_paused && !_lowBattery) return;
+    _paused = false;
+    _lowBattery = false;
+    if (_error == 'low_battery' || _error == 'paused') {
+      _error = null;
+    }
+    notifyListeners();
+  }
+
+  /// Handles low battery state transitions (< 20%):
+  /// Pauses nonessential tile prefetching when battery is critical.
+  void handleLowBattery(bool lowBattery) {
+    if (_lowBattery == lowBattery) return;
+    _lowBattery = lowBattery;
+    if (lowBattery) {
+      pause(reason: 'low_battery');
+    } else {
+      resume();
+    }
+  }
 
   /// Tiles downloaded in the last job (the rest were already saved).
   int get saved => _saved;
@@ -326,13 +436,6 @@ class TilePrefetcher extends ChangeNotifier {
 
   /// Default lateral corridor buffering radius (2.5 km Minkowski corridor).
   static const double corridorLateralRadiusM = SafetyConstants.prefetchCorridorRadiusM;
-
-  /// Intermediate zoom levels ensuring no blank tiles when riders zoom at speed:
-  /// Covers zoom 11 (wide regional overview) up to 16 (street/trail detail).
-  static const List<int> corridorZooms = SafetyConstants.prefetchZooms;
-
-  /// High-detail corridor zooms including junction level (17).
-  static const List<int> corridorZoomsHighDetail = SafetyConstants.prefetchZoomsHighDetail;
 
   /// Hook for future Play Store / App Store IAP feature entitlements.
   /// Currently unlocked for all riders by default via [FeatureGates.isUnlocked].
@@ -382,6 +485,131 @@ class TilePrefetcher extends ChangeNotifier {
     final latR = lat.clamp(-85.05112878, 85.05112878) * math.pi / 180;
     final y = ((1 - math.log(math.tan(latR) + 1 / math.cos(latR)) / math.pi) / 2 * n).floor();
     return (x.clamp(0, n - 1).toInt(), y.clamp(0, n - 1).toInt());
+  }
+
+  /// Returns all tiles covering a circular lateral radius of [radiusM] around [lat, lng]
+  /// for the specified [zooms] (defaults to [SafetyConstants.prefetchZooms]).
+  static Set<(int, int, int)> tilesAroundPoint(
+    double lat,
+    double lng, {
+    List<int>? zooms,
+    double radiusM = corridorLateralRadiusM,
+  }) {
+    final effectiveZooms = zooms ?? SafetyConstants.prefetchZooms;
+    final out = <(int, int, int)>{};
+    final latRad = lat.clamp(-85.05112878, 85.05112878) * math.pi / 180;
+    final cosLat = math.cos(latRad).abs();
+
+    for (final z in effectiveZooms) {
+      final t = tileOf(lat, lng, z);
+      final n = 1 << z;
+      out.add((z, t.$1, t.$2));
+
+      // Conformal Web Mercator ground resolution at latitude (meters per tile):
+      final metersPerTile = (40075016.686 * cosLat) / n;
+      final radiusTiles = radiusM / metersPerTile;
+      final r = math.max(1, radiusTiles.ceil());
+      final maxDistM = radiusM + metersPerTile * 0.5;
+      final maxDistSq = maxDistM * maxDistM;
+      final mptSq = metersPerTile * metersPerTile;
+
+      for (var dx = -r; dx <= r; dx++) {
+        for (var dy = -r; dy <= r; dy++) {
+          if (dx == 0 && dy == 0) continue;
+          final distSq = (dx * dx + dy * dy) * mptSq;
+          if (distSq <= maxDistSq) {
+            final x = t.$1 + dx;
+            final y = t.$2 + dy;
+            if (x >= 0 && y >= 0 && x < n && y < n) {
+              out.add((z, x, y));
+            }
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  /// Automatically computes the complete offline map tile footprint required for an active ride:
+  /// 1. Active route corridor (2.5 km lateral corridor)
+  /// 2. Rider current location (2.5 km lateral buffer)
+  /// 3. Planned stops (2.5 km buffer around each)
+  /// 4. Destination (2.5 km buffer)
+  /// 5. Nearby group members / convoy riders (2.5 km buffer around each)
+  static Set<(int, int, int)> tilesForActiveRide({
+    required List<(double, double)> routeLine,
+    (double, double)? riderLocation,
+    List<(double, double)> stops = const [],
+    (double, double)? destination,
+    List<(double, double)> groupMembers = const [],
+    List<int>? zooms,
+    double corridorRadiusM = corridorLateralRadiusM,
+    bool highDetail = false,
+    int? maxTiles,
+  }) {
+    final effectiveZooms = zooms ??
+        (highDetail
+            ? SafetyConstants.prefetchZoomsHighDetail
+            : SafetyConstants.prefetchZooms);
+
+    final out = <(int, int, int)>{};
+
+    // 1. Active route corridor (2.5 km lateral buffer)
+    if (routeLine.isNotEmpty) {
+      out.addAll(tilesAlong(
+        routeLine,
+        zooms: effectiveZooms,
+        corridorRadiusM: corridorRadiusM,
+        highDetail: highDetail,
+        maxTiles: maxTiles,
+      ));
+    }
+
+    // 2. Rider current location (2.5 km buffer)
+    if (riderLocation != null && riderLocation.$1 != 0.0 && riderLocation.$2 != 0.0) {
+      out.addAll(tilesAroundPoint(
+        riderLocation.$1,
+        riderLocation.$2,
+        zooms: effectiveZooms,
+        radiusM: corridorRadiusM,
+      ));
+    }
+
+    // 3. Planned stops (2.5 km buffer)
+    for (final s in stops) {
+      if (s.$1 != 0.0 && s.$2 != 0.0) {
+        out.addAll(tilesAroundPoint(
+          s.$1,
+          s.$2,
+          zooms: effectiveZooms,
+          radiusM: corridorRadiusM,
+        ));
+      }
+    }
+
+    // 4. Destination (2.5 km buffer)
+    if (destination != null && destination.$1 != 0.0 && destination.$2 != 0.0) {
+      out.addAll(tilesAroundPoint(
+        destination.$1,
+        destination.$2,
+        zooms: effectiveZooms,
+        radiusM: corridorRadiusM,
+      ));
+    }
+
+    // 5. Nearby group members (2.5 km buffer)
+    for (final m in groupMembers) {
+      if (m.$1 != 0.0 && m.$2 != 0.0) {
+        out.addAll(tilesAroundPoint(
+          m.$1,
+          m.$2,
+          zooms: effectiveZooms,
+          radiusM: corridorRadiusM,
+        ));
+      }
+    }
+
+    return out;
   }
 
   /// The tiles to save: 2.5 km lateral corridor buffering along [line] for offline prefetching.
@@ -471,6 +699,89 @@ class TilePrefetcher extends ChangeNotifier {
     return list.toSet();
   }
 
+  /// Asynchronously computes tiles along route with periodic event loop yields
+  /// to ensure the Flutter UI thread is NEVER blocked on dense routes.
+  static Future<Set<(int, int, int)>> tilesAlongAsync(
+    List<(double, double)> line, {
+    List<int>? zooms,
+    int? maxTiles,
+    bool highDetail = false,
+    double corridorRadiusM = corridorLateralRadiusM,
+  }) async {
+    if (line.isEmpty) return <(int, int, int)>{};
+    if (line.length <= 300) {
+      return tilesAlong(line, zooms: zooms, maxTiles: maxTiles, highDetail: highDetail, corridorRadiusM: corridorRadiusM);
+    }
+
+    final inputLine = line.length > 1500 ? GeoMath.simplify(line, toleranceM: 25.0) : line;
+    final samples = _sample(inputLine, SafetyConstants.prefetchSampleM);
+    final effectiveZooms = zooms ??
+        (highDetail ? SafetyConstants.prefetchZoomsHighDetail : SafetyConstants.prefetchZooms);
+    final isUnlimited = FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks);
+    final defaultMax = isUnlimited
+        ? (highDetail ? SafetyConstants.prefetchMaxTilesHighDetail : SafetyConstants.prefetchMaxTiles)
+        : (highDetail ? SafetyConstants.prefetchMaxTiles : SafetyConstants.prefetchMaxTilesCommunity);
+    final effectiveMaxTiles = maxTiles ?? defaultMax;
+
+    final out = <(int, int, int)>{};
+
+    for (var i = 0; i < samples.length; i++) {
+      if (i > 0 && i % 150 == 0) {
+        // Yield to UI event loop to preserve 60 fps rendering
+        await Future<void>.delayed(Duration.zero);
+      }
+      final p = samples[i];
+      final isKeyPoint = i == 0 || i == samples.length - 1 || (i % 5 == 0);
+      final latRad = p.$1.clamp(-85.05112878, 85.05112878) * math.pi / 180;
+      final cosLat = math.cos(latRad).abs();
+
+      for (final z in effectiveZooms) {
+        final t = tileOf(p.$1, p.$2, z);
+        final n = 1 << z;
+        out.add((z, t.$1, t.$2));
+
+        final metersPerTile = (40075016.686 * cosLat) / n;
+        final radiusTiles = corridorRadiusM / metersPerTile;
+        final r = math.max(1, radiusTiles.ceil());
+        final maxDistM = corridorRadiusM + metersPerTile * 0.5;
+        final maxDistSq = maxDistM * maxDistM;
+        final mptSq = metersPerTile * metersPerTile;
+
+        if (z == 17 && !isKeyPoint) continue;
+
+        for (var dx = -r; dx <= r; dx++) {
+          for (var dy = -r; dy <= r; dy++) {
+            if (dx == 0 && dy == 0) continue;
+            final distSq = (dx * dx + dy * dy) * mptSq;
+            if (distSq <= maxDistSq) {
+              final x = t.$1 + dx;
+              final y = t.$2 + dy;
+              if (x >= 0 && y >= 0 && x < n && y < n) {
+                out.add((z, x, y));
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (out.length <= effectiveMaxTiles) return out;
+
+    final list = out.toList();
+    final detailZooms = effectiveZooms.where((z) => z >= 14).toList()
+      ..sort((a, b) => b.compareTo(a));
+
+    for (final dz in detailZooms) {
+      for (var i = list.length - 1; i >= 0 && list.length > effectiveMaxTiles; i--) {
+        if (list[i].$1 == dz) list.removeAt(i);
+      }
+    }
+    while (list.length > effectiveMaxTiles) {
+      list.removeLast();
+    }
+    return list.toSet();
+  }
+
   static List<(double, double)> _sample(List<(double, double)> line, double everyM) {
     final out = <(double, double)>[line.first];
     var carry = 0.0;
@@ -498,6 +809,12 @@ class TilePrefetcher extends ChangeNotifier {
     bool highDetail = false,
   }) async {
     if (_running) return;
+    if (_paused || _lowBattery) {
+      _error = _lowBattery ? 'low_battery' : 'paused';
+      _finishedAt = _clock();
+      notifyListeners();
+      return;
+    }
 
     // Check future IAP entitlement hook via FeatureGates
     if (!FeatureGates.isUnlocked(Feature.unlimitedOfflinePacks)) {
@@ -521,6 +838,9 @@ class TilePrefetcher extends ChangeNotifier {
     final tiles = cache == null
         ? const <(int, int, int)>[]
         : tilesAlong(line, highDetail: highDetail).toList();
+    if (cache != null && tiles.isNotEmpty) {
+      cache.registerActiveTripTiles(tiles);
+    }
     _total = tiles.length;
     if (cache == null || tiles.isEmpty) {
       _finishedAt = _clock();
@@ -533,7 +853,7 @@ class TilePrefetcher extends ChangeNotifier {
     final pending = <Future<void>>{};
     try {
       for (final t in tiles) {
-        if (_cancel || consecutive >= SafetyConstants.prefetchMaxFailures) break;
+        if (_cancel || _paused || _lowBattery || consecutive >= SafetyConstants.prefetchMaxFailures) break;
         if (cache.lookup(t.$1, t.$2, t.$3) != null) {
           _done++;
           _maybeNotify();
@@ -583,6 +903,164 @@ class TilePrefetcher extends ChangeNotifier {
     }
   }
 
+  /// Automatically prepares map tiles around rider location, active route corridor (2.5 km),
+  /// stops, destination, and nearby group members in a low-priority background process
+  /// without manual download screens during normal riding.
+  /// Tiles are registered in [TileCache] as active trip tiles so they are NEVER deleted by LRU pruning.
+  Future<void> prepareActiveRide({
+    required List<(double, double)> routeLine,
+    (double, double)? riderLocation,
+    List<(double, double)> stops = const [],
+    (double, double)? destination,
+    List<(double, double)> groupMembers = const [],
+    required String label,
+    bool highDetail = false,
+    Duration spacing = const Duration(milliseconds: 150),
+  }) async {
+    final cache = _cache;
+    if (cache == null) return;
+
+    final allTiles = tilesForActiveRide(
+      routeLine: routeLine,
+      riderLocation: riderLocation,
+      stops: stops,
+      destination: destination,
+      groupMembers: groupMembers,
+      highDetail: highDetail,
+    );
+
+    // Register tiles as active trip tiles immediately to protect them from pruning
+    cache.registerActiveTripTiles(allTiles);
+
+    if (_running || _paused || _lowBattery) {
+      // Background worker already running or low battery pauses nonessential prefetching
+      return;
+    }
+
+    final uncached = allTiles.where((t) => cache.lookup(t.$1, t.$2, t.$3) == null).toList();
+    if (uncached.isEmpty) {
+      return;
+    }
+
+    _running = true;
+    _label = label;
+    _cancel = false;
+    _total = uncached.length;
+    _done = 0;
+    _saved = 0;
+    _failed = 0;
+    _error = null;
+    notifyListeners();
+
+    var consecutive = 0;
+    final pending = <Future<void>>{};
+
+    try {
+      for (final t in uncached) {
+        if (_cancel || _paused || _lowBattery || consecutive >= SafetyConstants.prefetchMaxFailures) break;
+        if (cache.lookup(t.$1, t.$2, t.$3) != null) {
+          _done++;
+          continue;
+        }
+
+        while (pending.length >= SafetyConstants.prefetchParallel) {
+          await Future.any(pending.toList());
+        }
+
+        late Future<void> f;
+        f = _fetch(cache, t).then((ok) {
+          if (ok) {
+            consecutive = 0;
+            _saved++;
+          } else {
+            consecutive++;
+            _failed++;
+          }
+          _done++;
+          pending.remove(f);
+          _maybeNotify();
+        });
+        pending.add(f);
+
+        if (spacing > Duration.zero) {
+          await Future<void>.delayed(spacing);
+        }
+      }
+
+      if (pending.isNotEmpty) {
+        await Future.wait(pending.toList());
+      }
+      if (consecutive >= SafetyConstants.prefetchMaxFailures) {
+        _error = 'network';
+      }
+    } catch (_) {
+      // Quiet background failure
+    } finally {
+      _running = false;
+      _finishedAt = _clock();
+      cache.prune(maxBytes: cache.maxBytesBudget).ignore();
+      notifyListeners();
+    }
+  }
+
+  /// Seamless invisible background route corridor tile prefetch (FEAT-MAP-01).
+  /// Runs automatically after trip creation without blocking the UI or requiring
+  /// separate manual download screens.
+  /// Respects battery (< 20%) and network conditions.
+  Future<void> prefetchCorridorBackground({
+    required List<(double, double)> routeLine,
+    required String label,
+    (double, double)? riderLocation,
+    List<(double, double)> stops = const [],
+    (double, double)? destination,
+    bool highDetail = false,
+  }) async {
+    // Check battery level (< 20%) before starting background prefetch
+    try {
+      final battery = Battery();
+      final level = await battery.batteryLevel;
+      if (level < 20) {
+        handleLowBattery(true);
+        return;
+      }
+    } catch (_) {}
+
+    await prepareActiveRide(
+      routeLine: routeLine,
+      riderLocation: riderLocation,
+      stops: stops,
+      destination: destination,
+      label: label,
+      highDetail: highDetail,
+    );
+  }
+
+  /// Checks whether all tiles for the active ride are already in the local cache.
+  bool isRidePrepared({
+    required List<(double, double)> routeLine,
+    (double, double)? riderLocation,
+    List<(double, double)> stops = const [],
+    (double, double)? destination,
+    List<(double, double)> groupMembers = const [],
+    bool highDetail = false,
+  }) {
+    final cache = _cache;
+    if (cache == null) return false;
+    final tiles = tilesForActiveRide(
+      routeLine: routeLine,
+      riderLocation: riderLocation,
+      stops: stops,
+      destination: destination,
+      groupMembers: groupMembers,
+      highDetail: highDetail,
+    );
+    if (tiles.isEmpty) return false;
+    for (final t in tiles) {
+      if (cache.lookup(t.$1, t.$2, t.$3) == null) return false;
+    }
+    return true;
+  }
+
   Future<bool> _fetch(TileCache cache, (int, int, int) t) async {
     final url = AppConstants.osmTileUrl.replaceAll('{z}', '${t.$1}').replaceAll('{x}', '${t.$2}').replaceAll('{y}', '${t.$3}');
     try {
@@ -613,5 +1091,18 @@ class TilePrefetcher extends ChangeNotifier {
     _cancel = true;
     _client.close();
     super.dispose();
+  }
+}
+
+/// Convenient global handle to the prefetch worker for background operations (FEAT-MAP-01).
+class TileCacheService {
+  TileCacheService._();
+  static TilePrefetcher? _worker;
+  static TilePrefetcher? get prefetchWorker =>
+      _worker ??
+      (TileCache.instance != null ? (_worker = TilePrefetcher(TileCache.instance)) : null);
+
+  static void registerWorker(TilePrefetcher worker) {
+    _worker = worker;
   }
 }

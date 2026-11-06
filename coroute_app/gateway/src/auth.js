@@ -44,6 +44,20 @@ function checkProfileComplete(u) {
   return Boolean(hasName && hasEmail && hasPhone && hasVehicle && hasIce);
 }
 
+/**
+ * Older guest accounts were stored with placeholder numbers (phone 9999999999, emergency contact
+ * 112112112) so they passed the profile check. Those are not anyone's real contact: an SOS must
+ * never text or show them. Returns the stored number, or '' for a guest placeholder.
+ */
+const GUEST_PLACEHOLDER_NUMBERS = new Set(['9999999999', '112112112']);
+function realContactNumber(u, field) {
+  const v = String((u && u[field]) || '').trim();
+  if (!v) return '';
+  const isGuest = u.provider === 'guest' || String(u.email || '').endsWith('@guest.coroute.local');
+  if (isGuest && GUEST_PLACEHOLDER_NUMBERS.has(v.replace(/[^0-9]/g, ''))) return '';
+  return v;
+}
+
 function publicUser(u) {
   const pillion = isPillionUser(u);
   return {
@@ -90,6 +104,8 @@ function selfUser(u) {
     // Effective state: a paid tier past its validUntil reads as community here even before the
     // sweeper rolled the document back. Shape: { tier, validUntil, isActive, isExpired, daysRemaining, expiringSoon, previousTier }.
     subscriptionStatus: effectiveSubscription(u),
+    // Lets the app tell a guest session apart (guest ids are ordinary usr_ ids).
+    isGuest: u.provider === 'guest',
   };
 }
 
@@ -103,13 +119,15 @@ function signToken(user) {
     // pv: the password version this token was issued for; a later password change ends it.
     { sub: user.userId, name: user.name, role: user.role, email: user.email, pv: Number(user.passwordChangedAt) || 0 },
     config.jwtSecret,
-    { expiresIn: `${config.jwtTtlDays}d`, issuer: 'coroute-gateway' },
+    { expiresIn: `${config.jwtTtlDays}d`, issuer: 'coroute-gateway', algorithm: 'HS256' },
   );
 }
 
 function verifyToken(token) {
   try {
-    return jwt.verify(token, config.jwtSecret, { issuer: 'coroute-gateway' });
+    // Algorithm pinned: a token signed any other way (none, RS/HS confusion) is never accepted.
+    if (typeof token !== 'string' || token.length > 4096) return null;
+    return jwt.verify(token, config.jwtSecret, { issuer: 'coroute-gateway', algorithms: ['HS256'] });
   } catch {
     return null;
   }
@@ -201,9 +219,12 @@ function identityOf(user) {
 
 class AuthService {
   /** @param {import('./oracle/repo').Repo} repo */
-  constructor(repo, { googleVerifier, gate = null } = {}) {
+  constructor(repo, { googleVerifier, gate = null, bcryptCost = config.bcryptCost } = {}) {
     this.repo = repo;
     this.gate = gate;
+    /** bcrypt work factor for every new hash; a stored hash below it is re-hashed at sign-in. */
+    this.bcryptCost = bcryptCost;
+    this._dummyHash = null;
     /** (user, changedKeys) => void: set by app.js so a live ride hears about phone / opt-out changes. */
     this.onProfileChanged = null;
     /** async (user) => user|null: set by app.js; rolls an expired paid tier back on login and /me. */
@@ -212,6 +233,11 @@ class AuthService {
   }
 
   _invalidate(userId) { if (this.gate) this.gate.invalidate(userId); }
+
+  /** True when a stored bcrypt hash uses fewer rounds than this.bcryptCost (or cannot be read). */
+  _needsRehash(hash) {
+    try { return bcrypt.getRounds(hash) < this.bcryptCost; } catch { return true; }
+  }
 
   async _uniqueUserId(name) {
     const base = `usr_${slug(name)}`;
@@ -249,7 +275,7 @@ class AuthService {
       userId: await this._uniqueUserId(clean.name),
       name: clean.name,
       email: clean.email,
-      passwordHash: await bcrypt.hash(password, 10),
+      passwordHash: await bcrypt.hash(password, this.bcryptCost),
       role: bootstrapRoleFor(clean.email),
       provider: 'password',
       phone: clean.phone,
@@ -267,13 +293,18 @@ class AuthService {
     const id = typeof identifier === 'string' ? identifier.trim() : '';
     if (!id || !password || typeof password !== 'string') throw new AuthError('Email/callsign and password are required.');
     const user = id.includes('@') ? await this.repo.findUserByEmail(id) : await this.repo.findUserByName(id);
-    // Constant-ish time: always run a compare.
-    const ok = user?.passwordHash ? await bcrypt.compare(password, user.passwordHash) : (await bcrypt.compare(password, '$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012345'), false);
+    // Constant-ish time: always run a compare (against a dummy hash of the same cost for unknown users).
+    if (!user?.passwordHash && !this._dummyHash) this._dummyHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), this.bcryptCost);
+    const ok = user?.passwordHash ? await bcrypt.compare(password, user.passwordHash) : (await bcrypt.compare(password, this._dummyHash), false);
     if (!user || !ok) throw new AuthError('Invalid credentials.', 401);
     if (user.status === 'ON_HOLD') throw new AuthError(MSG_ON_HOLD, 403, 'ACCOUNT_ON_HOLD');
     if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
     const role = bootstrapRoleFor(user.email, user.role);
-    const updated = await this._seen(await this.repo.updateUser(user.key, { lastLoginAt: Date.now(), role }) || user);
+    const patch = { lastLoginAt: Date.now(), role };
+    // Transparent upgrade: a hash made with a lower work factor is replaced now that we know the
+    // password. passwordChangedAt is not touched, so no session ends.
+    if (this._needsRehash(user.passwordHash)) patch.passwordHash = await bcrypt.hash(password, this.bcryptCost);
+    const updated = await this._seen(await this.repo.updateUser(user.key, patch) || user);
     return { token: signToken(updated), user: selfUser(updated) };
   }
 
@@ -313,7 +344,8 @@ class AuthService {
 
   async loginAsGuest({ name, vehicleNo } = {}) {
     const guestNum = Math.floor(1000 + Math.random() * 9000);
-    const cleanName = (name || `Guest_${guestNum}`).trim().slice(0, 24);
+    // Any JSON type may arrive here: a non-string name used to throw (500) instead of falling back.
+    const cleanName = (typeof name === 'string' ? name : '').replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, 24) || `Guest_${guestNum}`;
     const email = `guest_${Date.now()}_${guestNum}@guest.coroute.local`;
     const user = await this.repo.createUser({
       userId: await this._uniqueUserId(cleanName),
@@ -321,11 +353,12 @@ class AuthService {
       email,
       role: ROLE_RIDER,
       provider: 'guest',
-      phone: '9999999999',
+      // No made-up numbers: an SOS must never text a placeholder (guests are exempt from the profile check).
+      phone: '',
       vehicleType: 'Motorcycle (Guest)',
-      vehicleNo: vehicleNo || 'GUEST',
-      emergencyContact: '112112112',
-      emergencyContactName: 'Emergency Services',
+      vehicleNo: typeof vehicleNo === 'string' && vehicleNo.trim() ? vehicleNo.trim().slice(0, 20) : 'GUEST',
+      emergencyContact: '',
+      emergencyContactName: '',
       createdAt: Date.now(),
       lastLoginAt: Date.now(),
     });
@@ -343,7 +376,7 @@ class AuthService {
     }
     // Bumping passwordChangedAt ends every other session; this device gets a fresh token.
     const changedAt = Math.max(Date.now(), (Number(user.passwordChangedAt) || 0) + 1);
-    const updated = await this.repo.updateUser(user.key, { passwordHash: await bcrypt.hash(newPassword, 10), mustChangePassword: false, passwordChangedAt: changedAt });
+    const updated = await this.repo.updateUser(user.key, { passwordHash: await bcrypt.hash(newPassword, this.bcryptCost), mustChangePassword: false, passwordChangedAt: changedAt });
     this._invalidate(userId);
     return { ok: true, token: signToken(updated || { ...user, passwordChangedAt: changedAt }) };
   }
@@ -354,7 +387,7 @@ class AuthService {
     if (!target) throw new AuthError('User not found.', 404);
     const temp = crypto.randomBytes(9).toString('base64url').replace(/[-_]/g, 'x').slice(0, 12);
     await this.repo.updateUser(target.key, {
-      passwordHash: await bcrypt.hash(temp, 10), mustChangePassword: true, passwordResetBy: actor.userId, passwordResetAt: Date.now(),
+      passwordHash: await bcrypt.hash(temp, this.bcryptCost), mustChangePassword: true, passwordResetBy: actor.userId, passwordResetAt: Date.now(),
       passwordChangedAt: Math.max(Date.now(), (Number(target.passwordChangedAt) || 0) + 1),
     });
     this._invalidate(target.userId);
@@ -558,4 +591,4 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { ROSTER_KEYS, ASSIST_KEYS, AuthService, AuthError, UserGate, identityOf, requireAuth, requireAdmin, signToken, verifyToken, publicUser, selfUser, ROLE_ADMIN, ROLE_RIDER, slug };
+module.exports = { realContactNumber, ROSTER_KEYS, ASSIST_KEYS, AuthService, AuthError, UserGate, identityOf, requireAuth, requireAdmin, signToken, verifyToken, publicUser, selfUser, ROLE_ADMIN, ROLE_RIDER, slug };

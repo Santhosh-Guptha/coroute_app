@@ -18,16 +18,19 @@ const { ACTIVE_STATUSES } = require('./oracle/repo');
 const { haversine, encodePolyline, decodePolyline, pointToSegment } = require('./geo_math');
 const { scrub, scrubConvoyMeta, mentions } = require('./anonymise');
 const { validPhone, roleOf } = require('./validate');
+const { realContactNumber } = require('./auth');
 
 const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'MEETING', 'SCENIC', 'TOLL', 'OTHER', 'HOSPITAL', 'REPAIR', 'STAY', 'PHARMACY', 'TYRE', 'WASHROOM', 'ATM', 'POLICE', 'PARKING']);
 /** The chat card posted when a rider asks the group to wait (plain text, no emoji). */
 const WAIT_MESSAGE = 'Asked the group for a 2 minute stop. Please regroup safely.';
 const MAX_STOPS = 20;
-/** SOS kinds the app knows; any other A-Z_ word is kept as sent, anything else becomes EMERGENCY. */
-const SOS_TYPES = ['EMERGENCY', 'CRASH_OR_EMERGENCY', 'CRASH', 'MEDICAL', 'MECHANICAL', 'POLICE'];
 const RESPONSE_KINDS = new Set(['GOING', 'WITH_THEM', 'CANCEL']);
 const PRESENCE = new Set(['ONLINE', 'NO_SIGNAL', 'APP_CLOSED']);
 const LIVE_STATUSES = ['STARTED', 'PAUSED'];
+/** Alert storm guard: once a rider has SOS_STORM_MAX open alerts of one kind raised within SOS_DEDUPE_MS,
+ * further presses (any clientId, any socket) are answered as duplicates of the latest one. */
+const SOS_DEDUPE_MS = (() => { const n = parseInt(process.env.SOS_DEDUPE_MS || '', 10); return Number.isFinite(n) && n >= 0 ? n : 60000; })();
+const SOS_STORM_MAX = 2;
 
 // ---- EmergencyEvent (3.15): the SOS alert doc, extended ----
 const EMERGENCY_OPEN = ['CONFIRMED_ACCIDENT', 'ASSISTANCE_REQUESTED', 'RESPONDER_ASSIGNED', 'ASSISTANCE_ARRIVED'];
@@ -62,7 +65,6 @@ function severityOf(alertType, source) {
   if (source === 'CRASH_AUTO') return 'CRITICAL';
   return HIGH_TYPES.has(alertType) ? 'HIGH' : 'LOW';
 }
-function isOpenStatus(st) { return EMERGENCY_OPEN.includes(st); }
 
 class ConvoyError extends Error {
   /** reason: machine-readable cause. The app leaves a convoy only for NOT_MEMBER / CONVOY_GONE, never for other errors. */
@@ -75,8 +77,6 @@ class ConvoyError extends Error {
  * co-riding are set by server code paths only, the profile comes from the users table.
  */
 const TELEMETRY_FIELDS = ['lat', 'lng', 'speedKmh', 'heading', 'batteryLevel', 'isCharging', 'statusReason', 'statusMessage', 'stoppedSince', 'fuelEstimate', 'micMuted', 'isSpeaking'];
-/** Extra fields only trusted server code may set (CORIDER handler). */
-const TRUSTED_FIELDS = ['isCoRiding', 'ridingWithUserId'];
 
 const shortId = (n = 4) => crypto.randomBytes(n).toString('hex').toUpperCase();
 const now = () => Date.now();
@@ -134,6 +134,9 @@ class ConvoyManager extends EventEmitter {
       persistTimer: null,
       regroup: meta.activeRegroup || null,
     };
+    // An ended ride is read-only history: answered from this copy, never kept among the live rooms
+    // (a late JOIN, status call or telemetry for it must not pin it in memory or revive its timers).
+    if (meta.tripStatus === 'ENDED') return room;
     this.rooms.set(groupId, room);
     // 3.16: live link index from the open alerts (the token itself is never stored, only its hash).
     for (const a of room.alerts.values()) {
@@ -214,13 +217,32 @@ class ConvoyManager extends EventEmitter {
   }
 
   // ------------------------------------------------------------ lifecycle
+  /**
+   * The rider's single-active-trip lock, or null when it is stale: its convoy ended, was
+   * dissolved by an admin or no longer exists (a crash between the end and the lock release,
+   * older builds). A stale lock is released, so it can never keep a rider off every ride.
+   * When the convoy cannot be read (database trouble) the lock is kept: fail safe.
+   */
+  async _activeLock(userId) {
+    const lock = await this.repo.getActiveTrip(userId);
+    if (!lock || !lock.groupId) return lock;
+    const live = this.rooms.get(lock.groupId);
+    let meta = live ? live.meta : undefined;
+    if (!live) {
+      try { meta = await this.repo.getConvoyMeta(lock.groupId); } catch { return lock; }
+    }
+    if (meta && ACTIVE_STATUSES.includes(meta.tripStatus)) return lock;
+    await this.repo.releaseActiveTrip(userId).catch(() => {});
+    return null;
+  }
+
   async createConvoy(user, p) {
     const name = String(p.name || '').trim();
     if (name.length < 2) throw new ConvoyError('Convoy name is required.');
 
     // Concurrency-safe single active trip enforcement when monetization/membership is active
     if (config.paymentsEnabled !== false) {
-      const active = await this.repo.getActiveTrip(user.userId);
+      const active = await this._activeLock(user.userId);
       if (active && ['PLANNING', 'STARTED', 'PAUSED'].includes(active.status)) {
         throw new ConvoyError('You already have an active trip. End or leave it first.', 409, 'ACTIVE_TRIP_CONFLICT');
       }
@@ -291,7 +313,7 @@ class ConvoyManager extends EventEmitter {
     // Concurrency-safe single active trip check: cannot participate in multiple active trips simultaneously
     if (!room.riders.has(user.userId)) {
       if (config.paymentsEnabled !== false) {
-        const existingTrip = await this.repo.getActiveTrip(user.userId);
+        const existingTrip = await this._activeLock(user.userId);
         if (existingTrip && existingTrip.groupId !== meta.groupId && ['PLANNING', 'STARTED', 'PAUSED'].includes(existingTrip.status)) {
           throw new ConvoyError('You are already participating in another active trip. Leave or end it first.', 409, 'ACTIVE_TRIP_CONFLICT');
         }
@@ -309,8 +331,13 @@ class ConvoyManager extends EventEmitter {
             throw new ConvoyError('This is a solo trip under an Individual Membership. Additional riders cannot join.', 409, 'SOLO_TRIP_ONLY');
           }
         }
-        allowedCapacity = ownerMem.capacity;
+        const cap = Number(ownerMem.capacity);
+        if (Number.isFinite(cap) && cap >= 1) allowedCapacity = Math.floor(cap);
       }
+    }
+    // Removed from the owner's membership group: no new join (a rider already riding is never dropped).
+    if (!room.riders.has(user.userId) && room.meta.joinBlocked && room.meta.joinBlocked[user.userId]) {
+      throw new ConvoyError('The trip owner removed you from this group.', 403, 'JOIN_BLOCKED');
     }
     if (!room.riders.has(user.userId) && room.riders.size >= allowedCapacity) {
       throw new ConvoyError(`This convoy is full (${allowedCapacity} riders).`, 409, 'CONVOY_FULL');
@@ -348,14 +375,26 @@ class ConvoyManager extends EventEmitter {
   }
 
   async leave(groupId, userId) {
+    // The single-active-trip lock is released only when it is for THIS convoy: leaving some other
+    // (stale, ended or foreign) convoy must never unlock the ride the rider is on now.
+    const releaseIfHere = async () => {
+      const lock = await this.repo.getActiveTrip(userId).catch(() => null);
+      if (lock && lock.groupId === groupId) await this.repo.releaseActiveTrip(userId);
+    };
     const room = await this.getRoom(groupId, { required: false });
-    if (!room) { await this.repo.removeRider(groupId, userId); return; }
+    // An ended convoy keeps its record as it was at the end (a late "leave" must not move leftAt);
+    // a convoy the rider is not in is left untouched.
+    if (!room || !ACTIVE_STATUSES.includes(room.meta.tripStatus) || !room.riders.has(userId)) {
+      await this.repo.removeRider(groupId, userId);
+      await releaseIfHere();
+      return;
+    }
     const rider = room.riders.get(userId);
     room.riders.delete(userId);
     room.dirty.delete(userId);
     if (room.meta.members?.[userId]) room.meta.members[userId].leftAt = now();
     await this.repo.removeRider(groupId, userId);
-    await this.repo.releaseActiveTrip(userId);
+    await releaseIfHere();
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
     if (rider) this._emit(groupId, 'RIDER_LEFT', { userId, name: rider.name });
@@ -368,6 +407,13 @@ class ConvoyManager extends EventEmitter {
   async setTripStatus(groupId, status, { system = false } = {}) {
     if (!['PLANNING', 'STARTED', 'PAUSED', 'ENDED'].includes(status)) throw new ConvoyError('Invalid trip status.');
     const room = await this.getRoom(groupId);
+    if (room.meta.tripStatus === 'ENDED') {
+      // An ended ride is final: a retried "end" (timeout, double tap) must not move its end time,
+      // and a late pause/resume must never bring it back (its report, trips and reviews stand).
+      if (this.rooms.get(groupId) === room) this.rooms.delete(groupId); // loaded only to answer this
+      if (status === 'ENDED') return 'ENDED';
+      throw new ConvoyError('This ride has ended.', 409, 'RIDE_ENDED');
+    }
     room.meta.tripStatus = status;
     if (status === 'ENDED') {
       room.meta.endedAtEpochMs = now();
@@ -511,7 +557,7 @@ class ConvoyManager extends EventEmitter {
     // reconnect. Later copies wait for the first and are answered as duplicates (one alert).
     const raw = msg && msg.clientId;
     const cid = raw === undefined || raw === null ? '' : String(raw).slice(0, 64);
-    if (!cid) return this._raiseSos(groupId, user, msg);
+    if (!cid) return this._raiseSosSerial(groupId, user, msg);
     const inflight = this.sosInFlight || (this.sosInFlight = new Map());
     const k = `${groupId}|${user.userId}|${cid}`;
     const first = inflight.get(k);
@@ -519,9 +565,24 @@ class ConvoyManager extends EventEmitter {
       const r = await first;
       return { alert: r.alert, duplicate: true };
     }
-    const p = this._raiseSos(groupId, user, msg);
+    const p = this._raiseSosSerial(groupId, user, msg);
     inflight.set(k, p);
     try { return await p; } finally { inflight.delete(k); }
+  }
+
+  /**
+   * One SOS at a time per rider and room: a burst of presses (new clientIds, two phones, crash detection
+   * plus a manual press) arriving together waits for the first to be stored, so the alert storm guard in
+   * _raiseSos sees it and answers the rest as duplicates (one ALERT, one SMS round).
+   */
+  _raiseSosSerial(groupId, user, msg) {
+    const chains = this.sosChain || (this.sosChain = new Map());
+    const k = `${groupId}|${user.userId}`;
+    const prev = chains.get(k) || Promise.resolve();
+    const p = prev.catch(() => {}).then(() => this._raiseSos(groupId, user, msg));
+    chains.set(k, p);
+    p.catch(() => {}).finally(() => { if (chains.get(k) === p) chains.delete(k); });
+    return p;
   }
 
   async _raiseSos(groupId, user, msg = {}) {
@@ -539,6 +600,17 @@ class ConvoyManager extends EventEmitter {
       if (stored) return { alert: stripKey(stored), duplicate: true };
     }
     const t = now();
+    const kind = sosType(alertType || (type === 'SOS' ? '' : type));
+    // Alert storm guard: a burst of presses from several phones/sockets with new clientIds never floods
+    // the group (a second distinct SOS still goes out; the server SMS gateway texts once per minute).
+    let recent = 0, latest = null;
+    for (const a of room.alerts.values()) {
+      if (a.userId === user.userId && !a.resolved && a.alertType === kind && t - (Number(a.timestamp) || 0) < SOS_DEDUPE_MS) {
+        recent++;
+        if (!latest || (a.timestamp || 0) >= (latest.timestamp || 0)) latest = a;
+      }
+    }
+    if (latest && recent >= SOS_STORM_MAX) return { alert: latest, duplicate: true };
     const details = {};
     const speed = boundedNumber(msg.speedBeforeKmh, 0, 300);
     if (speed !== null) details.speedBeforeKmh = speed;
@@ -548,11 +620,12 @@ class ConvoyManager extends EventEmitter {
     const src = typeof msg.source === 'string' && EMERGENCY_SOURCES.has(msg.source) && !['MEMBER_REPORT', 'NEARBY_REPORT'].includes(msg.source)
       ? msg.source : (msg.auto === true ? 'CRASH_AUTO' : 'MANUAL');
     const auto = msg.auto === true || src === 'CRASH_AUTO';
-    const kind = sosType(alertType || (type === 'SOS' ? '' : type));
     const alert = {
       alertId: `SOS-${crypto.randomUUID()}`, userId: user.userId, userName: user.name,
       lat: clampLat(lat), lng: clampLng(lng), alertType: kind, timestamp: t, resolved: false,
       ...(cid ? { clientId: cid } : {}),
+      // The phone already texted its contacts: the server SMS gateway does not text them again.
+      ...(msg.clientSentSms === true || msg.clientDispatched === true ? { clientSentSms: true } : {}),
       auto,
       details,
       occurredAt: clampTime(msg.occurredAt, t - 6 * 3600000, t + 60000, t),
@@ -797,6 +870,27 @@ class ConvoyManager extends EventEmitter {
    * or null (unknown, expired, revoked, resolved). The position is the rider's current one in the
    * room when it is fresher than the alert's, else the alert's. Nothing else leaves.
    */
+  /**
+   * liveView, after making sure the live rooms are loaded: after a gateway restart only rooms a
+   * rider re-joined are in memory, so a guardian's link to an injured (offline) rider read as
+   * "expired". On the first miss the active rooms are loaded once (a live room stays in memory
+   * until it ends; a failed load is tried again after 10 s) and it is asked again.
+   */
+  async liveViewLoaded(hash) {
+    const v = this.liveView(hash);
+    if (v || typeof hash !== 'string' || this._liveWarmed) return v;
+    const t = now();
+    if (this._liveWarmAt && t - this._liveWarmAt < 10000) return null;
+    this._liveWarmAt = t;
+    let metas;
+    try { metas = await this.repo.listActiveConvoyMeta(); } catch { return null; }
+    for (const m of metas) {
+      if (!this.rooms.has(m.groupId)) await this.getRoom(m.groupId, { required: false }).catch(() => null);
+    }
+    this._liveWarmed = true;
+    return this.liveView(hash);
+  }
+
   liveView(hash) {
     const ref = typeof hash === 'string' ? this.liveLinks.get(hash) : null;
     if (!ref) return null;
@@ -1489,7 +1583,11 @@ class ConvoyManager extends EventEmitter {
       let touched = room.messages.length !== before;
       if (room.clientIds) for (const k of [...room.clientIds.keys()]) if (k.startsWith(`${uid}:`)) room.clientIds.delete(k);
       for (const [alertId, a] of [...room.alerts.entries()]) {
-        if (a.userId === uid) { room.alerts.delete(alertId); touched = true; } else if (mentions(a, id)) { room.alerts.set(alertId, scrub(a, id)); touched = true; }
+        if (a.userId === uid) {
+          // Their SOS goes, and with it any public live link to it (index entry included).
+          if (a.liveLink && a.liveLink.hash) this.liveLinks.delete(a.liveLink.hash);
+          room.alerts.delete(alertId); touched = true;
+        } else if (mentions(a, id)) { room.alerts.set(alertId, scrub(a, id)); touched = true; }
       }
       for (const [rid, r] of [...room.riders.entries()]) {
         if (mentions(r, id)) { room.riders.set(rid, scrub(r, id)); room.dirty.add(rid); touched = true; }
@@ -1523,6 +1621,8 @@ class ConvoyManager extends EventEmitter {
       this.emit('roomEnded', groupId, room);
     }
     await this.repo.deleteConvoyCascade(groupId);
+    // Its riders are free to ride again (the lock used to outlive the dissolved convoy).
+    await this.repo.releaseAllActiveTripsForGroup(groupId).catch(() => {});
     this.emit('fleet');
   }
 
@@ -1593,6 +1693,19 @@ class ConvoyManager extends EventEmitter {
 
     await this.leave(groupId, targetUserId);
     return { ok: true, removedUserId: targetUserId };
+  }
+
+  /**
+   * Stops a rider from joining this live ride again (membership owner removed them). Never removes a rider
+   * who is in the ride now: they keep the group's SOS network until they leave or the ride ends.
+   */
+  async blockFutureJoin(groupId, userId) {
+    const room = await this.getRoom(groupId, { required: false });
+    if (!room || !ACTIVE_STATUSES.includes(room.meta.tripStatus) || !userId) return false;
+    room.meta.joinBlocked = { ...(room.meta.joinBlocked || {}), [String(userId)]: now() };
+    this._touch(room);
+    await this.repo.saveConvoyMeta(room.meta);
+    return true;
   }
 
   async autoEndStaleConvoys(cutoffMs) {
@@ -1684,11 +1797,12 @@ function profileOf(u) {
   if (!u) return {};
   const pillion = (u.vehicleType || '').trim().toLowerCase() === 'pillion rider' || (u.vehicleNo || '').trim().toUpperCase() === 'PILLION';
   return {
-    phone: String(u.phone || ''),
+    // Guest placeholder numbers are nobody's real contact: never shown to the group or texted.
+    phone: realContactNumber(u, 'phone'),
     vehicleType: pillion ? 'Pillion Rider' : String(u.vehicleType || 'Motorcycle'),
     vehicleNo: pillion ? 'PILLION' : String(u.vehicleNo || ''),
-    emergencyContact: String(u.emergencyContact || ''),
-    emergencyContactName: String(u.emergencyContactName || ''),
+    emergencyContact: realContactNumber(u, 'emergencyContact'),
+    emergencyContactName: realContactNumber(u, 'emergencyContact') ? String(u.emergencyContactName || '') : '',
     smsOptOut: !!u.smsOptOut, // server only: never in publicRider
     // 3.15 nearby assistance, server only (never in publicRider).
     assistHelp: u.assistHelp !== false,
@@ -1851,7 +1965,7 @@ function sanitizeBreadcrumbs(list) {
 }
 
 module.exports = {
-  ConvoyManager, ConvoyError, publicRider, publicAlert, sanitizeTelemetry, TELEMETRY_FIELDS, TRUSTED_FIELDS, WAIT_MESSAGE, SOS_TYPES, LIVE_STATUSES,
-  statusOf, sourceOf, severityOf, isOpenStatus, falseAlarmCount, ownerInfo, EMERGENCY_OPEN, EMERGENCY_TERMINAL, EMERGENCY_SOURCES,
+  ConvoyManager, ConvoyError, publicRider, publicAlert, sanitizeTelemetry, TELEMETRY_FIELDS, WAIT_MESSAGE, LIVE_STATUSES,
+  statusOf, sourceOf, severityOf, falseAlarmCount, ownerInfo, EMERGENCY_OPEN, EMERGENCY_TERMINAL, EMERGENCY_SOURCES,
   townLimit, sha256,
 };

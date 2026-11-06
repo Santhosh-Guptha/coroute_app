@@ -62,9 +62,11 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
   bool _isProcessing = false;
   bool _isValidatingCoupon = false;
 
-  // Coupon state: clean, empty initial state (no prefilled RIDERFREE, optional)
+  // Coupon state: empty until the rider enters a code (nothing is prefilled or sent on their behalf).
   String? _appliedCouponCode;
   int _discountAmountRupees = 0;
+  // True only when the server said the applied code makes this plan free (₹0 activation).
+  bool _serverConfirmsFree = false;
   String? _promoMessage;
   String? _errorMessage;
   String? _pendingOrderId;
@@ -113,14 +115,16 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
     setState(() {
       _isValidatingCoupon = false;
       if (res != null && res['valid'] == true) {
-        _discountAmountRupees = (res['discountAmount'] as num?)?.toInt() ?? 0;
+        _discountAmountRupees = couponDiscountRupees(res, cat.priceRupees);
+        _serverConfirmsFree = couponServerConfirmsFree(res);
         _promoMessage = res['message']?.toString() ?? 'Coupon $code applied: -₹$_discountAmountRupees';
       } else {
         // Coupon not applicable to new tier
         _appliedCouponCode = null;
         _discountAmountRupees = 0;
+        _serverConfirmsFree = false;
         _promoMessage = null;
-        _errorMessage = ms.lastError ?? 'Coupon $code is not applicable to ${cat.name}. Reverted to original price.';
+        _errorMessage = '${_refusalMessage(res, ms)}. Back to the normal price.';
       }
     });
   }
@@ -146,17 +150,38 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
       _isValidatingCoupon = false;
       if (res != null && res['valid'] == true) {
         _appliedCouponCode = code;
-        final rawDisc = res['discountAmount'] ?? res['discountInr'];
-        _discountAmountRupees = (rawDisc as num?)?.toInt() ?? 0;
+        _discountAmountRupees = couponDiscountRupees(res, _selectedCategory.priceRupees);
+        _serverConfirmsFree = couponServerConfirmsFree(res);
         _promoMessage = res['message']?.toString() ?? 'Coupon $code applied: -₹$_discountAmountRupees';
         _errorMessage = null;
       } else {
         _appliedCouponCode = null;
         _discountAmountRupees = 0;
+        _serverConfirmsFree = false;
         _promoMessage = null;
-        _errorMessage = ms.lastError ?? 'Invalid or inapplicable coupon code.';
+        _errorMessage = _refusalMessage(res, ms);
       }
     });
+  }
+
+  /// The short plain message for a refused code (from the server's reason when it gave one).
+  String _refusalMessage(Map<String, dynamic>? res, MembershipService ms) {
+    final reason = res?['reason']?.toString() ?? ms.lastErrorReason;
+    return couponErrorMessage(reason) ??
+        res?['error']?.toString() ??
+        res?['message']?.toString() ??
+        ms.lastError ??
+        "This code can't be used";
+  }
+
+  /// The server refused the code at checkout: drop it so the rider can pay the normal price.
+  void _dropCoupon(String? message) {
+    _offerCtrl.clear();
+    _appliedCouponCode = null;
+    _discountAmountRupees = 0;
+    _serverConfirmsFree = false;
+    _promoMessage = null;
+    _errorMessage = '${message ?? "This code can't be used"}. The code was removed, so you can pay the normal price.';
   }
 
   /// Removes applied coupon and immediately restores original price
@@ -165,6 +190,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
       _offerCtrl.clear();
       _appliedCouponCode = null;
       _discountAmountRupees = 0;
+      _serverConfirmsFree = false;
       _promoMessage = null;
       _errorMessage = null;
     });
@@ -228,7 +254,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
     } else {
       setState(() {
         _isProcessing = false;
-        _errorMessage = ms.lastError ?? 'Payment signature verification failed. Please check your transaction history.';
+        _errorMessage = ms.lastError ?? 'Payment could not be verified. Check your payment history.';
       });
     }
   }
@@ -238,7 +264,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
     setState(() {
       _isProcessing = false;
       if (response.code == Razorpay.PAYMENT_CANCELLED) {
-        _errorMessage = 'Payment was cancelled by rider. You can retry when ready.';
+        _errorMessage = 'Payment cancelled. Try again when ready.';
       } else {
         _errorMessage = response.message ?? 'Payment failed (Code: ${response.code}).';
       }
@@ -262,12 +288,14 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
     });
 
     try {
-      // 1. Zero-Amount Membership Activation Flow (No Razorpay Order Created)
-      if (netPayable == 0) {
-        final couponCode = _appliedCouponCode ?? _offerCtrl.text.trim();
+      final couponCode = _appliedCouponCode;
+
+      // 1. Zero-amount activation (no Razorpay order), only when the server confirmed the
+      //    rider's code makes this plan free. The server checks the code again.
+      if (couponCode != null && _serverConfirmsFree && netPayable == 0) {
         final mem = await ms.activateFreeMembership(
           categoryId: _selectedCategory.id,
-          couponCode: couponCode.isNotEmpty ? couponCode : 'RIDERFREE',
+          couponCode: couponCode,
         );
 
         if (!mounted) return;
@@ -276,24 +304,48 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
         } else {
           setState(() {
             _isProcessing = false;
-            _errorMessage = ms.lastError ?? 'Zero-amount membership activation failed.';
+            if (ms.lastErrorIsCouponRefusal) {
+              _dropCoupon(ms.lastError);
+            } else {
+              _errorMessage = ms.lastError ?? 'Zero-amount membership activation failed.';
+            }
           });
         }
         return;
       }
 
-      // 2. Paid Razorpay Checkout Flow
+      // 2. Paid Razorpay Checkout Flow (a code is sent only when the rider applied one)
       final orderRes = await ms.createOrder(
         categoryId: _selectedCategory.id,
-        offerCode: _appliedCouponCode,
+        offerCode: couponCode,
       );
 
       if (orderRes == null) {
         if (!mounted) return;
         setState(() {
           _isProcessing = false;
-          _errorMessage = ms.lastError ?? 'Failed to create payment order with gateway.';
+          if (ms.lastErrorIsCouponRefusal) {
+            _dropCoupon(ms.lastError);
+          } else {
+            _errorMessage = ms.lastError ?? 'Failed to create payment order with gateway.';
+          }
         });
+        return;
+      }
+
+      // The server priced the order at ₹0 itself and has already activated the membership.
+      if (orderRes['isFree'] == true) {
+        final raw = orderRes['membership'];
+        final mem = raw is Map ? UserMembership.fromJson(Map<String, dynamic>.from(raw)) : ms.ownedMembership;
+        if (!mounted) return;
+        if (mem != null) {
+          _navigateToSuccess(mem, orderRes['orderId']?.toString() ?? 'FREE-PROMO');
+        } else {
+          setState(() {
+            _isProcessing = false;
+            _errorMessage = 'Your membership is being activated. Check again in a moment.';
+          });
+        }
         return;
       }
 
@@ -303,6 +355,15 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
 
       _lastCreatedOrderId = orderId;
       _pendingOrderId = orderId;
+
+      if (keyId.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _isProcessing = false;
+          _errorMessage = 'Payments are not set up. Please contact support.';
+        });
+        return;
+      }
 
       _openRazorpayCheckout(orderId: orderId, keyId: keyId, amountInPaise: amountInPaise);
     } catch (e) {
@@ -345,7 +406,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
       _navigateToSuccess(ms.ownedMembership!, _pendingOrderId ?? 'VERIFIED-SERVER');
     } else {
       setState(() {
-        _errorMessage = 'Order is still processing or waiting for payment settlement.';
+        _errorMessage = 'Payment is still processing.';
       });
     }
   }
@@ -463,12 +524,12 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
 
                       Text('Included Benefits:', style: AppText.caption.copyWith(fontWeight: FontWeight.w700)),
                       const SizedBox(height: 8),
-                      _benefitItem(Icons.emergency_rounded, 'Continuous Impact Crash Detection & Emergency SOS'),
-                      _benefitItem(Icons.map_rounded, 'Full Corridor Offline Maps (2.5 km Minkowski Corridor)'),
-                      _benefitItem(Icons.navigation_rounded, 'High-Precision Route Navigation & Speed Alerts'),
+                      _benefitItem(Icons.emergency_rounded, 'Crash alerts and SOS'),
+                      _benefitItem(Icons.map_rounded, 'Offline maps along your route'),
+                      _benefitItem(Icons.navigation_rounded, 'Route guide and speed warnings'),
                       if (_selectedCategory.capacity > 1) ...[
-                        _benefitItem(Icons.group_rounded, 'Live Convoy Hosting for up to ${_selectedCategory.capacity} Riders'),
-                        _benefitItem(Icons.mic_rounded, 'Tactical PTT Voice Intercom & Regroup Dispatch'),
+                        _benefitItem(Icons.group_rounded, 'Host rides for up to ${_selectedCategory.capacity} riders'),
+                        _benefitItem(Icons.mic_rounded, 'Group talk and regroup points'),
                       ],
                     ],
                   ),
@@ -576,7 +637,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                               TextButton(
                                 onPressed: _removeCoupon,
                                 style: TextButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
+                                  minimumSize: const Size(48, 48),
                                   foregroundColor: Colors.redAccent.shade100,
                                 ),
                                 child: const Text('Remove', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
@@ -713,7 +774,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  'Your coupon covers the entire membership fee. No payment method, card or UPI details are required. Tap below to activate instantly.',
+                  'Your coupon covers the full price. Tap below to start.',
                   style: AppText.caption.copyWith(color: AppTheme.text2, height: 1.3),
                 ),
               ],

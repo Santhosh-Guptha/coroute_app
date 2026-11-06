@@ -358,3 +358,83 @@ test('checkout page: app-order payment only, noindex, return link to the app', a
   }
   assert.equal((await fetch(base + '/checkout.html?order=x&t=y&e=1')).status, 200);
 });
+
+test('website index contains community stories container and small square checkbox consent', async () => {
+  const r = await fetch(base + '/');
+  const html = await r.text();
+  assert.equal(r.status, 200);
+  assert.ok(html.includes('id="community-stories-container"'), 'has community stories container');
+  assert.ok(html.includes('type="checkbox"') && html.includes('id="fb-consent"'), 'has small square checkbox consent');
+  assert.ok(!html.includes('paste url') && !html.includes('paste-url'), 'no paste url option');
+
+  // Rider stories come from the moderated feed only. The server may answer with { ok, stories } or a bare array,
+  // and either may be empty: the page never fills the gap with sample stories.
+  const api = await fetch(base + '/api/public/community-stories?limit=3');
+  assert.equal(api.status, 200);
+  const aj = await api.json();
+  assert.ok(Array.isArray(aj.stories), '/api/public/community-stories returns a stories list');
+  const sr = await fetch(base + '/community-stories');
+  assert.equal(sr.status, 200);
+  const sj = await sr.json();
+  assert.ok(Array.isArray(sj) || Array.isArray(sj.stories), '/community-stories returns a list');
+});
+
+// ---------------------------------------------------------------------------
+// Homepage for long-distance group riders: safe, secure, memorable, real reviews only.
+// ---------------------------------------------------------------------------
+test('home page: touring pitch, safe / secure / memorable sections, moderated reviews, no invented proof', async () => {
+  const html = await (await fetch(base + '/')).text();
+  for (const id of ['long-haul', 'safe', 'secure', 'memorable', 'reviews', 'faq', 'feedback']) {
+    assert.ok(html.includes(`id="${id}"`), `home: section #${id}`);
+  }
+  assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, 'home: exactly one h1');
+  assert.ok(html.includes('href="/get"') && html.includes('Download for Android') && html.includes('href="/how-it-works"'), 'home: primary and secondary CTA');
+  assert.ok(/<meta name="description" content="[^"]*group motorcycle touring safety app/i.test(html), 'home: description targets touring riders');
+  assert.ok(html.includes('<meta property="og:title"') && html.includes('<meta name="twitter:title"'), 'home: social titles');
+  assert.ok(html.includes('approved') || html.includes('reads each one'), 'home: explains that stories are moderated');
+  assert.ok(html.includes('does not replace them') && html.includes('call 112'), 'home: honest safety limits');
+  // Every image on the page is local; nothing is loaded from another site.
+  assert.ok(!/<img[^>]+src="https?:/i.test(html), 'home: third-party image');
+  // No internal infrastructure jargon in user-facing copy, and no hard-coded rider counts or ratings.
+  for (const p of ['/', '/features', '/safety', '/how-it-works', '/about', '/get']) {
+    const page = await (await fetch(base + p)).text();
+    assert.ok(!/Oracle|dual-node|WebSocket|SODA|BLE mesh|IMU\b/.test(page.replace(/<script[\s\S]*?<\/script>/g, '')), `${p}: infrastructure jargon`);
+    assert.ok(!/\b\d[\d,.]*\+?\s*(?:riders trust|happy riders|five-star|5-star reviews)/i.test(page), `${p}: invented social proof`);
+  }
+
+  // The reviews script renders rider text safely and never invents stories.
+  const fs = require('fs');
+  const path = require('path');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', 'site.js'), 'utf8');
+  const reviews = js.slice(js.indexOf('Rider reviews'), js.indexOf('Theme toggle'));
+  assert.ok(reviews.length > 1000, 'site.js has the reviews block');
+  assert.ok(reviews.includes("'/api/public/community-stories?limit='") && reviews.includes("'/community-stories'"), 'reviews: API with fallback');
+  assert.ok(!/innerHTML/.test(reviews), 'reviews: no innerHTML');
+  assert.ok(reviews.includes('Rider stories appear here after a ride and a moderation check'), 'reviews: honest empty state');
+  assert.ok(!/Arjun|Priya|Himalayan Pass|fallbackStories/.test(js), 'reviews: no hard-coded sample stories');
+  assert.ok(reviews.includes("img.loading = 'lazy'") && reviews.includes('img.alt'), 'reviews: lazy photos with alt text');
+  // The script must parse: a syntax error would silently break the menu, theme toggle and forms.
+  assert.doesNotThrow(() => new Function(js), 'site.js parses');
+});
+
+test('home page: "CoRoute in numbers" is hidden until real counts load; stories use the shared templates', async () => {
+  const html = await (await fetch(base + '/')).text();
+  const m = html.match(/<section[^>]*id="numbers"[^>]*>/);
+  assert.ok(m, 'home: section #numbers');
+  assert.ok(/\bhidden\b/.test(m[0]) && m[0].includes('data-usage-stats'), 'numbers: hidden by default, filled by site.js');
+  assert.ok(html.includes('id="usage-stats-list"'), 'numbers: list container');
+  // No number is written into the page itself: they only come from the API.
+  const section = html.slice(html.indexOf('id="numbers"'), html.indexOf('<!-- Reviews -->'));
+  assert.ok(!/\d{2,}/.test(section.replace(/<[^>]+>/g, '')), 'numbers: no hard-coded counts');
+  const fs = require('fs');
+  const path = require('path');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', 'site.js'), 'utf8');
+  const usage = js.slice(js.indexOf('CoRoute in numbers'), js.indexOf('Theme toggle'));
+  assert.ok(usage.includes("'/api/public/usage-stats'") && usage.includes("'/api/public/community-stats'"), 'numbers: API with fallback');
+  assert.ok(!/innerHTML/.test(usage), 'numbers: no innerHTML');
+  const { TEMPLATE_IDS } = require('../src/trip_reviews');
+  for (const id of TEMPLATE_IDS) assert.ok(js.includes(`'${id}'`), `site.js knows template ${id}`);
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', 'home.css'), 'utf8');
+  for (const id of ['photo-left', 'photo-top', 'quote-card']) assert.ok(css.includes(`.rv-card--${id}`), `home.css styles ${id}`);
+  assert.ok(css.includes('.rv-card__gallery'), 'home.css styles the gallery');
+});

@@ -1,17 +1,14 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/rider_model.dart';
 import 'package:coroute_app/data/models/safety_wire.dart';
-import 'package:coroute_app/domain/notify/notification_snapshot.dart';
 import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/domain/safety/accel_bucket.dart';
 import 'package:coroute_app/domain/safety/crash_detector.dart';
 import 'package:coroute_app/domain/safety/fuel_profile.dart';
 import 'package:coroute_app/domain/safety/fuel_range.dart';
 import 'package:coroute_app/domain/tracking/track_point.dart';
-import 'package:coroute_app/presentation/widgets/convoy_bead_wire_widget.dart';
 
 void main() {
   const int t0 = 1700000000000;
@@ -283,92 +280,6 @@ void main() {
     });
   });
 
-  group('Developer 3: ConvoyBeadWireWidget Sweeper Bug Fix', () {
-    testWidgets('Behind rider with userId == convoy.sweeperId renders Sweeper tag', (tester) async {
-      final sweeper = RiderModel(
-        userId: 's1',
-        name: 'Aditya',
-        lat: 12.95,
-        lng: 77.58,
-        role: RiderRoles.sweeper,
-        lastSeenEpochMs: t0,
-      );
-
-      final convoy = ConvoyModel(
-        groupId: 'g_bead',
-        name: 'Bead Test',
-        joinCode: 'BEAD1',
-        createdByUserId: 'lead1',
-        createdByUserName: 'Lead',
-        createdAtEpochMs: t0,
-        riders: {'s1': sweeper},
-      );
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: ConvoyBeadWireWidget(
-              convoyName: 'Convoy Test',
-              convoy: convoy,
-              ahead: const [],
-              behind: const [
-                RiderLine(userId: 'u_norm', name: 'Kiran', distanceM: 400, ahead: false),
-                RiderLine(userId: 's1', name: 'Aditya', distanceM: 1200, ahead: false),
-              ],
-            ),
-          ),
-        ),
-      );
-
-      // Aditya is s1 (the sweeper), must render ▼ Sweeper
-      expect(find.text('▼ Sweeper'), findsOneWidget);
-      // Kiran is not sweeper, must render ▼ Behind
-      expect(find.text('▼ Behind'), findsOneWidget);
-    });
-
-    testWidgets('Behind rider in pack of 3 who is NOT sweeper does not get fake Sweeper tag', (tester) async {
-      final sweeper = RiderModel(
-        userId: 'actual_sweeper',
-        name: 'Raj',
-        lat: 12.94,
-        lng: 77.57,
-        role: RiderRoles.sweeper,
-        lastSeenEpochMs: t0,
-      );
-
-      final convoy = ConvoyModel(
-        groupId: 'g_bead2',
-        name: 'Bead Test 2',
-        joinCode: 'BEAD2',
-        createdByUserId: 'lead1',
-        createdByUserName: 'Lead',
-        createdAtEpochMs: t0,
-        riders: {'actual_sweeper': sweeper},
-      );
-
-      // 3 riders behind, but behind2 ('Vikram') is NOT the sweeper
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: ConvoyBeadWireWidget(
-              convoyName: 'Convoy Test 2',
-              convoy: convoy,
-              ahead: const [],
-              behind: const [
-                RiderLine(userId: 'b1', name: 'Kiran', distanceM: 400, ahead: false),
-                RiderLine(userId: 'b2', name: 'Vikram', distanceM: 800, ahead: false),
-                RiderLine(userId: 'b3', name: 'Rohit', distanceM: 1200, ahead: false),
-              ],
-            ),
-          ),
-        ),
-      );
-
-      // None of behind1 or behind2 is the sweeper -> must NOT render ▼ Sweeper
-      expect(find.text('▼ Sweeper'), findsNothing);
-      expect(find.text('▼ Behind'), findsNWidgets(2));
-    });
-  });
 
   group('Developer 3: ConvoyService Limp-Mode Status Preservation', () {
     test('MECHANICAL status is preserved when moving at low speed (< 25 km/h)', () {

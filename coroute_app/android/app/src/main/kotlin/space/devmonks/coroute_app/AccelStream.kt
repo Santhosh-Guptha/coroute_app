@@ -24,9 +24,11 @@ import kotlin.math.sqrt
  * - Real-time gyroscope angular velocity (rad/s) integration for rollover/fall analysis.
  * - Reference orientation tilt tracking to detect lowside and highside falls onto bike sides.
  * - Lightweight 100-sample (2s @ 50 Hz) pre/post impact rolling buffer for impact duration estimation.
+ * - Monotonic timestamp-aware discrete jerk (da/dt) calculation for rapid transient shock analysis.
+ * - Hardware and sensor health tracking (gyroscope availability and sample rate confidence).
  * - Bounded Android partial wake-lock scoped strictly to active sensor sessions to survive deep sleep.
  * - Hardware batching (maxLatencyUs) to permit sensor hub batching and low battery consumption.
- * - Posts 8-element telemetry: [tMs, peakRawG, meanRawG, stdRawG, peakDynG, peakGyroRadS, tiltDeg, durationMs].
+ * - Posts 10-element telemetry: [tMs, peakRawG, meanRawG, stdRawG, peakDynG, peakGyroRadS, tiltDeg, durationMs, peakJerkGPerS, sensorConfidence].
  */
 class AccelStream(context: Context) : EventChannel.StreamHandler {
     private val appContext = context.applicationContext
@@ -76,6 +78,12 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
         session = null
     }
 
+    companion object {
+        /** Partial wake-lock timeout; re-armed every [WAKE_RENEW_MS] while sensor events arrive. */
+        private const val WAKE_TIMEOUT_MS = 30 * 60 * 1000L
+        private const val WAKE_RENEW_MS = 10 * 60 * 1000L
+    }
+
     private class HighResSample {
         var tMs: Long = 0L
         var gDyn: Double = 0.0
@@ -116,7 +124,8 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
         private val ringSize = 100
         private val ringBuf = Array(ringSize) { HighResSample() }
         private var ringHead = 0
-        private var consecutiveHighCount = 0
+        private var highRunMs = 0.0
+        private var wakeLockAt = 0L
 
         // Bucket state (touched only on the sensor thread)
         private var bucketSecond = Long.MIN_VALUE
@@ -127,6 +136,7 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
         private var peakDyn = 0.0
         private var maxTilt = 0.0
         private var maxDurationMs = 0.0
+        private var peakJerk = 0.0
 
         private val closed = ArrayList<Double>(128)
         private var lastFlush = 0L
@@ -142,8 +152,9 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
                 val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
                 wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "coroute:safety_sensor")?.apply {
                     setReferenceCounted(false)
-                    acquire(30 * 60 * 1000L) // 30 min safety timeout
+                    acquire(WAKE_TIMEOUT_MS) // bounded; renewed from onSensorChanged while the session runs
                 }
+                wakeLockAt = SystemClock.elapsedRealtime()
             } catch (_: Exception) {}
 
             val handler = Handler(t.looper)
@@ -246,7 +257,12 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
                 bucketSecond = second
             }
 
-            // High-resolution rolling buffer entry
+            // High-resolution rolling buffer entry and discrete jerk (da/dt) calculation
+            val prevSample = ringBuf[ringHead]
+            val dtSec = if (prevSample.tMs > 0 && tMs > prevSample.tMs) (tMs - prevSample.tMs) / 1000.0 else 0.02
+            val currentJerk = if (dtSec in 0.005..0.2) kotlin.math.abs(gDyn - prevSample.gDyn) / dtSec else 0.0
+            peakJerk = max(peakJerk, currentJerk)
+
             ringHead = (ringHead + 1) % ringSize
             ringBuf[ringHead].apply {
                 this.tMs = tMs
@@ -255,13 +271,16 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
                 this.gyroRadS = currentGyroRadS
             }
 
-            // Continuous impact duration tracking (samples >= 2.0g dynamic linear shock)
+            // Continuous impact duration tracking (samples >= 2.0g dynamic linear shock). Uses the real
+            // sample spacing (the requested 50 Hz is only a hint to Android) and survives the 1 s bucket
+            // boundary, so an impact that straddles two buckets is not cut short and mistaken for a
+            // pothole (<= 35 ms) or a pebble hit (< 25 ms) by the Dart crash rule.
             if (gDyn >= 2.0) {
-                consecutiveHighCount++
+                highRunMs += (dtSec * 1000.0).coerceIn(5.0, 200.0)
             } else {
-                consecutiveHighCount = 0
+                highRunMs = 0.0
             }
-            val currentDurationMs = consecutiveHighCount * 20.0
+            val currentDurationMs = highRunMs
 
             count++
             sumRaw += gRaw
@@ -276,14 +295,25 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
                 lastFlush = now
                 flush()
             }
+
+            // Rides last longer than the wake-lock timeout: before it ran out the lock was simply
+            // gone after 30 min and crash detection could stall in deep sleep for the rest of the
+            // ride. Re-arming the timeout keeps it bounded (it still ends if events stop coming).
+            if (now - wakeLockAt >= WAKE_RENEW_MS) {
+                wakeLockAt = now
+                try {
+                    wakeLock?.acquire(WAKE_TIMEOUT_MS)
+                } catch (_: Exception) {}
+            }
         }
 
         private fun closeBucket() {
             if (count > 0 && bucketSecond != Long.MIN_VALUE) {
                 val mean = sumRaw / count
                 val variance = max(0.0, sumSqRaw / count - mean * mean)
-                // 8-element telemetry:
-                // [tMs, peakRawG, meanRawG, stdRawG, peakDynG, peakGyroRadS, maxTiltDeg, maxDurationMs]
+                val sensorConfidence = if (gyroSensor != null) (if (count >= 30) 1.0 else 0.8) else (if (count >= 30) 0.7 else 0.5)
+                // 10-element telemetry:
+                // [tMs, peakRawG, meanRawG, stdRawG, peakDynG, peakGyroRadS, maxTiltDeg, maxDurationMs, peakJerkGPerS, sensorConfidence]
                 closed.add((bucketSecond * 1000L).toDouble())
                 closed.add(peakRaw)
                 closed.add(mean)
@@ -292,6 +322,8 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
                 closed.add(peakGyro)
                 closed.add(maxTilt)
                 closed.add(maxDurationMs)
+                closed.add(peakJerk)
+                closed.add(sensorConfidence)
             }
             count = 0
             sumRaw = 0.0
@@ -301,7 +333,7 @@ class AccelStream(context: Context) : EventChannel.StreamHandler {
             peakGyro = 0.0
             maxTilt = 0.0
             maxDurationMs = 0.0
-            consecutiveHighCount = 0
+            peakJerk = 0.0
         }
 
         private fun flush() {

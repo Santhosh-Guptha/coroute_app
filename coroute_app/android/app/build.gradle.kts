@@ -20,8 +20,35 @@ val keystoreProperties = Properties().apply {
 fun signingValue(key: String, env: String): String? =
     keystoreProperties.getProperty(key) ?: System.getenv(env)
 
+// 3.54 (Play release readiness): a release package must be signed with the upload key. When
+// key.properties (or the CI variables) is missing or incomplete, or the keystore file is not
+// there, a release assemble/bundle/install FAILS here instead of silently using the debug key.
+// Only presence is checked; no value is read out or printed.
+val releaseSigningReady: Boolean = run {
+    val storePath = signingValue("storeFile", "COROUTE_STORE_FILE")
+    storePath != null && file(storePath).exists() &&
+        signingValue("storePassword", "COROUTE_STORE_PASSWORD") != null &&
+        signingValue("keyAlias", "COROUTE_KEY_ALIAS") != null &&
+        signingValue("keyPassword", "COROUTE_KEY_PASSWORD") != null
+}
+val releasePackagingRequested: Boolean = gradle.startParameter.taskNames.any { task ->
+    val name = task.substringAfterLast(':')
+    name.contains("Release") && listOf("assemble", "bundle", "package", "install", "sign").any { name.startsWith(it) }
+}
+if (releasePackagingRequested && !releaseSigningReady) {
+    throw GradleException(
+        "Release signing is not configured: android/key.properties (or COROUTE_STORE_FILE, " +
+            "COROUTE_STORE_PASSWORD, COROUTE_KEY_ALIAS, COROUTE_KEY_PASSWORD) is missing or incomplete, " +
+            "or the keystore file was not found. A release build is never signed with the debug key. " +
+            "See android/key.properties.example."
+    )
+}
+
 android {
     namespace = "space.devmonks.coroute_app"
+    // compileSdk stays 37 (raised on purpose in 3d96e53 for the release build); it may be higher
+    // than targetSdk. targetSdk is pinned to 36 (Play: API 36 for app updates from 31 Aug 2026)
+    // instead of following the Flutter SDK default.
     compileSdk = 37
     ndkVersion = "28.2.13676358"
 
@@ -35,7 +62,7 @@ android {
     defaultConfig {
         applicationId = "space.devmonks.coroute_app"
         minSdk = maxOf(flutter.minSdkVersion, 23)
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -56,8 +83,9 @@ android {
 
     buildTypes {
         release {
-            // Falls back to the debug key when key.properties is absent so `flutter run --release` still works locally.
-            signingConfig = if (signingValue("storeFile", "COROUTE_STORE_FILE") != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            // The upload key only. Without it, release packaging tasks fail above; the debug config is
+            // kept here only so non-packaging tasks (lint, dependency reports) still configure.
+            signingConfig = if (releaseSigningReady) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
             // R8 shrinks the Java/Kotlin code and unused resources. proguard-rules.pro keeps the
             // plugins that use reflection (notifications, foreground service, recorder, Google auth).
             // If a plugin misbehaves on a device, set both back to false: split-per-abi below and

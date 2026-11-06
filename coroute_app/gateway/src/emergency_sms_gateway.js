@@ -2,7 +2,8 @@
 
 const crypto = require('crypto');
 const config = require('./config');
-const { cleanPhone, validPhone } = require('./validate');
+const { validPhone } = require('./validate');
+const { realContactNumber } = require('./auth');
 
 /**
  * Normalizes a phone number to standard E.164 string format (e.g. +919876543210).
@@ -26,6 +27,14 @@ function toE164(phone, defaultCountryCode = '+91') {
     }
   }
   return cleaned;
+}
+
+/** Most numbers one dispatch texts (profile contact plus the phone's guardians). */
+const MAX_CONTACTS = 5;
+
+/** Logs never carry full phone numbers (provider errors often echo the "To" number): last 3 digits only. */
+function redactPhones(s) {
+  return String(s ?? '').replace(/\+?\d[\d\s-]{5,}\d/g, (m) => `***${m.replace(/\D/g, '').slice(-3)}`);
 }
 
 /**
@@ -63,6 +72,12 @@ class EmergencySmsGateway {
     this.outbox = [];
     this.maxOutboxSize = 1000;
     this.liveLinks = new Map(); // tokenHash -> { tripId, riderId, ... }
+    // "I'm safe" / resolved: the rider's standalone tracking links stop working at once.
+    if (convoys && typeof convoys.on === 'function') {
+      convoys.on('emergency', (gid, alert, kind) => {
+        if (kind === 'RESOLVED' && alert && alert.userId) this.revokeLinksFor(alert.userId);
+      });
+    }
   }
 
   /**
@@ -91,16 +106,10 @@ class EmergencySmsGateway {
       expiresAt,
     };
 
+    this._pruneLinks(now);
     this.liveLinks.set(hash, liveRecord);
-
-    // If convoys manager is present, register in convoys live links map too
-    if (this.convoys?.liveLinks) {
-      this.convoys.liveLinks.set(hash, {
-        gid: tripId || 'standalone',
-        alertId: `SOS-${tripId || now}`,
-        standaloneRecord: liveRecord,
-      });
-    }
+    // (Not registered in convoys.liveLinks: that index is for alert links only; /e/<token> and
+    // /api/public/live fall back to this.liveView.)
 
     const origin = this.config.publicOrigin || 'https://coroute.live';
     return `${origin}/e/${token}`;
@@ -109,6 +118,20 @@ class EmergencySmsGateway {
   /**
    * Returns live link metadata if token hash exists and is valid.
    */
+  /** Drops expired links (and the oldest ones beyond 5000), so the map never grows without bound. */
+  _pruneLinks(now = Date.now()) {
+    for (const [h, rec] of this.liveLinks) if (now >= rec.expiresAt) this.liveLinks.delete(h);
+    while (this.liveLinks.size >= 5000) this.liveLinks.delete(this.liveLinks.keys().next().value);
+  }
+
+  /** Revokes every standalone link made for this rider (the rider is safe, signed out or deleted). */
+  revokeLinksFor(riderId) {
+    if (!riderId) return 0;
+    let n = 0;
+    for (const [h, rec] of this.liveLinks) if (rec.riderId === riderId) { this.liveLinks.delete(h); n++; }
+    return n;
+  }
+
   liveView(hash) {
     if (!hash || typeof hash !== 'string') return null;
     const rec = this.liveLinks.get(hash);
@@ -117,14 +140,20 @@ class EmergencySmsGateway {
       this.liveLinks.delete(hash);
       return null;
     }
+    // Live position: the rider's latest fix in their (loaded) ride when it is newer than the SOS.
+    let lat = rec.lat, lng = rec.lng, at = rec.createdAt;
+    const rider = this.convoys?.rooms?.get?.(rec.tripId)?.riders?.get(rec.riderId);
+    if (rider && Number.isFinite(rider.lat) && Number.isFinite(rider.lng) && (rider.lat || rider.lng) && (rider.lastSeenEpochMs || 0) > at) {
+      lat = +Number(rider.lat).toFixed(5); lng = +Number(rider.lng).toFixed(5); at = rider.lastSeenEpochMs;
+    }
     return {
       firstName: rec.firstName,
-      lat: rec.lat,
-      lng: rec.lng,
+      lat,
+      lng,
       speedKmh: rec.speedKmh,
       severity: rec.severity,
       bloodGroup: rec.bloodGroup,
-      at: rec.createdAt,
+      at,
       expiresAt: rec.expiresAt,
     };
   }
@@ -177,9 +206,9 @@ class EmergencySmsGateway {
     if (targetContacts.length === 0 && this.repo && riderId) {
       try {
         const u = await this.repo.findUserById(riderId);
-        if (u?.emergencyContact) {
+        if (u && realContactNumber(u, 'emergencyContact')) {
           targetContacts.push({
-            phone: u.emergencyContact,
+            phone: realContactNumber(u, 'emergencyContact'),
             name: u.emergencyContactName || 'Emergency Contact',
           });
         }
@@ -188,8 +217,18 @@ class EmergencySmsGateway {
       }
     }
 
-    // Filter valid contacts
-    const validContacts = targetContacts.filter((c) => c && (c.phone || c.number));
+    // Valid, distinct numbers only, at most MAX_CONTACTS: an SOS must never become an SMS cannon.
+    const seen = new Set();
+    const validContacts = [];
+    for (const c of targetContacts) {
+      if (!c || typeof c !== 'object') continue;
+      const phone = validPhone(c.phone || c.number);
+      const key = phone && toE164(phone);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      validContacts.push({ phone, name: String(c.name || 'Emergency Contact').slice(0, 60) });
+      if (validContacts.length >= MAX_CONTACTS) break;
+    }
     if (validContacts.length === 0) {
       return {
         dispatched: false,
@@ -285,6 +324,20 @@ class EmergencySmsGateway {
   async dispatchForSos({ groupId, user, alert, msg = {} }) {
     if (!alert || alert.serverDispatchedByGateway) return null;
     alert.serverDispatchedByGateway = true;
+    // One SMS round per rider per minute while their earlier alert is still open (a second SOS of the
+    // same emergency reaches the group, but the contacts are not texted twice).
+    const recent = this.recentSos || (this.recentSos = new Map());
+    const t = Date.now();
+    for (const [k, v] of recent) if (t - v.at >= 60000) recent.delete(k);
+    const rid = user?.userId || alert.userId;
+    const prev = rid && recent.get(rid);
+    if (prev && prev.alertId !== alert.alertId) {
+      const open = this.convoys?.rooms?.get?.(prev.gid)?.alerts?.get?.(prev.alertId);
+      if (!open || !open.resolved) {
+        this.log.info(`[emergency_gateway] SOS ${alert.alertId}: contacts were texted for ${prev.alertId} less than a minute ago`);
+        return null;
+      }
+    }
 
     // Check if client already successfully sent SMS
     if (msg.clientSentSms === true || msg.clientDispatched === true || alert.clientSentSms === true) {
@@ -298,9 +351,9 @@ class EmergencySmsGateway {
     }
 
     const contacts = [];
-    if (userDoc?.emergencyContact) {
+    if (userDoc && realContactNumber(userDoc, 'emergencyContact')) {
       contacts.push({
-        phone: userDoc.emergencyContact,
+        phone: realContactNumber(userDoc, 'emergencyContact'),
         name: userDoc.emergencyContactName || 'Emergency Contact',
       });
     }
@@ -318,16 +371,11 @@ class EmergencySmsGateway {
       return null;
     }
 
-    let trackingUrl = null;
-    if (this.convoys && groupId && alert.alertId) {
-      try {
-        const live = await this.convoys.createLiveLink(groupId, user, alert.alertId);
-        if (live?.token) {
-          const origin = this.config.publicOrigin || 'https://coroute.live';
-          trackingUrl = `${origin}/e/${live.token}`;
-        }
-      } catch (_) {}
-    }
+    // The texted link is the gateway's own (tripId = groupId, so it follows the rider's live position and
+    // dies when the alert is resolved). It never takes the alert's one rider/lead live link: that made the
+    // rider's own "share live link" answer 409 LINK_ACTIVE without a token right after every SOS.
+    const trackingUrl = null;
+    if (rid) recent.set(rid, { at: t, gid: groupId, alertId: alert.alertId });
 
     return await this.dispatchExternal({
       tripId: groupId,
@@ -394,7 +442,7 @@ class EmergencySmsGateway {
         }
       } catch (err) {
         errors.push(`${prov}: ${err.message}`);
-        this.log.warn(`[emergency_gateway] SMS dispatch via ${prov} failed: ${err.message}, attempting fallback...`);
+        this.log.warn(`[emergency_gateway] SMS dispatch via ${prov} failed: ${redactPhones(err.message)}, attempting fallback...`);
       }
     }
 
@@ -443,7 +491,7 @@ class EmergencySmsGateway {
       }
     } catch (err) {
       errors.push(`whatsapp_cloud_api: ${err.message}`);
-      this.log.warn(`[emergency_gateway] WhatsApp Cloud API failed: ${err.message}, attempting webhook fallback...`);
+      this.log.warn(`[emergency_gateway] WhatsApp Cloud API failed: ${redactPhones(err.message)}, attempting webhook fallback...`);
     }
 
     // 2. Try Telephony Webhook as WhatsApp secondary provider
@@ -702,7 +750,7 @@ class EmergencySmsGateway {
       this.outbox.pop();
     }
 
-    this.log.info(`[emergency_gateway] Outbox queue entry created: [${channel}] to ${to} (${contactName}) - ${status}`);
+    this.log.info(`[emergency_gateway] Outbox queue entry created: [${channel}] to ${redactPhones(to)} - ${status}`);
     return entry;
   }
 
@@ -716,15 +764,12 @@ class EmergencySmsGateway {
     }
     return list.slice(0, limit);
   }
-
-  clearOutbox() {
-    this.outbox = [];
-    this.liveLinks.clear();
-  }
 }
 
 module.exports = {
   EmergencySmsGateway,
+  redactPhones,
+  MAX_CONTACTS,
   toE164,
   toWhatsAppNumber,
 };

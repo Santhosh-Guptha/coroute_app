@@ -34,13 +34,31 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
     with SingleTickerProviderStateMixin {
   late final AnimationController _waveController;
 
+  // Press tracking: a release before the mic finished opening still ends the
+  // transmission, and a quick vertical swipe that starts on the bar (the rider
+  // dragging the ride sheet up or down) does not keep the mic keyed.
+  bool _pressed = false;
+  bool _swipeCancelled = false;
+  Offset? _downPos;
+  DateTime? _downTime;
+
   @override
   void initState() {
     super.initState();
+    // Runs only while someone is talking (see [_syncWave]): an always-running
+    // ticker would redraw the cockpit every frame for nothing.
     _waveController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
-    )..repeat(reverse: true);
+    );
+  }
+
+  void _syncWave(bool active) {
+    if (active) {
+      if (!_waveController.isAnimating) _waveController.repeat(reverse: true);
+    } else if (_waveController.isAnimating) {
+      _waveController.stop();
+    }
   }
 
   @override
@@ -60,6 +78,7 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
     final private = ic.isPrivateTalk;
     final leadChannel = ic.channel == IntercomChannel.leadOnly;
     final vox = ic.mode == IntercomMode.vox;
+    _syncWave(tx || rx);
 
     // Background color
     final Color bgColor;
@@ -69,6 +88,8 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
       bgColor = const Color(0xFF0F766E);
     } else if (muted) {
       bgColor = AppTheme.card;
+    } else if (vox) {
+      bgColor = const Color(0xFF0F766E);
     } else if (leadChannel) {
       bgColor = AppTheme.warnText;
     } else {
@@ -79,18 +100,22 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
     final String label;
     final IconData icon;
     if (tx) {
-      label = private ? 'PRIVATE TALKING' : (leadChannel ? 'LEAD TALKING' : 'TALKING');
+      label = private
+          ? 'PRIVATE TALKING'
+          : (leadChannel
+              ? 'LEAD TALKING'
+              : (vox ? 'HANDS-FREE · TALKING' : 'TALKING'));
       icon = Icons.mic_rounded;
     } else if (rx) {
       final who = ic.activeSpeakerName?.split(' ').first.toUpperCase() ?? 'RIDER';
       label = '$who SPEAKING';
       icon = Icons.volume_up_rounded;
+    } else if (vox) {
+      label = 'HANDS-FREE ACTIVE · TAP TO DISABLE';
+      icon = Icons.record_voice_over_rounded;
     } else if (muted) {
       label = 'MIC MUTED · TAP TO UNMUTE';
       icon = Icons.mic_off_rounded;
-    } else if (vox) {
-      label = 'VOX ACTIVE (HANDS-FREE)';
-      icon = Icons.record_voice_over_rounded;
     } else if (leadChannel) {
       label = 'LEAD & SWEEPER TALK';
       icon = Icons.shield_rounded;
@@ -101,18 +126,40 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
 
     return Semantics(
       button: true,
-      label: label,
+      label: vox ? 'Hands-Free active. Tap to disable.' : label,
       child: Listener(
-        onPointerDown: (_) async {
+        onPointerDown: (e) async {
+          if (vox) {
+            HapticFeedback.lightImpact();
+            await ic.disableHandsFree();
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).clearSnackBars();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Hands-Free disabled · Switched to Hold-to-Talk'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            }
+            return;
+          }
           if (muted) {
             HapticFeedback.lightImpact();
             ic.setMicMuted(false);
             return;
           }
-          if (vox) return;
+          _pressed = true;
+          _swipeCancelled = false;
+          _downPos = e.position;
+          _downTime = DateTime.now();
           HapticFeedback.selectionClick();
           final ok = await ic.beginTransmission();
-          if (!ok && context.mounted) {
+          if (ok && (!_pressed || _swipeCancelled)) {
+            // Released, or turned into a sheet drag, while the mic was opening.
+            await ic.endTransmission();
+            return;
+          }
+          if (!ok && !_swipeCancelled && context.mounted) {
             ScaffoldMessenger.of(context).clearSnackBars();
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -122,20 +169,35 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
             );
           }
         },
+        onPointerMove: (e) {
+          final start = _downPos;
+          final at = _downTime;
+          if (!_pressed || _swipeCancelled || start == null || at == null) return;
+          final dy = (e.position.dy - start.dy).abs();
+          final dx = (e.position.dx - start.dx).abs();
+          if (dy > 24 && dy > dx * 1.5 && DateTime.now().difference(at) < const Duration(milliseconds: 350)) {
+            _swipeCancelled = true;
+            if (ic.isTransmitting) ic.endTransmission();
+          }
+        },
         onPointerUp: (_) {
-          if (!vox && tx) {
+          final wasPressed = _pressed;
+          _pressed = false;
+          if (!vox && (tx || (wasPressed && ic.isTransmitting))) {
             HapticFeedback.selectionClick();
             ic.endTransmission();
           }
         },
         onPointerCancel: (_) {
-          if (!vox && tx) ic.endTransmission();
+          _pressed = false;
+          if (!vox && (tx || ic.isTransmitting)) ic.endTransmission();
         },
         child: AnimatedContainer(
           duration: Motion.button,
           curve: Motion.curve,
-          height: 54,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          // At least 56 dp (gloves), growing with large text instead of clipping it.
+          constraints: const BoxConstraints(minHeight: 56),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           decoration: BoxDecoration(
             color: bgColor,
             borderRadius: BorderRadius.circular(16),
@@ -171,6 +233,33 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
                   ),
                 ),
               ),
+              if (vox) ...[
+                const SizedBox(width: 8),
+                GestureDetector(
+                  key: const Key('minimal_bar_disable_hands_free'),
+                  onTap: () async {
+                    HapticFeedback.lightImpact();
+                    await ic.disableHandsFree();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white.withOpacity(0.4)),
+                    ),
+                    child: const Text(
+                      'DISABLE',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(width: 8),
               _AudioWaveformVisualizer(
                 controller: _waveController,

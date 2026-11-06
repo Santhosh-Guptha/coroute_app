@@ -36,7 +36,7 @@ class MockVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
   Future<bool> init() async => initResult;
 
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id}) async {
+  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
     spokenLines.add(text);
     spokenCalls.add((text, interrupt));
     return true;

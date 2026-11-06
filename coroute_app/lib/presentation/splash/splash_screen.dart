@@ -82,6 +82,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (auth.isAuthenticated && auth.isMasterAdmin) {
       _navigated = true;
+      // One admin console for phones and tablets (it adapts its layout).
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MasterAdminDashboard()));
     } else if (auth.isAuthenticated) {
       _navigated = true;

@@ -106,8 +106,8 @@ void main() {
       await tester.pump();
       expect(tester.widget<TextField>(find.byKey(const ValueKey('medicalNotes'))).controller!.text.length, 200);
 
-      await tester.scrollUntilVisible(find.text('Receive emergency texts from my ride group'), 200, scrollable: find.byType(Scrollable).first);
-      expect(find.text('A rider with no internet can text you where they are. When off, your number is not used for these texts.'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Get emergency texts from my group'), 200, scrollable: find.byType(Scrollable).first);
+      expect(find.text('Riders without internet can text you their location.'), findsOneWidget);
       expect(tester.widget<SwitchListTile>(find.byKey(const ValueKey('smsReceive'))).value, isTrue);
       expect(tester.takeException(), isNull);
     });

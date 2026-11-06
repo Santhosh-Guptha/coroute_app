@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const { createRazorpayGateway, RazorpayError } = require('./razorpay_gateway');
 const { effectiveSubscription, isPaidTier } = require('./subscription_lifecycle');
+const { verifyToken } = require('./auth');
 
 const PLAN_PRICES_INR = {
   community: { monthly: 0, annual: 0, label: 'Community Rider' },
@@ -13,56 +14,70 @@ const PLAN_PRICES_INR = {
   tourOperator: { monthly: 1999, annual: 14999, label: 'Tour Operator' },
 };
 
-const BUILTIN_COUPONS = {
-  WELCOME50: {
+/**
+ * Launch coupons that used to be hard-coded (and were valid with no usage tracking). They are now
+ * ordinary coupon records: seeded once into the coupon store when absent (never overwritten, so an
+ * admin edit, pause or archive sticks across restarts) and from then on checked exactly like any
+ * admin-made coupon: plan binding, total and per-rider limits, validity window.
+ */
+const DEFAULT_COUPONS = [
+  {
     code: 'WELCOME50',
+    name: 'Welcome 50% off',
     description: '50% discount on any monthly or annual plan',
     discountType: 'percentage',
     discountValue: 50,
     applicableTiers: ['all'],
     applicableCycles: ['all'],
     maxUsageTotal: 1000,
-    usageCount: 0,
     maxUsagePerUser: 1,
-    validFrom: 1700000000000,
-    expiresAt: Date.now() + 180 * 86400000,
-    isActive: true,
     minOrderAmount: 100,
-    usages: [],
+    validDays: 180,
   },
-  CAPTAIN100: {
+  {
     code: 'CAPTAIN100',
+    name: 'Captain ₹100 off',
     description: 'Flat ₹100 discount on Road Captain and Tour Operator passes',
     discountType: 'fixed',
     discountValue: 100,
     applicableTiers: ['roadCaptain', 'tourOperator'],
     applicableCycles: ['all'],
     maxUsageTotal: 500,
-    usageCount: 0,
     maxUsagePerUser: 1,
-    validFrom: 1700000000000,
-    expiresAt: Date.now() + 180 * 86400000,
-    isActive: true,
     minOrderAmount: 149,
-    usages: [],
+    validDays: 180,
   },
-  RIDERFREE: {
+  {
     code: 'RIDERFREE',
-    description: '100% Free 1-month CoRoute Pro Pass for testing and promotional giveaways',
+    name: 'Rider free introductory month',
+    description: 'One free month (introductory offer), once per rider',
     discountType: 'free',
     discountValue: 100,
-    applicableTiers: ['proRider', 'roadCaptain'],
+    // Bound to named plans (not "all"): the monthly Pro / Road Captain passes and the membership plans.
+    applicableTiers: ['proRider', 'roadCaptain', 'individual', 'group_small', 'group_large'],
     applicableCycles: ['monthly'],
     maxUsageTotal: 100,
-    usageCount: 0,
     maxUsagePerUser: 1,
-    validFrom: 1700000000000,
-    expiresAt: Date.now() + 365 * 86400000,
-    isActive: true,
     minOrderAmount: 0,
-    usages: [],
+    validDays: 365,
   },
-};
+];
+
+/**
+ * Seeds the DEFAULT_COUPONS that are not in the coupon store yet (an archived or edited record
+ * counts as present and is left alone). Returns the codes it created.
+ */
+async function seedDefaultCoupons(repo, now = Date.now()) {
+  if (!repo || typeof repo.findCoupon !== 'function' || typeof repo.saveCoupon !== 'function') return [];
+  const created = [];
+  for (const d of DEFAULT_COUPONS) {
+    if (await repo.findCoupon(d.code)) continue;
+    const { validDays, ...fields } = d;
+    await repo.saveCoupon({ ...fields, validFrom: now, expiresAt: now + validDays * 86400000, isActive: true, createdBy: 'seed' });
+    created.push(d.code);
+  }
+  return created;
+}
 
 async function getEffectivePlans(repo) {
   if (repo && typeof repo.getSubscriptionPricing === 'function') {
@@ -90,45 +105,48 @@ async function resolveCoupon(rawCode, repo) {
       const dbCoupon = await repo.findCoupon(cleanCode);
       if (dbCoupon) return dbCoupon;
     } catch {
-      // fallback
+      // a store error reads as "not found": no coupon is ever applied without its record
     }
   }
-  return BUILTIN_COUPONS[cleanCode] ? { ...BUILTIN_COUPONS[cleanCode] } : null;
+  return null;
 }
 
 function evaluateCoupon(coupon, { userId, planTier, billingCycle = 'monthly', amountInInr }) {
   if (!coupon) {
-    return { valid: false, error: 'Coupon code not found' };
+    return { valid: false, error: 'Coupon code not found', reason: 'COUPON_NOT_FOUND' };
   }
   if (!coupon.isActive) {
-    return { valid: false, error: 'This coupon is no longer active' };
+    const st = String(coupon.status || '').toUpperCase();
+    if (st === 'EXPIRED') return { valid: false, error: 'This coupon has expired', reason: 'COUPON_EXPIRED' };
+    if (st === 'USAGE_LIMIT_REACHED') return { valid: false, error: 'Coupon usage limit has been reached', reason: 'COUPON_LIMIT_REACHED' };
+    return { valid: false, error: 'This coupon is no longer active', reason: 'COUPON_INACTIVE' };
   }
   const now = Date.now();
   if (coupon.validFrom && now < coupon.validFrom) {
-    return { valid: false, error: 'This coupon is not active yet' };
+    return { valid: false, error: 'This coupon is not active yet', reason: 'COUPON_SCHEDULED' };
   }
   if (coupon.expiresAt && now > coupon.expiresAt) {
-    return { valid: false, error: 'This coupon has expired' };
+    return { valid: false, error: 'This coupon has expired', reason: 'COUPON_EXPIRED' };
   }
   if (coupon.maxUsageTotal && (coupon.usageCount || 0) >= coupon.maxUsageTotal) {
-    return { valid: false, error: 'Coupon usage limit has been reached' };
+    return { valid: false, error: 'Coupon usage limit has been reached', reason: 'COUPON_LIMIT_REACHED' };
   }
   if (userId && Array.isArray(coupon.usages)) {
     const userTimes = coupon.usages.filter((u) => u.userId === userId).length;
     if (userTimes >= (coupon.maxUsagePerUser || 1)) {
-      return { valid: false, error: 'You have already redeemed this coupon' };
+      return { valid: false, error: 'You have already redeemed this coupon', reason: 'PER_USER_LIMIT_REACHED' };
     }
   }
   const tier = normalizeTier(planTier);
   if (coupon.applicableTiers && !coupon.applicableTiers.includes('all') && !coupon.applicableTiers.includes(tier)) {
-    return { valid: false, error: `Coupon is not valid for ${tier}` };
+    return { valid: false, error: `Coupon is not valid for ${tier}`, reason: 'TIER_MISMATCH' };
   }
   if (coupon.applicableCycles && !coupon.applicableCycles.includes('all') && !coupon.applicableCycles.includes(billingCycle)) {
-    return { valid: false, error: `Coupon is not valid for ${billingCycle} subscriptions` };
+    return { valid: false, error: `Coupon is not valid for ${billingCycle} subscriptions`, reason: 'CYCLE_MISMATCH' };
   }
   const baseAmount = Number(amountInInr) || 0;
   if (coupon.minOrderAmount && baseAmount < coupon.minOrderAmount) {
-    return { valid: false, error: `Minimum order amount of ₹${coupon.minOrderAmount} required for this coupon` };
+    return { valid: false, error: `Minimum order amount of ₹${coupon.minOrderAmount} required for this coupon`, reason: 'MIN_ORDER_NOT_MET' };
   }
 
   let discountInr = 0;
@@ -167,6 +185,53 @@ function normalizeTier(tier) {
   return 'community';
 }
 
+/**
+ * Every plan a coupon can be bound to: the paid subscription tiers and the membership
+ * categories, with their current price and whether they are on sale.
+ */
+async function couponPlanOptions(repo) {
+  const plans = await getEffectivePlans(repo);
+  const out = [];
+  for (const tier of ['proRider', 'roadCaptain', 'tourOperator']) {
+    const p = plans[tier];
+    if (!p) continue;
+    out.push({ id: tier, label: p.label || tier, kind: 'subscription', monthlyInr: Number(p.monthly) || 0, annualInr: Number(p.annual) || 0, isActive: p.isActive !== false });
+  }
+  const catalog = repo && typeof repo.getMembershipCatalog === 'function' ? await repo.getMembershipCatalog().catch(() => ({})) : {};
+  for (const [id, c] of Object.entries(catalog || {})) {
+    if (!c || typeof c !== 'object') continue;
+    out.push({ id, label: c.name || id, kind: 'membership', monthlyInr: Number(c.monthlyPriceInr) || 0, annualInr: null, isActive: c.isActive !== false });
+  }
+  return out;
+}
+
+/**
+ * The plan binding of a coupon from admin input (`applicablePlans` or `applicableTiers`):
+ * ['all'] for every plan, otherwise known plan ids only. Returns { tiers } or { unknown }.
+ * undefined input gives { tiers: undefined } (keep what is stored).
+ */
+function cleanApplicablePlans(input, options) {
+  if (input === undefined) return { tiers: undefined };
+  if (!Array.isArray(input)) return { unknown: [String(input)] };
+  const raw = input.map((x) => String(x || '').trim()).filter(Boolean);
+  if (!raw.length || raw.includes('all')) return { tiers: ['all'] };
+  const ids = new Set(options.map((o) => o.id));
+  const tiers = [];
+  const unknown = [];
+  for (const r of raw) {
+    const id = ids.has(r) ? r : (normalizeTier(r) !== 'community' && ids.has(normalizeTier(r)) ? normalizeTier(r) : null);
+    if (id) { if (!tiers.includes(id)) tiers.push(id); } else unknown.push(r);
+  }
+  return unknown.length ? { unknown } : { tiers };
+}
+
+const PLAN_FEATURE_MAX = 20;
+/** Plan features from admin input: up to 20 short strings, or undefined when not sent / invalid. */
+function cleanFeatures(v) {
+  if (!Array.isArray(v)) return undefined;
+  return v.map((x) => String(x || '').replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, 80)).filter(Boolean).slice(0, PLAN_FEATURE_MAX);
+}
+
 // ---------------------------------------------------------------------------
 // OFFERS: automatic discounts an admin schedules per tier / cycle. Stored in
 // subscription_config (k='offer'). An offer without a linked couponCode is
@@ -186,15 +251,6 @@ function offerView(o) {
     couponCode: o.couponCode || null,
     maxRedemptions: Number(o.maxRedemptions) || 0, redemptions: Number(o.redemptions) || 0,
     createdAt: Number(o.createdAt) || 0, updatedAt: Number(o.updatedAt) || 0, createdBy: o.createdBy || null,
-  };
-}
-/** Public shape (no counters, no author). */
-function publicOfferView(o) {
-  const v = offerView(o);
-  return {
-    id: v.id, title: v.title, description: v.description, planTier: v.planTier, billingCycle: v.billingCycle,
-    discountType: v.discountType, discountValue: v.discountValue, startsAt: v.startsAt, endsAt: v.endsAt,
-    couponCode: v.couponCode, autoApplied: !v.couponCode,
   };
 }
 /** Active, inside its dates, and not sold out. */
@@ -303,7 +359,7 @@ function orderView(o) {
     orderId: o.orderId, userId: o.userId || null, status: o.status || 'CREATED',
     amount: (Number(o.amountInPaise) || 0) / 100, amountInPaise: Number(o.amountInPaise) || 0, currency: o.currency || 'INR',
     mode: o.mode || null, paymentId: o.paymentId || '', utr: o.utr || '', planTier: o.planTier || null, billingCycle: o.billingCycle || null,
-    couponCode: o.couponCode || null, offerId: o.offerId || null, offerTitle: o.offerTitle || null, discountAmount: Number(o.discountAmount) || 0,
+    category: o.category || null, couponCode: o.couponCode || o.offerCode || null, offerId: o.offerId || null, offerTitle: o.offerTitle || null, discountAmount: Number(o.discountAmount) || 0,
     channel: o.channel || null, isFree: Boolean(o.isFree), isTest: o.mode === 'test',
     failureReason: o.failureReason || null,
     refundStatus: o.refundStatus || null, refundId: o.refundId || null,
@@ -580,6 +636,40 @@ async function settleVerifiedOrder({ repo, auth, hub, order, paymentId, source }
 }
 
 /** One admin write in the audit trail (subscription_config k='audit'). Never throws, never stores a secret. */
+/**
+ * Admin manual grant / extension of a paid tier: a ledger order (mode 'manual', amount 0), the
+ * plan activation, a subscription-history period and an audit entry. Used by the grant route and
+ * by the per-rider configuration (PATCH /admin/users/:userId/config).
+ */
+async function adminGrantPlan({ repo, auth, hub, req, userDoc, planTier, days, reason = '' }) {
+  const adminId = req.user?.userId || 'admin';
+  const order = {
+    orderId: `manual_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+    userId: userDoc.userId, planTier, billingCycle: 'manual', durationDays: days,
+    amountInPaise: 0, currency: 'INR', mode: 'manual', grantedBy: adminId, reason,
+  };
+  await saveOrder(repo, order);
+  const result = await activatePlan({ repo, auth, hub, userDoc, order, paymentId: order.orderId, method: 'MANUAL', source: `admin_grant:${adminId}` });
+  const after = await repo.findUserById(userDoc.userId);
+  const periods = periodsOf(after);
+  periods.push({ tier: planTier, validFrom: result.record.validFrom, validUntil: result.validUntil, startedAt: Date.now(), reason: 'granted', days, note: reason, by: adminId, orderId: order.orderId });
+  await repo.updateUser(after.key, { subscriptionHistory: periods, subscriptionExpiredAt: 0 });
+  if (auth?.gate) auth.gate.invalidate(userDoc.userId);
+  await addAudit(repo, req, 'subscription.grant', userDoc.userId, { planTier, days, reason, orderId: order.orderId, validUntil: result.validUntil });
+  return {
+    userId: userDoc.userId, orderId: order.orderId, subscriptionTier: result.tier, subscriptionValidUntil: result.validUntil,
+    subscriptionStatus: effectiveSubscription({ ...after, subscriptionTier: result.tier, subscriptionValidUntil: result.validUntil }),
+  };
+}
+
+/** Admin revoke: the rider is on Community at once (history period + audit entry). */
+async function adminRevokePlan({ repo, auth, hub, req, userDoc, reason = '' }) {
+  const adminId = req.user?.userId || 'admin';
+  const current = await revokePlan({ repo, auth, hub, userDoc, by: adminId, reason: 'revoked', note: reason });
+  await addAudit(repo, req, 'subscription.revoke', userDoc.userId, { previousTier: current.rawTier, reason });
+  return { userId: userDoc.userId, subscriptionTier: 'community', previousTier: current.rawTier, subscriptionStatus: effectiveSubscription(await repo.findUserById(userDoc.userId)) };
+}
+
 async function addAudit(repo, req, action, target, details = {}) {
   if (!repo || typeof repo.addAuditEntry !== 'function') return;
   try {
@@ -708,16 +798,23 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   const handleValidateCoupon = wrap(async (req, res) => {
     const { code, planTier, billingCycle = 'monthly', amount } = req.body || {};
     if (!code || !String(code).trim()) {
-      return res.status(400).json({ valid: false, error: 'Coupon code is required' });
+      return res.status(400).json({ valid: false, error: 'Coupon code is required', reason: 'BAD_REQUEST' });
     }
 
     const coupon = await resolveCoupon(code, repo);
     if (!coupon) {
-      return res.status(404).json({ valid: false, error: `Coupon '${code}' not found` });
+      return res.status(404).json({ valid: false, error: `Coupon '${code}' not found`, reason: 'COUPON_NOT_FOUND' });
     }
 
+    // Public endpoint: when the app sends its session token the per-rider limit is checked too.
+    let riderId = req.user?.userId;
+    if (!riderId) {
+      const h = String(req.headers.authorization || '');
+      const claims = h.startsWith('Bearer ') ? verifyToken(h.slice(7)) : null;
+      if (claims && typeof claims.sub === 'string') riderId = claims.sub;
+    }
     const result = evaluateCoupon(coupon, {
-      userId: req.user?.userId,
+      userId: riderId,
       planTier,
       billingCycle,
       amountInInr: Number(amount) || 0,
@@ -730,7 +827,6 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   });
 
   r.post('/subscription/validate-coupon', handleValidateCoupon);
-  r.post('/api/subscription/validate-coupon', handleValidateCoupon);
   r.post('/validate-coupon', handleValidateCoupon);
 
   // Public config: plans + the ACTIVE mode's key id (never a secret, no payee details).
@@ -749,7 +845,6 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   });
 
   r.get('/subscription/config', handleGetConfig);
-  r.get('/api/subscription/config', handleGetConfig);
 
   // An order the app created, opened on the website to pay by UPI
   // (checkout.html?order=…&t=…&e=…). The token is the only credential: it is bound to the
@@ -787,7 +882,6 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
     });
   });
   r.get('/checkout/order/:orderId', checkoutLimiter, handleWebOrder);
-  r.get('/api/checkout/order/:orderId', checkoutLimiter, handleWebOrder);
 
   // ---------------------------------------------------------------------------
   // Verify Signature   POST /api/verify-payment   (web checkout, Razorpay handler)
@@ -822,7 +916,6 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
   });
 
   r.post('/verify-payment', verifyLimiter, handleVerifyPayment);
-  r.post('/api/verify-payment', verifyLimiter, handleVerifyPayment);
 
   // ---------------------------------------------------------------------------
   // Redirect-mode return URL (Checkout `redirect: true` + `callback_url`).
@@ -854,7 +947,6 @@ function registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap }) {
       (settled && settled.scheduled ? `&starts=${settled.scheduled.startsAt}` : ''));
   });
   r.post('/razorpay/callback', callbackLimiter, express.urlencoded({ extended: false, limit: '20kb' }), handleCallback);
-  r.post('/api/razorpay/callback', callbackLimiter, express.urlencoded({ extended: false, limit: '20kb' }), handleCallback);
 }
 
 /**
@@ -881,16 +973,17 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     const billingCycle = req.body.billingCycle === 'annual' ? 'annual' : 'monthly';
     const plans = await getEffectivePlans(repo);
     const planMeta = plans[planTier];
-    if (!planMeta) return res.status(400).json({ error: 'Invalid plan selected' });
+    if (!planMeta) return res.status(400).json({ error: 'Invalid plan selected', reason: 'INVALID_PLAN' });
+    if (planMeta.isActive === false) return res.status(400).json({ error: `${planMeta.label || planTier} is not on sale right now.`, reason: 'PLAN_INACTIVE' });
 
     let amountInInr = billingCycle === 'annual' ? planMeta.annual : planMeta.monthly;
     let couponResult = null;
     const rawCoupon = req.body.couponCode || req.body.coupon_code;
     if (rawCoupon) {
       const coupon = await resolveCoupon(rawCoupon, repo);
-      if (!coupon) return res.status(400).json({ error: `Coupon '${rawCoupon}' not found` });
+      if (!coupon) return res.status(400).json({ error: `Coupon '${rawCoupon}' not found`, reason: 'COUPON_NOT_FOUND' });
       couponResult = evaluateCoupon(coupon, { userId, planTier, billingCycle, amountInInr });
-      if (!couponResult.valid) return res.status(400).json({ error: couponResult.error });
+      if (!couponResult.valid) return res.status(400).json({ error: couponResult.error, reason: couponResult.reason || 'COUPON_INVALID' });
       amountInInr = couponResult.finalAmount;
     }
     // No coupon: the best live offer for this plan is applied automatically (a coupon always wins; no stacking).
@@ -1020,6 +1113,18 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
     });
 
     if (order.isFree) {
+      // A free order is only a quote until it is settled: the coupon is checked again here, so two
+      // unsettled free orders cannot both spend a once-per-rider coupon (nor one paused meanwhile).
+      const settled = order.status === 'PAID' || (userDoc.paymentHistory || []).some((p) => p.orderId === order.orderId);
+      if (!settled && order.couponCode) {
+        const check = evaluateCoupon(await resolveCoupon(order.couponCode, repo), {
+          userId, planTier: order.planTier, billingCycle: order.billingCycle, amountInInr: plans[order.planTier]?.[order.billingCycle] || 0,
+        });
+        if (!check.valid) {
+          await repo.updateRazorpayOrder(orderId, { status: 'FAILED', failureReason: check.reason || 'COUPON_INVALID' }).catch(() => {});
+          return res.status(400).json({ error: check.error, reason: check.reason || 'COUPON_INVALID' });
+        }
+      }
       const result = await activatePlan({ repo, auth, hub, userDoc, order, paymentId: `coupon_${order.couponCode}`, method: 'COUPON_FREE', source: 'coupon' });
       return done(result, 'COUPON_FREE');
     }
@@ -1142,7 +1247,18 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       if (typeof req.query.mode === 'string' && ['test', 'live', 'manual'].includes(req.query.mode.trim())) filter.mode = req.query.mode.trim();
       const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit, 10) || 200));
       const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
-      const all = (await repo.listRazorpayOrders(filter, 10000)).sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+      // Optional filters: plan (planTier or membership category), coupon code, order/payment id search, createdAt window.
+      const plan = typeof req.query.plan === 'string' ? req.query.plan.trim() : '';
+      const coupon = typeof req.query.coupon === 'string' ? req.query.coupon.trim().toUpperCase() : '';
+      const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase().slice(0, 100) : '';
+      const from = Number(req.query.from) || 0;
+      const to = Number(req.query.to) || 0;
+      const all = (await repo.listRazorpayOrders(filter, 20000))
+        .filter((o) => !plan || o.planTier === plan || o.category === plan)
+        .filter((o) => !coupon || String(o.couponCode || o.offerCode || '').toUpperCase() === coupon)
+        .filter((o) => !q || [o.orderId, o.paymentId, o.userId].some((v) => String(v || '').toLowerCase().includes(q)))
+        .filter((o) => (!from || (Number(o.createdAt) || 0) >= from) && (!to || (Number(o.createdAt) || 0) <= to))
+        .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
       const rows = all.slice(offset, offset + limit);
       const users = new Map();
       for (const o of rows) {
@@ -1183,22 +1299,8 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
       const userDoc = await repo.findUserById(req.params.userId);
       if (!userDoc) return res.status(404).json({ error: 'User not found' });
-      const adminId = req.user?.userId || 'admin';
-      const order = {
-        orderId: `manual_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
-        userId: userDoc.userId, planTier, billingCycle: 'manual', durationDays: days,
-        amountInPaise: 0, currency: 'INR', mode: 'manual', grantedBy: adminId, reason,
-      };
-      await saveOrder(repo, order);
-      const result = await activatePlan({ repo, auth, hub, userDoc, order, paymentId: order.orderId, method: 'MANUAL', source: `admin_grant:${adminId}` });
-      const after = await repo.findUserById(userDoc.userId);
-      const periods = periodsOf(after);
-      periods.push({ tier: planTier, validFrom: result.record.validFrom, validUntil: result.validUntil, startedAt: Date.now(), reason: 'granted', days, note: reason, by: adminId, orderId: order.orderId });
-      await repo.updateUser(after.key, { subscriptionHistory: periods, subscriptionExpiredAt: 0 });
-      if (auth?.gate) auth.gate.invalidate(userDoc.userId);
-      await addAudit(repo, req, 'subscription.grant', userDoc.userId, { planTier, days, reason, orderId: order.orderId, validUntil: result.validUntil });
-      res.json({ success: true, userId: userDoc.userId, orderId: order.orderId, subscriptionTier: result.tier, subscriptionValidUntil: result.validUntil,
-        subscriptionStatus: effectiveSubscription({ ...after, subscriptionTier: result.tier, subscriptionValidUntil: result.validUntil }) });
+      const out = await adminGrantPlan({ repo, auth, hub, req, userDoc, planTier, days, reason });
+      res.json({ success: true, ...out });
     }));
 
     // POST /api/admin/subscription/users/:userId/revoke { reason } -> community now
@@ -1206,10 +1308,8 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
       const userDoc = await repo.findUserById(req.params.userId);
       if (!userDoc) return res.status(404).json({ error: 'User not found' });
-      const adminId = req.user?.userId || 'admin';
-      const current = await revokePlan({ repo, auth, hub, userDoc, by: adminId, reason: 'revoked', note: reason });
-      await addAudit(repo, req, 'subscription.revoke', userDoc.userId, { previousTier: current.rawTier, reason });
-      res.json({ success: true, userId: userDoc.userId, subscriptionTier: 'community', previousTier: current.rawTier, subscriptionStatus: effectiveSubscription(await repo.findUserById(userDoc.userId)) });
+      const out = await adminRevokePlan({ repo, auth, hub, req, userDoc, reason });
+      res.json({ success: true, ...out });
     }));
 
     // POST /api/admin/payments/:orderId/refund { amountInPaise?, reason } -> Razorpay refund of the order's payment.
@@ -1349,6 +1449,10 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
             annual: meta.annual !== undefined ? Math.max(1, Math.round(Number(meta.annual))) : updated[normTier].annual,
             label: meta.label ? String(meta.label).trim() : updated[normTier].label,
           };
+          const features = cleanFeatures(meta.features);
+          if (features !== undefined) updated[normTier].features = features;
+          if (typeof meta.isActive === 'boolean') updated[normTier].isActive = meta.isActive;
+          if (typeof meta.description === 'string') updated[normTier].description = meta.description.trim().slice(0, 300);
         }
       }
 
@@ -1372,18 +1476,14 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       });
     }));
 
+    // GET /api/admin/coupons/plan-options -> the plans a coupon can be bound to (for the editor's multi-select)
+    r.get('/admin/coupons/plan-options', requireAdmin, wrap(async (req, res) => {
+      res.set('Cache-Control', 'no-store').json({ plans: await couponPlanOptions(repo) });
+    }));
+
     // GET /api/admin/coupons - List all coupons with usage stats & limits
     r.get('/admin/coupons', requireAdmin, wrap(async (req, res) => {
-      const dbCoupons = await repo.listCoupons(500).catch(() => []);
-      const dbCodes = new Set(dbCoupons.map((c) => c.code));
-
-      const allCoupons = [...dbCoupons];
-      for (const [code, c] of Object.entries(BUILTIN_COUPONS)) {
-        if (!dbCodes.has(code)) {
-          allCoupons.push({ ...c });
-        }
-      }
-
+      const allCoupons = await repo.listCoupons(500).catch(() => []);
       res.json({
         coupons: allCoupons,
         total: allCoupons.length,
@@ -1409,9 +1509,16 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
       if (body.discountType === 'percentage' && numVal > 100) {
         return res.status(400).json({ error: 'Percentage discount cannot exceed 100%' });
       }
+      const binding = cleanApplicablePlans(body.applicablePlans !== undefined ? body.applicablePlans : body.applicableTiers, await couponPlanOptions(repo));
+      if (binding.unknown) return res.status(400).json({ error: `Unknown plan: ${binding.unknown.join(', ')}`, reason: 'UNKNOWN_PLAN', unknown: binding.unknown });
+      if (body.validFrom !== undefined && body.expiresAt !== undefined && Number(body.expiresAt) <= Number(body.validFrom)) {
+        return res.status(400).json({ error: 'The coupon must end after it starts', reason: 'BAD_WINDOW' });
+      }
+      delete body.applicablePlans;
 
       const saved = await repo.saveCoupon({
         ...body,
+        applicableTiers: binding.tiers || ['all'],
         code,
         createdBy: req.user?.email || req.user?.userId || 'admin',
       });
@@ -1421,6 +1528,7 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
         discountValue: saved.discountValue,
         maxUsageTotal: saved.maxUsageTotal,
         maxDiscountCap: saved.maxDiscountCap,
+        applicableTiers: saved.applicableTiers,
       });
       res.status(201).json({
         success: true,
@@ -1437,7 +1545,16 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
         return res.status(404).json({ error: 'Coupon not found' });
       }
 
-      const patch = req.body || {};
+      const patch = { ...(req.body || {}) };
+      const binding = cleanApplicablePlans(patch.applicablePlans !== undefined ? patch.applicablePlans : patch.applicableTiers, await couponPlanOptions(repo));
+      if (binding.unknown) return res.status(400).json({ error: `Unknown plan: ${binding.unknown.join(', ')}`, reason: 'UNKNOWN_PLAN', unknown: binding.unknown });
+      delete patch.applicablePlans;
+      if (binding.tiers) patch.applicableTiers = binding.tiers;
+      const nextFrom = patch.validFrom !== undefined ? Number(patch.validFrom) : Number(existing.validFrom) || 0;
+      const nextTo = patch.expiresAt !== undefined ? Number(patch.expiresAt) : Number(existing.expiresAt) || 0;
+      if (nextFrom > 0 && nextTo > 0 && nextTo <= nextFrom) return res.status(400).json({ error: 'The coupon must end after it starts', reason: 'BAD_WINDOW' });
+      // Usage history and counters are server-owned: an edit never rewrites them.
+      delete patch.usages; delete patch.usageCount; delete patch.key;
       const updated = {
         ...existing,
         ...patch,
@@ -1613,14 +1730,20 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
 
 module.exports = {
   PLAN_PRICES_INR,
-  BUILTIN_COUPONS,
+  DEFAULT_COUPONS,
+  seedDefaultCoupons,
   getEffectivePlans,
   resolveCoupon,
   evaluateCoupon,
   normalizeTier,
+  couponPlanOptions,
+  cleanApplicablePlans,
   gatewayFor,
   activatePlan,
   revokePlan,
+  adminGrantPlan,
+  adminRevokePlan,
+  addAudit,
   recordRefund,
   webCheckoutToken,
   orderView,

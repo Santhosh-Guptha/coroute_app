@@ -41,6 +41,41 @@ String adminInrPaise(num? paise) => paise == null ? '₹—' : adminInr(paise / 
 /// A number from JSON (number or numeric string), null otherwise.
 num? adminNumOrNull(Object? v) => v is num ? v : num.tryParse('${v ?? ''}');
 
+/// The membership plans the console always lists, with names but no prices: prices come from
+/// the server plan catalog (`GET /api/admin/coupons/plan-options`, `monthlyInr`), so an admin
+/// price change on the gateway never leaves an old price in the app (3.54).
+const Map<String, String> adminMembershipPlanNames = {
+  'individual': 'Individual Membership',
+  'group_small': 'Small Group (2–6)',
+  'group_large': 'Large Group (7–12)',
+};
+
+/// "Small Group (2–6) (₹59/mo)" from the server plan [options] for [id]; the catalog label when
+/// the server has one, and no price when the server has none (never a hard-coded price).
+String adminPlanLabel(String id, List<Map<String, dynamic>> options, {bool perMonth = true}) {
+  Map<String, dynamic>? opt;
+  for (final o in options) {
+    if (o['id']?.toString() == id) {
+      opt = o;
+      break;
+    }
+  }
+  final label = opt?['label']?.toString().trim() ?? '';
+  final name = label.isNotEmpty ? label : (adminMembershipPlanNames[id] ?? id);
+  final price = adminNumOrNull(opt?['monthlyInr']);
+  if (price == null || price <= 0) return name;
+  return '$name (${adminInr(price)}${perMonth ? '/mo' : ''})';
+}
+
+/// The membership plan ids to list: the known ones, then any other membership plan the server
+/// catalog has.
+List<String> adminMembershipPlanIds(List<Map<String, dynamic>> options) => [
+      ...adminMembershipPlanNames.keys,
+      for (final o in options)
+        if (o['kind']?.toString() == 'membership' && !adminMembershipPlanNames.containsKey(o['id']?.toString()) && (o['id']?.toString() ?? '').isNotEmpty)
+          o['id'].toString(),
+    ];
+
 /// The first of [keys] in [m] that holds a number.
 num? adminPickNum(Map? m, List<String> keys) {
   if (m == null) return null;

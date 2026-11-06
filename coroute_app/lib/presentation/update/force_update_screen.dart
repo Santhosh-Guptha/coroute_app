@@ -62,7 +62,7 @@ class ForceUpdateScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'A critical safety and protocol update has been released. You must update CoRoute to stay synchronized with your convoy.',
+                      'An important safety update is out. Update CoRoute to keep riding with your group.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: AppTheme.text2,

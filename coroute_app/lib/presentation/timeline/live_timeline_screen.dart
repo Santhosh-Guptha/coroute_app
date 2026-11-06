@@ -214,7 +214,7 @@ class _LiveTimelineViewState extends State<LiveTimelineView> {
               child: EmptyState(
                 icon: Icons.timeline_rounded,
                 title: timeline.error != null ? 'Could not load the timeline' : 'No events yet',
-                message: timeline.error ?? 'The timeline fills in as the ride goes: who joins, stops, falls behind and arrives.',
+                message: timeline.error ?? 'Ride events show here as they happen.',
                 primaryLabel: timeline.error != null ? 'Try again' : null,
                 onPrimary: timeline.error != null ? () => LiveTimelineView.refresh(context, groupId) : null,
               ),

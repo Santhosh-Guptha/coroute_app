@@ -953,7 +953,7 @@ class _RefundDialogState extends State<_RefundDialog> {
   }
 }
 
-/// `GET /admin/payments?status=&mode=&userId=&limit=&offset=`, with refunds and CSV export.
+/// `GET /admin/payments?status=&mode=&plan=&q=&limit=&offset=`, with refunds and CSV export.
 class AdminPaymentsListTab extends StatefulWidget {
   const AdminPaymentsListTab({super.key});
 
@@ -974,8 +974,12 @@ class _AdminPaymentsListTabState extends State<AdminPaymentsListTab> with Automa
   String _status = '';
   String _mode = '';
   String _userId = '';
+  String _plan = '';
   Timer? _debounce;
   int _generation = 0;
+
+  /// Plan filter options from the server (subscription tiers and membership plans).
+  List<(String, String)> _plans = const [('', 'Any plan')];
 
   static const List<(String, String)> _statuses = [
     ('', 'Any status'),
@@ -1000,6 +1004,7 @@ class _AdminPaymentsListTabState extends State<AdminPaymentsListTab> with Automa
   void initState() {
     super.initState();
     _load();
+    _loadPlans();
   }
 
   @override
@@ -1008,7 +1013,25 @@ class _AdminPaymentsListTabState extends State<AdminPaymentsListTab> with Automa
     super.dispose();
   }
 
-  Map<String, String?> get _filters => {'status': _status, 'mode': _mode, 'userId': _userId.trim()};
+  Future<void> _loadPlans() async {
+    try {
+      final res = await context.read<ApiClient>().get('/admin/coupons/plan-options');
+      final list = adminMapList(res is Map ? res['plans'] : null);
+      if (!mounted || list.isEmpty) return;
+      setState(() {
+        _plans = [
+          ('', 'Any plan'),
+          for (final p in list)
+            if ((p['id']?.toString() ?? '').isNotEmpty) (p['id'].toString(), p['label']?.toString() ?? p['id'].toString()),
+        ];
+      });
+    } catch (_) {
+      // The plan filter stays at "Any plan"; the list still works.
+    }
+  }
+
+  // `q` matches the order id, the payment id or the rider's user id.
+  Map<String, String?> get _filters => {'status': _status, 'mode': _mode, 'plan': _plan, 'q': _userId.trim()};
 
   static String _labelOf(List<(String, String)> list, String v) => list.firstWhere((e) => e.$1 == v, orElse: () => (v, v)).$2;
 
@@ -1085,7 +1108,7 @@ class _AdminPaymentsListTabState extends State<AdminPaymentsListTab> with Automa
       children: [
         const SizedBox(height: 4),
         AdminSearchRow(
-          hint: 'Filter by user ID',
+          hint: 'Order, payment or user ID',
           onChanged: (v) {
             _userId = v;
             _debounce?.cancel();
@@ -1114,6 +1137,15 @@ class _AdminPaymentsListTabState extends State<AdminPaymentsListTab> with Automa
               options: _modes,
               onSelected: (v) {
                 setState(() => _mode = v);
+                _load();
+              },
+            ),
+            AdminFilterButton<String>(
+              value: _plan,
+              label: _labelOf(_plans, _plan),
+              options: _plans,
+              onSelected: (v) {
+                setState(() => _plan = v);
                 _load();
               },
             ),

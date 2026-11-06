@@ -6,7 +6,6 @@ import 'admin_config_tabs.dart';
 import 'admin_coupon_usage_tab.dart';
 import 'admin_payment_analytics_tab.dart';
 import 'admin_payments_tabs.dart';
-import 'admin_mobile_dashboard_screen.dart';
 import 'admin_promotions_tabs.dart';
 import 'admin_ui.dart';
 import 'master_admin_dashboard.dart';
@@ -90,7 +89,39 @@ enum AdminPaymentsTab {
   final IconData icon;
   final String description;
   final AdminPaymentsCategory category;
+
+  /// Short name for the tab chips on phones.
+  String get short => switch (this) {
+        AdminPaymentsTab.overview => 'Overview',
+        AdminPaymentsTab.subscribers => 'Members',
+        AdminPaymentsTab.coupons => 'Coupons',
+        AdminPaymentsTab.couponUsage => 'Coupon use',
+        AdminPaymentsTab.analytics => 'Analytics',
+        AdminPaymentsTab.payments => 'Payments',
+        AdminPaymentsTab.audit => 'Audit log',
+        AdminPaymentsTab.offers => 'Offers',
+        AdminPaymentsTab.pricing => 'Plans',
+        AdminPaymentsTab.gateway => 'Gateway',
+      };
 }
+
+/// The tabs of the "Payments" section (the rest are under "Plans and coupons").
+const List<AdminPaymentsTab> adminPaymentsSectionTabs = [
+  AdminPaymentsTab.overview,
+  AdminPaymentsTab.payments,
+  AdminPaymentsTab.analytics,
+  AdminPaymentsTab.subscribers,
+  AdminPaymentsTab.audit,
+  AdminPaymentsTab.gateway,
+];
+
+/// The tabs of the "Plans and coupons" section.
+const List<AdminPaymentsTab> adminPlansSectionTabs = [
+  AdminPaymentsTab.pricing,
+  AdminPaymentsTab.coupons,
+  AdminPaymentsTab.couponUsage,
+  AdminPaymentsTab.offers,
+];
 
 /// Master admin: "Payments & Plans" Configuration Console.
 ///
@@ -133,50 +164,88 @@ class _AdminPlansPricingScreenState extends State<AdminPlansPricingScreen> {
     );
   }
 
-  int _mapTabToMobileIndex(AdminPaymentsTab tab) {
-    switch (tab) {
-      case AdminPaymentsTab.overview:
-        return 0;
-      case AdminPaymentsTab.payments:
-      case AdminPaymentsTab.analytics:
-        return 1;
-      case AdminPaymentsTab.coupons:
-      case AdminPaymentsTab.couponUsage:
-        return 2;
-      case AdminPaymentsTab.subscribers:
-      case AdminPaymentsTab.pricing:
-      case AdminPaymentsTab.offers:
-        return 3;
-      case AdminPaymentsTab.gateway:
-      case AdminPaymentsTab.audit:
-        return 4;
-    }
-  }
+  /// Plans and coupons, or Payments (which nav item is selected).
+  AdminSection get _section => adminPlansSectionTabs.contains(_currentTab) ? AdminSection.plans : AdminSection.payments;
+
+  /// Every tab, kept alive so switching back keeps the scroll and the loaded data.
+  Widget _tabStack() => IndexedStack(
+        index: _currentTab.index,
+        children: [
+          AdminOverviewTab(onOpen: _goTo),
+          const AdminSubscribersTab(),
+          const AdminCouponsTab(),
+          const AdminCouponUsageTab(),
+          const AdminPaymentAnalyticsTab(),
+          const AdminPaymentsListTab(),
+          const AdminAuditTab(),
+          const AdminOffersTab(),
+          const AdminPricingTab(),
+          const AdminGatewayTab(),
+        ],
+      );
 
   @override
   Widget build(BuildContext context) {
-    return AdminShell(
-      title: 'Configuration Console',
-      subtitle: 'Subscribers, payments, pricing matrix and the Razorpay gateway',
-      actions: [
-        AdminIconAction(
-          icon: Icons.dashboard_customize_rounded,
-          label: 'Jump to module',
-          onTap: () => _openModuleMenu(context),
-        ),
-        AdminIconAction(
-          icon: Icons.preview_rounded,
-          label: 'Preview rider plans',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PlanSelectorScreen())),
-        ),
-      ],
-      nav: adminNavItems(context, AdminSection.plans),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= adminWideBreakpoint;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= adminWideBreakpoint;
 
-          if (isWide) {
-            return Row(
+        // Phone: the same tabs as on a tablet, picked from a row of chips (the
+        // section's tabs; every module is in the "All modules" menu).
+        if (!isWide) {
+          final tabs = _section == AdminSection.plans ? adminPlansSectionTabs : adminPaymentsSectionTabs;
+          return AdminShell(
+            title: _section == AdminSection.plans ? 'Plans and coupons' : 'Payments',
+            subtitle: _currentTab.label,
+            actions: [
+              AdminIconAction(icon: Icons.dashboard_customize_rounded, label: 'All modules', onTap: () => _openModuleMenu(context)),
+            ],
+            nav: adminNavItems(context, _section),
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 56,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                    children: [
+                      for (final tab in tabs)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(tab.short),
+                            selected: _currentTab == tab,
+                            onSelected: (_) => _goTo(tab),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Expanded(child: _tabStack()),
+              ],
+            ),
+          );
+        }
+
+        // Desktop / Wide Layout: Desktop Admin Shell with persistent side navigation.
+        return AdminShell(
+          title: _section == AdminSection.plans ? 'Plans and coupons' : 'Payments',
+          subtitle: 'Payments, members, plans, coupons and the payment gateway',
+          actions: [
+            AdminIconAction(
+              icon: Icons.dashboard_customize_rounded,
+              label: 'Jump to module',
+              onTap: () => _openModuleMenu(context),
+            ),
+            AdminIconAction(
+              icon: Icons.preview_rounded,
+              label: 'Preview rider plans',
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PlanSelectorScreen())),
+            ),
+          ],
+          nav: adminNavItems(context, _section),
+          body: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Left Configuration Menu Sidebar
@@ -300,36 +369,14 @@ class _AdminPlansPricingScreenState extends State<AdminPlansPricingScreen> {
                           ],
                         ),
                       ),
-                      Expanded(
-                        child: IndexedStack(
-                          index: _currentTab.index,
-                          children: [
-                            AdminOverviewTab(onOpen: _goTo),
-                            const AdminSubscribersTab(),
-                            const AdminCouponsTab(),
-                            const AdminCouponUsageTab(),
-                            const AdminPaymentAnalyticsTab(),
-                            const AdminPaymentsListTab(),
-                            const AdminAuditTab(),
-                            const AdminOffersTab(),
-                            const AdminPricingTab(),
-                            const AdminGatewayTab(),
-                          ],
-                        ),
-                      ),
+                      Expanded(child: _tabStack()),
                     ],
                   ),
                 ),
               ],
-            );
-          }
-
-          // Compact / Mobile Layout: Mobile-First Admin Dashboard Redesign (Screens 1-5)
-          return AdminMobileDashboardScreen(
-            initialTabIndex: _mapTabToMobileIndex(_currentTab),
-          );
-        },
-      ),
+            ),
+        );
+      },
     );
   }
 }

@@ -293,7 +293,8 @@ class _ProfileFormState extends State<ProfileForm> {
     return ListView(
       physics: const BouncingScrollPhysics(),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+      // Hosts use SafeArea(bottom: false); keep [Save] above the system nav bar.
+      padding: EdgeInsets.fromLTRB(20, 8, 20, 28 + MediaQuery.paddingOf(context).bottom),
       children: [
         ?header,
         if (err != null) ...[
@@ -303,6 +304,7 @@ class _ProfileFormState extends State<ProfileForm> {
         _section('About you'),
         TextField(
           controller: _name,
+          textInputAction: TextInputAction.next,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxCallsignLength)],
           textCapitalization: TextCapitalization.words,
           style: AppText.body,
@@ -311,6 +313,7 @@ class _ProfileFormState extends State<ProfileForm> {
         const SizedBox(height: Space.s12),
         TextField(
           controller: _phone,
+          textInputAction: TextInputAction.next,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
           keyboardType: TextInputType.phone,
           style: AppText.body,
@@ -345,6 +348,7 @@ class _ProfileFormState extends State<ProfileForm> {
           const SizedBox(height: Space.s12),
           TextField(
             controller: _vehicleNo,
+          textInputAction: TextInputAction.next,
             inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxVehicleNoLength)],
             textCapitalization: TextCapitalization.characters,
             style: AppText.body,
@@ -353,12 +357,13 @@ class _ProfileFormState extends State<ProfileForm> {
         ],
         _section('Emergency contact'),
         Text(
-          'Your SOS screen offers one tap to call or message this person.',
+          'SOS lets you call or text this person in one tap.',
           style: AppText.caption,
         ),
         const SizedBox(height: Space.s12),
         TextField(
           controller: _contactName,
+          textInputAction: TextInputAction.next,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxContactNameLength)],
           textCapitalization: TextCapitalization.words,
           style: AppText.body,
@@ -367,6 +372,7 @@ class _ProfileFormState extends State<ProfileForm> {
         const SizedBox(height: Space.s12),
         TextField(
           controller: _contactPhone,
+          textInputAction: TextInputAction.next,
           inputFormatters: [LengthLimitingTextInputFormatter(AppConstants.maxPhoneInputLength)],
           keyboardType: TextInputType.phone,
           style: AppText.body,
@@ -435,8 +441,8 @@ class _ProfileFormState extends State<ProfileForm> {
           contentPadding: EdgeInsets.zero,
           value: _responderMedical,
           onChanged: _busy ? null : (v) => setState(() => _responderMedical = v),
-          title: Text('Share with a rider from another group who comes to help me', style: _switchTitle),
-          subtitle: Text('Only after they accept to help, only while your alert is open. Off by default.', style: AppText.caption),
+          title: Text('Share with a rider who comes to help', style: _switchTitle),
+          subtitle: Text('Only after they accept, while your alert is open.', style: AppText.caption),
         ),
         ..._rideAndLanguage(),
         _section('Emergency texts'),
@@ -446,9 +452,9 @@ class _ProfileFormState extends State<ProfileForm> {
           contentPadding: EdgeInsets.zero,
           value: !_smsOptOut,
           onChanged: _busy ? null : (v) => setState(() => _smsOptOut = !v),
-          title: Text('Receive emergency texts from my ride group', style: _switchTitle),
+          title: Text('Get emergency texts from my group', style: _switchTitle),
           subtitle: Text(
-            'A rider with no internet can text you where they are. When off, your number is not used for these texts.',
+            'Riders without internet can text you their location.',
             style: AppText.caption,
           ),
         ),

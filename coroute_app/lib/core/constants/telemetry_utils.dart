@@ -26,12 +26,6 @@ class TelemetryUtils {
     return cardinalDirections16[index];
   }
 
-  /// Formats heading into human readable badge (e.g. 45° NE)
-  static String formatHeading(double heading) {
-    final cardinal = getCardinalDirection(heading);
-    return '${heading.round()}° $cardinal';
-  }
-
   /// Categorizes speed in km/h
   static String getSpeedCategory(double speedKmh) {
     if (speedKmh < 1.5) return 'Parked';

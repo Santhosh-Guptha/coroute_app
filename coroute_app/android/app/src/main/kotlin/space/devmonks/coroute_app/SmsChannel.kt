@@ -53,8 +53,16 @@ class SmsChannel(context: Context) : MethodChannel.MethodCallHandler {
                 send(to, body, result)
             }
             "launchSmsIntent" -> {
-                val to = call.argument<String>("to")?.trim().orEmpty()
                 val body = call.argument<String>("body").orEmpty()
+                // Several people at once (emergency texts without SEND_SMS): the rider or a
+                // bystander only has to press Send in the messages app.
+                val list = call.argument<List<String>>("toList")
+                val to = if (!list.isNullOrEmpty()) {
+                    val sep = if ((Build.MANUFACTURER ?: "").lowercase().contains("samsung")) "," else ";"
+                    list.map { it.replace(Regex("[^0-9+]"), "") }.filter { it.isNotEmpty() }.distinct().joinToString(sep)
+                } else {
+                    call.argument<String>("to")?.trim().orEmpty()
+                }
                 launchSmsIntent(to, body, result)
             }
             else -> result.notImplemented()
@@ -63,7 +71,7 @@ class SmsChannel(context: Context) : MethodChannel.MethodCallHandler {
 
     private fun launchSmsIntent(to: String, body: String, result: MethodChannel.Result) {
         try {
-            val cleanTo = to.replace(Regex("[^0-9+]"), "")
+            val cleanTo = to.replace(Regex("[^0-9+;,]"), "")
             val uri = if (cleanTo.isNotEmpty()) android.net.Uri.parse("smsto:$cleanTo") else android.net.Uri.parse("smsto:")
             val intent = Intent(Intent.ACTION_SENDTO, uri).apply {
                 if (body.isNotEmpty()) {

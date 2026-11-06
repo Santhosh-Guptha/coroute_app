@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'background_service.dart';
 import 'safety_native.dart';
+import 'sms_sender.dart';
 
 /// One place for every runtime permission the app needs, with the reason for each.
 class PermissionItem {
@@ -21,7 +22,6 @@ class PermissionsService {
 
   static bool get _mobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
-  static Future<bool> introShown() async => (await SharedPreferences.getInstance()).getBool(_doneKey) ?? false;
   static Future<void> markIntroShown() async => (await SharedPreferences.getInstance()).setBool(_doneKey, true);
 
   static Future<List<PermissionItem>> status() async {
@@ -30,6 +30,7 @@ class PermissionsService {
     final always = await Permission.locationAlways.status;
     final mic = await Permission.microphone.status;
     final notif = await Permission.notification.status;
+    final bt = await Permission.bluetooth.status;
     final battery = await BackgroundService.isIgnoringBatteryOptimizations();
     final android = Platform.isAndroid;
     // Full-screen alarms can be denied only on Android 14 (SDK 34) and newer.
@@ -37,8 +38,11 @@ class PermissionsService {
     final fullScreen = sdk >= 34 ? await SafetyNative.canUseFullScreenIntent() : true;
     return [
       PermissionItem(key: 'location', title: 'Location while using the app', reason: 'We need your location so your riding group can see your position during an active ride.', required: true, granted: loc.isGranted),
-      PermissionItem(key: 'locationAlways', title: 'Location in the background', reason: 'Keeps your group updated while the phone is in your pocket or the screen is locked, only during an active ride. Choose "Allow all the time".', required: true, granted: always.isGranted),
+      // Google Play prominent disclosure: what is collected, that it happens when the app is closed
+      // or not in use, and why. Shown on the permissions screen before the system prompt.
+      PermissionItem(key: 'locationAlways', title: 'Location in the background', reason: 'CoRoute collects your location to share your live position with your riding group and to send it with an SOS or crash alert, even when the app is closed or not in use. Only during an active ride. Choose "Allow all the time".', required: true, granted: always.isGranted),
       PermissionItem(key: 'microphone', title: 'Microphone', reason: 'Used only while you hold Talk or turn on hands-free talk.', required: false, granted: mic.isGranted),
+      PermissionItem(key: 'bluetooth', title: 'Bluetooth', reason: 'Connects to handlebar remotes and smart airbag vests for hands-free control and crash protection.', required: false, granted: bt.isGranted),
       PermissionItem(key: 'notification', title: 'Notifications', reason: 'Enable ride alerts to receive group separation and emergency updates.', required: false, granted: notif.isGranted),
       if (Platform.isAndroid)
         PermissionItem(key: 'battery', title: 'Unrestricted battery use', reason: 'Stops the phone from closing CoRoute during long rides.', required: false, granted: battery),
@@ -58,18 +62,40 @@ class PermissionsService {
         if (!(await Permission.locationWhenInUse.status).isGranted) await Permission.locationWhenInUse.request();
         final r = await Permission.locationAlways.request();
         if (r.isPermanentlyDenied) await openAppSettings();
-        return r.isGranted;
+        // Immediately re-check actual status from the OS; never assume granted just because settings was opened
+        return (await Permission.locationAlways.status).isGranted;
       case 'microphone':
-        return (await Permission.microphone.request()).isGranted;
-      case 'notification':
-        return (await Permission.notification.request()).isGranted;
-      case 'battery':
-        return BackgroundService.requestIgnoreBatteryOptimizations();
-      case 'sms':
-        if (!Platform.isAndroid) return false;
-        final r = await Permission.sms.request();
+        final r = await Permission.microphone.request();
         if (r.isPermanentlyDenied) await openAppSettings();
-        return r.isGranted;
+        return (await Permission.microphone.status).isGranted;
+      case 'notification':
+        final r = await Permission.notification.request();
+        if (r.isPermanentlyDenied) await openAppSettings();
+        return (await Permission.notification.status).isGranted;
+      case 'bluetooth':
+        if (Platform.isAndroid) {
+          try {
+            // Only BLUETOOTH_CONNECT is declared (headset routing; remotes pair as HID keyboards).
+            // BLUETOOTH_SCAN is not in the manifest, so asking for it always failed.
+            final connect = await Permission.bluetoothConnect.request();
+            if (connect.isPermanentlyDenied) await openAppSettings();
+            return await isBluetoothGranted();
+          } catch (_) {
+            final r = await Permission.bluetooth.request();
+            if (r.isPermanentlyDenied) await openAppSettings();
+            return (await Permission.bluetooth.status).isGranted;
+          }
+        }
+        final r = await Permission.bluetooth.request();
+        if (r.isPermanentlyDenied) await openAppSettings();
+        return (await Permission.bluetooth.status).isGranted;
+      case 'battery':
+        await BackgroundService.requestIgnoreBatteryOptimizations();
+        return BackgroundService.isIgnoringBatteryOptimizations();
+      case 'sms':
+        // No SEND_SMS in the Play build (policy): emergency texts open the messages app with
+        // the SOS filled in, so "Text the group" only needs a phone that can text.
+        return SmsComposer.available();
       case 'fullScreen':
         // A system page: the result is read again when the rider comes back.
         if (await SafetyNative.canUseFullScreenIntent()) return true;
@@ -84,5 +110,63 @@ class PermissionsService {
     if (!_mobile) return true;
     final items = await status();
     return items.where((p) => p.required).every((p) => p.granted);
+  }
+
+  static Future<bool> isLocationGranted() async {
+    if (!_mobile) return true;
+    return (await Permission.locationWhenInUse.status).isGranted;
+  }
+
+  static Future<bool> isLocationAlwaysGranted() async {
+    if (!_mobile) return true;
+    return (await Permission.locationAlways.status).isGranted;
+  }
+
+  static Future<bool> isMicrophoneGranted() async {
+    if (!_mobile) return true;
+    return (await Permission.microphone.status).isGranted;
+  }
+
+  static Future<bool> isBluetoothGranted() async {
+    if (!_mobile) return true;
+    if (Platform.isAndroid) {
+      try {
+        return (await Permission.bluetoothConnect.status).isGranted;
+      } catch (_) {
+        return (await Permission.bluetooth.status).isGranted;
+      }
+    }
+    return (await Permission.bluetooth.status).isGranted;
+  }
+
+  static Future<bool> isNotificationGranted() async {
+    if (!_mobile) return true;
+    return (await Permission.notification.status).isGranted;
+  }
+
+  /// Immediately checks actual permission state from the OS for a specific key.
+  /// Never assumes granted just because settings or a system dialog was opened.
+  static Future<bool> isPermissionGranted(String key) async {
+    if (!_mobile) return true;
+    switch (key) {
+      case 'location':
+        return isLocationGranted();
+      case 'locationAlways':
+        return isLocationAlwaysGranted();
+      case 'microphone':
+        return isMicrophoneGranted();
+      case 'bluetooth':
+        return isBluetoothGranted();
+      case 'notification':
+        return isNotificationGranted();
+      case 'battery':
+        return BackgroundService.isIgnoringBatteryOptimizations();
+      case 'sms':
+        return SmsComposer.available();
+      case 'fullScreen':
+        return Platform.isAndroid ? await SafetyNative.canUseFullScreenIntent() : true;
+      default:
+        return false;
+    }
   }
 }

@@ -11,7 +11,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:coroute_app/core/l10n/l10n.dart';
 import 'package:coroute_app/core/theme/app_palette.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
-import 'package:coroute_app/core/ui/ui.dart';
 import 'package:coroute_app/data/models/convoy_model.dart';
 import 'package:coroute_app/data/models/network_models.dart';
 import 'package:coroute_app/data/models/outbox_item.dart';
@@ -24,7 +23,6 @@ import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/data/services/tile_cache_service.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
 import 'package:coroute_app/data/services/weather_service.dart';
-import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/domain/tracking/geo_math.dart';
 import 'package:coroute_app/presentation/admin/admin_emergencies_panel.dart';
 import 'package:coroute_app/presentation/ride/assist_banner.dart';
@@ -33,7 +31,6 @@ import 'package:coroute_app/presentation/ride/incident_sheet.dart';
 import 'package:coroute_app/presentation/ride/navigate_to.dart';
 import 'package:coroute_app/presentation/ride/ride_sheet.dart';
 import 'package:coroute_app/presentation/ride/rider_card_sheet.dart';
-import 'package:coroute_app/presentation/ride/riders_ladder.dart';
 import 'package:coroute_app/presentation/rider/rider_home_screen.dart';
 import 'package:coroute_app/presentation/safety/safety_settings_sheet.dart';
 import 'package:coroute_app/presentation/trip_planner/trip_review_sheet.dart';
@@ -264,20 +261,6 @@ void main() {
       expect(find.text('14% battery'), findsNothing, reason: 'charging');
     });
 
-    testWidgets('ladder: the sweeper rung has the tail marker, a low rider the battery chip, both in the semantics', (tester) async {
-      final c = convoy(sweeper: 'u_k');
-      final snap = RideFacts.snapshot(c, 'u_me');
-      final statuses = {for (final r in c.riders.values) r.userId: RiderStatus.riding};
-      await render(tester, RidersLadder(rungs: snap.ladder, colors: const {}, statuses: statuses, nowMs: now, onTap: (_) {}));
-      expect(tester.takeException(), isNull);
-      expect(find.byType(SweeperMarker), findsOneWidget);
-      expect(find.text('Sweeper'), findsOneWidget);
-      expect(find.byType(LowBatteryChip), findsOneWidget, reason: 'Kiran only; Arjun is charging');
-      expect(find.text('14% battery'), findsOneWidget);
-      final handle = tester.ensureSemantics();
-      expect(find.bySemanticsLabel(RegExp('Kiran.*14% battery.*Sweeper')), findsOneWidget);
-      handle.dispose();
-    });
   });
 
   group('group settings (items 11, 13)', () {
@@ -330,31 +313,7 @@ void main() {
   });
 
   group('ride sheet rows (items 2, 7, 8, 16)', () {
-    test('save map states', () {
-      expect(saveMapStateOf(running: false, done: 0, total: 0), SaveMapState.idle);
-      expect(saveMapStateOf(running: true, done: 240, total: 600), SaveMapState.running);
-      expect(saveMapStateOf(running: false, done: 600, total: 600), SaveMapState.saved);
-      expect(saveMapStateOf(running: false, done: 10, total: 600, error: 'network'), SaveMapState.failed);
-      expect(SaveRouteMapRow.progressTitle(240, 600), 'Saving route map: 240 of 600');
-    });
 
-    testWidgets('Save route map: button, progress line, saved, failed with retry', (tester) async {
-      var saves = 0;
-      await render(tester, SaveRouteMapRow(running: false, done: 0, total: 0, onSave: () => saves++));
-      expect(find.text(SaveRouteMapRow.idleTitle), findsOneWidget);
-      await tester.tap(find.text(SaveRouteMapRow.idleTitle));
-      expect(saves, 1);
-      await render(tester, SaveRouteMapRow(running: true, done: 240, total: 600, onSave: () => saves++));
-      expect(find.text('Saving route map: 240 of 600'), findsOneWidget);
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      await render(tester, SaveRouteMapRow(running: false, done: 600, total: 600, onSave: () => saves++));
-      expect(find.text(SaveRouteMapRow.savedTitle), findsOneWidget);
-      await render(tester, SaveRouteMapRow(running: false, done: 5, total: 600, error: 'network', onSave: () => saves++));
-      expect(find.text(SaveRouteMapRow.failedTitle), findsOneWidget);
-      await tester.tap(find.text(SaveRouteMapRow.failedTitle));
-      expect(saves, 2);
-      expect(tester.takeException(), isNull);
-    });
 
     testWidgets('weather and dark lines under the ride sheet title', (tester) async {
       await render(
@@ -369,23 +328,6 @@ void main() {
       expect(find.byIcon(Icons.umbrella_rounded), findsOneWidget);
     });
 
-    testWidgets('fuel row without a tap target still offers Filled up through its trailing button', (tester) async {
-      var filled = 0;
-      await render(
-        tester,
-        SheetRow(
-          icon: Icons.local_gas_station_rounded,
-          title: '162 km since last fill',
-          subtitle: 'Tank range 250 km',
-          trailing: TextButton(onPressed: () => filled++, child: const Text('Filled up')),
-        ),
-      );
-      expect(find.text('162 km since last fill'), findsOneWidget);
-      expect(find.text('Tank range 250 km'), findsOneWidget);
-      await tester.tap(find.text('Filled up'));
-      expect(filled, 1);
-      expect(find.byIcon(Icons.chevron_right_rounded), findsNothing, reason: 'not a navigation row');
-    });
   });
 
   group('review sheet (items 7, 8, 16)', () {

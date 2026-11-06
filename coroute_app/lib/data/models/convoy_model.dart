@@ -17,6 +17,9 @@ class ConvoyModel {
 
   bool isTripOwner(String uid) => (tripOwnerUserId ?? createdByUserId) == uid;
   bool isTripHead(String uid) => (tripHeadUserId ?? tripOwnerUserId ?? createdByUserId) == uid;
+
+  /// True when the trip has only 1 participant (solo trip / convoy.riders.length <= 1).
+  bool get isSolo => riders.length <= 1;
   final String startLocationName;
   final String destinationName;
   final double destinationLat;

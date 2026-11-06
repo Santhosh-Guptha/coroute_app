@@ -300,4 +300,4 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
   };
 }
 
-module.exports = { createRazorpayGateway, setRazorpayFetch, RazorpayError, _crypto: { encrypt, decrypt } };
+module.exports = { createRazorpayGateway, setRazorpayFetch, RazorpayError };

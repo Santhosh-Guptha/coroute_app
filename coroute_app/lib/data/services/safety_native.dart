@@ -8,20 +8,38 @@ class DeviceSafetyInfo {
   final String manufacturer;
   final String model;
   final int sdkInt;
+  final String release;
+  final String cpuAbi;
 
   /// Accelerometer hardware queue size (0 = no batching, events come directly).
   final int accelFifo;
   final bool hasAccel;
+  final bool hasGyro;
+  final int gyroFifo;
 
   const DeviceSafetyInfo({
     required this.manufacturer,
     required this.model,
     required this.sdkInt,
+    this.release = '',
+    this.cpuAbi = '',
     required this.accelFifo,
     required this.hasAccel,
+    this.hasGyro = false,
+    this.gyroFifo = 0,
   });
 
-  static const DeviceSafetyInfo unknown = DeviceSafetyInfo(manufacturer: '', model: '', sdkInt: 0, accelFifo: 0, hasAccel: false);
+  static const DeviceSafetyInfo unknown = DeviceSafetyInfo(
+    manufacturer: '',
+    model: '',
+    sdkInt: 0,
+    release: '',
+    cpuAbi: '',
+    accelFifo: 0,
+    hasAccel: false,
+    hasGyro: false,
+    gyroFifo: 0,
+  );
 
   static DeviceSafetyInfo fromMap(Map<String, dynamic>? m) {
     if (m == null) return unknown;
@@ -29,8 +47,12 @@ class DeviceSafetyInfo {
       manufacturer: m['manufacturer']?.toString() ?? '',
       model: m['model']?.toString() ?? '',
       sdkInt: (m['sdkInt'] as num?)?.toInt() ?? 0,
+      release: m['release']?.toString() ?? '',
+      cpuAbi: m['cpuAbi']?.toString() ?? '',
       accelFifo: (m['accelFifo'] as num?)?.toInt() ?? 0,
       hasAccel: m['hasAccel'] == true,
+      hasGyro: m['hasGyro'] == true,
+      gyroFifo: (m['gyroFifo'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -102,6 +124,25 @@ class SafetyNative {
       return 'none';
     }
   }
+
+  /// Pre-ride phone check (SafetyChannel.phoneProbe): ~1.5 s of motion-sensor event counts
+  /// (`accelHz`, `gyroHz`, `magHz`, `...Present`, `...Events`) and the phone state for a ride
+  /// (`bgRestricted`, `powerSave`, `dndFilter`, volumes, `btOut`, `btMic`, `wiredOut`,
+  /// `freeBytes`, `hasTelephony`, `canCompose`, `canDial`). Empty map off Android or on error.
+  static Future<Map<String, dynamic>> phoneProbe() async {
+    if (!_android) return const <String, dynamic>{};
+    try {
+      final m = await _channel
+          .invokeMapMethod<String, dynamic>('phoneProbe')
+          .timeout(const Duration(seconds: 5));
+      return m ?? const <String, dynamic>{};
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
+  }
+
+  /// Opens the system sound settings (volume, Do Not Disturb).
+  static Future<bool> openSoundSettings() => _bool('openSoundSettings');
 
   static Future<bool> _bool(String method) async {
     if (!_android) return false;

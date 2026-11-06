@@ -28,3 +28,25 @@
 -keep class com.razorpay.** { *; }
 -dontwarn com.razorpay.**
 -dontwarn javax.annotation.**
+
+# Razorpay (official rules): payment callbacks are found by name.
+-keepclasseswithmembers class * {
+    public void onPayment*(...);
+}
+-dontwarn proguard.annotation.Keep
+-dontwarn proguard.annotation.KeepClassMembers
+
+# The app's own platform channels (crash sensor, SMS composer, TTS, safety window, tiles).
+-keep class space.devmonks.coroute_app.** { *; }
+
+# google_sign_in (Credential Manager / Play services auth)
+-keep class androidx.credentials.playservices.** { *; }
+-dontwarn com.google.android.gms.**
+
+# image_picker (camera via ACTION_IMAGE_CAPTURE, Android photo picker): plugin ships its own
+# consumer rules; geolocator, permission_handler, sqflite, flutter_secure_storage, url_launcher,
+# share_plus, wakelock_plus, battery_plus, package_info_plus and app_links do too.
+# R8 full mode (AGP 9): annotations only referenced at compile time.
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.lang.model.**
+-dontwarn org.conscrypt.**

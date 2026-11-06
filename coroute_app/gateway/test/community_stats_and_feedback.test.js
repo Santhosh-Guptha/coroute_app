@@ -93,14 +93,14 @@ test('Public Community Stats & Post-Trip Feedback Review Suite', async (t) => {
 
   let createdFeedbackId;
 
-  await t.test('Rider submits post-trip feedback with rating, suggestions, and consents', async () => {
+  await t.test('Rider submits post-trip feedback with multiple photos, rating, suggestions, and consents', async () => {
     const feedbackPayload = {
       rating: 5,
       writtenFeedback: 'Incredible convoy audio clarity through the mountain passes!',
       suggestions: 'Add more offline elevation markers.',
       consentTripDetails: true,
       consentPhoto: true,
-      photoUrl: 'https://coroute.duckdns.org/uploads/group_nilgiris.jpg',
+      photos: ['https://coroute.duckdns.org/uploads/pass1.jpg', 'https://coroute.duckdns.org/uploads/pass2.jpg'],
     };
 
     const res = await env.api('POST', '/trips/TRIP-TEST-200/feedback', feedbackPayload, riderToken);
@@ -111,10 +111,12 @@ test('Public Community Stats & Post-Trip Feedback Review Suite', async (t) => {
     assert.equal(res.json.feedback.rating, 5);
     assert.equal(res.json.feedback.consentTripDetails, true);
     assert.equal(res.json.feedback.consentPhoto, true);
+    assert.equal(res.json.feedback.photos.length, 2);
+    assert.equal(res.json.feedback.photoUrl, 'https://coroute.duckdns.org/uploads/pass1.jpg');
     createdFeedbackId = res.json.feedback.feedbackId;
   });
 
-  await t.test('Admin lists feedback and moderates story review', async () => {
+  await t.test('Admin lists feedback, moderates story review with layout template and formatted text, and public community stories returns approved stories', async () => {
     // List feedback
     const listRes = await env.api('GET', '/admin/feedback', undefined, adminToken);
     assert.equal(listRes.status, 200);
@@ -123,16 +125,44 @@ test('Public Community Stats & Post-Trip Feedback Review Suite', async (t) => {
     assert.ok(listRes.json.summary.pending >= 1);
     assert.ok(listRes.json.summary.withPhotos >= 1);
 
-    // Approve feedback for community stories
+    // Approve feedback with template layout, formatted text, and selected photos
     const approveRes = await env.api('PUT', `/admin/feedback/${createdFeedbackId}/review`, {
       action: 'APPROVE',
       adminNotes: 'Stunning hill climb convoy photo approved for website banner',
+      formattedText: 'Edited highlight: Amazing convoy experience through Nilgiris!',
+      templateLayout: 'text-left-pic-right',
+      selectedPhotos: ['https://coroute.duckdns.org/uploads/pass1.jpg'],
     }, adminToken);
     assert.equal(approveRes.status, 200);
     assert.equal(approveRes.json.ok, true);
     assert.equal(approveRes.json.feedback.status, 'APPROVED');
+    assert.equal(approveRes.json.feedback.templateLayout, 'text-left-pic-right');
+    assert.equal(approveRes.json.feedback.formattedText, 'Edited highlight: Amazing convoy experience through Nilgiris!');
+    assert.equal(approveRes.json.feedback.selectedPhotos.length, 1);
     assert.equal(approveRes.json.feedback.reviewHistory.length, 1);
     assert.equal(approveRes.json.feedback.reviewHistory[0].action, 'APPROVE');
+
+    // Test GET /public/community-stories returns approved stories
+    const publicStoriesRes = await env.api('GET', '/public/community-stories');
+    assert.equal(publicStoriesRes.status, 200);
+    assert.equal(publicStoriesRes.json.ok, true);
+    assert.ok(Array.isArray(publicStoriesRes.json.stories));
+    assert.ok(publicStoriesRes.json.stories.length >= 1);
+
+    const story = publicStoriesRes.json.stories[0];
+    assert.equal(story.feedbackId, createdFeedbackId);
+    assert.equal(story.templateLayout, 'text-left-pic-right');
+    assert.equal(story.formattedText, 'Edited highlight: Amazing convoy experience through Nilgiris!');
+    // Only the photo the admin selected is public.
+    assert.deepEqual(story.photos, ['https://coroute.duckdns.org/uploads/pass1.jpg']);
+    assert.deepEqual(story.selectedPhotos, ['https://coroute.duckdns.org/uploads/pass1.jpg']);
+    for (const k of ['userId', 'userName', 'userEmail', 'email', 'phone', 'tripId', 'reviewHistory', 'adminNotes', 'suggestions']) {
+      assert.ok(!(k in story), `public story must not carry ${k}`);
+    }
+    assert.equal(publicStoriesRes.json.summary.count, publicStoriesRes.json.stories.length);
+    assert.equal(story.rating, 5);
+    assert.equal(story.distanceKm, 420);
+    assert.ok(story.anonymousRiderLabel);
 
     // Non-admin refused
     const nonAdminReview = await env.api('PUT', `/admin/feedback/${createdFeedbackId}/review`, {

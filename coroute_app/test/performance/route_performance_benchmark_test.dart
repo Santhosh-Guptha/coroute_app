@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:coroute_app/domain/tracking/geo_math.dart';
 import 'package:coroute_app/data/models/route_model.dart';
@@ -19,9 +20,9 @@ List<(double, double)> generateRoute(int km) {
 
 void main() {
   test('Benchmark Route Processing Across Distance Categories (AFTER OPTIMIZATIONS)', () async {
-    print('========================================================================');
-    print('CO-ROUTE TRIP CREATION PERFORMANCE BENCHMARK (AFTER OPTIMIZATIONS)');
-    print('========================================================================');
+    debugPrint('========================================================================');
+    debugPrint('CO-ROUTE TRIP CREATION PERFORMANCE BENCHMARK (AFTER OPTIMIZATIONS)');
+    debugPrint('========================================================================');
     final cases = [
       ('Short Route', 15),
       ('Medium Route', 60),
@@ -56,13 +57,13 @@ void main() {
 
       final reductionPct = ((1.0 - (simplified.length / rawPts.length)) * 100).toStringAsFixed(1);
 
-      print('\n[$label - ${km}km]:');
-      print('  Original Points: ${rawPts.length} vertices, Polyline length: ${polyline.length} chars');
-      print('  Simplified Display Points: ${simplified.length} vertices ($reductionPct% vertex reduction!)');
-      print('  Async Route Parse & Decode (background isolate): ${swAsync.elapsedMilliseconds} ms');
-      print('  Douglas-Peucker Simplification: ${swSimplify.elapsedMilliseconds} ms (${swSimplify.elapsedMicroseconds} us)');
-      print('  tilesAlong (optimized corridor): ${swTiles.elapsedMilliseconds} ms (${tiles.length} tiles)');
-      print('  UI Thread Blocking during Frame Build: 0 ms (cached state in build!)');
+      debugPrint('\n[$label - ${km}km]:');
+      debugPrint('  Original Points: ${rawPts.length} vertices, Polyline length: ${polyline.length} chars');
+      debugPrint('  Simplified Display Points: ${simplified.length} vertices ($reductionPct% vertex reduction!)');
+      debugPrint('  Async Route Parse & Decode (background isolate): ${swAsync.elapsedMilliseconds} ms');
+      debugPrint('  Douglas-Peucker Simplification: ${swSimplify.elapsedMilliseconds} ms (${swSimplify.elapsedMicroseconds} us)');
+      debugPrint('  tilesAlong (optimized corridor): ${swTiles.elapsedMilliseconds} ms (${tiles.length} tiles)');
+      debugPrint('  UI Thread Blocking during Frame Build: 0 ms (cached state in build!)');
 
       // Assert correctness:
       expect(route.points.length, equals(rawPts.length));
@@ -74,7 +75,7 @@ void main() {
       expect(route.bounds!.minLat, lessThanOrEqualTo(route.bounds!.maxLat));
       expect(route.bounds!.minLng, lessThanOrEqualTo(route.bounds!.maxLng));
     }
-    print('\n========================================================================');
+    debugPrint('\n========================================================================');
   });
 
   test('Douglas-Peucker preserves endpoints and intermediate corner', () {

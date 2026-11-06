@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../core/config/feature_gates.dart';
@@ -65,11 +66,69 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
   /// This phone's own counts for the trip (hard stops, 3.16); never uploaded.
   RideStats? _stats;
 
+  /// The rider's post-trip review of this trip (null: none yet) and whether they may write one.
+  TripReview? _review;
+  bool _reviewChecked = false;
+  bool _canReview = false;
+
+  /// The review prompt opens by itself once per trip, within this long after the trip ended.
+  static const Duration reviewPromptWindow = Duration(days: 3);
+
   @override
   void initState() {
     super.initState();
     _load();
-    if (!widget.adminView) _loadStats();
+    if (!widget.adminView) {
+      _loadStats();
+      _loadReview();
+    }
+  }
+
+  /// The id the gateway knows this trip by: the rider's trip record, else the convoy.
+  String get _reviewTripId => widget.trip.tripId.isNotEmpty ? widget.trip.tripId : widget.trip.groupId;
+
+  Future<void> _loadReview() async {
+    final id = _reviewTripId;
+    if (id.isEmpty) return;
+    final api = context.read<ApiClient>();
+    try {
+      final res = await api.getTripReview(id);
+      if (!mounted) return;
+      setState(() {
+        _review = TripReview.tryParse(res['feedback']);
+        _canReview = res['canReview'] == true;
+        _reviewChecked = true;
+      });
+      _maybePromptReview();
+    } catch (_) {
+      // Offline or not synced yet: the review button in the app bar still works.
+    }
+  }
+
+  /// Opens the review sheet once, right after a recently finished trip, if the rider has not reviewed it.
+  Future<void> _maybePromptReview() async {
+    if (_review != null || !_canReview) return;
+    final ended = widget.trip.endTimeEpochMs;
+    if (ended <= 0 || DateTime.now().millisecondsSinceEpoch - ended > reviewPromptWindow.inMilliseconds) return;
+    final key = 'review_prompted_$_reviewTripId';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(key) == true) return;
+      await prefs.setBool(key, true);
+    } catch (_) {
+      return; // never prompt repeatedly when the flag cannot be kept
+    }
+    if (!mounted) return;
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    // Not over another screen or sheet the rider has opened meanwhile.
+    if (!(ModalRoute.of(context)?.isCurrent ?? false)) return;
+    await _openReview();
+  }
+
+  Future<void> _openReview() async {
+    final saved = await TripFeedbackSheet.show(context, tripId: _reviewTripId, tripName: widget.trip.tripName, existing: _review);
+    if (saved != null && mounted) setState(() => _review = saved);
   }
 
   Future<void> _loadStats() async {
@@ -287,12 +346,9 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
           if (!widget.adminView)
             IconButton(
               tooltip: 'Rate & Review Trip',
-              icon: const Icon(Icons.rate_review_outlined, color: Colors.amber),
-              onPressed: () => TripFeedbackSheet.show(
-                context,
-                tripId: widget.trip.tripId,
-                tripName: widget.trip.tripName,
-              ),
+              // warnText (not Colors.amber): readable on the light theme in sunlight.
+              icon: Icon(Icons.rate_review_outlined, color: AppTheme.warnText),
+              onPressed: _openReview,
             ),
           IconButton(
             tooltip: '2D Replay & Scrubber',
@@ -413,7 +469,8 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 800),
         child: ListView(
-          padding: dsScreenPadding,
+          // The Scaffold body has no bottom SafeArea: keep the last card above the system nav bar.
+          padding: dsScreenPadding.copyWith(bottom: dsScreenPadding.bottom + MediaQuery.paddingOf(context).bottom),
           children: [
             if (error != null) ...[
               RideAlert(tier: AlertTier.normal, title: 'Could not load the group report', message: error, actionLabel: 'Try again', onAction: _load),
@@ -475,7 +532,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
               if (t.isEstimate && r == null && !_loading)
                 Padding(
                   padding: const EdgeInsets.only(top: Space.s12),
-                  child: Text('These numbers are from your phone. The exact report is ready about a minute after the trip ends.', style: AppText.caption),
+                  child: Text('From your phone. The full report is ready a minute after the ride.', style: AppText.caption),
                 ),
             ],
             if (!widget.adminView && r != null && others.isNotEmpty) ...[
@@ -486,6 +543,10 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             ],
             const SizedBox(height: 20),
             _moreDetails(r, me, myId),
+            if (!widget.adminView && _reviewChecked && (_review != null || _canReview)) ...[
+              const SizedBox(height: 20),
+              _reviewCard(),
+            ],
             const SizedBox(height: 20),
             Row(
               children: [
@@ -510,6 +571,42 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// "Your review": its moderation status (and the admin's reason), or a prompt to write one.
+  Widget _reviewCard() {
+    final rv = _review;
+    return DsCard(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.rate_review_outlined, color: AppTheme.accentText),
+          const SizedBox(width: Space.s12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(rv == null ? 'Rate this ride' : 'Your review', style: AppText.body.copyWith(fontWeight: FontWeight.w800)),
+                const SizedBox(height: Space.s4),
+                if (rv == null)
+                  Text('Tell other riders about it. Shown after a quick check.', style: AppText.caption)
+                else ...[
+                  TripReviewStatusChip(status: rv.status),
+                  const SizedBox(height: Space.s4),
+                  Text(rv.statusMessage, style: AppText.caption),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: Space.s8),
+          TextButton(
+            onPressed: _openReview,
+            child: Text(rv == null ? 'Review' : 'Edit'),
+          ),
+        ],
       ),
     );
   }
@@ -555,7 +652,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
         if (me != null && !me.trackAvailable)
           Padding(
             padding: const EdgeInsets.only(top: Space.s12),
-            child: Text('Your phone did not upload a route for this trip, so distance and riding time are estimates.',
+            child: Text('No route from your phone. Distance and time are estimates.',
                 style: AppText.caption.copyWith(color: AppTheme.warnText)),
           ),
         const SizedBox(height: Space.s16),
@@ -701,7 +798,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
           Text(
             m.trackAvailable
                 ? '${formatDistance(m.distanceM)} · riding ${dur(m.movingMs)} · waited ${waits.length} ${waits.length == 1 ? 'time' : 'times'}, ${dur(m.restMs)}'
-                : 'No route was uploaded from this phone. Waits below come from the live updates.',
+                : 'No route from this phone. Waits come from live updates.',
             style: AppText.caption.copyWith(color: m.trackAvailable ? AppTheme.text : AppTheme.warnText),
           ),
           const SizedBox(height: Space.s4),

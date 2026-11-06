@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/confirm.dart';
-import '../../data/models/convoy_model.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/background_service.dart';
 import '../../core/ui/ride_alert.dart';
@@ -229,7 +228,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
 
   Widget _rideTab(String? groupId) {
     if (groupId != null) {
-      return LiveCockpitMapScreen(key: ValueKey(groupId), convoyId: groupId, embedded: true, focus: _mapFocus);
+      return LiveCockpitMapScreen(key: ValueKey(groupId), convoyId: groupId, embedded: true, focus: _mapFocus, isVisible: _tab == HomeTab.ride);
     }
     return RideStartView(
       showRideSaved: _rideSaved,
@@ -341,14 +340,6 @@ class _AlertsNavIcon extends StatelessWidget {
     );
   }
 }
-
-/// What the home screen shows about the active convoy.
-typedef HomeConvoyFacts = ({String? groupId, String name, int riders, String joinCode, String destination});
-
-/// The few convoy facts the home screen shows. A record compares by value, so the home
-/// screen rebuilds only when one of these changes, never on a rider's position update.
-HomeConvoyFacts homeConvoyFacts(ConvoyModel? c) =>
-    (groupId: c?.groupId, name: c?.name ?? '', riders: c?.riders.length ?? 0, joinCode: c?.joinCode ?? '', destination: c?.destinationName ?? '');
 
 /// Ride totals over the trip history, for the home screen.
 class HomeAnalytics {

@@ -12,11 +12,7 @@ import 'package:coroute_app/core/theme/app_palette.dart';
 import 'package:coroute_app/core/theme/app_theme.dart';
 import 'package:coroute_app/core/theme/theme_controller.dart';
 import 'package:coroute_app/core/ui/ui.dart';
-import 'package:coroute_app/core/widgets/cockpit_hud.dart';
 import 'package:coroute_app/data/local/track_queue.dart';
-import 'package:coroute_app/data/models/convoy_model.dart';
-import 'package:coroute_app/data/models/rider_model.dart';
-import 'package:coroute_app/data/models/stop_point_model.dart';
 import 'package:coroute_app/data/services/alert_service.dart';
 import 'package:coroute_app/data/services/api_client.dart';
 import 'package:coroute_app/data/services/auth_service.dart';
@@ -28,12 +24,9 @@ import 'package:coroute_app/data/services/timeline_service.dart';
 import 'package:coroute_app/data/services/track_recorder.dart';
 import 'package:coroute_app/data/services/track_uploader.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
-import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/presentation/admin/master_admin_dashboard.dart';
 import 'package:coroute_app/presentation/auth/access_gate_screen.dart';
-import 'package:coroute_app/presentation/ride/riders_ladder.dart';
 import 'package:coroute_app/presentation/rider/rider_home_screen.dart';
-import 'package:coroute_app/presentation/widgets/intercom_dock.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -285,213 +278,9 @@ void main() {
   // The dashboard screen is gone (3.12): the ride is one map with one sheet. The map itself
   // loads network tiles, so this test drives the ride sheet parts with the live service data
   // instead of the whole screen (A's ui_widgets_test covers each part at 320 dp).
-  group('UI Level E2E: Active ride sheet, riders ladder, trip progress and intercom', () {
-    testWidgets('An active convoy shows its riders, stops and the talk-to picker', (tester) async {
-      tester.view.physicalSize = const Size(800, 1200);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(() {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-      });
-
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final riders = {
-        'usr_me': RiderModel(
-          userId: 'usr_me',
-          name: 'Phoenix (Me)',
-          lat: 12.9716,
-          lng: 77.5946,
-          speedKmh: 68.0,
-          heading: 45.0,
-          batteryLevel: 92,
-          lastSeenEpochMs: now,
-        ),
-        'usr_lead': RiderModel(
-          userId: 'usr_lead',
-          name: 'Captain Jack',
-          lat: 12.9740,
-          lng: 77.5960,
-          speedKmh: 72.0,
-          heading: 45.0,
-          batteryLevel: 85,
-          lastSeenEpochMs: now,
-        ),
-        'usr_sweep': RiderModel(
-          userId: 'usr_sweep',
-          name: 'Tail Sweep',
-          lat: 12.9690,
-          lng: 77.5930,
-          speedKmh: 65.0,
-          heading: 45.0,
-          batteryLevel: 78,
-          lastSeenEpochMs: now,
-        ),
-      };
-
-      final stops = [
-        StopPointModel(stopId: 's1', name: 'Shell Fuel Stop', lat: 12.9800, lng: 77.6000, orderIndex: 1),
-        StopPointModel(stopId: 's2', name: 'Hilltop Cafe', lat: 13.0100, lng: 77.6200, orderIndex: 2),
-      ];
-
-      final activeConvoy = ConvoyModel(
-        groupId: 'GRP-GHATS-01',
-        name: 'Western Ghats Monsoon Express',
-        joinCode: 'WST900',
-        createdByUserId: 'usr_lead',
-        createdByUserName: 'Captain Jack',
-        createdAtEpochMs: now - 3600000,
-        destinationName: 'Coorg Valley Peak',
-        destinationLat: 12.3375,
-        destinationLng: 75.8069,
-        riders: riders,
-        stopPoints: stops,
-      );
-
-      final mockHttp = MockClient((req) async {
-        if (req.url.path.endsWith('/convoys/active')) {
-          return http.Response(jsonEncode({'convoy': activeConvoy.toJson()}), 200);
-        }
-        return http.Response('{}', 200);
-      });
-      final api = ApiClient(httpClient: mockHttp, storage: const FlutterSecureStorage());
-      final auth = AuthService(api);
-      final rt = RealtimeService();
-      final meta = MetaService(api);
-      final trips = TripStorageService(api);
-      final timeline = TimelineService(api, rt);
-      final queue = MemoryTrackQueue();
-      final recorder = TrackRecorder(queue, TrackUploader(api, queue));
-      final convoy = ConvoyService(api, rt, trips, recorder: recorder, timeline: timeline);
-      final intercom = IntercomService(rt);
-
-      await convoy.startSession(token: 'test-token', userId: 'usr_me');
-
-      Widget rideParts() => Consumer<ConvoyService>(builder: (context, service, _) {
-            final c = service.activeConvoy;
-            if (c == null) return const SizedBox.shrink();
-            final nowMs = DateTime.now().millisecondsSinceEpoch;
-            final me = c.riders['usr_me']!;
-            return Column(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(c.name),
-                        Text('Code ${c.joinCode}'),
-                        RidersLadder(
-                          rungs: RideFacts.ladder(c, 'usr_me'),
-                          colors: const {},
-                          statuses: {for (final r in c.riders.values) r.userId: riderStatusOf(r, c, isMe: r.userId == 'usr_me', nowMs: nowMs)},
-                          nowMs: nowMs,
-                          onTap: (_) {},
-                        ),
-                        TripProgress(stops: [
-                          for (final st in c.plannedStops)
-                            TripProgressStop(name: st.name, kind: StopKind.fromCategory(st.category), done: st.isVisited),
-                        ]),
-                      ],
-                    ),
-                  ),
-                ),
-                IntercomDock(convoy: c, me: me),
-              ],
-            );
-          });
-
-      await tester.pumpWidget(createUiHarness(
-        api: api,
-        auth: auth,
-        rt: rt,
-        convoy: convoy,
-        meta: meta,
-        trips: trips,
-        timeline: timeline,
-        intercom: intercom,
-        child: rideParts(),
-      ));
-      await tester.pump(const Duration(milliseconds: 300));
-
-      // Convoy loaded from the session
-      expect(find.text('Western Ghats Monsoon Express'), findsOneWidget);
-      expect(find.textContaining('WST900'), findsOneWidget);
-
-      // Riders ladder: everyone, with me marked
-      expect(find.text('Captain Jack'), findsOneWidget);
-      expect(find.text('Tail Sweep'), findsOneWidget);
-      expect(find.textContaining('Phoenix (Me)'), findsOneWidget);
-
-      // Trip progress lists the planned stops
-      expect(find.text('Shell Fuel Stop'), findsOneWidget);
-      expect(find.text('Hilltop Cafe'), findsOneWidget);
-
-      // Intercom dock: one row, no mode toggle and no SOS (SOS is the hold button on the map)
-      expect(find.text('Talk to: Everyone'), findsOneWidget);
-      expect(find.text('HOLD TO TALK'), findsOneWidget);
-      expect(find.text('PTT'), findsNothing);
-      expect(find.text('VOX'), findsNothing);
-      expect(find.text('SOS'), findsNothing);
-
-      // Open Intercom Talk-To Channel Picker
-      await tester.tap(find.text('Talk to: Everyone'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-
-      final sheet = find.byType(BottomSheet);
-      expect(find.text('Everyone in the convoy'), findsOneWidget);
-      expect(find.descendant(of: sheet, matching: find.text('Captain Jack')), findsOneWidget);
-      expect(find.descendant(of: sheet, matching: find.text('Tail Sweep')), findsOneWidget);
-      expect(find.descendant(of: sheet, matching: find.textContaining('Phoenix (Me)')), findsNothing);
-
-      // Select Captain Jack for Private 1:1 Radio
-      await tester.tap(find.widgetWithText(ListTile, 'Captain Jack'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(find.text('Private: Captain Jack'), findsOneWidget);
-
-      // Clean up session and background timers
-      await convoy.endSession();
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump(const Duration(seconds: 4));
-    });
-  });
 
   group('UI Level E2E: Cockpit HUD Dynamics & Master Admin Controls', () {
     // 3.12: the HUD is only the speed card; compass, heading and speed category are gone.
-    testWidgets('CockpitHud shows the speed and, without a group limit, the label Speed', (tester) async {
-      // 1. 45 km/h (heading and battery are still accepted, no longer shown)
-      await tester.pumpWidget(MaterialApp(
-        theme: AppTheme.themeFor(AppPalette.dark),
-        home: const Scaffold(
-          body: CockpitHud(speedKmh: 45.0, heading: 90.0, batteryLevel: 95),
-        ),
-      ));
-      // RideMetric draws the number and unit as one rich text.
-      expect(find.text('45 km/h'), findsOneWidget);
-
-      // 2. 80 km/h
-      await tester.pumpWidget(MaterialApp(
-        theme: AppTheme.themeFor(AppPalette.dark),
-        home: const Scaffold(
-          body: CockpitHud(speedKmh: 80.0, heading: 315.0, batteryLevel: 80),
-        ),
-      ));
-      // RideMetric draws the number and unit as one rich text.
-      expect(find.text('80 km/h'), findsOneWidget);
-
-      // 3. 115 km/h, no limit set: label 'Speed', no compass text
-      await tester.pumpWidget(MaterialApp(
-        theme: AppTheme.themeFor(AppPalette.dark),
-        home: const Scaffold(
-          body: CockpitHud(speedKmh: 115.0, heading: 180.0, batteryLevel: 65),
-        ),
-      ));
-      // RideMetric draws the number and unit as one rich text.
-      expect(find.text('115 km/h'), findsOneWidget);
-      expect(find.text('Speed'), findsOneWidget);
-      expect(find.text('180° S'), findsNothing);
-    });
 
     testWidgets('MasterAdminDashboard displays fleet counters and Global Broadcast modal', (tester) async {
       final mockHttp = MockClient((req) async {

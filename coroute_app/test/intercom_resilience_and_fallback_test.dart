@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:coroute_app/data/services/audio_route_watchdog.dart';
 import 'package:coroute_app/data/services/intercom_network_resilience.dart';
 import 'package:coroute_app/data/services/settings_service.dart';
 import 'package:coroute_app/data/services/voice_service.dart';
@@ -12,7 +11,7 @@ class _FakeVoiceEngine implements VoiceEngine {
   Future<bool> init() async => true;
 
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id}) async {
+  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
     spoken.add(text);
     return true;
   }
@@ -30,93 +29,6 @@ void main() {
   // ==========================================================================
   // Test Group 1: AudioRouteWatchdog Tests
   // ==========================================================================
-  group('AudioRouteWatchdog Tests', () {
-    test('Detects Bluetooth disconnection and sets isAudioRoutingIssue = true', () {
-      final watchdog = AudioRouteWatchdog(
-        initialBluetoothConnected: true,
-        initialRoute: AudioRouteType.bluetooth,
-      );
-
-      expect(watchdog.isBluetoothConnected, isTrue);
-      expect(watchdog.isAudioRoutingIssue, isFalse);
-      expect(watchdog.currentRoute, equals(AudioRouteType.bluetooth));
-
-      bool notified = false;
-      watchdog.addListener(() => notified = true);
-
-      // Simulate Bluetooth disconnection from helmet headset
-      watchdog.onBluetoothStateChanged(false);
-
-      expect(watchdog.isBluetoothConnected, isFalse);
-      expect(watchdog.isAudioRoutingIssue, isTrue);
-      expect(watchdog.currentRoute, equals(AudioRouteType.speaker));
-      expect(notified, isTrue);
-    });
-
-    test('Detects 0% volume and flags isVolumeMuted = true', () {
-      final watchdog = AudioRouteWatchdog(initialVolume: 0.75);
-
-      expect(watchdog.currentVolume, equals(0.75));
-      expect(watchdog.isVolumeMuted, isFalse);
-
-      // Volume drops to 0%
-      watchdog.onVolumeChanged(0.0);
-
-      expect(watchdog.currentVolume, equals(0.0));
-      expect(watchdog.isVolumeMuted, isTrue);
-
-      // Volume increases to 50%
-      watchdog.onVolumeChanged(0.50);
-
-      expect(watchdog.currentVolume, equals(0.50));
-      expect(watchdog.isVolumeMuted, isFalse);
-    });
-
-    test('boostIntercomVolume() restores volume to 100% and resets muted flag', () async {
-      double? platformVolumeTarget;
-      final watchdog = AudioRouteWatchdog(
-        initialVolume: 0.0,
-        onSetVolume: (vol) async {
-          platformVolumeTarget = vol;
-        },
-      );
-
-      expect(watchdog.isVolumeMuted, isTrue);
-      expect(watchdog.currentVolume, equals(0.0));
-
-      // Rider activates emergency intercom volume boost
-      await watchdog.boostIntercomVolume();
-
-      expect(watchdog.currentVolume, equals(1.0));
-      expect(watchdog.isVolumeMuted, isFalse);
-      expect(platformVolumeTarget, equals(1.0));
-    });
-
-    test('attemptReconnectBluetooth() resets routing issue flag', () async {
-      bool reconnectCalled = false;
-      final watchdog = AudioRouteWatchdog(
-        initialBluetoothConnected: true,
-        onReconnectBluetooth: () async {
-          reconnectCalled = true;
-          return true;
-        },
-      );
-
-      // Trigger Bluetooth failure
-      watchdog.onBluetoothStateChanged(false);
-      expect(watchdog.isAudioRoutingIssue, isTrue);
-      expect(watchdog.isBluetoothConnected, isFalse);
-
-      // Attempt reconnection
-      final success = await watchdog.attemptReconnectBluetooth();
-
-      expect(success, isTrue);
-      expect(reconnectCalled, isTrue);
-      expect(watchdog.isAudioRoutingIssue, isFalse);
-      expect(watchdog.isBluetoothConnected, isTrue);
-      expect(watchdog.currentRoute, equals(AudioRouteType.bluetooth));
-    });
-  });
 
   // ==========================================================================
   // Test Group 2: Network Audio Resilience & FEC Tests

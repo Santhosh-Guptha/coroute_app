@@ -71,4 +71,4 @@ class SafetyAudit {
   stop() { clearTimeout(this.timer); this.timer = null; }
 }
 
-module.exports = { SafetyAudit, cleanRow, AUDIT_KINDS: KINDS };
+module.exports = { SafetyAudit, cleanRow };

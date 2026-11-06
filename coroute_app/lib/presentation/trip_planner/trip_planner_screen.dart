@@ -9,6 +9,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/map_tiles.dart';
 import '../../core/ui/ui.dart';
+import '../../data/models/convoy_model.dart';
 import '../../data/models/route_model.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/auth_service.dart';
@@ -18,7 +19,7 @@ import '../map_picker/map_picker_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
 import 'trip_review_sheet.dart';
-import 'widgets/route_map_pack_card.dart';
+import '../../data/services/tile_cache_service.dart';
 import '../../data/models/membership_model.dart';
 import '../../data/services/membership_service.dart';
 import '../subscription/membership_payment_screen.dart';
@@ -60,6 +61,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   int _speedLimit = 0;
   int _routeRequest = 0;
   bool _membershipJustActivated = false;
+  String? _loadingMessage;
 
   @override
   void initState() {
@@ -265,17 +267,34 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       _nameFocus.requestFocus();
       return;
     }
-    _isReviewing = true;
+    setState(() {
+      _isReviewing = true;
+      _loadingMessage = 'Checking trip details...';
+    });
     FocusScope.of(context).unfocus();
     try {
-      // Stage 1: Check membership status with the backend before review
+      // Stage 1: Authoritative membership entitlement recognition (ISSUE-10)
       final ms = context.read<MembershipService?>();
       if (ms != null && ms.paymentsEnabled) {
-        await ms.fetchMyMembership();
-        final owned = ms.ownedMembership;
-        final needsPayment = owned == null || !owned.isActive || owned.capacity < 1;
+        var owned = ms.ownedMembership;
+        // Authoritatively check if an active plan already covers the trip
+        final hasActivePlan = owned != null && !owned.isExpired && owned.capacity >= 1;
+
+        if (!hasActivePlan) {
+          // If no active entitlement currently in memory, sync with backend
+          await ms.fetchMyMembership();
+          owned = ms.ownedMembership;
+        } else {
+          // If user already has an active plan covering the trip, trigger background refresh
+          // without blocking the user or prompting for payment
+          ms.fetchMyMembership().ignore();
+        }
+
+        // Needs payment only if user genuinely has no valid, unexpired plan with capacity >= 1
+        final needsPayment = owned == null || owned.isExpired || owned.capacity < 1;
 
         if (needsPayment && mounted) {
+          setState(() => _loadingMessage = null);
           // Resolve applicable category
           MembershipCategory category = const MembershipCategory(
             id: 'individual',
@@ -308,8 +327,6 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
           final proceed = await TripCreationPaymentAlertSheet.show(
             context,
             category: category,
-            activeOfferCode: 'RIDERFREE',
-            discountPercent: 100,
           );
 
           if (proceed != true || !mounted) {
@@ -330,12 +347,18 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
           }
 
           // Stage 4: Refresh membership eligibility from backend
+          if (mounted) setState(() => _loadingMessage = 'Checking trip details...');
           await ms.fetchMyMembership();
           _membershipJustActivated = true;
         }
       }
 
       if (!mounted) return;
+
+      setState(() => _loadingMessage = 'Preparing your trip...');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      if (!mounted) return;
+      setState(() => _loadingMessage = null);
 
       // Stage 4: Return to exact trip creation review stage with all details restored
       final limit = await TripReviewSheet.show(
@@ -362,7 +385,12 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       // Final step: explicit user confirmation launches trip
       await _launch(name);
     } finally {
-      _isReviewing = false;
+      if (mounted) {
+        setState(() {
+          _isReviewing = false;
+          _loadingMessage = null;
+        });
+      }
     }
   }
 
@@ -375,9 +403,15 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     // Pre-ride checklist (never blocks; closing it without starting cancels the launch).
     if (!await PreRideChecklistSheet.show(context)) return;
     if (!mounted) return;
-    setState(() => _launching = true);
+
+    setState(() {
+      _launching = true;
+      _loadingMessage = 'Creating your trip...';
+    });
+
+    ConvoyModel? convoy;
     try {
-      await convoys.createConvoy(
+      convoy = await convoys.createConvoy(
         name: name,
         creatorId: auth.currentUserId ?? '',
         creatorName: auth.currentUserName ?? 'Lead rider',
@@ -393,11 +427,34 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
         speedLimitKmh: _speedLimit,
       );
     } catch (e) {
-      if (mounted) setState(() => _launching = false);
+      if (mounted) {
+        setState(() {
+          _launching = false;
+          _loadingMessage = null;
+        });
+      }
       _snack(e is ApiException ? e.message : 'Could not start the ride. Check your connection.');
       return;
     }
     if (!mounted) return;
+
+    // FEAT-MAP-01: Invisible Background Route Tile Prefetch
+    // Seamlessly prefetch route corridor tiles in the background without blocking or showing separate download screens.
+    // Respects battery (< 20%) and network conditions.
+    try {
+      final prefetcher = context.read<TilePrefetcher?>();
+      final routePts = _route?.points ?? convoy.routeLine;
+      if (prefetcher != null && routePts.isNotEmpty) {
+        prefetcher.prefetchCorridorBackground(
+          routeLine: routePts,
+          label: name,
+          riderLocation: _start != null ? (_start!.lat, _start!.lng) : null,
+          destination: _destination != null ? (_destination!.lat, _destination!.lng) : null,
+          stops: [for (final s in _stops) (s.lat, s.lng)],
+        ).ignore();
+      }
+    } catch (_) {}
+
     HapticFeedback.mediumImpact();
     // Back to the home shell; it switches to the Ride tab when the active ride appears.
     Navigator.of(context).popUntil((r) => r.isFirst);
@@ -413,42 +470,81 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     return Scaffold(
       backgroundColor: AppTheme.map,
       resizeToAvoidBottomInset: true,
-      body: LayoutBuilder(builder: (context, c) {
-        final map = LoadingState(loading: _routing, child: _mapView());
-        final sideBySide = c.maxWidth > c.maxHeight && c.maxWidth >= 560;
-        if (sideBySide) {
-          final formWidth = (c.maxWidth * 0.45).clamp(280.0, 480.0).toDouble();
-          return Row(
-            children: [
-              SizedBox(width: formWidth, child: _sheet(sideBySide: true)),
-              Expanded(child: Stack(children: [Positioned.fill(child: map), _floatingTop()])),
-            ],
-          );
-        }
-        // Half the screen, at least 300 dp and always leaving 120 dp of map;
-        // with the keyboard up (little height) the sheet takes most of it.
-        final sheetHeight = c.maxHeight < 420 ? c.maxHeight * 0.75 : (c.maxHeight * 0.5).clamp(300.0, c.maxHeight - 120).toDouble();
-        return Stack(
-          children: [
-            // The map runs under the sheet's rounded corners.
-            Positioned(left: 0, right: 0, top: 0, bottom: sheetHeight - Radii.sheet, child: map),
-            _floatingTop(),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: sheetHeight,
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 680),
-                  child: _sheet(),
+      body: Stack(
+        children: [
+          LayoutBuilder(builder: (context, c) {
+            final map = LoadingState(loading: _routing, child: _mapView());
+            final sideBySide = c.maxWidth > c.maxHeight && c.maxWidth >= 560;
+            if (sideBySide) {
+              final formWidth = (c.maxWidth * 0.45).clamp(280.0, 480.0).toDouble();
+              return Row(
+                children: [
+                  SizedBox(width: formWidth, child: _sheet(sideBySide: true)),
+                  Expanded(child: Stack(children: [Positioned.fill(child: map), _floatingTop()])),
+                ],
+              );
+            }
+            // Half the screen, at least 300 dp and always leaving 120 dp of map;
+            // with the keyboard up (little height) the sheet takes most of it.
+            final sheetHeight = c.maxHeight < 420 ? c.maxHeight * 0.75 : (c.maxHeight * 0.5).clamp(300.0, c.maxHeight - 120).toDouble();
+            return Stack(
+              children: [
+                // The map runs under the sheet's rounded corners.
+                Positioned(left: 0, right: 0, top: 0, bottom: sheetHeight - Radii.sheet, child: map),
+                _floatingTop(),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: sheetHeight,
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 680),
+                      child: _sheet(),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }),
+          if (_loadingMessage != null)
+            Positioned.fill(
+              child: AbsorbPointer(
+                child: Container(
+                  color: Colors.black54,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+                      decoration: BoxDecoration(
+                        color: AppTheme.card,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: dsFloatingShadow(),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.brand),
+                          ),
+                          const SizedBox(width: 16),
+                          Flexible(
+                            child: Text(
+                              _loadingMessage!,
+                              style: AppText.body.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ],
-        );
-      }),
+        ],
+      ),
     );
   }
 
@@ -524,6 +620,9 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     return FlutterMap(
       mapController: _map,
       options: MapOptions(
+          minZoom: 3.0,
+          maxZoom: 19.0,
+          cameraConstraint: const CameraConstraint.containLatitude(),
         initialCenter: center,
         initialZoom: _start != null ? 11 : 5,
         onMapReady: _fit,
@@ -594,16 +693,20 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
                       icon: Icons.add_rounded,
                       fontSize: 15,
                       label: 'Add stop',
-                      onPressed: _stops.length >= _maxStops || _launching ? null : _addStop,
+                      onPressed: _stops.length >= _maxStops || _launching || _isReviewing ? null : _addStop,
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: DsButton(
-                      icon: _launching ? Icons.hourglass_top_rounded : Icons.fact_check_rounded,
+                      icon: (_launching || _isReviewing) ? Icons.hourglass_top_rounded : Icons.fact_check_rounded,
                       fontSize: 15,
-                      label: _launching ? 'Starting the ride' : 'Review',
-                      onPressed: _launching ? null : _review,
+                      label: _launching
+                          ? (_loadingMessage ?? 'Creating your trip...')
+                          : (_isReviewing
+                              ? (_loadingMessage ?? 'Checking trip details...')
+                              : 'Review'),
+                      onPressed: (_launching || _isReviewing) ? null : _review,
                     ),
                   ),
                 ],
@@ -659,14 +762,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text('Straight-line estimate: the road route is not available right now.', style: AppText.caption),
-            )
-          else ...[
-            const SizedBox(height: 14),
-            RouteMapPackCard(
-              route: r,
-              tripName: _name.text.trim().isNotEmpty ? _name.text.trim() : 'Planned Route',
             ),
-          ],
         ],
         const SizedBox(height: 16),
         _TimelineRow(

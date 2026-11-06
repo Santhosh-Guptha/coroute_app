@@ -130,7 +130,7 @@ void main() {
         detector.onFix(TrackPoint(ts: s * 1000, lat: 12.9716, lng: 77.5946, speedKmh: 60, accuracyM: 5));
         detector.onAccel(AccelBucket(tMs: s * 1000, peakG: 1.5, meanG: 1.0, stdG: 0.3));
       }
-      expect(detector.armedAt(30000), isTrue, reason: 'Crash detector armed above 25 km/h');
+      expect(detector.armedAt(30000), isTrue, reason: 'Crash detector armed (one fix above 25 km/h arms at once)');
 
       // 2. High impact deceleration at t = 30s: 6.5 g spike (> 4.0 g threshold)
       detector.onAccel(AccelBucket(tMs: 30000, peakG: 6.5, meanG: 2.0, stdG: 1.5));

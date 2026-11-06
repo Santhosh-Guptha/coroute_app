@@ -640,8 +640,43 @@ class _CouponEditorState extends State<_CouponEditor> {
   bool _busy = false;
   String? _problem;
 
+  /// The plans a coupon can be bound to, from the server (subscription tiers and membership plans).
+  List<Map<String, dynamic>> _planOptions = [];
+  bool _plansLoaded = false;
+  String? _plansError;
+
   bool get _isNew => widget.coupon == null;
   String get _codePath => Uri.encodeComponent(_c['code']?.toString() ?? '');
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlans();
+  }
+
+  Future<void> _loadPlans() async {
+    String? error;
+    List<Map<String, dynamic>> plans = [];
+    try {
+      final res = await context.read<ApiClient>().get('/admin/coupons/plan-options');
+      plans = adminMapList(res is Map ? res['plans'] : null);
+    } catch (e) {
+      error = adminErrorOf(e);
+    }
+    if (!mounted) return;
+    setState(() {
+      _planOptions = plans;
+      _plansLoaded = true;
+      _plansError = error;
+    });
+  }
+
+  String _planLabel(Map<String, dynamic> p) {
+    final label = p['label']?.toString() ?? p['id']?.toString() ?? '';
+    final price = adminNumOrNull(p['monthlyInr']);
+    final off = p['isActive'] == false ? ', off sale' : '';
+    return price == null ? '$label$off' : '$label (${adminInr(price)}/mo$off)';
+  }
 
   @override
   void dispose() {
@@ -675,9 +710,11 @@ class _CouponEditorState extends State<_CouponEditor> {
       return d > price ? price : d;
     }
 
-    final dSolo = calcDiscount(9);
-    final dSmall = calcDiscount(49);
-    final dLarge = calcDiscount(99);
+    final shown = [
+      for (final p in _planOptions)
+        if (_tiers.isEmpty || _tiers.contains(p['id']?.toString() ?? '')) p,
+    ].where((p) => adminNumOrNull(p['monthlyInr']) != null).take(6).toList();
+    if (shown.isEmpty) return const SizedBox.shrink();
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 10),
@@ -694,13 +731,19 @@ class _CouponEditorState extends State<_CouponEditor> {
             children: [
               Icon(Icons.calculate_outlined, size: 16, color: AppTheme.accentText),
               const SizedBox(width: 6),
-              Text('LIVE SAVINGS PREVIEW', style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.accentText)),
+              Text('WHAT RIDERS PAY (MONTHLY)', style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.accentText)),
             ],
           ),
           const SizedBox(height: 6),
-          Text('• Solo ₹9/mo: saves ₹${dSolo.toStringAsFixed(1)} → rider pays ₹${(9 - dSolo).toStringAsFixed(1)}', style: AppText.caption),
-          Text('• Group 2–6 (₹49/mo): saves ₹${dSmall.toStringAsFixed(1)} → rider pays ₹${(49 - dSmall).toStringAsFixed(1)}', style: AppText.caption),
-          Text('• Group 7–12 (₹99/mo): saves ₹${dLarge.toStringAsFixed(1)} → rider pays ₹${(99 - dLarge).toStringAsFixed(1)}', style: AppText.caption),
+          for (final p in shown)
+            Builder(builder: (_) {
+              final price = adminNumOrNull(p['monthlyInr']) ?? 0;
+              final d = calcDiscount(price);
+              return Text(
+                '${p['label'] ?? p['id']}: ${adminInr(price)}, saves ${adminInr(d)}, pays ${adminInr(price - d)}',
+                style: AppText.caption,
+              );
+            }),
         ],
       ),
     );
@@ -874,7 +917,12 @@ class _CouponEditorState extends State<_CouponEditor> {
 
           _buildLivePreview(),
 
-          Text('Applicable Plans', style: AppText.label.copyWith(fontWeight: FontWeight.w800)),
+          Text('Valid for these plans', style: AppText.label.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text(
+            !_plansLoaded ? 'Loading plans...' : (_plansError ?? 'Checkout refuses this coupon for any other plan.'),
+            style: AppText.caption.copyWith(color: _plansError == null ? AppTheme.text2 : AppTheme.sos),
+          ),
           const SizedBox(height: 6),
           Wrap(
             spacing: 8,
@@ -885,21 +933,27 @@ class _CouponEditorState extends State<_CouponEditor> {
                 selected: _tiers.isEmpty,
                 onSelected: (_) => setState(_tiers.clear),
               ),
-              FilterChip(
-                label: const Text('Individual (₹9)'),
-                selected: _tiers.contains('individual'),
-                onSelected: (on) => setState(() => on ? _tiers.add('individual') : _tiers.remove('individual')),
-              ),
-              FilterChip(
-                label: const Text('Small Group (₹49)'),
-                selected: _tiers.contains('group_small'),
-                onSelected: (on) => setState(() => on ? _tiers.add('group_small') : _tiers.remove('group_small')),
-              ),
-              FilterChip(
-                label: const Text('Large Group (₹99)'),
-                selected: _tiers.contains('group_large'),
-                onSelected: (on) => setState(() => on ? _tiers.add('group_large') : _tiers.remove('group_large')),
-              ),
+              for (final p in _planOptions)
+                FilterChip(
+                  label: Text(_planLabel(p)),
+                  selected: _tiers.contains(p['id']?.toString() ?? ''),
+                  onSelected: (on) => setState(() {
+                    final id = p['id']?.toString() ?? '';
+                    if (id.isEmpty) return;
+                    if (on) {
+                      _tiers.add(id);
+                    } else {
+                      _tiers.remove(id);
+                    }
+                  }),
+                ),
+              // A saved binding to a plan that no longer exists stays visible so it can be removed.
+              for (final t in _tiers.where((t) => _plansLoaded && !_planOptions.any((p) => p['id']?.toString() == t)).toList())
+                FilterChip(
+                  label: Text('$t (unknown)'),
+                  selected: true,
+                  onSelected: (_) => setState(() => _tiers.remove(t)),
+                ),
             ],
           ),
           const SizedBox(height: 12),

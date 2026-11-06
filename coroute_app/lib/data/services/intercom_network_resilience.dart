@@ -43,11 +43,6 @@ enum TacticalSignal {
       };
 }
 
-/// Helper extension on [VoiceService] for tactical voice prompts.
-extension TacticalVoiceServiceExtension on VoiceService {
-  Future<bool> speakVoicePrompt(String text) => speak(text, priority: VoicePriority.critical);
-}
-
 /// Represents a voice frame with optional Forward Error Correction (FEC) redundant payload.
 class ResilientVoicePacket {
   ResilientVoicePacket({

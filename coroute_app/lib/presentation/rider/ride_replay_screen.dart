@@ -183,7 +183,7 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
         backgroundColor: AppTheme.darkCanvas,
         appBar: AppBar(title: Text(widget.rideTitle)),
         body: Center(
-          child: Text('No telemetry points found for this trip.', style: TextStyle(color: AppTheme.textMuted)),
+          child: Text('No route saved for this ride.', style: TextStyle(color: AppTheme.textMuted)),
         ),
       );
     }
@@ -200,6 +200,9 @@ class _RideReplayScreenState extends State<RideReplayScreen> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
+          minZoom: 3.0,
+          maxZoom: 19.0,
+          cameraConstraint: const CameraConstraint.containLatitude(),
               initialCenter: LatLng(currentPt.latitude, currentPt.longitude),
               initialZoom: 15.0,
             ),

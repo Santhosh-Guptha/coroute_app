@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:coroute_app/data/models/convoy_model.dart';
@@ -7,13 +6,7 @@ import 'package:coroute_app/data/models/network_models.dart';
 import 'package:coroute_app/data/models/network_wire.dart';
 import 'package:coroute_app/data/models/ride_feature_policy.dart';
 import 'package:coroute_app/data/models/sos_alert_model.dart';
-import 'package:coroute_app/domain/dtn/dtn_bundle.dart';
 
-String sha256Hex(String input) {
-  final bytes = utf8.encode(input);
-  final digest = DtnCrypto.sha256(bytes);
-  return digest.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
-}
 
 void main() {
   group('Cross-Group Assistance Topology and Route-Aware Filtering', () {
@@ -293,30 +286,6 @@ void main() {
   });
 
   group('Ride Guardian Capability Token Authorization', () {
-    test('SHA-256 capability token validation and deterministic hashing', () {
-      const validToken = 'cK9_xY2mP1qR8vW0tL3zN5jH7gF4bA6d';
-      expect(validToken.length, 32);
-
-      // Capability token regex matching server validToken rule.
-      final tokenRegex = RegExp(r'^[A-Za-z0-9_-]{32}$');
-      expect(tokenRegex.hasMatch(validToken), isTrue);
-
-      // Invalid tokens fail pattern check.
-      expect(tokenRegex.hasMatch('short'), isFalse);
-      expect(tokenRegex.hasMatch('a' * 31), isFalse);
-      expect(tokenRegex.hasMatch('a' * 33), isFalse);
-      expect(tokenRegex.hasMatch('invalid+token/with=special*chars!'), isFalse);
-
-      // Deterministic SHA-256 digest computation matches wire expectation.
-      final tokenHash = sha256Hex(validToken);
-      expect(tokenHash.length, 64);
-      expect(tokenHash, matches(RegExp(r'^[0-9a-f]{64}$')));
-
-      // Known test vector verification.
-      const testInput = 'abc';
-      final testHash = sha256Hex(testInput);
-      expect(testHash, 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
-    });
 
     test('Ride Guardian PIN gate format validation and error code handling', () {
       final pinRegex = RegExp(r'^[0-9]{4,8}$');

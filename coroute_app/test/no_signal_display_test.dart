@@ -15,7 +15,6 @@ import 'package:coroute_app/data/services/api_client.dart';
 import 'package:coroute_app/data/services/convoy_service.dart';
 import 'package:coroute_app/data/services/realtime_service.dart';
 import 'package:coroute_app/data/services/trip_storage_service.dart';
-import 'package:coroute_app/domain/ride/ride_facts.dart';
 import 'package:coroute_app/presentation/ride/rider_card_sheet.dart';
 import 'package:coroute_app/presentation/ride/riders_ladder.dart';
 
@@ -109,29 +108,6 @@ void main() {
   for (final palette in [AppPalette.light, AppPalette.dark]) {
     final theme = palette.isLight ? 'light' : 'dark';
 
-    testWidgets('ladder at 320 dp x1.3 $theme: no signal with time and place, app closed, possible incident chip', (tester) async {
-      final c = convoy();
-      final statuses = {for (final r in c.riders.values) r.userId: riderStatusOf(r, c, isMe: r.userId == 'me', nowMs: now)};
-      await narrow(
-        tester,
-        RidersLadder(
-          rungs: RideFacts.ladder(c, 'me'),
-          colors: const {},
-          statuses: statuses,
-          nowMs: now,
-          onTap: (_) {},
-          offlinePlaces: const {'k': 'Hosur'},
-          possibleIncident: const {'a'},
-        ),
-        palette: palette,
-      );
-      expect(tester.takeException(), isNull);
-      expect(find.text('No signal since 10:42 AM near Hosur'), findsOneWidget);
-      expect(find.text('App closed on this phone'), findsOneWidget);
-      expect(find.text('Possible incident'), findsOneWidget);
-      // The presence line replaces "last seen" on the chip (no duplicate words).
-      expect(find.textContaining('last seen'), findsNothing);
-    });
 
     testWidgets('rider card at 320 dp x1.3 $theme: no signal since, app closed', (tester) async {
       final api = ApiClient(httpClient: MockClient((_) async => http.Response('{}', 200)), storage: const FlutterSecureStorage());

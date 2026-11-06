@@ -74,7 +74,7 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
     if (z >= 17.0) return 'Junction turns, landmark POIs & buildings';
     if (z >= 16.0) return 'Sharp street names & local roads';
     if (z >= 14.0) return 'Primary highways & township connectors';
-    return 'Regional corridor overview';
+    return 'Route area';
   }
 
   @override
@@ -257,7 +257,7 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
                           const SizedBox(width: 6),
                           ActionChip(
                             avatar: Icon(Icons.fit_screen_rounded, size: 16, color: AppTheme.text),
-                            label: const Text('Fit Corridor'),
+                            label: const Text('Fit route'),
                             backgroundColor: AppTheme.card,
                             labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.text),
                             side: BorderSide(color: AppTheme.border),
@@ -303,7 +303,7 @@ class _OfflineTileVerificationScreenState extends State<OfflineTileVerificationS
                                 Text('Offline Storage Ready', style: AppText.headline.copyWith(fontSize: 15)),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '$cachedCount tiles cached · High detail corridor active',
+                                  '$cachedCount map pieces saved',
                                   style: AppText.caption,
                                 ),
                               ],
