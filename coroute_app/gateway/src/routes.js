@@ -19,7 +19,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 /**
  * @param {{auth: import('./auth').AuthService, convoys: import('./convoys').ConvoyManager, repo: any, soda: any, hub: any, startedAt:number}} deps
  */
-function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null }) {
+function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network = null, audit = null, publicLiveLimiter = null, emergencyGateway = null, lease = null, nodeName = null }) {
   const r = express.Router();
   r.use((req, res, next) => {
     const feature = req.path.startsWith('/geo/essentials') ? 'essentials' : req.path.startsWith('/geo/weather') ? 'weather'
@@ -89,6 +89,10 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
       rooms: convoys.rooms.size,
       sockets: hub ? hub.wss.clients.size : 0,
       version: require('../package.json').version,
+      // Two-VM deployment: which node answered, its GATEWAY_ROLE, and the scheduled jobs it holds.
+      role: config.gatewayRole,
+      node: nodeName || null,
+      leases: lease ? Object.entries(lease.status()).filter(([, v]) => v.holding).map(([k]) => k) : [],
     });
   }));
 
@@ -526,16 +530,24 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     if (chunks.length === 0 || chunks.length > 20) return res.status(400).json({ error: 'Send 1 to 20 chunks.' });
     const acked = [], rejected = [];
     let added = false;
+    // Valid chunks are written together (one batched insert); the answer waits until every one is stored,
+    // and a failed write fails the request so the phone keeps those chunks and sends them again.
+    const saves = [];
     for (const c of chunks) {
       try {
         const chunk = validateChunk(c, { tripStartMs: perm.tripStartMs });
-        const r2 = await tracks.save(gid, req.user.userId, chunk);
-        acked.push(r2.seq);
-        if (!r2.duplicate) added = true;
+        saves.push(tracks.save(gid, req.user.userId, chunk));
       } catch (e) {
         if (!(e instanceof TrackError)) throw e;
         rejected.push({ seq: c?.seq ?? null, error: e.message });
       }
+    }
+    const settled = await Promise.allSettled(saves);
+    const failed = settled.find((x) => x.status === 'rejected');
+    if (failed) throw failed.reason;
+    for (const { value: r2 } of settled) {
+      acked.push(r2.seq);
+      if (!r2.duplicate) added = true;
     }
     if (perm.ended && added && timeline) timeline.scheduleRebuild(gid);
     res.json({ acked, rejected });

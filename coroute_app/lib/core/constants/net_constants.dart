@@ -26,6 +26,13 @@ class NetConstants {
   /// app says "CoRoute server not reachable" instead of "Offline".
   static const int serverUnreachableAfter = 2;
 
+  /// While the socket stays up, an SOS, "I'm safe" or outbox item the server has not confirmed
+  /// this long after sending is sent again with the same clientId (the server ignores repeats).
+  static const Duration unconfirmedResendAfter = Duration(seconds: 20);
+
+  /// A JOIN refused with SERVER_BUSY is tried again after this (plus up to 30 s of jitter).
+  static const Duration serverBusyRetry = Duration(seconds: 45);
+
   /// Roster changes (riders joining, leaving, opting out) are fetched at most this often.
   static const Duration rosterRefreshDebounce = Duration(seconds: 30);
 

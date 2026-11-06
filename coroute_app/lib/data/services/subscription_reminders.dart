@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/feature_gates.dart';
@@ -98,7 +96,8 @@ class PlanReminderScheduler {
 
   static const String _permissionAskedKey = 'coroute_plan_reminder_permission_asked';
 
-  bool get supported => !kIsWeb && Platform.isAndroid;
+  bool get supported =>
+      !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
 
   /// Replaces whatever was scheduled with [reminders] for [tier].
   Future<void> schedule(List<PlanReminder> reminders, SubscriptionTier tier) async {
@@ -124,7 +123,10 @@ class PlanReminderScheduler {
   /// Asks for the Android 13+ notification permission, once per install.
   /// Called from the plan selector or the account screen, never at start-up.
   static Future<void> requestPermissionOnce() async {
-    if (kIsWeb || !Platform.isAndroid) return;
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android && defaultTargetPlatform != TargetPlatform.iOS)) {
+      return;
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       if (prefs.getBool(_permissionAskedKey) ?? false) return;

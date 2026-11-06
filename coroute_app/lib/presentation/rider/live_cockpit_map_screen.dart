@@ -2090,6 +2090,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       lastUpdateMs: newestOther,
       nowMs: now,
       serverUnreachable: service.serverUnreachable,
+      serverBusy: service.serverBusy,
     );
     if (connection != null) {
       _armStaleTimer();

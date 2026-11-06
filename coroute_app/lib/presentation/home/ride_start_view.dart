@@ -876,6 +876,9 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
   bool _busy = false;
   String? _error;
 
+  /// The last try failed because the server is busy: the button says "Try again".
+  bool _serverBusy = false;
+
   @override
   void dispose() {
     _code.dispose();
@@ -973,6 +976,7 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
     } else {
       setState(() {
         _busy = false;
+        _serverBusy = convoyService.lastErrorIsServerBusy;
         _error =
             convoyService.lastError ?? 'No active ride found for this code.';
       });
@@ -1073,7 +1077,7 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
                       color: Colors.white,
                     ),
                   )
-                : const Text('Join'),
+                : Text(_serverBusy && err != null ? 'Try again' : 'Join'),
           ),
         ],
       ),

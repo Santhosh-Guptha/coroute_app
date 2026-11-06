@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui_format.dart';
+import '../../data/services/api_client.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/realtime_service.dart';
 
@@ -35,10 +36,12 @@ class ConnectionBanner extends StatelessWidget {
     required int nowMs,
     bool sosWaiting = false,
     bool serverUnreachable = false,
+    bool serverBusy = false,
   }) {
     final connected = state == RealtimeState.connected;
     if (sosWaiting) return connected ? 'Sending your SOS' : 'SOS waiting to send';
-    if (connected) return null;
+    // Connected, but the gateway refused this new rider's JOIN for now (tried again by itself).
+    if (connected) return serverBusy ? ApiException.serverBusyMessage : null;
     if (serverUnreachable) return 'CoRoute server not reachable';
     final last = lastUpdateMs;
     final ago = (last == null || last <= 0) ? null : formatAgo(Duration(milliseconds: (nowMs - last).clamp(0, 1 << 40).toInt()));

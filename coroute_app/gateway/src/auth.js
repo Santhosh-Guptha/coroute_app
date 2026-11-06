@@ -1,7 +1,7 @@
 'use strict';
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { defaultHasher } = require('./password_hash');
 const { OAuth2Client } = require('google-auth-library');
 const config = require('./config');
 const { effectiveSubscription } = require('./subscription_lifecycle');
@@ -123,14 +123,30 @@ function signToken(user) {
   );
 }
 
-function verifyToken(token) {
+/**
+ * Verifies with JWT_SECRET, then (rotation grace) with JWT_SECRET_PREVIOUS. Never signs with the previous one.
+ * @returns {{claims: object, previous: boolean}|null}
+ */
+function verifyTokenDetailed(token) {
+  // Algorithm pinned: a token signed any other way (none, RS/HS confusion) is never accepted.
+  if (typeof token !== 'string' || token.length > 4096) return null;
+  const opts = { issuer: 'coroute-gateway', algorithms: ['HS256'] };
   try {
-    // Algorithm pinned: a token signed any other way (none, RS/HS confusion) is never accepted.
-    if (typeof token !== 'string' || token.length > 4096) return null;
-    return jwt.verify(token, config.jwtSecret, { issuer: 'coroute-gateway', algorithms: ['HS256'] });
+    return { claims: jwt.verify(token, config.jwtSecret, opts), previous: false };
+  } catch (e) {
+    // Only a signature mismatch may fall back; an expired or malformed token stays refused.
+    if (!config.jwtSecretPrevious || e?.name !== 'JsonWebTokenError' || e.message !== 'invalid signature') return null;
+  }
+  try {
+    return { claims: jwt.verify(token, config.jwtSecretPrevious, opts), previous: true };
   } catch {
     return null;
   }
+}
+
+function verifyToken(token) {
+  const r = verifyTokenDetailed(token);
+  return r ? r.claims : null;
 }
 
 const MSG_ON_HOLD = 'Your account has been placed on hold by the administrator.';
@@ -219,12 +235,11 @@ function identityOf(user) {
 
 class AuthService {
   /** @param {import('./oracle/repo').Repo} repo */
-  constructor(repo, { googleVerifier, gate = null, bcryptCost = config.bcryptCost } = {}) {
+  constructor(repo, { googleVerifier, gate = null, hasher = defaultHasher() } = {}) {
     this.repo = repo;
     this.gate = gate;
-    /** bcrypt work factor for every new hash; a stored hash below it is re-hashed at sign-in. */
-    this.bcryptCost = bcryptCost;
-    this._dummyHash = null;
+    /** Password hashing off the event loop (scrypt; legacy bcrypt verified in a worker, then upgraded). */
+    this.hasher = hasher;
     /** (user, changedKeys) => void: set by app.js so a live ride hears about phone / opt-out changes. */
     this.onProfileChanged = null;
     /** async (user) => user|null: set by app.js; rolls an expired paid tier back on login and /me. */
@@ -233,11 +248,6 @@ class AuthService {
   }
 
   _invalidate(userId) { if (this.gate) this.gate.invalidate(userId); }
-
-  /** True when a stored bcrypt hash uses fewer rounds than this.bcryptCost (or cannot be read). */
-  _needsRehash(hash) {
-    try { return bcrypt.getRounds(hash) < this.bcryptCost; } catch { return true; }
-  }
 
   async _uniqueUserId(name) {
     const base = `usr_${slug(name)}`;
@@ -275,7 +285,7 @@ class AuthService {
       userId: await this._uniqueUserId(clean.name),
       name: clean.name,
       email: clean.email,
-      passwordHash: await bcrypt.hash(password, this.bcryptCost),
+      passwordHash: await this.hasher.hash(password),
       role: bootstrapRoleFor(clean.email),
       provider: 'password',
       phone: clean.phone,
@@ -293,17 +303,16 @@ class AuthService {
     const id = typeof identifier === 'string' ? identifier.trim() : '';
     if (!id || !password || typeof password !== 'string') throw new AuthError('Email/callsign and password are required.');
     const user = id.includes('@') ? await this.repo.findUserByEmail(id) : await this.repo.findUserByName(id);
-    // Constant-ish time: always run a compare (against a dummy hash of the same cost for unknown users).
-    if (!user?.passwordHash && !this._dummyHash) this._dummyHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), this.bcryptCost);
-    const ok = user?.passwordHash ? await bcrypt.compare(password, user.passwordHash) : (await bcrypt.compare(password, this._dummyHash), false);
-    if (!user || !ok) throw new AuthError('Invalid credentials.', 401);
+    // Same work for unknown accounts: a dummy verify of the current cost, then the same refusal.
+    const check = user?.passwordHash ? await this.hasher.verify(password, user.passwordHash) : (await this.hasher.dummyVerify(password), null);
+    if (!user || !check?.ok) throw new AuthError('Invalid credentials.', 401);
     if (user.status === 'ON_HOLD') throw new AuthError(MSG_ON_HOLD, 403, 'ACCOUNT_ON_HOLD');
     if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
     const role = bootstrapRoleFor(user.email, user.role);
     const patch = { lastLoginAt: Date.now(), role };
-    // Transparent upgrade: a hash made with a lower work factor is replaced now that we know the
-    // password. passwordChangedAt is not touched, so no session ends.
-    if (this._needsRehash(user.passwordHash)) patch.passwordHash = await bcrypt.hash(password, this.bcryptCost);
+    // Transparent upgrade: a legacy bcrypt hash (or scrypt at older parameters) is replaced now that we
+    // know the password. passwordChangedAt is not touched, so no session ends.
+    if (check.needsRehash) patch.passwordHash = await this.hasher.hash(password);
     const updated = await this._seen(await this.repo.updateUser(user.key, patch) || user);
     return { token: signToken(updated), user: selfUser(updated) };
   }
@@ -371,12 +380,12 @@ class AuthService {
     if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) throw new AuthError('New password must be at least 8 characters.');
     if (newPassword.length > 200) throw new AuthError('Password must be at most 200 characters.');
     if (user.passwordHash) {
-      const ok = typeof currentPassword === 'string' && currentPassword && await bcrypt.compare(currentPassword, user.passwordHash);
+      const ok = typeof currentPassword === 'string' && currentPassword && (await this.hasher.verify(currentPassword, user.passwordHash)).ok;
       if (!ok && !user.mustChangePassword) throw new AuthError('Current password is incorrect.', 401);
     }
     // Bumping passwordChangedAt ends every other session; this device gets a fresh token.
     const changedAt = Math.max(Date.now(), (Number(user.passwordChangedAt) || 0) + 1);
-    const updated = await this.repo.updateUser(user.key, { passwordHash: await bcrypt.hash(newPassword, this.bcryptCost), mustChangePassword: false, passwordChangedAt: changedAt });
+    const updated = await this.repo.updateUser(user.key, { passwordHash: await this.hasher.hash(newPassword), mustChangePassword: false, passwordChangedAt: changedAt });
     this._invalidate(userId);
     return { ok: true, token: signToken(updated || { ...user, passwordChangedAt: changedAt }) };
   }
@@ -387,7 +396,7 @@ class AuthService {
     if (!target) throw new AuthError('User not found.', 404);
     const temp = crypto.randomBytes(9).toString('base64url').replace(/[-_]/g, 'x').slice(0, 12);
     await this.repo.updateUser(target.key, {
-      passwordHash: await bcrypt.hash(temp, this.bcryptCost), mustChangePassword: true, passwordResetBy: actor.userId, passwordResetAt: Date.now(),
+      passwordHash: await this.hasher.hash(temp), mustChangePassword: true, passwordResetBy: actor.userId, passwordResetAt: Date.now(),
       passwordChangedAt: Math.max(Date.now(), (Number(target.passwordChangedAt) || 0) + 1),
     });
     this._invalidate(target.userId);
@@ -568,9 +577,12 @@ function requireAuth(gate) {
   return (req, res, next) => {
     const h = req.headers.authorization || '';
     const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-    const claims = token && verifyToken(token);
-    if (!claims) return res.status(401).json({ error: MSG_SESSION, code: 'SESSION_INVALID' });
+    const verified = token && verifyTokenDetailed(token);
+    if (!verified) return res.status(401).json({ error: MSG_SESSION, code: 'SESSION_INVALID' });
+    const { claims } = verified;
     req.tokenIssuedAt = (claims.iat || 0) * 1000;
+    // Signed with JWT_SECRET_PREVIOUS (rotation grace): accepted, and the client is moved to the new secret.
+    req.tokenPreviousSecret = verified.previous;
     if (!gate) {
       req.user = { userId: claims.sub, name: claims.name, role: claims.role, email: claims.email };
       return next();
@@ -578,6 +590,9 @@ function requireAuth(gate) {
     gate.check(claims).then((user) => {
       req.dbUser = user;
       req.user = identityOf(user);
+      if (verified.previous) {
+        try { res.set('X-CoRoute-Token', signToken(user)); } catch { /* never in the way */ }
+      }
       next();
     }, (e) => {
       if (e instanceof AuthError) return res.status(e.status).json({ error: e.message, code: e.code });
@@ -591,4 +606,4 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { realContactNumber, ROSTER_KEYS, ASSIST_KEYS, AuthService, AuthError, UserGate, identityOf, requireAuth, requireAdmin, signToken, verifyToken, publicUser, selfUser, ROLE_ADMIN, ROLE_RIDER, slug };
+module.exports = { realContactNumber, ROSTER_KEYS, ASSIST_KEYS, AuthService, AuthError, UserGate, identityOf, requireAuth, requireAdmin, signToken, verifyToken, verifyTokenDetailed, publicUser, selfUser, ROLE_ADMIN, ROLE_RIDER, slug };

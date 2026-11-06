@@ -35,18 +35,39 @@ const { GuardianService } = require('./guardians');
 const { GuardianPush } = require('./guardian_push');
 const { guardianRouter } = require('./guardian_routes');
 const { EmergencySmsGateway } = require('./emergency_sms_gateway');
+const { JobLease } = require('./job_lease');
+// TODO(P1): backups. When src/backups.js exports startBackupJobs({ lease, repo, soda, logger }), it is
+// started with the other leased jobs below; until then this stays null.
+const backupModule = (() => {
+  try { return require('./backups'); } catch (e) {
+    if (e.code === 'MODULE_NOT_FOUND' && String(e.message).includes("'./backups'")) return null;
+    throw e;
+  }
+})();
 
 function createSoda() {
   if (config.sodaUrl === 'memory' || config.sodaUrl === 'http://mock') return new MemorySoda();
   return new SodaClient({ baseUrl: config.sodaUrl, user: config.oracleUser, password: config.oraclePassword, timeoutMs: config.oracleTimeoutMs });
 }
 
-async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch } = {}) {
+async function createApp({ soda = createSoda(), logger = console, migrate = true, googleVerifier, geoFetch, clock, emergencyFetch, lease } = {}) {
   const repo = new Repo(soda);
+  const nodeName = config.nodeName || process.env.NODE_NAME || require('os').hostname();
+  // Scheduled jobs run on exactly one node of a two-VM deployment (src/job_lease.js, GATEWAY_ROLE).
+  lease = lease || new JobLease({ soda, role: config.gatewayRole, node: nodeName, logger,
+    ttlMs: config.jobLeaseTtlMs, heartbeatMs: config.jobLeaseHeartbeatMs, graceMs: config.jobLeaseGraceMs });
+  if (config.jwtSecretPrevious) {
+    logger.warn('[auth] JWT_SECRET_PREVIOUS is configured: tokens signed with it are accepted (verification only) and refreshed to JWT_SECRET. Remove it once the rotation grace period is over.');
+  }
+  if (!config.settingsEncryptionKey && config.env === 'production') {
+    logger.warn('[config] SETTINGS_ENCRYPTION_KEY is not set: saved Razorpay secrets and checkout links depend on JWT_SECRET.');
+  }
   if (migrate) {
     await repo.migrate();
     // The launch coupons are ordinary coupon records: created once when absent, then admin-managed.
-    await seedDefaultCoupons(repo).catch((e) => logger.warn(`[coupons] default coupon seed failed: ${e.message}`));
+    // Leased so two nodes booting together never seed twice.
+    await lease.once('coupon-seed', () => seedDefaultCoupons(repo))
+      .catch((e) => logger.warn(`[coupons] default coupon seed failed: ${e.message}`));
   }
 
   const gate = new UserGate(repo);
@@ -88,7 +109,9 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
 
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 1); // behind Caddy/nginx on the VM
+  // Only these proxies' X-Forwarded-For is believed (TRUST_PROXY; default loopback = this VM's Caddy).
+  // VM2 also trusts VM1's private IP, so req.ip (and every IP rate limit) is the real client.
+  app.set('trust proxy', config.trustProxy);
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
@@ -136,7 +159,9 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
         publicKey, process.env.GUARDIAN_VAPID_PRIVATE_KEY);
       guardianPush = new GuardianPush({ repo, service, publicKey,
         send: (subscription, payload, options) => webpush.sendNotification(subscription, payload, options) });
-      guardianPush.start();
+      // Leased (one node), preferring the live node: building a guardian view loads the ride room.
+      const push = guardianPush;
+      lease.run('guardian-push', 15000, () => push.tick(), { prefer: 'live', firstDelayMs: 15000 });
     }
     app.use('/api/guardian', guardianRouter({ service, gate, origin: origin.origin, push: guardianPush }));
   }
@@ -245,7 +270,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
       }
     },
   }));
-  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network, audit, publicLiveLimiter, emergencyGateway }));
+  app.use('/api', buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeline, geo, essentials, gate, network, audit, publicLiveLimiter, emergencyGateway, lease, nodeName }));
   // 404: JSON for the API, a real page for everything else.
   app.use((req, res) => {
     if (req.path.startsWith('/api/') || req.path === '/api') return res.status(404).json({ error: 'Not found' });
@@ -272,11 +297,27 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   // Subscription expiry warnings (7/3/1 days) and rollback to community, hourly; started with retention.
   const subscriptions = new SubscriptionSweeper({ repo, auth, hub, logger });
   auth.onUserSeen = (user) => expireIfDue({ repo, auth, hub }, user);
-  const retentionStart = retention.start.bind(retention);
-  retention.start = () => { retentionStart(); subscriptions.start(); };
+  // Every scheduled job that writes data or sends messages runs under a lease: exactly once per interval
+  // across the nodes sharing this database. server.js calls retention.start() after listen().
+  let jobsStarted = false;
+  retention.start = () => {
+    if (jobsStarted) return;
+    jobsStarted = true;
+    const min = 60000;
+    lease.run('retention', config.retentionRunEveryMinutes * min, () => retention.runOnce(Date.now(), { autoEnd: false }), { firstDelayMs: min });
+    // Ending a stale convoy goes through its room: run it where rooms live.
+    lease.run('convoy-auto-end', 60 * min, () => retention.autoEnd(), { prefer: 'live', firstDelayMs: min });
+    lease.run('db-keepalive', config.keepAliveEveryMinutes * min, () => retention.keepAlive());
+    lease.run('subscriptions', subscriptions.everyMs, () => subscriptions.runOnce(), { firstDelayMs: 90000 });
+    if (backupModule && typeof backupModule.startBackupJobs === 'function') {
+      backupModule.startBackupJobs({ lease, repo, soda, logger });
+    }
+  };
+  subscriptions.start = () => retention.start();
 
   async function shutdown() {
     guardianPush?.stop();
+    const leaseStopped = lease.stopAll({ waitMs: 8000 });
     retention.stop();
     subscriptions.stop();
     timeline.stop();
@@ -288,10 +329,11 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await convoys.flushAll();
     await timeline.idle();
     await audit.flush().catch(() => {});
+    await leaseStopped.catch(() => {});
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { app, server, hub, repo, soda, auth, gate, convoys, retention, subscriptions, tracks, timeline, geo, network, discovery, audit, routes, emergencyGateway, shutdown };
+  return { app, server, hub, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

@@ -396,14 +396,20 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
 
   Future<void> _launch(String name) async {
     if (_launching) return;
-    final auth = context.read<AuthService>();
-    final convoys = context.read<ConvoyService>();
     if (!await PermissionsScreen.ensure(context)) return;
     if (!mounted) return;
     // Pre-ride checklist (never blocks; closing it without starting cancels the launch).
     if (!await PreRideChecklistSheet.show(context)) return;
     if (!mounted) return;
+    await _create(name);
+  }
 
+  /// Creates the ride (after the checks) and goes back to the home shell. Also the "Retry"
+  /// of the server-busy message, which does not ask the checks again.
+  Future<void> _create(String name) async {
+    if (_launching || !mounted) return;
+    final auth = context.read<AuthService>();
+    final convoys = context.read<ConvoyService>();
     setState(() {
       _launching = true;
       _loadingMessage = 'Creating your trip...';
@@ -433,7 +439,12 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
           _loadingMessage = null;
         });
       }
-      _snack(e is ApiException ? e.message : 'Could not start the ride. Check your connection.');
+      if (e is ApiException && e.isServerBusy) {
+        // The gateway is full for new rides right now: plain words and a retry, nothing else.
+        _busySnack(name);
+      } else {
+        _snack(e is ApiException ? e.message : 'Could not start the ride. Check your connection.');
+      }
       return;
     }
     if (!mounted) return;
@@ -463,6 +474,15 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
   void _snack(String m) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  }
+
+  void _busySnack(String name) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: const Text(ApiException.serverBusyMessage),
+      duration: const Duration(seconds: 10),
+      action: SnackBarAction(label: 'Retry', onPressed: () => _create(name)),
+    ));
   }
 
   @override

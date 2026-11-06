@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -121,7 +120,8 @@ class AlertService with WidgetsBindingObserver {
     AlertChannel.social: (NetworkConstants.channelSocial, 'Riding groups nearby', 'Other public riding groups on your way.', Importance.low),
   };
 
-  bool get _supported => !kIsWeb && Platform.isAndroid;
+  bool get _supported =>
+      !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
 
   Future<void> _init() async {
     if (_ready || !_supported) return;
@@ -352,7 +352,18 @@ class AlertService with WidgetsBindingObserver {
       additionalFlags: sos ? Int32List.fromList(const [4]) : null, // FLAG_INSISTENT
       styleInformation: a.body.isEmpty ? null : BigTextStyleInformation(a.body),
     );
-    _plugin.show(a.id, a.title, a.body.isEmpty ? null : a.body, NotificationDetails(android: details)).ignore();
+    final iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentSound: !social,
+      presentBadge: true,
+      interruptionLevel: sos ? InterruptionLevel.critical : InterruptionLevel.active,
+    );
+    _plugin.show(
+      a.id,
+      a.title,
+      a.body.isEmpty ? null : a.body,
+      NotificationDetails(android: details, iOS: iosDetails),
+    ).ignore();
     _shown[a.key] = a;
     if (_shownKeys.add(a.key)) {
       _persistShown();

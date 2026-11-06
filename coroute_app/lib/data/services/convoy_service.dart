@@ -228,6 +228,17 @@ class ConvoyService extends ChangeNotifier {
   int _networkRevision = 0;
   bool _wasConnected = false;
 
+  // Failover (two gateways): what the server has not confirmed is sent again while the socket
+  // stays up (see _resendUnconfirmed), and a JOIN refused as SERVER_BUSY is tried again.
+  final Map<String, int> _sendingSince = {};
+  int _sosSentAt = 0;
+  int _resolvesSentAt = 0;
+  bool _roomConfirmed = false;
+  String? _serverBusyGid;
+  int _serverBusyAt = 0;
+  int _serverBusyRetryMs = 0;
+  bool _lastErrorIsServerBusy = false;
+
   // 3.16: "Leave ride" pressed on the notification (the UI confirms it), live emergency
   // links this phone created (memory only, token never persisted or logged).
   bool _leaveRequestedFromNotification = false;
@@ -294,6 +305,22 @@ class ConvoyService extends ChangeNotifier {
 
   /// The internet works but the CoRoute server does not answer (banner: "CoRoute server not reachable").
   bool get serverUnreachable => _rt.serverUnreachable;
+
+  /// The gateway refused this new rider's JOIN because it is full right now (socket ERROR
+  /// SERVER_BUSY). Not a removal: the ride stays, and the JOIN is tried again by itself
+  /// (and by [retryAfterServerBusy]).
+  bool get serverBusy => _serverBusyGid != null && _serverBusyGid == _activeGroupId;
+
+  /// The last create or join failed because the gateway is busy ([ApiException.serverBusyMessage]).
+  bool get lastErrorIsServerBusy => _lastErrorIsServerBusy;
+
+  /// "Try again" after SERVER_BUSY on the socket: sends the JOIN again now.
+  void retryAfterServerBusy() {
+    final gid = _activeGroupId;
+    if (gid == null || !_rt.isConnected) return;
+    _serverBusyAt = _clock();
+    _rt.joinRoom(gid);
+  }
 
   /// True when the connected gateway supports [feature] (see ProtocolFeatures).
   bool supports(String feature) => _rt.supports(feature);
@@ -787,7 +814,10 @@ class ConvoyService extends ChangeNotifier {
     _statusTimer?.cancel();
     _lastStatus = '';
     // Redraw at most every 10 s, and only when the visible text changed (no sound, same notification).
-    _statusTimer = Timer.periodic(const Duration(seconds: 10), (_) => _pushStatus());
+    _statusTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _resendUnconfirmed();
+      _pushStatus();
+    });
     Timer(const Duration(seconds: 3), _pushStatus);
   }
 
@@ -922,6 +952,7 @@ class ConvoyService extends ChangeNotifier {
       // are needed exactly when there is none.
       if (_rosterWanted && _rosterStale) refreshEmergencyRoster(force: true).ignore();
     } else {
+      _roomConfirmed = false;
       recorder?.refreshPendingCount().ignore();
       // Handed to a socket that is gone: waiting for signal again (sent after the next SNAPSHOT).
       _outboxTimer?.cancel();
@@ -960,9 +991,17 @@ class ConvoyService extends ChangeNotifier {
       return;
     }
     if (type == 'ERROR') {
+      if (e['code']?.toString() == ApiException.serverBusyCode) {
+        // The gateway is full for new riders right now: say so plainly and try the JOIN again
+        // later. Never a removal from the ride and never an outbox failure.
+        _onServerBusy();
+        return;
+      }
       final cid = e['clientId']?.toString();
       final code = e['code'];
-      if (cid != null && cid.isNotEmpty) _onOutboxError(cid, code is num ? code.toInt() : int.tryParse('$code'), e['message']?.toString());
+      if (cid != null && cid.isNotEmpty) {
+        _onOutboxError(cid, code is num ? code.toInt() : int.tryParse('$code'), e['message']?.toString(), e['reason']?.toString());
+      }
       _lastError = e['message']?.toString();
       debugPrint('gateway error ${e['code']}: ${e['message']}');
       // Leave the convoy only when the server says we are no longer in it, and only after
@@ -996,6 +1035,14 @@ class ConvoyService extends ChangeNotifier {
         if (e['convoy'] is Map) {
           final serverConvoy = ConvoyModel.fromJson(Map<String, dynamic>.from(e['convoy'] as Map));
           _mergeServerConvoy(serverConvoy);
+        }
+        _roomConfirmed = true;
+        if (_serverBusyGid != null) {
+          _serverBusyGid = null;
+          if (_lastErrorIsServerBusy) {
+            _lastError = null;
+            _lastErrorIsServerBusy = false;
+          }
         }
         // Back in the room after a dead zone or a restart: send the SOS that is still waiting,
         // then the outbox in order (the server ignores repeats by clientId).
@@ -1428,6 +1475,7 @@ class ConvoyService extends ChangeNotifier {
 
   Future<ConvoyModel?> joinConvoyByCode({required String code, required RiderModel rider}) async {
     _lastError = null;
+    _lastErrorIsServerBusy = false;
     try {
       await _refreshBatteryLevel();
       await _flushPendingLeaves();
@@ -1448,7 +1496,11 @@ class ConvoyService extends ChangeNotifier {
       _activate(convoy);
       return convoy;
     } on ApiException catch (e) {
-      if (e.code == 'ACTIVE_TRIP_CONFLICT') {
+      if (e.isServerBusy) {
+        // HTTP 503 SERVER_BUSY: plain words, the sheet offers "Try again". Nothing else changes.
+        _lastError = ApiException.serverBusyMessage;
+        _lastErrorIsServerBusy = true;
+      } else if (e.code == 'ACTIVE_TRIP_CONFLICT') {
         _lastError = 'You are already in an active trip. Please end or leave your current trip first.';
       } else if (e.code == 'MEMBERSHIP_EXPIRED') {
         _lastError = 'Active membership required. Please renew your membership.';
@@ -2703,6 +2755,7 @@ class ConvoyService extends ChangeNotifier {
       changed = true;
       if (ack) {
         _outbox[idx] = item.copyWith(state: OutboxState.sending);
+        _sendingSince[item.clientId] = now;
         idx++;
       } else {
         // Older gateway (no ACK): done once handed to the socket, as in 3.13.
@@ -2727,6 +2780,7 @@ class ConvoyService extends ChangeNotifier {
 
   void _onAck(String? clientId) {
     if (clientId == null || clientId.isEmpty) return;
+    _sendingSince.remove(clientId);
     final before = _outbox.length;
     _outbox.removeWhere((i) => i.clientId == clientId);
     if (_outbox.length == before) return;
@@ -2736,10 +2790,19 @@ class ConvoyService extends ChangeNotifier {
 
   /// ERROR for an outbox item: 4xx (not 429) means the server refused it ("Not sent");
   /// 429 and 5xx keep it for another try.
-  void _onOutboxError(String clientId, int? code, String? message) {
+  void _onOutboxError(String clientId, int? code, String? message, [String? reason]) {
     final idx = _outbox.indexWhere((i) => i.clientId == clientId);
     if (idx < 0) return;
     final c = code ?? 500;
+    if (_notInRoomYet(c, message, reason)) {
+      // Sent between HELLO and the answer to the (re-)JOIN, typically right after a failover:
+      // not a refusal of the item. It waits and goes again after the SNAPSHOT (same clientId);
+      // a real removal from the ride clears the outbox anyway.
+      _sendingSince.remove(clientId);
+      _outbox[idx] = _outbox[idx].copyWith(state: OutboxState.waiting);
+      _persistOutbox();
+      return;
+    }
     if (c >= 400 && c < 500 && c != 429) {
       final item = _outbox[idx];
       _outbox[idx] = item.copyWith(state: OutboxState.failed, error: message ?? 'Not sent', failedAt: _clock());
@@ -2806,7 +2869,56 @@ class ConvoyService extends ChangeNotifier {
     _outboxTimer?.cancel();
     _outboxTimer = null;
     _outbox = [];
+    _sendingSince.clear();
     _outboxStore.clear().ignore();
+  }
+
+  /// While the socket stays up, what the server has not confirmed is sent again with the same
+  /// clientId (the server ignores repeats): an SOS without its ALERT echo, "I'm safe" without
+  /// ALERT_RESOLVED, an outbox item without its ACK. The server confirms only after a durable
+  /// save, so a save that failed without closing the socket is never lost. Runs on the 10 s
+  /// status tick (no extra timer); after a reconnect the SNAPSHOT sends everything anyway.
+  /// Also tries again a JOIN refused as SERVER_BUSY.
+  void _resendUnconfirmed() {
+    final gid = _activeGroupId;
+    if (gid == null || !_rt.isConnected) return;
+    final now = _clock();
+    if (_serverBusyGid == gid && now - _serverBusyAt >= _serverBusyRetryMs) retryAfterServerBusy();
+    if (!_roomConfirmed) return; // the SNAPSHOT after the re-JOIN sends everything
+    final after = NetConstants.unconfirmedResendAfter.inMilliseconds;
+    if (_pendingSos != null && now - _sosSentAt >= after) _sendPendingSos();
+    if (_pendingResolves.isNotEmpty && now - _resolvesSentAt >= after) _sendPendingResolves();
+    var stale = false;
+    for (var i = 0; i < _outbox.length; i++) {
+      final item = _outbox[i];
+      if (item.state != OutboxState.sending) continue;
+      if (now - (_sendingSince[item.clientId] ?? 0) >= after) {
+        _outbox[i] = item.copyWith(state: OutboxState.waiting);
+        stale = true;
+      }
+    }
+    _sendingSince.removeWhere((cid, _) => !_outbox.any((i) => i.clientId == cid && i.state == OutboxState.sending));
+    if (stale || _outbox.any((i) => i.state == OutboxState.waiting)) _flushOutbox();
+  }
+
+  @visibleForTesting
+  void debugResendUnconfirmed() => _resendUnconfirmed();
+
+  /// The gateway's "not in the room yet" answers to an outbox item: 409 "Join a convoy first."
+  /// (no reason), NOT_JOINED, or NOT_MEMBER (which is double-checked with the server anyway).
+  static bool _notInRoomYet(int code, String? message, String? reason) {
+    if (reason == 'NOT_JOINED' || reason == 'NOT_MEMBER') return true;
+    return code == 409 && (reason == null || reason.isEmpty) && (message ?? '').startsWith('Join a convoy first');
+  }
+
+  void _onServerBusy() {
+    _serverBusyGid = _activeGroupId;
+    _serverBusyAt = _clock();
+    // 45-75 s, so a full gateway is not asked again by every new rider at the same moment.
+    _serverBusyRetryMs = NetConstants.serverBusyRetry.inMilliseconds + math.Random().nextInt(30000);
+    _lastError = ApiException.serverBusyMessage;
+    _lastErrorIsServerBusy = true;
+    notifyListeners();
   }
 
   // --------------------------------------------------------- SMS roster
@@ -2895,7 +3007,9 @@ class ConvoyService extends ChangeNotifier {
   bool _sendPendingSos() {
     final p = _pendingSos;
     if (p == null || p.groupId != _activeGroupId) return false;
-    return _rt.send(p.toMessage());
+    final sent = _rt.send(p.toMessage());
+    if (sent) _sosSentAt = _clock();
+    return sent;
   }
 
   Future<void> _loadPendingSos() async {
@@ -2953,7 +3067,7 @@ class ConvoyService extends ChangeNotifier {
     _pendingResolves[alertId] = reason;
     _pendingResolvesGid = gid;
     _savePendingResolves();
-    _rt.send({'type': 'SOS_RESOLVE', 'alertId': alertId, if (_netOn) 'reason': reason.wire});
+    if (_rt.send({'type': 'SOS_RESOLVE', 'alertId': alertId, if (_netOn) 'reason': reason.wire})) _resolvesSentAt = _clock();
   }
 
   /// Resolves not yet confirmed by the server (alertId -> reason), for the active ride only.
@@ -3015,6 +3129,7 @@ class ConvoyService extends ChangeNotifier {
     for (final entry in _pendingResolves.entries) {
       _rt.send({'type': 'SOS_RESOLVE', 'alertId': entry.key, if (_netOn) 'reason': entry.value.wire});
     }
+    _resolvesSentAt = _clock();
   }
 
   // ------------------------------------------------- 3.15 safety network

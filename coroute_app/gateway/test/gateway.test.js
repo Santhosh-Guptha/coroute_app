@@ -82,7 +82,7 @@ test('register / login / token / profile; passwords are hashed; admin role by al
   assert.equal(a.user.userId, 'usr_alice_rider');
 
   const stored = await soda.findOne('users', { email: 'alice@coroute.test' });
-  assert.ok(stored.value.passwordHash.startsWith('$2'));
+  assert.ok(stored.value.passwordHash.startsWith('scrypt$'));
   assert.equal(stored.value.password, undefined);
 
   const dup = await api('POST', '/auth/register', { name: 'Alice Two', email: 'alice@coroute.test', password: 'Password#123', phone: '9999999999' });

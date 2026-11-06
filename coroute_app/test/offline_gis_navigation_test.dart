@@ -30,7 +30,7 @@ void main() {
       expect(find.text('OFFLINE · PACK ACTIVE'), findsOneWidget);
       expect(find.text('|'), findsOneWidget);
       expect(find.text('📶'), findsOneWidget);
-      expect(find.text('4 P2P Peers'), findsOneWidget);
+      expect(find.text('4 nearby'), findsOneWidget);
 
       // Verify container decoration and neon cyan border
       final containerFinder = find.byType(Container).first;

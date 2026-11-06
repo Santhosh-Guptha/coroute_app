@@ -9,8 +9,9 @@
  *
  * Where values come from (first match wins):
  *   1. Admin-saved settings in Oracle (`subscription_config`, k = 'razorpay').
- *      Secrets are stored AES-256-GCM encrypted with a key derived from
- *      JWT_SECRET; they are never returned by any endpoint.
+ *      Secrets are stored AES-256-GCM encrypted ("v2:" with SETTINGS_ENCRYPTION_KEY; older "v1:" values
+ *      used a key derived from JWT_SECRET and are re-encrypted with the new key on first read, so
+ *      rotating JWT_SECRET no longer loses them). They are never returned by any endpoint.
  *   2. Environment: RAZORPAY_MODE, RAZORPAY_TEST_KEY_ID / _SECRET,
  *      RAZORPAY_LIVE_KEY_ID / _SECRET, RAZORPAY_[TEST_|LIVE_]WEBHOOK_SECRET.
  *      The legacy RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET pair is filed under
@@ -34,31 +35,51 @@ class RazorpayError extends Error {
   }
 }
 
-function encKey() {
-  return crypto.createHash('sha256').update(`${config.jwtSecret}:razorpay-settings:v1`).digest();
+/** Legacy key: derived from a JWT secret (current, then JWT_SECRET_PREVIOUS during a rotation). */
+function legacyKey(secret) {
+  return crypto.createHash('sha256').update(`${secret}:razorpay-settings:v1`).digest();
+}
+
+/** Keys to try, newest first: [{ v, key }]. */
+function decryptKeys() {
+  const keys = [];
+  if (config.settingsEncryptionKey) keys.push({ v: 'v2', key: config.settingsEncryptionKey });
+  keys.push({ v: 'v1', key: legacyKey(config.jwtSecret) });
+  if (config.jwtSecretPrevious) keys.push({ v: 'v1', key: legacyKey(config.jwtSecretPrevious) });
+  return keys;
 }
 
 function encrypt(plain) {
   if (!plain) return '';
+  const [{ v, key }] = decryptKeys();
   const iv = crypto.randomBytes(12);
-  const c = crypto.createCipheriv('aes-256-gcm', encKey(), iv);
+  const c = crypto.createCipheriv('aes-256-gcm', key, iv);
   const data = Buffer.concat([c.update(String(plain), 'utf8'), c.final()]);
-  return ['v1', iv.toString('base64'), c.getAuthTag().toString('base64'), data.toString('base64')].join(':');
+  return [v, iv.toString('base64'), c.getAuthTag().toString('base64'), data.toString('base64')].join(':');
 }
 
-function decrypt(blob) {
-  if (!blob) return '';
-  try {
-    const [v, iv, tag, data] = String(blob).split(':');
-    if (v !== 'v1') return '';
-    const d = crypto.createDecipheriv('aes-256-gcm', encKey(), Buffer.from(iv, 'base64'));
-    d.setAuthTag(Buffer.from(tag, 'base64'));
-    return Buffer.concat([d.update(Buffer.from(data, 'base64')), d.final()]).toString('utf8');
-  } catch {
-    // JWT_SECRET changed since the secret was saved: treat as not set.
-    return '';
+/**
+ * Decrypts with SETTINGS_ENCRYPTION_KEY first, then the legacy JWT-derived key(s).
+ * @returns {{plain: string, stale: boolean}} stale: readable, but not with the newest key (re-encrypt it).
+ */
+function decryptDetailed(blob) {
+  if (!blob) return { plain: '', stale: false };
+  const [v, iv, tag, data] = String(blob).split(':');
+  if (!['v1', 'v2'].includes(v) || !iv || !tag || !data) return { plain: '', stale: false };
+  const keys = decryptKeys();
+  for (let i = 0; i < keys.length; i++) {
+    try {
+      const d = crypto.createDecipheriv('aes-256-gcm', keys[i].key, Buffer.from(iv, 'base64'));
+      d.setAuthTag(Buffer.from(tag, 'base64'));
+      const plain = Buffer.concat([d.update(Buffer.from(data, 'base64')), d.final()]).toString('utf8');
+      return { plain, stale: i > 0 || v !== keys[0].v };
+    } catch { /* next key */ }
   }
+  // Saved with a key this server no longer has: treat as not set.
+  return { plain: '', stale: false };
 }
+
+function decrypt(blob) { return decryptDetailed(blob).plain; }
 
 function envPairs() {
   const e = process.env;
@@ -98,13 +119,23 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
   async function settings({ fresh = false } = {}) {
     if (!fresh && cache && Date.now() - cacheAt < CACHE_MS) return cache;
     const env = envPairs();
-    const s = (await stored()) || {};
+    const raw = await stored();
+    const s = raw || {};
+    let migrate = null; // values readable only with a legacy key: re-encrypted with the current key below
+    const open = (m, field) => {
+      const r = decryptDetailed((s[m] || {})[field]);
+      if (r.stale && r.plain) {
+        migrate = migrate || { ...s, test: { ...(s.test || {}) }, live: { ...(s.live || {}) } };
+        migrate[m][field] = encrypt(r.plain);
+      }
+      return r.plain;
+    };
     const pick = (m) => {
       const saved = s[m] || {};
       return {
         keyId: saved.keyId || env[m].keyId,
-        keySecret: decrypt(saved.keySecretEnc) || env[m].keySecret,
-        webhookSecret: decrypt(saved.webhookSecretEnc) || env[m].webhookSecret,
+        keySecret: open(m, 'keySecretEnc') || env[m].keySecret,
+        webhookSecret: open(m, 'webhookSecretEnc') || env[m].webhookSecret,
         source: saved.keyId ? 'admin' : (env[m].keyId ? 'env' : 'none'),
       };
     };
@@ -117,6 +148,13 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
       updatedBy: s.updatedBy || null,
     };
     cacheAt = Date.now();
+    if (migrate && repo && typeof repo.setPaymentGatewaySettings === 'function') {
+      // Only when nothing changed in between (an admin save wins over the migration).
+      try {
+        const now = await stored();
+        if (JSON.stringify(now) === JSON.stringify(raw)) await repo.setPaymentGatewaySettings(migrate);
+      } catch { /* next read tries again */ }
+    }
     return cache;
   }
 
@@ -300,4 +338,4 @@ function createRazorpayGateway({ repo, fetchImpl } = {}) {
   };
 }
 
-module.exports = { createRazorpayGateway, setRazorpayFetch, RazorpayError };
+module.exports = { createRazorpayGateway, setRazorpayFetch, RazorpayError, _settingsCrypto: { encrypt, decrypt, decryptDetailed, legacyKey } };

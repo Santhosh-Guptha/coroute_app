@@ -175,7 +175,7 @@ void main() {
 
       expect(find.text('Offline Map Packs'), findsOneWidget);
       expect(find.text('Local Map Cache Storage'), findsOneWidget);
-      expect(find.textContaining('of 200 MB used'), findsOneWidget);
+      expect(find.textContaining('of 400 MB used'), findsOneWidget);
       expect(find.text('No offline maps yet'), findsOneWidget);
     });
 
@@ -200,7 +200,7 @@ void main() {
 
       expect(find.text('Nandi Hills Sunrise Run'), findsOneWidget);
       expect(find.text('HIGH DETAIL'), findsOneWidget);
-      expect(find.textContaining('480 tiles (~12.0 MB)'), findsOneWidget);
+      expect(find.textContaining('about 12.0 MB'), findsOneWidget);
       expect(find.widgetWithText(OutlinedButton, 'Verify Offline'), findsOneWidget);
       expect(find.byIcon(Icons.delete_outline_rounded), findsOneWidget);
 

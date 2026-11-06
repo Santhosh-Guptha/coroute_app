@@ -64,6 +64,33 @@ class MemorySoda extends SodaClient {
     this._coll(collection).set(key, structuredClone(doc));
     return key;
   }
+  /** All or nothing, like one SODA bulk insert in a single transaction. */
+  async insertMany(collection, docs) {
+    if (!Array.isArray(docs) || docs.length === 0) return [];
+    const fieldsList = [...(this.indexes.get(collection)?.values() || [])];
+    const existing = [...this._coll(collection).values()];
+    for (let i = 0; i < docs.length; i++) {
+      const doc = docs[i];
+      for (const fields of fieldsList) {
+        if (fields.some(f => doc[f] === undefined || doc[f] === null)) continue;
+        const clash = (other) => fields.every(f => other[f] === doc[f]);
+        if (existing.some(clash) || docs.slice(0, i).some(clash)) throw Object.assign(new Error('unique constraint'), { status: 409 });
+      }
+    }
+    const keys = [];
+    for (const doc of docs) {
+      const key = `K${++this.seq}`;
+      this._coll(collection).set(key, structuredClone(doc));
+      keys.push(key);
+    }
+    return keys;
+  }
+  async *scan(collection, { pageSize = 500 } = {}) {
+    const all = [...this._coll(collection).entries()];
+    for (let i = 0; i < all.length; i += pageSize) {
+      yield all.slice(i, i + pageSize).map(([key, value]) => ({ key, value: structuredClone(value) }));
+    }
+  }
   async replace(collection, key, doc) {
     if (!this._coll(collection).has(key)) throw Object.assign(new Error('not found'), { status: 404 });
     this._coll(collection).set(key, structuredClone(doc));

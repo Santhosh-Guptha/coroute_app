@@ -105,6 +105,10 @@ class CoRouteApp extends StatelessWidget {
           final rt = RealtimeService();
           // A refreshed session token is used for the next reconnect.
           api.addListener(() => rt.updateToken(api.token));
+          // The gateway answered over HTTP, or the app is back in front: a socket waiting out
+          // its backoff reconnects now (no-op when connected or already connecting).
+          api.onServerReached = rt.retryNow;
+          AppLifecycleListener(onResume: rt.retryNow);
           return rt;
         }),
         ChangeNotifierProvider(create: (ctx) {

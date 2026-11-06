@@ -111,6 +111,41 @@ class SodaClient {
     return item.id;
   }
 
+  /**
+   * Bulk insert (SODA REST `?action=insert` with a JSON array): one round trip for many documents.
+   * Returns the keys in input order. Never retried here: an ambiguous bulk write is resolved by the
+   * caller (e.g. TrackStore re-checks which documents exist before inserting one by one).
+   */
+  async insertMany(collection, docs) {
+    if (!Array.isArray(docs) || docs.length === 0) return [];
+    const r = await this._request('POST', `/${encodeURIComponent(collection)}?action=insert`, docs, { retries: 0 });
+    const items = r?.items || [];
+    if (items.length !== docs.length || items.some((it) => !it?.id)) throw new SodaError('SODA bulk insert returned an unexpected key list', 500, r);
+    return items.map((it) => it.id);
+  }
+
+  /**
+   * Every document of a collection, page by page (GET listing, ordered by key on ORDS), as
+   * an async iterator of [{key, value}] pages. Used by backups; never stops before `hasMore` is false.
+   */
+  async *scan(collection, { pageSize = 500 } = {}) {
+    const limit = Math.min(Math.max(pageSize, 1), 1000);
+    const seen = new Set();
+    for (let offset = 0; ; ) {
+      const r = await this._request('GET', `/${encodeURIComponent(collection)}?limit=${limit}&offset=${offset}&fields=all`);
+      const items = r?.items || [];
+      const page = [];
+      for (const it of items) {
+        if (!it?.id || seen.has(it.id)) continue;
+        seen.add(it.id);
+        page.push({ key: it.id, value: it.value });
+      }
+      if (page.length) yield page;
+      offset += items.length;
+      if (!items.length || r?.hasMore === false || (r?.hasMore === undefined && items.length < limit)) return;
+    }
+  }
+
   /** Replaces the document stored under key. */
   async replace(collection, key, doc) {
     await this._request('PUT', `/${encodeURIComponent(collection)}/${encodeURIComponent(key)}`, doc, { retries: 0 });

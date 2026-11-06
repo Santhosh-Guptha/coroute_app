@@ -77,9 +77,9 @@ class RideNotificationChannel {
   /// Throws MissingPluginException off Android.
   Future<bool> show(Map<String, Object?> args) async => (await _ch.invokeMethod<bool>('show', args)) == true;
 
-  /// Android 7 or newer (custom notification layouts with the system frame).
+  /// Supported on Android 7+ and iOS (custom notification actions & ongoing updates).
   Future<bool> supported() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
+    if (kIsWeb || (defaultTargetPlatform != TargetPlatform.android && defaultTargetPlatform != TargetPlatform.iOS)) return false;
     try {
       return (await _ch.invokeMethod<bool>('supported')) == true;
     } catch (_) {

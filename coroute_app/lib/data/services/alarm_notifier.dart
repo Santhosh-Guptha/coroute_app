@@ -1,4 +1,3 @@
-import 'dart:io' show Platform;
 import 'dart:isolate';
 import 'dart:ui' show IsolateNameServer;
 import 'package:flutter/foundation.dart';
@@ -47,17 +46,24 @@ class AlarmNotifier {
   static ReceivePort? _port;
   static final Map<String, void Function(String? actionId, String? payload)> _handlers = {};
 
-  static bool get _supported => !kIsWeb && Platform.isAndroid;
+  static bool get _supported =>
+      !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
 
   // Repeating pattern: the phone keeps buzzing while the alarm is up.
   static final Int64List _alarmVibration = Int64List.fromList(const [0, 900, 500, 900, 500, 900]);
   static final Int32List _insistent = Int32List.fromList(const [4]); // FLAG_INSISTENT: sound repeats until cancelled
 
+  @visibleForTesting
+  static void resetForTesting() {
+    _init = null;
+    _plugin = null;
+  }
+
   /// Initialises the plugin once with the tap/button dispatcher and creates the
   /// safety channels. Safe to call many times and from several services.
   static Future<bool> ensureInitialized([FlutterLocalNotificationsPlugin? plugin]) {
     if (!_supported) return Future<bool>.value(false);
-    _plugin ??= plugin ?? FlutterLocalNotificationsPlugin();
+    _plugin = plugin ?? _plugin ?? FlutterLocalNotificationsPlugin();
     return _init ??= _doInit();
   }
 
@@ -67,42 +73,51 @@ class AlarmNotifier {
       tz_data.initializeTimeZones();
       _listenForBackgroundPresses();
       final ok = await plugin.initialize(
-        const InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher')),
+        const InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          iOS: DarwinInitializationSettings(
+            requestAlertPermission: false,
+            requestBadgePermission: false,
+            requestSoundPermission: false,
+          ),
+        ),
         onDidReceiveNotificationResponse: _onResponse,
         onDidReceiveBackgroundNotificationResponse: alarmNotificationBackground,
       );
-      final android = plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-      await android?.createNotificationChannel(AndroidNotificationChannel(
-        SafetyConstants.channelCrash,
-        'Crash alarm',
-        description: 'Rings when the phone senses a possible crash during a ride.',
-        importance: Importance.max,
-        enableVibration: true,
-        vibrationPattern: _alarmVibration,
-        audioAttributesUsage: AudioAttributesUsage.alarm,
-      ));
-      await android?.createNotificationChannel(const AndroidNotificationChannel(
-        SafetyConstants.channelSafety,
-        'Ride safety',
-        description: 'Are you OK? checks and break reminders, for you only.',
-        importance: Importance.high,
-      ));
-      await android?.createNotificationChannel(AndroidNotificationChannel(
-        SafetyConstants.channelAdminAlarm,
-        'Emergency alarm (admin)',
-        description: 'Rings on the admin console while an SOS or crash is open.',
-        importance: Importance.max,
-        enableVibration: true,
-        vibrationPattern: _alarmVibration,
-        audioAttributesUsage: AudioAttributesUsage.alarm,
-      ));
-      await android?.createNotificationChannel(const AndroidNotificationChannel(
-        channelPlan,
-        'Plan reminders',
-        description: 'Tells you a few days before your CoRoute plan ends.',
-        importance: Importance.defaultImportance,
-      ));
-      return ok ?? false;
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        final android = plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+        await android?.createNotificationChannel(AndroidNotificationChannel(
+          SafetyConstants.channelCrash,
+          'Crash alarm',
+          description: 'Rings when the phone senses a possible crash during a ride.',
+          importance: Importance.max,
+          enableVibration: true,
+          vibrationPattern: _alarmVibration,
+          audioAttributesUsage: AudioAttributesUsage.alarm,
+        ));
+        await android?.createNotificationChannel(const AndroidNotificationChannel(
+          SafetyConstants.channelSafety,
+          'Ride safety',
+          description: 'Are you OK? checks and break reminders, for you only.',
+          importance: Importance.high,
+        ));
+        await android?.createNotificationChannel(AndroidNotificationChannel(
+          SafetyConstants.channelAdminAlarm,
+          'Emergency alarm (admin)',
+          description: 'Rings on the admin console while an SOS or crash is open.',
+          importance: Importance.max,
+          enableVibration: true,
+          vibrationPattern: _alarmVibration,
+          audioAttributesUsage: AudioAttributesUsage.alarm,
+        ));
+        await android?.createNotificationChannel(const AndroidNotificationChannel(
+          channelPlan,
+          'Plan reminders',
+          description: 'Tells you a few days before your CoRoute plan ends.',
+          importance: Importance.defaultImportance,
+        ));
+      }
+      return ok ?? true;
     } catch (e) {
       debugPrint('alarm notifier init note: $e');
       _init = null; // try again next time
@@ -174,7 +189,21 @@ class AlarmNotifier {
       ],
     );
     try {
-      await _plugin?.show(SafetyConstants.crashAlarmId, title, body, NotificationDetails(android: details), payload: payloadCrash);
+      await _plugin?.show(
+        SafetyConstants.crashAlarmId,
+        title,
+        body,
+        NotificationDetails(
+          android: details,
+          iOS: const DarwinNotificationDetails(
+            presentAlert: true,
+            presentSound: true,
+            presentBanner: true,
+            interruptionLevel: InterruptionLevel.critical,
+          ),
+        ),
+        payload: payloadCrash,
+      );
     } catch (e) {
       debugPrint('crash alarm note: $e');
     }
@@ -209,7 +238,21 @@ class AlarmNotifier {
       ],
     );
     try {
-      await _plugin?.show(_promptId(p.key), p.title, p.message, NotificationDetails(android: details), payload: '$payloadPrompt:${p.key}');
+      await _plugin?.show(
+        _promptId(p.key),
+        p.title,
+        p.message,
+        NotificationDetails(
+          android: details,
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentSound: true,
+            presentBanner: true,
+            interruptionLevel: isCritical ? InterruptionLevel.critical : InterruptionLevel.timeSensitive,
+          ),
+        ),
+        payload: '$payloadPrompt:${p.key}',
+      );
     } catch (e) {
       debugPrint('prompt note: $e');
     }
@@ -281,7 +324,14 @@ class AlarmNotifier {
         title,
         body,
         tz.TZDateTime.from(at.toUtc(), tz.UTC),
-        NotificationDetails(android: details),
+        NotificationDetails(
+          android: details,
+          iOS: const DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+        ),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         payload: payload,
       );
@@ -301,11 +351,14 @@ class AlarmNotifier {
     }
   }
 
-  /// Asks for the Android 13+ notification permission. True when granted (or
-  /// not needed on this Android version).
+  /// Asks for the notification permission (Android 13+ / iOS). True when granted.
   static Future<bool> requestNotificationPermission() async {
     if (!await ensureInitialized()) return false;
     try {
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        final ios = _plugin?.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+        return await ios?.requestPermissions(alert: true, badge: true, sound: true) ?? false;
+      }
       final android = _plugin?.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
       return await android?.requestNotificationsPermission() ?? false;
     } catch (_) {

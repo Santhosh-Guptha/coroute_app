@@ -15,9 +15,24 @@
  * Chunks are idempotent on (groupId, userId, seq), so a phone can safely
  * resend after a lost ACK. When loading, points are merged by timestamp,
  * which also absorbs overlapping chunks after an app restart.
+ *
+ * Writes are micro-batched: chunks saved within TRACK_BATCH_FLUSH_MS (or until
+ * TRACK_BATCH_MAX are queued) go to the database in ONE bulk insert. Every
+ * caller still waits for the write of its own chunk: an ACK (HTTP 200 /
+ * TRACK_ACK) is only sent once the chunk is durably stored, and a failed batch
+ * rejects every caller, so the phone keeps the chunk and sends it again.
+ *
+ * Old tracks: after TRACK_DETAIL_DAYS the retention job merges a rider's chunks
+ * into one simplified document (Douglas-Peucker, `simplified: true`, negative
+ * seq) of the same shape, so loading, GPX export, replay and trip reports read
+ * both kinds alike.
  */
 const config = require('./config');
-const { haversine, decodePolyline, simplify } = require('./geo_math');
+const { haversine, decodePolyline, encodePolyline, simplify } = require('./geo_math');
+
+const envInt = (name, def) => { const n = parseInt(process.env[name], 10); return Number.isFinite(n) ? n : def; };
+/** A config value, or the environment variable when config.js does not define it (yet). */
+const setting = (key, envName, def) => (Number.isFinite(config[key]) ? config[key] : envInt(envName, def));
 
 class TrackError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; this.name = 'TrackError'; }
@@ -64,17 +79,116 @@ function validateChunk(msg, { nowMs = Date.now(), tripStartMs = 0, maxPoints = c
 }
 
 class TrackStore {
-  constructor(repo) { this.repo = repo; }
+  /**
+   * @param {object} repo
+   * @param {{flushMs?:number, maxBatch?:number, logger?:object}} [opts]
+   */
+  constructor(repo, opts = {}) {
+    this.repo = repo;
+    this.flushMs = Math.max(0, opts.flushMs ?? setting('trackBatchFlushMs', 'TRACK_BATCH_FLUSH_MS', 250));
+    this.maxBatch = Math.max(1, opts.maxBatch ?? setting('trackBatchMax', 'TRACK_BATCH_MAX', 50));
+    this.log = opts.logger || console;
+    this.queue = []; // [{ k, doc, resolve, reject }]
+    this.timer = null;
+    this.inflight = new Map(); // "gid|uid|seq" -> promise of the queued / writing chunk
+    this.flushing = new Set();
+    this.stats = { batches: 0, chunks: 0, fallbacks: 0, failures: 0 };
+  }
 
-  /** Stores a validated chunk. Returns { seq, duplicate }. */
-  async save(groupId, userId, chunk) {
-    const existing = await this.repo.findTrackChunk(groupId, userId, chunk.seq);
-    if (existing) return { seq: chunk.seq, duplicate: true };
-    await this.repo.insertTrackChunk({
+  /**
+   * Stores a validated chunk. Resolves to { seq, duplicate } only after the chunk is in the
+   * database; rejects when it could not be written (the caller must not ACK it then).
+   */
+  save(groupId, userId, chunk) {
+    const k = `${groupId}\u0000${userId}\u0000${chunk.seq}`;
+    const same = this.inflight.get(k);
+    // The same chunk sent again while its first copy is still being written (retry after a lost ACK).
+    if (same) return same.then(() => ({ seq: chunk.seq, duplicate: true }));
+    const doc = {
       groupId, userId, seq: chunk.seq, startTs: chunk.startTs, endTs: chunk.endTs, count: chunk.points.length,
       ...chunk.raw, createdAt: Date.now(),
-    });
-    return { seq: chunk.seq, duplicate: false };
+    };
+    const p = new Promise((resolve, reject) => this.queue.push({ k, doc, resolve, reject }));
+    this.inflight.set(k, p);
+    const done = () => { if (this.inflight.get(k) === p) this.inflight.delete(k); };
+    p.then(done, done);
+    if (this.queue.length >= this.maxBatch) this._flushNow();
+    else if (!this.timer) {
+      this.timer = setTimeout(() => this._flushNow(), this.flushMs);
+      if (this.timer.unref) this.timer.unref();
+    }
+    return p;
+  }
+
+  /** Writes everything queued now; resolves when every batch in progress has finished. */
+  async flush() {
+    this._flushNow();
+    await Promise.all([...this.flushing]);
+  }
+
+  _flushNow() {
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    while (this.queue.length) {
+      const batch = this.queue.splice(0, this.maxBatch);
+      const run = this._writeBatch(batch);
+      this.flushing.add(run);
+      run.finally(() => this.flushing.delete(run));
+    }
+  }
+
+  async _writeBatch(batch) {
+    const results = new Map(); // item -> { duplicate } | Error
+    try {
+      // 1. Which of these are stored already (resent after a lost ACK)? One query per rider.
+      const byRider = new Map();
+      for (const it of batch) {
+        const rk = `${it.doc.groupId}\u0000${it.doc.userId}`;
+        if (!byRider.has(rk)) byRider.set(rk, []);
+        byRider.get(rk).push(it);
+      }
+      const fresh = [];
+      for (const items of byRider.values()) {
+        const { groupId, userId } = items[0].doc;
+        const have = await this.repo.existingTrackSeqs(groupId, userId, items.map((it) => it.doc.seq));
+        for (const it of items) {
+          if (have.has(it.doc.seq)) results.set(it, { duplicate: true });
+          else fresh.push(it);
+        }
+      }
+      // 2. One bulk insert for the rest.
+      if (fresh.length) {
+        try {
+          await this.repo.insertTrackChunks(fresh.map((it) => it.doc));
+          for (const it of fresh) results.set(it, { duplicate: false });
+        } catch (bulkErr) {
+          // A concurrent writer stored one of them, or the bulk write failed part way: one by one,
+          // and a chunk that is in the database after a failed insert counts as stored.
+          this.stats.fallbacks++;
+          for (const it of fresh) {
+            try {
+              await this.repo.insertTrackChunk(it.doc);
+              results.set(it, { duplicate: false });
+            } catch (e) {
+              const stored = await this.repo.findTrackChunk(it.doc.groupId, it.doc.userId, it.doc.seq).catch(() => null);
+              results.set(it, stored ? { duplicate: true } : e);
+            }
+          }
+        }
+      }
+      this.stats.batches++;
+    } catch (e) {
+      for (const it of batch) if (!results.has(it)) results.set(it, e);
+    }
+    for (const it of batch) {
+      const r = results.get(it);
+      if (r instanceof Error || !r) {
+        this.stats.failures++;
+        it.reject(r || new Error('Track chunk was not stored.'));
+      } else {
+        this.stats.chunks++;
+        it.resolve({ seq: it.doc.seq, duplicate: r.duplicate });
+      }
+    }
   }
 
   /** Loads, decodes and merges points for one rider (or all riders) of a convoy. */
@@ -99,6 +213,54 @@ class TrackStore {
     }
     return byUser;
   }
+}
+
+/**
+ * Simplified copy of a merged, time-sorted point list for long-term storage: Douglas-Peucker with
+ * `toleranceM`, always keeping the first and last point, and at least one point every `maxGapMs`
+ * (so stops keep their length and are not mistaken for signal gaps by analyseTrack).
+ */
+function simplifyTrack(points, { toleranceM = 5, maxGapMs = 60000 } = {}) {
+  if (points.length <= 2) return points.slice();
+  const dp = simplify(points, toleranceM);
+  const keepTs = new Set(dp.map((p) => p.ts));
+  const out = [];
+  let last = null;
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const next = points[i + 1];
+    const keep = keepTs.has(p.ts) || i === 0 || i === points.length - 1 ||
+      (last && next && next.ts - last.ts > maxGapMs);
+    if (keep) { out.push(p); last = p; }
+  }
+  return out;
+}
+
+/** Encodes time-sorted points as a stored chunk body ({ startTs, endTs, count, enc, t, v, acc }). */
+function encodeChunkBody(points) {
+  const startTs = points[0].ts;
+  return {
+    startTs, endTs: points[points.length - 1].ts, count: points.length,
+    enc: encodePolyline(points),
+    t: points.map((p) => p.ts - startTs),
+    v: points.map((p) => p.v || 0),
+    acc: points.map((p) => p.acc || 0),
+  };
+}
+
+/** Decodes stored chunks into one time-sorted point list without duplicate timestamps. */
+function mergeChunkPoints(chunks) {
+  const list = [];
+  for (const c of chunks) {
+    const pts = decodePolyline(c.enc) || [];
+    for (let i = 0; i < pts.length; i++) {
+      list.push({ ts: c.startTs + (c.t?.[i] ?? 0), lat: pts[i].lat, lng: pts[i].lng, v: c.v?.[i] ?? 0, acc: c.acc?.[i] ?? 0 });
+    }
+  }
+  list.sort((a, b) => a.ts - b.ts);
+  const out = [];
+  for (const p of list) if (!out.length || out[out.length - 1].ts !== p.ts) out.push(p);
+  return out;
 }
 
 /** Drops fixes that are inaccurate, out of order or physically impossible. */
@@ -240,4 +402,4 @@ function uploadPermission(meta, userId, nowMs = Date.now()) {
   return { ok: true, tripStartMs: meta.createdAtEpochMs || 0, ended };
 }
 
-module.exports = { uploadPermission, TrackStore, TrackError, validateChunk, filterPoints, detectStops, analyseTrack, toWire, toGpx };
+module.exports = { uploadPermission, TrackStore, TrackError, validateChunk, filterPoints, detectStops, analyseTrack, toWire, toGpx, simplifyTrack, encodeChunkBody, mergeChunkPoints };

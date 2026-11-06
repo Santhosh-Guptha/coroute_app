@@ -22,6 +22,15 @@ class ApiException implements Exception {
   bool get isUnauthorized => statusCode == 401;
   bool get isOffline => statusCode == 0;
 
+  /// The gateway is full for new rides or new riders right now (HTTP 503, or a socket ERROR
+  /// on JOIN, with this code). Not the rider's fault and never a removal from a ride.
+  static const String serverBusyCode = 'SERVER_BUSY';
+
+  /// What the app says for [serverBusyCode] (with a retry).
+  static const String serverBusyMessage = 'Server busy. Try again in a few minutes.';
+
+  bool get isServerBusy => code == serverBusyCode;
+
   /// Gateway codes that end the session on this phone.
   static const sessionEndingCodes = {'SESSION_INVALID', 'ACCOUNT_GONE', 'ACCOUNT_ON_HOLD', 'ACCOUNT_BLOCKED'};
 
@@ -60,6 +69,10 @@ class ApiClient extends ChangeNotifier {
   /// The gateway's message when it last ended the session (for example "Your account has
   /// been blocked by the administrator."), so the sign-in screen can say why.
   String? lastSessionEndMessage;
+
+  /// Called whenever the gateway itself answered (any status): the network is back, so the
+  /// realtime socket can stop waiting out its backoff (see RealtimeService.retryNow).
+  VoidCallback? onServerReached;
 
   static const _sessionHeader = 'x-coroute-token';
 
@@ -220,6 +233,7 @@ class ApiClient extends ChangeNotifier {
         decoded = null; // HTML or text: a Wi-Fi login page, a proxy or an outage page, not our server
       }
     }
+    if (fromGateway) onServerReached?.call();
     if (res.statusCode >= 200 && res.statusCode < 300) {
       // Sliding session: the server hands out a fresh token now and then.
       final fresh = res.headers[_sessionHeader];

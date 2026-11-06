@@ -169,17 +169,17 @@ void main() {
     expect(rt.sent, isEmpty, reason: 'nothing before the room is joined again');
     rt.emit({'type': 'SNAPSHOT'});
     await settle();
-    expect(rt.sent.map((m) => m['type']).toList(), ['CHAT', 'STOP_VISITED', 'CHAT']);
+    expect(rt.sent.where((m) => m['clientId'] != null).map((m) => m['type']).toList(), ['CHAT', 'STOP_VISITED', 'CHAT']);
     expect(rt.sent.first['text'], 'a');
 
     // Link drops before the ACK: back to waiting, sent again with the same ids.
-    final ids = rt.sent.map((m) => m['clientId']).toList();
+    final ids = rt.sent.where((m) => m['clientId'] != null).map((m) => m['clientId']).toList();
     rt.setConnected(false);
     expect(c.outbox.every((i) => i.state == OutboxState.waiting), isTrue);
     rt.setConnected(true);
     rt.emit({'type': 'SNAPSHOT'});
     await settle(1200); // the drip allows 4 per second
-    expect(rt.sent.skip(3).map((m) => m['clientId']).toList(), ids);
+    expect(rt.sent.where((m) => m['clientId'] != null).skip(3).map((m) => m['clientId']).toList(), ids);
     c.dispose();
   });
 

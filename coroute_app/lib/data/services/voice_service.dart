@@ -46,7 +46,7 @@ class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
 
   @override
   Future<bool> init() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
+    if (kIsWeb || (defaultTargetPlatform != TargetPlatform.android && defaultTargetPlatform != TargetPlatform.iOS)) return false;
     try {
       final r = await _ch.invokeMethod<Object?>('init', {'language': L10n.ttsTag});
       if (r is! Map) return false;

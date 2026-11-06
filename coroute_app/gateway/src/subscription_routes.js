@@ -612,14 +612,33 @@ async function recordRefund({ repo, auth, hub, order, refundId, amountInPaise, s
   return { ...(updated || { ...fresh, ...patch }), planRevoked };
 }
 
+/**
+ * HMAC keys for web-checkout links, newest first. Signing uses a key derived from SETTINGS_ENCRYPTION_KEY
+ * (independent of JWT_SECRET); links signed before it was configured (JWT_SECRET, or JWT_SECRET_PREVIOUS
+ * during a rotation) stay valid until they expire.
+ */
+function webCheckoutKeys() {
+  const keys = [];
+  if (config.settingsEncryptionKey) keys.push(crypto.createHmac('sha256', config.settingsEncryptionKey).update('coroute:web-checkout:v2').digest());
+  keys.push(config.jwtSecret);
+  if (config.jwtSecretPrevious) keys.push(config.jwtSecretPrevious);
+  return keys;
+}
+function webCheckoutSig(key, orderId, expiresAt) {
+  return crypto.createHmac('sha256', key).update(`web-checkout:${orderId}:${expiresAt}`).digest('hex').slice(0, 32);
+}
 /** Short HMAC that lets the web checkout page load one app order without a login, until expiresAt. */
 function webCheckoutToken(orderId, expiresAt) {
-  return crypto.createHmac('sha256', config.jwtSecret).update(`web-checkout:${orderId}:${expiresAt}`).digest('hex').slice(0, 32);
+  return webCheckoutSig(webCheckoutKeys()[0], orderId, expiresAt);
 }
 function webCheckoutTokenValid(orderId, expiresAt, t) {
-  const a = Buffer.from(webCheckoutToken(orderId, expiresAt));
   const b = Buffer.from(String(t || ''));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  let ok = false;
+  for (const key of webCheckoutKeys()) {
+    const a = Buffer.from(webCheckoutSig(key, orderId, expiresAt));
+    if (a.length === b.length && crypto.timingSafeEqual(a, b)) ok = true;
+  }
+  return ok;
 }
 function webCheckoutUrl(req, orderId, expiresAt) {
   const origin = config.publicOrigin || `${req.protocol}://${req.get('host')}`;
@@ -1746,6 +1765,7 @@ module.exports = {
   addAudit,
   recordRefund,
   webCheckoutToken,
+  webCheckoutTokenValid,
   orderView,
   offerView,
   offerIsLive,

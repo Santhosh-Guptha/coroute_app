@@ -1,4 +1,3 @@
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -57,20 +56,21 @@ class DeviceSafetyInfo {
   }
 }
 
-/// Small Android helpers on the `coroute/safety` MethodChannel (SafetyChannel.kt).
-/// Every call is safe off Android and never throws.
+/// Small device helpers on the `coroute/safety` MethodChannel (SafetyChannel.kt / AppDelegate.swift).
+/// Every call is safe on mobile and never throws.
 class SafetyNative {
   SafetyNative._();
 
   static const MethodChannel _channel = MethodChannel('coroute/safety');
   static DeviceSafetyInfo? _info;
 
-  static bool get _android => !kIsWeb && Platform.isAndroid;
+  static bool get _supported =>
+      !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
 
   static Future<DeviceSafetyInfo> deviceInfo() async {
     final cached = _info;
     if (cached != null) return cached;
-    if (!_android) return DeviceSafetyInfo.unknown;
+    if (!_supported) return DeviceSafetyInfo.unknown;
     try {
       final info = DeviceSafetyInfo.fromMap(await _channel.invokeMapMethod<String, dynamic>('deviceInfo'));
       _info = info;
@@ -80,9 +80,9 @@ class SafetyNative {
     }
   }
 
-  /// Android 14+ can deny full-screen alarms; below that it is always allowed.
+  /// Android 14+ can deny full-screen alarms; below that (and on iOS) it is always allowed.
   static Future<bool> canUseFullScreenIntent() async {
-    if (!_android) return false;
+    if (!_supported) return false;
     try {
       return await _channel.invokeMethod<bool>('canUseFullScreenIntent') ?? true;
     } catch (_) {
@@ -90,7 +90,7 @@ class SafetyNative {
     }
   }
 
-  /// Opens the system page "Allow full-screen notifications" for CoRoute (Android 14+).
+  /// Opens the system page "Allow full-screen notifications" for CoRoute (Android 14+) or app settings.
   static Future<bool> openFullScreenIntentSettings() => _bool('openFullScreenIntentSettings');
 
   /// Opens the brand's autostart / battery page, or the app's settings page.
@@ -98,15 +98,15 @@ class SafetyNative {
 
   /// Shows CoRoute over the lock screen and turns the screen on, only while a crash alarm is open.
   static Future<void> alarmWindow(bool on) async {
-    if (!_android) return;
+    if (!_supported) return;
     try {
       await _channel.invokeMethod<void>('alarmWindow', <String, bool>{'on': on});
     } catch (_) {}
   }
 
-  /// The app's own cache folder (`context.cacheDir`), for the map tile cache. Null off Android.
+  /// The app's own cache folder (`context.cacheDir` / `Caches`), for the map tile cache. Null off mobile.
   static Future<String?> cacheDir() async {
-    if (!_android) return null;
+    if (!_supported) return null;
     try {
       final d = await _channel.invokeMethod<String>('cacheDir');
       return d == null || d.isEmpty ? null : d;
@@ -115,9 +115,9 @@ class SafetyNative {
     }
   }
 
-  /// 'wifi', 'mobile' or 'none' (ConnectivityManager; no new permission). 'none' off Android.
+  /// 'wifi', 'mobile' or 'none' (Network monitor; no new permission). 'none' off mobile.
   static Future<String> networkKind() async {
-    if (!_android) return 'none';
+    if (!_supported) return 'none';
     try {
       return await _channel.invokeMethod<String>('networkKind') ?? 'none';
     } catch (_) {
@@ -128,9 +128,9 @@ class SafetyNative {
   /// Pre-ride phone check (SafetyChannel.phoneProbe): ~1.5 s of motion-sensor event counts
   /// (`accelHz`, `gyroHz`, `magHz`, `...Present`, `...Events`) and the phone state for a ride
   /// (`bgRestricted`, `powerSave`, `dndFilter`, volumes, `btOut`, `btMic`, `wiredOut`,
-  /// `freeBytes`, `hasTelephony`, `canCompose`, `canDial`). Empty map off Android or on error.
+  /// `freeBytes`, `hasTelephony`, `canCompose`, `canDial`). Empty map off mobile or on error.
   static Future<Map<String, dynamic>> phoneProbe() async {
-    if (!_android) return const <String, dynamic>{};
+    if (!_supported) return const <String, dynamic>{};
     try {
       final m = await _channel
           .invokeMapMethod<String, dynamic>('phoneProbe')
@@ -145,7 +145,7 @@ class SafetyNative {
   static Future<bool> openSoundSettings() => _bool('openSoundSettings');
 
   static Future<bool> _bool(String method) async {
-    if (!_android) return false;
+    if (!_supported) return false;
     try {
       return await _channel.invokeMethod<bool>(method) ?? false;
     } catch (_) {

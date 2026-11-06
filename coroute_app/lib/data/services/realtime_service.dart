@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show HttpException, SocketException, TlsException, WebSocketException;
-import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/net_constants.dart';
 import '../../core/constants/network_constants.dart';
 import '../models/safety_wire.dart';
+import '../../domain/sync/reconnect_policy.dart';
 
 /// Binary voice packet kinds (must match gateway/src/ws.js).
 class VoiceKind {
@@ -52,18 +52,29 @@ enum LinkProblem { none, noNetwork, serverUnreachable }
 
 /// The one and only WebSocket to the gateway.
 ///
-/// Design goals: a single socket per app (battery), automatic reconnect with
-/// backoff, automatic re-JOIN of the active convoy after a reconnect, and a
+/// Design goals: a single socket per app (battery), automatic reconnect (a quick
+/// first retry, then capped backoff with jitter: [ReconnectPolicy]), a move asked by
+/// the server (RECONNECT) without any error, automatic re-JOIN of the active convoy
+/// after a reconnect, and a
 /// hard guarantee that no event or audio frame from a previous group is ever
 /// delivered after [leaveRoom]: the gateway enforces membership, and this
 /// class additionally drops anything that is not for the current room.
 class RealtimeService extends ChangeNotifier {
+  RealtimeService({ReconnectPolicy? policy}) : _policy = policy ?? ReconnectPolicy();
+
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
   Timer? _reconnectTimer;
   Timer? _staleTimer;
-  int _attempt = 0;
   bool _wantConnection = false;
+
+  /// When to try again after a drop: quick first retry, then backoff with full jitter up to ~10 s.
+  final ReconnectPolicy _policy;
+
+  /// True while waiting out a move the server asked for (RECONNECT): not a failure, no error.
+  bool _serverMovePending = false;
+  DateTime _lastNudgeAt = DateTime.fromMillisecondsSinceEpoch(0);
+  Duration? _lastReconnectDelay;
   bool _adminMode = false;
   String? _token;
   String? _groupId;
@@ -149,6 +160,26 @@ class RealtimeService extends ChangeNotifier {
   @visibleForTesting
   void debugConnectFailed(Object error) => _noteConnectFailure(classify(error));
 
+  /// Test hook: replaces opening a real socket (counts the attempts in unit tests).
+  @visibleForTesting
+  VoidCallback? debugOnOpen;
+
+  /// Test hook: the socket closed unexpectedly (as the socket's onDone or onError would).
+  @visibleForTesting
+  void debugConnectionLost() => _scheduleReconnect();
+
+  /// The wait chosen for the last scheduled reconnect (null before any).
+  @visibleForTesting
+  Duration? get debugLastReconnectDelay => _lastReconnectDelay;
+
+  /// Unexpected closes or failed connects since the server last took this phone back.
+  @visibleForTesting
+  int get debugFailures => _policy.failures;
+
+  /// True while a reconnect is waiting (backoff or a server move).
+  @visibleForTesting
+  bool get debugReconnectScheduled => _reconnectTimer?.isActive == true;
+
   // ------------------------------------------------------------ lifecycle
   /// Called when the gateway refused the socket's account (close code 4401: signed out or
   /// deleted, 4403: on hold or blocked). The app then asks the server whether the session
@@ -178,7 +209,7 @@ class RealtimeService extends ChangeNotifier {
     _token = token;
     if (_refused) {
       _refused = false;
-      _attempt = 0;
+      _policy.reset();
       _scheduleReconnect();
     }
   }
@@ -188,12 +219,14 @@ class RealtimeService extends ChangeNotifier {
     _adminMode = adminMode;
     _wantConnection = true;
     _refused = false;
-    _attempt = 0;
+    _serverMovePending = false;
+    _policy.reset();
     _open();
   }
 
   void disconnect() {
     _wantConnection = false;
+    _serverMovePending = false;
     _groupId = null;
     _joinExtras = null;
     _unreachableFailures = 0;
@@ -331,6 +364,11 @@ class RealtimeService extends ChangeNotifier {
     if (!_wantConnection || _token == null || _refused) return;
     _closeChannel();
     _setState(RealtimeState.connecting);
+    final hook = debugOnOpen;
+    if (hook != null) {
+      hook();
+      return;
+    }
     try {
       final uri = Uri.parse('${AppConfig.wsUrl}?token=${Uri.encodeQueryComponent(_token!)}');
       final ch = WebSocketChannel.connect(uri);
@@ -388,7 +426,8 @@ class RealtimeService extends ChangeNotifier {
       }
       final type = msg['type']?.toString();
       if (type == 'HELLO') {
-        _attempt = 0;
+        // Not in a ride: the server has this phone back. In a ride that is the SNAPSHOT (below).
+        if (_groupId == null) _policy.reset();
         _helloOnChannel = true;
         final f = msg['features'];
         _features = f is List ? <String>{for (final x in f) x.toString()} : const <String>{};
@@ -403,6 +442,11 @@ class RealtimeService extends ChangeNotifier {
         return;
       }
       if (type == 'PONG') return;
+      if (type == 'RECONNECT') {
+        final d = msg['delayMs'];
+        _onServerMove(d is num ? d.toInt() : int.tryParse('${d ?? ''}'));
+        return;
+      }
       // Room-scoped events carry no groupId by design (the socket is bound to a
       // room server-side). Drop them if we have since left the room.
       const roomScoped = {
@@ -416,6 +460,8 @@ class RealtimeService extends ChangeNotifier {
       };
       if (roomScoped.contains(type) && _groupId == null) return;
       if (type == 'SNAPSHOT' && msg['convoy'] is Map && msg['convoy']['groupId'] != _groupId) return;
+      // Back in the ride (JOIN answered): the next drop starts with the quick retry again.
+      if (type == 'SNAPSHOT') _policy.reset();
       _events.add(msg);
       return;
     }
@@ -479,16 +525,52 @@ class RealtimeService extends ChangeNotifier {
     }
   }
 
+  /// An unexpected close or a failed connect: one reconnect is scheduled (never two sockets).
+  /// The first retry is quick (300-1000 ms: a failed gateway's riders reach the backup at
+  /// once), then backoff with full jitter capped at 10 s (see [ReconnectPolicy]).
   void _scheduleReconnect() {
     if (!_wantConnection || _refused) return;
     if (_reconnectTimer?.isActive == true) return;
     _closeChannel();
     _setState(RealtimeState.disconnected);
-    // 1s, 2s, 4s ... capped at 30s, with jitter, gentle on battery and server.
-    final base = math.min(30000, 1000 * math.pow(2, math.min(_attempt, 5)).toInt());
-    final jitter = math.Random().nextInt(500);
-    _attempt++;
-    _reconnectTimer = Timer(Duration(milliseconds: base + jitter), _open);
+    final wait = _policy.nextAfterFailure();
+    _lastReconnectDelay = wait;
+    _reconnectTimer = Timer(wait, _open);
+  }
+
+  /// The gateway asked this phone to move (RECONNECT: handback to the primary after a
+  /// failover, or a planned shutdown): close now and come back to the same address after its
+  /// delay plus a little jitter. No error, no "Offline", and not a failure for the backoff.
+  /// The room and the JOIN extras are kept, so the re-JOIN follows the next HELLO as usual;
+  /// the ride, the outbox and the screen stay as they are.
+  void _onServerMove(int? delayMs) {
+    if (!_wantConnection || _refused) return;
+    _reconnectTimer?.cancel();
+    _closeChannel();
+    _serverMovePending = true;
+    // At most the subtle "Reconnecting" state, never "Offline" or an error.
+    _setState(RealtimeState.connecting);
+    final wait = _policy.afterServerRequest(delayMs);
+    _lastReconnectDelay = wait;
+    _reconnectTimer = Timer(wait, () {
+      _serverMovePending = false;
+      _open();
+    });
+  }
+
+  /// A sign that the network is back (the gateway answered an HTTP request, the app came back
+  /// to the front): a socket waiting out its backoff is opened now. A no-op while connecting
+  /// or connected (never a second socket) and during a move the server asked for; at most
+  /// once every 2 s.
+  void retryNow() {
+    if (!_wantConnection || _refused || _token == null || _serverMovePending) return;
+    if (_state != RealtimeState.disconnected) return;
+    final now = DateTime.now();
+    if (now.difference(_lastNudgeAt) < const Duration(seconds: 2)) return;
+    _lastNudgeAt = now;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _open();
   }
 
   void _closeChannel() {

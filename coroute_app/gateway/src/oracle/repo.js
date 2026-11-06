@@ -16,6 +16,10 @@
  *   trip_events     group timeline entries     unique: eventId; kept forever, coordinates removed after TRACK_RETENTION_DAYS
  *   geo_cache       place search / route cache unique: k; removed after GEO_CACHE_DAYS
  *   safety_audit    safety network audit rows  indexed: at, actorId; removed after AUDIT_RETENTION_DAYS (3.15)
+ *   room_snapshots  one per live room          unique: groupId. Every rider's live state (position, presence,
+ *                   telemetry) in ONE document, rewritten by ConvoyManager's periodic flush instead of one
+ *                   convoy_riders write per rider. convoy_riders documents are still written on join, leave,
+ *                   role and profile changes; listRiders() overlays the newer snapshot state on them.
  */
 const { identity, scrub, scrubConvoyMeta, mentions, FORMER_RIDER } = require('../anonymise');
 
@@ -47,6 +51,7 @@ const C = {
   activeTrips: 'active_trips',
   organizations: 'organizations',
   diagnostics: 'device_diagnostics',
+  roomSnapshots: 'room_snapshots',
 };
 
 /** Alert fields that live in memory only (filled by the safety network) and are never stored. */
@@ -66,6 +71,18 @@ class Repo {
   constructor(soda) {
     this.soda = soda;
     this.alertChains = new Map(); // alertId -> tail of its write chain (read-modify-write is never interleaved)
+    this.snapshotChains = new Map(); // groupId -> tail of its room snapshot write chain
+    this.snapshotKeys = new Map(); // groupId -> SODA key of its room snapshot (saves the lookup on every flush)
+  }
+
+  /** Runs room snapshot writes of one group strictly one after another (never an older state last). */
+  _snapshotSerial(groupId, fn) {
+    const prev = this.snapshotChains.get(groupId) || Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.catch(() => {});
+    this.snapshotChains.set(groupId, tail);
+    tail.then(() => { if (this.snapshotChains.get(groupId) === tail) this.snapshotChains.delete(groupId); });
+    return run;
   }
 
   /** Runs one read-modify-write of an alert after the previous one for the same alert finished. */
@@ -102,6 +119,7 @@ class Repo {
     await idx(C.convoys, 'convoys_status_ix', ['tripStatus', { path: 'updatedAt', datatype: 'number' }]);
     await idx(C.riders, 'riders_group_user_ux', ['groupId', 'userId'], true);
     await idx(C.riders, 'riders_user_ix', ['userId']);
+    await idx(C.roomSnapshots, 'room_snapshots_group_ux', ['groupId'], true);
     await idx(C.messages, 'messages_group_ts_ix', ['groupId', { path: 'timestamp', datatype: 'number' }]);
     await idx(C.messages, 'messages_id_ux', ['messageId'], true);
     await idx(C.alerts, 'alerts_group_ix', ['groupId', 'resolved']);
@@ -278,6 +296,11 @@ class Repo {
         await this._scrubWhere(C.convoys, { groupId: gid }, id, { rewrite: scrubConvoyMeta });
       }
       await this._scrubWhere(C.riders, { groupId: gid }, id); // e.g. another rider co-riding with them
+      // The room snapshot: the rider's own entry goes, other riders' entries lose every trace of them.
+      await this._snapshotSerial(gid, () => this._scrubWhere(C.roomSnapshots, { groupId: gid }, id, {
+        mentioned: (doc, i) => mentions(doc, i),
+        rewrite: (doc, i) => scrub({ ...doc, riders: (Array.isArray(doc.riders) ? doc.riders : []).filter((r) => !r || r.userId !== uid) }, i),
+      }));
       await this._scrubWhere(C.events, { groupId: gid }, id);
       await this._scrubWhere(C.trips, { groupId: gid }, id, tripScrub);
       await this._scrubWhere(C.alerts, { groupId: gid }, id);
@@ -474,22 +497,104 @@ class Repo {
     for (const coll of [C.riders, C.messages, C.alerts, C.voiceLog, C.trackChunks, C.events, C.trips]) {
       await this.soda.removeWhere(coll, { groupId });
     }
+    await this.removeRoomSnapshot(groupId);
     await this.soda.removeWhere(C.convoys, { groupId });
   }
 
   // ---------- riders ----------
+  /**
+   * Riders of a convoy: the convoy_riders documents (written on join / leave / role changes) with the
+   * newer live state of the room snapshot laid over them. A rider found only in the snapshot (its own
+   * document not written yet) is included too.
+   */
   async listRiders(groupId) {
-    const rows = await this.soda.query(C.riders, { groupId }, { limit: 500 });
-    return rows.map((r) => ({ ...r.value, key: r.key }));
+    const [rows, snap] = await Promise.all([
+      this.soda.query(C.riders, { groupId }, { limit: 500 }),
+      this.loadRoomSnapshot(groupId).catch(() => null),
+    ]);
+    const byId = new Map();
+    const savedAt = new Map();
+    for (const r of rows) {
+      const { savedAt: at, ...value } = r.value;
+      byId.set(value.userId, { ...value, key: r.key });
+      savedAt.set(value.userId, Number(at) || 0);
+    }
+    if (snap) {
+      for (const s of snap.riders) {
+        if (!s || !s.userId) continue;
+        const cur = byId.get(s.userId);
+        if (!cur) byId.set(s.userId, { ...s, groupId });
+        else if ((snap.updatedAt || 0) >= savedAt.get(s.userId)) byId.set(s.userId, { ...cur, ...s, groupId, key: cur.key });
+      }
+    }
+    return [...byId.values()];
   }
   async upsertRider(groupId, rider) {
     const doc = { ...rider, groupId, userId: rider.userId };
     delete doc.key;
-    const key = await this.soda.upsertBy(C.riders, { groupId, userId: rider.userId }, doc);
+    const key = await this.soda.upsertBy(C.riders, { groupId, userId: rider.userId }, { ...doc, savedAt: Date.now() });
     return { key, ...doc };
   }
   async removeRider(groupId, userId) {
-    return this.soda.removeWhere(C.riders, { groupId, userId });
+    const n = await this.soda.removeWhere(C.riders, { groupId, userId });
+    // The rider must not come back from the room snapshot at the next room load.
+    await this._snapshotSerial(groupId, async () => {
+      const r = await this.soda.findOne(C.roomSnapshots, { groupId });
+      if (!r || !Array.isArray(r.value.riders) || !r.value.riders.some((x) => x && x.userId === userId)) return;
+      await this.soda.replace(C.roomSnapshots, r.key, { ...r.value, riders: r.value.riders.filter((x) => !x || x.userId !== userId) });
+    }).catch(() => {});
+    return n;
+  }
+
+  // ---------- room snapshots (one document per live room) ----------
+  /**
+   * Stores the live state of every rider of a room in ONE document (one write instead of one per rider).
+   * `riders`: array (or Map) of the rider objects ConvoyManager keeps in memory (same fields upsertRider stores).
+   * `positionsAt`: when these positions were taken (ms). Writes of one group never overtake each other.
+   */
+  async saveRoomSnapshot(groupId, { riders = [], positionsAt = Date.now() } = {}) {
+    const list = (riders instanceof Map ? [...riders.values()] : Array.isArray(riders) ? riders : [])
+      .filter((r) => r && r.userId)
+      .map((r) => { const d = { ...r, groupId, userId: r.userId }; delete d.key; return d; });
+    const doc = { groupId, riders: list, positionsAt: Number(positionsAt) || Date.now(), updatedAt: Date.now() };
+    return this._snapshotSerial(groupId, async () => {
+      const known = this.snapshotKeys.get(groupId);
+      if (known) {
+        try {
+          await this.soda.replace(C.roomSnapshots, known, doc);
+          return { key: known, ...doc };
+        } catch (e) {
+          if (!e || e.status !== 404) throw e;
+          this.snapshotKeys.delete(groupId); // removed meanwhile (retention, cascade): look it up again
+        }
+      }
+      let key;
+      try {
+        key = await this.soda.upsertBy(C.roomSnapshots, { groupId }, doc);
+      } catch (e) {
+        if (!e || (e.status !== 409 && e.status !== 400)) throw e;
+        key = await this.soda.upsertBy(C.roomSnapshots, { groupId }, doc); // lost a first-insert race
+      }
+      this.snapshotKeys.set(groupId, key);
+      return { key, ...doc };
+    });
+  }
+  /** The last saved room snapshot: { riders, positionsAt, updatedAt } or null. */
+  async loadRoomSnapshot(groupId) {
+    const r = await this.soda.findOne(C.roomSnapshots, { groupId });
+    if (!r) return null;
+    this.snapshotKeys.set(groupId, r.key);
+    return {
+      riders: Array.isArray(r.value.riders) ? r.value.riders : [],
+      positionsAt: r.value.positionsAt || 0,
+      updatedAt: r.value.updatedAt || 0,
+    };
+  }
+  async removeRoomSnapshot(groupId) {
+    return this._snapshotSerial(groupId, async () => {
+      this.snapshotKeys.delete(groupId);
+      return this.soda.removeWhere(C.roomSnapshots, { groupId });
+    });
   }
   async findActiveMembership(userId) {
     const rows = await this.soda.query(C.riders, { userId }, { limit: 50 });
@@ -623,6 +728,23 @@ class Repo {
     return this.soda.findOne(C.trackChunks, { groupId, userId, seq });
   }
   async insertTrackChunk(doc) { return this.soda.insert(C.trackChunks, doc); }
+  /** One bulk insert for many chunks (all or nothing on Oracle; see TrackStore for the fallback). */
+  async insertTrackChunks(docs) {
+    if (typeof this.soda.insertMany === 'function') return this.soda.insertMany(C.trackChunks, docs);
+    const keys = [];
+    for (const d of docs) keys.push(await this.soda.insert(C.trackChunks, d));
+    return keys;
+  }
+  /** The seqs of one rider's chunks that are already stored, out of `seqs`. */
+  async existingTrackSeqs(groupId, userId, seqs) {
+    const found = new Set();
+    for (let i = 0; i < seqs.length; i += 200) {
+      const part = seqs.slice(i, i + 200);
+      const rows = await this.soda.query(C.trackChunks, { groupId, userId, seq: { $in: part } }, { limit: 1000 });
+      for (const r of rows) found.add(r.value.seq);
+    }
+    return found;
+  }
   /** All chunks overlapping [from, to], oldest first, paged so long trips load completely. */
   async listTrackChunks(groupId, { userId, from = 0, to = Number.MAX_SAFE_INTEGER } = {}) {
     const filter = { groupId, startTs: { $lte: to }, endTs: { $gte: from } };

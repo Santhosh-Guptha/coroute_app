@@ -1,4 +1,3 @@
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -25,7 +24,8 @@ abstract class SmsSender {
   /// Launches the system SMS composer using intent/URL without runtime permissions.
   static Future<bool> launchSmsIntent({required String to, required String body}) async {
     final clean = to.replaceAll(RegExp(r'[^0-9+]'), '');
-    if (!kIsWeb && Platform.isAndroid) {
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)) {
       try {
         final ok = await const MethodChannel('coroute/sms').invokeMethod<bool>(
           'launchSmsIntent',
@@ -64,7 +64,8 @@ class SmsComposer {
     ];
     if (numbers.isEmpty) return false;
     if (numbers.length == 1) return SmsSender.launchSmsIntent(to: numbers.first, body: body);
-    if (!kIsWeb && Platform.isAndroid) {
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)) {
       try {
         final ok = await const MethodChannel('coroute/sms').invokeMethod<bool>(
           'launchSmsIntent',
@@ -83,15 +84,15 @@ class SmsComposer {
     return SmsSender.launchSmsIntent(to: numbers.first, body: body);
   }
 
-  /// True when this phone has a messages app to open (Android: telephony feature; iOS: sms: URL).
+  /// True when this phone has a messages app to open (Android: telephony feature; iOS: sms: URL or capability).
   static Future<bool> available() async {
     if (kIsWeb) return false;
     try {
-      if (Platform.isAndroid) {
-        final m = await const MethodChannel('coroute/sms').invokeMapMethod<String, dynamic>('capability');
-        return m?['hasTelephony'] == true;
+      if (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) {
+        final res = await const MethodChannel('coroute/sms').invokeMethod<Object?>('capability');
+        if (res is Map) return res['hasTelephony'] == true;
+        return true;
       }
-      if (Platform.isIOS) return await canLaunchUrl(Uri(scheme: 'sms', path: '112'));
     } catch (_) {}
     return false;
   }
@@ -102,18 +103,19 @@ class SmsComposer {
 class NativeSmsSender implements SmsSender {
   static const MethodChannel _channel = MethodChannel('coroute/sms');
 
-  bool get _android => !kIsWeb && Platform.isAndroid;
+  bool get _supported =>
+      !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
 
   @override
   Future<SmsCapability> capability() async {
-    if (!_android) return SmsCapability.none;
+    if (!_supported) return SmsCapability.none;
     try {
-      final m = await _channel.invokeMapMethod<String, dynamic>('capability');
-      if (m == null) return SmsCapability.none;
+      final res = await _channel.invokeMethod<Object?>('capability');
+      if (res is! Map) return SmsCapability.none;
       return SmsCapability(
-        hasTelephony: m['hasTelephony'] == true,
-        permission: m['permission'] == true,
-        simReady: m['simReady'] == true,
+        hasTelephony: res['hasTelephony'] == true,
+        permission: res['permission'] == true,
+        simReady: res['simReady'] == true,
       );
     } catch (_) {
       return SmsCapability.none;
@@ -122,10 +124,11 @@ class NativeSmsSender implements SmsSender {
 
   @override
   Future<SmsStatus> send(String to, String body) async {
-    if (!_android) return SmsStatus.failed;
+    if (!_supported) return SmsStatus.failed;
     try {
-      final m = await _channel.invokeMapMethod<String, dynamic>('send', <String, String>{'to': to, 'body': body});
-      return statusFromWire(m?['status']?.toString());
+      final res = await _channel.invokeMethod<Object?>('send', <String, String>{'to': to, 'body': body});
+      if (res is! Map) return SmsStatus.failed;
+      return statusFromWire(res['status']?.toString());
     } catch (_) {
       return SmsStatus.failed;
     }

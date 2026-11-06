@@ -10,6 +10,11 @@
  *    eXIf chunks; WebP EXIF and XMP chunks. Pixels are not re-encoded (no native image library).
  *  - Files get random names and live in a data folder outside public/ (config.reviewPhotoDir).
  *    Nothing in that folder is served as a static file: routes check who may see each photo.
+ *  - Storage backend (REVIEW_PHOTO_STORE): `disk` (default, REVIEW_PHOTO_DIR) or `par` (OCI Object
+ *    Storage through the bucket Pre-Authenticated Request REVIEW_PHOTO_PAR_URL, objects named
+ *    `review-photos/<id>.<ext>`). Both have the same API (save / read / remove). With `par` the
+ *    photos are still served only through the gateway's checked routes: the PAR URL is a secret and
+ *    never reaches a client. scripts/migrate_review_photos_to_par.js copies existing disk files.
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -202,13 +207,73 @@ function preparePhoto(buf) {
   return { ...res, kind, ...TYPES[kind] };
 }
 
+const PAR_PREFIX = 'review-photos/';
+
+/** Backend settings: explicit options, then config.js, then the environment. */
+function photoBackend(opts = {}) {
+  let cfg = {};
+  try { cfg = require('./config'); } catch { /* scripts without a full configuration */ }
+  const store = String(opts.store || cfg.reviewPhotoStore || process.env.REVIEW_PHOTO_STORE || 'disk').trim().toLowerCase();
+  const parUrl = String(opts.parUrl || cfg.reviewPhotoParUrl || process.env.REVIEW_PHOTO_PAR_URL || '').trim();
+  return { store, parUrl };
+}
+
+/**
+ * The review photo store. Disk (default) keeps files in [dir]; REVIEW_PHOTO_STORE=par keeps them in
+ * Object Storage (REVIEW_PHOTO_PAR_URL). opts: { store?: 'disk'|'par', parUrl?, objectStore? }.
+ */
+function createPhotoStore(dir, opts = {}) {
+  const { store, parUrl } = photoBackend(opts);
+  if (store === 'par') return createParPhotoStore(parUrl, opts);
+  if (store !== 'disk') throw new Error(`[review_photos] REVIEW_PHOTO_STORE must be disk or par (got ${store})`);
+  return createDiskPhotoStore(dir);
+}
+
+/** Object name of a photo in the bucket, or null for metadata that is not a stored photo. */
+function objectNameOf(meta) {
+  if (!meta || !isPhotoId(meta.id) || !Object.values(TYPES).some((t) => t.ext === meta.ext)) return null;
+  return `${PAR_PREFIX}${meta.id}.${meta.ext}`;
+}
+
+/** Object Storage store (bucket PAR). `objectStore` may be given directly (tests). */
+function createParPhotoStore(parUrl, { objectStore } = {}) {
+  let os = objectStore;
+  if (!os) {
+    if (!parUrl) throw new Error('[review_photos] REVIEW_PHOTO_STORE=par needs REVIEW_PHOTO_PAR_URL (a bucket PAR ending in /o/)');
+    os = require('./object_store').createParStore(parUrl);
+  }
+  return {
+    kind: 'par',
+    dir: null,
+    fileOf: () => null,
+    objectName: objectNameOf,
+    async save(prepared) {
+      const id = newPhotoId();
+      const meta = { id, mime: prepared.mime, ext: prepared.ext, bytes: prepared.data.length, width: prepared.width || null, height: prepared.height || null, at: Date.now() };
+      await os.put(objectNameOf(meta), prepared.data, prepared.mime);
+      return meta;
+    },
+    async read(meta) {
+      const name = objectNameOf(meta);
+      if (!name) return null;
+      return os.get(name).catch(() => null);
+    },
+    /** Best effort, like the disk store (a PAR without DELETE overwrites the object with a tombstone). */
+    async remove(meta) {
+      const name = objectNameOf(meta);
+      if (name) await os.del(name).catch(() => {});
+    },
+  };
+}
+
 /** Disk store for review photos. [dir] is outside public/ and created on first use. */
-function createPhotoStore(dir) {
+function createDiskPhotoStore(dir) {
   const fileOf = (meta) => {
     if (!meta || !isPhotoId(meta.id) || !Object.values(TYPES).some((t) => t.ext === meta.ext)) return null;
     return path.join(dir, `${meta.id}.${meta.ext}`);
   };
   return {
+    kind: 'disk',
     dir,
     fileOf,
     async save(prepared) {
@@ -231,4 +296,4 @@ function createPhotoStore(dir) {
   };
 }
 
-module.exports = { MAX_BYTES, MAX_PER_REVIEW, TYPES, PhotoError, isPhotoId, newPhotoId, sniff, preparePhoto, createPhotoStore, cleanJpeg, exifOrientation };
+module.exports = { MAX_BYTES, MAX_PER_REVIEW, TYPES, PAR_PREFIX, PhotoError, isPhotoId, newPhotoId, sniff, preparePhoto, createPhotoStore, createDiskPhotoStore, createParPhotoStore, objectNameOf, cleanJpeg, exifOrientation };

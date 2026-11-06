@@ -25,6 +25,38 @@ function list(name, def = []) {
 
 const isTest = process.env.NODE_ENV === 'test';
 
+function oneOf(name, allowed, def) {
+  const v = String(process.env[name] || '').trim().toLowerCase();
+  if (!v) return def;
+  if (!allowed.includes(v)) throw new Error(`[config] ${name} must be one of ${allowed.join(', ')}`);
+  return v;
+}
+
+/** SETTINGS_ENCRYPTION_KEY: 32 bytes, base64. Empty means "not configured" (legacy JWT-derived key only). */
+function settingsKey(v) {
+  const s = String(v || '').trim();
+  if (!s) return null;
+  const buf = Buffer.from(s, 'base64');
+  if (buf.length !== 32 || buf.toString('base64').replace(/=+$/, '') !== s.replace(/=+$/, '')) {
+    throw new Error('[config] SETTINGS_ENCRYPTION_KEY must be 32 random bytes, base64 encoded (openssl rand -base64 32)');
+  }
+  return buf;
+}
+
+/** TRUST_PROXY: comma list of IPs, CIDRs or Express keywords; default loopback only. */
+function trustList(v) {
+  const net = require('net');
+  const items = String(v || 'loopback').split(',').map((x) => x.trim()).filter(Boolean);
+  for (const it of items) {
+    if (['loopback', 'linklocal', 'uniquelocal'].includes(it)) continue;
+    const [ip, bits, extra] = it.split('/');
+    const fam = net.isIP(ip);
+    const okBits = bits === undefined || (/^\d+$/.test(bits) && Number(bits) <= (fam === 6 ? 128 : 32));
+    if (!fam || !okBits || extra !== undefined) throw new Error(`[config] TRUST_PROXY entry "${it}" is not an IP, CIDR or loopback/linklocal/uniquelocal`);
+  }
+  return items.length ? items : ['loopback'];
+}
+
 const config = {
   env: process.env.NODE_ENV || 'production',
   port: int('PORT', 3000),
@@ -47,9 +79,34 @@ const config = {
   adminEmails: list('BOOTSTRAP_ADMIN_EMAILS', list('ADMIN_EMAILS')),
   // Account gate: how long a users document is trusted before it is read again (status, role, password change).
   userGateTtlMs: int('USER_GATE_TTL_MS', 30000),
-  // bcrypt work factor for new password hashes (older, cheaper hashes are upgraded at the next sign-in).
-  // Fixed at 12 in production; the test suite uses the minimum so its many sign-ups stay fast.
-  bcryptCost: isTest ? 4 : 12,
+  // JWT_SECRET_PREVIOUS (optional, rotation grace): tokens signed with it are still ACCEPTED (never signed);
+  // the response carries a fresh X-CoRoute-Token signed with JWT_SECRET. Remove it after the grace period.
+  jwtSecretPrevious: (process.env.JWT_SECRET_PREVIOUS || '').trim(),
+  // Password hashes (src/password_hash.js): scrypt on the libuv threadpool, scrypt$N$r$p$salt$hash.
+  // N = 2^15, r = 8, p = 1 is ~100 ms and 32 MiB per hash; the test suite defaults to 2^10.
+  // Legacy bcrypt hashes are verified in a worker thread and re-hashed to scrypt at the next sign-in.
+  passwordScryptN: int('PASSWORD_SCRYPT_N', isTest ? 1024 : 32768),
+  passwordScryptR: int('PASSWORD_SCRYPT_R', 8),
+  passwordScryptP: int('PASSWORD_SCRYPT_P', 1),
+  // Concurrent scrypt jobs (each holds a threadpool thread and 128*N*r bytes); the rest queue.
+  passwordHashConcurrency: int('PASSWORD_HASH_CONCURRENCY', 2),
+  passwordBcryptWorkers: int('PASSWORD_BCRYPT_WORKERS', 1),
+  // 32 random bytes, base64 (openssl rand -base64 32). Encrypts admin-saved Razorpay secrets and signs
+  // web-checkout links, independent of JWT_SECRET. Legacy (JWT-derived) values are still read and migrated.
+  settingsEncryptionKey: settingsKey(process.env.SETTINGS_ENCRYPTION_KEY),
+
+  // Two-VM production: what this node is for. 'live' (VM1: rides, sockets), 'web' (VM2: website, payments,
+  // admin), 'all' (single VM, default). Caddy decides routing; the role only decides which node prefers
+  // to run scheduled jobs (src/job_lease.js).
+  gatewayRole: oneOf('GATEWAY_ROLE', ['live', 'web', 'all'], 'all'),
+  // Job leases: lease life, renew/poll period, and how long a lease must have been expired before a node
+  // of the non-preferred role takes it over.
+  jobLeaseTtlMs: int('JOB_LEASE_TTL_MS', 60000),
+  jobLeaseHeartbeatMs: int('JOB_LEASE_HEARTBEAT_MS', 15000),
+  jobLeaseGraceMs: int('JOB_LEASE_GRACE_MS', 120000),
+  // Proxies whose X-Forwarded-For is believed (comma list of IPs, CIDRs or loopback/linklocal/uniquelocal).
+  // VM1: loopback (its own Caddy). VM2: loopback,10.0.0.70 (VM1's Caddy forwards web routes over the VCN).
+  trustProxy: trustList(process.env.TRUST_PROXY),
 
   // Joining by code: failed attempts allowed per window, per rider and per network (brute-force guard).
   joinWindowMin: int('JOIN_WINDOW_MIN', 15),
@@ -307,6 +364,9 @@ const config = {
 
 if (!isTest && config.jwtSecret.length < 32) {
   throw new Error('[config] JWT_SECRET must be at least 32 characters');
+}
+if (config.jwtSecretPrevious && (config.jwtSecretPrevious.length < 32 || config.jwtSecretPrevious === config.jwtSecret)) {
+  throw new Error('[config] JWT_SECRET_PREVIOUS must be at least 32 characters and differ from JWT_SECRET');
 }
 
 module.exports = config;
