@@ -46,6 +46,22 @@ const MAX_SOCKETS_PER_USER = Math.max(2, envInt('WS_MAX_SOCKETS_PER_USER', 8));
 /** Voice frames per second a single stream may relay (20 ms frames are 50/s). */
 const VOICE_MAX_FPS = envInt('VOICE_MAX_FPS', 100);
 
+/**
+ * Outbound priority (per socket). While a socket's send buffer is under OUT_SOFT_BYTES everything goes out at
+ * once, in order. Above it, messages wait in three lanes drained every OUT_DRAIN_MS: 0 safety and control
+ * (SOS, ALERT, RESOLVE, ERROR, ACK, RECONNECT...), 1 roster / chat / everything else, 2 positions (latest per
+ * rider only, dropped while the buffer stays over WS_POSITION_DROP_BYTES). Voice is never queued: it is
+ * dropped while a socket has a backlog. A socket whose lane 1 backlog passes OUT_MAX_QUEUED is closed (the
+ * app reconnects and gets a SNAPSHOT).
+ */
+const OUT_SOFT_BYTES = Math.min(POS_DROP_BYTES, envInt('WS_OUT_SOFT_BYTES', 128 * 1024));
+const OUT_DRAIN_MS = 25;
+const OUT_MAX_QUEUED = 5000;
+const PRIO_0 = new Set(['ALERT', 'ALERT_RESOLVED', 'SOS_RESPONSE', 'EMERGENCY_UPDATE', 'ERROR', 'ACK', 'RECONNECT', 'RIDER_BATTERY_SHUTDOWN',
+  'DISSOLVED', 'TRIP_STATUS', 'HELLO', 'ASSIST_REQUEST', 'ROAD_HAZARD']);
+/** A rider whose last activity in a ride is older than this, and who is live nowhere, is a new live rider for the cap. */
+const LIVE_REJOIN_GRACE_MS = envInt('LIVE_REJOIN_GRACE_MS', 15 * 60000);
+
 /** Intercom sample rates: 16 kHz, and 8 kHz from phones in data saver mode. */
 const VOICE_RATES = new Set([8000, 16000]);
 
@@ -116,11 +132,17 @@ class Hub {
     this.posPending = new Map(); // groupId -> Map<userId, RIDER_UPDATE json> (large rooms, coalesced)
     this.posTimers = new Map(); // groupId -> flush timer
     this.posSentAt = new Map(); // groupId -> Map<userId, last fan-out time> (large rooms)
-    this.stats = { posIn: 0, posOut: 0, posDropped: 0, posCoalesced: 0, slowKicked: 0 };
+    this.stats = { posIn: 0, posOut: 0, posDropped: 0, posCoalesced: 0, slowKicked: 0, queued: 0 };
+    this.outPending = new Set(); // sockets with queued outbound messages (see OUT_SOFT_BYTES)
+    this.outTimer = null;
+    /** Two-node live mirror (src/mirror.js), set by app.js; null on a single node. */
+    this.mirror = null;
     this.wss = new WebSocketServer({ server, path, maxPayload: 256 * 1024 });
     this.wss.on('connection', (ws, req) => this._onConnection(ws, req));
 
-    convoys.on('event', (groupId, payload) => this.broadcast(groupId, payload));
+    convoys.on('event', (groupId, payload, opts) => this.broadcast(groupId, payload, opts));
+    // The sender's own copy of a durable event, after it was stored and the peer gateway has it.
+    convoys.on('echo', (groupId, payload, userId) => this.broadcast(groupId, payload, { onlyUser: userId }));
     convoys.on('broadcast', (entry) => this.broadcastAll({ type: 'BROADCAST', message: entry.message, ts: entry.timestamp }));
     convoys.on('fleet', () => this._scheduleFleet());
     convoys.featureAnalytics?.on('change', () => this._scheduleFleet());
@@ -144,6 +166,7 @@ class Hub {
     // Sockets closed by a restart are not "no signal": presence is left as it was.
     this.closing = true;
     clearInterval(this.heartbeat); clearInterval(this.fleetTimer);
+    if (this.outTimer) { clearTimeout(this.outTimer); this.outTimer = null; }
     for (const t of this.posTimers.values()) clearTimeout(t);
     this.posTimers.clear(); this.posPending.clear();
     this.wss.close();
@@ -183,7 +206,7 @@ class Hub {
       if (!pending) { pending = new Map(); this.posPending.set(gid, pending); }
       if (!pending.has(rider.userId) && t - (sentAt.get(rider.userId) || 0) >= POS_COALESCE_MS) {
         sentAt.set(rider.userId, t);
-        return this._sendPosition(set, msg, null, fromWs);
+        return this._sendPosition(set, msg, fromWs ? null : rider.userId, fromWs, rider.userId);
       }
       if (pending.has(rider.userId)) this.stats.posCoalesced++;
       pending.set(rider.userId, msg);
@@ -194,7 +217,8 @@ class Hub {
       }
       return;
     }
-    this._sendPosition(set, msg, null, fromWs);
+    // A position relayed from the peer gateway (no local sender socket) never goes back to its own rider.
+    this._sendPosition(set, msg, fromWs ? null : rider.userId, fromWs, rider.userId);
   }
 
   _flushPositions(gid) {
@@ -210,49 +234,138 @@ class Hub {
     for (const [uid, msg] of pending) {
       if (!room.riders.has(uid)) { if (sentAt) sentAt.delete(uid); continue; }
       if (sentAt) sentAt.set(uid, t);
-      this._sendPosition(set, msg, uid, null);
+      this._sendPosition(set, msg, uid, null, uid);
     }
   }
 
-  _sendPosition(set, msg, fromUid, exceptWs) {
+  _sendPosition(set, msg, fromUid, exceptWs, posUid = fromUid) {
     for (const peer of set) {
       if (peer === exceptWs || peer.readyState !== WebSocket.OPEN) continue;
       if (fromUid && peer.user && peer.user.userId === fromUid) continue;
       if (peer.bufferedAmount > MAX_BUFFERED_BYTES) { this.stats.slowKicked++; this._kick(peer, 1013, 'SLOW_LINK'); continue; }
       if (peer.bufferedAmount > POS_DROP_BYTES) { this.stats.posDropped++; continue; }
-      peer.send(msg);
+      this._out(peer, msg, 2, posUid);
       this.stats.posOut++;
     }
   }
 
+  // ------------------------------------------------------------- outbound priority
+  /** Lane of a server message: 0 safety/control, 1 the rest (positions use lane 2 in _sendPosition). */
+  static prioOf(payload) { return payload && PRIO_0.has(payload.type) ? 0 : 1; }
+
+  /**
+   * Sends now when the socket has no backlog and its buffer is under OUT_SOFT_BYTES; otherwise queues in
+   * its lane (lane 2: one pending position per rider, the newest). Returns false for a closed socket.
+   */
+  _out(ws, data, prio = 1, key = null) {
+    if (ws.readyState !== WebSocket.OPEN) return false;
+    if (!ws.outq && !(ws.bufferedAmount > OUT_SOFT_BYTES)) { ws.send(data); return true; }
+    if (!ws.outq) { ws.outq = [[], [], new Map()]; this.outPending.add(ws); }
+    this.stats.queued++;
+    if (prio === 2) {
+      const k = key || `_${this.stats.queued}`;
+      ws.outq[2].delete(k); // keeps lane order by arrival of the newest
+      ws.outq[2].set(k, data);
+    } else {
+      ws.outq[prio].push(data);
+      if (ws.outq[1].length > OUT_MAX_QUEUED) { this.stats.slowKicked++; this._dropOut(ws); this._kick(ws, 1013, 'SLOW_LINK'); return false; }
+    }
+    this._armOut();
+    return true;
+  }
+
+  _armOut() {
+    if (this.outTimer || this.closing) return;
+    this.outTimer = setTimeout(() => { this.outTimer = null; this._drainOut(); }, OUT_DRAIN_MS);
+    if (this.outTimer.unref) this.outTimer.unref();
+  }
+
+  _dropOut(ws) { ws.outq = null; this.outPending.delete(ws); }
+
+  _drainOut() {
+    for (const ws of [...this.outPending]) {
+      if (ws.readyState !== WebSocket.OPEN || !ws.outq) { this._dropOut(ws); continue; }
+      const [q0, q1, q2] = ws.outq;
+      while (!(ws.bufferedAmount > OUT_SOFT_BYTES)) {
+        if (q0.length) { ws.send(q0.shift()); continue; }
+        if (q1.length) { ws.send(q1.shift()); continue; }
+        if (q2.size) {
+          const [k, data] = q2.entries().next().value;
+          q2.delete(k);
+          if (ws.bufferedAmount > POS_DROP_BYTES) { this.stats.posDropped++; continue; }
+          ws.send(data);
+          continue;
+        }
+        break;
+      }
+      if (!q0.length && !q1.length && !q2.size) this._dropOut(ws);
+    }
+    if (this.outPending.size) this._armOut();
+  }
+
   // ------------------------------------------------------------- helpers
-  send(ws, obj) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+  send(ws, obj) { if (ws.readyState === WebSocket.OPEN) this._out(ws, JSON.stringify(obj), Hub.prioOf(obj)); }
   sendError(ws, code, message, reason, clientId) {
     this.send(ws, { type: 'ERROR', code, message, ...(reason ? { reason } : {}), ...(clientId ? { clientId } : {}) });
   }
 
-  broadcast(groupId, payload, { except } = {}) {
+  /**
+   * Room broadcast. `except`: one socket left out; `exceptUser` / `onlyUser`: every socket of that rider
+   * left out / only that rider's sockets (the held-back sender echo of durable events).
+   */
+  broadcast(groupId, payload, { except, exceptUser, onlyUser } = {}) {
     const set = this.rooms.get(groupId);
     if (!set) return;
     const msg = JSON.stringify(payload);
-    for (const ws of set) if (ws !== except && ws.readyState === WebSocket.OPEN) ws.send(msg);
+    const prio = Hub.prioOf(payload);
+    for (const ws of set) {
+      if (ws === except || ws.readyState !== WebSocket.OPEN) continue;
+      const uid = ws.user && ws.user.userId;
+      if (exceptUser && uid === exceptUser) continue;
+      if (onlyUser && uid !== onlyUser) continue;
+      this._out(ws, msg, prio);
+    }
+  }
+  /** Room broadcast that the peer gateway repeats to its own sockets of the room (messages not from ConvoyManager). */
+  roomSend(groupId, payload, opts) {
+    this.broadcast(groupId, payload, opts);
+    if (this.mirror) this.mirror.wire(groupId, payload);
+  }
+  /** Distinct riders with an open socket bound to a room on this node. */
+  liveUsers() {
+    const out = new Set();
+    for (const set of this.rooms.values()) for (const ws of set) if (ws.readyState === WebSocket.OPEN && ws.user) out.add(ws.user.userId);
+    return out;
+  }
+  /** Tells a socket to reconnect (through the load balancer) after delayMs; closed by us if it has not gone after a grace. */
+  requestReconnect(ws, delayMs, reason, graceMs = 10000) {
+    if (ws.readyState !== WebSocket.OPEN || ws.reconnectAt) return false;
+    ws.reconnectAt = Date.now();
+    this.send(ws, { type: 'RECONNECT', delayMs: Math.max(0, Math.round(delayMs)), reason });
+    const t = setTimeout(() => { if (ws.readyState === WebSocket.OPEN) this._kick(ws, 1012, reason === 'shutdown' ? 'SHUTDOWN' : 'HANDBACK'); }, delayMs + graceMs);
+    if (t.unref) t.unref();
+    return true;
   }
   /** Room broadcast to sockets that announced `cap` in their JOIN (3.15 types never reach older apps). */
   broadcastCap(groupId, cap, payload) {
     const set = this.rooms.get(groupId);
     if (!set) return 0;
     const msg = JSON.stringify({ ts: Date.now(), ...payload });
+    const prio = Hub.prioOf(payload);
     let n = 0;
-    for (const ws of set) if (ws.caps && ws.caps.has(cap) && ws.readyState === WebSocket.OPEN) { ws.send(msg); n++; }
+    for (const ws of set) if (ws.caps && ws.caps.has(cap) && ws.readyState === WebSocket.OPEN) { this._out(ws, msg, prio); n++; }
     return n;
   }
   /** Personal message to every open socket of a user that announced `cap`. Returns how many got it. */
-  sendToUser(userId, payload, cap) {
+  sendToUser(userId, payload, cap, { local = false } = {}) {
     const set = this.byUser.get(userId);
-    if (!set) return 0;
+    // Not connected here: the peer gateway may hold the rider's socket (hand-back / failover window).
+    if (!set) { if (!local && this.mirror) this.mirror.user(userId, payload, cap); return 0; }
     const msg = JSON.stringify({ ts: Date.now(), ...payload });
+    const prio = Hub.prioOf(payload);
     let n = 0;
-    for (const ws of set) if ((!cap || (ws.caps && ws.caps.has(cap))) && ws.allowed && ws.readyState === WebSocket.OPEN) { ws.send(msg); n++; }
+    for (const ws of set) if ((!cap || (ws.caps && ws.caps.has(cap))) && ws.allowed && ws.readyState === WebSocket.OPEN) { this._out(ws, msg, prio); n++; }
+    if (!n && !local && this.mirror) this.mirror.user(userId, payload, cap);
     return n;
   }
   /** True when the user has an open, allowed socket with `cap` bound to a room. */
@@ -286,7 +399,7 @@ class Hub {
 
   broadcastAll(payload) {
     const msg = JSON.stringify(payload);
-    for (const ws of this.wss.clients) if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    for (const ws of this.wss.clients) if (ws.readyState === WebSocket.OPEN) this._out(ws, msg, 1);
   }
 
   _bind(ws, groupId) {
@@ -357,6 +470,7 @@ class Hub {
     });
     ws.on('close', () => {
       const gid = ws.groupId;
+      this._dropOut(ws);
       this._unbind(ws);
       this._unindex(ws);
       this.admins.delete(ws);
@@ -398,6 +512,7 @@ class Hub {
 
   _kick(ws, code, reason) {
     ws.allowed = false;
+    this._dropOut(ws);
     this._unbind(ws);
     this.admins.delete(ws);
     try { ws.close(code, String(reason).slice(0, 100)); } catch { /* already closing */ }
@@ -416,6 +531,8 @@ class Hub {
   }
 
   _handleError(ws, e) {
+    // Not stored yet (database trouble): the sender gets nothing, so its phone resends.
+    if (e && e.silent) return;
     if (e instanceof ConvoyError || e instanceof TrackError) return this.sendError(ws, e.status, e.message, e.reason, e.clientId);
     this.log.warn('[ws] error', e.message);
     this.sendError(ws, 500, 'Internal error', undefined, e && e.clientId);
@@ -452,8 +569,23 @@ class Hub {
     return true;
   }
 
+  /**
+   * LIVE_RIDER_CAP on a socket JOIN: a member who is coming back to the ride (active in it within
+   * LIVE_REJOIN_GRACE_MS: joined, seen or presence changed) or who has an open SOS in it is never refused.
+   */
+  _rejoining(groupId, userId) {
+    const room = this.convoys.rooms.get(groupId);
+    const r = room && room.riders.get(userId);
+    if (!r) return true; // loaded from the database just now: a member of a live ride
+    const t = Date.now();
+    const last = Math.max(Number(r.lastSeenEpochMs) || 0, Number(r.presenceAt) || 0, Number(r.joinedAt) || 0);
+    if (t - last < LIVE_REJOIN_GRACE_MS) return true;
+    for (const a of room.alerts.values()) if (!a.resolved && a.userId === userId) return true;
+    return false;
+  }
+
   _requireRoom(ws) {
-    if (!ws.groupId) throw new ConvoyError('Join a convoy first.', 409);
+    if (!ws.groupId) throw new ConvoyError('Join a convoy first.', 409, 'NOT_JOINED');
     return ws.groupId;
   }
 
@@ -501,6 +633,7 @@ class Hub {
     // Relayed as JSON RIDER_UPDATE: the raw 24-byte frame carries no sender id, so a peer could
     // not tell whose position it is (and the sender could not be trusted to say).
     this._fanoutPosition(gid, ws, rider);
+    if (this.mirror && rider) this.mirror.position(gid, rider);
   }
 
   async _onJson(ws, data) {
@@ -547,6 +680,9 @@ class Hub {
         const groupId = String(msg.groupId || '');
         if (groupId.length > 64) throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER');
         if (!(await this.convoys.isMember(groupId, u.userId))) throw new ConvoyError('You are not a member of this convoy.', 403, 'NOT_MEMBER');
+        if (this.mirror && this.mirror.capReached(u.userId) && !this._rejoining(groupId, u.userId)) {
+          throw new ConvoyError('Server busy, try in a few minutes', 503, 'SERVER_BUSY');
+        }
         this._bind(ws, groupId);
         ws.byeReason = null;
         // 3.15 client capabilities, on every JOIN (array of at most 8 short words, unknown ones ignored).
@@ -585,7 +721,9 @@ class Hub {
         if (!room) return;
         // Only telemetry fields are applied (never role or profile); see ConvoyManager.patchRider.
         const rider = this.convoys.patchRider(room, u.userId, msg, { emit: false });
-        return this._fanoutPosition(gid, ws, rider);
+        this._fanoutPosition(gid, ws, rider);
+        if (this.mirror && rider) this.mirror.position(gid, rider);
+        return;
       }
       case 'STATUS': return this._once(ws, cid, 'STATUS', async () => {
         const gid = this._requireRoom(ws);
@@ -625,8 +763,9 @@ class Hub {
             this.log.warn('[ws] Emergency gateway dispatch failed', err.message);
           });
         }
-        // A retried SOS: only the sender hears it again, so the phone can mark it delivered.
-        if (r.duplicate) this.send(ws, { type: 'ALERT', alert: publicAlert(r.alert), duplicate: true, ts: Date.now() });
+        // A retried SOS: only the sender hears it again, so the phone can mark it delivered. Never while it
+        // is not stored (database trouble): the phone keeps resending and each resend tries the store again.
+        if (r.duplicate && r.persisted !== false) this.send(ws, { type: 'ALERT', alert: publicAlert(r.alert), duplicate: true, ts: Date.now() });
         return;
       }
       case 'SOS_RESPOND': {
@@ -681,7 +820,7 @@ class Hub {
         if (room && room.riders && room.riders.has(u.userId)) {
           room.riders.get(u.userId).micMuted = !!msg.muted;
         }
-        return this.broadcast(gid, {
+        return this.roomSend(gid, {
           type: 'MIC_STATUS',
           userId: u.userId,
           micMuted: !!msg.muted,
@@ -748,7 +887,7 @@ class Hub {
           statusReason: 'BATTERY_SHUTDOWN',
         };
         const rider = this.convoys.patchRider(room, u.userId, patch);
-        this.broadcast(gid, {
+        this.roomSend(gid, {
           type: 'RIDER_BATTERY_SHUTDOWN',
           userId: u.userId,
           userName: u.name,
@@ -933,6 +1072,10 @@ class Hub {
         if (cur && cur.ws !== ws && t - cur.lastAt < config.voiceStreamIdleMs) {
           return this.send(ws, { type: 'VOICE_BUSY', speaker: cur.fromName, ts: t });
         }
+        // The floor held by a rider on the peer gateway (hand-back window) is busy too.
+        const rem = state.remote;
+        if (rem && t - rem.lastAt < config.voiceStreamIdleMs) return this.send(ws, { type: 'VOICE_BUSY', speaker: rem.fromName, ts: t });
+        state.remote = null;
         if (cur && cur.ws !== ws) this._endStream(gid, cur, 'preempted');
       }
       const channel = pkt.header.channel === 'LEAD_ONLY' ? 'LEAD_ONLY' : 'ALL';
@@ -953,8 +1096,10 @@ class Hub {
       if (to) state.private.set(ws.user.userId, stream); else state.group = stream;
       ws.voiceStream = stream;
       this.convoys.featureAnalytics?.record('voice', true);
-      this._relay(gid, stream, VOICE_START, { ...this._hdr(stream), channel: stream.channel, sampleRate: stream.sampleRate, codec: stream.codec }, null);
-      this.broadcast(gid, {
+      const hdr = { ...this._hdr(stream), channel: stream.channel, sampleRate: stream.sampleRate, codec: stream.codec };
+      this._relay(gid, stream, VOICE_START, hdr, null);
+      if (this.mirror) this.mirror.voice(gid, VOICE_START, hdr, null);
+      this.roomSend(gid, {
         type: 'MIC_STATUS',
         userId: ws.user.userId,
         isSpeaking: true,
@@ -974,7 +1119,9 @@ class Hub {
       if (!stream.rateAt || t - stream.rateAt >= 1000) { stream.rateAt = t; stream.rateN = 0; }
       if (++stream.rateN > VOICE_MAX_FPS) return;
       stream.lastAt = t; stream.frames++;
-      this._relay(gid, stream, VOICE_FRAME, { ...this._hdr(stream), seq: pkt.header.seq | 0 }, pkt.payload);
+      const hdr = { ...this._hdr(stream), seq: pkt.header.seq | 0 };
+      this._relay(gid, stream, VOICE_FRAME, hdr, pkt.payload);
+      if (this.mirror) this.mirror.voice(gid, VOICE_FRAME, hdr, pkt.payload);
       return;
     }
     if (pkt.kind === VOICE_END) this._endStream(gid, stream, 'end');
@@ -996,7 +1143,7 @@ class Hub {
         const isLeadOrSweeper = role === 'LEAD' || role === 'SWEEPER' || (room && room.meta && room.meta.createdByUserId === client.user.userId) || client.user.role === 'ADMIN' || client.user.role === 'MASTER_ADMIN';
         if (!isLeadOrSweeper) continue;
       }
-      if (client.bufferedAmount > 512 * 1024) continue; // slow link: drop audio rather than build latency
+      if (client.bufferedAmount > 512 * 1024 || client.outq) continue; // slow link: drop audio rather than build latency
       client.send(frame);
     }
   }
@@ -1008,8 +1155,10 @@ class Hub {
       if (state.private.get(stream.from) === stream) state.private.delete(stream.from);
     }
     if (stream.ws.voiceStream === stream) stream.ws.voiceStream = null;
-    this._relay(gid, stream, VOICE_END, { ...this._hdr(stream), reason }, null);
-    this.broadcast(gid, {
+    const hdr = { ...this._hdr(stream), reason };
+    this._relay(gid, stream, VOICE_END, hdr, null);
+    if (this.mirror) this.mirror.voice(gid, VOICE_END, hdr, null);
+    this.roomSend(gid, {
       type: 'MIC_STATUS',
       userId: stream.from,
       isSpeaking: false,
@@ -1023,6 +1172,48 @@ class Hub {
 
   _endVoiceStreamsOf(ws) {
     if (ws.voiceStream && ws.groupId) this._endStream(ws.groupId, ws.voiceStream, 'disconnect');
+  }
+
+  /**
+   * Voice from a rider on the peer gateway (hand-back window), relayed to this node's sockets of the room.
+   * The group floor: a remote START while a local group stream is live goes to the room authority
+   * (`peerHasFloorAuthority`: the peer is the GATEWAY_ROLE=live node): the local stream is preempted, or
+   * the remote one is ignored here (the peer preempts it when our START reaches it).
+   */
+  applyRemoteVoice(gid, kind, header, payload, { peerHasFloorAuthority = false } = {}) {
+    if (!header || typeof header.streamId !== 'string') return;
+    const state = this._voiceState(gid);
+    const rp = state.remotePrivate || (state.remotePrivate = new Map());
+    const t = Date.now();
+    const pseudo = { ws: null, to: header.to || null, channel: header.channel === 'LEAD_ONLY' ? 'LEAD_ONLY' : 'ALL' };
+    if (kind === VOICE_START) {
+      if (!header.to) {
+        const cur = state.group;
+        if (cur && t - cur.lastAt < config.voiceStreamIdleMs) {
+          if (!peerHasFloorAuthority) return;
+          this._endStream(gid, cur, 'preempted');
+        }
+        state.remote = { streamId: header.streamId, from: header.from, fromName: header.fromName, lastAt: t };
+      } else {
+        rp.set(header.streamId, { lastAt: t });
+      }
+      this._relay(gid, pseudo, kind, header, null);
+      return;
+    }
+    const known = (state.remote && state.remote.streamId === header.streamId) ? state.remote : rp.get(header.streamId);
+    if (!known) return;
+    known.lastAt = t;
+    if (kind === VOICE_END) {
+      if (state.remote === known) state.remote = null; else rp.delete(header.streamId);
+    }
+    this._relay(gid, pseudo, kind, header, kind === VOICE_FRAME ? payload : null);
+  }
+
+  /** The group floor of a room for the mirror snapshot, or null. */
+  floorOf(gid) {
+    const st = this.voice.get(gid);
+    const g = st && st.group;
+    return g ? { streamId: g.streamId, from: g.from, fromName: g.fromName } : null;
   }
 }
 

@@ -31,6 +31,8 @@ const LIVE_STATUSES = ['STARTED', 'PAUSED'];
  * further presses (any clientId, any socket) are answered as duplicates of the latest one. */
 const SOS_DEDUPE_MS = (() => { const n = parseInt(process.env.SOS_DEDUPE_MS || '', 10); return Number.isFinite(n) && n >= 0 ? n : 60000; })();
 const SOS_STORM_MAX = 2;
+/** Telemetry alone touches the convoy document at most this often (ride liveness for the stale-convoy job). */
+const META_TOUCH_MS = 10 * 60000;
 
 // ---- EmergencyEvent (3.15): the SOS alert doc, extended ----
 const EMERGENCY_OPEN = ['CONFIRMED_ACCIDENT', 'ASSISTANCE_REQUESTED', 'RESPONDER_ASSIGNED', 'ASSISTANCE_ARRIVED'];
@@ -110,6 +112,52 @@ class ConvoyManager extends EventEmitter {
     this.audit = opts.audit || null;
     /** 3.16 live emergency links: sha256(token) -> { gid, alertId } for open alerts of loaded rooms. */
     this.liveLinks = new Map();
+    /** Two-node live mirror (src/mirror.js), set by app.js. Null: single node, behaviour as before. */
+    this.mirror = opts.mirror || null;
+  }
+
+  // ------------------------------------------------------------ two-node mirror
+  /** True when the peer gateway runs this room's background automation (timeline ticks, expiry, discovery). */
+  passive(groupId) { return !!this.mirror && !this.mirror.authoritative(groupId); }
+
+  /**
+   * LIVE_RIDER_CAP: a rider who is not live anywhere yet is refused while the cap is reached
+   * (503 SERVER_BUSY). Riders already riding, rejoining or reconnecting are never refused (callers decide).
+   */
+  _admitNewRider(userId) {
+    if (this.mirror && this.mirror.capReached(userId)) throw new ConvoyError('Server busy, try in a few minutes', 503, 'SERVER_BUSY');
+  }
+
+  /** Index (or drop) the live link of one alert after it was changed by the peer gateway. */
+  _indexLiveLink(groupId, a) {
+    if (!a || !a.liveLink || !a.liveLink.hash) return;
+    if (!a.resolved && !a.liveLink.revokedAt) this.liveLinks.set(a.liveLink.hash, { gid: groupId, alertId: a.alertId });
+    else this.liveLinks.delete(a.liveLink.hash);
+  }
+
+  /**
+   * Durable room events (alerts, resolves, SOS responses, chat). The caller stored it first; then the room
+   * hears it, the peer gateway acknowledges it (bounded wait, never when it is down) and only then the
+   * sender gets its echo. A failed store (persisted = false) still reaches the room and the peer (safety
+   * first) but the sender gets no echo, so the phone keeps resending by clientId.
+   * The synchronous part (room + peer) runs before the first await: callers may fire side effects right after.
+   */
+  async _durable(groupId, type, payload, { sender = null, persisted = true } = {}) {
+    if (['ALERT', 'ALERT_RESOLVED', 'SOS_RESPONSE'].includes(type)) this.featureAnalytics.record('safety', true);
+    const full = { type, ts: now(), ...payload };
+    const split = !!sender && (!persisted || !!(this.mirror && this.mirror.linked()));
+    this.emit('event', groupId, full, split ? { exceptUser: sender } : undefined);
+    const ack = this.mirror ? this.mirror.local(groupId, full, { durable: true }) : null;
+    if (ack) await ack;
+    if (split && persisted) this.emit('echo', groupId, full, sender);
+    if (!persisted) this.log.warn(`[convoys] ${type} in ${groupId} not stored: sent to the room, sender not acknowledged (it will retry)`);
+    return persisted;
+  }
+
+  /** Marks a record (alert or message id) of a room as not yet stored / stored again. */
+  _setUnsaved(room, id, unsaved) {
+    if (unsaved) (room.unsaved || (room.unsaved = new Set())).add(id);
+    else if (room.unsaved) room.unsaved.delete(id);
   }
 
   _audit(row) { try { if (this.audit) this.audit.add(row); } catch { /* never in the way */ } }
@@ -133,6 +181,7 @@ class ConvoyManager extends EventEmitter {
       lastPersist: new Map(),
       persistTimer: null,
       regroup: meta.activeRegroup || null,
+      metaSavedAt: now(),
     };
     // An ended ride is read-only history: answered from this copy, never kept among the live rooms
     // (a late JOIN, status call or telemetry for it must not pin it in memory or revive its timers).
@@ -213,7 +262,10 @@ class ConvoyManager extends EventEmitter {
 
   _emit(groupId, type, payload = {}) {
     if (['ALERT', 'ALERT_RESOLVED', 'SOS_RESPONSE'].includes(type)) this.featureAnalytics.record('safety', true);
-    this.emit('event', groupId, { type, ts: now(), ...payload });
+    const full = { type, ts: now(), ...payload };
+    this.emit('event', groupId, full);
+    // Replicated to the peer gateway (state + the same room message for its sockets).
+    if (this.mirror) this.mirror.local(groupId, full);
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -239,6 +291,7 @@ class ConvoyManager extends EventEmitter {
   async createConvoy(user, p) {
     const name = String(p.name || '').trim();
     if (name.length < 2) throw new ConvoyError('Convoy name is required.');
+    this._admitNewRider(user.userId);
 
     // Concurrency-safe single active trip enforcement when monetization/membership is active
     if (config.paymentsEnabled !== false) {
@@ -291,9 +344,10 @@ class ConvoyManager extends EventEmitter {
 
     const room = {
       groupId, meta, riders: new Map([[rider.userId, rider]]), messages: [], alerts: new Map(),
-      dirty: new Set(), lastPersist: new Map(), persistTimer: null, regroup: null,
+      dirty: new Set(), lastPersist: new Map(), persistTimer: null, regroup: null, metaSavedAt: t,
     };
     this.rooms.set(groupId, room);
+    if (this.mirror) this.mirror.roomCreated(room);
     await this.repo.setActiveTrip(user.userId, { groupId, role: 'OWNER', status: 'STARTED' });
     this.emit('fleet');
     const at = meta.start || (rider.lat || rider.lng ? { lat: rider.lat, lng: rider.lng, name: '' } : null);
@@ -310,6 +364,8 @@ class ConvoyManager extends EventEmitter {
     if (!meta) throw new ConvoyError('No active convoy found for that code.', 404);
 
     const room = await this.getRoom(meta.groupId);
+    // Live-rider cap: a rider already in this ride (re-join, re-sync) is never refused.
+    if (!room.riders.has(user.userId)) this._admitNewRider(user.userId);
     // Concurrency-safe single active trip check: cannot participate in multiple active trips simultaneously
     if (!room.riders.has(user.userId)) {
       if (config.paymentsEnabled !== false) {
@@ -471,19 +527,42 @@ class ConvoyManager extends EventEmitter {
     if (room.persistTimer) return;
     room.persistTimer = setTimeout(() => {
       room.persistTimer = null;
+      // Two nodes: the room is written by a node that holds sockets of it (both may during a hand-back).
+      if (this.mirror && !this.mirror.shouldPersist(room.groupId)) { room.dirty.clear(); return; }
       this.flushRoom(room).catch((e) => this.log.warn('[convoys] persist failed', e.message));
     }, this.persistIntervalMs);
     if (room.persistTimer.unref) room.persistTimer.unref();
   }
 
-  async flushRoom(room) {
+  /**
+   * Writes the live state of a room: ONE room snapshot document with every rider (repo.saveRoomSnapshot)
+   * instead of one write per rider; repo.listRiders lays it over the convoy_riders documents, which are
+   * still written at once on join, leave and role changes. The convoy document is touched at most every
+   * META_TOUCH_MS for telemetry alone (it only keeps the ride from looking stale).
+   * `perRider`: also rewrite the changed riders' own documents (account deletion scrubs them).
+   * A failed write keeps the riders dirty for the next round.
+   */
+  async flushRoom(room, { perRider = false } = {}) {
     const ids = [...room.dirty];
     room.dirty.clear();
-    await Promise.all(ids.map(async (userId) => {
-      const rider = room.riders.get(userId);
-      if (rider) await this.repo.upsertRider(room.groupId, rider);
-    }));
-    if (ids.length) {
+    if (!ids.length) return;
+    try {
+      if (perRider || typeof this.repo.saveRoomSnapshot !== 'function') {
+        await Promise.all(ids.map(async (userId) => {
+          const rider = room.riders.get(userId);
+          if (rider) await this.repo.upsertRider(room.groupId, rider);
+        }));
+      }
+      if (typeof this.repo.saveRoomSnapshot === 'function') {
+        await this.repo.saveRoomSnapshot(room.groupId, { riders: [...room.riders.values()], positionsAt: now() });
+      }
+    } catch (e) {
+      for (const id of ids) if (room.riders.has(id)) room.dirty.add(id);
+      if (this.rooms.get(room.groupId) === room) this._schedulePersist(room);
+      throw e;
+    }
+    if (now() - (room.metaSavedAt || 0) >= META_TOUCH_MS) {
+      room.metaSavedAt = now();
       this._touch(room);
       await this.repo.saveConvoyMeta(room.meta);
     }
@@ -492,6 +571,7 @@ class ConvoyManager extends EventEmitter {
   async flushAll() {
     for (const room of this.rooms.values()) {
       clearTimeout(room.persistTimer); room.persistTimer = null;
+      if (this.mirror && !this.mirror.shouldPersist(room.groupId)) continue;
       await this.flushRoom(room).catch(() => {});
     }
   }
@@ -514,15 +594,41 @@ class ConvoyManager extends EventEmitter {
     if (clientId) {
       msg.clientId = clientId;
       msg.sentAt = clampTime(sentAt, t - 6 * 3600000, t, t);
+      // Sent before but not stored (database trouble): store that one now, never a second copy.
+      const prev = room.unsaved && room.unsaved.size ? room.messages.find((m) => m.senderId === user.userId && m.clientId === clientId) : null;
+      if (prev && room.unsaved.has(prev.messageId)) return this._retryUnsavedMessage(room, prev);
     }
-    return this._postMessage(room, msg);
+    return this._postMessage(room, msg, { sender: user.userId });
   }
 
-  async _postMessage(room, msg) {
+  /**
+   * Stores a chat message, then tells the room and the peer gateway (durable: see _durable). `sender`: the
+   * rider whose echo waits for the store and the peer. A failed store still reaches the room; the sender
+   * gets no echo and no ACK (silent error), and the resend with the same clientId stores it again.
+   */
+  async _postMessage(room, msg, { sender = null } = {}) {
     room.messages.push(msg);
     if (room.messages.length > 500) room.messages.splice(0, room.messages.length - 500);
-    await this.repo.addMessage(room.groupId, msg);
-    this._emit(room.groupId, 'MESSAGE', { message: msg });
+    let persisted = true;
+    try { await this.repo.addMessage(room.groupId, msg); } catch (e) {
+      persisted = false;
+      this._setUnsaved(room, msg.messageId, true);
+      this.log.warn('[convoys] message store failed', e.message);
+    }
+    await this._durable(room.groupId, 'MESSAGE', { message: msg }, { sender, persisted });
+    if (!persisted) throw notStored();
+    return msg;
+  }
+
+  /** A resent chat message (same rider, same clientId) whose first store failed: stored now, then echoed. */
+  async _retryUnsavedMessage(room, msg) {
+    try { await this.repo.addMessage(room.groupId, msg); } catch (e) {
+      this.log.warn('[convoys] message store failed again', e.message);
+      throw notStored();
+    }
+    this._setUnsaved(room, msg.messageId, false);
+    if (this.mirror) this.mirror.replicate(room.groupId, { saved: [msg.messageId] });
+    this.emit('echo', room.groupId, { type: 'MESSAGE', ts: now(), message: msg }, msg.senderId);
     return msg;
   }
 
@@ -563,7 +669,7 @@ class ConvoyManager extends EventEmitter {
     const first = inflight.get(k);
     if (first) {
       const r = await first;
-      return { alert: r.alert, duplicate: true };
+      return { alert: r.alert, duplicate: true, persisted: r.persisted !== false };
     }
     const p = this._raiseSosSerial(groupId, user, msg);
     inflight.set(k, p);
@@ -593,11 +699,16 @@ class ConvoyManager extends EventEmitter {
     const cid = clientId === undefined || clientId === null ? '' : String(clientId).slice(0, 64);
     if (cid) {
       for (const a of room.alerts.values()) {
-        if (a.userId === user.userId && a.clientId === cid) return { alert: a, duplicate: true };
+        if (a.userId === user.userId && a.clientId === cid) {
+          // Its first store failed: stored now (the sender is answered only once it is).
+          const persisted = room.unsaved && room.unsaved.has(a.alertId) ? await this._retryUnsavedAlert(room, a) : true;
+          return { alert: a, duplicate: true, persisted };
+        }
       }
-      // Already resolved and no longer in memory: still the same SOS, never a new one.
+      // Already resolved and no longer in memory: still the same SOS, never a new one. Stored but open and
+      // not in this room's memory (the gateway that took it went down before the peer heard of it): adopted.
       const stored = await this.repo.findAlertByClientId(groupId, user.userId, cid);
-      if (stored) return { alert: stripKey(stored), duplicate: true };
+      if (stored) return { alert: this._adoptStoredAlert(room, stripKey(stored), user.userId), duplicate: true, persisted: true };
     }
     const t = now();
     const kind = sosType(alertType || (type === 'SOS' ? '' : type));
@@ -633,7 +744,35 @@ class ConvoyManager extends EventEmitter {
       ...this._emergencyFields(room, { lat: clampLat(lat), lng: clampLng(lng), msg, source: src, alertType: kind, t }),
     };
     const ownerDoc = await withTimeout(this.repo.findUserById(user.userId), 1500).catch(() => null);
-    return { alert: await this._storeAlert(room, alert, ownerDoc), duplicate: false };
+    await this._storeAlert(room, alert, ownerDoc, { sender: user.userId });
+    return { alert, duplicate: false, persisted: !(room.unsaved && room.unsaved.has(alert.alertId)) };
+  }
+
+  /** Stores again an alert whose first store failed (a resend with its clientId). True once it is stored. */
+  async _retryUnsavedAlert(room, a) {
+    try {
+      const there = a.clientId ? await this.repo.findAlertByClientId(room.groupId, a.userId, a.clientId) : null;
+      if (!there) await this.repo.addAlert(room.groupId, a);
+    } catch (e) {
+      this.log.warn('[convoys] alert store failed again', e.message);
+      return false;
+    }
+    this._setUnsaved(room, a.alertId, false);
+    if (this.mirror) this.mirror.replicate(room.groupId, { saved: [a.alertId] });
+    return true;
+  }
+
+  /** An open alert found in the database but not in this room's memory joins the room (everyone hears it). */
+  _adoptStoredAlert(room, a, senderId) {
+    if (a.resolved || room.alerts.has(a.alertId) || this.rooms.get(room.groupId) !== room) return room.alerts.get(a.alertId) || a;
+    room.alerts.set(a.alertId, a);
+    this._indexLiveLink(room.groupId, a);
+    const full = { type: 'ALERT', ts: now(), alert: publicAlert(a, { summary: this._summary(room.groupId, a.alertId) }) };
+    this.emit('event', room.groupId, full, { exceptUser: senderId });
+    if (this.mirror) this.mirror.local(room.groupId, full);
+    this.emit('fleet');
+    this.emit('roomLoaded', room.groupId); // the safety network gives it its incident back
+    return a;
   }
 
   /** The 3.15 EmergencyEvent fields of a new alert. */
@@ -660,17 +799,25 @@ class ConvoyManager extends EventEmitter {
    * it to the safety network ('emergency' RAISED, not awaited). `ownerDoc`: the subject's users doc
    * (medical info for the group; assistance settings and false alarm history for the network).
    */
-  async _storeAlert(room, alert, ownerDoc) {
+  async _storeAlert(room, alert, ownerDoc, { sender = null } = {}) {
     const medical = medicalOf(ownerDoc);
     if (medical) alert.medical = medical;
     room.alerts.set(alert.alertId, alert);
-    await this.repo.addAlert(room.groupId, alert);
-    this._emit(room.groupId, 'ALERT', { alert: publicAlert(alert, { summary: this._summary(room.groupId, alert.alertId) }) });
+    // Stored first. A failed store is logged and the alert still goes out (safety first); the sender gets
+    // no echo, so the phone resends with the same clientId and the store is tried again.
+    let persisted = true;
+    try { await this.repo.addAlert(room.groupId, alert); } catch (e) {
+      persisted = false;
+      this._setUnsaved(room, alert.alertId, true);
+      this.log.warn('[convoys] alert store failed', e.message);
+    }
+    const delivered = this._durable(room.groupId, 'ALERT', { alert: publicAlert(alert, { summary: this._summary(room.groupId, alert.alertId) }) }, { sender, persisted });
     this.emit('fleet');
     try {
       this.emit('emergency', room.groupId, alert, 'RAISED', { owner: ownerInfo(ownerDoc) });
     } catch (e) { this.log.warn('[convoys] emergency hook failed', e.message); }
     this._lookupHospital(room, alert);
+    await delivered;
     return alert;
   }
 
@@ -713,8 +860,11 @@ class ConvoyManager extends EventEmitter {
     if (!a || a.resolved) {
       if (a) {
         delete a.medical;
-        await this.repo.resolveAlert(groupId, alertId, user.userId);
-        this._emit(groupId, 'ALERT_RESOLVED', { alertId, by: user.userId, status: statusOf(a) });
+        // A repeated resolve (the phone saw no echo): stored again, then echoed.
+        let persisted = true;
+        try { await this.repo.resolveAlert(groupId, alertId, user.userId); } catch (e) { persisted = false; this.log.warn('[convoys] resolve failed', e.message); }
+        if (persisted) this._setUnsaved(room, `res:${alertId}`, false);
+        await this._durable(groupId, 'ALERT_RESOLVED', { alertId, by: user.userId, status: statusOf(a) }, { sender: user.userId, persisted });
         this.emit('fleet');
         return true;
       }
@@ -764,12 +914,16 @@ class ConvoyManager extends EventEmitter {
       delete a.medical;
       // 3.16: a live link dies with the alert.
       const linkPatch = this._revokeLink(groupId, a, t, 'SYSTEM') ? { liveLink: a.liveLink } : {};
+      let persisted = true;
       await this.repo.resolveAlert(groupId, alertId, by, { status: next, resolveReason: a.resolveReason, lastUpdateAt: t, ...(a.netResponders ? { netResponders: a.netResponders } : {}), ...linkPatch })
-        .catch((e) => this.log.warn('[convoys] resolve failed', e.message));
+        .catch((e) => { persisted = false; this.log.warn('[convoys] resolve failed', e.message); });
+      if (!persisted) this._setUnsaved(room, `res:${alertId}`, true);
       this.emit('activity', groupId, { type: 'EMERGENCY_STATUS', alert: a });
-      this._emit(groupId, 'ALERT_RESOLVED', { alertId, by, status: next });
+      // Stored first, then the room and the peer gateway, then the echo to the rider who resolved it.
+      const delivered = this._durable(groupId, 'ALERT_RESOLVED', { alertId, by, status: next }, { sender: by && by !== 'SYSTEM' ? by : null, persisted });
       this.emit('fleet');
       this._hook('RESOLVED', groupId, a);
+      await delivered;
       return a;
     }
     await this.repo.updateAlert(groupId, alertId, { status: next, lastUpdateAt: t }).catch((e) => this.log.warn('[convoys] status save failed', e.message));
@@ -794,7 +948,7 @@ class ConvoyManager extends EventEmitter {
     if (!a) return false;
     const sum = this._summary(groupId, alertId) || {};
     const pos = sum.position || { lat: a.lat, lng: a.lng };
-    this.emit('capEvent', groupId, 'net1', {
+    const payload = {
       type: 'EMERGENCY_UPDATE', alertId, status: statusOf(a), lastUpdateAt: a.lastUpdateAt || a.timestamp || 0,
       lat: pos.lat, lng: pos.lng,
       network: sum.network || { state: 'OFF', stage: 0, notified: 0, onScene: false, responders: [] },
@@ -802,7 +956,9 @@ class ConvoyManager extends EventEmitter {
       // 3.16: known once the lookup answered (never delays anything).
       ...(a.nearestHospital ? { nearestHospital: a.nearestHospital } : {}),
       ts: now(),
-    });
+    };
+    this.emit('capEvent', groupId, 'net1', payload);
+    if (this.mirror) this.mirror.local(groupId, payload, { cap: 'net1' });
     return true;
   }
 
@@ -937,7 +1093,9 @@ class ConvoyManager extends EventEmitter {
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
     for (const rider of changed) {
-      room.dirty.delete(rider.userId);
+      // Its own document now; the room snapshot (laid over it on load) is rewritten with the next flush.
+      room.dirty.add(rider.userId);
+      this._schedulePersist(room);
       await this.repo.upsertRider(groupId, rider).catch((e) => this.log.warn('[convoys] role save failed', e.message));
       this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(rider) });
     }
@@ -991,6 +1149,7 @@ class ConvoyManager extends EventEmitter {
         if (!open.reportedBy) {
           open.reportedBy = user.userId; open.reportedByName = user.name;
           await this.repo.updateAlert(groupId, open.alertId, { reportedBy: user.userId, reportedByName: user.name }).catch(() => {});
+          if (this.mirror) this.mirror.replicate(groupId, { alerts: [open] });
         }
         return { alert: open, duplicate: true };
       }
@@ -1005,19 +1164,17 @@ class ConvoyManager extends EventEmitter {
         ...this._emergencyFields(room, { lat: base.lat, lng: base.lng, msg: { heading: msg.heading }, source: 'MEMBER_REPORT', alertType: 'RIDER_DOWN', t, status: 'ASSISTANCE_REQUESTED' }),
       };
       const doc = await withTimeout(this.repo.findUserById(subject.userId), 1500).catch(() => null);
-      return { alert: await this._storeAlert(room, alert, doc), duplicate: false };
+      await this._storeAlert(room, alert, doc, { sender: user.userId });
+      if (room.unsaved && room.unsaved.has(alert.alertId)) throw notStored();
+      return { alert, duplicate: false };
     }
     const alert = {
       ...base, userId: user.userId, userName: user.name,
       ...this._emergencyFields(room, { lat: base.lat, lng: base.lng, msg: { heading: msg.heading }, source: 'NEARBY_REPORT', alertType: 'RIDER_DOWN', t, status: 'ASSISTANCE_ARRIVED' }),
     };
     // The injured person is not the reporter: no medical info of the reporter is attached.
-    room.alerts.set(alert.alertId, alert);
-    await this.repo.addAlert(groupId, alert);
-    this._emit(groupId, 'ALERT', { alert: publicAlert(alert, { summary: this._summary(groupId, alert.alertId) }) });
-    this.emit('fleet');
-    try { this.emit('emergency', groupId, alert, 'RAISED', { owner: null }); } catch (e) { this.log.warn('[convoys] emergency hook failed', e.message); }
-    this._lookupHospital(room, alert);
+    await this._storeAlert(room, alert, null, { sender: user.userId });
+    if (room.unsaved && room.unsaved.has(alert.alertId)) throw notStored();
     return { alert, duplicate: false };
   }
 
@@ -1036,18 +1193,32 @@ class ConvoyManager extends EventEmitter {
     const map = { ...(a.responders || {}) };
     const t = now();
     const prev = map[user.userId];
+    const unsavedKey = `resp:${a.alertId}`;
+    // The same answer again after its store failed: stored now (the ACK waits for it).
+    const unchanged = async () => {
+      if (room.unsaved && room.unsaved.has(unsavedKey)) {
+        try { await this.repo.updateAlert(groupId, a.alertId, { responders: a.responders || {} }); } catch { throw notStored(); }
+        this._setUnsaved(room, unsavedKey, false);
+      }
+      return { changed: false, responders: respondersList(map) };
+    };
     if (k === 'CANCEL') {
-      if (!prev) return { changed: false, responders: respondersList(map) };
+      if (!prev) return unchanged();
       delete map[user.userId];
     } else {
-      if (prev && prev.kind === k) return { changed: false, responders: respondersList(map) };
+      if (prev && prev.kind === k) return unchanged();
       if (!prev && Object.keys(map).length >= config.sosRespondersMax) throw new ConvoyError('Enough riders are already responding.', 409, 'RESPONDERS_FULL');
       map[user.userId] = { userId: user.userId, name: user.name, kind: k, at: t };
     }
     a.responders = map;
-    await this.repo.updateAlert(groupId, a.alertId, { responders: map });
+    let persisted = true;
+    try { await this.repo.updateAlert(groupId, a.alertId, { responders: map }); } catch (e) {
+      persisted = false;
+      this.log.warn('[convoys] SOS response store failed', e.message);
+    }
+    this._setUnsaved(room, unsavedKey, !persisted);
     const responders = respondersList(map);
-    this._emit(groupId, 'SOS_RESPONSE', { alertId: a.alertId, userId: user.userId, name: user.name, kind: k === 'CANCEL' ? null : k, at: t, responders });
+    await this._durable(groupId, 'SOS_RESPONSE', { alertId: a.alertId, userId: user.userId, name: user.name, kind: k === 'CANCEL' ? null : k, at: t, responders }, { sender: user.userId, persisted });
     this.emit('activity', groupId, { type: 'SOS_RESPONSE', user, alert: a, kind: k, at: t, responders });
     this.emit('fleet');
     // 3.15 lifecycle: own-group responders move the emergency too.
@@ -1060,6 +1231,7 @@ class ConvoyManager extends EventEmitter {
       && !(this.network && this.network.hasActiveResponder(groupId, a.alertId))) {
       await this.setEmergencyStatus(groupId, a.alertId, 'ASSISTANCE_REQUESTED', { by: user.userId });
     }
+    if (!persisted) throw notStored();
     return { changed: true, responders };
   }
 
@@ -1107,6 +1279,7 @@ class ConvoyManager extends EventEmitter {
       room.riders.set(userId, next);
       room.dirty.add(userId);
       this._schedulePersist(room);
+      if (this.mirror) this.mirror.replicate(room.groupId, { riders: [next] });
       if (cur.phone !== next.phone || cur.emergencyContact !== next.emergencyContact || cur.emergencyContactName !== next.emergencyContactName) {
         this._emit(room.groupId, 'RIDER_UPDATE', { rider: publicRider(next) });
       }
@@ -1125,8 +1298,8 @@ class ConvoyManager extends EventEmitter {
       if (now() - at <= config.clientIdTtlH * 3600000) return true;
       map.delete(k);
     }
-    // Chat survives a gateway restart: the stored messages carry their clientId.
-    if (type === 'CHAT') return room.messages.some((m) => m.senderId === userId && m.clientId === clientId);
+    // Chat survives a gateway restart: the stored messages carry their clientId (one not stored yet is not "seen").
+    if (type === 'CHAT') return room.messages.some((m) => m.senderId === userId && m.clientId === clientId && !(room.unsaved && room.unsaved.has(m.messageId)));
     return false;
   }
 
@@ -1135,6 +1308,7 @@ class ConvoyManager extends EventEmitter {
     const k = `${userId}:${clientId}`;
     map.delete(k);
     map.set(k, now());
+    if (this.mirror) this.mirror.replicate(room.groupId, { cids: [[k, map.get(k)]] });
     const cutoff = now() - config.clientIdTtlH * 3600000;
     for (const [key, at] of map) { if (at >= cutoff && map.size <= config.clientIdCache) break; map.delete(key); }
   }
@@ -1595,7 +1769,7 @@ class ConvoyManager extends EventEmitter {
       if (mentions(room.meta, id)) { room.meta = scrubConvoyMeta(room.meta, id); touched = true; }
       if (touched) {
         await this.repo.saveConvoyMeta(room.meta);
-        await this.flushRoom(room).catch(() => {});
+        await this.flushRoom(room, { perRider: true }).catch(() => {});
       }
     }
     return live;
@@ -1658,6 +1832,9 @@ class ConvoyManager extends EventEmitter {
     room.meta.tripHeadUserId = targetUserId;
     const newHead = room.riders.get(targetUserId);
     newHead.role = 'LEAD';
+    room.dirty.add(targetUserId);
+    if (currentHeadId) room.dirty.add(currentHeadId);
+    this._schedulePersist(room);
     await this.repo.upsertRider(groupId, newHead);
     this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(newHead) });
 
@@ -1849,6 +2026,13 @@ function clientRiderInput(p) {
 }
 
 function stripKey(o) { const { key, ...rest } = o; return rest; }
+
+/** Thrown when a durable record could not be stored: the sender gets nothing (no ERROR, no ACK) and resends. */
+function notStored() {
+  const e = new ConvoyError('Not stored yet.', 503, 'NOT_STORED');
+  e.silent = true;
+  return e;
+}
 
 function publicRider(r) {
   // Everything the convoy-mates need; nothing they don't.

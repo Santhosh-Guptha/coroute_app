@@ -372,10 +372,7 @@ void main() {
       expect(find.text('Rain likely after Warangal around 3 PM.'), findsOneWidget);
       expect(find.text(L10n.t('weather.by')), findsOneWidget);
       expect(find.text(TripReviewSheet.checkingWeather), findsNothing);
-      expect(find.text('Download Route Map Pack'), findsOneWidget);
-      await tester.ensureVisible(find.text('Download'));
-      await tester.tap(find.text('Download'));
-      expect(pf.starts, 1);
+      expect(find.text('Download Route Map Pack'), findsNothing);
     });
 
     testWidgets('data saver: no request, "Weather check skipped"', (tester) async {

@@ -1,0 +1,81 @@
+# /etc/caddy/Caddyfile on VM1 (LIVE node, 10.0.0.70). Installed by deploy/setup_node.sh (NODE_ROLE=live).
+#
+#   LIVE routes (rides, sockets, SOS, live links, guardian)  -> 127.0.0.1:3000 (this VM)
+#   everything else (website, auth, payments, admin, ...)     -> 10.0.0.99:3000 (VM2), this VM as fallback
+#
+# The LIVE matcher is generated from deploy/route_split.md: node deploy/gen_caddy_routes.js
+# Needs a Caddy build with github.com/caddy-dns/duckdns (setup_node.sh installs one); DUCKDNS_TOKEN comes
+# from /run/coroute/caddy.env (deploy/fetch_secrets.sh, systemd drop-in caddy.service.d/coroute.conf).
+# Validate: caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile   Reload: systemctl reload caddy
+{
+	# NLB health checks connect by IP without SNI: they get this site's certificate.
+	default_sni coroute.duckdns.org
+	# Client IPs: the OCI NLB preserves the source IP, so Caddy sees the real client and sets
+	# X-Forwarded-For itself (an incoming X-Forwarded-For is ignored: no trusted_proxies here).
+}
+
+(coroute_tls) {
+	tls {
+		dns duckdns {env.DUCKDNS_TOKEN}
+		resolvers 1.1.1.1 8.8.8.8
+		protocols tls1.2 tls1.3
+	}
+}
+
+(coroute_common) {
+	encode zstd gzip
+	# The gateway (helmet) sets CSP, HSTS, nosniff, frame and referrer policies per response; these are the
+	# same values, applied only where a response lacks them (static files, proxy errors).
+	header {
+		defer
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		?X-Content-Type-Options nosniff
+		?X-Frame-Options DENY
+		?Referrer-Policy no-referrer
+		-Server
+		-X-Powered-By
+	}
+}
+
+coroute.duckdns.org {
+	import coroute_tls
+	import coroute_common
+
+	# BEGIN GENERATED LIVE ROUTES (deploy/gen_caddy_routes.js from deploy/route_split.md; do not edit by hand)
+	@live expression `path_regexp('(?i)^(?:/ws|/api/guardian(?:/.*)?|/api/admin/users(?:/.*)?)/?$') || (method('DELETE') && path_regexp('(?i)^(?:/api/convoys/[^/]+/riders/[^/]+|/api/v1/sos/live-links|/api/me|/api/membership/members/[^/]+|/api/admin/convoys/[^/]+)/?$')) || (method('GET', 'HEAD') && path_regexp('(?i)^(?:/api/health|/api/health/live|/e/[^/]+|/api/public/live/[^/]+|/join/[^/]+|/watch|/watch-sw[.]js|/api/convoys/active|/api/convoys/[^/]+|/api/convoys/[^/]+/emergency-roster|/api/admin/fleet|/api/admin/groups|/api/admin/emergencies|/api/admin/safety|/api/admin/feature-analytics|/api/admin/stats|/api/admin/analytics(?:/.*)?)/?$')) || (method('PATCH') && path_regexp('(?i)^(?:/api/me)/?$')) || (method('POST') && path_regexp('(?i)^(?:/api/convoys|/api/convoys/join|/api/convoys/[^/]+/leave|/api/convoys/[^/]+/trip-head|/api/convoys/[^/]+/status|/api/convoys/[^/]+/tracks|/api/v1/sos/dispatch-external|/api/sos/dispatch-external|/api/geo/essentials|/api/admin/emergencies/[^/]+/[^/]+/contact|/api/admin/broadcast)/?$')) || (method('POST', 'DELETE') && path_regexp('(?i)^(?:/api/convoys/[^/]+/alerts/[^/]+/live-link)/?$'))`
+	# END GENERATED LIVE ROUTES
+
+	handle @live {
+		reverse_proxy 127.0.0.1:3000 {
+			# WebSockets are proxied natively; keep them open for 5 min across a config reload.
+			stream_close_delay 5m
+			flush_interval -1
+		}
+	}
+
+	handle {
+		# WEB: VM2 first, this VM when VM2 is down (failed dial, or failed health check).
+		reverse_proxy 10.0.0.99:3000 127.0.0.1:3000 {
+			lb_policy first
+			lb_try_duration 5s
+			lb_try_interval 250ms
+			fail_duration 30s
+			max_fails 1
+			health_uri /api/health
+			health_interval 10s
+			health_timeout 3s
+			health_status 2xx
+			flush_interval -1
+		}
+	}
+}
+
+# Requests by IP (the NLB health check: HTTPS /api/health/live): only the health endpoint answers.
+:443 {
+	handle /api/health/live {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle {
+		respond 404
+	}
+}

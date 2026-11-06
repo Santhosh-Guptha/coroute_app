@@ -205,7 +205,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
-    const target = config.appStoreUrl || config.iosTestFlightUrl || config.iosIpaUrl || `${originOf(req)}/get#ios`;
+    const target = config.appStoreUrl || config.iosTestFlightUrl || config.iosIpaUrl || `${originOf(req)}/get`;
     res.redirect(302, target);
   });
   app.get('/robots.txt', (req, res) => res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${originOf(req)}/sitemap.xml\n`));
@@ -351,6 +351,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await convoys.flushAll();
     await timeline.idle();
     await audit.flush().catch(() => {});
+    if (typeof tracks.flush === 'function') await tracks.flush().catch(() => {});
     await leaseStopped.catch(() => {});
     await new Promise((resolve) => server.close(resolve));
   }

@@ -44,11 +44,11 @@
           <p class="t-lead">The group ride app for long-distance touring: live convoy map, push-to-talk, crash detection and guardians. Up to __MAX_RIDERS__ riders in one ride group.</p>
           <div class="cluster cluster--16">
             <a class="btn btn--primary btn--lg" href="/download"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
-            <a class="btn btn--secondary btn--lg" href="/download/ios" id="ios-download-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>Download for iOS</a>
+            <!--ios--><a class="btn btn--secondary btn--lg" href="/download/ios" id="ios-download-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>Download for iOS</a><!--/ios-->
             <a class="btn btn--ghost btn--lg" href="/download/32bit">32-bit Android</a>
           </div>
           <div class="pg-dl__meta">
-            <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Android 6.0+ &amp; iOS 14.0+</span>
+            <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><!--ios-->Android 6.0+ &amp; iOS 14.0+<!--/ios--><!--no-ios-->Android 6.0+<!--/no-ios--></span>
             <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Version __APP_VERSION__</span>
             <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>No trackers or analytics SDKs</span>
           </div>
@@ -56,8 +56,8 @@
         <aside class="pg-dl__card" aria-labelledby="which-title" data-reveal>
           <h2 class="t-h4" id="which-title">Which one do I need?</h2>
           <p class="t-small t-muted">For Android, tap <strong style="color:var(--c-text)">Download for Android</strong> on almost any modern phone (64-bit). Older phones can use the 32-bit download.</p>
-          <p class="t-small t-muted">For iPhone, tap <strong style="color:var(--c-text)">Download for iOS</strong> for TestFlight beta or App Store installation.</p>
-          <p class="pg-dl__alt">Not sure? Try the main download first. Nothing breaks if it does not install.</p>
+<!--ios-->          <p class="t-small t-muted">For iPhone, tap <strong style="color:var(--c-text)">Download for iOS</strong> for TestFlight beta or App Store installation.</p>
+<!--/ios-->          <p class="pg-dl__alt">Not sure? Try the main download first. Nothing breaks if it does not install.</p>
         </aside>
       </div>
     </div>
@@ -79,7 +79,7 @@
         <div><dt>Phone</dt><dd>Android 6.0 or newer<span>With GPS. Every rider in the group needs the app.</span></dd></div>
         <div><dt>Account</dt><dd>Phone number, or sign in with Google<span>Plus your bike number (or pillion) and an emergency contact before your first group ride.</span></dd></div>
         <div><dt>Connection</dt><dd>Mobile data during the ride<span>Short gaps are fine. Your route is kept on the phone and sent later.</span></dd></div>
-        <div><dt>iPhone</dt><dd>Not available<span>No iOS version yet.</span></dd></div>
+        <div><dt>iPhone</dt><dd><!--ios-->iOS 14.0 or newer<span>From the App Store or TestFlight.</span><!--/ios--><!--no-ios-->Not available<span>No iOS version yet.</span><!--/no-ios--></dd></div>
       </dl>
     </div>
   </section>
@@ -168,7 +168,7 @@
             <li><span>Tap <strong>Install</strong>, then <strong>Open</strong>.</span></li>
             <li><span>Sign up, add your emergency contact and guardians, and run the pre-ride checklist.</span></li>
           </ol>
-          <div class="stack stack--12" id="ios" style="margin-top:var(--sp-24)">
+<!--ios-->          <div class="stack stack--12" id="ios" style="margin-top:var(--sp-24)">
             <p class="eyebrow">iPhone and iPad</p>
             <h2 class="t-h3" id="install-ios-title">Installing on iOS</h2>
             <p class="t-small t-muted">iOS devices install apps through Apple TestFlight, the App Store, or developer sideloading.</p>
@@ -178,7 +178,7 @@
             <li><span>If using TestFlight, install Apple TestFlight from the App Store and tap Start Testing.</span></li>
             <li><span>For offline IPA installation, install the package using Xcode or AltStore with your Apple ID.</span></li>
             <li><span>Open CoRoute, allow Location (select Always Allow for safety alarms while the phone is locked), Motion and Notifications.</span></li>
-          </ol>
+          </ol><!--/ios-->
         </div>
         <div class="stack stack--24" data-reveal>
           <div class="card">

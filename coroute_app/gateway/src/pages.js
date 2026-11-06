@@ -67,6 +67,10 @@ function loadSite(publicDir) {
   const pkgVersion = require('../package.json').version;
   const appVersion = pkgVersion.replace(/\.0$/, '');
 
+  // iPhone download blocks: <!--ios-->..<!--/ios--> shown only when an App Store / TestFlight / IPA link is
+  // configured; <!--no-ios-->..<!--/no-ios--> shown otherwise (read once at startup).
+  const cfg = require('./config');
+  const iosAvailable = Boolean(cfg.appStoreUrl || cfg.iosTestFlightUrl || cfg.iosIpaUrl);
   const cache = new Map();
   for (const file of [...new Set([...Object.values(SITE_PAGES), ...SPECIAL_PAGES])]) {
     if (OPTIONAL_PAGES.has(file) && !fs.existsSync(path.join(publicDir, file))) continue;
@@ -76,6 +80,7 @@ function loadSite(publicDir) {
     });
     const page = (html.match(/<body\b[^>]*\bdata-page="([a-z0-9-]+)"/) || [])[1];
     if (page) html = html.replaceAll(`data-nav="${page}"`, `data-nav="${page}" aria-current="page"`);
+    html = applyPlatformBlocks(html, iosAvailable);
     html = html.replaceAll('__ASSET_V__', assetVersion).replaceAll('__APP_VERSION__', appVersion);
     cache.set(file, versionAssets(html, file));
   }
@@ -97,6 +102,13 @@ function loadSite(publicDir) {
   };
 }
 
+/** Keeps or strips the <!--ios--> / <!--no-ios--> blocks of a page. */
+function applyPlatformBlocks(html, iosAvailable) {
+  return html
+    .replace(/<!--ios-->([\s\S]*?)<!--\/ios-->/g, (m, inner) => (iosAvailable ? inner : ''))
+    .replace(/<!--no-ios-->([\s\S]*?)<!--\/no-ios-->/g, (m, inner) => (iosAvailable ? '' : inner));
+}
+
 /** True for paths that must never be served as static files (partials, templates, raw page sources). */
 function isHiddenPath(rawPath) {
   let p;
@@ -105,4 +117,4 @@ function isHiddenPath(rawPath) {
   return p.startsWith('/partials/') || p === '/partials' || /\/_[^/]*$/.test(p) || p.endsWith('.html');
 }
 
-module.exports = { loadSite, isHiddenPath, SITE_PAGES, SITEMAP };
+module.exports = { loadSite, isHiddenPath, applyPlatformBlocks, SITE_PAGES, SITEMAP };

@@ -22,7 +22,7 @@ async function burst(env, ip, n) {
 test('default: loopback (this VM\'s Caddy) is trusted; rate limits key on the client from X-Forwarded-For', async (t) => {
   assert.deepEqual(config.trustProxy, ['loopback']);
   const env = await boot();
-  t.after(() => env.close());
+  t.after(() => env.gw.shutdown());
   const a = await burst(env, '203.0.113.10', 6);
   assert.ok(a.slice(0, 5).every((s) => s !== 429), JSON.stringify(a));
   assert.equal(a[5], 429, 'sixth message from the same client is limited');
@@ -38,7 +38,7 @@ test('VM2: a peer not in TRUST_PROXY cannot choose its address with X-Forwarded-
   config.trustProxy = ['10.0.0.70']; // only VM1's Caddy; this test connects from 127.0.0.1
   t.after(() => { config.trustProxy = saved; });
   const env = await boot();
-  t.after(() => env.close());
+  t.after(() => env.gw.shutdown());
   const statuses = [];
   for (let i = 0; i < 6; i++) statuses.push(...await burst(env, `203.0.113.${20 + i}`, 1));
   assert.equal(statuses[5], 429, 'all six counted against the real peer 127.0.0.1');

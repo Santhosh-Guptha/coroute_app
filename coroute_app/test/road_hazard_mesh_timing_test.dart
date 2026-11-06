@@ -225,19 +225,11 @@ void main() {
       FeatureGates.forceAllUnlocked = true;
     });
 
-    test('TEST-ENT-01: Broadcast is restricted to Road Captain & Tour Operator', () {
-      FeatureGates.forceAllUnlocked = false;
-
-      // Community tier: CANNOT broadcast
-      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast, SubscriptionTier.community), isFalse);
-
-      // Pro Rider tier: CANNOT broadcast
-      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast, SubscriptionTier.proRider), isFalse);
-
-      // Road Captain tier: UNLOCKED to broadcast
+    test('TEST-ENT-01: Broadcast is available in single plan for all riders', () {
+      // Single plan architecture: broadcast is available for all riders
+      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast, SubscriptionTier.community), isTrue);
+      expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast, SubscriptionTier.proRider), isTrue);
       expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast, SubscriptionTier.roadCaptain), isTrue);
-
-      // Tour Operator tier: UNLOCKED to broadcast
       expect(FeatureGates.isUnlocked(Feature.roadHazardBroadcast, SubscriptionTier.tourOperator), isTrue);
     });
 

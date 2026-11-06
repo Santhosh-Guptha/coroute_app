@@ -114,8 +114,8 @@ class TrackStore {
     p.then(done, done);
     if (this.queue.length >= this.maxBatch) this._flushNow();
     else if (!this.timer) {
+      // Not unref'd: it only exists while chunks wait (at most flushMs), and they must be written.
       this.timer = setTimeout(() => this._flushNow(), this.flushMs);
-      if (this.timer.unref) this.timer.unref();
     }
     return p;
   }

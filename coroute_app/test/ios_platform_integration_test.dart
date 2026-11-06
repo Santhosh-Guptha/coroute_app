@@ -4,7 +4,6 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:coroute_app/core/config/feature_gates.dart';
 import 'package:coroute_app/core/constants/ride_notification_constants.dart';
 import 'package:coroute_app/data/services/alarm_notifier.dart';
 import 'package:coroute_app/data/services/phone_call_service.dart';

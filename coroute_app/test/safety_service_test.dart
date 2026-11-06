@@ -893,15 +893,10 @@ void main() {
     });
 
     testWidgets('the night flag comes from fixes, at most every 5 min or after a 20 km move', (tester) async {
-      SharedPreferences.setMockInitialValues({});
+      await setUp0(tester);
       now = t0; // 2023-11-14 22:13 UTC: 3:43 AM in Hyderabad, dark
-      port = FakePort(() => now);
-      accel = FakeAccel();
-      sms = FakeSms();
-      settings = SettingsService();
-      await settings.load();
       final voice = VoiceService(settings, engine: SilentEngine(), clock: () => now);
-      safety = SafetyService.forTest(port, settings, accel: accel, sms: sms, clock: () => now, voice: voice);
+      safety = SafetyService.forTest(port, settings, accel: accel, sms: sms, clock: () => now, voice: voice, soloFixes: () => soloFixes.stream);
       port.convoy = ride();
       port.changed();
       expect(safety.isDark, isFalse);
@@ -972,13 +967,8 @@ void main() {
     });
 
     testWidgets('a route map still being saved is cancelled when the ride ends (no downloads after the ride)', (tester) async {
-      SharedPreferences.setMockInitialValues({});
+      await setUp0(tester);
       now = t0;
-      port = FakePort(() => now);
-      accel = FakeAccel();
-      sms = FakeSms();
-      settings = SettingsService();
-      await settings.load();
       late Directory tmp;
       late TilePrefetcher tiles;
       var served = 0;
@@ -992,7 +982,7 @@ void main() {
           return http.Response.bytes(Uint8List.fromList(List<int>.filled(10, 1)), 200);
         });
         tiles = TilePrefetcher(cache, client: client, clock: () => now, spacing: Duration.zero);
-        safety = SafetyService.forTest(port, settings, accel: accel, sms: sms, clock: () => now, tiles: tiles);
+        safety = SafetyService.forTest(port, settings, accel: accel, sms: sms, clock: () => now, tiles: tiles, soloFixes: () => soloFixes.stream);
         port.convoy = ride();
         port.changed();
         // The rider tapped "Save route map" (any network); the job is long.

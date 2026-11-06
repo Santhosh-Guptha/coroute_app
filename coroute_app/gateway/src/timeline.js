@@ -446,6 +446,7 @@ class TimelineEngine {
     const t = this.now();
     for (const [gid, room] of this.convoys.rooms) {
       if (!['STARTED', 'PAUSED'].includes(room.meta.tripStatus)) continue;
+      if (this.convoys.passive && this.convoys.passive(gid)) continue; // run by the peer gateway (src/mirror.js)
       const st = await this._state(gid);
       const limit = (room.meta.offlineAlertMinutes || config.offlineAlertMinutes) * 60000;
       const typical = this._typicalGap(st);

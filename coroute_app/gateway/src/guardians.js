@@ -1,6 +1,6 @@
 'use strict';
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
+const { defaultHasher } = require('./password_hash');
 const { featurePolicy } = require('./feature_policy');
 
 const HOUR = 3600000;
@@ -80,7 +80,7 @@ class GuardianService {
     const grant = { grantId: crypto.randomUUID(), tokenHash: hash(secret), creatorId: userId,
       subjectId: userId, subject, subjects, groupId, level: input.level,
       label: (input.label || '').trim(), joinedAt: member.joinedAt, createdAt: now, expiresAt: Math.min(expiresAt, now + policy.guardianMaxHours * HOUR) };
-    if (input.pin) grant.pinHash = await bcrypt.hash(input.pin, 10);
+    if (input.pin) grant.pinHash = await defaultHasher().hash(input.pin);
     await this.repo.createGuardianGrant(grant); // Do not issue a token if persistence fails.
     return { ...summary(grant, false, now), token: secret };
   }
@@ -177,7 +177,7 @@ class GuardianService {
         const error = new GuardianError(f.total >= 50 ? 'Too many wrong PINs. Ask the rider for a new link.' : 'Too many wrong PINs. Try again in 15 minutes.', 429);
         error.code = 'GUARDIAN_PIN_LOCKED'; throw error;
       }
-      if (typeof pin !== 'string' || !/^[0-9]{4,8}$/.test(pin) || !await bcrypt.compare(pin, grant.pinHash)) {
+      if (typeof pin !== 'string' || !/^[0-9]{4,8}$/.test(pin) || !(await defaultHasher().verify(pin, grant.pinHash)).ok) {
         if (typeof pin === 'string' && pin) {
           const cur = f && now - f.at < 15 * 60000 ? f : { n: 0, at: now, total: f ? f.total : 0 };
           cur.n++; cur.total = (cur.total || 0) + 1;

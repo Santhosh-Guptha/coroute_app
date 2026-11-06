@@ -109,5 +109,6 @@ void main() {
     final file = File('../docs/ui-audit/screenshots/01_app_entry/SCR-001_splash_initial.png');
     expect(file.existsSync(), isTrue);
     debugPrint('AUDIT_CAPTURE_TEST_SUCCESS: ${file.path} (${file.lengthSync()} bytes)');
+    convoy.dispose();
   });
 }

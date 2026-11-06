@@ -65,7 +65,7 @@ test('privacy, terms, 404 page, robots, sitemap, static assets, download redirec
   assert.equal(dl32.headers.get('location'), `${base}/coroute-32bit.apk`);
   const dlIos = await fetch(base + '/download/ios', { redirect: 'manual' });
   assert.equal(dlIos.status, 302);
-  assert.equal(dlIos.headers.get('location'), `${base}/get#ios`);
+  assert.equal(dlIos.headers.get('location'), `${base}/get`); // no iOS link configured in tests
 });
 
 test('internal documentation is not served; public pages follow the site rules', async () => {
@@ -102,7 +102,9 @@ test('internal documentation is not served; public pages follow the site rules',
   const get = await (await fetch(base + '/get')).text();
   assert.ok(get.includes(`Up to ${config.maxConvoyRiders} riders`), 'max riders from config');
   assert.ok(!get.includes('__MAX_RIDERS__'));
-  assert.ok(get.includes('href="/download"') && get.includes('href="/download/32bit"') && get.includes('href="/download/ios"'), 'download page links all builds');
+  assert.ok(get.includes('href="/download"') && get.includes('href="/download/32bit"'), 'download page links all Android builds');
+  // The iOS button appears only when APP_STORE_URL / IOS_TESTFLIGHT_URL / IOS_IPA_URL is set (website_ios_blocks.test.js).
+  assert.equal(get.includes('href="/download/ios"'), Boolean(config.appStoreUrl || config.iosTestFlightUrl || config.iosIpaUrl));
 });
 
 test('site pages: shared shell, unique head tags, active nav, no placeholders left', async () => {

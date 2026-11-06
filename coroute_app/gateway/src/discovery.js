@@ -160,7 +160,8 @@ class Discovery {
   tick(now = this.clock()) {
     if (!this.enabled) return;
     const eligible = [];
-    for (const [gid, room] of this.convoys.rooms) if (this._eligible(room)) eligible.push([gid, room]);
+    // Rooms run by the peer gateway (src/mirror.js) are paired there.
+    for (const [gid, room] of this.convoys.rooms) if (this._eligible(room) && !(this.convoys.passive && this.convoys.passive(gid))) eligible.push([gid, room]);
     if (eligible.length < 2 && !this.encounters.size) return;
     const states = new Map();
     for (const [gid, room] of eligible) { const s = this._groupState(gid, room, now); if (s) states.set(gid, s); }

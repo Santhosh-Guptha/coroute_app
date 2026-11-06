@@ -1075,6 +1075,7 @@ class SafetyNetwork extends EventEmitter {
     this.lastPrune = now;
     // Open alerts without an incident (dropped by the incident cap) still expire.
     for (const [gid, room] of this.convoys.rooms) {
+      if (this.convoys.passive && this.convoys.passive(gid)) continue; // run by the peer gateway (src/mirror.js)
       for (const a of room.alerts.values()) {
         if (!a.resolved && !this.byAlert.has(a.alertId) && now - (a.lastUpdateAt || a.timestamp || 0) >= config.emergencyExpireMin * 60000) {
           this.convoys.setEmergencyStatus(gid, a.alertId, 'EXPIRED', { by: 'SYSTEM' }).catch(() => {});

@@ -268,11 +268,9 @@ void main() {
       expect(snapshot.totalPackSpreadM, isNotNull);
       expect(snapshot.totalPackSpreadM!, closeTo(1113.0, 30.0));
 
-      // Test FeatureGate entitlement hook
-      FeatureGates.forceAllUnlocked = false;
-      FeatureGates.activeTier = SubscriptionTier.community; // Community does not have totalConvoySpreadAlert
-      final lockedSpread = RideFacts.totalPackSpreadM(convoy);
-      expect(lockedSpread, isNull, reason: 'Gated when totalConvoySpreadAlert is locked');
+      // Single-plan architecture: all features are included for all riders
+      final activeSpread = RideFacts.totalPackSpreadM(convoy);
+      expect(activeSpread, isNotNull);
 
       // Cleanup
       FeatureGates.forceAllUnlocked = true;

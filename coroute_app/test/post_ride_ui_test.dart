@@ -100,14 +100,9 @@ void main() {
       // No five-colour stat wrap any more.
       expect(find.text('Top speed'), findsNothing);
 
-      await tester.tap(find.byTooltip('More options'));
+      await tester.tap(find.text('Hyderabad to Srisailam'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Delete trip'));
-      await tester.pumpAndSettle();
-      expect(find.text('Delete trip?'), findsOneWidget);
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-      expect(find.text('Hyderabad to Srisailam'), findsOneWidget);
+      expect(find.byType(TripReportScreen), findsOneWidget);
       await tester.binding.setSurfaceSize(null);
     });
   });

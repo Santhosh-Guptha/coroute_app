@@ -1,7 +1,14 @@
+# /etc/systemd/system/coroute-gateway.service  (installed by deploy/setup_node.sh)
+# Secrets: /run/coroute/secrets.env (tmpfs, written from OCI Vault by coroute-secrets.service).
+# Settings: /etc/coroute/gateway.env (no secrets). A key in both: the secrets file wins (read last).
 [Unit]
-Description=CoRoute real-time gateway
-After=network-online.target
+Description=CoRoute gateway
+Documentation=file:///opt/coroute/gateway/README.md
 Wants=network-online.target
+After=network-online.target coroute-secrets.service
+Requires=coroute-secrets.service
+# Restart forever (a crash loop during a DB outage must not leave the node dead).
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -9,21 +16,45 @@ User=coroute
 Group=coroute
 WorkingDirectory=/opt/coroute/gateway
 EnvironmentFile=/etc/coroute/gateway.env
+EnvironmentFile=/run/coroute/secrets.env
+Environment=NODE_OPTIONS=--max-old-space-size=384
 ExecStart=/usr/bin/node src/server.js
 Restart=always
-RestartSec=3
+RestartSec=2
+# SIGTERM -> server.js drains: flushes rides, releases job leases, closes sockets (all within 20 s).
 KillSignal=SIGTERM
 TimeoutStopSec=20
+# 1 GB micro VM: Node heap 384 MB + scrypt (2 x 32 MB) + buffers. Above 700 MB the kernel kills it, then restart.
+MemoryHigh=640M
+MemoryMax=700M
+LimitNOFILE=65535
+TasksMax=512
 # Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/opt/coroute/gateway
-LimitNOFILE=65536
-# Logs go to journald; journald rotates them for you (zero maintenance)
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+# The code is read-only; only data directories are writable (review photos on disk, local state).
+ReadWritePaths=-/opt/coroute/gateway/data -/var/lib/coroute
+UMask=0027
 StandardOutput=journal
 StandardError=journal
+SyslogIdentifier=coroute-gateway
 
 [Install]
 WantedBy=multi-user.target

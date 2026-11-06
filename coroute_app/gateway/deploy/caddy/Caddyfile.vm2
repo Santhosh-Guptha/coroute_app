@@ -1,0 +1,50 @@
+# /etc/caddy/Caddyfile on VM2 (WEB + mirror node, 10.0.0.99). Installed by deploy/setup_node.sh (NODE_ROLE=web).
+#
+# VM2 is the NLB *backup*: it receives public traffic only when VM1 fails its health check, and then serves
+# everything (LIVE and WEB) from its own gateway. In normal operation VM1's Caddy reaches this VM's gateway
+# directly on 10.0.0.99:3000 (VCN only; the gateway trusts X-Forwarded-For from 10.0.0.70, see TRUST_PROXY).
+#
+# Needs a Caddy build with github.com/caddy-dns/duckdns; DUCKDNS_TOKEN from /run/coroute/caddy.env.
+# DuckDNS holds ONE TXT record: issue this VM's certificate first, then VM1's (renewals then stay apart).
+{
+	default_sni coroute.duckdns.org
+}
+
+(coroute_tls) {
+	tls {
+		dns duckdns {env.DUCKDNS_TOKEN}
+		resolvers 1.1.1.1 8.8.8.8
+		protocols tls1.2 tls1.3
+	}
+}
+
+(coroute_common) {
+	encode zstd gzip
+	header {
+		defer
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		?X-Content-Type-Options nosniff
+		?X-Frame-Options DENY
+		?Referrer-Policy no-referrer
+		-Server
+		-X-Powered-By
+	}
+}
+
+coroute.duckdns.org {
+	import coroute_tls
+	import coroute_common
+	reverse_proxy 127.0.0.1:3000 {
+		stream_close_delay 5m
+		flush_interval -1
+	}
+}
+
+:443 {
+	handle /api/health/live {
+		reverse_proxy 127.0.0.1:3000
+	}
+	handle {
+		respond 404
+	}
+}

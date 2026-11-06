@@ -30,7 +30,7 @@ test('config: SETTINGS_ENCRYPTION_KEY is 32 bytes; JWT_SECRET_PREVIOUS is loaded
 
 test('JWT_SECRET_PREVIOUS: accepted for verification only, and the response moves the client to the new secret', async (t) => {
   const env = await boot();
-  t.after(() => env.close());
+  t.after(() => env.gw.shutdown());
   const u = await env.register('Rotate Rider', 'rotate@coroute.test');
   const claims = jwt.decode(u.token);
   assert.ok(jwt.verify(u.token, config.jwtSecret), 'new tokens are signed with JWT_SECRET');

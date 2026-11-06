@@ -125,24 +125,40 @@ class SodaClient {
   }
 
   /**
-   * Every document of a collection, page by page (GET listing, ordered by key on ORDS), as
-   * an async iterator of [{key, value}] pages. Used by backups; never stops before `hasMore` is false.
+   * Every document of a collection, page by page, as an async iterator of [{key, value}] pages (backups).
+   * Keyset paging on the key (`fromID`, the listing is ordered by key), so documents inserted or deleted
+   * meanwhile never make it skip others. If the server ignores `fromID`, it falls back to offset paging
+   * (duplicates are dropped by key).
    */
   async *scan(collection, { pageSize = 500 } = {}) {
-    const limit = Math.min(Math.max(pageSize, 1), 1000);
+    const limit = Math.min(Math.max(pageSize, 2), 1000);
+    const coll = `/${encodeURIComponent(collection)}`;
     const seen = new Set();
-    for (let offset = 0; ; ) {
-      const r = await this._request('GET', `/${encodeURIComponent(collection)}?limit=${limit}&offset=${offset}&fields=all`);
-      const items = r?.items || [];
+    let keyset = true;
+    let lastKey = null;
+    let offset = 0;
+    for (let guard = 0; guard < 1e6; guard++) {
+      const path = keyset && lastKey
+        ? `${coll}?fromID=${encodeURIComponent(lastKey)}&limit=${limit + 1}&fields=all`
+        : `${coll}?limit=${limit}&offset=${offset}&fields=all`;
+      const r = await this._request('GET', path);
+      const items = (r?.items || []).filter((it) => it && it.id);
+      if (keyset && lastKey && items.length && items[0].id !== lastKey) {
+        keyset = false; // fromID not honoured: continue by offset from where we are
+        offset = seen.size;
+        continue;
+      }
       const page = [];
       for (const it of items) {
-        if (!it?.id || seen.has(it.id)) continue;
+        if (seen.has(it.id)) continue;
         seen.add(it.id);
         page.push({ key: it.id, value: it.value });
       }
       if (page.length) yield page;
+      const more = r?.hasMore === true || (r?.hasMore === undefined && items.length >= (keyset && lastKey ? limit + 1 : limit));
+      if (!page.length || !more) return;
+      lastKey = page[page.length - 1].key;
       offset += items.length;
-      if (!items.length || r?.hasMore === false || (r?.hasMore === undefined && items.length < limit)) return;
     }
   }
 
