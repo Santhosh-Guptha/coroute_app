@@ -41,15 +41,17 @@
       <div class="pg-dl">
         <div class="page-hero__inner">
           <p class="eyebrow">Get the app</p>
-          <h1>Get CoRoute.</h1>
+          <h1>Get <span class="hm-hero__accent">CoRoute.</span></h1>
           <p class="t-lead">The group ride app for long-distance touring: live convoy map, push-to-talk, crash detection and guardians. Up to __MAX_RIDERS__ riders in one ride group.</p>
           <div class="cluster cluster--16">
             <a class="btn btn--primary btn--lg" href="/download"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
             <!--ios--><a class="btn btn--secondary btn--lg" href="/download/ios" id="ios-download-btn"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>Download for iOS</a><!--/ios-->
+            <!--no-ios--><button class="btn btn--soon btn--lg" type="button" aria-disabled="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>iOS app<span class="soon-more">: building now</span> <span class="soon-pill">Coming soon</span></button><!--/no-ios-->
             <a class="btn btn--ghost btn--lg" href="/download/32bit">32-bit Android</a>
           </div>
           <div class="pg-dl__meta">
             <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg><!--ios-->Android 6.0+ &amp; iOS 14.0+<!--/ios--><!--no-ios-->Android 6.0+<!--/no-ios--></span>
+            <!--no-ios--><span>iOS app, building now <span class="soon-pill">Coming soon</span></span><!--/no-ios-->
             <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>Version __APP_VERSION__</span>
             <span><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-check"/></svg>No trackers or analytics SDKs</span>
           </div>
@@ -58,16 +60,12 @@
           <h2 class="t-h4" id="which-title">Which one do I need?</h2>
           <p class="t-small t-muted">For Android, tap <strong style="color:var(--c-text)">Download for Android</strong> on almost any modern phone (64-bit). Older phones can use the 32-bit download.</p>
 <!--ios-->          <p class="t-small t-muted">For iPhone, tap <strong style="color:var(--c-text)">Download for iOS</strong> for TestFlight beta or App Store installation.</p>
-<!--/ios-->          <p class="pg-dl__alt">Not sure? Try the main download first. Nothing breaks if it does not install.</p>
+<!--/ios--><!--no-ios-->          <p class="t-small t-muted">On an iPhone? The iOS app is building now and coming soon. Until then, a guardian link works in any iPhone browser, no app needed.</p>
+<!--/no-ios-->          <p class="pg-dl__alt">Not sure? Try the main download first. Nothing breaks if it does not install.</p>
         </aside>
       </div>
     </div>
-    <svg class="page-hero__route" viewBox="0 0 1440 160" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
-      <path class="road__edge" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
-      <path class="road" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
-      <path class="road__centre" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
-      <path class="route-line" data-route="reveal" d="M-20 140 C 260 140 380 70 640 78 S 1040 150 1460 60"/>
-    </svg>
+    <!--#include route-motif-->
   </section>
 
   <!-- Requirements -->
@@ -80,7 +78,7 @@
         <div><dt>Phone</dt><dd>Android 6.0 or newer<span>With GPS. Every rider in the group needs the app.</span></dd></div>
         <div><dt>Account</dt><dd>Phone number, or sign in with Google<span>Plus your bike number (or pillion) and an emergency contact before your first group ride.</span></dd></div>
         <div><dt>Connection</dt><dd>Mobile data during the ride<span>Short gaps are fine. Your route is kept on the phone and sent later.</span></dd></div>
-        <div><dt>iPhone</dt><dd><!--ios-->iOS 14.0 or newer<span>From the App Store or TestFlight.</span><!--/ios--><!--no-ios-->Not available<span>No iOS version yet.</span><!--/no-ios--></dd></div>
+        <div><dt>iPhone</dt><dd><!--ios-->iOS 14.0 or newer<span>From the App Store or TestFlight.</span><!--/ios--><!--no-ios-->Building now, coming soon<span>The iOS app is building now and coming soon. It will appear on this page when it is ready.</span><!--/no-ios--></dd></div>
       </dl>
     </div>
   </section>

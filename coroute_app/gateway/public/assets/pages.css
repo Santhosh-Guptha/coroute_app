@@ -522,3 +522,101 @@
 .hm-head > p.eyebrow--safety { color: var(--c-safety-ink); }
 .hm-head > p.cluster { margin-top: 0; margin-bottom: var(--sp-16); }
 .hm-head > p.cluster .eyebrow { margin-bottom: 0; }
+
+/* ==========================================================================
+   3.55: every product page in the home page's visual language.
+   Same hero treatment (kicker pill, heavy title with a teal accent, the convoy on a mountain road below),
+   the home's card radius and icon tiles, and the home's closing band. Tokens from site.css only.
+   ========================================================================== */
+
+/* Page hero: sky, scenery and the route motif (partials/route-motif.html) */
+.hm-hero--page, .page-hero {
+  isolation: isolate;
+  padding-bottom: calc(clamp(96px, 13vw, 190px) + clamp(8px, 2vw, 24px));
+  background:
+    radial-gradient(900px 380px at 85% -10%, var(--c-brand-light), transparent 70%),
+    linear-gradient(180deg, var(--c-surface) 0%, var(--c-sky) 62%, var(--c-bg) 100%);
+}
+.page-hero:has(.route-motif) { padding-bottom: calc(clamp(96px, 13vw, 190px) + clamp(8px, 2vw, 24px)); }
+.hm-hero--page > .container, .page-hero > .container { position: relative; z-index: 1; }
+.hm-hero__inner > .eyebrow:first-child, .page-hero__inner > .eyebrow:first-child {
+  display: inline-flex; width: fit-content; align-items: center; gap: 10px; padding: 6px 14px 6px 10px; border-radius: var(--r-full);
+  background: var(--c-surface); border: 1px solid var(--c-border); box-shadow: var(--shadow-sm);
+  font-size: var(--fs-xs); letter-spacing: .02em; text-transform: none; color: var(--c-text-2);
+}
+.hm-hero__inner > .eyebrow:first-child::before, .page-hero__inner > .eyebrow:first-child::before {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--c-brand); box-shadow: 0 0 0 4px var(--c-brand-light);
+}
+.hm-hero__inner > .eyebrow--safety:first-child::before { background: var(--c-safety); box-shadow: 0 0 0 4px var(--c-safety-light); }
+.hm-hero--page h1, .page-hero__inner h1 {
+  font-size: clamp(2.375rem, 1.5rem + 3.6vw, 4.25rem); line-height: 1.04; letter-spacing: -0.035em; font-weight: 800; max-width: 14ch;
+}
+.hm-hero__accent { color: var(--c-brand); }
+.hm-hero--page .t-lead, .page-hero__inner .t-lead { font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .hm-hero__inner > *, .page-hero__inner > * { animation: pg-rise .6s var(--ease) both; }
+  .hm-hero__inner > :nth-child(2), .page-hero__inner > :nth-child(2) { animation-delay: 60ms; }
+  .hm-hero__inner > :nth-child(3), .page-hero__inner > :nth-child(3) { animation-delay: 120ms; }
+  .hm-hero__inner > :nth-child(n+4), .page-hero__inner > :nth-child(n+4) { animation-delay: 180ms; }
+  @keyframes pg-rise { from { opacity: .35; transform: translateY(14px); } }
+}
+
+/* In-page jump links: rounded chips like the home's pills */
+.pg-jump a { border-radius: var(--r-full); text-transform: none; letter-spacing: 0; font-weight: 800; font-size: var(--fs-small); background: var(--c-surface); transition: border-color var(--d-fast) var(--ease), background-color var(--d-fast) var(--ease), transform var(--d-fast) var(--ease); }
+.pg-jump a:hover { border-color: var(--c-brand); transform: translateY(-1px); }
+.pg-jump__n { border-radius: 50%; background: var(--c-brand-light); color: var(--c-brand); }
+
+/* Section heads: the home's .hp-head rhythm */
+.hm-head { max-width: 46rem; }
+.hm-head h2 { line-height: var(--lh-heading); }
+.hm-group__title { letter-spacing: -0.02em; }
+
+/* Cards: the home's .fx-card (radius 22, 48 px icon tile, lift on hover) */
+.hm-feature { border-radius: var(--r-xl); gap: var(--sp-8); }
+.hm-feature h3 { margin-top: var(--sp-4); font-size: var(--fs-h4); }
+.hm-feature__icon { width: 48px; height: 48px; transition: transform var(--d-base) var(--ease); }
+.hm-feature__icon .icon { width: 24px; height: 24px; }
+.hm-feature:hover .hm-feature__icon { transform: translateY(-2px) rotate(-4deg); }
+.hm-feature--safety { background: linear-gradient(160deg, var(--c-red-soft), var(--c-surface) 60%); }
+.section--surface .hm-feature, .section--surface .hm-step { background: var(--c-bg); }
+
+/* Numbered steps: the home's .hw-step, with the icon in a teal disc and a dashed road joining them */
+.hm-step {
+  position: relative; border-radius: var(--r-xl); gap: var(--sp-8);
+  transition: transform var(--d-base) var(--ease), border-color var(--d-base) var(--ease), box-shadow var(--d-base) var(--ease);
+}
+.hm-step > .icon {
+  width: 44px; height: 44px; padding: 11px; border-radius: 50%; background: var(--c-brand-fill); color: #FFFFFF; margin-bottom: var(--sp-8);
+  box-shadow: 0 6px 16px -6px rgba(11, 110, 120, 0.55);
+}
+.hm-step:hover { transform: translateY(-2px); border-color: var(--c-accent-line); box-shadow: var(--shadow-md); }
+.hm-step h3 { font-size: var(--fs-h4); }
+
+/* Facts, never-list, notices and the other boxed blocks: the home's radius */
+.hm-facts, .pg-never, .pg-principles, .pg-stats { border-radius: var(--r-lg); }
+.hm-notice, .pg-notice { border-radius: var(--r-lg); }
+.pg-dl__card { border-radius: var(--r-xl); border-top-width: 1px; box-shadow: var(--shadow-md); }
+.philosophy-card { border-radius: var(--r-xl); }
+
+/* Closing band: the home's .hp-final__box */
+.hm-cta, .pg-cta {
+  position: relative; overflow: hidden; border-radius: var(--r-sheet); border: none; color: #FFFFFF;
+  background: radial-gradient(700px 300px at 90% 0%, rgba(92, 202, 211, .35), transparent 70%), #0B6E78 url("/assets/topo.svg") center / cover no-repeat;
+}
+.pg-cta h2 { color: #FFFFFF; font-size: var(--fs-h2); }
+.pg-cta p { color: rgba(255, 255, 255, .9); }
+.pg-cta .btn--primary { background: #FFFFFF; color: #0B6E78 !important; box-shadow: none; }
+.pg-cta .btn--primary:hover { background: #E3F3F5; }
+.pg-cta .btn--secondary, .pg-cta .btn--outline, .pg-cta .btn--ghost { background: transparent; color: #FFFFFF !important; border-color: rgba(255, 255, 255, .6); }
+.pg-cta .link-arrow, .pg-cta a:not(.btn) { color: #FFFFFF; }
+.hm-cta .btn--primary, .pg-cta .btn--primary { box-shadow: 0 10px 24px -12px rgba(0, 0, 0, .5); }
+
+/* FAQ rows on how-it-works: the home's rounded <details> */
+.pg-faq { border-top: none; display: grid; gap: var(--sp-12); }
+.pg-faq details { border: 1px solid var(--c-border); border-radius: var(--r-lg); background: var(--c-surface); padding: 0 var(--sp-20); transition: border-color var(--d-fast) var(--ease); }
+.section--surface .pg-faq details { background: var(--c-bg); }
+.pg-faq details[open] { border-color: var(--c-accent-line); }
+
+@media (max-width: 480px) {
+  .hm-hero--page h1, .page-hero__inner h1 { max-width: none; }
+}

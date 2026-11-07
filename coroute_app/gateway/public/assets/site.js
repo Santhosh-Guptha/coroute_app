@@ -144,6 +144,19 @@
     if (!revealIO) return cb();
     el._onReveal = cb; revealIO.observe(el);
   }
+  /* 3.55: cards on every page enter like the app's lists, a short stagger per row. Pages only mark their blocks with
+     classes; this tags them, and siblings that reveal together get increasing delays (capped, so nothing waits long). */
+  var AUTO_REVEAL = '.hm-features > li, .hm-steps > li, .hm-facts > div, .philosophy-grid > *, .pg-never > *, .pg-perms > *, ' +
+    '.pg-faq details, .hm-cta, .pg-cta, .hm-notice, .pg-dl__card, .legal-summary, .imp-grid > .imp-tile, .imp-safety, .nf__links > li';
+  $$(AUTO_REVEAL).forEach(function (el) {
+    if (!el.hasAttribute('data-reveal') && !el.closest('[data-pinned]')) el.setAttribute('data-reveal', '');
+  });
+  $$('[data-reveal]').forEach(function (el) {
+    if (el.style.getPropertyValue('--reveal-delay') || !el.parentElement || el.parentElement.hasAttribute('data-reveal-stagger')) return;
+    var sibs = Array.prototype.filter.call(el.parentElement.children, function (c) { return c.hasAttribute('data-reveal'); });
+    var i = sibs.indexOf(el);
+    if (sibs.length > 1 && i > 0) el.style.setProperty('--reveal-delay', (Math.min(i, 6) * 70) + 'ms');
+  });
   $$('[data-reveal-stagger]').forEach(function (parent) {
     var step = +parent.getAttribute('data-reveal-stagger') || 80;
     $$('[data-reveal]', parent).forEach(function (el, i) { el.style.setProperty('--reveal-delay', (i * step) + 'ms'); });
@@ -154,9 +167,12 @@
   $$('[data-reveal]').forEach(function (el) {
     if (revealIO && win.scrollY < 8) {
       var r = el.getBoundingClientRect();
-      if (r.top < firstScreen * 0.9 && r.bottom > 0 && !el.closest('[data-pinned]')) { el.classList.add('is-in', 'is-instant'); return; }
+      if (r.top < firstScreen * 0.9 && r.bottom > 0 && !el.closest('[data-pinned]')) { el.classList.add('is-in', 'is-instant', 'is-done'); return; }
     }
-    watchReveal(el, function () { el.classList.add('is-in'); });
+    watchReveal(el, function () {
+      el.classList.add('is-in');
+      setTimeout(function () { el.classList.add('is-done'); }, 900 + (parseInt(el.style.getPropertyValue('--reveal-delay'), 10) || 0));
+    });
   });
 
   /* ---------- Numbers: data-count="12" (data-count-decimals, data-count-from) ---------- */
@@ -216,8 +232,11 @@
     });
   }
 
-  /* ---------- Page transitions on internal links ---------- */
-  if (!reduce) {
+  /* ---------- Page transitions on internal links ----------
+     Browsers with cross-document view transitions cross-fade by themselves (site.css @view-transition); the rest get
+     this short fade-out. Nothing moves with reduced motion. */
+  var nativePageTransitions = 'onpagereveal' in win && !!(win.CSS && CSS.supports && CSS.supports('view-transition-name: none'));
+  if (!reduce && !nativePageTransitions) {
     doc.addEventListener('click', function (e) {
       var a = e.target.closest && e.target.closest('a[href]');
       if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -666,6 +685,64 @@
         .then(renderUsage)
         .catch(function () { /* stays as it was: no numbers are better than wrong ones */ });
     };
+    /* ---------- Ride analytics card (3.55): live community totals, no sample numbers ----------
+       Same source (usage-stats: kmRidden, movingHours, ridesCompleted, avgSpeedKmh, weeklyKm, groupsRidden, sosResolved),
+       already coarse on the server. A number below the privacy floor stays a dash; a week without 10 rides has no bar. */
+    var raBox = doc.querySelector('[data-ride-analytics]');
+    var renderRideAnalytics = function (j) {
+      if (!raBox) return;
+      var st = j && j.stats;
+      if (!st || typeof st !== 'object') return;
+      var set = function (key, text) { var dd = raBox.querySelector('[data-ra="' + key + '"]'); if (dd) dd.textContent = text; };
+      var km = uKm(uNum(st.kmRidden)), hours = uCount(uNum(st.movingHours)), rides = uCount(uNum(st.ridesCompleted)), speed = uNum(st.avgSpeedKmh);
+      set('km', km !== null ? uFmt(km) + ' km' : '\u2014');
+      set('hours', hours !== null ? uFmt(hours) + ' h' : '\u2014');
+      set('rides', rides !== null ? uFmt(rides) : '\u2014');
+      set('speed', speed !== null && rides !== null ? Math.floor(speed) + ' km/h' : '\u2014');
+      var svg = doc.getElementById('ra-chart');
+      if (svg) {
+        while (svg.childNodes.length > 1) svg.removeChild(svg.lastChild);
+        var NS = 'http://www.w3.org/2000/svg';
+        var weeks = Array.isArray(st.weeklyKm) ? st.weeklyKm.slice(-8) : [];
+        var vals = weeks.map(function (w) { return w && typeof w.km === 'number' && w.km > 0 ? w.km : null; });
+        var max = Math.max.apply(null, vals.map(function (v) { return v || 0; }).concat([0]));
+        if (!max) {
+          var t = doc.createElementNS(NS, 'text');
+          t.setAttribute('x', '160'); t.setAttribute('y', '56'); t.setAttribute('text-anchor', 'middle'); t.setAttribute('class', 'ra-chart__empty');
+          t.textContent = 'Weekly totals appear once 10 rides are logged in a week';
+          svg.appendChild(t);
+        } else {
+          vals.forEach(function (v, i) {
+            var r = doc.createElementNS(NS, 'rect');
+            var h = v ? Math.max(4, Math.round((v / max) * 82)) : 4;
+            r.setAttribute('x', String(8 + i * 40)); r.setAttribute('y', String(96 - h));
+            r.setAttribute('width', '26'); r.setAttribute('height', String(h)); r.setAttribute('rx', '5');
+            r.setAttribute('class', v ? (i === vals.length - 1 ? 'ra-chart__bar ra-chart__bar--now' : 'ra-chart__bar') : 'ra-chart__bar ra-chart__bar--next');
+            var tip = doc.createElementNS(NS, 'title');
+            var ws = weeks[i] && weeks[i].weekStart ? new Date(weeks[i].weekStart) : null;
+            tip.textContent = (ws && !isNaN(ws.getTime()) ? 'Week of ' + ws.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ': ' : '') + (v ? uFmt(v) + ' km' : 'under 10 rides, not shown');
+            r.appendChild(tip);
+            svg.appendChild(r);
+          });
+        }
+      }
+      var list = doc.getElementById('ra-safety');
+      if (list) {
+        list.textContent = '';
+        var chips = [];
+        var groups = uCount(uNum(st.groupsRidden)), sos = uCount(uNum(st.sosResolved));
+        if (groups !== null) chips.push([uFmt(groups), ' group rides']);
+        if (sos !== null) chips.push([uFmt(sos), ' SOS alerts resolved']);
+        chips.forEach(function (c) { var li = doc.createElement('li'); var b = doc.createElement('b'); b.textContent = c[0]; li.appendChild(b); li.appendChild(doc.createTextNode(c[1])); list.appendChild(li); });
+      }
+    };
+    var loadRideAnalytics = function () {
+      if (!raBox || doc.hidden) return;
+      uGet('/api/public/usage-stats').then(renderRideAnalytics).catch(function () { /* dashes stay: no numbers are better than wrong ones */ });
+    };
+    loadRideAnalytics();
+    if (raBox && win.setInterval) win.setInterval(loadRideAnalytics, 60000);
+
     loadUsage();
     // Live: check again every minute while the page is open (the server caches, so this is cheap).
     if (win.setInterval) win.setInterval(loadUsage, 60000);
@@ -686,6 +763,143 @@
       syncThemeBtn();
       try { win.localStorage.setItem('coroute_theme', next); } catch (e) { /* storage blocked */ }
     });
+  }
+
+  /* ---------- CoRoute impact, live (3.55): real totals from real riders ----------
+     Source: GET /api/public/impact-stats -> { ok, enabled, stats: { kmRidden, movingHours, ridesCompleted, groupRides,
+     largestGroup, longestTripKm, bikes, safety: { sosResolved, crashAlerts, alertsAnswered, medianResponseSec,
+     roadReports }, ... } }. The server already makes every number coarse (src/public_privacy.js safeImpact): 0 or null
+     means "not enough yet", and such a tile stays hidden. The same floors are applied here again, so an older or
+     misconfigured server can never put an exact small number on the page. A box ([data-impact]) shows only when at
+     least two of its tiles are real. Checked every minute while the tab is visible; counters roll up, never with
+     reduced motion. Values go in with textContent only. */
+  var impactBoxes = doc.querySelectorAll ? Array.prototype.slice.call(doc.querySelectorAll('[data-impact]')) : [];
+  if (impactBoxes.length && 'fetch' in win) {
+    var iNum = function (v) { var n = typeof v === 'string' ? parseFloat(v) : v; return typeof n === 'number' && isFinite(n) && n > 0 ? n : null; };
+    var iCount = function (v) {
+      var n = iNum(v); if (n === null) return null;
+      n = Math.floor(n); if (n < 10) return null;
+      var step = n < 1000 ? 10 : n < 100000 ? 100 : 1000;
+      return Math.floor(n / step) * step;
+    };
+    var iKm = function (v) {
+      var n = iNum(v); if (n === null) return null;
+      var step = n < 10000 ? 100 : 1000, r = Math.floor(n / step) * step;
+      return r >= 100 ? r : null;
+    };
+    var iPlus = function (n) { return Math.round(n).toLocaleString('en-IN') + '+'; };
+    var iPlain = function (n) { return Math.round(n).toLocaleString('en-IN'); };
+    // A median response time as people say it: "40 s", "3 min", "1 h 10 min". Never animated.
+    var iDuration = function (sec) {
+      if (sec < 60) return [String(Math.round(sec)), 's'];
+      if (sec < 3600) return [String(Math.round(sec / 60)), 'min'];
+      var h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+      return [String(h), m ? 'h ' + m + ' min' : 'h'];
+    };
+    var impactValues = function (st) {
+      var s = st.safety && typeof st.safety === 'object' ? st.safety : {};
+      var rides = iCount(st.ridesCompleted), groups = iCount(st.groupRides != null ? st.groupRides : st.groupsRidden);
+      var largest = iNum(st.largestGroup), longest = iNum(st.longestTripKm), resp = iNum(s.medianResponseSec);
+      return {
+        km: { n: iKm(st.kmRidden), fmt: iPlus },
+        hours: { n: iCount(st.movingHours), fmt: iPlus },
+        rides: { n: rides, fmt: iPlus },
+        groupRides: { n: groups, fmt: iPlus },
+        // A record of one ride, without names: only alongside enough group rides (the server gates it the same way).
+        largestGroup: { n: groups !== null && largest !== null && largest >= 2 ? Math.floor(largest) : null, fmt: iPlain },
+        longestTrip: { n: rides !== null && longest !== null && longest >= 10 ? Math.floor(longest / 10) * 10 : null, fmt: iPlus },
+        bikes: { n: iCount(st.bikes), fmt: iPlus },
+        sos: { n: iCount(s.sosResolved), fmt: iPlus },
+        crash: { n: iCount(s.crashAlerts), fmt: iPlus },
+        answered: { n: iCount(s.alertsAnswered), fmt: iPlus },
+        response: { n: resp !== null ? Math.round(resp) : null, duration: true },
+        roads: { n: iCount(s.roadReports), fmt: iPlus },
+      };
+    };
+    var iReduce = !win.matchMedia || win.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var iSeen = !('IntersectionObserver' in win);
+    var iPending = [];
+    var iWrite = function (dd, text, unit) {
+      dd.textContent = text;
+      if (unit) { var u = doc.createElement('small'); u.textContent = unit; dd.appendChild(u); }
+    };
+    var iRoll = function (dd, from, to, fmt) {
+      if (iReduce || !win.requestAnimationFrame || from === to) { iWrite(dd, fmt(to)); return; }
+      var t0 = null, dur = from ? 900 : 1400, id = dd._roll = (dd._roll || 0) + 1;
+      iWrite(dd, fmt(from));
+      win.requestAnimationFrame(function step(now) {
+        if (dd._roll !== id) return;
+        if (t0 === null) t0 = now;
+        var k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+        iWrite(dd, fmt(from + (to - from) * e));
+        if (k < 1) win.requestAnimationFrame(step);
+      });
+    };
+    var renderImpact = function (st) {
+      var v = impactValues(st);
+      var now = new Date();
+      impactBoxes.forEach(function (box) {
+        var tiles = Array.prototype.slice.call(box.querySelectorAll('[data-impact-key]'));
+        var real = 0, missing = 0;
+        tiles.forEach(function (tile) {
+          var val = v[tile.getAttribute('data-impact-key')];
+          var dd = tile.querySelector('[data-impact-value]');
+          if (!val || val.n === null || !dd) { tile.hidden = true; missing++; return; }
+          real++;
+          var prev = tile._n;
+          tile._n = val.n;
+          tile.hidden = false;
+          if (val.duration) {
+            var d = iDuration(val.n);
+            dd.setAttribute('aria-label', d[0] + ' ' + d[1]);
+            iWrite(dd, d[0], d[1]);
+          } else {
+            dd.setAttribute('aria-label', val.fmt(val.n));
+            // First time: roll up from zero when the box comes into view. Later: from the last shown value.
+            if (prev == null && !iSeen) { iWrite(dd, val.fmt(0)); iPending.push([dd, val.n, val.fmt]); }
+            else iRoll(dd, prev == null ? 0 : prev, val.n, val.fmt);
+          }
+          if (prev != null && prev !== val.n && !iReduce) {
+            tile.classList.remove('is-updated'); void tile.offsetWidth; tile.classList.add('is-updated');
+          }
+        });
+        Array.prototype.slice.call(box.querySelectorAll('[data-impact-group]')).forEach(function (g) {
+          g.hidden = !g.querySelector('[data-impact-key]:not([hidden])');
+        });
+        var note = box.querySelector('[data-impact-note]');
+        if (note) note.hidden = !(missing && real >= 2);
+        var upd = box.querySelector('[data-impact-updated]');
+        if (upd) upd.textContent = 'Updated ' + now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        box.hidden = real < 2;
+      });
+    };
+    var iLast = 0;
+    var loadImpact = function () {
+      if (doc.hidden) return;
+      iLast = Date.now();
+      fetch('/api/public/impact-stats', { headers: { Accept: 'application/json' }, credentials: 'omit' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (j) {
+          // Switched off by the admin or the feature flag: hide, and say nothing.
+          if (!j || j.enabled === false || !j.stats || typeof j.stats !== 'object') { impactBoxes.forEach(function (b) { b.hidden = true; }); return; }
+          renderImpact(j.stats);
+        })
+        .catch(function () { /* stays as it was: no numbers are better than wrong ones */ });
+    };
+    if (!iSeen) {
+      var impIO = new IntersectionObserver(function (entries) {
+        if (!entries.some(function (en) { return en.isIntersecting; })) return;
+        iSeen = true;
+        impIO.disconnect();
+        iPending.splice(0).forEach(function (p) { iRoll(p[0], 0, p[1], p[2]); });
+      }, { threshold: 0.15 });
+      impactBoxes.forEach(function (b) { impIO.observe(b); });
+    }
+    loadImpact();
+    if (win.setInterval) win.setInterval(loadImpact, 60000);
+    if (doc.addEventListener) {
+      doc.addEventListener('visibilitychange', function () { if (!doc.hidden && Date.now() - iLast >= 60000) loadImpact(); });
+    }
   }
 
   /* ---------- Accordion (FAQ buttons; <details> needs no script) ---------- */

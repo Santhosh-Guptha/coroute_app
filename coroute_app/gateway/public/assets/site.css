@@ -140,6 +140,14 @@
   --rad: var(--r-md);
   --rad-lg: var(--r-lg);
 
+  /* 3.55 page scenery (route motif under every page hero): the home hero's poster palette */
+  --c-sky: #D6EAEF;
+  --c-hill-far: #C9DBD8;
+  --c-hill-near: #ADC7C3;
+  --c-road-ink: #3E4F5C;
+  --c-rider-a: #1565C0; --c-rider-b: #0B6E78; --c-rider-c: #C2185B; --c-rider-d: #9A6A00; --c-rider-e: #B4541C;
+  --c-live: #2E9E5B;
+
   color-scheme: light;
 }
 
@@ -160,6 +168,9 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 8px 22px rgba(0, 0, 0, 0.42);
   --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.55);
+  --c-sky: #12262D; --c-hill-far: #1D2C35; --c-hill-near: #18252D; --c-road-ink: #0A1014;
+  --c-rider-a: #82B1FF; --c-rider-b: #5CCAD3; --c-rider-c: #FF80AB; --c-rider-d: #FFD54F; --c-rider-e: #F0A070;
+  --c-live: #5FD08A;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -179,6 +190,9 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 8px 22px rgba(0, 0, 0, 0.42);
     --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.55);
+    --c-sky: #12262D; --c-hill-far: #1D2C35; --c-hill-near: #18252D; --c-road-ink: #0A1014;
+    --c-rider-a: #82B1FF; --c-rider-b: #5CCAD3; --c-rider-c: #FF80AB; --c-rider-d: #FFD54F; --c-rider-e: #F0A070;
+    --c-live: #5FD08A;
     color-scheme: dark;
   }
 }
@@ -502,10 +516,167 @@ h3, h4, .t-h3, .t-h4 { letter-spacing: -0.01em; }
 .hm-feature p { font-size: var(--fs-small); color: var(--c-text-2); line-height: var(--lh-snug); margin: 0; }
 .topo { position: relative; overflow: hidden; }
 
+/* ==========================================================================
+   3.55 motion system, shared by every page (the app's 120 / 180 / 260 ms, ease-out, no bounce).
+   Everything below is decoration: with prefers-reduced-motion the content is simply there, still.
+   ========================================================================== */
+
+/* ---------- Reveal on scroll: [data-reveal] (site.js adds .is-in, staggers siblings with --reveal-delay) ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .js [data-reveal] { transition: opacity .6s var(--ease), transform .7s var(--ease); transition-delay: var(--reveal-delay, 0ms); }
+  .js [data-reveal]:not(.is-in) { opacity: 0; transform: translateY(18px) scale(.985); }
+  .js [data-reveal].is-instant { transition: none; }
+  /* Once in place, the element's own hover transitions take over again (site.js adds .is-done). */
+  .js [data-reveal].is-done { transition: transform var(--d-base) var(--ease), border-color var(--d-base) var(--ease), box-shadow var(--d-base) var(--ease), background-color var(--d-base) var(--ease); }
+}
+
+/* ---------- Page to page: a soft cross-fade where the browser supports view transitions ----------
+   The header keeps its place while the page underneath changes. Older browsers get site.js's short fade. */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition { navigation: auto; }
+  .site-header { view-transition-name: site-header; }
+  ::view-transition-old(root) { animation: vt-out 160ms var(--ease) both; }
+  ::view-transition-new(root) { animation: vt-in 320ms var(--ease) both; }
+  @keyframes vt-out { to { opacity: 0; transform: translateY(-6px); } }
+  @keyframes vt-in { from { opacity: 0; transform: translateY(10px); } }
+  .is-leaving .site-main { opacity: 0; transform: translateY(6px); transition: opacity 150ms var(--ease), transform 150ms var(--ease); }
+}
+
+/* ---------- Press and hover micro-interactions ---------- */
+.btn:active { transform: scale(.98); }
+.link-arrow svg { transition: transform var(--d-base) var(--ease); }
+.link-arrow:hover svg { transform: translateX(3px); }
+
+/* ---------- Live dot (same as the home hero's): a steady green dot with a slow ping ---------- */
+.live-dot { position: relative; width: 10px; height: 10px; border-radius: 50%; background: var(--c-live); flex: none; }
+.live-dot::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid var(--c-live); opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .live-dot::after { animation: live-ping 2.4s var(--ease) infinite; }
+  @keyframes live-ping { 0% { transform: scale(.5); opacity: .9; } 100% { transform: scale(1.6); opacity: 0; } }
+}
+
+/* ---------- iOS: building now, coming soon (shown while no App Store / TestFlight link is configured) ---------- */
+.btn--soon, .btn--soon[aria-disabled="true"] {
+  opacity: 1; cursor: default; pointer-events: auto; gap: 8px 10px; flex-wrap: wrap; white-space: normal; text-align: center;
+  background: var(--c-surface); color: var(--c-text-2) !important; border: 1px dashed var(--c-border-strong); box-shadow: none;
+}
+.btn--soon:hover, .btn--soon:active { transform: none; background: var(--c-surface); border-color: var(--c-border-strong); color: var(--c-text-2) !important; }
+.soon-pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--r-full);
+  background: var(--c-safety-light); color: var(--c-safety-ink); border: 1px solid var(--c-safety-line);
+  font-size: var(--fs-label); font-weight: 800; letter-spacing: .04em; white-space: nowrap; line-height: 1.5;
+}
+.soon-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+@media (prefers-reduced-motion: no-preference) {
+  .soon-pill::before { animation: soon-blink 1.8s ease-in-out infinite; }
+  @keyframes soon-blink { 50% { opacity: .25; } }
+}
+.site-footer__soon { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--c-text-2); font-weight: 600; }
+.hm-cta .btn--soon, .hp-final .btn--soon { background: transparent; color: #FFFFFF !important; border-color: rgba(255, 255, 255, .6); }
+.hm-cta .soon-pill, .hp-final .soon-pill { background: rgba(255, 255, 255, .14); color: #FFFFFF; border-color: rgba(255, 255, 255, .4); }
+
+/* ---------- Route motif: the app's convoy on a mountain road, under every page hero ----------
+   Inline SVG (partials/route-motif.html). Riders travel the route with CSS offset-path; without support,
+   or with reduced motion, they wait in place along the road. */
+.route-motif { position: absolute; left: 0; right: 0; bottom: 0; height: clamp(96px, 13vw, 190px); z-index: 0; pointer-events: none; }
+.route-motif svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rm-hill--far { fill: var(--c-hill-far); opacity: .55; }
+.rm-hill--near { fill: var(--c-hill-near); opacity: .6; }
+.rm-road { fill: none; stroke: var(--c-road-ink); stroke-width: 20; stroke-linecap: round; opacity: .9; }
+.rm-centre { fill: none; stroke: var(--c-bg); stroke-width: 1.5; stroke-dasharray: 10 12; opacity: .7; }
+.rm-route { fill: none; stroke: var(--c-brand); stroke-width: 4; stroke-linecap: round; stroke-dasharray: 3 13; }
+.rm-rider circle { stroke: var(--c-bg); stroke-width: 3; }
+.rm-rider--1 circle { fill: var(--c-rider-d); } .rm-rider--2 circle { fill: var(--c-rider-b); } .rm-rider--3 circle { fill: var(--c-rider-c); }
+.rm-rider--4 circle { fill: var(--c-rider-a); } .rm-rider--5 circle { fill: var(--c-rider-e); }
+.rm-rider { visibility: hidden; }
+@supports (offset-path: path("M0 0")) {
+  .rm-rider {
+    visibility: visible; offset-path: path("M-20 200 C 260 200 380 130 640 138 S 1040 210 1460 120"); offset-rotate: 0deg;
+    offset-distance: var(--rm-at, 50%);
+  }
+  .rm-rider--1 { --rm-at: 64%; } .rm-rider--2 { --rm-at: 58%; } .rm-rider--3 { --rm-at: 53%; } .rm-rider--4 { --rm-at: 48%; } .rm-rider--5 { --rm-at: 42%; }
+  @media (prefers-reduced-motion: no-preference) {
+    .rm-route { animation: rm-march 1.4s linear infinite; }
+    .rm-rider { animation: rm-ride 26s linear infinite; }
+    .rm-rider--1 { animation-delay: -16.6s; } .rm-rider--2 { animation-delay: -15.1s; } .rm-rider--3 { animation-delay: -13.8s; }
+    .rm-rider--4 { animation-delay: -12.5s; } .rm-rider--5 { animation-delay: -10.9s; }
+    .is-offscreen .rm-rider, .is-offscreen .rm-route { animation-play-state: paused; }
+  }
+}
+@keyframes rm-march { to { stroke-dashoffset: -16; } }
+@keyframes rm-ride {
+  0% { offset-distance: 0%; opacity: 0; }
+  6% { opacity: 1; }
+  94% { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+
+/* ---------- CoRoute impact, live (home, and a compact strip on /safety and /features) ----------
+   Hidden until site.js has at least two real numbers from /api/public/impact-stats. */
+.imp[hidden], .imp [hidden] { display: none !important; }
+.imp__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sp-16); }
+.imp__head h2 { font-size: var(--fs-h2); line-height: var(--lh-heading); }
+.imp__head .imp__lead { margin-top: var(--sp-16); color: var(--c-text-2); font-size: var(--fs-lead); line-height: var(--lh-snug); max-width: 44rem; }
+.imp__live {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 14px 6px 12px; border-radius: var(--r-full);
+  background: var(--c-surface); border: 1px solid var(--c-border); font-size: var(--fs-xs); font-weight: 800; color: var(--c-text-2);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.imp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-12); margin-top: clamp(24px, 4vw, 40px); }
+@media (min-width: 760px) { .imp-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--sp-16); } }
+@media (min-width: 1024px) {
+  .imp-grid--main { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .imp-grid--main > .imp-tile:first-child { grid-column: span 2; }
+  .imp-grid--main > .imp-tile:first-child dd { font-size: clamp(2.25rem, 1.4rem + 2.6vw, 3.5rem); }
+}
+.imp-tile {
+  position: relative; overflow: hidden; min-width: 0; display: flex; flex-direction: column-reverse; justify-content: flex-end; gap: 6px;
+  padding: var(--sp-20) var(--sp-20) var(--sp-24); border-radius: var(--r-lg); background: var(--c-surface); border: 1px solid var(--c-border);
+  transition: border-color var(--d-base) var(--ease), box-shadow var(--d-base) var(--ease), transform var(--d-base) var(--ease);
+}
+.imp-tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--imp-c, var(--c-brand)); }
+.imp-tile:hover { border-color: var(--c-accent-line); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.imp-tile dt { display: flex; align-items: center; gap: 8px; font-size: var(--fs-small); font-weight: 700; color: var(--c-text-2); line-height: 1.3; }
+.imp-tile dt .icon { width: 18px; height: 18px; color: var(--imp-c, var(--c-brand)); }
+.imp-tile dd { font-size: clamp(1.625rem, 1.2rem + 1.9vw, 2.625rem); line-height: 1.05; font-weight: 800; letter-spacing: -0.03em; color: var(--c-text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.imp-tile dd small { font-size: .5em; font-weight: 800; letter-spacing: 0; color: var(--c-text-3); margin-left: 4px; }
+.imp-tile--amber { --imp-c: var(--c-safety); }
+.imp-tile--sos { --imp-c: var(--c-sos-ink); }
+.imp-tile.is-updated { border-color: var(--c-accent-line); }
+@media (prefers-reduced-motion: no-preference) {
+  .imp-tile.is-updated::after { content: ""; position: absolute; inset: 0; background: var(--c-brand-glow); animation: imp-flash 1.2s var(--ease) both; pointer-events: none; }
+  @keyframes imp-flash { from { opacity: 1; } to { opacity: 0; } }
+}
+/* Safety at work: a night band like the app's SOS screen */
+.imp-safety {
+  margin-top: clamp(24px, 4vw, 40px); padding: clamp(20px, 3.5vw, 40px); border-radius: var(--r-sheet);
+  background: radial-gradient(600px 260px at 100% 0%, rgba(200, 16, 46, .22), transparent 70%), #0F171D; color: #C9D4DB; border: 1px solid #2A3842;
+}
+.imp-safety__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-12); }
+.imp-safety__title { display: flex; align-items: center; gap: 10px; font-size: var(--fs-h3); color: #F2F6F8; }
+.imp-safety__title .icon { width: 22px; height: 22px; color: #FF8A9A; }
+.imp-safety__sub { margin-top: var(--sp-8); font-size: var(--fs-small); color: #9BAAB5; max-width: 44rem; }
+.imp-safety .imp-grid { margin-top: var(--sp-20); }
+.imp-safety .imp-tile { background: rgba(255, 255, 255, .04); border-color: #2A3842; }
+.imp-safety .imp-tile:hover { border-color: #3A4A55; box-shadow: none; }
+.imp-safety .imp-tile dt { color: #C9D4DB; }
+.imp-safety .imp-tile dd { color: #F2F6F8; }
+.imp-safety .imp-tile dd small { color: #9BAAB5; }
+.imp-safety .imp-tile { --imp-c: #5CCAD3; }
+.imp-safety .imp-tile--sos { --imp-c: #FF8A9A; }
+.imp-safety .imp-tile--amber { --imp-c: #F0A070; }
+.imp__note { margin-top: var(--sp-16); font-size: var(--fs-small); color: var(--c-text-3); max-width: 52rem; }
+.imp__note .icon { width: 16px; height: 16px; margin-right: 6px; color: var(--c-brand); vertical-align: -3px; }
+.imp__more { margin-top: var(--sp-8); }
+/* Compact strip (/safety, /features) */
+.imp--compact .imp__head h2 { font-size: var(--fs-h3); }
+.imp--compact .imp-grid { margin-top: var(--sp-20); }
+.imp--compact .imp-tile dd { font-size: clamp(1.5rem, 1.15rem + 1.4vw, 2.125rem); }
+
 /* ---------- Motion: respect the visitor's system setting ---------- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
-  .btn--primary:hover, .card--interactive:hover, .hm-feature:hover { transform: none; }
+  .btn--primary:hover, .card--interactive:hover, .hm-feature:hover, .imp-tile:hover, .btn:active, .link-arrow:hover svg { transform: none; }
 }
 /* Windows high contrast: keep control outlines visible */
 @media (forced-colors: active) {
@@ -515,4 +686,7 @@ h3, h4, .t-h3, .t-h4 { letter-spacing: -0.01em; }
   .site-header, .mobile-menu, .site-footer__nav, .skip-link { display: none !important; }
   .site-main { padding-top: 0; }
   body { background: #FFFFFF; color: #000000; }
+}
+@media (max-width: 480px) {
+  .btn--soon .soon-more { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 }

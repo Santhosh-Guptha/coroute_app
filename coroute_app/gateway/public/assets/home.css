@@ -12,12 +12,7 @@
   .hp-split { grid-template-columns: 1.05fr .95fr; }
   .hp-split--rev > :first-child { order: 2; }
 }
-/* Gentle reveal on scroll (site.js adds .is-in). Off with reduced motion or without JS. */
-@media (prefers-reduced-motion: no-preference) {
-  .js [data-reveal] { opacity: 0; transform: translateY(16px); transition: opacity .6s var(--ease), transform .6s var(--ease); transition-delay: var(--reveal-delay, 0ms); }
-  .js [data-reveal].is-in { opacity: 1; transform: none; }
-  .js [data-reveal].is-instant { transition: none; }
-}
+/* Reveal on scroll ([data-reveal]) lives in site.css (3.55), so every page shares the same motion. */
 
 /* ---------- Hero: the motto over a live 3D road ---------- */
 .hx {
@@ -488,6 +483,9 @@
 .ra-safety b { color: #FFFFFF; font-variant-numeric: tabular-nums; }
 .ra-card figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: var(--sp-12); font-size: var(--fs-xs); color: var(--c-text-3); }
 .ra-card figcaption .ra-badge { color: var(--c-safety-ink); }
+.ra-badge--live::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #5CCAD3; vertical-align: middle; }
+.ra-chart__empty { fill: #9BAAB5; font-size: 11px; font-weight: 700; }
+.ra-chart__lbl { fill: #9BAAB5; font-size: 9px; font-weight: 700; }
 
 /* ---------- Get safety for your group rides ---------- */
 .gx__grid { display: grid; gap: clamp(32px, 5vw, 72px); }

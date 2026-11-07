@@ -69,10 +69,11 @@
         <div class="hx__cta">
           <a class="btn btn--primary btn--lg" href="/get"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
           <!--ios--><a class="btn btn--secondary btn--lg" href="/get#ios"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>Download for iOS</a><!--/ios-->
+          <!--no-ios--><button class="btn btn--soon btn--lg" type="button" aria-disabled="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>iOS app<span class="soon-more">: building now</span> <span class="soon-pill">Coming soon</span></button><!--/no-ios-->
           <a class="btn btn--ghost btn--lg" href="/how-it-works">How it works</a>
         </div>
         <p class="hx__free"><a href="#community-free"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-free"/></svg><span><b>Community:</b> solo riding is always free, with every safety feature.</span></a></p>
-        <p class="hx__note"><!--ios-->Android 6.0 or newer and iOS 14.0 or newer.<!--/ios--><!--no-ios-->Android 6.0 or newer.<!--/no-ios--> No ads, no trackers.</p>
+        <p class="hx__note"><!--ios-->Android 6.0 or newer and iOS 14.0 or newer.<!--/ios--><!--no-ios-->Android 6.0 or newer. iOS app: building now, coming soon.<!--/no-ios--> No ads, no trackers.</p>
         <p class="hx__live" id="live-now" data-live-now hidden><span class="hx__pulse" aria-hidden="true"></span><span id="live-now-text"></span></p>
       </div>
     </section>
@@ -119,6 +120,47 @@
       </div>
     </section>
     <!-- /numbers -->
+
+    <!-- CoRoute impact, live (3.55): filled by site.js from GET /api/public/impact-stats, checked every minute while the
+         page is open. Hidden until at least two real numbers come back; a tile without one stays hidden. No number is
+         written into this page. -->
+    <section class="section section--surface imp" id="impact" aria-labelledby="impact-title" data-impact hidden>
+      <div class="container">
+        <div class="imp__head">
+          <div class="hp-head">
+            <p class="eyebrow">CoRoute impact, live</p>
+            <h2 id="impact-title">What riders do together, counted live.</h2>
+            <p class="imp__lead">Real totals from real riders, rounded down. Never per rider and never per place, and nothing is estimated.</p>
+          </div>
+          <p class="imp__live"><span class="live-dot" aria-hidden="true"></span><span data-impact-updated>Live</span></p>
+        </div>
+        <dl class="imp-grid imp-grid--main" aria-label="CoRoute riders, all time">
+          <div class="imp-tile" data-impact-key="km" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>Kilometres ridden</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile" data-impact-key="hours" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Hours on the road</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile" data-impact-key="rides" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-flag"/></svg>Rides</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile" data-impact-key="groupRides" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Group rides</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile imp-tile--amber" data-impact-key="largestGroup" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-meeting"/></svg>Largest group, riders</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile" data-impact-key="longestTrip" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-scenic"/></svg>Longest trip, km</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile" data-impact-key="bikes" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg>Bikes on CoRoute</dt><dd data-impact-value>&mdash;</dd></div>
+        </dl>
+        <div class="imp-safety" data-impact-group role="group" aria-labelledby="impact-safety-title">
+          <div class="imp-safety__head">
+            <h3 class="imp-safety__title" id="impact-safety-title"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg>Safety at work</h3>
+          </div>
+          <p class="imp-safety__sub">What the safety features did for real riders: alerts raised, answered by riders nearby and resolved, and road hazards shared with everyone on that road.</p>
+          <dl class="imp-grid">
+            <div class="imp-tile imp-tile--sos" data-impact-key="sos" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg>SOS alerts resolved</dt><dd data-impact-value>&mdash;</dd></div>
+            <div class="imp-tile imp-tile--sos" data-impact-key="crash" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg>Crash alerts raised</dt><dd data-impact-value>&mdash;</dd></div>
+            <div class="imp-tile" data-impact-key="answered" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-wave"/></svg>Alerts answered by fellow riders</dt><dd data-impact-value>&mdash;</dd></div>
+            <div class="imp-tile imp-tile--amber" data-impact-key="response" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Typical response time</dt><dd data-impact-value>&mdash;</dd></div>
+            <div class="imp-tile imp-tile--amber" data-impact-key="roads" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-hazard"/></svg>Road hazards reported</dt><dd data-impact-value>&mdash;</dd></div>
+          </dl>
+        </div>
+        <p class="imp__note" data-impact-note hidden>More numbers appear here once enough riders and rides are behind them.</p>
+        <p class="imp__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>How these are counted: totals only, from completed rides and closed alerts, rounded down, and shown only once at least ten rides or alerts are behind a number. Never per rider, per route or per place.</p>
+      </div>
+    </section>
+    <!-- /impact -->
 
     <!-- Features: safety first -->
     <section class="section fx" id="features" aria-labelledby="features-title">
@@ -301,7 +343,7 @@
       </div>
     </section>
 
-    <!-- Your ride analytics: what the app shows each rider about their own riding. The card is a labelled sample. -->
+    <!-- Your ride analytics: what the app shows each rider. The card shows live community totals (3.55, no sample numbers). -->
     <section class="section section--surface ra" id="ride-analytics" aria-labelledby="ra-title">
       <div class="container hp-split">
         <div class="hp-head">
@@ -316,34 +358,22 @@
           </ul>
           <p class="ra__private t-small"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg>Only you see them. They are never on this website, never used for ads and never sold.</p>
         </div>
-        <figure class="ra-card" aria-labelledby="ra-cap">
-          <div class="ra-card__frame" aria-hidden="true">
-            <div class="ra-card__top"><span class="ra-card__title">My riding</span><span class="ra-badge">Sample</span></div>
-            <dl class="ra-tiles">
-              <div><dt>Distance</dt><dd>1,240 <small>km</small></dd></div>
-              <div><dt>Moving time</dt><dd>31 <small>h</small></dd></div>
-              <div><dt>Rides</dt><dd>14</dd></div>
-              <div><dt>Top speed</dt><dd>92 <small>km/h</small></dd></div>
+        <figure class="ra-card" aria-labelledby="ra-cap" data-ride-analytics>
+          <div class="ra-card__frame">
+            <div class="ra-card__top"><span class="ra-card__title">CoRoute riders</span><span class="ra-badge ra-badge--live" id="ra-badge">Live</span></div>
+            <dl class="ra-tiles" id="ra-tiles">
+              <div><dt>Distance</dt><dd data-ra="km">&mdash;</dd></div>
+              <div><dt>Moving time</dt><dd data-ra="hours">&mdash;</dd></div>
+              <div><dt>Rides</dt><dd data-ra="rides">&mdash;</dd></div>
+              <div><dt>Avg moving speed</dt><dd data-ra="speed">&mdash;</dd></div>
             </dl>
-            <p class="ra-card__label">Kilometres by week</p>
-            <svg class="ra-chart" viewBox="0 0 320 110" focusable="false">
+            <p class="ra-card__label">Kilometres by week, all riders</p>
+            <svg class="ra-chart" id="ra-chart" viewBox="0 0 320 110" focusable="false" role="img" aria-label="Kilometres by week">
               <line class="ra-chart__base" x1="0" y1="96" x2="320" y2="96"/>
-              <rect class="ra-chart__bar" x="8" y="62" width="26" height="34" rx="5"/>
-              <rect class="ra-chart__bar" x="48" y="40" width="26" height="56" rx="5"/>
-              <rect class="ra-chart__bar" x="88" y="70" width="26" height="26" rx="5"/>
-              <rect class="ra-chart__bar" x="128" y="24" width="26" height="72" rx="5"/>
-              <rect class="ra-chart__bar" x="168" y="52" width="26" height="44" rx="5"/>
-              <rect class="ra-chart__bar" x="208" y="78" width="26" height="18" rx="5"/>
-              <rect class="ra-chart__bar ra-chart__bar--now" x="248" y="10" width="26" height="86" rx="5"/>
-              <rect class="ra-chart__bar ra-chart__bar--next" x="288" y="88" width="26" height="8" rx="4"/>
             </svg>
-            <ul class="ra-safety" role="list">
-              <li><b>3</b> hard brakes</li>
-              <li><b>6</b> regroups</li>
-              <li><b>0</b> SOS alerts</li>
-            </ul>
+            <ul class="ra-safety" role="list" id="ra-safety"></ul>
           </div>
-          <figcaption id="ra-cap"><span class="ra-badge">Sample</span> An illustration with made-up sample numbers, not a real rider's data. Your own analytics fill in from your rides, in the app.</figcaption>
+          <figcaption id="ra-cap">Real totals from every CoRoute rider, rounded down and shown only when at least 10 rides are behind a number. Your own analytics are in the app, private to you.</figcaption>
         </figure>
       </div>
     </section>
@@ -518,7 +548,7 @@
           </details>
           <details>
             <summary>Is there an iPhone version?</summary>
-            <div class="hp-faq__a"><p><!--ios-->Yes. Tap Download for iOS to install it from the App Store or TestFlight. It needs iOS 14 or newer.<!--/ios--><!--no-ios-->No iOS version yet. CoRoute runs on Android 6.0 or newer.<!--/no-ios--></p></div>
+            <div class="hp-faq__a"><p><!--ios-->Yes. Tap Download for iOS to install it from the App Store or TestFlight. It needs iOS 14 or newer.<!--/ios--><!--no-ios-->Not yet. The iOS app is building now and coming soon. Until then, CoRoute runs on Android 6.0 or newer.<!--/no-ios--></p></div>
           </details>
         </div>
       </div>
@@ -536,6 +566,7 @@
           <div class="hp-final__cta">
             <a class="btn btn--primary btn--lg" href="/get"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-download"/></svg>Download for Android</a>
             <!--ios--><a class="btn btn--secondary btn--lg" href="/get#ios"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>Download for iOS</a><!--/ios-->
+            <!--no-ios--><button class="btn btn--soon btn--lg" type="button" aria-disabled="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-apple"/></svg>iOS app<span class="soon-more">: building now</span> <span class="soon-pill">Coming soon</span></button><!--/no-ios-->
             <a class="btn btn--ghost btn--lg" href="/how-it-works">How it works</a>
           </div>
         </div>

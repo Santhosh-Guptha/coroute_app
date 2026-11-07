@@ -10,7 +10,8 @@
   let sessionId = secret || ticket ? null : readStored('guardianSession'), timer = null, expiryTimer = null, running = false, stopped = false, failures = 0, pageActive = true;
   const states = { WAITING_FOR_START: 'The ride has not started.', RIDE_ENDED: 'The ride has ended.',
     RIDING: 'Riding', STOPPED: 'Stopped', PAUSED: 'Ride paused', LOCATION_UNAVAILABLE: 'Location updates are unavailable.',
-    NO_ACTIVE_ALERT: 'No active alert reported.', EMERGENCY: 'Help has been requested.', UNAVAILABLE: 'Status unavailable.' };
+    NO_ACTIVE_ALERT: 'No active alert reported.', EMERGENCY: 'Help has been requested.', UNAVAILABLE: 'Status unavailable.',
+    ARRIVED: 'Arrived safely. Location sharing has stopped.' };
   function clear() {
     el('ride-title').textContent = 'Personal ride'; el('ride-status').textContent = '';
     el('freshness').textContent = ''; el('incident').textContent = ''; el('expiry').textContent = '';
@@ -141,6 +142,12 @@
     const alert = data.alerts?.[0];
     if (alert) el('incident').textContent = alert.type === 'POSSIBLE_ACCIDENT'
       ? 'A possible accident was reported. This is not confirmation of injury.' : 'An active request for help was reported.';
+    // 3.55 no-signal ahead: said by the rider's phone before a stretch that had no signal on earlier rides.
+    const ahead = data.signalAhead;
+    if (!alert && ahead && isFinite(ahead.backAt)) {
+      const back = new Date(ahead.backAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      el('incident').textContent = `Entering a no-signal stretch${ahead.near ? ` near ${ahead.near}` : ''}, expected back online around ${back}. The last reported location is shown.`;
+    }
     const position = alert?.position || data.position;
     const mapBox = el('guardian-map-box');
     if (position && isFinite(position.lat) && isFinite(position.lng)) {

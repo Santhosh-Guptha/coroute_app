@@ -40,8 +40,8 @@
     <div class="container">
       <div class="hm-hero__inner">
         <p class="eyebrow">Features</p>
-        <h1 id="hero-title">Built around the long ride.</h1>
-        <p class="t-lead">Up to __MAX_RIDERS__ riders can join one group. Everything a touring group needs before, during and after a multi-day ride, in one Android app.</p>
+        <h1 id="hero-title">Built around <span class="hm-hero__accent">the long ride.</span></h1>
+        <p class="t-lead">Up to __MAX_RIDERS__ riders can join one group. Everything a touring group needs before, during and after a multi-day ride, in one app: on Android today, with the iOS app building now.</p>
         <nav class="pg-jump" aria-label="On this page">
           <a href="#before"><span class="pg-jump__n">1</span>Before</a>
           <a href="#during"><span class="pg-jump__n">2</span>During</a>
@@ -49,6 +49,7 @@
         </nav>
       </div>
     </div>
+    <!--#include route-motif-->
   </section>
 
   <!-- Before the ride -->
@@ -99,6 +100,28 @@
         <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg></div><h3>Links that end</h3><p>Guardian links stop when the ride ends. Emergency links stop after 30 minutes or when the alert is closed.</p></li>
         <li class="hm-feature hm-feature--account"><div class="hm-feature__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-eye-off"/></svg></div><h3>Private by default</h3><p>No ads, no trackers, no sale of data. Recorded routes are deleted after 90 days, and you can delete your account in the app.</p></li>
       </ul>
+    </div>
+  </section>
+
+  <!-- CoRoute impact, live (3.55, compact): filled by site.js from GET /api/public/impact-stats; hidden until real -->
+  <section class="section section--tight imp imp--compact" id="impact" aria-labelledby="impact-title" data-impact hidden>
+    <div class="container">
+      <div class="imp__head">
+        <div class="hm-head" style="margin-bottom:0">
+          <p class="eyebrow">CoRoute impact, live</p>
+          <h2 id="impact-title">These features, on real roads.</h2>
+        </div>
+        <p class="imp__live"><span class="live-dot" aria-hidden="true"></span><span data-impact-updated>Live</span></p>
+      </div>
+      <dl class="imp-grid" aria-label="CoRoute riders, all time">
+        <div class="imp-tile" data-impact-key="km" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-route"/></svg>Kilometres ridden</dt><dd data-impact-value>&mdash;</dd></div>
+        <div class="imp-tile" data-impact-key="hours" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Hours on the road</dt><dd data-impact-value>&mdash;</dd></div>
+        <div class="imp-tile" data-impact-key="groupRides" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-users"/></svg>Group rides</dt><dd data-impact-value>&mdash;</dd></div>
+        <div class="imp-tile imp-tile--amber" data-impact-key="largestGroup" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-meeting"/></svg>Largest group, riders</dt><dd data-impact-value>&mdash;</dd></div>
+        <div class="imp-tile" data-impact-key="longestTrip" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-scenic"/></svg>Longest trip, km</dt><dd data-impact-value>&mdash;</dd></div>
+        <div class="imp-tile" data-impact-key="bikes" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-speed"/></svg>Bikes on CoRoute</dt><dd data-impact-value>&mdash;</dd></div>
+      </dl>
+      <p class="imp__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>Real totals from real riders, rounded down. Never per rider or per place. <a class="link" href="/#impact">More live numbers</a></p>
     </div>
   </section>
 

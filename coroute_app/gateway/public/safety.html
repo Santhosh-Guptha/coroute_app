@@ -40,7 +40,7 @@
     <div class="container">
       <div class="hm-hero__inner">
         <p class="eyebrow eyebrow--safety">Safety</p>
-        <h1 id="hero-title">Look out for each other.</h1>
+        <h1 id="hero-title">Look out for <span class="hm-hero__accent">each other.</span></h1>
         <p class="t-lead">On a long ride, help can be hours away. CoRoute makes sure your group and the people at home know quickly when something goes wrong. It complements emergency services; it does not replace them.</p>
         <p class="hm-call"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg>In an emergency in India, call 112 first.</p>
         <nav class="pg-jump" aria-label="On this page">
@@ -51,6 +51,7 @@
         </nav>
       </div>
     </div>
+    <!--#include route-motif-->
   </section>
 
   <!-- Crash detection -->
@@ -189,6 +190,27 @@
       <div class="hm-notice">
         <strong>Coroute complements emergency services. It does not replace them.</strong> In an emergency in India, call 112. Elsewhere, call your local emergency number. Coroute cannot promise that anyone will respond.
       </div>
+    </div>
+  </section>
+
+  <!-- CoRoute impact, live (3.55, compact): safety outcomes from GET /api/public/impact-stats; hidden until real -->
+  <section class="section section--tight imp imp--compact" id="impact" aria-labelledby="impact-title" data-impact hidden>
+    <div class="container">
+      <div class="imp-safety" data-impact-group>
+        <div class="imp-safety__head">
+          <h2 class="imp-safety__title" id="impact-title"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-shield"/></svg>Safety at work, live</h2>
+          <p class="imp__live"><span class="live-dot" aria-hidden="true"></span><span data-impact-updated>Live</span></p>
+        </div>
+        <p class="imp-safety__sub">What these features did for real CoRoute riders. Real totals, rounded down, never per rider or per place.</p>
+        <dl class="imp-grid">
+          <div class="imp-tile imp-tile--sos" data-impact-key="sos" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-sos"/></svg>SOS alerts resolved</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile imp-tile--sos" data-impact-key="crash" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-crash"/></svg>Crash alerts raised</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile" data-impact-key="answered" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-wave"/></svg>Alerts answered by fellow riders</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile imp-tile--amber" data-impact-key="response" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-clock"/></svg>Typical response time</dt><dd data-impact-value>&mdash;</dd></div>
+          <div class="imp-tile imp-tile--amber" data-impact-key="roads" hidden><dt><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-hazard"/></svg>Road hazards reported</dt><dd data-impact-value>&mdash;</dd></div>
+        </dl>
+      </div>
+      <p class="imp__note"><svg class="icon" aria-hidden="true" focusable="false"><use href="/assets/icons.svg#i-lock"/></svg>A number appears only once at least ten alerts are behind it. <a class="link" href="/#impact">More live numbers</a></p>
     </div>
   </section>
 

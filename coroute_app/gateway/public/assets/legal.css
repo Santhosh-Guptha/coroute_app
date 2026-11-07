@@ -131,3 +131,11 @@
   .legal-totop--float{width:44px;padding:0;justify-content:center}
   .legal-totop--float .legal-totop__label{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 }
+
+/* ---------- 3.55: the legal hero in the home page's language (kicker pill, sky, the convoy on the road) ---------- */
+.legal-hero{overflow:hidden;padding-bottom:calc(clamp(96px,13vw,190px) + clamp(8px,2vw,24px));background:radial-gradient(900px 380px at 85% -10%,var(--c-brand-light),transparent 70%),linear-gradient(180deg,var(--c-surface) 0%,var(--c-sky) 62%,var(--c-bg) 100%)}
+.legal-hero > .container{position:relative;z-index:1}
+.legal-hero__inner > .eyebrow:first-child{display:inline-flex;width:fit-content;align-items:center;gap:10px;padding:6px 14px 6px 10px;border-radius:var(--r-full);background:var(--c-surface);border:var(--border);box-shadow:var(--shadow-sm);font-size:var(--fs-xs);letter-spacing:.02em;text-transform:none;color:var(--c-text-2)}
+.legal-hero__inner > .eyebrow:first-child::before{width:8px;height:8px;border-radius:50%;background:var(--c-brand);box-shadow:0 0 0 4px var(--c-brand-light)}
+.legal-hero h1{font-weight:800;letter-spacing:-0.035em}
+.legal-summary,.legal-toc{border-radius:var(--r-xl)}
