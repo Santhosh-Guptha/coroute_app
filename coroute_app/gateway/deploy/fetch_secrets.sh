@@ -71,6 +71,9 @@ while IFS= read -r line || [ -n "$line" ]; do
   name="${BASH_REMATCH[1]}"; ocid="${BASH_REMATCH[2]}"
   value="$(fetch "$ocid")" || die "could not read secret $name from OCI Vault (dynamic group / policy / network?)"
   [ -n "$value" ] || die "secret $name is empty"
+  if [[ "$name" =~ _PAR_URL$ ]]; then
+    value="${value//oraclecloudapps.com/oraclecloud.com}"
+  fi
   if [[ " $CADDY_ONLY " == *" $name "* ]]; then
     env_line "$name" "$value" >> "$tmp_caddy"
   else

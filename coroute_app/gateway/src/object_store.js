@@ -38,7 +38,7 @@ const isTombstone = (buf) => Buffer.isBuffer(buf) && buf.length === TOMBSTONE.le
 
 function validBaseUrl(u) {
   try {
-    const x = new URL(u);
+    const x = new URL(String(u).replace('.oraclecloudapps.com', '.oraclecloud.com'));
     return (x.protocol === 'https:' || x.protocol === 'http:') && /\/o\/?$/.test(x.pathname);
   } catch { return false; }
 }
@@ -48,10 +48,11 @@ function validBaseUrl(u) {
  * @param {{fetchImpl?:Function, retries?:number, timeoutMs?:number, backoffMs?:number}} [opts]
  */
 function createParStore(parBaseUrl, opts = {}) {
-  if (!parBaseUrl || !validBaseUrl(String(parBaseUrl))) {
+  const sanitized = String(parBaseUrl || '').replace('.oraclecloudapps.com', '.oraclecloud.com');
+  if (!sanitized || !validBaseUrl(sanitized)) {
     throw new ObjectStoreError('Object store: the PAR URL must be a bucket PAR ending in /o/.', 0, 'BAD_PAR_URL');
   }
-  const base = String(parBaseUrl).replace(/\/?$/, '/');
+  const base = sanitized.replace(/\/?$/, '/');
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   const retries = opts.retries ?? 3;
   const timeoutMs = opts.timeoutMs ?? 30000;
