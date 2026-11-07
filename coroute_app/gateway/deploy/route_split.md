@@ -98,6 +98,19 @@ Path syntax: `:param` = one segment, trailing `/*` = the path itself and everyth
 | WEB | GET | /api/community-stats | membership_routes.js | database |
 | WEB | GET | /api/community-stories | membership_routes.js | database |
 | WEB | GET | /api/usage-stats | admin_analytics.js | database |
+| WEB | GET | /api/impact-stats | admin_analytics.js | database |
+| WEB | GET | /api/me/warnings | admin_warnings.js | database |
+| WEB | POST | /api/me/warnings/:id/ack | admin_warnings.js | database |
+| WEB | GET | /api/features | feature_flags.js | feature switches snapshot |
+| WEB | GET | /api/road-hazards/near | road_and_places.js | database |
+| WEB | POST | /api/road-hazards/:hazardId/clear | road_and_places.js | database |
+| WEB | POST | /api/places/reviews | road_and_places.js | database |
+| WEB | POST | /api/places/reviews/:reviewId/photo | road_and_places.js | database / object storage |
+| WEB | GET | /api/places/reviews | road_and_places.js | database |
+| WEB | GET | /api/places/review-summary | road_and_places.js | database |
+| WEB | GET | /api/places/reviews/:reviewId/photo/:photoId | road_and_places.js | database / object storage |
+| WEB | POST | /api/road-risk/brakes | road_risk.js | database |
+| WEB | GET | /api/road-risk/near | road_risk.js | database |
 | WEB | POST | /api/diagnostics/submit | routes.js | database |
 | WEB | * | /api/admin/* | routes.js, subscription_routes.js, membership_routes.js | every other admin screen: payments, coupons, offers, pricing, payment gateway, memberships, reviews, feedback, diagnostics, audit, app builds, convoy history, page analytics (database only) |
 | WEB | GET | /download | app.js | redirect |
