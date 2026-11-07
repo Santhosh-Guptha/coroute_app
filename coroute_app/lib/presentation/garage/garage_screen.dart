@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/garage_service.dart';
+import '../../domain/garage/bike_input.dart';
 import '../../domain/garage/bike_profile.dart';
 import '../../domain/places/fuel_match.dart';
 
@@ -24,11 +25,16 @@ class _GarageScreenState extends State<GarageScreen> {
   @override
   void initState() {
     super.initState();
-    _garageService = widget.garageService ?? GarageService();
+    // 3.55: the app's one garage (engine care and fuel read the same active bike).
+    _garageService = widget.garageService ?? GarageService.shared;
     _garageService.load();
   }
 
-  void _showAddBikeModal() {
+  void _showAddBikeModal() => _showBikeSheet();
+
+  /// The add sheet; with [editing], the same sheet pre-filled, saved under the same id
+  /// (odometer, service history and notes are kept).
+  void _showBikeSheet({BikeProfile? editing}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -38,10 +44,16 @@ class _GarageScreenState extends State<GarageScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetContext) => _AddBikeSheet(
+        initial: editing,
         onSave: (newBike) async {
-          await _garageService.saveBike(newBike);
-          if (sheetContext.mounted) {
+          final saved = await _garageService.saveBike(newBike);
+          if (!sheetContext.mounted) return;
+          if (saved) {
             Navigator.of(sheetContext).maybePop();
+          } else {
+            ScaffoldMessenger.maybeOf(sheetContext)?.showSnackBar(
+              const SnackBar(content: Text('Could not save this bike. Try again.')),
+            );
           }
         },
       ),
@@ -58,7 +70,7 @@ class _GarageScreenState extends State<GarageScreen> {
         backgroundColor: AppTheme.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(
-          'Service Completed: ${bike.name}',
+          'Record service: ${bike.name}',
           style: TextStyle(color: AppTheme.text, fontSize: 18),
         ),
         content: Column(
@@ -66,7 +78,7 @@ class _GarageScreenState extends State<GarageScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Odometer reading at service:',
+              'Odometer reading at the service',
               style: TextStyle(color: AppTheme.text2, fontSize: 13),
             ),
             const SizedBox(height: 14),
@@ -110,7 +122,7 @@ class _GarageScreenState extends State<GarageScreen> {
               backgroundColor: AppTheme.brand,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Confirm Service'),
+            child: const Text('Save service'),
           ),
         ],
       ),
@@ -125,20 +137,19 @@ class _GarageScreenState extends State<GarageScreen> {
         backgroundColor: AppTheme.card,
         elevation: 0,
         title: Text(
-          'GARAGE & MOTORCYCLES',
+          'Garage',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: AppTheme.text,
-            fontSize: 16,
+            fontSize: 18,
             fontWeight: FontWeight.w800,
-            letterSpacing: 1.2,
           ),
         ),
         actions: [
           IconButton(
             icon: Icon(Icons.add_circle, color: AppTheme.accentText, size: 26),
-            tooltip: 'Add Motorcycle',
+            tooltip: 'Add bike',
             onPressed: _showAddBikeModal,
           ),
         ],
@@ -154,9 +165,9 @@ class _GarageScreenState extends State<GarageScreen> {
                 // instead of pointing at the small + in the app bar.
                 return EmptyState(
                   icon: Icons.two_wheeler_rounded,
-                  title: 'No motorcycles in your garage yet',
+                  title: 'No bikes in your garage yet',
                   message: 'Add your bike to track service and fuel range.',
-                  primaryLabel: 'Add motorcycle',
+                  primaryLabel: 'Add bike',
                   onPrimary: _showAddBikeModal,
                 );
               }
@@ -178,6 +189,7 @@ class _GarageScreenState extends State<GarageScreen> {
                         isActive: isActive,
                         onSelectActive: () => _garageService.setActiveBike(bike.id),
                         onRecordService: () => _showRecordServiceDialog(bike),
+                        onEdit: () => _showBikeSheet(editing: bike),
                         onFuelType: (t) => _garageService.saveBike(bike.copyWith(fuelType: t)),
                         // Confirm first: one stray gloved tap used to delete a bike.
                         onDelete: bikes.length > 1
@@ -212,6 +224,7 @@ class _BikeCard extends StatelessWidget {
   final VoidCallback onRecordService;
   final VoidCallback? onDelete;
   final ValueChanged<BikeFuelType>? onFuelType;
+  final VoidCallback? onEdit;
 
   const _BikeCard({
     required this.bike,
@@ -220,18 +233,29 @@ class _BikeCard extends StatelessWidget {
     required this.onRecordService,
     this.onDelete,
     this.onFuelType,
+    this.onEdit,
   });
+
+  /// "452 cc · Liquid-cooled · Black" (3.55); what is not given is left out.
+  static String detailsLine(BikeProfile bike) {
+    final parts = <String>[
+      if (bike.engineCc > 0) '${bike.engineCc} cc',
+      if (bike.fuelType != BikeFuelType.ev && bike.cooling != EngineCooling.unknown) bike.cooling.label,
+      if (bike.colour.trim().isNotEmpty) bike.colour.trim(),
+    ];
+    return parts.isEmpty ? 'Add engine size, cooling and colour' : parts.join(' · ');
+  }
 
   @override
   Widget build(BuildContext context) {
     Color serviceColor = AppTheme.accentText;
-    String serviceLabel = 'SERVICE OK';
+    String serviceLabel = 'Service OK';
     if (bike.isServiceOverdue) {
       serviceColor = AppTheme.sos;
-      serviceLabel = 'SERVICE OVERDUE';
+      serviceLabel = 'Service overdue';
     } else if (bike.isServiceDueSoon) {
       serviceColor = AppTheme.warnText;
-      serviceLabel = 'DUE IN ${bike.kmUntilService.round()} KM';
+      serviceLabel = 'Service in ${bike.kmUntilService.round()} km';
     }
 
     return Container(
@@ -278,8 +302,9 @@ class _BikeCard extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
+                      // No year field in the add/edit sheet, so the stored default year is not shown.
                       Text(
-                        '${bike.year} · ${bike.make} ${bike.model}',
+                        '${bike.make} ${bike.model}'.trim().isEmpty ? 'Make and model not set' : '${bike.make} ${bike.model}'.trim(),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -316,7 +341,49 @@ class _BikeCard extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       minimumSize: const Size(48, 48),
                     ),
-                    child: const Text('Set Active'),
+                    child: const Text('Set active'),
+                  ),
+              ],
+            ),
+          ),
+
+          // 3.55 bike details and full-tank range, with "Edit details".
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+            child: Row(
+              children: [
+                Icon(Icons.settings_suggest_rounded, size: 18, color: AppTheme.muted),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        detailsLine(bike),
+                        key: ValueKey('bikeDetails_${bike.id}'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: AppTheme.text, fontSize: 13, fontWeight: FontWeight.w700),
+                      ),
+                      Text(
+                        'Full tank ≈ ${bike.fullTankRangeKm.round()} km',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: AppTheme.text2, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                if (onEdit != null)
+                  TextButton.icon(
+                    key: ValueKey('editBike_${bike.id}'),
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_rounded, size: 18),
+                    label: const Text('Edit details'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.accentText,
+                      minimumSize: const Size(48, 48),
+                    ),
                   ),
               ],
             ),
@@ -343,7 +410,7 @@ class _BikeCard extends StatelessWidget {
                     for (final t in BikeFuelType.values) PopupMenuItem(value: t, child: Text(t.label)),
                   ],
                   child: Container(
-                    constraints: const BoxConstraints(minHeight: 40),
+                    constraints: const BoxConstraints(minHeight: 48),
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     alignment: Alignment.center,
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -426,7 +493,7 @@ class _BikeCard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     alignment: Alignment.center,
                     child: Text(
-                      'Record Service',
+                      'Record service',
                       style: TextStyle(
                         color: AppTheme.text2,
                         fontSize: 12,
@@ -519,31 +586,75 @@ class _MiniSpec extends StatelessWidget {
 class _AddBikeSheet extends StatefulWidget {
   final ValueChanged<BikeProfile> onSave;
 
-  const _AddBikeSheet({required this.onSave});
+  /// The bike being edited (3.55); null adds a new one.
+  final BikeProfile? initial;
+
+  const _AddBikeSheet({required this.onSave, this.initial});
 
   @override
   State<_AddBikeSheet> createState() => _AddBikeSheetState();
 }
 
+/// Quick colour chips (3.55): the name is what the group sees; the swatch only helps pick.
+const List<(String, Color)> _quickColours = [
+  ('Black', Color(0xFF111111)),
+  ('White', Color(0xFFF5F5F5)),
+  ('Red', Color(0xFFD32F2F)),
+  ('Blue', Color(0xFF1E63D6)),
+  ('Grey', Color(0xFF7A7A7A)),
+  ('Silver', Color(0xFFC0C0C0)),
+  ('Green', Color(0xFF2E7D32)),
+  ('Yellow', Color(0xFFF9C80E)),
+  ('Orange', Color(0xFFF57C00)),
+];
+
 class _AddBikeSheetState extends State<_AddBikeSheet> {
   final _nameController = TextEditingController();
   final _makeController = TextEditingController();
   final _modelController = TextEditingController();
+  final _ccController = TextEditingController();
+  final _colourController = TextEditingController();
   final _tankController = TextEditingController(text: '15.0');
   final _reserveController = TextEditingController(text: '3.0');
   final _mileageController = TextEditingController(text: '25.0');
   final _odometerController = TextEditingController(text: '0');
   BikeFuelType _fuelType = BikeFuelType.petrol;
+  EngineCooling _cooling = EngineCooling.unknown;
 
-  /// Shown under the name field when [SAVE TO GARAGE] is pressed without a name
+  /// Field → friendly message, shown under each field when "Save to garage" finds a problem
   /// (the button used to do nothing, with no feedback).
-  String? _nameError;
+  Map<String, String> _errors = const {};
+
+  bool get _editing => widget.initial != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final b = widget.initial;
+    if (b != null) {
+      _nameController.text = b.name;
+      _makeController.text = b.make;
+      _modelController.text = b.model;
+      _ccController.text = b.engineCc > 0 ? '${b.engineCc}' : '';
+      _colourController.text = b.colour;
+      _tankController.text = _num(b.tankCapacityL);
+      _reserveController.text = _num(b.reserveCapacityL);
+      _mileageController.text = _num(b.expectedMileageKmL);
+      _odometerController.text = b.totalOdometerKm.round().toString();
+      _fuelType = b.fuelType;
+      _cooling = b.cooling;
+    }
+  }
+
+  static String _num(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
 
   @override
   void dispose() {
     _nameController.dispose();
     _makeController.dispose();
     _modelController.dispose();
+    _ccController.dispose();
+    _colourController.dispose();
     _tankController.dispose();
     _reserveController.dispose();
     _mileageController.dispose();
@@ -559,12 +670,80 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
       _tankController.text = p.tankCapacityL.toString();
       _reserveController.text = p.reserveCapacityL.toString();
       _mileageController.text = p.expectedMileageKmL.toString();
+      // 3.55: presets also know the engine size and cooling.
+      _ccController.text = p.engineCc > 0 ? '${p.engineCc}' : '';
+      _cooling = p.cooling;
+      _errors = const {};
     });
   }
+
+  void _clearError(String field) {
+    if (_errors.containsKey(field)) setState(() => _errors = {..._errors}..remove(field));
+  }
+
+  void _save() {
+    final errors = validateBikeInput(
+      name: _nameController.text,
+      cc: _ccController.text,
+      tank: _tankController.text,
+      reserve: _reserveController.text,
+      mileage: _mileageController.text,
+      odometer: _odometerController.text,
+      unit: _fuelType.unit,
+      checkCc: _fuelType != BikeFuelType.ev,
+    );
+    if (errors.isNotEmpty) {
+      setState(() => _errors = errors);
+      return;
+    }
+    final cc = parseBikeNumber(_ccController.text)?.round() ?? 0;
+    final tank = parseBikeNumber(_tankController.text)!;
+    final reserve = parseBikeNumber(_reserveController.text)!;
+    final mileage = parseBikeNumber(_mileageController.text)!;
+    final colour = _colourController.text.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final initial = widget.initial;
+    final odo = parseBikeNumber(_odometerController.text) ?? initial?.totalOdometerKm ?? 0.0;
+    final evBike = _fuelType == BikeFuelType.ev;
+
+    final base = initial ?? BikeProfile(id: 'bike_${DateTime.now().millisecondsSinceEpoch}', name: '');
+    // copyWith keeps the id, service interval, last service, notes and year of an edited bike.
+    final bike = base.copyWith(
+      name: _nameController.text.trim(),
+      make: _makeController.text.trim(),
+      model: _modelController.text.trim(),
+      tankCapacityL: tank,
+      reserveCapacityL: reserve,
+      expectedMileageKmL: mileage,
+      totalOdometerKm: odo,
+      fuelType: _fuelType,
+      engineCc: evBike ? initial?.engineCc ?? 0 : cc,
+      colour: colour.length > 30 ? colour.substring(0, 30).trim() : colour,
+      cooling: evBike ? initial?.cooling ?? EngineCooling.unknown : _cooling,
+    );
+    widget.onSave(bike);
+  }
+
+  InputDecoration _decoration(String label, String field, {String? helper}) => InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: AppTheme.muted),
+        errorText: _errors[field],
+        errorMaxLines: 2,
+        helperText: helper,
+        helperMaxLines: 2,
+      );
+
+  Widget _sectionLabel(String text) => Text(
+        text,
+        style: TextStyle(color: AppTheme.muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8),
+      );
 
   @override
   Widget build(BuildContext context) {
     final presets = BikeProfile.popularPresets;
+    final evBike = _fuelType == BikeFuelType.ev;
+    final typedCc = parseBikeNumber(_ccController.text)?.round() ?? 0;
+    final guess = BikeProfile(id: '', name: '', engineCc: typedCc).effectiveCooling;
+    final colourNow = _colourController.text.trim().toLowerCase();
 
     return Center(
       child: ConstrainedBox(
@@ -584,13 +763,14 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'ADD MOTORCYCLE',
-                      style: TextStyle(
-                        color: AppTheme.text,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2,
+                    Expanded(
+                      child: Text(
+                        _editing ? 'Edit bike' : 'Add bike',
+                        style: TextStyle(
+                          color: AppTheme.text,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ),
                     IconButton(
@@ -600,188 +780,218 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                     ),
                   ],
                 ),
-            const SizedBox(height: 12),
-            Text(
-              'QUICK PRESETS',
-              style: TextStyle(
-                color: AppTheme.muted,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-              ),
-            ),
-            const SizedBox(height: 8),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: presets.map((p) {
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ActionChip(
-                      backgroundColor: AppTheme.soft,
-                      label: Text(
-                        p.model,
-                        style: TextStyle(color: AppTheme.text, fontSize: 12),
+                const SizedBox(height: 12),
+                _sectionLabel('QUICK PRESETS'),
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: presets.map((p) {
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ActionChip(
+                          backgroundColor: AppTheme.soft,
+                          label: Text(
+                            p.model,
+                            style: TextStyle(color: AppTheme.text, fontSize: 12),
+                          ),
+                          onPressed: () => _applyPreset(p),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  key: const ValueKey('bikeName'),
+                  controller: _nameController,
+                  textCapitalization: TextCapitalization.words,
+                  textInputAction: TextInputAction.next,
+                  onChanged: (_) => _clearError('name'),
+                  style: TextStyle(color: AppTheme.text),
+                  decoration: _decoration('Bike name (e.g. My Himalayan 450)', 'name'),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _makeController,
+                        textCapitalization: TextCapitalization.words,
+                        style: TextStyle(color: AppTheme.text),
+                        decoration: _decoration('Make', 'make'),
                       ),
-                      onPressed: () => _applyPreset(p),
                     ),
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _nameController,
-              textCapitalization: TextCapitalization.words,
-              textInputAction: TextInputAction.next,
-              onChanged: (_) {
-                if (_nameError != null) setState(() => _nameError = null);
-              },
-              style: TextStyle(color: AppTheme.text),
-              decoration: InputDecoration(
-                labelText: 'Bike Name (e.g. My Himalayan 450)',
-                labelStyle: TextStyle(color: AppTheme.muted),
-                errorText: _nameError,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _makeController,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: _modelController,
+                        textCapitalization: TextCapitalization.words,
+                        style: TextStyle(color: AppTheme.text),
+                        decoration: _decoration('Model', 'model'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _sectionLabel('RUNS ON'),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final t in BikeFuelType.values)
+                      ChoiceChip(
+                        key: ValueKey('addBikeFuel_${t.name}'),
+                        label: Text(t.label),
+                        selected: _fuelType == t,
+                        onSelected: (_) => setState(() => _fuelType = t),
+                      ),
+                  ],
+                ),
+                // 3.55 engine details: they set when an engine rest is advised on a long hard ride.
+                if (!evBike) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('bikeCc'),
+                    controller: _ccController,
+                    keyboardType: TextInputType.number,
+                    onChanged: (_) {
+                      _clearError('cc');
+                      setState(() {});
+                    },
                     style: TextStyle(color: AppTheme.text),
-                    decoration: InputDecoration(
-                      labelText: 'Make',
-                      labelStyle: TextStyle(color: AppTheme.muted),
+                    decoration: _decoration('Engine (cc)', 'cc', helper: 'Optional, e.g. 350').copyWith(
+                      suffixText: 'cc',
+                      suffixStyle: TextStyle(color: AppTheme.muted),
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  _sectionLabel('COOLING'),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      for (final c in EngineCooling.values)
+                        ChoiceChip(
+                          key: ValueKey('bikeCooling_${c.name}'),
+                          label: Text(c.label),
+                          selected: _cooling == c,
+                          onSelected: (_) => setState(() => _cooling = c),
+                        ),
+                    ],
+                  ),
+                  if (_cooling == EngineCooling.unknown && guess != EngineCooling.unknown)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Not sure: we will treat a $typedCc cc engine as ${guess.label.toLowerCase()}.',
+                        style: TextStyle(color: AppTheme.text2, fontSize: 12),
+                      ),
+                    ),
+                ],
+                const SizedBox(height: 12),
+                TextField(
+                  key: const ValueKey('bikeColour'),
+                  controller: _colourController,
+                  textCapitalization: TextCapitalization.words,
+                  maxLength: 30,
+                  onChanged: (_) => setState(() {}),
+                  style: TextStyle(color: AppTheme.text),
+                  decoration: _decoration('Colour', 'colour', helper: 'Your group sees it on the ride map'),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _modelController,
-                    style: TextStyle(color: AppTheme.text),
-                    decoration: InputDecoration(
-                      labelText: 'Model',
-                      labelStyle: TextStyle(color: AppTheme.muted),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final (name, swatch) in _quickColours)
+                      ChoiceChip(
+                        key: ValueKey('bikeColourChip_$name'),
+                        avatar: Container(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: swatch,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: AppTheme.border),
+                          ),
+                        ),
+                        label: Text(name),
+                        selected: colourNow == name.toLowerCase(),
+                        onSelected: (_) => setState(() => _colourController.text = name),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('bikeTank'),
+                        controller: _tankController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onChanged: (_) => _clearError('tank'),
+                        style: TextStyle(color: AppTheme.text),
+                        decoration: _decoration('Tank (${_fuelType.unit})', 'tank'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('bikeReserve'),
+                        controller: _reserveController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onChanged: (_) => _clearError('reserve'),
+                        style: TextStyle(color: AppTheme.text),
+                        decoration: _decoration('Reserve (${_fuelType.unit})', 'reserve'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('bikeMileage'),
+                        controller: _mileageController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onChanged: (_) => _clearError('mileage'),
+                        style: TextStyle(color: AppTheme.text),
+                        decoration: _decoration('Mileage (km/${_fuelType.unit})', 'mileage'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const ValueKey('bikeOdometer'),
+                  controller: _odometerController,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => _clearError('odometer'),
+                  style: TextStyle(color: AppTheme.text),
+                  decoration: _decoration('Current odometer (km)', 'odometer'),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    key: const ValueKey('saveBike'),
+                    onPressed: _save,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.brand,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text(
+                      _editing ? 'Save changes' : 'Save to garage',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Text('RUNS ON', style: TextStyle(color: AppTheme.muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              children: [
-                for (final t in BikeFuelType.values)
-                  ChoiceChip(
-                    key: ValueKey('addBikeFuel_${t.name}'),
-                    label: Text(t.label),
-                    selected: _fuelType == t,
-                    onSelected: (_) => setState(() => _fuelType = t),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _tankController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    style: TextStyle(color: AppTheme.text),
-                    decoration: InputDecoration(
-                      labelText: 'Tank (${_fuelType.unit})',
-                      labelStyle: TextStyle(color: AppTheme.muted),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _reserveController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    style: TextStyle(color: AppTheme.text),
-                    decoration: InputDecoration(
-                      labelText: 'Reserve (${_fuelType.unit})',
-                      labelStyle: TextStyle(color: AppTheme.muted),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _mileageController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    style: TextStyle(color: AppTheme.text),
-                    decoration: InputDecoration(
-                      labelText: 'km/${_fuelType.unit}',
-                      labelStyle: TextStyle(color: AppTheme.muted),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _odometerController,
-              keyboardType: TextInputType.number,
-              style: TextStyle(color: AppTheme.text),
-              decoration: InputDecoration(
-                labelText: 'Current Odometer (km)',
-                labelStyle: TextStyle(color: AppTheme.muted),
-              ),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton(
-                onPressed: () {
-                  final name = _nameController.text.trim();
-                  if (name.isEmpty) {
-                    setState(() => _nameError = 'Give your bike a name');
-                    return;
-                  }
-
-                  final tank = double.tryParse(_tankController.text.trim()) ?? 15.0;
-                  final reserve = double.tryParse(_reserveController.text.trim()) ?? 3.0;
-                  final mileage = double.tryParse(_mileageController.text.trim()) ?? 25.0;
-                  final odo = double.tryParse(_odometerController.text.trim()) ?? 0.0;
-
-                  final newBike = BikeProfile(
-                    id: 'bike_${DateTime.now().millisecondsSinceEpoch}',
-                    name: name,
-                    make: _makeController.text.trim(),
-                    model: _modelController.text.trim(),
-                    tankCapacityL: tank,
-                    reserveCapacityL: reserve,
-                    expectedMileageKmL: mileage,
-                    totalOdometerKm: odo,
-                    fuelType: _fuelType,
-                  );
-
-                  widget.onSave(newBike);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.brand,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: const Text(
-                  'SAVE TO GARAGE',
-                  style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.0),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
-    ),
-  ),
-);
+    );
   }
 }

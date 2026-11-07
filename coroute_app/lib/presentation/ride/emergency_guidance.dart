@@ -8,6 +8,7 @@ import '../../core/l10n/l10n.dart';
 import '../../core/ui/ui_format.dart';
 import '../../data/models/convoy_model.dart';
 import '../../data/models/network_models.dart';
+import '../../data/models/road_hazard_telemetry.dart';
 import '../../data/models/route_model.dart';
 import '../../data/services/convoy_service.dart';
 import '../../data/services/settings_service.dart';
@@ -18,6 +19,7 @@ import '../../domain/route/reroute_policy.dart';
 import '../../domain/route/route_progress.dart';
 import '../../domain/notify/relation.dart';
 import '../../domain/route/threshold_announcer.dart';
+import '../../domain/safety/road_surface_detector.dart';
 import '../../domain/tracking/bearing.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../../domain/tracking/track_point.dart';
@@ -556,6 +558,9 @@ class EmergencyGuidance extends ChangeNotifier {
     // FEAT-02: Collective Road Hazard AI Telemetry Mesh warnings at 300m
     for (final rh in _convoys.roadHazards) {
       if (_roadHazardSpoken.contains(rh.eventId)) continue;
+      // 3.55: saved reports along the whole route can be many; far ones cost nothing (the
+      // straight line is never longer than the way along the road).
+      if (rh.fromHistory && GeoMath.haversine(me.$1, me.$2, rh.lat, rh.lng) > 1500) continue;
       double? dist;
       var along = false;
       if (mine != null && mine.onLine && gr != null) {
@@ -577,9 +582,20 @@ class EmergencyGuidance extends ChangeNotifier {
       }
       if (dist != null && dist > 50 && dist <= 350) {
         _roadHazardSpoken.add(rh.eventId);
-        _say('Caution: severe road hazard 300 meters ahead', 'ROAD_HAZARD:${rh.eventId}:300m');
+        _say(roadHazardSpeech(rh, dist), 'ROAD_HAZARD:${rh.eventId}:300m');
       }
     }
+  }
+
+  /// 3.55: what a road report sounds like. A live severe pothole keeps the FEAT-02 line ("Caution:
+  /// severe road hazard 300 meters ahead"); everything else says what it is and how far
+  /// ("Caution. Speed breaker ahead in 300 metres. Slow down."), saved reports adding
+  /// "reported by CoRoute riders".
+  static String roadHazardSpeech(RoadHazardObservation rh, double distanceM) {
+    final kind = RoadSurfaceKind.fromWire(rh.classification.wireName);
+    final severe = rh.severity == RoadHazardSeverity.high || rh.severity == RoadHazardSeverity.critical;
+    if (!rh.fromHistory && kind == RoadSurfaceKind.pothole && severe) return 'Caution: severe road hazard 300 meters ahead';
+    return RoadSurfaceText.spoken(kind, distanceM, fromHistory: rh.fromHistory);
   }
 
   static double _angleDiff(double a, double b) {

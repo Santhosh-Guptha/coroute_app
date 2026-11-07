@@ -25,6 +25,8 @@ import 'ride_share_card.dart';
 import 'trip_route_map.dart';
 import '../trip/trip_feedback_sheet.dart';
 import '../review/app_review_prompt.dart';
+import '../widgets/feature_switch.dart';
+import 'ride_safety_summary_card.dart';
 
 /// Full report of a finished trip, in two tabs:
 ///  * Summary: the key numbers first (shown at once from the saved trip, no
@@ -356,7 +358,7 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             ),
           if (!widget.adminView)
             IconButton(
-              tooltip: 'Rate & Review Trip',
+              tooltip: 'Rate this ride',
               // warnText (not Colors.amber): readable on the light theme in sunlight.
               icon: Icon(Icons.rate_review_outlined, color: AppTheme.warnText),
               onPressed: _openReview,
@@ -558,6 +560,11 @@ class _TripReportScreenState extends State<TripReportScreen> with SingleTickerPr
             ],
             const SizedBox(height: 20),
             _moreDetails(r, me, myId),
+            // 3.55 ride safety report: my own phone's summary, never uploaded.
+            if (!widget.adminView && _stats?.safety != null && context.featureOn('safetyReport')) ...[
+              const SizedBox(height: 20),
+              RideSafetySummaryCard(summary: _stats!.safety!),
+            ],
             if (!widget.adminView && _reviewChecked && (_review != null || _canReview)) ...[
               const SizedBox(height: 20),
               _reviewCard(),

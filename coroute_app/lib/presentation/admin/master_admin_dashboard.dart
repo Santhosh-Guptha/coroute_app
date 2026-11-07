@@ -17,6 +17,7 @@ import '../ride/riders_ladder.dart';
 import '../timeline/member_colors.dart';
 import 'admin_convoy_inspector.dart';
 import 'admin_emergencies_panel.dart';
+import 'admin_features_screen.dart';
 import 'admin_insights_screen.dart';
 import 'admin_payments_logic.dart';
 import 'admin_plans_pricing_screen.dart';
@@ -28,9 +29,10 @@ import 'admin_settings_screen.dart';
 import 'admin_ui.dart';
 import 'admin_users_screen.dart';
 
-/// The sections of the one admin console (rail on wide screens, drawer on phones): eight, each
+/// The sections of the one admin console (rail on wide screens, drawer on phones): nine, each
 /// with a short plain name. Plans and coupons are tabs of Payments; phone reports are in Insights.
-enum AdminSection { dashboard, users, rides, safety, payments, reviews, insights, settings }
+/// 3.55: Features (the admin feature switches) before Settings.
+enum AdminSection { dashboard, users, rides, safety, payments, reviews, insights, features, settings }
 
 /// The nav items for an admin screen that shows [current]. From the
 /// overview a section is pushed; from another section it replaces that
@@ -68,6 +70,7 @@ List<AdminNavItem> adminNavItems(BuildContext context, AdminSection current, {in
     item(AdminSection.payments, Icons.payments_outlined, 'Payments', () => const AdminPlansPricingScreen()),
     item(AdminSection.reviews, Icons.rate_review_outlined, 'Reviews', () => const AdminReviewsScreen()),
     item(AdminSection.insights, Icons.insights_rounded, 'Insights', () => const AdminInsightsScreen()),
+    item(AdminSection.features, Icons.toggle_on_outlined, 'Features', () => const AdminFeaturesScreen()),
     item(AdminSection.settings, Icons.settings_outlined, 'Settings', () => const AdminSettingsScreen()),
     if (onSignOut != null) AdminNavItem(icon: Icons.logout_rounded, label: 'Sign out', danger: true, onTap: onSignOut),
   ];
@@ -210,7 +213,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
         backgroundColor: AppTheme.bg,
         appBar: AppBar(
           backgroundColor: AppTheme.bg,
-          title: const Text('Access Denied'),
+          title: const Text('Access denied'),
         ),
         body: Center(
           child: Padding(

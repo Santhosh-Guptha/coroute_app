@@ -2,15 +2,20 @@ import 'guardian_sheet.dart';
 import 'public_ride_widgets.dart';
 import 'ride_feature_summary.dart';
 import 'ride_sheet.dart';
+import '../widgets/feature_switch.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
+import '../../data/models/ride_feature_policy.dart';
 import '../../data/models/network_wire.dart';
 import '../../data/models/safety_wire.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/feature_flags_service.dart';
+import '../../data/services/group_safety_service.dart';
+import 'group_safety_cards.dart';
 
 bool _isGroupSettingsShowing = false;
 
@@ -138,9 +143,11 @@ class GroupSettingsView extends StatelessWidget {
                             const Text('Ride Guardian', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
                             const SizedBox(height: 2),
                             Text(
-                              convoy.featurePolicy.guardianEnabled
-                                  ? 'Share your personal ride with someone you trust.'
-                                  : 'Guardian links are disabled for this group.',
+                              !convoy.featurePolicy.guardianEnabled
+                                  ? 'Guardian links are turned off for this group.'
+                                  : !context.featureOn('guardianLink')
+                                      ? 'Guardian links: ${FeatureFlagsService.offNote.toLowerCase()}'
+                                      : 'Share your personal ride with someone you trust.',
                               style: const TextStyle(color: DsHeroCard.secondary, fontSize: 13, fontWeight: FontWeight.w600),
                             ),
                           ],
@@ -156,7 +163,7 @@ class GroupSettingsView extends StatelessWidget {
                     tone: DsButtonTone.onHero,
                     height: 48,
                     fontSize: 15,
-                    onPressed: convoy.featurePolicy.guardianEnabled ? () => showGuardianSheet(context, groupId: convoyId) : null,
+                    onPressed: convoy.featurePolicy.guardianEnabled && context.featureOn('guardianLink') ? () => showGuardianSheet(context, groupId: convoyId) : null,
                   ),
                 ],
               ),
@@ -194,6 +201,8 @@ class GroupSettingsView extends StatelessWidget {
             'guardianStopMinutes': ('Guardian stopped warning minutes', [5, 15, 30, 60, 120]),
             'guardianOfflineMinutes': ('Guardian offline warning minutes', [2, 5, 10, 30, 60]),
             'guardianDeviationMinutes': ('Guardian deviation warning minutes', [1, 5, 10, 15, 30]),
+            // 3.55 group stretch alert: the lead hears "Group spread 4 km, slow down" past this.
+            'stretchAlertKm': ('Group spread alert (km)', RideFeaturePolicy.stretchAlertChoices),
           }.entries)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -314,6 +323,36 @@ class GroupSettingsView extends StatelessWidget {
             ),
           const SizedBox(height: 8),
 
+          // 3b. Riding roles (3.55): lead at the front, sweeper at the back, automatic or set by the lead.
+          // 3.55 admin feature switches: riding roles / automatic roles turned off for every rider.
+          if (service.supportsRideRoles && convoy.riders.length >= 2 && !(context.featureOn('rideRoles') && context.featureOn('autoRoles'))) ...[
+            SheetSectionTitle('Riding roles'),
+            FeatureOffNote(label: context.featureOn('rideRoles') ? 'Automatic roles' : null),
+            const SizedBox(height: 8),
+          ],
+          if (service.supportsRideRoles && convoy.riders.length >= 2 && context.featureOn('rideRoles') && context.featureOn('autoRoles')) ...[
+            SheetSectionTitle('Riding roles'),
+            group([
+              DsSwitchRow(
+                label: 'Automatic roles',
+                subtitle: 'The rider at the front leads and the last rider sweeps. Riders are told when '
+                    'their role changes. Off: the lead sets roles from each rider\'s card.',
+                value: convoy.autoRoles,
+                onChanged: lead ? (v) => service.setAutoRoles(v) : null,
+                divider: false,
+              ),
+            ]),
+            const SizedBox(height: 8),
+          ],
+
+          // 3c. Buddy pairs (3.55, large groups): "Your buddy: Kiran", the lead can (re)assign.
+          if (context.featureOn('buddyPairs') && context.read<GroupSafetyService?>() != null &&
+              (convoy.capacity >= 7 || convoy.riders.length >= 7)) ...[
+            SheetSectionTitle('Buddy pairs'),
+            BuddyLine(service: context.read<GroupSafetyService>(), lead: lead, largeGroup: true),
+            const SizedBox(height: 8),
+          ],
+
           // 4. Spoken alerts for the whole group (each rider's own voice choice is in Settings).
           SheetSectionTitle('Spoken alerts'),
           group([
@@ -334,8 +373,9 @@ class GroupSettingsView extends StatelessWidget {
               discovery: convoy.discovery,
               assistDefault: convoy.assistDefault,
               lead: lead,
-              discoveryAvailable: service.supports(ProtocolFeatures.discovery),
-              assistAvailable: service.supports(ProtocolFeatures.safetyNet),
+              // 3.55 admin feature switches: nearby groups / nearby rider help turned off for everyone.
+              discoveryAvailable: service.supports(ProtocolFeatures.discovery) && context.featureOn('discovery'),
+              assistAvailable: service.supports(ProtocolFeatures.safetyNet) && context.featureOn('assistNetwork'),
               onChanged: ({GroupVisibility? visibility, bool? discovery, bool? assistDefault}) {
                 final ok = service.setGroupVisibility(visibility: visibility, discovery: discovery, assistDefault: assistDefault);
                 if (!ok) {

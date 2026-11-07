@@ -50,6 +50,13 @@ class RideAlert extends StatelessWidget {
   /// Shows a close button when set.
   final VoidCallback? onDismiss;
 
+  /// 3.55: further choices after the main action ("Ask group to wait", "Decline"...), same style.
+  final List<(String, VoidCallback)> moreActions;
+
+  /// 3.55 night riding care: after sunset (set by SafetyService's road care) alert cards get a
+  /// thicker border and a shadow so they stand out on a dark screen.
+  static bool nightContrast = false;
+
   const RideAlert({
     super.key,
     required this.tier,
@@ -58,6 +65,7 @@ class RideAlert extends StatelessWidget {
     this.actionLabel,
     this.onAction,
     this.onDismiss,
+    this.moreActions = const [],
   });
 
   @override
@@ -81,10 +89,10 @@ class RideAlert extends StatelessWidget {
       liveRegion: critical,
       child: Material(
         color: bg,
-        elevation: 0,
+        elevation: nightContrast ? 6 : 0,
         shape: RoundedRectangleBorder(
           borderRadius: Radii.lgAll,
-          side: BorderSide(color: border, width: 2),
+          side: BorderSide(color: important && nightContrast ? AppTheme.warnText : border, width: nightContrast ? 3 : 2),
         ),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 56),
@@ -115,20 +123,30 @@ class RideAlert extends StatelessWidget {
                             style: AppText.label.copyWith(color: sub),
                           ),
                         ),
-                      if (action != null && onAction != null)
+                      if ((action != null && onAction != null) || moreActions.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: Space.s4),
-                          child: TextButton(
-                            onPressed: onAction,
-                            style: TextButton.styleFrom(
-                              foregroundColor: actionFg,
-                              backgroundColor: actionBg,
-                              minimumSize: const Size(48, 44),
-                              padding: const EdgeInsets.symmetric(horizontal: Space.s12),
-                              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
-                              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-                            ),
-                            child: Text(action, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          child: Wrap(
+                            spacing: Space.s8,
+                            runSpacing: Space.s4,
+                            children: [
+                              for (final (label, tap) in [
+                                if (action != null && onAction != null) (action, onAction!),
+                                ...moreActions,
+                              ])
+                                TextButton(
+                                  onPressed: tap,
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: actionFg,
+                                    backgroundColor: actionBg,
+                                    minimumSize: const Size(48, 44),
+                                    padding: const EdgeInsets.symmetric(horizontal: Space.s12),
+                                    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
+                                    textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                                  ),
+                                  child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                ),
+                            ],
                           ),
                         ),
                     ],

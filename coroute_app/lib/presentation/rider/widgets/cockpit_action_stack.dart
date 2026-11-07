@@ -90,7 +90,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
           : null;
       final distText = distM != null ? ' · ${formatDistanceRounded(distM)} away' : '';
       final isMeshAlert = alert.alertId.startsWith('mesh_');
-      final sourceTag = isMeshAlert ? ' (via Mesh)' : '';
+      final sourceTag = isMeshAlert ? ' (via Bluetooth)' : '';
 
       items.add(
         _ActionPill(
@@ -119,7 +119,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
           iconColor: Colors.white,
           accentColor: AppTheme.brand,
           title: 'CALL IN PROGRESS',
-          subtitle: 'Intercom mic paused · Audio alerts safe',
+          subtitle: 'Intercom mic paused · Safety alerts still play',
           onTap: () {
             HapticFeedback.lightImpact();
           },
@@ -171,7 +171,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
               title: '$who DIVERTING FOR FUEL',
               subtitle: rider.statusMessage.isNotEmpty
                   ? '${rider.statusMessage} · Tap to locate'
-                  : 'Refueling$rangeNote · Tap to locate or regroup',
+                  : 'Refuelling$rangeNote · Tap to locate or regroup',
               onTap: () {
                 HapticFeedback.lightImpact();
                 if (widget.onFocusLocation != null && rider.lat != 0 && rider.lng != 0) {
@@ -196,7 +196,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
                 iconColor: Colors.white,
                 accentColor: AppTheme.warnText,
                 title: 'GROUP SEPARATION · ${formatDistanceRounded(gapM)}',
-                subtitle: 'Group is ahead · Tap to find the Lead',
+                subtitle: 'Group is ahead · Tap to find the lead',
                 onTap: () {
                   HapticFeedback.lightImpact();
                   if (widget.onFocusLocation != null) {
@@ -228,7 +228,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
             title: 'GROUP FUEL · $who: ${consensus.lowestRangeKm.round()} km left',
             subtitle: st != null
                 ? '${st.name}$distStr · Tap to add stop'
-                : 'Bottleneck rider needs fuel · Tap to search',
+                : 'A rider is low on fuel · Tap to find a station',
             onTap: () {
               HapticFeedback.mediumImpact();
               _showFuelQuickSheet(
@@ -553,7 +553,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      isLow ? 'Low Fuel Alert' : 'Petrol Bunks Near You',
+                                      isLow ? 'Low fuel' : 'Fuel stations near you',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: AppText.title,
@@ -561,7 +561,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
                                     Text(
                                       usableKm != null
                                           ? 'Estimated ~${usableKm.round()} km usable range left'
-                                          : 'Upcoming petrol bunks along route or nearby',
+                                          : 'Fuel stations ahead on your route or nearby',
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                       style: AppText.caption.copyWith(
@@ -581,7 +581,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'PETROL BUNKS NEAR YOU',
+                                'FUEL STATIONS NEAR YOU',
                                 style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.muted),
                               ),
                               if (riderLat != null && riderLng != null && riderLat != 0 && riderLng != 0)
@@ -604,7 +604,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
                                   icon: isFetchingNearby
                                       ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
                                       : const Icon(Icons.refresh_rounded, size: 14),
-                                  label: Text(isFetchingNearby ? 'Scanning...' : 'Scan Nearby', style: const TextStyle(fontSize: 12)),
+                                  label: Text(isFetchingNearby ? 'Searching…' : 'Search again', style: const TextStyle(fontSize: 12)),
                                 ),
                             ],
                           ),
@@ -618,8 +618,8 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
                                   const SizedBox(height: 8),
                                   Text(
                                     isFetchingNearby
-                                        ? 'Locating verified petrol stations near your position...'
-                                        : 'No petrol stations found within 25 km. Tap "Scan Nearby" or configure fuel profile.',
+                                        ? 'Finding fuel stations near you…'
+                                        : 'No fuel stations found within 25 km. Tap "Search again" or check your fuel settings.',
                                     textAlign: TextAlign.center,
                                     style: AppText.body.copyWith(color: AppTheme.muted),
                                   ),
@@ -660,7 +660,7 @@ class _CockpitActionStackState extends State<CockpitActionStack> {
                                     onOpenFuelSheet?.call();
                                   },
                                   icon: const Icon(Icons.tune_rounded, size: 18),
-                                  label: const Text('Manage Fuel Profile'),
+                                  label: const Text('Fuel settings'),
                                 ),
                               ),
                             ],
@@ -812,7 +812,7 @@ class _StationRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  station.name.isEmpty ? 'Petrol Pump' : station.name,
+                  station.name.isEmpty ? 'Petrol pump' : station.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: AppText.title.copyWith(fontSize: 14),
@@ -841,7 +841,7 @@ class _StationRow extends StatelessWidget {
             ),
             onPressed: onAdd,
             icon: const Icon(Icons.add_location_alt_rounded, size: 18),
-            label: Text(rawAheadM > 0 ? 'Add Stop' : 'Route', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            label: Text(rawAheadM > 0 ? 'Add stop' : 'Route', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -924,7 +924,7 @@ class _SideFuelButton extends StatelessWidget {
         : null;
     final bunkSubtitle = nearestStationName != null
         ? (distText != null ? '$nearestStationName · $distText' : nearestStationName!)
-        : 'Tap for bunks';
+        : 'Tap for fuel stations';
 
     return Material(
       color: bgColor,

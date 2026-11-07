@@ -222,7 +222,7 @@ class GloveQuickActionGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final commsSubtitle = isSolo ? 'Solo ride' : 'Convoy active';
+    final commsSubtitle = isSolo ? 'Solo ride' : 'Group ride active';
     final stopsCount = convoy.plannedStops.length;
     final stopsSubtitle = stopsCount == 0 ? 'No stops' : '$stopsCount stop${stopsCount > 1 ? 's' : ''}';
     final reason = stopReasonText ?? '';
@@ -388,7 +388,7 @@ class CompactConvoyRoster extends StatelessWidget {
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
-                        'CONVOY SPREAD: $spreadText',
+                        'GROUP SPREAD: $spreadText',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppText.overline.copyWith(color: AppTheme.accentText),
@@ -448,7 +448,7 @@ class CompactConvoyRoster extends StatelessWidget {
                 } else if (r.role == 'LEAD') {
                   roleTag = 'LEAD';
                 } else if (r.role == 'SWEEPER') {
-                  roleTag = 'SWEEP';
+                  roleTag = 'SWEEPER';
                 }
 
                 return InkWell(
@@ -603,8 +603,8 @@ class SecondaryManagementGroup extends StatelessWidget {
           _CardTile(
             icon: Icons.shield_rounded,
             iconColor: AppTheme.accentText,
-            title: 'Ride Guardian Live Share',
-            subtitle: 'Live encrypted web tracking link for family or friends',
+            title: 'Ride Guardian',
+            subtitle: 'A private live link for family or friends',
             onTap: onOpenGuardian,
           ),
           const Divider(height: 1),
@@ -671,7 +671,7 @@ class RideLifecycleBar extends StatelessWidget {
               isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
             ),
             label: Text(
-              isPaused ? 'Resume Convoy Ride' : 'Pause Convoy Ride',
+              isPaused ? 'Resume group ride' : 'Pause group ride',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
             ),
           ),

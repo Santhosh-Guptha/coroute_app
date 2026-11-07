@@ -11,6 +11,7 @@ import '../../data/services/trip_storage_service.dart';
 import '../../domain/analytics/ride_analytics.dart';
 import '../../domain/places/fuel_match.dart';
 import '../feedback/suggest_feature_screen.dart';
+import '../widgets/feature_switch.dart';
 
 /// "Your ride analytics": totals, this month against last, km per week,
 /// safety habits, fuel, group vs solo and streaks. Computed on the phone from
@@ -21,8 +22,14 @@ class RideAnalyticsScreen extends StatefulWidget {
 
   static const String privacyLine = 'Calculated on your phone. Only you can see this.';
 
-  static Future<void> open(BuildContext context) =>
-      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const RideAnalyticsScreen()));
+  static Future<void> open(BuildContext context) async {
+    // 3.55 admin feature switch: ride analytics turned off for every rider (every entry point).
+    if (!context.featureOnNow('rideAnalytics')) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Ride analytics are turned off for now.')));
+      return;
+    }
+    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const RideAnalyticsScreen()));
+  }
 
   @override
   State<RideAnalyticsScreen> createState() => _RideAnalyticsScreenState();

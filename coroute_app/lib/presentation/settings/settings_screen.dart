@@ -14,9 +14,11 @@ import '../account/edit_profile_screen.dart';
 import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../onboarding/permissions_screen.dart';
 import '../ride/fuel_sheet.dart';
+import '../safety/crash_learning_row.dart';
 import '../safety/safety_settings_sheet.dart';
 import '../trip_planner/offline_map_manager_screen.dart';
 import '../widgets/data_saver_tile.dart';
+import '../widgets/feature_switch.dart';
 import 'features_guide_screen.dart';
 
 /// The one Settings screen: only the choices a rider really makes, grouped
@@ -149,6 +151,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         value: s.crashDetection,
                         onChanged: (v) => _setCrash(s, v),
                       ),
+                      const CrashLearningRow(), // 3.55: "Learned from N false alarms on this bike"
                       if (auth != null) _EmergencyRow(auth: auth, onTap: () => _push(const EditProfileScreen())),
                       SafetySwitch(
                         key: const ValueKey('settings_sms'),
@@ -166,6 +169,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         value: s.soloCheckIn,
                         onChanged: s.setSoloCheckIn,
                       ),
+                      // 3.55 solo check-in by ETA and no-signal ahead (docs/features_355/solo_guardian.md).
+                      if (context.featureOn('soloCheckIn'))
+                        SafetySwitch(
+                          icon: Icons.timer_rounded,
+                          title: 'Solo check-in timer',
+                          subtitle: (auth?.emergencyContact ?? '').trim().length >= 7
+                              ? 'On a solo ride with a destination, asks "Are you OK?" if you have not arrived by your ETA plus a margin, then texts your emergency contact.'
+                              : 'Add an emergency contact to use it. On a solo ride, your contact is texted if you are overdue and do not answer.',
+                          value: s.etaCheckIn,
+                          onChanged: s.setEtaCheckIn,
+                        ),
+                      if (context.featureOn('noSignalAhead'))
+                        SafetySwitch(
+                          icon: Icons.signal_cellular_connected_no_internet_4_bar_rounded,
+                          title: 'No-signal ahead',
+                          subtitle: 'Before a stretch where your phone had no signal on earlier rides, tells your group and guardians when you expect to be back online.',
+                          value: s.noSignalAhead,
+                          onChanged: s.setNoSignalAhead,
+                        ),
                       SafetySwitch(
                         icon: Icons.free_breakfast_rounded,
                         title: SafetyTexts.fatigueTitle,

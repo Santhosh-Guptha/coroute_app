@@ -18,7 +18,7 @@ class TimelineFilter {
   static const alerts = TimelineFilter('Alerts', {
     'SOS', 'SEPARATED', 'OFF_ROUTE', 'OFFLINE', 'OVERSPEED', 'POSSIBLE_INCIDENT', 'NO_REPLY', 'SOS_RESPONSE', 'CHECK_IN',
   });
-  static const riding = TimelineFilter('Riding', {'MOVING', 'CORIDE'});
+  static const riding = TimelineFilter('Riding', {'MOVING', 'CORIDE', 'VEHICLE_SWAP'}); // 3.55 swaps
   static const group = TimelineFilter('Group', {
     'TRIP_STARTED', 'TRIP_PAUSED', 'TRIP_RESUMED', 'TRIP_ENDED', 'JOINED', 'LEFT',
     'STOP_ADDED', 'STOP_SUGGESTED', 'STOP_SKIPPED', 'ROUTE_CHANGED',
@@ -95,6 +95,8 @@ class _TimelineListState extends State<TimelineList> {
     'NO_REPLY': Icons.help_outline_rounded,
     'SOS_RESPONSE': Icons.directions_run_rounded,
     'CHECK_IN': Icons.verified_user_rounded,
+    // 3.55 bike / pillion swap.
+    'VEHICLE_SWAP': Icons.swap_horiz_rounded,
   };
 
   static Color _tone(TimelineEventModel e) {

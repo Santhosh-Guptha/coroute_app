@@ -239,11 +239,12 @@ const List<FeatureInfo> featureCatalog = [
     group: FeatureGroup.riding,
     icon: Icons.garage_rounded,
     name: 'Garage',
-    what: 'Keep your bikes, odometer and service dates in one place.',
+    what: 'Keep your bikes, odometer and service dates in one place. Your active bike sets your fuel range and engine rest advice.',
     when: 'Any time. Works offline.',
     battery: Impact.none,
     data: Impact.none,
-    privacy: 'Stays on your phone.',
+    privacy: 'Your bikes are kept on your phone. Your group sees your active bike\'s colour, and a short summary '
+        '(model, engine size, tank and mileage) is shared with CoRoute to improve fuel and engine advice.',
     settings: SettingsTarget.garage,
   ),
   FeatureInfo(
@@ -467,13 +468,14 @@ const List<FeatureInfo> featureCatalog = [
     id: 'roles',
     group: FeatureGroup.group,
     icon: Icons.flag_rounded,
-    name: 'Lead and Sweep',
-    what: 'The Lead guides the ride. The Sweep rides last so no one is left behind.',
+    name: 'Riding roles',
+    what: 'The Lead rides at the front and sets the pace. Middle riders keep the rider ahead in sight. '
+        'The Sweeper rides last so no one is left behind. Riders are told when their role changes.',
     when: 'During a group ride.',
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Roles are shown to the group.',
-    changeHint: 'The Lead sets the Sweep from a rider\'s card.',
+    changeHint: 'Automatic roles follow the order on the road (Group settings). The lead can also set a role from a rider\'s card.',
   ),
   FeatureInfo(
     id: 'group_alerts',

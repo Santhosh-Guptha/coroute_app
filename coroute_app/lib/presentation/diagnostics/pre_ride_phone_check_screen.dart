@@ -15,6 +15,7 @@ import '../../data/services/permissions_service.dart';
 import '../../data/services/safety_native.dart';
 import '../../data/services/settings_service.dart';
 import '../safety/oem_battery_guide.dart';
+import '../safety/mount_check_line.dart';
 
 /// Pre-ride phone check: a short checklist (pass / warn / fail) with a one-tap fix for each
 /// problem and one plain verdict ("Ready to ride"). Nothing is ever blocked: before a ride
@@ -435,6 +436,7 @@ class _PreRidePhoneCheckScreenState extends State<PreRidePhoneCheckScreen> with 
               ),
               if (_showPassed) ...passed.map(_passRow),
               const SizedBox(height: 8),
+              const MountCheckLine(), // 3.55 phone-mount check: where the phone was last ride
               _buildSubmissionTile(report),
             ],
           ),

@@ -2,6 +2,8 @@ import 'data/services/ride_essentials_coordinator.dart';
 import 'data/services/route_essentials_service.dart';
 import 'data/services/fuel_sharing_binding.dart';
 import 'data/services/fuel_settings_binding.dart';
+import 'data/services/garage_binding.dart';
+import 'data/services/garage_service.dart';
 import 'data/services/phone_call_service.dart';
 import 'dart:async';
 import 'package:app_links/app_links.dart';
@@ -19,12 +21,13 @@ import 'core/theme/theme_controller.dart';
 import 'core/ui/ui.dart';
 import 'data/services/alert_service.dart';
 import 'data/services/api_client.dart';
+import 'data/services/feature_flags_service.dart';
+import 'data/services/admin_warnings_service.dart';
 import 'data/services/auth_service.dart';
 import 'data/services/background_service.dart';
 import 'data/services/p2p_mesh_service.dart';
 import 'data/services/convoy_service.dart';
 import 'data/services/geo_service.dart';
-import 'data/services/helmet_voice_service.dart';
 import 'data/services/intercom_service.dart';
 import 'data/services/meta_service.dart';
 import 'data/services/app_version_service.dart';
@@ -37,6 +40,8 @@ import 'data/services/ride_notification_service.dart';
 import 'data/services/medical_id_lock_sync.dart';
 import 'data/services/safety_native.dart';
 import 'data/services/safety_service.dart';
+import 'data/services/solo_guardian_service.dart';
+import 'data/services/sos_battery_reserve.dart';
 import 'data/services/settings_service.dart';
 import 'data/services/tile_cache_service.dart';
 import 'data/services/timeline_service.dart';
@@ -48,6 +53,9 @@ import 'data/services/nav_voice.dart';
 import 'data/services/voice_service.dart';
 import 'data/services/weather_service.dart';
 import 'data/services/permission_revocation_safety_service.dart';
+import 'data/services/place_review_service.dart';
+import 'data/services/group_safety_service.dart';
+import 'data/services/map_places_service.dart';
 import 'domain/notify/notification_snapshot.dart';
 import 'presentation/auth/access_gate_screen.dart';
 import 'presentation/ride/emergency_guidance.dart';
@@ -117,6 +125,13 @@ class CoRouteApp extends StatelessWidget {
           AppLifecycleListener(onResume: rt.retryNow);
           return rt;
         }),
+        // 3.55 admin feature switches: saved copy, GET /features, socket FEATURE_FLAGS pushes.
+        // Not lazy, so a switch applies even before any screen asks for it.
+        ChangeNotifierProvider<FeatureFlagsService>(lazy: false,
+          create: (ctx) => FeatureFlagsService(ctx.read<ApiClient>(), realtime: ctx.read<RealtimeService>())),
+        // 3.55 platform: moderator warnings on Home (GET /me/warnings + socket push; switch adminWarnings).
+        ChangeNotifierProvider<AdminWarningsService>(lazy: false,
+          create: (ctx) => AdminWarningsService(ctx.read<ApiClient>(), realtime: ctx.read<RealtimeService>())),
         ChangeNotifierProvider(create: (ctx) {
           final auth = AuthService(ctx.read<ApiClient>());
           ctx.read<RealtimeService>().onAuthRejected = auth.revalidate;
@@ -141,6 +156,10 @@ class CoRouteApp extends StatelessWidget {
           final pr = PublicRideService(ctx.read<RealtimeService>());
           pr.speaker = (line, key) => ctx.read<VoiceService>().speak(line, priority: VoicePriority.important, key: key).ignore();
           pr.emergencyActive = () => ctx.read<ConvoyService>().activeConvoy?.activeAlerts.any((a) => !a.resolved) ?? false;
+          // 3.55 admin feature switch: public ride turned off for every rider.
+          final ff = ctx.read<FeatureFlagsService>();
+          pr.featureOn = FeatureFlagsService.on;
+          ff.addListener(pr.featureSwitchesChanged);
           return pr;
         }),
         ChangeNotifierProvider(create: (ctx) {
@@ -160,6 +179,10 @@ class CoRouteApp extends StatelessWidget {
               mesh: ctx.read<P2pMeshService>(),
               onPlanChanged: () => ctx.read<MembershipService>().fetchMyMembership().ignore(),
             );
+            // 3.55 riding role prompts ("You are now the sweeper, drop back...") in the important tier.
+            convoys.speaker = (line, key) => ctx.read<VoiceService>().speak(line, priority: VoicePriority.important, key: key).ignore();
+            // 3.55 admin feature switches (road warnings, riding roles): no hard dependency on the service.
+            convoys.featureOn = FeatureFlagsService.on;
             final theme = ctx.read<ThemeController>();
             convoys.addListener(() {
               final me = convoys.myUserId == null ? null : convoys.activeConvoy?.riders[convoys.myUserId];
@@ -173,6 +196,7 @@ class CoRouteApp extends StatelessWidget {
         ),
         ChangeNotifierProvider(create: (ctx) {
           final intercom = IntercomService(ctx.read<RealtimeService>(), settings: ctx.read<SettingsService>());
+          intercom.featureOn = FeatureFlagsService.on; // 3.55 admin feature switch 'intercom'
           final phoneCall = ctx.read<PhoneCallService>();
           phoneCall.addListener(() => intercom.setPhoneCallActive(phoneCall.isCallActive));
           return intercom;
@@ -205,18 +229,97 @@ class CoRouteApp extends StatelessWidget {
             final settings = ctx.read<SettingsService>();
             final safety = SafetyService(convoys, settings, ctx.read<AuthService>(),
               voice: ctx.read<VoiceService>(), weather: ctx.read<WeatherService>(), tiles: ctx.read<TilePrefetcher>());
+            safety.featureOn = FeatureFlagsService.on; // 3.55 admin feature switches (engine care)
+            // 3.55: potholes, speed breakers and rough road felt at the front warn the riders
+            // behind and are saved for later rides (ConvoyService decides whether to send).
+            safety.onRoadSurface = convoys.reportRoadSurface;
             return safety;
           },
         ),
-        ChangeNotifierProvider<HelmetVoiceService>(
+        // 3.55 SOS battery reserve: below 10% in a ride, keep power for SOS / crash detection,
+        // pause heavy extras and send the last location to the group once.
+        ChangeNotifierProvider<SosBatteryReserve>.value(value: SosBatteryReserve.shared),
+        Provider<SosBatteryReserveBinding>(
           lazy: false,
-          create: (ctx) => HelmetVoiceService(
-            convoyService: ctx.read<ConvoyService>(),
-            safetyService: ctx.read<SafetyService>(),
-            intercomService: ctx.read<IntercomService>(),
-            voiceService: ctx.read<VoiceService>(),
+          create: (ctx) {
+            SosBatteryReserve.shared.featureOn = FeatureFlagsService.on; // switch 'sosBatteryReserve'
+            return SosBatteryReserveBinding(ctx.read<ConvoyService>(),
+                realtime: ctx.read<RealtimeService>(), tiles: ctx.read<TilePrefetcher>(), intercom: ctx.read<IntercomService>());
+          },
+          dispose: (_, b) => b.dispose(),
+        ),
+        // 3.55 solo check-in by ETA (text the emergency contact when a solo ride is overdue and the
+        // rider does not answer) and no-signal ahead (coverage log of my own rides). Not lazy: the
+        // timer must run with the screen off.
+        ChangeNotifierProvider<SoloGuardianService>(
+          lazy: false,
+          create: (ctx) => SoloGuardianService(
+            ctx.read<ConvoyService>(),
+            ctx.read<SettingsService>(),
+            ctx.read<AuthService>(),
+            ctx.read<RealtimeService>(),
+            safety: ctx.read<SafetyService>(),
+            voice: ctx.read<VoiceService>(),
+            featureOn: FeatureFlagsService.on,
           ),
         ),
+        // 3.55 group safety: missing-rider check, group stretch alert, smart regroup point, group
+        // break planner, buddy pairs, risky-stretch heads-up. Logic on the phone; never speaks over
+        // an SOS / crash alarm (docs/features_355/group_safety.md).
+        ChangeNotifierProvider<GroupSafetyService>(
+          lazy: false,
+          create: (ctx) {
+            final api = ctx.read<ApiClient>();
+            final convoys = ctx.read<ConvoyService>();
+            final safety = ctx.read<SafetyService>();
+            final gs = GroupSafetyService(convoys, ctx.read<RealtimeService>(), api,
+                timeline: ctx.read<TimelineService>(), places: () => MapPlacesService.shared(api).all)
+              ..fatigueScore = (() => safety.fatigueLevel) // 0-100 on the phone; only a level 0..3 is shared
+              ..hardStops = (() => safety.hardStops)
+              ..alarmOpen = (() => safety.alarm != null || convoys.myOpenSosAlertId != null)
+              ..featureOn = FeatureFlagsService.on
+              ..speaker = (line, key) => ctx.read<VoiceService>().speak(line, priority: VoicePriority.important, key: key).ignore();
+            return gs;
+          },
+        ),
+        // 3.55: CoRoute rider place reviews: a polite "How was it?" after a while at a place
+        // (never while riding or during an SOS / crash alarm), ratings on the map and place card.
+        ChangeNotifierProvider<PlaceReviewService>(
+          lazy: false,
+          create: (ctx) {
+            final convoys = ctx.read<ConvoyService>();
+            final safety = ctx.read<SafetyService>();
+            final reviews = PlaceReviewService(ctx.read<ApiClient>())
+              // 3.55 safety review: also any open SOS / crash alert of another rider in the ride.
+              ..emergencyOpen = (() => SosBatteryReserve.isActive /* 3.55: no review prompts on SOS reserve */ || safety.alarm != null || convoys.pendingSos != null || convoys.myOpenSosAlertId != null ||
+                  (convoys.activeConvoy?.activeAlerts.any((a) => !a.resolved) ?? false))
+              ..rideActive = (() => convoys.activeConvoy != null && convoys.activeConvoy!.tripStatus != 'ENDED')
+              ..attachFixes(convoys.myFixes);
+            return reviews;
+          },
+        ),
+        // 3.55: one garage for the whole app; its active bike feeds engine care, the fuel
+        // profile (when the rider set none), the ride's vehicle colour and the profile summary.
+        Provider<GarageService>.value(value: GarageService.shared),
+        Provider<GarageBinding>(
+          lazy: false,
+          create: (ctx) {
+            final convoys = ctx.read<ConvoyService>();
+            return GarageBinding(
+              ctx.read<GarageService>(),
+              engineCare: ctx.read<SafetyService>().engineCare,
+              auth: ctx.read<AuthService>(),
+              settings: ctx.read<SettingsService>(),
+              weather: ctx.read<WeatherService>(),
+              onVehicleColour: (c) => convoys.vehicleColor = c,
+            );
+          },
+          dispose: (_, b) => b.dispose(),
+        ),
+        // 3.55 platform: HelmetVoiceService (hotwords) is no longer created at start-up. Nothing
+        // feeds it speech (no recogniser; the mic runs only during PTT/VOX, FEAT-MIC-01), so it
+        // only cost memory. Readers use context.read<HelmetVoiceService?>() and get null.
+        // Register it here again (lazy) once a speech source exists.
         ChangeNotifierProvider<PermissionRevocationSafetyService>(
           lazy: false,
           create: (ctx) => PermissionRevocationSafetyService(
@@ -285,6 +388,7 @@ class CoRouteApp extends StatelessWidget {
               // Talk follows the ride's plan: a solo ride (Community host, one seat) has no Talk;
               // null while the seats are unknown (older gateway), so a group ride still shows it.
               talkAllowed: () {
+                if (!FeatureFlagsService.on('intercom')) return false; // 3.55 admin feature switch
                 final ride = convoys.activeConvoy;
                 return ride == null || ride.capacity <= 0 ? null : ride.hasGroupFeatures;
               },

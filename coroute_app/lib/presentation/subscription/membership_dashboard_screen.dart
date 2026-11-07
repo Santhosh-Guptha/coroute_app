@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/ui_tokens.dart';
 import '../../data/models/membership_model.dart';
 import '../../data/services/auth_service.dart';
 import '../../data/services/membership_service.dart';
@@ -47,7 +48,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
-        backgroundColor: isError ? Colors.redAccent.shade700 : AppTheme.brand,
+        backgroundColor: isError ? AppTheme.sos : AppTheme.brand,
         duration: const Duration(seconds: 3),
       ),
     );
@@ -67,7 +68,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
       _showSnack('Invitation sent to $identifier.');
     } else {
-      _showSnack(ms.lastError ?? 'Failed to invite rider.', isError: true);
+      _showSnack(ms.lastError ?? 'Could not invite this rider. Try again.', isError: true);
     }
   }
 
@@ -78,25 +79,25 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Invite Group Rider', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text('Invite a rider', style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Enter the rider\'s email, username, or phone number. They will be added to your group membership and can join your convoys at zero extra cost.',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
+            Text(
+              'Enter the rider\'s email, username or phone number. They join your plan and ride in your group rides at no extra cost.',
+              style: TextStyle(color: AppTheme.text2, fontSize: 13),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _inviteCtrl,
               autofocus: true,
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: AppTheme.text),
               decoration: InputDecoration(
                 hintText: 'Email or username or phone',
-                hintStyle: const TextStyle(color: Colors.white38),
+                hintStyle: TextStyle(color: AppTheme.muted),
                 filled: true,
-                fillColor: Colors.black26,
+                fillColor: AppTheme.soft,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
               ),
             ),
@@ -105,12 +106,12 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+            child: Text('Cancel', style: TextStyle(color: AppTheme.text2)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.brand),
             onPressed: () => _handleInvite(ctx),
-            child: const Text('Send Invite', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            child: const Text('Send invite', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -122,15 +123,15 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.card,
-        title: const Text('Remove Rider?', style: TextStyle(color: Colors.white)),
+        title: Text('Remove rider?', style: TextStyle(color: AppTheme.text)),
         content: Text(
           'Remove $name from your plan? Their seat becomes free.',
-          style: const TextStyle(color: Colors.white70),
+          style: TextStyle(color: AppTheme.text2),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.sos),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Remove', style: TextStyle(color: Colors.white)),
           ),
@@ -143,9 +144,9 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     final success = await ms.removeMember(userId);
     if (!mounted) return;
     if (success) {
-      _showSnack('$name removed from group membership.');
+      _showSnack('$name removed from your plan.');
     } else {
-      _showSnack(ms.lastError ?? 'Failed to remove rider.', isError: true);
+      _showSnack(ms.lastError ?? 'Could not remove this rider. Try again.', isError: true);
     }
   }
 
@@ -178,11 +179,11 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       appBar: AppBar(
         backgroundColor: AppTheme.card,
         elevation: 0,
-        title: const Text('CoRoute Membership & Plans', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: const Text('Membership & plans', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
         actions: [
           IconButton(
             icon: const Icon(Icons.receipt_long_rounded),
-            tooltip: 'Payment & Invoice History',
+            tooltip: 'Payments & plan history',
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const PaymentHistoryScreen()),
@@ -267,7 +268,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: AppTheme.border),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -281,15 +282,15 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'Verifying Membership Status',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+          Text(
+            'Checking your plan',
+            style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 15),
           ),
           const SizedBox(height: 6),
-          const Text(
-            'Checking your plan...',
+          Text(
+            'This takes a few seconds.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white60, fontSize: 12),
+            style: TextStyle(color: AppTheme.text2, fontSize: 12),
           ),
         ],
       ),
@@ -341,16 +342,16 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
+              children: [
                 Text(
-                  'Safety-First Membership Guarantee',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                  'Safety is always free',
+                  style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 13),
                 ),
                 SizedBox(height: 4),
                 Text(
                   'Community is free for every rider: solo rides with SOS, crash alerts and guardians. '
                   'If a paid plan ends mid-ride, the ride goes on.',
-                  style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
+                  style: TextStyle(color: AppTheme.text2, fontSize: 12, height: 1.3),
                 ),
               ],
             ),
@@ -364,27 +365,27 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.amber.shade900.withValues(alpha: 0.25),
-        border: Border.all(color: Colors.amber.shade600, width: 1.5),
+        color: AppTheme.warnTint,
+        border: Border.all(color: AppTheme.warnBorder, width: 1.5),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.lock_clock_rounded, color: Colors.amberAccent, size: 22),
+              Icon(Icons.lock_clock_rounded, color: AppTheme.warnText, size: 22),
               SizedBox(width: 8),
               Text(
-                'Single Active Trip Lock Engaged',
-                style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 15),
+                'You are already in a ride',
+                style: TextStyle(color: AppTheme.warnText, fontWeight: FontWeight.bold, fontSize: 15),
               ),
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            'You are in a ride (${lock.groupId}) as ${lock.role}. Leave or end it to start another.',
-            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3),
+            'Leave or end your current ride to start another one.',
+            style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.3),
           ),
         ],
       ),
@@ -423,7 +424,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isExpired ? Colors.redAccent : AppTheme.brand.withValues(alpha: 0.6)),
+        border: Border.all(color: isExpired ? AppTheme.sos : AppTheme.brand.withValues(alpha: 0.6)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -434,35 +435,38 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isExpired ? Colors.redAccent : AppTheme.brand,
+                  color: isExpired ? AppTheme.sos : AppTheme.brand,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  isExpired ? 'EXPIRED' : 'ACTIVE MEMBERSHIP',
+                  isExpired ? 'ENDED' : 'ACTIVE PLAN',
                   style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11),
                 ),
               ),
               Text(
                 '₹${mem.priceRupees} / month',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 16),
               ),
             ],
           ),
           const SizedBox(height: 12),
           Text(
-            mem.category == 'individual'
-                ? 'Individual Solo Membership'
-                : 'Group Membership (${mem.capacity} Riders Capacity)',
-            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+            switch (mem.category) {
+              'group_small' => 'Small Group (2–6)',
+              'group_large' => 'Large Group (7–12)',
+              'individual' => 'Legacy plan (Individual)',
+              _ => mem.name,
+            },
+            style: TextStyle(color: AppTheme.text, fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          const Row(
+          Row(
             children: [
-              Icon(Icons.verified_user_rounded, color: Colors.lightGreenAccent, size: 16),
+              Icon(Icons.verified_user_rounded, color: StatusColors.success, size: 16),
               SizedBox(width: 6),
               Text(
-                'Owner: You (Permanent & Non-transferable)',
-                style: TextStyle(color: Colors.lightGreenAccent, fontSize: 12, fontWeight: FontWeight.w600),
+                'You own this plan (not transferable)',
+                style: TextStyle(color: StatusColors.success, fontSize: 12, fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -471,14 +475,14 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             children: [
               Icon(
                 isExpired ? Icons.event_busy_rounded : Icons.event_available_rounded,
-                color: isExpired ? Colors.redAccent : Colors.white70,
+                color: isExpired ? AppTheme.sos : AppTheme.text2,
                 size: 16,
               ),
               const SizedBox(width: 6),
               Text(
-                isExpired ? 'Ended on $validDate' : 'Valid until: $validDate',
+                isExpired ? 'Ended on $validDate' : 'Valid until $validDate',
                 style: TextStyle(
-                  color: isExpired ? Colors.redAccent : Colors.white70,
+                  color: isExpired ? AppTheme.sos : AppTheme.text2,
                   fontSize: 12,
                   fontWeight: isExpired ? FontWeight.bold : FontWeight.w500,
                 ),
@@ -488,11 +492,11 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           const SizedBox(height: 6),
           Row(
             children: [
-              const Icon(Icons.people_outline_rounded, color: Colors.white70, size: 16),
+              Icon(Icons.people_outline_rounded, color: AppTheme.text2, size: 16),
               const SizedBox(width: 6),
               Text(
-                'Seat Count: ${mem.occupiedSeats} / ${mem.capacity} ${mem.capacity == 1 ? "seat" : "seats"}',
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                'Seats used: ${mem.occupiedSeats} of ${mem.capacity}',
+                style: TextStyle(color: AppTheme.text2, fontSize: 12),
               ),
             ],
           ),
@@ -504,7 +508,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.autorenew_rounded, size: 18, color: Colors.black),
                     label: const Text(
-                      'Reactivate Plan',
+                      'Renew plan',
                       style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
@@ -545,25 +549,25 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     final paid = catalog?.paidCategories ?? const <MembershipCategory>[];
     final renewable = currentCat.canBuy || paid.isEmpty;
     final renewCat = renewable ? currentCat : paid.first;
-    final renewLabel = renewable ? 'Renew Current Plan (₹${owned.priceRupees} / mo)' : 'Host a group from ₹${renewCat.priceRupees}';
+    final renewLabel = renewable ? 'Renew plan (₹${owned.priceRupees} / mo)' : 'Host a group from ₹${renewCat.priceRupees}';
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.red.shade900.withValues(alpha: 0.2),
+        color: AppTheme.sos.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.8), width: 1.5),
+        border: Border.all(color: AppTheme.sos.withValues(alpha: 0.8), width: 1.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 24),
+              Icon(Icons.warning_amber_rounded, color: AppTheme.sos, size: 24),
               SizedBox(width: 8),
               Text(
-                'Membership Expired',
-                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 16),
+                'Your plan has ended',
+                style: TextStyle(color: AppTheme.sos, fontWeight: FontWeight.bold, fontSize: 16),
               ),
             ],
           ),
@@ -572,7 +576,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             renewable
                 ? 'Your ${owned.name} plan ended on $validDate. You ride on Community (free, solo rides) until you renew.'
                 : 'Your ${owned.name} plan ended on $validDate. You ride on Community now: free, solo rides, every safety feature.',
-            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3),
+            style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.3),
           ),
           const SizedBox(height: 14),
           SizedBox(
@@ -607,7 +611,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: AppTheme.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -616,12 +620,12 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                mem.capacity == 1 ? 'Seat Capacity' : 'Group Seat Capacity',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                mem.capacity == 1 ? 'Your seat' : 'Group seats',
+                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 15),
               ),
               Text(
-                '$used / $total ${total == 1 ? "Seat" : "Seats"}',
-                style: TextStyle(color: isFull ? Colors.redAccent : AppTheme.brand, fontWeight: FontWeight.bold),
+                '$used of $total ${total == 1 ? "seat" : "seats"}',
+                style: TextStyle(color: isFull ? AppTheme.sos : AppTheme.brand, fontWeight: FontWeight.bold),
               ),
             ],
           ),
@@ -631,18 +635,18 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             child: LinearProgressIndicator(
               value: ratio,
               minHeight: 10,
-              backgroundColor: Colors.white10,
-              valueColor: AlwaysStoppedAnimation<Color>(isFull ? Colors.redAccent : AppTheme.brand),
+              backgroundColor: AppTheme.soft,
+              valueColor: AlwaysStoppedAnimation<Color>(isFull ? AppTheme.sos : AppTheme.brand),
             ),
           ),
           const SizedBox(height: 12),
           Text(
             isFull
                 ? (mem.capacity == 1
-                    ? 'Solo plan: 1 seat. Upgrade below to invite riders.'
+                    ? 'This plan has 1 seat. Pick Small Group or Large Group below to invite riders.'
                     : 'All seats are taken. Remove a rider or upgrade.')
-                : '${mem.availableSeats} seat(s) free. Invited riders ride free.',
-            style: const TextStyle(color: Colors.white60, fontSize: 12),
+                : '${mem.availableSeats} ${mem.availableSeats == 1 ? 'seat' : 'seats'} free. Invited riders ride free.',
+            style: TextStyle(color: AppTheme.text2, fontSize: 12),
           ),
         ],
       ),
@@ -658,7 +662,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: AppTheme.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -667,21 +671,21 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                mem.capacity == 1 ? 'Rider Invitations' : 'Group Participants',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                mem.capacity == 1 ? 'Invite riders' : 'Riders on your plan',
+                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 15),
               ),
               ElevatedButton.icon(
                 icon: const Icon(Icons.person_add_rounded, size: 16, color: Colors.black),
                 label: const Text('Invite', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isFull ? Colors.white24 : AppTheme.brand,
+                  backgroundColor: isFull ? AppTheme.border : AppTheme.brand,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 ),
                 onPressed: isFull
                     ? () => _showSnack(
                           mem.capacity == 1
-                              ? 'Solo plan: 1 seat. Upgrade below to add seats.'
-                              : 'Seat capacity reached (${mem.capacity} seats). Upgrade or remove a member to invite.',
+                              ? 'This plan has 1 seat. Pick Small Group or Large Group below to add seats.'
+                              : 'All ${mem.capacity} seats are taken. Remove a rider or pick a bigger plan.',
                           isError: true,
                         )
                     : _openInviteDialog,
@@ -695,9 +699,9 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
               child: Center(
                 child: Text(
                   mem.capacity == 1
-                      ? 'Solo plan: 1 seat. Upgrade below to invite friends.'
+                      ? 'This plan has 1 seat. Pick Small Group or Large Group below to invite friends.'
                       : 'No members invited yet. Tap "Invite" to add riders.',
-                  style: const TextStyle(color: Colors.white38, fontSize: 13),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 13),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -707,17 +711,17 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: members.length,
-              separatorBuilder: (_, index) => const Divider(color: Colors.white10, height: 16),
+              separatorBuilder: (_, index) => Divider(color: AppTheme.soft, height: 16),
               itemBuilder: (ctx, i) {
                 final m = members[i];
                 return Row(
                   children: [
                     CircleAvatar(
                       radius: 18,
-                      backgroundColor: Colors.white12,
+                      backgroundColor: AppTheme.border,
                       child: Text(
                         (m.name.isNotEmpty ? m.name[0] : (m.email.isNotEmpty ? m.email[0] : 'R')).toUpperCase(),
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -725,16 +729,16 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(m.name.isNotEmpty ? m.name : (m.email.isNotEmpty ? m.email : m.phone), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+                          Text(m.name.isNotEmpty ? m.name : (m.email.isNotEmpty ? m.email : m.phone), style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w600, fontSize: 14)),
                           Text(
                             m.isAccepted ? 'Accepted' : 'Invited, waiting',
-                            style: TextStyle(color: m.isAccepted ? Colors.lightGreenAccent : Colors.amberAccent, fontSize: 11),
+                            style: TextStyle(color: m.isAccepted ? StatusColors.success : AppTheme.warnText, fontSize: 11),
                           ),
                         ],
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.person_remove_rounded, color: Colors.redAccent, size: 20),
+                      icon: Icon(Icons.person_remove_rounded, color: AppTheme.sos, size: 20),
                       tooltip: 'Remove from group',
                       onPressed: () => _handleRemoveMember(m.userId, m.name.isNotEmpty ? m.name : m.email),
                     ),
@@ -755,7 +759,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white12),
+          border: Border.all(color: AppTheme.border),
         ),
         child: Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -772,25 +776,25 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
               ),
               child: Icon(Icons.upgrade_rounded, color: AppTheme.brand, size: 20),
             ),
-            title: const Text(
+            title: Text(
               'Change plan or seats',
               style: TextStyle(
-                color: Colors.white,
+                color: AppTheme.text,
                 fontWeight: FontWeight.bold,
                 fontSize: 15,
               ),
             ),
-            subtitle: const Text(
+            subtitle: Text(
               'Add seats or change plan',
-              style: TextStyle(color: Colors.white54, fontSize: 12),
+              style: TextStyle(color: AppTheme.muted, fontSize: 12),
             ),
             iconColor: AppTheme.brand,
-            collapsedIconColor: Colors.white60,
+            collapsedIconColor: AppTheme.text2,
             children: [
-              const Divider(color: Colors.white10, height: 16),
-              const Text(
+              Divider(color: AppTheme.soft, height: 16),
+              Text(
                 'Pick a plan below. Changes apply right away.',
-                style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
+                style: TextStyle(color: AppTheme.text2, fontSize: 12, height: 1.3),
               ),
               const SizedBox(height: 14),
               _buildCatalogSection(catalog, owned, isExpandableContent: true),
@@ -807,7 +811,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.lightGreenAccent.withValues(alpha: 0.4)),
+        border: Border.all(color: StatusColors.success.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -816,19 +820,19 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: Colors.lightGreenAccent, borderRadius: BorderRadius.circular(20)),
-                child: const Text('GROUP PARTICIPANT', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)),
+                decoration: BoxDecoration(color: StatusColors.success, borderRadius: BorderRadius.circular(20)),
+                child: const Text('INVITED RIDER', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)),
               ),
               const Spacer(),
-              const Text('Zero Extra Cost', style: TextStyle(color: Colors.lightGreenAccent, fontWeight: FontWeight.bold)),
+              Text('No extra cost', style: TextStyle(color: StatusColors.success, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 12),
-          const Text('Invited Member Access', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+          Text('You ride on a friend\'s plan', style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'You are in a group plan. You ride with all features for free.',
-            style: TextStyle(color: Colors.white70, fontSize: 13),
+            style: TextStyle(color: AppTheme.text2, fontSize: 13),
           ),
         ],
       ),
@@ -860,10 +864,10 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           ];
 
     final title = isRenewal
-        ? 'Renew or Switch Plan'
-        : (owned != null ? 'Upgrade or Switch Plan' : 'Select Membership Plan');
+        ? 'Renew or change plan'
+        : (owned != null ? 'Upgrade or change plan' : 'Choose a plan');
     final subtitle = isRenewal
-        ? 'Select a plan below to renew your membership or switch to a different tier.'
+        ? 'Pick a plan below to renew or change your plan.'
         : (owned != null
             ? 'An upgrade starts now and credits your unused days. Fewer seats start when your plan ends.'
             : 'Ride solo for free, or pick how many riders you host. Each plan lasts 30 days.');
@@ -877,19 +881,19 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             children: [
               Text(
                 title,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
+                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 17),
               ),
               if (owned == null)
-                const Text(
+                Text(
                   'Community is free',
-                  style: TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.w600),
+                  style: TextStyle(color: AppTheme.muted, fontSize: 11, fontWeight: FontWeight.w600),
                 ),
             ],
           ),
           const SizedBox(height: 6),
           Text(
             subtitle,
-            style: const TextStyle(color: Colors.white60, fontSize: 12),
+            style: TextStyle(color: AppTheme.text2, fontSize: 12),
           ),
           const SizedBox(height: 14),
         ],
@@ -897,12 +901,12 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           _buildCategoryCard(cat, owned, isRenewal: isRenewal),
         ],
         if (listed.isEmpty)
-          const Padding(
+          Padding(
             padding: EdgeInsets.only(bottom: 14),
             child: Text(
               'Group plans show here when you are online.',
               key: Key('membership_catalog_offline'),
-              style: TextStyle(color: Colors.white60, fontSize: 12),
+              style: TextStyle(color: AppTheme.text2, fontSize: 12),
             ),
           ),
       ],
@@ -919,7 +923,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
       decoration: BoxDecoration(
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: yours ? Colors.lightGreenAccent.withValues(alpha: 0.6) : Colors.white12, width: yours ? 1.5 : 1.0),
+        border: Border.all(color: yours ? StatusColors.success.withValues(alpha: 0.6) : AppTheme.border, width: yours ? 1.5 : 1.0),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -927,24 +931,24 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(cat.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-              const Text('Free', style: TextStyle(color: Colors.lightGreenAccent, fontWeight: FontWeight.bold, fontSize: 16)),
+              Text(cat.name, style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 16)),
+              Text('Free', style: TextStyle(color: StatusColors.success, fontWeight: FontWeight.bold, fontSize: 16)),
             ],
           ),
           const SizedBox(height: 6),
           Row(
             children: [
-              const Icon(Icons.person_rounded, color: Colors.white60, size: 16),
+              Icon(Icons.person_rounded, color: AppTheme.text2, size: 16),
               const SizedBox(width: 6),
               Text(
                 yours ? 'Your plan · solo rides' : 'Every rider has it · solo rides',
-                style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                style: TextStyle(color: AppTheme.text2, fontSize: 12, fontWeight: FontWeight.w600),
               ),
             ],
           ),
           if (cat.description.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(cat.description, style: const TextStyle(color: Colors.white60, fontSize: 13, height: 1.35)),
+            Text(cat.description, style: TextStyle(color: AppTheme.text2, fontSize: 13, height: 1.35)),
           ],
           if (cat.features.isNotEmpty) ...[
             const SizedBox(height: 12),
@@ -953,17 +957,17 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Row(
                   children: [
-                    const Icon(Icons.check_circle_outline_rounded, color: Colors.lightGreenAccent, size: 14),
+                    Icon(Icons.check_circle_outline_rounded, color: StatusColors.success, size: 14),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(feat, style: const TextStyle(color: Colors.white70, fontSize: 12))),
+                    Expanded(child: Text(feat, style: TextStyle(color: AppTheme.text2, fontSize: 12))),
                   ],
                 ),
               ),
           ],
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Talk, messages and hosting a group come with Small Group or Large Group.',
-            style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.3),
+            style: TextStyle(color: AppTheme.muted, fontSize: 11, height: 1.3),
           ),
         ],
       ),
@@ -983,9 +987,9 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
     String buttonLabel;
     if (isCurrent) {
       if (isExpired) {
-        buttonLabel = 'Renew Current Plan (₹${cat.priceRupees})';
+        buttonLabel = 'Renew plan (₹${cat.priceRupees})';
       } else {
-        buttonLabel = 'Current Active Plan (Tap to Extend)';
+        buttonLabel = 'Your plan · tap to extend';
       }
     } else if (owned != null) {
       if (cat.capacity > owned.capacity) {
@@ -996,7 +1000,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
         buttonLabel = 'Switch to ${cat.name} (₹${cat.priceRupees}) when this plan ends';
       }
     } else {
-      buttonLabel = 'Select & Pay ₹${cat.priceRupees}';
+      buttonLabel = 'Buy for ₹${cat.priceRupees}';
     }
 
     return Container(
@@ -1007,8 +1011,8 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isCurrent
-              ? (isExpired ? Colors.redAccent : Colors.lightGreenAccent)
-              : (isPopular ? AppTheme.brand.withValues(alpha: 0.8) : Colors.white12),
+              ? (isExpired ? AppTheme.sos : StatusColors.success)
+              : (isPopular ? AppTheme.brand.withValues(alpha: 0.8) : AppTheme.border),
           width: isPopular || isCurrent ? 1.5 : 1.0,
         ),
       ),
@@ -1020,7 +1024,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             children: [
               Row(
                 children: [
-                  Text(cat.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text(cat.name, style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.bold, fontSize: 16)),
                   if (isPopular) ...[
                     const SizedBox(width: 8),
                     Container(
@@ -1043,17 +1047,17 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
           const SizedBox(height: 6),
           Row(
             children: [
-              Icon(cat.isIndividual ? Icons.person_rounded : Icons.groups_rounded, color: Colors.white60, size: 16),
+              Icon(cat.isIndividual ? Icons.person_rounded : Icons.groups_rounded, color: AppTheme.text2, size: 16),
               const SizedBox(width: 6),
               Text(
-                cat.isIndividual ? 'Solo Rider (1 Seat)' : 'Group (${cat.capacity} seats)',
-                style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                cat.isIndividual ? '1 seat' : 'Up to ${cat.capacity} riders',
+                style: TextStyle(color: AppTheme.text2, fontSize: 12, fontWeight: FontWeight.w600),
               ),
             ],
           ),
           if (cat.description.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(cat.description, style: const TextStyle(color: Colors.white60, fontSize: 13)),
+            Text(cat.description, style: TextStyle(color: AppTheme.text2, fontSize: 13)),
           ],
           const SizedBox(height: 12),
           if (cat.features.isNotEmpty) ...[
@@ -1065,9 +1069,9 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Row(
                       children: [
-                        const Icon(Icons.check_circle_outline_rounded, color: Colors.lightGreenAccent, size: 14),
+                        Icon(Icons.check_circle_outline_rounded, color: StatusColors.success, size: 14),
                         const SizedBox(width: 6),
-                        Text(feat, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(feat, style: TextStyle(color: AppTheme.text2, fontSize: 12)),
                       ],
                     ),
                   ),
@@ -1080,7 +1084,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: (isCurrent && !isExpired) ? Colors.white12 : AppTheme.brand,
+                backgroundColor: (isCurrent && !isExpired) ? AppTheme.border : AppTheme.brand,
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
@@ -1088,7 +1092,7 @@ class _MembershipDashboardScreenState extends State<MembershipDashboardScreen> {
               child: Text(
                 buttonLabel,
                 style: TextStyle(
-                  color: (isCurrent && !isExpired) ? Colors.white70 : Colors.black,
+                  color: (isCurrent && !isExpired) ? AppTheme.text2 : Colors.black,
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
                 ),

@@ -11,6 +11,7 @@ import '../../data/local/ride_stats_store.dart';
 import '../../data/models/ride_analytics_inputs.dart';
 import '../../data/models/trip_history_model.dart';
 import '../../data/services/convoy_service.dart';
+import '../../data/services/feature_flags_service.dart';
 import '../../data/services/safety_service.dart';
 import '../../data/services/trip_storage_service.dart';
 import '../../domain/review/review_prompt_policy.dart';
@@ -49,6 +50,7 @@ class AppReviewPrompt {
   /// [groupId]) and shows the sheet when they allow it. Never throws.
   static Future<void> maybeShowAfterRide(BuildContext context, {String tripId = '', String groupId = '', int? rating}) async {
     if (_busy || !context.mounted) return;
+    if (!FeatureFlagsService.on('reviewPrompt')) return; // 3.55 admin feature switch
     _busy = true;
     try {
       final uris = storeUris();

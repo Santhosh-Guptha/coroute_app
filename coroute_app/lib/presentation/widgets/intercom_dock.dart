@@ -53,7 +53,7 @@ class IntercomOptions extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 18),
-          const DsSectionHeader('Audio & Controls'),
+          const DsSectionHeader('Audio & controls'),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),

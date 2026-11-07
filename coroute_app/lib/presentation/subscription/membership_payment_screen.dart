@@ -232,7 +232,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
     } catch (e) {
       setState(() {
         _isProcessing = false;
-        _errorMessage = 'Could not launch payment gateway: $e';
+        _errorMessage = 'Could not open the payment page. Try again.';
       });
     }
   }
@@ -246,7 +246,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
     if (orderId == null || orderId.isEmpty) {
       setState(() {
         _isProcessing = false;
-        _errorMessage = 'Missing order reference from payment gateway.';
+        _errorMessage = 'The payment page returned no order. Check your payment history before you pay again.';
       });
       return;
     }
@@ -275,7 +275,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
       if (response.code == Razorpay.PAYMENT_CANCELLED) {
         _errorMessage = 'Payment cancelled. Try again when ready.';
       } else {
-        _errorMessage = response.message ?? 'Payment failed (Code: ${response.code}).';
+        _errorMessage = response.message ?? 'Payment failed (code ${response.code}). Try again.';
       }
     });
   }
@@ -313,7 +313,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
           if (ms.lastErrorIsCouponRefusal) {
             _dropCoupon(ms.lastError);
           } else {
-            _errorMessage = ms.lastError ?? 'Failed to create payment order with gateway.';
+            _errorMessage = ms.lastError ?? 'Could not start the payment. Try again.';
           }
         });
         return;
@@ -329,7 +329,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
         } else {
           setState(() {
             _isProcessing = false;
-            _errorMessage = 'Your membership is being activated. Check again in a moment.';
+            _errorMessage = 'Your plan is being activated. Check again in a moment.';
           });
         }
         return;
@@ -356,7 +356,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
       if (!mounted) return;
       setState(() {
         _isProcessing = false;
-        _errorMessage = 'Payment checkout error: $e';
+        _errorMessage = 'Could not start the payment. Try again.';
       });
     }
   }
@@ -407,7 +407,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text('Membership Payment', style: AppText.headline.copyWith(fontSize: 16)),
+        title: Text('Plan payment', style: AppText.headline.copyWith(fontSize: 16)),
         centerTitle: true,
       ),
       body: SafeArea(
@@ -488,7 +488,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                                 Text(_selectedCategory.name, style: AppText.title.copyWith(fontSize: 17, fontWeight: FontWeight.w800)),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '${_selectedCategory.capacity} ${(_selectedCategory.capacity == 1 ? 'Rider' : 'Riders')} Capacity · Monthly Subscription',
+                                  'Up to ${_selectedCategory.capacity} ${_selectedCategory.capacity == 1 ? 'rider' : 'riders'} · 30 days',
                                   style: AppText.caption,
                                 ),
                               ],
@@ -509,7 +509,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                       if (_selectedCategory.capacity > 1) ...[
                         _benefitItem(Icons.group_rounded, 'Host rides for up to ${_selectedCategory.capacity} riders'),
                         _benefitItem(Icons.mic_rounded, 'Group talk and messages'),
-                        _benefitItem(Icons.flag_rounded, 'Regroup points, lead and sweep'),
+                        _benefitItem(Icons.flag_rounded, 'Regroup points and riding roles (lead, middle, sweeper)'),
                       ],
                       _benefitItem(Icons.emergency_rounded, 'Crash alerts and SOS (free for everyone)'),
                       _benefitItem(Icons.map_rounded, 'Offline maps and route guide'),
@@ -534,7 +534,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              'PROMOTIONAL COUPON (OPTIONAL)',
+                              'COUPON CODE (OPTIONAL)',
                               style: AppText.overline,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -543,7 +543,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                             GestureDetector(
                               onTap: _removeCoupon,
                               child: Text(
-                                'Remove Coupon',
+                                'Remove coupon',
                                 style: TextStyle(color: Colors.redAccent.shade100, fontSize: 11, fontWeight: FontWeight.bold),
                               ),
                             ),
@@ -617,7 +617,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '$_appliedCouponCode Applied!',
+                                      '$_appliedCouponCode applied',
                                       style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.w900, fontSize: 13),
                                     ),
                                     Text(
@@ -650,8 +650,8 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                 ] else ...[
                   Text('PAYMENT METHOD', style: AppText.overline),
                   const SizedBox(height: 8),
-                  _paymentMethodRadio('razorpay_upi', 'Instant UPI Apps', 'Google Pay, PhonePe, Paytm, BHIM UPI', Icons.bolt_rounded),
-                  _paymentMethodRadio('razorpay_card_netbanking', 'Cards & Net Banking', 'Visa, Mastercard, RuPay, All Indian Banks', Icons.credit_card_rounded),
+                  _paymentMethodRadio('razorpay_upi', 'UPI apps', 'Google Pay, PhonePe, Paytm, BHIM UPI', Icons.bolt_rounded),
+                  _paymentMethodRadio('razorpay_card_netbanking', 'Cards & net banking', 'Visa, Mastercard, RuPay, all Indian banks', Icons.credit_card_rounded),
                 ],
                 const SizedBox(height: 16),
 
@@ -690,7 +690,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                     ),
                     onPressed: _isProcessing ? null : _checkPendingOrderStatus,
                     icon: const Icon(Icons.sync_rounded, size: 18),
-                    label: const Text('Check Pending Order Status'),
+                    label: const Text('Check payment status'),
                   ),
                   const SizedBox(height: 12),
                 ],
@@ -710,7 +710,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
                         )
                       : Text(
-                          netPayable > 0 ? 'Pay ₹$netPayable & Activate Membership' : 'Activate Free Membership (₹0)',
+                          netPayable > 0 ? 'Pay ₹$netPayable and start plan' : 'Start plan for ₹0',
                           style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 15),
                         ),
                 ),
@@ -741,7 +741,7 @@ class _MembershipPaymentScreenState extends State<MembershipPaymentScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '100% Free Activation',
+                  'Nothing to pay',
                   style: AppText.title.copyWith(fontSize: 14, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 3),
@@ -837,7 +837,7 @@ class PlanQuoteBreakdown extends StatelessWidget {
           const SizedBox(height: 2),
           const Divider(height: 1),
           const SizedBox(height: 8),
-          _row('Total Payable', quote.isFree ? '₹0.00 (Free)' : '₹${quote.payableInr}.00', total: true),
+          _row('Total to pay', quote.isFree ? '₹0.00 (Free)' : '₹${quote.payableInr}.00', total: true),
           if (explain && quote.summary.isNotEmpty) ...[
             const SizedBox(height: 10),
             Text(quote.summary, style: AppText.caption.copyWith(color: AppTheme.text, fontWeight: FontWeight.w600)),

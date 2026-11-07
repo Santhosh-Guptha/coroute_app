@@ -187,7 +187,7 @@ class AccountScreen extends StatelessWidget {
                 ),
 
                 const SizedBox(height: Space.s24),
-                const DsSectionHeader('My bike & Garage'),
+                const DsSectionHeader('My bikes'),
                 const SizedBox(height: Space.s12),
                 DsCard(
                   padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
@@ -287,7 +287,7 @@ class AccountScreen extends StatelessWidget {
 
                 if (memService?.paymentsEnabled == true) ...[
                   const SizedBox(height: Space.s24),
-                  const DsSectionHeader('Membership & Plans'),
+                  const DsSectionHeader('Membership & plans'),
                   const SizedBox(height: Space.s12),
                   DsCard(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),

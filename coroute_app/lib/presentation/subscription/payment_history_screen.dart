@@ -236,19 +236,19 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
     if (name.isEmpty) return 'Plan';
     switch (name.toLowerCase()) {
       case 'individual':
-        return 'Individual';
+        return 'Legacy plan (Individual)';
       case 'group_small':
         return 'Small Group (2–6)';
       case 'group_large':
         return 'Large Group (7–12)';
       case 'prorider':
-        return 'CoRoute Pro (legacy)';
+        return 'Legacy plan (CoRoute Pro)';
       case 'roadcaptain':
-        return 'Road Captain (legacy)';
+        return 'Legacy plan (Road Captain)';
       case 'touroperator':
-        return 'Tour Operator (legacy)';
+        return 'Legacy plan (Tour Operator)';
       case 'community':
-        return 'No plan';
+        return 'Community (free)';
     }
     return name.replaceAll('_', ' ').toUpperCase();
   }

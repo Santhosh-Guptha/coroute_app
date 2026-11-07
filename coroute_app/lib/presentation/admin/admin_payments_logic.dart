@@ -65,6 +65,16 @@ const Map<String, String> adminMembershipPlanNames = {
 /// The plans riders can buy (and coupons can be bound to): the paid plans only.
 const List<String> adminPaidPlanIds = ['group_small', 'group_large'];
 
+/// The plan id for any value the gateway may send: a plan id as is, a legacy tier mapped to its
+/// plan (CoRoute Pro -> Small Group, Road Captain / Tour Operator -> Large Group), else Community.
+String adminPlanIdOf(String? raw) {
+  final v = (raw ?? '').trim();
+  if (v == 'group_small' || v == 'group_large' || v == 'community') return v;
+  if (v == 'proRider') return 'group_small';
+  if (v == 'roadCaptain' || v == 'tourOperator') return 'group_large';
+  return 'community';
+}
+
 /// "Small Group (2–6) (₹59/mo)" from the server plan [options] for [id]; the catalog label when
 /// the server has one, and no price when the server has none (never a hard-coded price).
 String adminPlanLabel(String id, List<Map<String, dynamic>> options, {bool perMonth = true}) {

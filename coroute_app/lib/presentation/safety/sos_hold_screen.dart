@@ -105,11 +105,11 @@ class SosAlertList extends StatelessWidget {
       if (n.trim().isEmpty) continue;
       initials.add(initialsOf(n));
     }
-    String convoy = 'Convoy riders';
+    String convoy = 'Your group';
     if (initials.isNotEmpty) {
       final shown = initials.take(maxInitials).join(', ');
       final more = initials.length - maxInitials;
-      convoy = 'Convoy riders ($shown${more > 0 ? ' +$more' : ''})';
+      convoy = 'Your group ($shown${more > 0 ? ' +$more' : ''})';
     }
     final name = emergencyContactName.trim();
     return [

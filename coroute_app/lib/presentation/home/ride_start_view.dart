@@ -18,6 +18,7 @@ import '../rider/rider_home_screen.dart';
 import '../trip_planner/trip_planner_screen.dart';
 import '../trip/trip_feedback_sheet.dart';
 import '../widgets/emergency_sos_sheet.dart';
+import '../widgets/admin_warning_card.dart';
 import '../widgets/pre_ride_checklist_sheet.dart';
 import '../subscription/membership_status_chip.dart';
 import '../../data/services/device_diagnostic_service.dart';
@@ -237,9 +238,8 @@ class RideStartView extends StatelessWidget {
                 _Greeting(name: name),
                 const SizedBox(height: Space.s24),
                 if (a != null) ...[a, const SizedBox(height: Space.s16)],
-                // Inline and dismissible (was a SnackBar from the login screen
-                // that floated over the bike status list). Still at most one alert.
-                if (a == null && auth.isGuest) const _GuestNotice(),
+                // 3.55 platform: a moderator's warning (switch adminWarnings); nothing when none.
+                const AdminWarningCard(),
                 const _NoRideHero(),
                 const SizedBox(height: Space.s16),
                 IntrinsicHeight(
@@ -476,33 +476,6 @@ class _ActionTile extends StatelessWidget {
   }
 }
 
-/// "Riding as a guest" notice: inline on Home instead of a SnackBar, so it
-/// never covers content. Dismissed once per app session.
-class _GuestNotice extends StatefulWidget {
-  const _GuestNotice();
-
-  static bool _dismissed = false;
-
-  @override
-  State<_GuestNotice> createState() => _GuestNoticeState();
-}
-
-class _GuestNoticeState extends State<_GuestNotice> {
-  @override
-  Widget build(BuildContext context) {
-    if (_GuestNotice._dismissed) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Space.s16),
-      child: RideAlert(
-        tier: AlertTier.normal,
-        title: 'Riding in Guest Mode',
-        message: 'Connect an account anytime to save your ride history.',
-        onDismiss: () => setState(() => _GuestNotice._dismissed = true),
-      ),
-    );
-  }
-}
-
 /// "BIKE STATUS": usable range, crash detection and the intercom, from the
 /// services this phone has (each is optional, so the tab renders without them).
 class _BikeStatusCard extends StatelessWidget {
@@ -565,8 +538,8 @@ class _BikeStatusCard extends StatelessWidget {
           ),
           DsListRow(
             icon: Icons.two_wheeler_rounded,
-            label: 'Motorcycle',
-            value: 'Garage & service',
+            label: 'Garage',
+            value: 'My bikes & service',
             divider: false,
             onTap: () {
               if (_isOpeningGarage) return;

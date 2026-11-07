@@ -10,12 +10,15 @@ import '../../data/services/convoy_service.dart';
 import '../../data/services/intercom_service.dart';
 import '../../data/services/timeline_service.dart';
 import '../../domain/ride/ride_facts.dart';
+import '../../domain/ride/ride_roles.dart';
+import '../../domain/ride/vehicle_swap.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../../domain/timeline/timeline_text.dart';
 import '../timeline/member_colors.dart';
 import 'incident_sheet.dart';
 import 'incident_view.dart';
 import 'riders_ladder.dart';
+import '../widgets/feature_switch.dart';
 
 bool _isRiderCardShowing = false;
 
@@ -65,6 +68,25 @@ class RiderCard extends StatelessWidget {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cannot call $clean')));
     }
+  }
+
+  /// 3.55: confirms, then asks [r] for the swap (the answer comes back as a cockpit card).
+  static Future<void> _askSwap(BuildContext context, ConvoyService service, RiderModel r, SwapKind kind) async {
+    final first = r.name.split(' ').first;
+    final ok = await confirmAction(
+      context,
+      title: kind == SwapKind.bikes ? 'Swap bikes with $first?' : 'Change places with $first?',
+      message: kind == SwapKind.bikes
+          ? '$first is asked to accept. You then ride each other\'s bike for the rest of this ride. Stop safely before you swap.'
+          : '$first is asked to accept. The pillion becomes the rider and the rider sits pillion. Stop safely before you swap.',
+      confirmLabel: 'Ask $first',
+    );
+    if (!ok || !context.mounted) return;
+    final sent = service.requestSwap(r.userId, kind);
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(sent ? 'Asked $first. Waiting for their answer.' : 'Could not ask now. Try again with signal.'),
+    ));
   }
 
   @override
@@ -120,8 +142,16 @@ class RiderCard extends StatelessWidget {
     final pairedWithThem = me != null && me.isCoRiding && me.ridingWithUserId == r.userId;
     final reason = riderReasonText(r);
     // The lead assigns one sweeper (3.16); never the lead themself, needs a 3.16 gateway.
-    final riderIsLead = r.role == RiderRoles.lead || r.userId == convoy.createdByUserId;
-    final canSetSweeper = !isMe && service.canEditRoute && !riderIsLead && service.supports(ProtocolFeatures.ride316);
+    // 3.55: the riding lead may be any rider (the owner keeps the owner's rights).
+    final riderIsLead = service.supportsRideRoles ? convoy.ridingLeadId == r.userId : (r.role == RiderRoles.lead || r.userId == convoy.createdByUserId);
+    final canSetSweeper = !isMe && service.canEditRoute && !riderIsLead && service.supports(ProtocolFeatures.ride316) && !service.supportsRideRoles;
+    // Lead / middle / sweeper for any rider (me included) and "swap with me" (3.55 gateways).
+    final canSetRoles = service.canEditRoute && service.supportsRideRoles && convoy.riders.length >= 2;
+    // 3.55 admin feature switch: riding roles turned off for every rider (the gateway refuses too).
+    final rolesOn = context.featureOn('rideRoles');
+    final roleNow = riderIsLead ? RideRole.lead : (r.isSweeper ? RideRole.sweeper : RideRole.middle);
+    final myRole = convoy.ridingLeadId == myId ? RideRole.lead : ((me?.isSweeper ?? false) ? RideRole.sweeper : RideRole.middle);
+    final canSwap = !isMe && me != null && service.supportsRideRoles && !convoy.isSoloRide && context.featureOn('vehicleSwap');
 
     (String, String?) split(double? m) {
       if (m == null) return ('-', null);
@@ -328,6 +358,53 @@ class RiderCard extends StatelessWidget {
             // Paired: the pillion is told when they get separated from their rider.
             () => service.setCoRiderDriver(myId, pairedWithThem ? '' : r.userId),
           ),
+        // 3.55 bike / pillion swap: asks the other rider, who accepts or declines on their phone
+        // (hidden while the admin switched 'vehicleSwap' off; the gateway refuses too).
+        if (canSwap && SwapRules.canSwapBikes(me, r))
+          action(Icons.swap_horiz_rounded, 'Swap bikes', () => _askSwap(context, service, r, SwapKind.bikes)),
+        if (canSwap && SwapRules.canSwapPillion(me, r))
+          action(Icons.airline_seat_recline_normal_rounded, 'Change places (rider and pillion)', () => _askSwap(context, service, r, SwapKind.pillion)),
+        if (canSetRoles && !rolesOn) ...[
+          const SizedBox(height: 12),
+          Semantics(header: true, child: const DsSectionHeader('Riding role')),
+          const FeatureOffNote(),
+        ],
+        if (canSetRoles && rolesOn) ...[
+          const SizedBox(height: 12),
+          Semantics(header: true, child: const DsSectionHeader('Riding role')),
+          const SizedBox(height: 6),
+          DsSegment<String>(
+            values: RideRole.all,
+            selected: roleNow,
+            label: (v) => '${RideRole.label(v)}\n${RideRole.place(v)}',
+            onChanged: (v) {
+              if (v == roleNow) return;
+              final ok = service.setRiderRole(r.userId, v);
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(ok
+                    ? (isMe
+                        ? 'You are now ${RideRole.label(v)}: ride at the ${RideRole.place(v)} when it is safe.'
+                        : '${r.name.split(' ').first} is now ${RideRole.label(v)} and will be told to move to the ${RideRole.place(v)}.')
+                    : 'Could not change this now. Try again with signal.'),
+              ));
+            },
+          ),
+          if (convoy.autoRoles)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('Automatic roles are on: roles may follow the order on the road again.', style: AppText.caption),
+            ),
+          // Hidden when we already ride the same role (a swap would change nothing).
+          if (!isMe && me != null && myRole != roleNow)
+            action(Icons.swap_vert_rounded, 'Swap roles with me', () {
+              final ok = service.swapRiderRoles(myId, r.userId);
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(ok
+                    ? 'Swapping roles with ${r.name.split(' ').first}. You will both be told where to ride.'
+                    : 'Could not change this now. Try again with signal.'),
+              ));
+            }),
+        ],
         if (canSetSweeper)
           action(
             r.isSweeper ? Icons.flag_outlined : Icons.flag_rounded,

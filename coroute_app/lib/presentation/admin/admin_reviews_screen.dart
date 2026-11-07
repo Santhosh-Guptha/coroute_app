@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../trip/trip_feedback_sheet.dart';
+import 'admin_place_reviews_screen.dart';
 import 'admin_ui.dart';
 import 'master_admin_dashboard.dart';
 
@@ -191,7 +192,15 @@ class _AdminReviewsScreenState extends State<AdminReviewsScreen> {
     return AdminShell(
       title: 'Reviews',
       subtitle: _loaded ? '$pending waiting for approval' : 'Post-trip reviews',
-      actions: [AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load)],
+      actions: [
+        // 3.55: CoRoute rider place reviews (photos waiting for a quick check).
+        AdminIconAction(
+          icon: Icons.place_outlined,
+          label: 'Place reviews',
+          onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const AdminPlaceReviewsScreen())),
+        ),
+        AdminIconAction(icon: Icons.refresh_rounded, label: 'Refresh', onTap: _load),
+      ],
       nav: adminNavItems(context, AdminSection.reviews),
       body: Center(
         child: ConstrainedBox(

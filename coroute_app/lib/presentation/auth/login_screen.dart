@@ -180,35 +180,6 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  // --- GUEST MODE / QUICK RIDE ACTION ---
-  Future<void> _handleGuestMode() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-      _sessionNotice = null;
-    });
-
-    final auth = context.read<AuthService>();
-    final res = await auth.continueAsGuest();
-
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-
-    if (res['success'] == true) {
-      // No SnackBar here: it floated over the Home bike status list. Home
-      // shows an inline, dismissible "Riding in Guest Mode" notice instead.
-      ScaffoldMessenger.of(context).clearSnackBars();
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const RiderHomeScreen()),
-      );
-    } else {
-      setState(() {
-        _errorMessage = res['error']?.toString() ?? 'Could not start guest ride.';
-      });
-    }
-  }
-
   // --- REGISTRATION ACTION ---
   Future<void> _handleRegistration() async {
     final name = _regNameController.text.trim();
@@ -586,50 +557,6 @@ class _LoginScreenState extends State<LoginScreen>
         _googleButton('Sign In with Google'),
 
         const SizedBox(height: 16),
-
-        // Direct Quick Ride / Guest Mode Link
-        Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: AppTheme.soft,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppTheme.border.withOpacity(0.6), width: 1),
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: _isLoading ? null : _handleGuestMode,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: AppTheme.brand.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(Icons.flash_on_rounded, color: AppTheme.brand, size: 22),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Quick Ride / Guest Mode', style: AppText.title.copyWith(fontSize: 14)),
-                          Text('Hop on immediately without an account', style: AppText.caption),
-                        ],
-                      ),
-                    ),
-                    Icon(Icons.chevron_right_rounded, size: 20, color: AppTheme.muted),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
 
         const SizedBox(height: 14),
 

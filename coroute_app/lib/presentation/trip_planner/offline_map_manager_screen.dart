@@ -54,7 +54,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
         builder: (ctx) => AlertDialog(
           backgroundColor: AppTheme.card,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text('Delete Map Pack?', style: AppText.headline),
+          title: Text('Delete map pack?', style: AppText.headline),
           content: Text(
             'Delete "${pack.name}"? This frees space.',
             style: AppText.body,
@@ -109,7 +109,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
         builder: (ctx) => AlertDialog(
           backgroundColor: AppTheme.card,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text('Clear All Offline Map Packs?', style: AppText.headline),
+          title: Text('Delete all offline map packs?', style: AppText.headline),
           content: Text(
             'This deletes all offline maps from your phone.',
             style: TextStyle(color: AppTheme.text2),
@@ -122,7 +122,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
             FilledButton(
               style: FilledButton.styleFrom(backgroundColor: AppTheme.sos),
               onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Clear All'),
+              child: const Text('Delete all'),
             ),
           ],
         ),
@@ -165,7 +165,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
       backgroundColor: AppTheme.bg,
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        title: const Text('Offline Map Packs'),
+        title: const Text('Offline map packs'),
         backgroundColor: AppTheme.card,
         elevation: 0,
         actions: [
@@ -382,7 +382,7 @@ class _OfflineMapManagerScreenState extends State<OfflineMapManagerScreen> {
                     minimumSize: const Size(0, 48),
                   ),
                   icon: const Icon(Icons.remove_red_eye_rounded, size: 16),
-                  label: const Text('Verify Offline', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  label: const Text('Check offline', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                   onPressed: _isNavigating
                       ? null
                       : () async {

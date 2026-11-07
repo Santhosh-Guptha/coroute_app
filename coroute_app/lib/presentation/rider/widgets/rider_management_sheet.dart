@@ -125,7 +125,7 @@ class RiderManagementSheet extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Manage Convoy Riders', style: AppText.title),
+                  Text('Manage riders', style: AppText.title),
                   const SizedBox(height: 2),
                   Text(
                     '$tierLabel · ${convoy.riderCountLabel} joined',
@@ -152,7 +152,7 @@ class RiderManagementSheet extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('CONVOY INVITE CODE', style: AppText.overline),
+                  Text('INVITE CODE', style: AppText.overline),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
@@ -226,13 +226,13 @@ class RiderManagementSheet extends StatelessWidget {
             roleBadge = 'TRIP HEAD';
             roleBadgeColor = AppTheme.accentText;
           } else if (r.role == 'LEAD') {
-            roleBadge = 'LEAD (POINT)';
+            roleBadge = 'LEAD';
             roleBadgeColor = AppTheme.accentText;
           } else if (r.role == 'SWEEPER') {
             roleBadge = 'SWEEPER';
             roleBadgeColor = AppTheme.warnText;
           } else {
-            roleBadge = 'RIDER';
+            roleBadge = 'MIDDLE';
             roleBadgeColor = AppTheme.muted;
           }
 

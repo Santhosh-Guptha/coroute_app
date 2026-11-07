@@ -198,7 +198,9 @@ class _AdminRideReportSheetState extends State<AdminRideReportSheet> {
     final ok = await confirmAction(
       context,
       title: 'Warn $_name?',
-      message: 'The warning is kept on their public ride record, so the next report can be judged with it.',
+      // 3.55: the rider also gets it as an in-app notice (gateway default text; switch adminWarnings).
+      message: 'They see a message from CoRoute moderators asking them to follow the public ride guidelines. '
+          'The warning is also kept on their public ride record, so the next report can be judged with it.',
       confirmLabel: 'Warn',
     );
     if (!ok || !mounted) return;

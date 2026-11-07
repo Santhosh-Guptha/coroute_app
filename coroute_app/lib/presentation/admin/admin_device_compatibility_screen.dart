@@ -127,7 +127,7 @@ class _AdminDeviceCompatibilityScreenState extends State<AdminDeviceCompatibilit
         backgroundColor: const Color(0xFF0D1117),
         appBar: AppBar(
           backgroundColor: const Color(0xFF0D1117),
-          title: const Text('Access Denied', style: TextStyle(color: Colors.white)),
+          title: const Text('Access denied', style: TextStyle(color: Colors.white)),
         ),
         body: const Center(
           child: Text(

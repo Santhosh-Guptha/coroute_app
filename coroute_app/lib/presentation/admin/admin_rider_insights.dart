@@ -183,9 +183,12 @@ class _AdminRiderInsightsState extends State<AdminRiderInsights> {
     final isAdmin = rider['role']?.toString() == 'MASTER_ADMIN';
     final sos = adminNum(stats, 'sos');
     final falseAlarms = adminNum(stats, 'falseAlarms');
-    final tier = plan['tier']?.toString() ?? 'community';
+    final tier = adminPlanIdOf(plan['tier']?.toString());
+    final planName = plan['name']?.toString() ?? '';
+    final legacyTier = plan['legacyTier']?.toString() ?? '';
     final validUntil = adminEpoch(plan['validUntil']);
     final maxTrips = adminNumOrNull(limits['maxTrips']);
+    final bikeLine = adminBikeLine(rider['bike']);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -206,12 +209,22 @@ class _AdminRiderInsightsState extends State<AdminRiderInsights> {
             ),
           ],
         ),
+        // 3.55: the bike the rider's app shared (engine care and fuel analysis).
+        if (bikeLine != null) ...[
+          const SizedBox(height: 12),
+          AdminCard(child: AdminDetailLine('Bike', bikeLine)),
+        ],
         const AdminSectionLabel('Plan and access'),
         AdminCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              AdminDetailLine('Plan', tier == 'community' ? 'Community (free)' : '${adminTierLabel(tier)} until ${adminDate(validUntil)}'),
+              AdminDetailLine(
+                'Plan',
+                tier == 'community'
+                    ? 'Community (free)'
+                    : '${planName.isNotEmpty ? planName : adminTierLabel(tier)}${legacyTier.isNotEmpty ? ' (legacy ${adminTierLabel(legacyTier).replaceFirst('Legacy: ', '')})' : ''} until ${adminDate(validUntil)}',
+              ),
               if (membership != null)
                 AdminDetailLine(
                   'Membership',
@@ -239,7 +252,7 @@ class _AdminRiderInsightsState extends State<AdminRiderInsights> {
                     OutlinedButton.icon(
                       onPressed: _saving ? null : () => _toggleRole(isAdmin),
                       icon: Icon(isAdmin ? Icons.person_outline_rounded : Icons.admin_panel_settings_rounded, size: 18),
-                      label: Text(isAdmin ? 'Make rider' : 'Make admin'),
+                      label: Text(isAdmin ? 'Remove admin' : 'Make admin'),
                     ),
                 ],
               ),
@@ -328,8 +341,9 @@ class _PlanDialog extends StatefulWidget {
 }
 
 class _PlanDialogState extends State<_PlanDialog> {
-  static const List<String> _tiers = ['community', ...adminPaidTierNames];
-  late String _tier = _tiers.contains(widget.currentTier) ? widget.currentTier : 'community';
+  /// 3.55: the plans riders have. The rider gets a real membership, so their app shows it at once.
+  static const List<String> _tiers = ['community', ...adminPaidPlanIds];
+  late String _tier = _tiers.contains(widget.currentTier) ? widget.currentTier : adminPlanIdOf(widget.currentTier);
   final TextEditingController _days = TextEditingController(text: '30');
   final TextEditingController _note = TextEditingController();
   String? _problem;
@@ -395,4 +409,22 @@ class _PlanDialogState extends State<_PlanDialog> {
       ],
     );
   }
+}
+
+/// "Classic 350 · 349 cc · Air/oil-cooled · Black · 13 L tank · 35 km/L" from the rider
+/// detail's `bike` block (3.55); null when the rider shared no bike (or an older gateway).
+String? adminBikeLine(Object? raw) {
+  if (raw is! Map) return null;
+  num n(String k) => raw[k] is num ? raw[k] as num : 0;
+  String fmt(num v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+  const cooling = {'air': 'Air-cooled', 'oil': 'Air/oil-cooled', 'liquid': 'Liquid-cooled'};
+  final parts = <String>[
+    if ((raw['model'] ?? '').toString().trim().isNotEmpty) raw['model'].toString().trim(),
+    if (n('cc') > 0) '${fmt(n('cc'))} cc',
+    ?cooling[raw['cooling']],
+    if ((raw['colour'] ?? '').toString().trim().isNotEmpty) raw['colour'].toString().trim(),
+    if (n('tankL') > 0) '${fmt(n('tankL'))} L tank',
+    if (n('mileageKmL') > 0) '${fmt(n('mileageKmL'))} km/L',
+  ];
+  return parts.isEmpty ? null : parts.join(' · ');
 }

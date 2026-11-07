@@ -160,6 +160,8 @@ class CrashAlarmScreen extends StatelessWidget {
         lng: alarm.lng,
         currentBpm: alarm.currentBpm,
         traumaLevel: alarm.traumaLevel,
+        // 3.55 rider-down check: the same alarm, titled "Bike down?".
+        titleOverride: safety.alarmIsRiderDown ? SafetyService.riderDownTitle : null,
       ),
     );
   }
@@ -188,6 +190,9 @@ class CrashAlarmView extends StatelessWidget {
   final int? currentBpm;
   final BiometricTraumaLevel? traumaLevel;
 
+  /// A different headline for the same alarm (3.55 rider-down: "Bike down?"). Null: [title].
+  final String? titleOverride;
+
   const CrashAlarmView({
     super.key,
     required this.secondsLeft,
@@ -197,6 +202,7 @@ class CrashAlarmView extends StatelessWidget {
     this.lng,
     this.currentBpm,
     this.traumaLevel,
+    this.titleOverride,
   });
 
   static const double buttonHeight = 72;
@@ -212,7 +218,7 @@ class CrashAlarmView extends StatelessWidget {
       header: true,
       liveRegion: true,
       child: Text(
-        title,
+        titleOverride ?? title,
         textAlign: TextAlign.center,
         maxLines: 4,
         overflow: TextOverflow.ellipsis,

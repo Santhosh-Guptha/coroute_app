@@ -3,13 +3,19 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/ui/ui.dart';
 import '../../../data/models/road_hazard_telemetry.dart';
 
-/// Floating high-contrast HUD pill for impending road hazard warnings (FEAT-02).
-/// Displays prominent alert 300 meters before reaching a severe pothole or surface defect.
+/// Floating high-contrast HUD pill for impending road hazard warnings.
+/// Displays prominent alert 300 m before reaching a severe pothole or surface defect.
+///
+/// 3.55: titled by kind ("Pothole ahead", "Speed breaker ahead", "Rough road ahead"); a saved
+/// report from earlier rides says "Reported by CoRoute riders" and offers "Fixed?" ([onFixed]).
 class RoadHazardHudPill extends StatelessWidget {
   final RoadHazardObservation hazard;
   final int distanceM;
   final VoidCallback? onTap;
   final VoidCallback? onDismiss;
+
+  /// Saved reports only: the rider says the spot is fixed / not there.
+  final VoidCallback? onFixed;
 
   const RoadHazardHudPill({
     super.key,
@@ -17,7 +23,17 @@ class RoadHazardHudPill extends StatelessWidget {
     this.distanceM = 300,
     this.onTap,
     this.onDismiss,
+    this.onFixed,
   });
+
+  /// "Pothole ahead", "Speed breaker ahead", "Rough road ahead", "Road hazard ahead".
+  static String titleFor(RoadHazardObservation h) => switch (h.classification) {
+        RoadHazardClassification.pothole || RoadHazardClassification.severeRidge => 'Pothole ahead',
+        RoadHazardClassification.speedBreaker => 'Speed breaker ahead',
+        RoadHazardClassification.roughRoad => 'Rough road ahead',
+        RoadHazardClassification.transverseJoint => 'Road joint ahead',
+        RoadHazardClassification.uncertainSurfaceAnomaly => 'Road hazard ahead',
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -26,15 +42,18 @@ class RoadHazardHudPill extends StatelessWidget {
     final accent = isCritical ? AppTheme.sos : amber;
     final isConfident = hazard.confidence >= 0.80;
 
-    final title = isCritical
-        ? 'CAUTION: CRITICAL ROAD HAZARD'
-        : (isConfident ? 'CAUTION: SEVERE ROAD HAZARD' : 'CAUTION: ROAD SURFACE ANOMALY');
-    final subtitle = '$distanceM meters ahead';
+    // An older report without a kind: plain "Road hazard ahead", "Severe" when critical or confident.
+    final legacy = hazard.classification == RoadHazardClassification.uncertainSurfaceAnomaly && !hazard.fromHistory;
+    final plainTitle = legacy && (isCritical || isConfident) ? 'Severe road hazard ahead' : titleFor(hazard);
+    final title = plainTitle.toUpperCase();
+    final subtitle = hazard.fromHistory
+        ? '$distanceM m ahead · Reported by CoRoute riders${hazard.reports > 1 ? ' (${hazard.reports})' : ''}'
+        : '$distanceM m ahead';
 
     return Semantics(
       liveRegion: true,
       container: true,
-      label: '$title, $subtitle.',
+      label: '$plainTitle, ${subtitle.replaceAll(' m ahead', ' metres ahead')}.',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -97,29 +116,23 @@ class RoadHazardHudPill extends StatelessWidget {
                               ),
                             ),
                           ),
-                          if (hazard.classification == RoadHazardClassification.pothole) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: AppTheme.soft,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                'POTHOLE',
-                                style: TextStyle(
-                                  color: AppTheme.text2,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                     ],
                   ),
                 ),
+                if (hazard.fromHistory && onFixed != null)
+                  Semantics(
+                    button: true,
+                    label: 'Report this spot as fixed',
+                    excludeSemantics: true,
+                    child: TextButton(
+                      key: const ValueKey('roadHazardFixed'),
+                      onPressed: onFixed,
+                      style: TextButton.styleFrom(minimumSize: const Size(56, 48), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                      child: Text('Fixed?', style: TextStyle(color: AppTheme.accentText, fontWeight: FontWeight.w800)),
+                    ),
+                  ),
                 if (onDismiss != null)
                   IconButton(
                     icon: Icon(Icons.close_rounded, color: AppTheme.text2, size: 22),

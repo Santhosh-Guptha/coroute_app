@@ -16,6 +16,7 @@ extension PoiCategoryStyle on PoiCategory {
         PoiCategory.stay => Icons.hotel_rounded,
         PoiCategory.toilet => Icons.wc_rounded,
         PoiCategory.viewpoint => Icons.landscape_rounded,
+        PoiCategory.heritage => Icons.account_balance_rounded, // 3.55
       };
 
   Color get color => switch (this) {
@@ -30,5 +31,6 @@ extension PoiCategoryStyle on PoiCategory {
         PoiCategory.stay => const Color(0xFF0277BD),
         PoiCategory.toilet => const Color(0xFF546E7A),
         PoiCategory.viewpoint => const Color(0xFF558B2F),
+        PoiCategory.heritage => const Color(0xFF9C6B00), // 3.55: bronze, distinct from mechanic brown
       };
 }

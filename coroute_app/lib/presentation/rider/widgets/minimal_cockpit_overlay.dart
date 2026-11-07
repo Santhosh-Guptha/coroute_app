@@ -649,7 +649,7 @@ class CockpitSpeedometer extends StatelessWidget {
           ),
           if (showUnit)
             Text(
-              'KM/H',
+              'km/h',
               style: TextStyle(
                 color: overLimit
                     ? const Color(0xFFFF6E40)

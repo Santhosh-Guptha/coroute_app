@@ -32,9 +32,9 @@ class AdminUsersScreen extends StatefulWidget {
   /// Riders per request.
   static const int pageSize = 50;
 
-  /// The legacy tiers the gateway can filter by ('' = every rider); shown read-only as "Legacy".
-  /// Membership plans are listed under Plans & Coupons.
-  static const List<String> tiers = ['', 'community', 'proRider', 'roadCaptain', 'tourOperator'];
+  /// The plans the gateway can filter by ('' = every rider). 3.55: the plans riders have; a rider
+  /// still on a legacy tier is listed under the plan it maps to (CoRoute Pro -> Small Group ...).
+  static const List<String> tiers = ['', 'community', 'group_small', 'group_large'];
 
   /// Query string for one page (pure, for tests).
   static Map<String, String> queryFor({
@@ -281,7 +281,9 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
 
   static String tierLabel(String t) => switch (t) {
         '' => 'All plans',
-        'community' => 'No legacy plan',
+        'community' => 'Community (free)',
+        'group_small' => 'Small Group (2–6)',
+        'group_large' => 'Large Group (7–12)',
         'proRider' => 'Legacy: CoRoute Pro',
         'roadCaptain' => 'Legacy: Road Captain',
         'tourOperator' => 'Legacy: Tour Operator',

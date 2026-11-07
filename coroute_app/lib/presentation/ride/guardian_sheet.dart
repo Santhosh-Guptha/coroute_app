@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/api_client.dart';
 import '../../data/services/convoy_service.dart';
+import '../widgets/feature_switch.dart';
 
 bool _isGuardianSheetShowing = false;
 
@@ -14,6 +15,11 @@ Future<void> showGuardianSheet(
   required String groupId,
 }) async {
   if (_isGuardianSheetShowing) return;
+  // 3.55 admin feature switch: Ride Guardian links turned off for every rider (every entry point).
+  if (!context.featureOnNow('guardianLink')) {
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Ride Guardian is turned off for now.')));
+    return;
+  }
   _isGuardianSheetShowing = true;
   try {
     await showAppSheet<void>(

@@ -1,8 +1,11 @@
 import '../../data/services/ride_essentials_coordinator.dart';
 import '../../data/services/route_essentials_service.dart';
 import 'package:coroute_app/presentation/ride/essentials_sheet.dart';
+import '../widgets/feature_switch.dart';
 import 'package:coroute_app/presentation/ride/fuel_sheet.dart';
 import 'package:coroute_app/presentation/ride/guardian_sheet.dart';
+import 'package:coroute_app/presentation/ride/roll_call_card.dart';
+import 'package:coroute_app/data/services/solo_guardian_service.dart';
 import 'dart:async';
 import '../ride/navigate_to.dart';
 import 'package:flutter/material.dart';
@@ -38,6 +41,7 @@ import '../../data/services/convoy_service.dart';
 import '../../data/services/geo_service.dart';
 import '../../data/services/realtime_service.dart';
 import '../../data/services/safety_service.dart';
+import '../../data/services/sos_battery_reserve.dart';
 import '../../data/services/settings_service.dart';
 import '../../data/services/tile_cache_service.dart';
 import '../../data/services/timeline_service.dart';
@@ -47,6 +51,7 @@ import '../../domain/notify/alert_priority.dart';
 import '../../domain/ride/ride_facts.dart';
 import '../../domain/route/route_plan.dart';
 import '../../domain/route/route_progress.dart';
+import '../../domain/safety/speed_limit_advisor.dart';
 import '../../domain/safety/sun_helper.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../alerts/alert_tiers.dart';
@@ -77,6 +82,9 @@ import '../ride/incident_view.dart';
 import '../ride/map_focus.dart';
 import '../../data/services/map_places_service.dart';
 import '../map_places/map_places_layer.dart';
+import '../map_places/place_review_prompt_banner.dart';
+import '../../data/services/place_review_service.dart';
+import '../../domain/places/place_dwell.dart';
 import '../map_places/place_chips.dart';
 import '../ride/meet_here_sheet.dart';
 import '../ride/messages_sheet.dart';
@@ -85,6 +93,9 @@ import '../ride/ride_sheet.dart';
 import '../ride/rider_card_sheet.dart';
 import '../ride/riders_ladder.dart';
 import '../ride/route_guide.dart';
+import 'ride_advisories.dart'; // 3.55 heritage places on the way, off the group's route
+import '../../domain/places/heritage_ahead.dart';
+import '../../domain/route/off_route_group.dart';
 import '../safety/sos_hold_screen.dart';
 import 'package:flutter/gestures.dart' show GestureBinding, PointerDownEvent, PointerEvent;
 import '../../core/theme/theme_controller.dart';
@@ -118,6 +129,8 @@ import 'widgets/cockpit_permission_warning_banner.dart';
 import 'widgets/rider_management_sheet.dart';
 import '../widgets/sheet_coordinator.dart';
 import '../settings/settings_screen.dart';
+import '../../data/services/group_safety_service.dart';
+import '../ride/group_safety_cards.dart';
 
 /// The active ride: the map first, a compact top bar (next stop or
 /// destination, connection and GPS in words), one alert slot, the SOS
@@ -345,6 +358,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
 
   // Map places (fuel, hospitals, mechanics, food...): one cache on the phone, shared with the planner.
   MapPlacesService? _places;
+  // 3.55 road context: the line I follow and the cached road limits / zones, lent to SafetyService.
+  SafetyService? _roadCareSafety;
+  RouteProgress? _roadCareLine() => _guide.active;
+  ({List<RoadLimitPoint> roads, List<SpeedZonePoint> zones}) _roadCareData() =>
+      _places?.roadContext ?? (roads: const <RoadLimitPoint>[], zones: const <SpeedZonePoint>[]);
+
+  // 3.55: "Historic place on your way" and "You left the group's route" (see ride_advisories.dart).
+  final RideAdvisories _advice = RideAdvisories();
   MapPlacesService? _placesFor(bool lowData) {
     final api = context.read<ApiClient?>();
     if (api == null) return null;
@@ -353,6 +374,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     final safety = context.read<SafetyService?>();
     if (safety != null) {
       safety.fuelAheadSource ??= (lat, lng, usableKm, marginKm) => places.fuelAhead(lat, lng, usableKm: usableKm, marginKm: marginKm);
+      // 3.55: the places a dwell is measured against (no extra fetch).
+      context.read<PlaceReviewService?>()?.placesSource ??= () => places.all;
       final type = safety.fuelEconomy.fuelType;
       if (places.fuelType != type) WidgetsBinding.instance.addPostFrameCallback((_) => places.fuelType = type);
     }
@@ -394,6 +417,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   void _openEssentials() {
     final e = _essentials, s = _convoys;
     if (e == null || s == null) return;
+    // 3.55 admin feature switch: stops on the way turned off for every rider.
+    if (!context.featureOnNow('essentials')) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Stops on the way are turned off for now.')));
+      return;
+    }
     final c = s.allConvoys[widget.convoyId];
     final me = c?.riders[s.myUserId];
     final leader = me?.role == 'LEAD';
@@ -538,6 +566,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         _localGuide.addListener(_onGuide);
       }
       _auth = context.read<AuthService>();
+      _guide.onFuelStopDone = _onFuelStopDone;
+      _roadCareSafety = context.read<SafetyService?>();
+      _roadCareSafety?.roadCare
+        ?..activeLine = _roadCareLine
+        ..roadData = _roadCareData;
       final s = context.read<ConvoyService>();
       _convoys = s;
       s.addListener(_onConvoyUpdate);
@@ -559,11 +592,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       if (existingDetector != null) {
         _sirenDetector = existingDetector;
         _ownsSirenDetector = false;
-      } else {
-        final intercom = _intercomService;
-        _sirenDetector = SirenAcousticDetector(intercomService: intercom);
-        _ownsSirenDetector = true;
       }
+      // 3.55 platform: no private detector any more. Nothing feeds it audio (no PTT/VOX hook
+      // calls processPcmChunk), so it was idle memory; the siren pill shows only when an app
+      // level SirenAcousticDetector is provided with a real audio source.
       _sirenDetector?.activeSirenNotifier.addListener(_onSirenAlert);
       // FEAT-MIC-01: the microphone stays OFF by default; the siren detector is never fed
       // continuous background audio (capture only while the rider holds PTT or uses VOX).
@@ -653,12 +685,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   void _onConvoyUpdate() {
     final s = _convoys;
     if (s == null || !mounted) return;
+    // The shared guide may be a new one for a new ride session: keep my fuel-stop callback on it.
+    _guide.onFuelStopDone ??= _onFuelStopDone;
     _syncWakelock();
     final convoy = s.allConvoys[widget.convoyId];
     final uid = _auth?.currentUserId ?? s.myUserId ?? '';
     if (convoy == null || uid.isEmpty) return;
     final me = convoy.riders[uid];
     _checkAutoOfflineMapPreparation(convoy, me);
+    if (me != null) _updateAdvisories(s, convoy, me);
     if (_rideEssentials != null) {
       if (_essentials?.snapshot == null && convoy.route != null) {
         _syncEssentials(category: 'FUEL');
@@ -805,6 +840,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     _convoys?.removeListener(_onConvoyUpdate);
     widget.focus?.removeListener(_onFocusRequest);
     _rideEssentials?.removeListener(_essentialsChanged);
+    if (_guide.onFuelStopDone == _onFuelStopDone) _guide.onFuelStopDone = null;
+    final roadCare = _roadCareSafety?.roadCare;
+    if (roadCare != null && roadCare.activeLine == _roadCareLine) roadCare.activeLine = null;
+    if (roadCare != null && roadCare.roadData == _roadCareData) roadCare.roadData = null;
     if (_rideEssentials == null) {
       _localGuide.removeListener(_onGuide);
       _localGuide.dispose();
@@ -1162,6 +1201,60 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     } catch (_) {}
   }
 
+  bool _fuelRouting = false;
+
+  /// One flow for "take me to fuel" (3.55): the pump is marked at once, the detour route is asked
+  /// (awaited), and what the rider hears and reads says what really happened: routed, or marked
+  /// without a route yet (no signal; retried from the next fixes). A second tap while a request is on
+  /// its way does nothing. The group plan is never changed.
+  Future<void> _autoRouteToFuel(ConvoyService service, RiderModel me,
+      {required double lat, required double lng, required String name, double distM = 0}) async {
+    if (_fuelRouting) return;
+    // 3.55 admin feature switch: no automatic detour while fuel auto-route is off; the pump is shown.
+    if (!context.featureOnNow('fuelAutoRoute')) {
+      _focus(lat, lng);
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text('Routing to fuel stations is turned off for now. $name is shown on the map.')));
+      return;
+    }
+    _fuelRouting = true;
+    final voice = context.read<VoiceService?>();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final safety = context.read<SafetyService?>();
+    final distText = distM > 0 ? ' ${(distM / 1000).toStringAsFixed(1)} km ahead' : '';
+    bool ok = false;
+    try {
+      _focus(lat, lng);
+      ok = await _guide.addPersonalFuelStop(lat: lat, lng: lng, name: name);
+    } finally {
+      _fuelRouting = false;
+    }
+    if (!mounted) return;
+    final usable = safety?.estimatedUsableKm?.round();
+    service.updateStatusReason(
+      userId: me.userId,
+      reason: 'FUELING',
+      message: 'Refuelling at $name$distText${usable != null ? ' ($usable km left)' : ''}',
+    );
+    messenger?.clearSnackBars();
+    if (ok) {
+      voice?.speak('Fuel stop added. Routing you to $name$distText.', priority: VoicePriority.important);
+      messenger?.showSnackBar(SnackBar(content: Text('Routing to $name$distText. Only your route changed.'), backgroundColor: AppTheme.brand));
+    } else {
+      voice?.speak('Fuel stop $name marked on your map. No route yet, trying again.', priority: VoicePriority.important);
+      messenger?.showSnackBar(SnackBar(content: Text('$name is marked on your map. No route yet (no signal); trying again as you ride.')));
+    }
+  }
+
+  /// My fuel stop was reached or passed (RouteGuide): the "refuelling" status ends.
+  void _onFuelStopDone(StopPointModel stop, {required bool reached}) {
+    if (!mounted) return;
+    final service = _convoys;
+    final uid = service?.myUserId;
+    if (service != null && uid != null) service.updateStatusReason(userId: uid, reason: '', message: '');
+    final voice = context.read<VoiceService?>();
+    voice?.speak(reached ? 'You have reached ${stop.name}.' : 'Fuel stop removed.', priority: VoicePriority.important);
+  }
+
   void _handleFuelPromptAction(ConvoyService service, RiderModel? me) {
     if (me == null) return;
     final safety = context.read<SafetyService?>();
@@ -1177,34 +1270,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                 .firstOrNull;
     if (matched != null || station != null) {
       final stationLat = matched?.poi.lat ?? station!.lat, stationLng = matched?.poi.lng ?? station!.lng;
-      final stationName = matched != null ? matched.poi.displayName : (station!.name.isEmpty ? 'Petrol Pump' : station.name);
-      _guide.addPersonalFuelStop(
-        lat: stationLat,
-        lng: stationLng,
-        name: stationName,
-      ).ignore();
-      _focus(stationLat, stationLng);
-      final usable = safety?.estimatedUsableKm?.round() ?? 30;
+      final stationName = matched != null ? matched.poi.displayName : (station!.name.isEmpty ? 'Petrol pump' : station.name);
       final distM = matched != null
           ? matched.distanceKm * 1000
           : (station!.routePositionM > (_essentials?.progressM ?? 0))
               ? (station.routePositionM - (_essentials?.progressM ?? 0))
               : station.accessDistanceM;
-      final distText = (distM > 0) ? ' ${(distM / 1000).toStringAsFixed(1)} km ahead' : '';
-
-      service.updateStatusReason(
-        userId: me.userId,
-        reason: 'FUELING',
-        message: 'Refueling at $stationName$distText ($usable km left)',
-      );
       safety?.answerPrompt(SafetyConstants.promptFuel);
-      final voice = context.read<VoiceService?>();
-      voice?.speak('Auto-routing to $stationName$distText on your route. Stop added for you.', priority: VoicePriority.critical);
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Auto-routed to $stationName$distText · Stop added for you'),
-        backgroundColor: AppTheme.brand,
-      ));
+      _autoRouteToFuel(service, me, lat: stationLat, lng: stationLng, name: stationName, distM: distM).ignore();
     } else {
       if (me.lat != 0 && me.lng != 0) {
         _essentials?.fetchNearbyFuel(lat: me.lat, lng: me.lng, force: true);
@@ -1274,11 +1347,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text('Petrol Bunks Near You', style: AppText.title),
+                                    Text('Fuel stations near you', style: AppText.title),
                                     Text(
                                       usableKm != null
-                                          ? 'Usable range ~${usableKm.round()} km · Select a station to navigate'
-                                          : 'Verified fuel stations near current position',
+                                          ? 'Usable range ~${usableKm.round()} km · Tap a station to route there'
+                                          : 'Mapped fuel stations around your position',
                                       style: AppText.caption.copyWith(color: AppTheme.accentText, fontWeight: FontWeight.bold),
                                     ),
                                   ],
@@ -1292,7 +1365,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('NEARBY PETROL STATIONS', style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.muted)),
+                              Text('NEARBY FUEL STATIONS', style: AppText.caption.copyWith(fontWeight: FontWeight.w800, color: AppTheme.muted)),
                               if (me.lat != 0 && me.lng != 0)
                                 TextButton.icon(
                                   onPressed: isScanning ? null : () async {
@@ -1306,7 +1379,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                                     }
                                   },
                                   icon: isScanning ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh_rounded, size: 14),
-                                  label: Text(isScanning ? 'Scanning...' : 'Scan Nearby', style: const TextStyle(fontSize: 12)),
+                                  label: Text(isScanning ? 'Searching…' : 'Search again', style: const TextStyle(fontSize: 12)),
                                 ),
                             ],
                           ),
@@ -1319,7 +1392,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                                   Icon(Icons.location_searching_rounded, size: 40, color: AppTheme.muted),
                                   const SizedBox(height: Space.s12),
                                   Text(
-                                    isScanning ? 'Finding petrol stations near you...' : 'No petrol bunks found within 25 km.',
+                                    isScanning ? 'Finding fuel stations near you…' : 'No fuel stations found within 25 km.',
                                     textAlign: TextAlign.center,
                                     style: AppText.body.copyWith(color: AppTheme.muted),
                                   ),
@@ -1347,7 +1420,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                                         child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            Text(st.name.isEmpty ? 'Petrol Pump' : st.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 14)),
+                                            Text(st.name.isEmpty ? 'Petrol pump' : st.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.title.copyWith(fontSize: 14)),
                                             Text(
                                               st.isCoco ? 'COCO · $distStr away' : (st.operatorName != null ? '${st.operatorName} · $distStr away' : '$distStr away'),
                                               maxLines: 1,
@@ -1376,7 +1449,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                                         ),
                                         onPressed: () {
                                           if (ctx.mounted) Navigator.pop(ctx);
-                                          final picked = PickedPlace(name: st.name.isEmpty ? 'Petrol Pump' : st.name, lat: st.lat, lng: st.lng, category: 'FUEL');
+                                          final picked = PickedPlace(name: st.name.isEmpty ? 'Petrol pump' : st.name, lat: st.lat, lng: st.lng, category: 'FUEL');
                                           final lead = service.canEditRoute;
                                           if (lead) {
                                             if (service.activeConvoy?.route?.points.isEmpty ?? true) {
@@ -1443,6 +1516,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     if (me == null) return;
     final safety = context.read<SafetyService?>();
     safety?.markStationClosed(station.placeId);
+    // The closed pump was my fuel stop: it goes (the next one is picked below).
+    final mine = _guide.personalFuelStop;
+    if (mine != null && GeoMath.haversine(mine.lat, mine.lng, station.lat, station.lng) < 60) _guide.clearPersonalFuelStop();
 
     final upcomingFuel = _essentials?.upcoming
         .where((e) => e.category == 'FUEL' && !(safety?.isStationClosed(e.placeId) ?? false))
@@ -1455,28 +1531,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       final distKm = nextStation.aheadM(_essentials?.progressM ?? 0) / 1000;
       if (distKm <= usableKm) {
         voice?.speak('Station closed. Next one: ${nextStation.name}, ${distKm.toStringAsFixed(1)} kilometers.');
-        final picked = PickedPlace(
-          name: nextStation.name.isEmpty ? 'Petrol Pump' : nextStation.name,
-          lat: nextStation.lat,
-          lng: nextStation.lng,
-          category: 'FUEL',
-        );
-        final lead = service.canEditRoute;
-        if (lead) {
-          service.addStop(picked);
-        } else {
-          service.suggestStop(picked);
-        }
-        _focus(nextStation.lat, nextStation.lng);
-        service.updateStatusReason(
-          userId: me.userId,
-          reason: 'FUELING',
-          message: 'Rerouting to ${nextStation.name} (${distKm.toStringAsFixed(1)} km)',
-        );
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${station.name} closed · Rerouting to ${nextStation.name}'),
+          content: Text('${station.name} closed · Routing you to ${nextStation.name}'),
           backgroundColor: AppTheme.warnText,
         ));
+        // 3.55: my own detour (the group plan is not changed for a closed pump; the lead can still
+        // add a group fuel stop from Stops).
+        _autoRouteToFuel(service, me,
+            lat: nextStation.lat, lng: nextStation.lng,
+            name: nextStation.name.isEmpty ? 'Petrol pump' : nextStation.name, distM: distKm * 1000).ignore();
         return;
       }
     }
@@ -1487,9 +1550,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       barrierColor: AppScrim.color,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.card,
-        title: Text('No Reachable Station Ahead', style: TextStyle(color: AppTheme.sos, fontWeight: FontWeight.bold)),
+        title: Text('No reachable fuel station ahead', style: TextStyle(color: AppTheme.sos, fontWeight: FontWeight.bold)),
         content: Text(
-          'All remaining mapped stations ahead exceed your estimated usable range (${usableKm.round()} km).\n\nPlease turn back to the last confirmed fuel station or call roadside emergency assist.',
+          'Every mapped fuel station ahead is beyond your usable range (${usableKm.round()} km).\n\nTurn back to the last fuel station you passed, or call for roadside help.',
           style: AppText.body,
         ),
         actions: [
@@ -1803,6 +1866,55 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     });
   }
 
+  // ------------------------------------------- 3.55 heritage places, off the group's route
+
+  /// From the convoy listener: updates the advisories and says their lines once.
+  void _updateAdvisories(ConvoyService s, ConvoyModel convoy, RiderModel me) {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final sosOpen = s.pendingSos != null || convoy.activeAlerts.any((a) => !a.resolved);
+    // 3.55 admin feature switches (unknown or no service: on).
+    _advice.heritageEnabled = context.featureOnNow('heritagePlaces') && !SosBatteryReserve.isActive; // 3.55 SOS battery reserve
+    _advice.offGroupEnabled = context.featureOnNow('offRouteGroupPrompt');
+    final lines = _advice.update(convoy: convoy, me: me, guide: _guide, places: _places, sosOpen: sosOpen, nowMs: nowMs);
+    if (lines.isEmpty) return;
+    final voice = context.read<VoiceService?>();
+    for (final l in lines) {
+      // Heritage at the lowest voice priority; leaving the group's route as navigation.
+      voice?.speak(l.text, priority: l.heritage ? VoicePriority.important : VoicePriority.warning, key: l.key).ignore();
+    }
+  }
+
+  /// "Route to group": my own route to the group's planned route near the closest rider.
+  Future<void> _routeToGroup(ConvoyModel convoy, RiderModel me) async {
+    final target = _advice.rejoinTarget(convoy, me, DateTime.now().millisecondsSinceEpoch);
+    setState(_advice.resolveOffGroup);
+    if (target == null) return;
+    final voice = context.read<VoiceService?>();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final ok = await _guide.routeToGroup(lat: target.lat, lng: target.lng, name: target.name);
+    if (!mounted) return;
+    messenger?.clearSnackBars();
+    if (ok) {
+      voice?.speak('Routing you back to the group.', priority: VoicePriority.warning, key: 'ROUTE_TO_GROUP').ignore();
+      messenger?.showSnackBar(SnackBar(content: Text('Routing you to the group near ${target.peer.name}. Only your route changed.')));
+    } else {
+      messenger?.showSnackBar(const SnackBar(content: Text('No route to the group yet (no signal). Trying again as you ride.')));
+    }
+  }
+
+  /// "Add stop" on a historic place: the lead adds it, anyone else suggests it.
+  void _heritageStop(ConvoyService service, HeritageAhead h) {
+    final place = PickedPlace(lat: h.poi.lat, lng: h.poi.lng, name: h.poi.displayName, category: 'SCENIC', plannedDwellMin: 30);
+    final lead = service.canEditRoute;
+    final ok = lead ? service.addStop(place) : service.suggestStop(place);
+    setState(_advice.dismissHeritage);
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+      content: Text(ok
+          ? (lead ? '${h.poi.displayName} added as a stop.' : '${h.poi.displayName} suggested to the lead.')
+          : 'Could not add the stop now. Try again with signal.'),
+    ));
+  }
+
   // ------------------------------------------------------------- alert slot
 
   List<_Slot> _slots({
@@ -1907,7 +2019,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         out.add(_Slot(
           key: key,
           tier: AlertTier.important,
-          title: 'SEVERE ROAD HAZARD',
+          title: RoadHazardHudPill.titleFor(rh), // 3.55: by kind
           priority: AlertPriority.hazard,
           dismissible: true,
           child: RoadHazardHudPill(
@@ -1915,6 +2027,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
             distanceM: d.round(),
             onTap: () => _focus(rh.lat, rh.lng),
             onDismiss: () => _dismissAlert(key),
+            // 3.55: a saved report the rider finds fixed.
+            onFixed: rh.fromHistory ? () => service.clearSavedRoadHazard(rh.eventId) : null,
           ),
         ));
       }
@@ -2093,6 +2207,188 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     }
     final ok = service.sosOkNotice;
     if (ok != null) out.add(_Slot(key: 'SOS_OK', tier: AlertTier.normal, title: ok));
+    // 3.55 place reviews: "How was Sri Sai Dhaba?" after a while there, only when stopped
+    // (the service never offers it while riding or during an SOS / crash alarm).
+    final placePrompt = context.select<PlaceReviewService?, PlaceReviewPrompt?>((s) => s?.prompt);
+    final placeReviews = context.read<PlaceReviewService?>();
+    if (placePrompt != null && placeReviews != null) {
+      out.add(_Slot(
+        key: 'PLACE_REVIEW:${placePrompt.placeId}',
+        tier: AlertTier.normal,
+        priority: AlertPriority.social,
+        title: placePrompt.title,
+        message: placePrompt.message,
+        actionLabel: 'Rate',
+        onAction: () => PlaceReviewPromptBanner.rate(context, placeReviews, placePrompt),
+        dismissible: true,
+        onDismiss: placeReviews.dismissPrompt,
+        child: PlaceReviewPromptBanner(prompt: placePrompt, service: placeReviews),
+      ));
+    }
+    // 3.55 riding roles: "You are now the sweeper, drop back..." (mine is important, others normal).
+    final role = service.roleNotice;
+    if (role != null) {
+      out.add(_Slot(
+        key: 'ROLE:${role.title}',
+        tier: role.mine ? AlertTier.important : AlertTier.normal,
+        title: role.title,
+        message: role.message.isEmpty ? null : role.message,
+        dismissible: true,
+        onDismiss: service.dismissRoleNotice,
+      ));
+    }
+    // 3.55: "You left the group's route": the way back first, then a wait request or my own way.
+    if (_advice.offGroupShow) {
+      final key = 'OFF_GROUP:${_advice.offGroupSinceMs}';
+      final target = _advice.rejoinTarget(convoy, me, nowMs);
+      out.add(_Slot(
+        key: key,
+        tier: AlertTier.important,
+        title: OffRouteGroupMonitor.title,
+        child: RideAlert(
+          tier: AlertTier.important,
+          title: OffRouteGroupMonitor.title,
+          message: target == null ? 'No recent position from the group.' : 'The group is near ${target.peer.name.split(' ').first}.',
+          actionLabel: target == null ? null : 'Route to group',
+          onAction: target == null ? null : () => _routeToGroup(convoy, me),
+          moreActions: [
+            ('Ask group to wait', () {
+              service.requestWait(me.name);
+              setState(_advice.resolveOffGroup);
+            }),
+            ('Keep my own route', () => setState(_advice.resolveOffGroup)),
+          ],
+        ),
+      ));
+    }
+    // 3.55 bike / pillion swap: someone asked me (Accept / Decline), then the outcome.
+    final ask = service.swapAsk;
+    if (ask != null) {
+      out.add(_Slot(
+        key: 'SWAP_ASK:${ask.requestId}',
+        tier: AlertTier.important,
+        title: ask.title,
+        priority: AlertPriority.routeInfo,
+        order: 250,
+        child: RideAlert(
+          tier: AlertTier.important,
+          title: ask.title,
+          message: ask.message,
+          actionLabel: 'Accept',
+          onAction: () => service.answerSwap(ask.requestId, true),
+          moreActions: [('Decline', () => service.answerSwap(ask.requestId, false))],
+        ),
+      ));
+    }
+    final swap = service.swapNotice;
+    if (swap != null) {
+      out.add(_Slot(
+        key: 'SWAP:${swap.title}',
+        tier: swap.mine ? AlertTier.important : AlertTier.normal,
+        title: swap.title,
+        message: swap.message.isEmpty ? null : swap.message,
+        priority: AlertPriority.routeInfo,
+        dismissible: true,
+        onDismiss: service.dismissSwapNotice,
+      ));
+    }
+    // 3.55: "Historic place on your way: Golconda Fort" (normal tier, Show / Add stop).
+    final heritage = _advice.heritage;
+    if (heritage != null && nowMs < _advice.heritageUntilMs) {
+      final key = 'HERITAGE:${heritage.poi.id}';
+      final title = 'Historic place on your way: ${heritage.poi.displayName}';
+      out.add(_Slot(
+        key: key,
+        tier: AlertTier.normal,
+        title: title,
+        child: RideAlert(
+          tier: AlertTier.normal,
+          title: title,
+          message: heritage.message,
+          actionLabel: 'Show',
+          onAction: () => _focus(heritage.poi.lat, heritage.poi.lng),
+          moreActions: [('Add stop', () => _heritageStop(service, heritage))],
+          onDismiss: () {
+            _advice.dismissHeritage();
+            _dismissAlert(key);
+          },
+        ),
+      ));
+    }
+    // 3.55 engine care from the garage bike's details: a rest after a long hard stretch.
+    final safetyForEngine = context.read<SafetyService?>();
+    final engine = safetyForEngine?.engineNotice;
+    if (safetyForEngine != null && engine != null) {
+      out.add(_Slot(
+        key: 'ENGINE:${engine.title}',
+        tier: AlertTier.normal,
+        title: engine.title,
+        message: engine.message.isEmpty ? null : engine.message,
+        dismissible: true,
+        onDismiss: safetyForEngine.dismissEngineNotice,
+      ));
+    }
+    // 3.55 road context: sharp bend, road speed limit, altitude or night care (informational;
+    // road care itself stays silent and hidden while an emergency is open).
+    final roadNotice = safetyForEngine?.roadCare.notice;
+    if (safetyForEngine != null && roadNotice != null) {
+      out.add(_Slot(
+        key: roadNotice.key,
+        tier: roadNotice.important ? AlertTier.important : AlertTier.normal,
+        title: roadNotice.title,
+        message: roadNotice.message.isEmpty ? null : roadNotice.message,
+        priority: AlertPriority.routeInfo,
+        dismissible: true,
+        onDismiss: safetyForEngine.roadCare.dismissNotice,
+      ));
+    }
+    // 3.55 SOS battery reserve (below 10%): "Battery saver for SOS is on" (informational).
+    final reserve = context.read<SosBatteryReserve?>();
+    if (reserve != null && reserve.showCard) {
+      out.add(_Slot(
+        key: 'SOS_RESERVE',
+        tier: AlertTier.important,
+        title: SosBatteryReserve.cardTitle,
+        message: reserve.beaconSent ? SosBatteryReserve.cardMessage : SosBatteryReserve.cardMessageNotSent,
+        priority: AlertPriority.groupSafety,
+        order: 150,
+        dismissible: true,
+        onDismiss: reserve.dismissCard,
+      ));
+    }
+    // 3.55 phone-mount check: once per ride when the phone is not in a handlebar mount.
+    final sensorNotice = safetyForEngine?.sensorSafety.notice;
+    if (safetyForEngine != null && sensorNotice != null) {
+      out.add(_Slot(
+        key: sensorNotice.key,
+        tier: AlertTier.normal,
+        title: sensorNotice.title,
+        message: sensorNotice.message,
+        priority: AlertPriority.routeInfo,
+        dismissible: true,
+        onDismiss: safetyForEngine.sensorSafety.dismissNotice,
+      ));
+    }
+    // 3.55 no-signal ahead (mine and other riders'): informational route cards, never above safety.
+    final soloGuardian = context.read<SoloGuardianService?>();
+    for (final n in soloGuardian?.notices ?? const <SoloGuardianNotice>[]) {
+      out.add(_Slot(key: n.key, tier: AlertTier.normal, title: n.title, message: n.message, dismissible: true,
+          onDismiss: () => soloGuardian?.dismissNotice(n.key)));
+    }
+    // 3.55 group safety (missing-rider check, buddy, stretch, group break, risky stretch): group
+    // safety priority at most, so SOS / crash / incidents always rank above; the card is the child
+    // (slot message left empty so no other filter hides it).
+    final groupSafety = context.watch<GroupSafetyService?>();
+    if (groupSafety != null) {
+      for (final n in groupSafety.notices) {
+        out.add(_Slot(
+          key: 'GS:${n.key}',
+          tier: GroupSafetyCard.tierOf(n),
+          title: n.title,
+          child: GroupSafetyCard(notice: n, service: groupSafety),
+        ));
+      }
+    }
     // The invite code belongs to a group ride; a solo ride (Community host) has none to share.
     if (convoy.riders.length <= 1 && convoy.hasGroupFeatures) {
       out.add(_Slot(
@@ -2171,6 +2467,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     final lowData = context.select<SettingsService?, bool>((s) => s?.lowData ?? false);
     // This phone's ride safety prompts ("Are you OK?", "Time for a break").
     final prompts = safetyPromptsOf(context);
+    // 3.55 engine care: rebuild when the "give your engine a rest" notice comes or goes.
+    context.select<SafetyService?, Object?>((s) => s?.engineNotice);
+    // 3.55 no-signal ahead cards (lib/data/services/solo_guardian_service.dart).
+    context.select<SoloGuardianService?, int>((s) => s?.notices.length ?? 0);
+    // 3.55 road context card and night contrast for alert cards.
+    context.select<SafetyService?, (Object?, bool)>((s) => (s?.roadCare.notice, s?.roadCare.isNight ?? false));
+    // 3.55 phone-mount card and the SOS battery reserve card.
+    context.select<SafetyService?, Object?>((s) => s?.sensorSafety.notice);
+    context.select<SosBatteryReserve?, (bool, bool)>((r) => (r?.showCard ?? false, r?.beaconSent ?? false));
     // 3.16: the fuel reminder row, the weather line and the route map prefetch state.
     final fuelRangeKm = context.select<SettingsService?, int>((s) => s?.fuelRangeKm ?? 0);
     final riddenKm = context.select<SafetyService?, int>((s) => ((s?.riddenSinceFillM ?? 0) / 1000).round());
@@ -2579,35 +2884,11 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
                             estimatedUsableKm: safety?.estimatedUsableKm,
                             isLead: lead,
                             onAddStationStop: (station) async {
-                              final stationName = station.name.isEmpty ? 'Petrol Pump' : station.name;
-                              final voice = context.mounted ? context.read<VoiceService?>() : null;
-                              final messenger = context.mounted ? ScaffoldMessenger.maybeOf(context) : null;
-
-                              await _guide.addPersonalFuelStop(
-                                lat: station.lat,
-                                lng: station.lng,
-                                name: stationName,
-                              );
-                              if (!mounted) return;
-                              _focus(station.lat, station.lng);
-                              final usable = safety?.estimatedUsableKm?.round() ?? 30;
                               final distM = (station.routePositionM > (_essentials?.progressM ?? 0))
                                   ? (station.routePositionM - (_essentials?.progressM ?? 0))
                                   : station.accessDistanceM;
-                              final distText = (distM > 0) ? ' ${(distM / 1000).toStringAsFixed(1)} km ahead' : '';
-
-                              service.updateStatusReason(
-                                userId: me.userId,
-                                reason: 'FUELING',
-                                message: 'Refueling at $stationName$distText ($usable km left)',
-                              );
-
-                              voice?.speak('Auto-routing to $stationName$distText on your route. Stop added for you.', priority: VoicePriority.critical);
-                              messenger?.clearSnackBars();
-                              messenger?.showSnackBar(SnackBar(
-                                content: Text('Auto-routed to $stationName$distText · Stop added for you'),
-                                backgroundColor: AppTheme.brand,
-                              ));
+                              await _autoRouteToFuel(service, me, lat: station.lat, lng: station.lng,
+                                  name: station.name.isEmpty ? 'Petrol pump' : station.name, distM: distM);
                             },
                             onFocusLocation: (lat, lng) => _focus(lat, lng),
                             onOpenFuelSheet: () => _popup<void>('fuel', () => showFuelSheet(context)),
@@ -2936,7 +3217,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       if (paused)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text('Paused by Trip Head', style: AppText.label.copyWith(color: StatusColors.warning, fontWeight: FontWeight.bold)),
+          child: Text('Paused by the trip head', style: AppText.label.copyWith(color: StatusColors.warning, fontWeight: FontWeight.bold)),
         ),
       if (weatherLine != null) SheetLine(icon: Icons.umbrella_rounded, text: weatherLine),
       if (darkLine != null) SheetLine(icon: Icons.nights_stay_rounded, text: darkLine),
@@ -2993,6 +3274,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
 
       // 3. Convoy Status & Compact Roster
       if (!convoy.isSolo) ...[
+        RollCallCard(convoy: convoy, nowMs: now), // 3.55 start and arrival roll call
         CompactConvoyRoster(
           convoy: convoy,
           me: me,
@@ -3251,10 +3533,33 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
             ],
           ),
         if (_essentials != null && convoy.activeAlerts.isEmpty)
+          // The next essentials on the route: medium discs with the category icon (3.55; were a small tag).
           MarkerLayer(rotate: true, markers: [for (final p in _essentials!.upcoming.take(3)) Marker(
-            point: LatLng(p.lat, p.lng), width: 40, height: 40,
-            child: IconButton(tooltip: '${p.name}, mapped ${essentialCategories[p.category]}',
-              onPressed: _openEssentials, icon: const Icon(Icons.local_offer_rounded), color: AppTheme.accentText),
+            point: LatLng(p.lat, p.lng), width: 44, height: 44,
+            child: Tooltip(
+              message: '${p.name}, ${essentialCategories[p.category] ?? 'place'} on your route',
+              child: Semantics(
+                button: true,
+                label: '${p.name}, ${essentialCategories[p.category] ?? 'place'} on your route',
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _openEssentials,
+                  child: Center(
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppTheme.brand,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                        boxShadow: const [BoxShadow(color: Color(0x40000000), blurRadius: 4, offset: Offset(0, 1))],
+                      ),
+                      child: Icon(essentialIcon(p.category), size: 21, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           )]),
         // The way to an emergency I navigate to (red), above the group route.
         if (navLine.length >= 2)
@@ -3263,6 +3568,26 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           ]),
         MarkerLayer(rotate: true, markers: [
           for (final s in convoy.plannedStops) _stopMarker(s),
+          // My own fuel stop (3.55): marked from the moment I asked for it, until I reach or pass it.
+          if (_guide.personalFuelStop != null)
+            Marker(
+              key: const ValueKey('personal_fuel_stop'),
+              point: LatLng(_guide.personalFuelStop!.lat, _guide.personalFuelStop!.lng),
+              width: 44,
+              height: 44,
+              child: Semantics(
+                label: 'My fuel stop: ${_guide.personalFuelStop!.name}',
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.warnText,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 3),
+                    boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 5, offset: Offset(0, 2))],
+                  ),
+                  child: const Icon(Icons.local_gas_station_rounded, size: 22, color: Colors.white),
+                ),
+              ),
+            ),
           for (final s in convoy.suggestedStops)
             Marker(
               point: LatLng(s.lat, s.lng),
@@ -3395,12 +3720,15 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     // FEAT-02: Map markers for collective road hazards
     for (final rh in service.roadHazards) {
       final d = myPos ? GeoMath.haversine(me.lat, me.lng, rh.lat, rh.lng) : null;
+      // 3.55: saved reports along the route are drawn only near me (the map stays readable).
+      if (rh.fromHistory && (d == null || d > 5000)) continue;
       out.add(Marker(
         point: LatLng(rh.lat, rh.lng),
         width: HazardMarker.width,
         height: HazardMarker.height,
         child: HazardMarker(
-          label: hazardMarkerLabel(d),
+          // 3.55: "Pothole · 300 m", "Speed breaker", "Rough road".
+          label: '${rh.classification.label}${d == null ? '' : ' · ${formatDistanceRounded(d)}'}',
           level: HazardLevel.active,
         ),
       ));

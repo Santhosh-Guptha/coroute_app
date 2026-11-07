@@ -7,6 +7,7 @@ import '../../../core/ui/ui.dart';
 import '../../../data/models/convoy_model.dart';
 import '../../../data/models/rider_model.dart';
 import '../../../data/services/intercom_service.dart';
+import '../../widgets/feature_switch.dart';
 
 /// Full-width glove-friendly in-cockpit Push-To-Talk Intercom Bar.
 ///
@@ -70,7 +71,8 @@ class _MinimalHoldToTalkBarState extends State<MinimalHoldToTalkBar>
   @override
   Widget build(BuildContext context) {
     final ic = context.watch<IntercomService?>();
-    if (ic == null) return const SizedBox.shrink();
+    // 3.55 admin feature switch: group talk turned off for every rider.
+    if (ic == null || !context.featureOn('intercom')) return const SizedBox.shrink();
 
     final tx = ic.isTransmitting;
     final rx = ic.isReceiving;

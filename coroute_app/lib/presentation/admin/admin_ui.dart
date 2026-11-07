@@ -83,16 +83,16 @@ enum AccountStatus {
   }
 }
 
-/// A convoy role in plain words: LEAD "Lead", SWEEP/SWEEPER "Sweep", others "Rider".
+/// A riding role in plain words: LEAD "Lead", SWEEP/SWEEPER "Sweeper", others "Middle".
 String adminRoleLabel(Object? role) {
   switch ((role?.toString() ?? '').toUpperCase()) {
     case 'LEAD':
       return 'Lead';
     case 'SWEEP':
     case 'SWEEPER':
-      return 'Sweep';
+      return 'Sweeper';
     default:
-      return 'Rider';
+      return 'Middle';
   }
 }
 
