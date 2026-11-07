@@ -476,6 +476,9 @@ class IntercomNetworkResilience extends ChangeNotifier {
   }
 
   // ---------------------------------------- Packet Loss Concealment (PLC) Engine
+  /// One generator for the comfort noise (was a new Random per audio sample, 3.55).
+  static final math.Random _rng = math.Random();
+
   /// Generates smooth comfort silence or pitch-decayed interpolation when a packet
   /// is completely missing and cannot be recovered via FEC.
   ///
@@ -506,7 +509,7 @@ class IntercomNetworkResilience extends ChangeNotifier {
         }
 
         // Add subtle low-level comfort dither (-55 dBFS)
-        final dither = (math.Random().nextInt(15) - 7);
+        final dither = (_rng.nextInt(15) - 7);
         final clamped = (sample + dither).round().clamp(-32768, 32767);
         outData.setInt16(i * 2, clamped, Endian.little);
       }
@@ -518,7 +521,7 @@ class IntercomNetworkResilience extends ChangeNotifier {
 
       for (var i = 0; i < sampleCount; i++) {
         // Pseudo-random low-amplitude acoustic presence (-50 to -60 dBFS)
-        final rawNoise = (math.Random().nextInt(31) - 15).toDouble();
+        final rawNoise = (_rng.nextInt(31) - 15).toDouble();
         // 1-pole low-pass smoothing filter: y[n] = 0.85*y[n-1] + 0.15*x[n]
         prevNoise = 0.85 * prevNoise + 0.15 * rawNoise;
 

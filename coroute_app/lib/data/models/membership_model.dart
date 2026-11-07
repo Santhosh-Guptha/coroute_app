@@ -208,9 +208,9 @@ class UserMembership {
 
   String get name {
     if (categoryName != null && categoryName!.isNotEmpty) return categoryName!;
-    if (category == 'individual') return 'Individual Solo';
-    if (category == 'group_small') return 'Group (2–6)';
-    if (category == 'group_large') return 'Group (7–12)';
+    if (category == 'individual') return 'Legacy plan (Individual)';
+    if (category == 'group_small') return 'Small Group (2–6)';
+    if (category == 'group_large') return 'Large Group (7–12)';
     return category.replaceAll('_', ' ').toUpperCase();
   }
 

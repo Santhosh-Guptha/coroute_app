@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/safety_constants.dart';
+import '../../domain/safety/ride_safety_summary.dart';
 
 /// Rider-only numbers for one trip (3.16: hard stops; ride analytics: rest
 /// breaks, safety alerts, SOS and crash alerts). Kept on the phone only, never
@@ -21,6 +22,10 @@ class RideStats {
   final bool sos;
   final bool crashAlert;
 
+  /// 3.55 ride safety report (key 'sf'): night km, over-limit minutes, fatigue peak, "Bike down?"
+  /// checks, road hazards felt. Null for rides saved before 3.55. On the phone only.
+  final RideSafetySummary? safety;
+
   const RideStats({
     required this.groupId,
     required this.hardStops,
@@ -29,6 +34,7 @@ class RideStats {
     this.alerts = 0,
     this.sos = false,
     this.crashAlert = false,
+    this.safety,
   });
 
   bool get hadEmergency => sos || crashAlert;
@@ -40,6 +46,7 @@ class RideStats {
         if (alerts > 0) 'a': alerts,
         if (sos) 's': 1,
         if (crashAlert) 'c': 1,
+        if (safety != null && !safety!.isEmpty) 'sf': safety!.toJson(),
       };
 
   static RideStats? fromJson(String groupId, Object? j) {
@@ -53,6 +60,7 @@ class RideStats {
       alerts: n('a'),
       sos: n('s') > 0,
       crashAlert: n('c') > 0,
+      safety: RideSafetySummary.fromJson(j['sf']),
     );
   }
 }

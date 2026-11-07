@@ -207,6 +207,14 @@ class ApiClient extends ChangeNotifier {
         const Duration(seconds: 60),
       ));
 
+  /// 3.55: POSTs raw bytes (a photo) to a gateway path, e.g. a place review photo. Throws
+  /// [ApiException] like the JSON calls.
+  Future<dynamic> postBytes(String path, Uint8List bytes, String contentType, {Duration timeout = const Duration(seconds: 60)}) =>
+      _send(
+        () => _http.post(Uri.parse('${AppConfig.apiUrl}$path'), headers: {..._headers(), 'Content-Type': contentType}, body: bytes),
+        timeout,
+      );
+
   /// Full address of a gateway path such as `/admin/reviews/<id>/photos/<photoId>`.
   String apiUrlOf(String path) => '${AppConfig.apiUrl}$path';
 

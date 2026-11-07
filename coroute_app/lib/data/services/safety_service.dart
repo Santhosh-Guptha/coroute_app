@@ -20,10 +20,6 @@ import '../../domain/safety/solo_check_in.dart';
 import '../../domain/safety/sun_helper.dart';
 import '../../domain/tracking/geo_math.dart';
 import '../../domain/tracking/track_point.dart';
-import '../../domain/safety/crash_incident.dart';
-import '../../domain/sync/durable_event.dart';
-import '../local/durable_event_queue.dart';
-import '../local/local_incident_store.dart';
 import '../local/ride_stats_store.dart';
 import '../models/convoy_model.dart';
 import '../models/emergency_roster.dart';
@@ -45,6 +41,13 @@ import 'solo_fix_source.dart';
 import 'tile_cache_service.dart';
 import 'voice_service.dart';
 import 'weather_service.dart';
+import '../../domain/garage/engine_care.dart';
+import '../../domain/safety/road_surface_detector.dart';
+import '../../domain/safety/rider_down_detector.dart';
+import '../../domain/safety/crash_incident.dart' show CrashScenario, MovementState;
+import 'sensor_safety_hub.dart';
+import 'sos_battery_reserve.dart';
+import 'road_care_service.dart';
 
 enum SafetyPromptKind { checkIn, fatigue, fuel, followUp, overspeed }
 
@@ -405,11 +408,9 @@ class SafetyService extends ChangeNotifier {
     VoiceService? voice,
     WeatherService? weather,
     TilePrefetcher? tiles,
-    LocalIncidentStore? incidentStore,
-    DurableEventQueue? eventQueue,
     Stream<TrackPoint> Function()? soloFixes,
   }) : this._(ConvoySafetyPort(convoys, auth), settings, accel ?? NativeAccelSource(), sms ?? NativeSmsSender(), null, true,
-            voice: voice, weather: weather, tiles: tiles, incidentStore: incidentStore, eventQueue: eventQueue, soloFixes: soloFixes);
+            voice: voice, weather: weather, tiles: tiles, soloFixes: soloFixes);
 
   @visibleForTesting
   SafetyService.forTest(
@@ -422,11 +423,9 @@ class SafetyService extends ChangeNotifier {
     WeatherService? weather,
     TilePrefetcher? tiles,
     Future<String> Function()? networkKind,
-    LocalIncidentStore? incidentStore,
-    DurableEventQueue? eventQueue,
     Stream<TrackPoint> Function()? soloFixes,
   }) : this._(port, settings, accel, sms, clock, false,
-            voice: voice, weather: weather, tiles: tiles, networkKind: networkKind, incidentStore: incidentStore, eventQueue: eventQueue,
+            voice: voice, weather: weather, tiles: tiles, networkKind: networkKind,
             soloFixes: soloFixes);
 
   SafetyService._(
@@ -440,8 +439,6 @@ class SafetyService extends ChangeNotifier {
     this._weather,
     this._tiles,
     Future<String> Function()? networkKind,
-    this._incidentStore,
-    this._eventQueue,
     Stream<TrackPoint> Function()? soloFixes,
   })  : _networkKind = networkKind ?? SafetyNative.networkKind,
         _soloFixSource = soloFixes ?? nativeSoloFixes {
@@ -453,6 +450,8 @@ class SafetyService extends ChangeNotifier {
       AlarmNotifier.onAction(AlarmNotifier.payloadCrash, _onCrashAction);
       AlarmNotifier.onAction(AlarmNotifier.payloadPrompt, _onPromptAction);
     }
+    sensorSafety.featureOn = (id) => featureOn?.call(id) ?? true; // 3.55 switches
+    sensorSafety.addListener(notifyListeners);
     _onConvoy();
     _instance = this;
   }
@@ -467,9 +466,6 @@ class SafetyService extends ChangeNotifier {
   final WeatherService? _weather;
   final TilePrefetcher? _tiles;
   final Future<String> Function() _networkKind;
-  final LocalIncidentStore? _incidentStore;
-  final DurableEventQueue? _eventQueue;
-  String? _activeIncidentId;
 
   // Offline solo ride (3.54): crash detection and a local SOS without a convoy or internet.
   final Stream<TrackPoint> Function() _soloFixSource;
@@ -481,8 +477,6 @@ class SafetyService extends ChangeNotifier {
   /// The group id of an SOS raised during an offline solo ride (never sent to the server).
   static const String offlineSoloGroupId = 'offline-solo';
 
-  LocalIncidentStore? get incidentStore => _incidentStore;
-  DurableEventQueue? get eventQueue => _eventQueue;
   CrashDetector get detector => _detector;
 
   final CrashDetector _detector = CrashDetector();
@@ -504,6 +498,52 @@ class SafetyService extends ChangeNotifier {
 
   StreamSubscription<TrackPoint>? _fixSub;
   StreamSubscription<AccelBucket>? _accelSub;
+
+  // 3.55: road surface events (pothole, speed breaker, rough road) from the same 1 s buckets,
+  // and engine care from the garage bike's details.
+  final RoadSurfaceDetector _surface = RoadSurfaceDetector();
+
+  /// 3.55 phone-only sensor safety (fatigue score, rider-down check, crash learning, phone-mount
+  /// check, ride safety report): logic in [SensorSafetyHub], only hooks here.
+  final SensorSafetyHub sensorSafety = SensorSafetyHub();
+
+  /// 0-100 fatigue level of this rider (3.55 fatigue score), for the group break planner.
+  /// Only this level is ever shared, never the sensor data behind it.
+  int get fatigueLevel => sensorSafety.fatigueLevel;
+
+  /// The open alarm is a "Bike down?" check (3.55 rider-down), not a crash.
+  bool _alarmRiderDown = false;
+  bool get alarmIsRiderDown => _alarm != null && _alarmRiderDown;
+  static const String riderDownTitle = 'Bike down?';
+
+  /// Receives road surface events while riding (main.dart: ConvoyService reports them to the
+  /// group when I ride at the front). Never called in an offline solo ride.
+  void Function(RoadSurfaceEvent event)? onRoadSurface;
+
+  final EngineCareAdvisor engineCare = EngineCareAdvisor();
+
+  /// 3.55 road context on the phone: sharp bends, road speed limits, altitude and night care.
+  late final RoadCareService roadCare = RoadCareService(
+    voice: _voice,
+    emergency: () => _alarm != null || _hasOpenSos || (_port.activeConvoy?.activeAlerts.any((a) => !a.resolved) ?? false),
+    featureOn: (id) => featureOn?.call(id) ?? true,
+    convoyLine: () => _port.activeConvoy?.route?.points,
+    onChanged: () {
+      if (!_disposed) notifyListeners();
+    },
+    now: _now,
+  );
+  EngineCareAdvice? _engineNotice;
+  Timer? _engineNoticeClear;
+
+  /// "Give your engine a rest" for 60 s after it is advised (the cockpit shows it as a card).
+  EngineCareAdvice? get engineNotice => _engineNotice;
+
+  void dismissEngineNotice() {
+    _engineNoticeClear?.cancel();
+    _engineNotice = null;
+    notifyListeners();
+  }
   bool _accelUnavailable = false;
 
   CrashAlarmState? _alarm;
@@ -670,6 +710,22 @@ class SafetyService extends ChangeNotifier {
   bool get isOverspeedActive => _isOverspeedActive;
   int get currentSpeedLimit => _lastCheckedLimit;
   List<SafetyPrompt> get prompts => List.unmodifiable(_prompts.values);
+
+  // 3.55 (solo check-in by ETA, lib/data/services/solo_guardian_service.dart): a prompt owned by
+  // another service, shown and notified like this service's own; the owner gets the answer.
+  final Map<String, void Function(bool primary)> _promptOwners = <String, void Function(bool primary)>{};
+  void showOwnedPrompt(SafetyPrompt p, void Function(bool primary) onAnswer) {
+    _promptOwners[p.key] = onAnswer;
+    _showPrompt(p, notifyAlways: true);
+  }
+
+  void removeOwnedPrompt(String key) {
+    _promptOwners.remove(key);
+    _removePrompt(key);
+  }
+
+  /// A crash alarm or an SOS of mine is open (nothing else may speak or ask then).
+  bool get emergencyOpen => _alarm != null || _hasOpenSos;
   SmsFallbackStatus? get smsStatus => _smsStatus;
 
   /// The accelerometer is running right now.
@@ -786,12 +842,13 @@ class SafetyService extends ChangeNotifier {
     _alarmEvent = null;
     _detector.cooldown(_now());
     _endAlarmNative();
-    if (_activeIncidentId != null) {
-      _incidentStore?.updateStatus(_activeIncidentId!, IncidentStatus.confirmedOk, resolvedAt: _now(), syncToQueue: false).ignore();
-      _activeIncidentId = null;
-    }
+    // 3.55: "I'm OK" on a phone crash alarm tunes this bike's possible-crash stage (bounded, never
+    // the severe paths); a "Bike down?" check or an outside impact never does.
+    final riderDown = _alarmRiderDown;
+    _alarmRiderDown = false;
+    if (e != null && !riderDown && _alarmExternal == null) sensorSafety.onFalseAlarm(e.scenario);
     // A real impact answered with "I'm OK": ask once more at the next stop or in 20 min.
-    if (e != null && _alarmExternal != ExternalImpactSource.developer) {
+    if (e != null && !riderDown && _alarmExternal != ExternalImpactSource.developer) {
       _lastImpactG = e.impactG;
       _followUp = _FollowUp(at: _now(), lat: e.lat, lng: e.lng);
     }
@@ -815,10 +872,7 @@ class SafetyService extends ChangeNotifier {
     _alarmTimer = null;
     _alarm = null;
     _alarmEvent = null;
-    if (_activeIncidentId != null) {
-      _incidentStore?.updateStatus(_activeIncidentId!, IncidentStatus.resolved, resolvedAt: _now(), syncToQueue: false).ignore();
-      _activeIncidentId = null;
-    }
+    _alarmRiderDown = false;
     notifyListeners();
   }
 
@@ -836,6 +890,12 @@ class SafetyService extends ChangeNotifier {
 
   void answerPrompt(String key, {bool primary = true}) {
     if (!_prompts.containsKey(key)) return;
+    final owner = _promptOwners.remove(key);
+    if (owner != null) {
+      _removePrompt(key);
+      owner(primary);
+      return;
+    }
     if (key == SafetyConstants.promptCheckIn) {
       final told = _checkIn.noReplySent;
       _checkIn.answeredOk(_now());
@@ -1018,6 +1078,9 @@ class SafetyService extends ChangeNotifier {
       if (_detector.armedAt(p.ts)) _brakes.onFix(p);
       if (ev != null) _openAlarm(ev);
     }
+    // 3.55 sensor safety: rider-down speed, fatigue score, ride safety report (phone only).
+    sensorSafety.onFix(p, stretchStart: _fatigue.stretchStart, limitKmh: _lastCheckedLimit, dark: _dark);
+    sensorSafety.summary.onReserve(SosBatteryReserve.isActive, p.ts);
     if (_soloOnly) {
       // Offline solo ride: crash detection only (no convoy for check-ins, fuel or route data).
       _updateSensor();
@@ -1028,12 +1091,45 @@ class SafetyService extends ChangeNotifier {
     if (wasRiding && _fatigue.stretchStart == null) _rideBreaks++; // a rest of 10 min or more
     if (remind) {
       _triggerFatigueAlert();
+      sensorSafety.noteRulePrompt(p.ts);
+    } else if (_settings.fatigueReminder &&
+        !_prompts.containsKey(SafetyConstants.promptFatigue) &&
+        sensorSafety.earlyFatigueDue(nowMs: p.ts, stretchStart: _fatigue.stretchStart)) {
+      _triggerAdaptiveFatigueAlert(p.ts); // 3.55 fatigue score: earlier, never later than the 2 h rule
+    } else if (_settings.fatigueReminder) {
+      // 3.55 night riding care: one softer break prompt at 90 min after sunset (shown by roadCare).
+      roadCare.nightBreakDue(stretchStartMs: _fatigue.stretchStart, nowMs: p.ts);
     }
     _onFuelFix(p);
+    _onEngineFix(p);
     _onDarkFix(p);
     _evalFollowUp(_port.activeConvoy);
     _checkSpeedLimit(p);
+    roadCare.onFix(p, dark: _dark, otherLimitKmh: _lastCheckedLimit, otherActive: _isOverspeedActive); // 3.55
     _updateSensor();
+  }
+
+  /// 3.55 admin feature switches (set in main.dart to FeatureFlagsService.on). Null = on. Only
+  /// non-safety extras read it (engine care); crash detection, SOS and texts never do.
+  bool Function(String id)? featureOn;
+
+  /// Engine care (3.55): once per hard stretch, spoken and shown for a minute.
+  void _onEngineFix(TrackPoint p) {
+    if (!(featureOn?.call('engineCare') ?? true)) return; // switched off by the admin
+    final advice = engineCare.onFix(p);
+    if (advice == null) return;
+    // 3.55 safety review: an engine tip never shows or speaks over an emergency (my crash alarm,
+    // my SOS, or any open SOS / crash alert in the group).
+    final emergency = _alarm != null || _hasOpenSos || (_port.activeConvoy?.activeAlerts.any((a) => !a.resolved) ?? false);
+    if (emergency) return;
+    _engineNotice = advice;
+    _engineNoticeClear?.cancel();
+    _engineNoticeClear = Timer(const Duration(seconds: 60), () {
+      _engineNotice = null;
+      notifyListeners();
+    });
+    _voice?.speak(advice.speech);
+    notifyListeners();
   }
 
   void _triggerFatigueAlert() {
@@ -1057,6 +1153,56 @@ class SafetyService extends ChangeNotifier {
     _fatigueTimer?.cancel();
     _fatigueEscalated = false;
     _fatigueTimer = Timer(const Duration(seconds: 60), _onFatigue60sTimeout);
+  }
+
+  /// 3.55 fatigue score: an earlier break prompt when the rider's pattern shows tiredness (at
+  /// most one fatigue prompt per 30 min; the 2 h rule above still comes on time). Informational:
+  /// no escalation to the lead, never over an emergency.
+  void _triggerAdaptiveFatigueAlert(int nowMs) {
+    final emergency = _alarm != null || _hasOpenSos || (_port.activeConvoy?.activeAlerts.any((a) => !a.resolved) ?? false);
+    if (emergency) return;
+    final a = sensorSafety.fatigue;
+    sensorSafety.noteEarlyPrompt(nowMs);
+    _voice?.speakFatigueConfirmation(
+      'Time for a break soon. Your riding shows signs of tiredness.',
+      dedupeKey: 'fatigue_adaptive_${nowMs ~/ 60000}',
+    );
+    _showPrompt(
+      SafetyPrompt(
+        key: SafetyConstants.promptFatigue,
+        kind: SafetyPromptKind.fatigue,
+        title: 'Time for a break',
+        message: a.suggestedBreakInMin <= 5
+            ? 'Your riding shows signs of tiredness. Stop at the next safe place for a break.'
+            : 'Your riding shows signs of tiredness. Plan a break in the next ${a.suggestedBreakInMin} min.',
+        primaryLabel: "I'm alert",
+        secondaryLabel: 'Taking a break',
+      ),
+      notifyAlways: true,
+    );
+  }
+
+  /// 3.55 rider-down check: the bike went down at a stop and nothing moved for a minute. Opens
+  /// the same crash alarm ("Bike down?"), countdown, SOS and text fallback.
+  void _openRiderDownAlarm(RiderDownEvent d) {
+    if (_alarm != null || _hasOpenSos) {
+      sensorSafety.riderDown.suppress(_now());
+      return;
+    }
+    _alarmRiderDown = true;
+    _openAlarm(CrashEvent(
+      impactAtMs: d.tipAtMs,
+      impactG: d.peakG,
+      speedBeforeKmh: d.speedBeforeKmh,
+      lat: d.lat,
+      lng: d.lng,
+      hasRotationOrTilt: true,
+      isSlideFall: true,
+      scenario: CrashScenario.stationaryDrop,
+      confidence: 0.7,
+      movementState: MovementState.stopped,
+    ));
+    if (_alarm == null) _alarmRiderDown = false;
   }
 
   void _onFatigue60sTimeout() {
@@ -1094,18 +1240,49 @@ class SafetyService extends ChangeNotifier {
 
   void _onAccel(AccelBucket b) {
     if (_disposed) return;
-    if (_detector.armedAt(b.tMs)) {
+    final armed = _detector.armedAt(b.tMs);
+    if (armed) {
       _brakes.onAccel(b);
       if (_brakes.count > 0 && _brakes.count % 10 == 0 && _brakes.count != _brakesSaved) _saveRideStats(endedAt: 0);
     }
+    // The crash detector sees every second first (3.55 safety review: before, the road surface
+    // detector ran first on the same second and could report a crash impact as a pothole).
     final ev = _detector.onAccel(b);
     if (ev != null) _openAlarm(ev);
+    // 3.55 rider-down check, steering wobble and phone-mount check from the same second, always
+    // after the crash detector (which keeps priority: the check rests while it weighs an impact).
+    final busy = _alarm != null || _hasOpenSos;
+    final down = sensorSafety.onAccel(b, crashBusy: busy || _detector.evaluating, emergency: busy);
+    if (down != null && _settings.crashDetection) _openRiderDownAlarm(down);
+    // Road surface (3.55): only with a fresh fix (position and speed of this second), and never
+    // while the crash detector is weighing a possible crash or a crash alarm is open (the tumbling
+    // phone and the GPS speed lag after a fall must not become "pothole" / "rough road" reports).
+    if (armed && !_detector.evaluating && _alarm == null) {
+      final f = _lastFix;
+      final sink = onRoadSurface;
+      if (sink != null && f != null && !_soloOnly && (b.tMs - f.ts).abs() <= 5000) {
+        final rev = _surface.onBucket(b, speedKmh: f.speedKmh, lat: f.lat, lng: f.lng);
+        if (rev != null) {
+          sensorSafety.onRoadHazard(); // 3.55 ride safety report
+          try {
+            sink(rev);
+          } catch (_) {}
+        }
+      }
+    }
     _updateSensor();
   }
 
   void _resetRide() {
     silenceSiren();
     _detector.reset();
+    _surface.reset();
+    sensorSafety.resetRide(_detector);
+    _alarmRiderDown = false;
+    engineCare.reset();
+    roadCare.reset();
+    _engineNoticeClear?.cancel();
+    _engineNotice = null;
     _accelUnavailable = false; // try the sensor again on the next ride
     _fatigue.reset();
     _fatigueTimer?.cancel();
@@ -1167,7 +1344,7 @@ class SafetyService extends ChangeNotifier {
         !_accelUnavailable &&
         _settings.crashDetection &&
         _rideOn &&
-        (_detector.wantsSensor || counting);
+        (_detector.wantsSensor || counting || sensorSafety.wantsSensor);
     if (want && _accelSub == null) {
       _accelSub = _accel.buckets().listen(_onAccel, onError: (Object e) {
         // No accelerometer (or the sensor failed): stop asking for it during this ride.
@@ -1202,6 +1379,7 @@ class SafetyService extends ChangeNotifier {
       lng = f?.lng ?? me?.lng ?? 0;
     }
     if (_rideActive) _rideCrash = true;
+    sensorSafety.onAlarmOpened(riderDownCheck: _alarmRiderDown);
     final seconds = SafetyConstants.crashCountdown.inSeconds;
     _alarmEvent = CrashEvent(
       impactAtMs: e.impactAtMs,
@@ -1217,28 +1395,6 @@ class SafetyService extends ChangeNotifier {
       movementState: e.movementState,
     );
     final bioSnap = BiometricSafetyBridge().isActive ? BiometricSafetyBridge().snapshot : null;
-    final incId = 'crash-${e.impactAtMs}-$now';
-    _activeIncidentId = incId;
-    final incident = CrashIncident(
-      incidentId: incId,
-      timestamp: e.impactAtMs,
-      lat: lat,
-      lng: lng,
-      impactG: e.impactG,
-      speedBeforeKmh: e.speedBeforeKmh,
-      peakGyroRadS: 0.0,
-      tiltDeg: 0.0,
-      isSlideFall: e.isSlideFall,
-      scenario: e.scenario,
-      confidence: e.confidence,
-      peakJerkGPerS: e.peakJerkGPerS,
-      source: _alarmExternal != null ? 'WEARABLE' : 'CRASH_AUTO',
-      status: IncidentStatus.countdownActive,
-      idempotencyKey: 'crash_$incId',
-      groupId: _port.activeConvoy?.groupId,
-    );
-    _incidentStore?.recordIncident(incident, syncToQueue: false).ignore();
-
     _alarm = CrashAlarmState(
       startedAtMs: now,
       secondsLeft: seconds,
@@ -1254,7 +1410,7 @@ class SafetyService extends ChangeNotifier {
     if (_native) {
       SafetyNative.alarmWindow(true).ignore();
       AlarmNotifier.showCrashAlarm(
-        title: L10n.t('notif.crash.title'),
+        title: _alarmRiderDown ? riderDownTitle : L10n.t('notif.crash.title'),
         body: L10n.t('notif.crash.body', {'n': seconds}),
       ).ignore();
     }
@@ -1293,6 +1449,7 @@ class SafetyService extends ChangeNotifier {
     _alarmTimer?.cancel();
     _alarmTimer = null;
     if (a == null || e == null) return;
+    if (!_alarmRiderDown && _alarmExternal == null) sensorSafety.onRealAlarm(e.scenario); // 3.55 learning
     // An impact from outside the phone (wearable hook) is sent as such, whatever the answer.
     final external = _alarmExternal != null;
     _alarmExternal = null;
@@ -1347,29 +1504,6 @@ class SafetyService extends ChangeNotifier {
       );
     }
     final isUnresponsive = source == EmergencySource.crashAuto;
-    if (_activeIncidentId != null) {
-      _incidentStore?.updateStatus(_activeIncidentId!, IncidentStatus.dispatched, syncToQueue: true).ignore();
-      if (_eventQueue != null) {
-        _eventQueue.enqueue(DurableEvent(
-          eventId: 'evt_$_activeIncidentId',
-          idempotencyKey: 'crash_$_activeIncidentId',
-          eventType: DurableEventType.crashIncident,
-          priority: EventPriority.critical,
-          groupId: _port.activeConvoy?.groupId ?? '',
-          payload: {
-            'incidentId': _activeIncidentId,
-            'lat': e.lat,
-            'lng': e.lng,
-            'impactG': e.impactG,
-            'speedBeforeKmh': e.speedBeforeKmh,
-            'source': source.wire,
-            'alertType': alertType,
-            'auto': true,
-          },
-          createdAt: e.impactAtMs,
-        )).ignore();
-      }
-    }
     _alarm = a.copyWith(
       sent: true,
       secondsLeft: 0,
@@ -1384,8 +1518,9 @@ class SafetyService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Manually triggers an Emergency SOS event, recording it to local incident persistence
-  /// and placing it into the durable priority event queue with critical priority.
+  /// Manually triggers an Emergency SOS. Offline delivery is the pending-SOS store's job
+  /// (ConvoyService: persisted, resent on reconnect with its clientId; 3.55 retired the unused
+  /// incident queue, see docs/features_355/platform.md).
   Future<void> triggerManualSos({String type = SosTypes.emergency}) async {
     if (_rideActive) _rideSos = true;
     final now = _now();
@@ -1394,31 +1529,6 @@ class SafetyService extends ChangeNotifier {
     final me = uid == null ? null : _port.activeConvoy?.riders[uid];
     final lat = f?.lat ?? me?.lat ?? 0.0;
     final lng = f?.lng ?? me?.lng ?? 0.0;
-    final incId = 'sos-$now-${math.Random().nextInt(0xffff)}';
-
-    final incident = CrashIncident(
-      incidentId: incId,
-      timestamp: now,
-      lat: lat,
-      lng: lng,
-      impactG: 0.0,
-      speedBeforeKmh: f?.speedKmh ?? 0.0,
-      source: EmergencySource.manual.wire,
-      status: IncidentStatus.dispatched,
-      idempotencyKey: 'sos_$incId',
-      groupId: _port.activeConvoy?.groupId,
-    );
-    await _incidentStore?.recordIncident(incident, syncToQueue: true);
-
-    await _eventQueue?.enqueue(DurableEvent(
-      eventId: 'evt_$incId',
-      idempotencyKey: 'sos_$incId',
-      eventType: DurableEventType.sos,
-      priority: EventPriority.critical,
-      groupId: _port.activeConvoy?.groupId ?? '',
-      payload: incident.toJson(),
-      createdAt: now,
-    ));
 
     if (_soloOnly) {
       // Offline solo ride: no convoy to send to. The messages app opens for the emergency contact.
@@ -1632,7 +1742,7 @@ class SafetyService extends ChangeNotifier {
               kind: SafetyPromptKind.fuel,
               title: warning.title,
               message: warning.message,
-              primaryLabel: 'Route to Bunk',
+              primaryLabel: 'Route to fuel',
               secondaryLabel: L10n.t('fuel.filled'),
             ),
             notifyAlways: true,
@@ -1674,7 +1784,7 @@ class SafetyService extends ChangeNotifier {
             kind: SafetyPromptKind.fuel,
             title: warning.title,
             message: warning.message,
-            primaryLabel: 'Route to Bunk',
+            primaryLabel: 'Route to fuel',
             secondaryLabel: L10n.t('fuel.filled'),
           ),
           notifyAlways: true,
@@ -1745,6 +1855,7 @@ class SafetyService extends ChangeNotifier {
   void _endRideStats() {
     if (_groupId == null || !_rideActive) return;
     _saveRideStats(endedAt: _now());
+    sensorSafety.endRide();
   }
 
   void _saveRideStats({required int endedAt}) {
@@ -1759,6 +1870,7 @@ class SafetyService extends ChangeNotifier {
       alerts: _rideAlerts,
       sos: _rideSos,
       crashAlert: _rideCrash,
+      safety: sensorSafety.buildSummary(hardBrakes: _brakes.count, breaks: _rideBreaks), // 3.55, phone only
     )).ignore();
   }
 
@@ -2091,6 +2203,8 @@ class SafetyService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _engineNoticeClear?.cancel();
+    sensorSafety.dispose();
     silenceSiren();
     _saveFuel(force: true);
     _port.removeListener(_onConvoy);

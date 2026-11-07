@@ -49,8 +49,14 @@ class PublicRideService extends ChangeNotifier {
   String? _notice;
   int _noticeSeq = 0;
 
-  /// The connected gateway has public ride.
-  bool get available => _rt.supports(PublicRideWire.feature);
+  /// The connected gateway has public ride, and the admin has not switched it off (3.55).
+  bool get available => _rt.supports(PublicRideWire.feature) && (featureOn?.call('publicRide') ?? true);
+
+  /// 3.55 admin feature switches (set in main.dart to FeatureFlagsService.on). Null = on.
+  bool Function(String id)? featureOn;
+
+  /// A switch changed: the cards, the HUD and the map markers re-read [available].
+  void featureSwitchesChanged() => notifyListeners();
 
   PublicRideSettings get settings => _settings;
   PublicRidePrefs get prefs => _prefs;

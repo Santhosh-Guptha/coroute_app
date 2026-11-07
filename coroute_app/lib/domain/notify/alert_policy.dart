@@ -233,7 +233,10 @@ class AlertPolicy {
         case 'NO_REPLY':
           if (mine || !(me.isLead || me.isSweeper)) break;
           out.add(AlertSpec('$noReplyPrefix${e.userId}', AlertChannel.alerts, 'No reply from $who',
-              'Far from the group for ${TimelineText.duration(checkInFarFor)} and did not answer Are you OK. Automatic check.'));
+              e.dataString('context') == 'MISSING_RIDER'
+                  // 3.55 missing-rider check: stopped while the group rode on.
+                  ? 'Stopped while the group moved on and did not answer Are you OK. Automatic check.'
+                  : 'Far from the group for ${TimelineText.duration(checkInFarFor)} and did not answer Are you OK. Automatic check.'));
           break;
         case 'STOPPED':
           if (mine || dur < stationaryAlert || !(me.isLead || me.isSweeper)) break;
@@ -374,10 +377,10 @@ class AlertPolicy {
         return AlertSpec('EV:${e.eventId}', AlertChannel.updates, '$who suggests a stop', '${e.dataString('name')}. Open the stops list to add it or decline.');
       case 'JOINED':
         if (mine) return null;
-        return AlertSpec('EV:${e.eventId}', AlertChannel.activity, '$who joined the convoy', '');
+        return AlertSpec('EV:${e.eventId}', AlertChannel.activity, '$who joined the ride', '');
       case 'LEFT':
         if (mine) return null;
-        return AlertSpec('EV:${e.eventId}', AlertChannel.activity, '$who left the convoy', '');
+        return AlertSpec('EV:${e.eventId}', AlertChannel.activity, '$who left the ride', '');
       case 'STOP_ADDED':
         if (mine) return null;
         if (e.dataString('category').toUpperCase() == 'MEETING') return meetingChanged(e, me);

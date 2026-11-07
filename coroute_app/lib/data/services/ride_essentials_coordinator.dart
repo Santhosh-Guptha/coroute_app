@@ -8,6 +8,7 @@ import '../models/convoy_model.dart';
 import 'convoy_service.dart';
 import 'route_essentials_service.dart';
 import 'settings_service.dart';
+import 'sos_battery_reserve.dart';
 
 /// Uses the ride's existing GPS stream; never starts a location subscription.
 abstract class RideEssentialsPort implements Listenable {
@@ -31,7 +32,8 @@ class ConvoyEssentialsPort implements RideEssentialsPort {
   @override
   bool get isRealGpsActive => convoys.isRealGpsActive;
   @override
-  bool get conservingBattery => convoys.conservingBattery;
+  // 3.55 SOS battery reserve: no network refresh of stops on the way below 10%.
+  bool get conservingBattery => convoys.conservingBattery || SosBatteryReserve.isActive;
   @override
   Stream<TrackPoint> get myFixes => convoys.myFixes;
   @override

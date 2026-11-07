@@ -13,7 +13,9 @@ import '../../domain/places/fuel_match.dart';
 import '../../domain/places/place_poi.dart';
 import '../../domain/places/poi_category.dart';
 import '../../domain/places/poi_declutter.dart';
+import '../../domain/places/road_context.dart';
 import '../../domain/places/route_corridor.dart';
+import '../../domain/safety/speed_limit_advisor.dart';
 import '../../domain/tracking/geo_math.dart';
 import 'api_client.dart';
 import 'garage_service.dart';
@@ -21,21 +23,30 @@ import 'safety_native.dart';
 
 /// Places of one grid cell, as fetched at [at] (epoch ms).
 class PoiCellData {
-  const PoiCellData(this.at, this.pois);
+  const PoiCellData(this.at, this.pois, [this.road = const []]);
   final int at;
   final List<PlacePoi> pois;
+
+  /// 3.55 smart speed limits: road limits and school zones of the cell (never shown on the map).
+  final List<RoadContextItem> road;
 
   static PoiCellData? fromWire(Object? j) {
     if (j is! Map || j['at'] is! num || j['p'] is! List) return null;
     final pois = <PlacePoi>[];
+    final road = <RoadContextItem>[];
     for (final e in j['p'] as List) {
       final poi = PlacePoi.fromWire(e);
-      if (poi != null) pois.add(poi);
+      if (poi != null) {
+        pois.add(poi);
+      } else {
+        final r = RoadContextItem.fromWire(e);
+        if (r != null) road.add(r);
+      }
     }
-    return PoiCellData((j['at'] as num).toInt(), pois);
+    return PoiCellData((j['at'] as num).toInt(), pois, road);
   }
 
-  Map<String, Object> toWire() => {'at': at, 'p': [for (final x in pois) x.toWire()]};
+  Map<String, Object> toWire() => {'at': at, 'p': [for (final x in pois) x.toWire(), for (final x in road) x.toWire()]};
 }
 
 /// Where cells live on the phone between rides.
@@ -82,7 +93,9 @@ class FilePoiCellStore implements PoiCellStore {
       }()
           .catchError((Object _) => null);
 
-  String _name(String key) => '${key.replaceAll(':', '_')}.json';
+  // 3.55: "v2_" files hold cells fetched with heritage places; older files are never read again
+  // (so a cell saved before 3.55 is fetched once more) and are pruned like any old file.
+  String _name(String key) => 'v2_${key.replaceAll(':', '_')}.json';
 
   @override
   Future<PoiCellData?> read(String key) async {
@@ -243,6 +256,32 @@ class MapPlacesService extends ChangeNotifier {
       default:
         return _enabled.contains(x.category);
     }
+  }
+
+  // 3.55 smart speed limits: road limits, school zones and hospitals of all loaded cells.
+  ({List<RoadLimitPoint> roads, List<SpeedZonePoint> zones})? _roadContext;
+
+  /// Road limits and school / hospital zones of all loaded cells (cached until the cells change).
+  ({List<RoadLimitPoint> roads, List<SpeedZonePoint> zones}) get roadContext {
+    final cached = _roadContext;
+    if (cached != null) return cached;
+    final roads = <RoadLimitPoint>[], zones = <SpeedZonePoint>[];
+    final seen = <String>{};
+    for (final c in _cells.values) {
+      for (final x in c.road) {
+        if (!seen.add(x.id)) continue;
+        final r = x.road;
+        if (r != null) roads.add(r);
+        final z = x.zone;
+        if (z != null) zones.add(z);
+      }
+    }
+    for (final x in all) {
+      if (x.category == PoiCategory.hospital && (x.tags['amenity'] == 'hospital' || x.tags['healthcare'] == 'hospital')) {
+        zones.add(SpeedZonePoint(lat: x.lat, lng: x.lng, kind: SpeedZoneKind.hospital));
+      }
+    }
+    return _roadContext = (roads: roads, zones: zones);
   }
 
   /// Places shown with the current chips (all loaded cells).
@@ -458,6 +497,7 @@ class MapPlacesService extends ChangeNotifier {
   void _changed() {
     _version++;
     _all = null;
+    _roadContext = null;
     _visibleCache = null;
     _projected = null;
     notifyListeners();

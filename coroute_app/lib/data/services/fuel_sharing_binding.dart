@@ -1,4 +1,5 @@
 import 'convoy_service.dart';
+import 'feature_flags_service.dart';
 import 'safety_service.dart';
 import 'settings_service.dart';
 
@@ -17,6 +18,8 @@ class FuelSharingBinding {
   String? _last;
   Map<String, dynamic>? _estimate() {
     final range = safety.estimatedUsableKm;
+    // 3.55 admin feature switch: group fuel off = this phone shares no fuel range.
+    if (!FeatureFlagsService.on('groupFuel')) return null;
     if (!settings.shareFuelEstimate || range == null || !range.isFinite || safety.fuelEstimateUncertain || safety.fuelConfirmedAt <= 0) return null;
     return {'usableKm': range.floor(), 'confirmedAt': safety.fuelConfirmedAt};
   }

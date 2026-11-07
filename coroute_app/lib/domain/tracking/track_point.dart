@@ -6,12 +6,17 @@ class TrackPoint {
   final double speedKmh;
   final double accuracyM;
 
+  /// 3.55 high-altitude care: GPS altitude in metres when the fix had one (null = unknown).
+  /// Used on the phone only; not part of the stored or uploaded track.
+  final double? altM;
+
   const TrackPoint({
     required this.ts,
     required this.lat,
     required this.lng,
     this.speedKmh = 0,
     this.accuracyM = 0,
+    this.altM,
   });
 
   Map<String, dynamic> toJson() => {'ts': ts, 'lat': lat, 'lng': lng, 'v': speedKmh, 'acc': accuracyM};

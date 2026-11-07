@@ -77,6 +77,18 @@ class ConvoyModel {
   final RideFeaturePolicy featurePolicy;
   final Map<String, dynamic> featureAnalytics;
 
+  /// 3.55: automatic riding roles (the front rider leads, the last one sweeps). Off unless the
+  /// lead turned it on; the gateway moves the roles and tells the riders to change position.
+  final bool autoRoles;
+
+  /// The riding lead (front): the rider with role LEAD, else the creator (older rides).
+  String? get ridingLeadId {
+    for (final r in riders.values) {
+      if (r.role == 'LEAD') return r.userId;
+    }
+    return riders.containsKey(createdByUserId) ? createdByUserId : null;
+  }
+
   /// The rider the lead made the sweeper (3.16), if any.
   String? get sweeperId {
     for (final r in riders.values) {
@@ -134,6 +146,7 @@ class ConvoyModel {
     this.featurePolicy = const RideFeaturePolicy(),
     this.featureAnalytics = const {},
     this.capacity = 0,
+    this.autoRoles = false,
   });
 
   ConvoyModel copyWith({
@@ -173,6 +186,7 @@ class ConvoyModel {
     RideFeaturePolicy? featurePolicy,
     Map<String, dynamic>? featureAnalytics,
     int? capacity,
+    bool? autoRoles,
   }) {
     return ConvoyModel(
       groupId: groupId ?? this.groupId,
@@ -210,6 +224,7 @@ class ConvoyModel {
       featurePolicy: featurePolicy ?? this.featurePolicy,
       featureAnalytics: featureAnalytics ?? this.featureAnalytics,
       capacity: capacity ?? this.capacity,
+      autoRoles: autoRoles ?? this.autoRoles,
     );
   }
 
@@ -249,6 +264,7 @@ class ConvoyModel {
       'featurePolicy': featurePolicy.toJson(),
       'featureAnalytics': featureAnalytics,
       if (capacity > 0) 'capacity': capacity,
+      if (autoRoles) 'autoRoles': true,
     };
   }
 
@@ -328,6 +344,7 @@ class ConvoyModel {
       visibility: GroupVisibility.fromWire(json['visibility']?.toString()),
       discovery: json['discovery'] == true,
       assistDefault: json['assistDefault'] != false,
+      autoRoles: json['autoRoles'] == true,
       townLimitKmh: (json['townLimitKmh'] as num?)?.toInt() ?? 0,
       featurePolicy: RideFeaturePolicy.fromJson(json['featurePolicy']),
       featureAnalytics: json['featureAnalytics'] is Map ? Map<String, dynamic>.from(json['featureAnalytics']) : const {},

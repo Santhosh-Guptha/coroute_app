@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:record/record.dart';
 import '../../core/config/feature_gates.dart';
+import 'feature_flags_service.dart';
 import 'intercom_service.dart';
 
 /// Identified siren modulation pattern.
@@ -542,6 +543,7 @@ class SirenAcousticDetector extends ChangeNotifier {
   }
 
   void _onPcmData(Uint8List bytes) {
+    if (!FeatureFlagsService.on('sirenDetector')) return; // 3.55 admin feature switch
     if (bytes.length < 1024) return; // 512 samples * 2 bytes = 1024 bytes
 
     final int16List = Int16List.view(bytes.buffer, bytes.offsetInBytes, bytes.length ~/ 2);

@@ -113,6 +113,11 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   /// Only invoked while microphone capture is legitimately active (PTT or VOX).
   void Function(Uint8List chunk)? onMicChunk;
 
+  /// 3.55 admin feature switches (set in main.dart to FeatureFlagsService.on). Null = on. While
+  /// 'intercom' is off no new talk starts (the gateway refuses a stream start too).
+  bool Function(String id)? featureOn;
+  bool get _talkSwitchOn => featureOn?.call('intercom') ?? true;
+
   // ---- transmit state ----
   bool _micMuted = false;
   bool _deafened = false;
@@ -376,7 +381,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
 
   /// PTT: call on press. Opens the mic and a stream to the chosen target.
   Future<bool> beginTransmission() async {
-    if (_micMuted || _transmitting || !_rt.isConnected || _pausedByPhoneCall || _microphoneRevoked) return false;
+    if (_micMuted || _transmitting || !_rt.isConnected || _pausedByPhoneCall || _microphoneRevoked || !_talkSwitchOn) return false;
     if (!await _ensurePermission()) return false;
     if (!await _openMic()) return false;
     _startStream();
@@ -391,7 +396,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
 
   /// VOX: arm the open mic. Transmits only while sound exceeds the threshold.
   Future<bool> startVox() async {
-    if (_micMuted || !_rt.isConnected || _pausedByPhoneCall || _microphoneRevoked) return false;
+    if (_micMuted || !_rt.isConnected || _pausedByPhoneCall || _microphoneRevoked || !_talkSwitchOn) return false;
     if (!await _ensurePermission()) return false;
     _mode = IntercomMode.vox;
     final ok = await _openMic();

@@ -34,6 +34,9 @@ class SettingsService extends ChangeNotifier {
   bool _smsFallback = false;
   bool _fatigueReminder = true;
   bool _soloCheckIn = true;
+  // 3.55 solo check-in by ETA and no-signal ahead (on by default; docs/features_355/solo_guardian.md).
+  bool _etaCheckIn = true;
+  bool _noSignalAhead = true;
   bool _oemGuideSeen = false;
   bool _loaded = false;
 
@@ -87,9 +90,43 @@ class SettingsService extends ChangeNotifier {
     final generation = _fuelGeneration, key = _fuelKey('fuel_profile_v1');
     final prefs = await _p();
     if (!await prefs.setString(key, jsonEncode(profile.toJson()))) throw StateError('Fuel settings could not be saved');
+    // 3.55: the rider's own fuel settings: the garage never replaces them.
+    await prefs.remove(_fuelKey(_keyGarageFuel));
     if (generation != _fuelGeneration) return;
     _fuelProfile = profile;
     notifyListeners();
+  }
+
+  static const String _keyGarageFuel = 'fuel_profile_from_garage_v1';
+
+  /// 3.55: fills the fuel profile from the active garage bike (tank, reserve, mileage) when the
+  /// signed-in rider has set none (no profile and no simple range), or when the one there was
+  /// filled from the garage before (a bike change or edit updates it). The rider's own settings
+  /// always win. Reads storage directly, so a profile still loading is never overwritten.
+  /// True when the profile changed.
+  Future<bool> adoptGarageFuelProfile(FuelProfile profile) async {
+    if (!profile.valid || !profile.litresMode || !_fuelScoped || _fuelUser == null) return false;
+    final generation = _fuelGeneration;
+    try {
+      final prefs = await _p();
+      if (generation != _fuelGeneration) return false;
+      final key = _fuelKey('fuel_profile_v1'), markKey = _fuelKey(_keyGarageFuel);
+      final stored = prefs.getString(key);
+      final mark = prefs.getString(markKey);
+      final rangeSet = (prefs.getInt(_fuelKey(NetworkConstants.keyFuelRangeKm)) ?? 0) > 0;
+      final fromGarage = stored == null ? !rangeSet : (mark != null && stored == mark);
+      final next = jsonEncode(profile.toJson());
+      if (!fromGarage || stored == next) return false;
+      if (!await prefs.setString(key, next)) return false;
+      await prefs.setString(markKey, next);
+      if (generation != _fuelGeneration) return true;
+      _fuelProfile = profile;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('settings save note: $e');
+      return false;
+    }
   }
   bool _batterySaver = false;
   bool _hardwarePtt = false;
@@ -101,6 +138,12 @@ class SettingsService extends ChangeNotifier {
   bool get smsFallback => _smsFallback;
   bool get fatigueReminder => _fatigueReminder;
   bool get soloCheckIn => _soloCheckIn;
+
+  /// 3.55: text my emergency contact when a solo ride with a destination is overdue and I do not answer.
+  bool get etaCheckIn => _etaCheckIn;
+
+  /// 3.55: tell my group and guardians before a stretch that had no signal on my earlier rides.
+  bool get noSignalAhead => _noSignalAhead;
   bool get oemGuideSeen => _oemGuideSeen;
   bool get isLoaded => _loaded;
 
@@ -149,6 +192,8 @@ class SettingsService extends ChangeNotifier {
       _smsFallback = prefs.getBool(SafetyConstants.keySmsFallback) ?? false;
       _fatigueReminder = prefs.getBool(SafetyConstants.keyFatigueReminder) ?? true;
       _soloCheckIn = prefs.getBool(SafetyConstants.keySoloCheckIn) ?? true;
+      _etaCheckIn = prefs.getBool(keyEtaCheckIn) ?? true;
+      _noSignalAhead = prefs.getBool(keyNoSignalAhead) ?? true;
       _oemGuideSeen = prefs.getBool(SafetyConstants.keyOemGuideSeen) ?? false;
       _voiceWarnings = prefs.getBool(NetworkConstants.keyVoiceWarnings) ?? true;
       _hazardAlerts = prefs.getBool(NetworkConstants.keyHazardAlerts) ?? true;
@@ -216,6 +261,23 @@ class SettingsService extends ChangeNotifier {
     _fatigueReminder = value;
     notifyListeners();
     await _save(SafetyConstants.keyFatigueReminder, value);
+  }
+
+  static const String keyEtaCheckIn = 'eta_check_in_v1';
+  static const String keyNoSignalAhead = 'no_signal_ahead_v1';
+
+  Future<void> setEtaCheckIn(bool value) async {
+    if (value == _etaCheckIn) return;
+    _etaCheckIn = value;
+    notifyListeners();
+    await _save(keyEtaCheckIn, value);
+  }
+
+  Future<void> setNoSignalAhead(bool value) async {
+    if (value == _noSignalAhead) return;
+    _noSignalAhead = value;
+    notifyListeners();
+    await _save(keyNoSignalAhead, value);
   }
 
   Future<void> setSoloCheckIn(bool value) async {

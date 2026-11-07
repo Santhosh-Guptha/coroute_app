@@ -38,5 +38,7 @@ TrackPoint soloFixFrom(Position p, {int? nowMs}) {
     lng: p.longitude,
     speedKmh: mps * 3.6,
     accuracyM: p.accuracy.isFinite ? p.accuracy : 0,
+    // 3.55 high-altitude care: 0 is what phones report without an altitude.
+    altM: p.altitude.isFinite && p.altitude != 0 ? p.altitude : null,
   );
 }

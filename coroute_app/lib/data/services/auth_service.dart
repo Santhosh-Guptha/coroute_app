@@ -130,7 +130,7 @@ class AuthService extends ChangeNotifier {
   /// Until then the form only sends the medical fields the rider actually changed.
   bool get medicalLoaded => _medicalLoaded;
   bool get isLoading => _isLoading;
-  bool get isAuthenticated => (_api.hasToken || isGuest) && _userId != null;
+  bool get isAuthenticated => _api.hasToken && _userId != null && !isGuest;
   bool get isMasterAdmin => roleIsAdmin(_role);
 
   /// True if the user is registered or designated as a pillion passenger.
@@ -138,8 +138,8 @@ class AuthService extends ChangeNotifier {
       (_vehicleType ?? '').trim().toLowerCase() == 'pillion rider' ||
       (_vehicleNo ?? '').trim().toUpperCase() == 'PILLION';
 
-  /// True if the user is in quick guest ride mode.
-  /// Server guest accounts have ordinary `usr_` ids; their e-mail is on the guest domain.
+  /// True for a guest session saved by a build before 3.55. Guest mode is retired:
+  /// such a session is cleared on start and the rider is asked to create a free account.
   bool get isGuest =>
       (_userId ?? '').startsWith('guest_') ||
       (_email ?? '').endsWith('@guest.coroute.local');
@@ -148,7 +148,7 @@ class AuthService extends ChangeNotifier {
   /// Every rider must have verified contact numbers, bike registration (or pillion status),
   /// and emergency (ICE) contacts before creating or participating in group rides.
   bool get isProfileComplete {
-    if (isMasterAdmin || isGuest) return true;
+    if (isMasterAdmin) return true;
     final nameOk = (_name ?? '').trim().length >= 2;
     final emailOk = (_email ?? '').trim().contains('@');
     final phoneOk = (_phone ?? '').trim().length >= 7;
@@ -174,6 +174,11 @@ class AuthService extends ChangeNotifier {
     _emergencyContactName =
         prefs.getString(AppConstants.keyEmergencyName) ?? '';
     _vehicleNo = prefs.getString(AppConstants.keyVehicleNo) ?? '';
+    // Guest mode was retired in 3.55: a saved guest session is cleared once, with a clear message.
+    if (isGuest) {
+      _lastSignOutReason = 'Guest mode has ended. Create a free CoRoute account (Community plan) to keep riding.';
+      await _clearSession();
+    }
     _isLoading = false;
     notifyListeners();
 
@@ -246,6 +251,10 @@ class AuthService extends ChangeNotifier {
     }
     // Plan state travels with the profile; an expired paid tier arrives as community.
     _noteSubscriptionStatus(u['subscriptionStatus']);
+    // 3.55 bike summary: only a gateway that returns it accepts it (older ones never see it).
+    if (u.containsKey('bikeModel')) {
+      _bikeOnServer = {for (final k in bikeSummaryKeys) k: u[k]};
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(AppConstants.keyUserId, _userId ?? '');
@@ -378,90 +387,68 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  /// Direct guest / quick ride mode for riders hopping on immediately without an account.
-  Future<Map<String, dynamic>> continueAsGuest({String? callsign}) async {
-    _isLoading = true;
-    notifyListeners();
-
-    final guestName = callsign?.trim().isNotEmpty == true
-        ? callsign!.trim()
-        : 'Guest Rider';
-    try {
-      final res = await _api.post(
-        '/auth/guest',
-        {'name': guestName},
-        const Duration(seconds: 12),
-        false,
-      );
-      if (res is Map && res['token'] != null) {
-        await _api.setToken(res['token'] as String);
-        final u = res['user'] as Map<String, dynamic>? ?? {};
-        _userId =
-            u['userId'] as String? ??
-            'guest_${DateTime.now().millisecondsSinceEpoch}';
-        _name = u['name'] as String? ?? guestName;
-        _email = u['email'] as String? ?? '$_userId@guest.coroute.local';
-        _role = u['role'] as String? ?? AppConstants.riderRole;
-        _vehicleType = u['vehicleType'] as String? ?? 'Motorcycle (Guest)';
-        _vehicleNo = u['vehicleNo'] as String? ?? 'GUEST';
-        // Never a made-up number: an SOS must not text or show a placeholder contact.
-        _phone = u['phone'] as String? ?? '';
-        _emergencyContact = u['emergencyContact'] as String? ?? '';
-        _emergencyContactName = u['emergencyContactName'] as String? ?? '';
-        _isLoading = false;
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(AppConstants.keyUserId, _userId!);
-        await prefs.setString(AppConstants.keyUserName, _name!);
-        await prefs.setString(AppConstants.keyUserRole, _role!);
-        await prefs.setString(AppConstants.keyUserEmail, _email!);
-        await prefs.setString(AppConstants.keyVehicleType, _vehicleType!);
-        await prefs.setString(AppConstants.keyVehicleNo, _vehicleNo!);
-        notifyListeners();
-        return {
-          'success': true,
-          'isAdmin': false,
-          'userId': _userId,
-          'name': _name,
-        };
-      }
-    } catch (e) {
-      debugPrint('Guest API login fallback: $e');
-    }
-
-    final guestId = 'guest_${DateTime.now().millisecondsSinceEpoch}';
-    _userId = guestId;
-    _role = AppConstants.riderRole;
-    _name = guestName;
-    _email = '$guestId@guest.coroute.local';
-    _vehicleType = 'Motorcycle (Guest)';
-    _phone = '';
-    _vehicleNo = 'GUEST';
-    _emergencyContact = '';
-    _emergencyContactName = '';
-    _isLoading = false;
-
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(AppConstants.keyUserId, _userId!);
-    await prefs.setString(AppConstants.keyUserName, _name!);
-    await prefs.setString(AppConstants.keyUserRole, _role!);
-    await prefs.setString(AppConstants.keyUserEmail, _email!);
-    await prefs.setString(AppConstants.keyVehicleType, _vehicleType!);
-    await prefs.setString(AppConstants.keyVehicleNo, _vehicleNo!);
-    notifyListeners();
-    return {
-      'success': true,
-      'isAdmin': false,
-      'userId': _userId,
-      'name': _name,
-    };
-  }
-
   String? _lastProfileError;
 
   /// The server's reason the last profile update was refused (for example "That callsign is
   /// taken."), or null when it failed for network reasons or succeeded.
   String? get lastProfileError => _lastProfileError;
+
+  /// 3.55: the active bike's summary keys the gateway stores (engine care and fuel analysis).
+  static const List<String> bikeSummaryKeys = ['bikeModel', 'bikeCc', 'bikeColour', 'bikeTankL', 'bikeMileageKmL', 'bikeCooling'];
+
+  /// The bike summary as the gateway last returned it (null: an older gateway, or not loaded yet).
+  Map<String, dynamic>? _bikeOnServer;
+
+  /// Shares the active bike's summary, best effort: only with a gateway that returned the
+  /// summary before (older ones are never sent unknown keys), only when it changed, and every
+  /// error (offline, refused) is ignored silently; the garage on the phone stays the source.
+  Future<bool> syncBikeSummary(Map<String, Object> summary) async {
+    final known = _bikeOnServer;
+    if (_userId == null || known == null) return false;
+    final changed = <String, Object>{
+      for (final e in summary.entries)
+        if (bikeSummaryKeys.contains(e.key) && !_sameBikeValue(known[e.key], e.value)) e.key: e.value,
+    };
+    if (changed.isEmpty) return true;
+    // One request at a time; the newest summary goes next. A refused one is not sent again.
+    if (_bikeSyncing) {
+      _bikePending = summary;
+      return false;
+    }
+    final sig = changed.toString();
+    if (sig == _bikeRefused) return false;
+    _bikeSyncing = true;
+    try {
+      final res = await _api.patch('/me', changed);
+      if (res is Map) {
+        await _applyUser(Map<String, dynamic>.from(res));
+      } else {
+        _bikeOnServer = {...known, ...changed};
+      }
+      return true;
+    } on ApiException catch (e) {
+      debugPrint('bike summary note: $e');
+      if (e.statusCode >= 400 && e.statusCode < 500) _bikeRefused = sig;
+      return false;
+    } catch (e) {
+      debugPrint('bike summary note: $e');
+      return false;
+    } finally {
+      _bikeSyncing = false;
+      final next = _bikePending;
+      _bikePending = null;
+      if (next != null) syncBikeSummary(next).ignore();
+    }
+  }
+
+  bool _bikeSyncing = false;
+  Map<String, Object>? _bikePending;
+  String? _bikeRefused;
+
+  static bool _sameBikeValue(Object? a, Object b) {
+    if (a is num && b is num) return (a - b).abs() < 0.05;
+    return (a ?? '').toString() == b.toString();
+  }
 
   /// Update rider profile details (server is the source of truth). The
   /// medical fields and [smsOptOut] are sent only when given (older callers
@@ -620,6 +607,7 @@ class AuthService extends ChangeNotifier {
     _emergencyContactName = null;
     _vehicleNo = null;
     _mustChangePassword = false;
+    _bikeOnServer = null;
     _bloodGroup = '';
     _allergies = '';
     _medicalNotes = '';

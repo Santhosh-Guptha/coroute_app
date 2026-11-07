@@ -69,7 +69,7 @@ class TimelineText {
       case 'JOINED':
         return '$who joined';
       case 'LEFT':
-        return '$who left the convoy';
+        return '$who left the ride';
       case 'STOPPED':
         return e.open ? '$who is stopped, $dur so far' : '$who stopped for $dur';
       case 'MOVING':
@@ -180,6 +180,10 @@ class TimelineText {
         return e.dataString('role').toUpperCase() == 'SWEEPER' ? '$who is now the sweeper' : '$who is no longer the sweeper';
       case 'FOLLOW_UP':
         return '$who said they are still OK';
+      case 'VEHICLE_SWAP':
+        // 3.55: two riders swapped bikes, or a rider and their pillion changed places.
+        final other = e.dataString('withName').isEmpty ? 'another rider' : e.dataString('withName');
+        return e.dataString('kind').toUpperCase() == 'PILLION' ? '$who and $other changed places (rider and pillion)' : '$who and $other swapped bikes';
       case 'CORIDE':
         final w = e.dataString('withName');
         return e.open ? '$who is riding with ${w.isEmpty ? 'another rider' : w}' : '$who rode with ${w.isEmpty ? 'another rider' : w} for $dur';

@@ -16,59 +16,69 @@ class GarageService {
 
   bool _loaded = false;
 
-  /// Loads stored motorcycle profiles from persistent storage.
-  Future<void> load() async {
-    if (_loaded) return;
+  Future<void>? _loading;
+
+  /// The one garage the whole app shares (3.55): the garage screen, the engine-care advice and
+  /// the profile summary all see the same bikes. Registered as a provider in main.dart.
+  static final GarageService shared = GarageService();
+
+  /// The sample bike earlier versions put in every new garage (3.55: removed). Only an untouched
+  /// copy is recognised: a rider who rode it, serviced it or wrote notes keeps it as their own.
+  static bool isLegacySeed(BikeProfile b) =>
+      b.id == 'bike_default_01' &&
+      b.name == 'Royal Enfield Himalayan 450' &&
+      b.totalOdometerKm == 0 &&
+      b.lastServiceOdometerKm == 0 &&
+      b.notes.isEmpty;
+
+  /// Loads stored motorcycle profiles from persistent storage. A new garage starts empty
+  /// (3.55: no sample bike); an untouched legacy sample bike is removed.
+  Future<void> load() {
+    if (_loaded) return Future.value();
+    return _loading ??= _load();
+  }
+
+  Future<void> _load() async {
     final sp = await SharedPreferences.getInstance();
     final rawList = sp.getStringList(_keyBikes);
     final activeId = sp.getString(_keyActiveBike);
 
-    List<BikeProfile> loadedBikes = [];
+    final loadedBikes = <BikeProfile>[];
+    var removedSeed = false;
     if (rawList != null && rawList.isNotEmpty) {
       for (final item in rawList) {
         try {
           final map = jsonDecode(item) as Map<String, dynamic>;
-          loadedBikes.add(BikeProfile.fromJson(map));
+          final bike = BikeProfile.fromJson(map);
+          if (isLegacySeed(bike)) {
+            removedSeed = true;
+            continue;
+          }
+          loadedBikes.add(bike);
         } catch (_) {}
       }
     }
-
-    if (loadedBikes.isEmpty) {
-      // Seed with default touring motorcycle
-      final defaultBike = const BikeProfile(
-        id: 'bike_default_01',
-        name: 'Royal Enfield Himalayan 450',
-        make: 'Royal Enfield',
-        model: 'Himalayan 450',
-        year: 2024,
-        tankCapacityL: 17.0,
-        reserveCapacityL: 3.5,
-        expectedMileageKmL: 28.0,
-        totalOdometerKm: 0.0,
-        serviceIntervalKm: 5000.0,
-        lastServiceOdometerKm: 0.0,
-        isDefault: true,
-      );
-      loadedBikes = [defaultBike];
-      await _persistBikes(sp, loadedBikes);
-      await sp.setString(_keyActiveBike, defaultBike.id);
-    }
+    if (removedSeed) await _persistBikes(sp, loadedBikes);
 
     bikesNotifier.value = loadedBikes;
 
-    // Resolve active bike
+    // Resolve active bike (none in an empty garage).
     final matching = loadedBikes.where((b) => b.id == activeId).toList();
     if (matching.isNotEmpty) {
       activeBikeNotifier.value = matching.first;
-    } else {
+    } else if (loadedBikes.isNotEmpty) {
       activeBikeNotifier.value = loadedBikes.first;
       await sp.setString(_keyActiveBike, loadedBikes.first.id);
+    } else {
+      activeBikeNotifier.value = null;
+      if (activeId != null) await sp.remove(_keyActiveBike);
     }
 
     _loaded = true;
   }
 
-  /// The active bike as saved on the phone, read only (never seeds a default).
+  /// The active bike as saved on the phone, read only (never seeds a default; skips the
+  /// untouched legacy sample bike, so a garage not opened since 3.55 reads as empty).
   static Future<BikeProfile?> readActiveBike() async {
     try {
       final sp = await SharedPreferences.getInstance();
@@ -77,6 +87,7 @@ class GarageService {
       for (final item in sp.getStringList(_keyBikes) ?? const <String>[]) {
         try {
           final b = BikeProfile.fromJson(jsonDecode(item) as Map<String, dynamic>);
+          if (isLegacySeed(b)) continue;
           first ??= b;
           if (b.id == activeId) return b;
         } catch (_) {}
@@ -98,8 +109,9 @@ class GarageService {
     activeBikeNotifier.value = target.first;
   }
 
-  /// Adds a new bike or updates an existing bike profile in the garage.
-  Future<void> saveBike(BikeProfile bike) async {
+  /// Adds a new bike or updates an existing bike profile in the garage (same id: edit).
+  /// False when a new bike is not allowed by the plan.
+  Future<bool> saveBike(BikeProfile bike) async {
     // Feature gate check: Free tier allows 1 bike, multiBikeGarage allows unlimited
     final currentBikes = List<BikeProfile>.from(bikesNotifier.value);
     final existingIndex = currentBikes.indexWhere((b) => b.id == bike.id);
@@ -108,7 +120,7 @@ class GarageService {
         currentBikes.isNotEmpty &&
         !FeatureGates.isUnlocked(Feature.multiBikeGarage)) {
       // Future IAP protection: in community tier, only 1 bike is supported
-      return;
+      return false;
     }
 
     if (existingIndex >= 0) {
@@ -125,6 +137,7 @@ class GarageService {
       activeBikeNotifier.value = bike;
       await sp.setString(_keyActiveBike, bike.id);
     }
+    return true;
   }
 
   /// Deletes a motorcycle profile from the garage.

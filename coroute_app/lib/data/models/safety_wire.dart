@@ -28,17 +28,22 @@ class RiderRoles {
 /// Why a CHECK_IN is sent: post-crash follow-up or prolonged riding fatigue escalation.
 enum CheckInContext {
   followUp,
-  fatigue;
+  fatigue,
 
-  /// Wire name: FOLLOW_UP, FATIGUE.
+  /// 3.55 missing-rider check: stopped while the group rode on, and no answer.
+  missingRider;
+
+  /// Wire name: FOLLOW_UP, FATIGUE, MISSING_RIDER.
   String get wire => switch (this) {
         CheckInContext.followUp => 'FOLLOW_UP',
         CheckInContext.fatigue => 'FATIGUE',
+        CheckInContext.missingRider => 'MISSING_RIDER',
       };
 
   static CheckInContext? fromWire(String? s) => switch (s?.toUpperCase()) {
         'FOLLOW_UP' => CheckInContext.followUp,
         'FATIGUE' => CheckInContext.fatigue,
+        'MISSING_RIDER' => CheckInContext.missingRider,
         _ => null,
       };
 }
@@ -153,4 +158,7 @@ class ProtocolFeatures {
   /// 3.16: sweeper role, town speed limit, follow-up check-in, live links, nearest hospital.
   static const String ride316 = 'ride316';
   static const String featurePolicy = 'featurePolicy1';
+
+  /// 3.55: riding roles (lead / middle / sweeper, ROLE_SWAP, automatic roles), ROLE_CHANGE.
+  static const String ride355 = 'ride355';
 }

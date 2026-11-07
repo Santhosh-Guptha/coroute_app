@@ -11,6 +11,7 @@ class RideFeaturePolicy {
     this.guardianStopMinutes = 15,
     this.guardianOfflineMinutes = 10,
     this.guardianDeviationMinutes = 5,
+    this.stretchAlertKm = 3,
   });
   final bool essentialsEnabled,
       autoDiscovery,
@@ -22,6 +23,10 @@ class RideFeaturePolicy {
       guardianStopMinutes,
       guardianOfflineMinutes,
       guardianDeviationMinutes;
+
+  /// 3.55 group stretch alert: the lead is told past this along-route spread (km: 1, 2, 3 or 5).
+  final int stretchAlertKm;
+  static const List<int> stretchAlertChoices = [1, 2, 3, 5];
   factory RideFeaturePolicy.fromJson(dynamic value) {
     final j = value is Map ? value : const {};
     bool flag(String key, bool fallback) =>
@@ -41,6 +46,7 @@ class RideFeaturePolicy {
       guardianStopMinutes: bounded('guardianStopMinutes', 15, 5, 120),
       guardianOfflineMinutes: bounded('guardianOfflineMinutes', 10, 2, 60),
       guardianDeviationMinutes: bounded('guardianDeviationMinutes', 5, 1, 30),
+      stretchAlertKm: j['stretchAlertKm'] is int && stretchAlertChoices.contains(j['stretchAlertKm']) ? j['stretchAlertKm'] as int : 3,
     );
   }
   Map<String, dynamic> toJson() => {
@@ -54,5 +60,6 @@ class RideFeaturePolicy {
     'guardianStopMinutes': guardianStopMinutes,
     'guardianOfflineMinutes': guardianOfflineMinutes,
     'guardianDeviationMinutes': guardianDeviationMinutes,
+    'stretchAlertKm': stretchAlertKm,
   };
 }

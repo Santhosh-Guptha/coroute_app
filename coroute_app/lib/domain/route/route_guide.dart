@@ -86,18 +86,157 @@ class RouteGuide extends ChangeNotifier {
 
   StopPointModel? get personalFuelStop => _personalFuelStop;
 
+  // 3.55 "Route to group": a personal stop of another kind. Unlike the fuel stop it is only a way
+  // back: it is cleared as soon as I am on the group's planned route again, within
+  // [groupReachedM] of the target, or when the group plan changes.
+  StopPointModel? _groupTarget;
+  bool _groupDetourPending = false;
+  int _groupRetryAtMs = 0;
+
+  /// Where "Route to group" takes me (a point on the group's route near the closest rider), or null.
+  StopPointModel? get groupTarget => _groupTarget;
+
+  /// Within this distance of the group target it has done its job.
+  static const double groupReachedM = 150;
+
+  /// Called once when I reach (or ride past) my personal fuel stop and it is cleared.
+  /// `reached`: true at the pump, false when I rode on past it.
+  void Function(StopPointModel stop, {required bool reached})? onFuelStopDone;
+
+  // 3.55 fuel detour stability: one request at a time, retried while offline, never dropped by
+  // "back on the planned route" before the pump, kept through re-routes and a new group plan.
+  bool _fuelBusy = false;
+  bool _fuelDetourPending = false;
+  int _fuelRetryAtMs = 0;
+  double _fuelClosestM = double.infinity;
+
+  /// Within this distance of the pump it counts as reached (or within [fuelSlowReachedM] when slow).
+  static const double fuelReachedM = 60;
+  static const double fuelSlowReachedM = 150;
+
+  /// Riding on this much farther than my closest approach (once I was within
+  /// [fuelPassNearM]) means I passed the pump: the stop is cleared.
+  static const double fuelPassedM = 600;
+  static const double fuelPassNearM = 400;
+
+  /// A failed detour (no signal) is asked again at most this often.
+  static const Duration fuelRetryEvery = Duration(seconds: 30);
+
   /// Hands-free personal fuel detour stop for THIS rider only.
   /// Computes a personal detour without altering the group convoy plan for other riders.
+  ///
+  /// The stop is set (and shown) at once; the detour route follows when the route service answers.
+  /// True when the detour route is in place; false when it is not (no position or destination, no
+  /// signal: the stop stays marked and the route is asked again from the next fixes).
   Future<bool> addPersonalFuelStop({
     required double lat,
     required double lng,
     required String name,
   }) async {
     if (_disposed) return false;
-    final convoy = _convoy;
-    final start = _lastFix ?? (convoy != null && convoy.destinationLat != 0 ? (convoy.destinationLat, convoy.destinationLng) : null);
-    if (start == null || (start.$1 == 0 && start.$2 == 0)) return false;
+    final same = _personalFuelStop != null && GeoMath.haversine(_personalFuelStop!.lat, _personalFuelStop!.lng, lat, lng) < 30;
+    if (same && _personal != null) return true; // a repeat tap for the same pump: nothing to do
+    // 3.55 safety review: a request already on its way (a route to the group, or another pump) no
+    // longer drops this tap. The pump is marked now and its detour is asked from the next fix once
+    // that request is back (the old answer is ignored: identical() / generation checks below).
+    if (same && _fuelBusy) return false;
+    _personalFuelStop = StopPointModel(
+      stopId: 'personal_fuel_${DateTime.now().millisecondsSinceEpoch}',
+      lat: lat,
+      lng: lng,
+      name: name,
+      category: 'FUEL',
+      suggestedByName: 'Me',
+    );
+    _fuelClosestM = double.infinity;
+    _fuelDetourPending = true;
+    _fuelRetryAtMs = 0;
+    _routeVersion++;
+    _notify();
+    return _fetchFuelDetour();
+  }
 
+  /// 3.55: routes me back to my group: from my position to [lat],[lng] (on the group's planned
+  /// route near the closest rider, or that rider), then on through my remaining stops to the end.
+  /// True when the route is in place; false while it is still to come (retried from the next fixes).
+  Future<bool> routeToGroup({required double lat, required double lng, required String name}) async {
+    if (_disposed || (lat == 0 && lng == 0)) return false;
+    final same = _groupTarget != null && GeoMath.haversine(_groupTarget!.lat, _groupTarget!.lng, lat, lng) < 30;
+    if (same && _personal != null && !_groupDetourPending) return true;
+    _groupTarget = StopPointModel(
+      stopId: 'personal_group_${DateTime.now().millisecondsSinceEpoch}',
+      lat: lat,
+      lng: lng,
+      name: name,
+      category: 'REGROUP',
+      suggestedByName: 'Me',
+    );
+    _groupDetourPending = true;
+    _groupRetryAtMs = 0;
+    _routeVersion++;
+    _notify();
+    return _fetchGroupDetour();
+  }
+
+  /// Drops the route back to the group (I chose my own way); the plan (or a re-route) takes over.
+  void clearGroupTarget() {
+    if (_groupTarget == null) return;
+    _groupTarget = null;
+    _groupDetourPending = false;
+    if (_personalFuelStop != null) {
+      // The detour went through the target first: ask again straight to the pump.
+      _fuelDetourPending = true;
+      _fuelRetryAtMs = 0;
+    }
+    _clearPersonal();
+    reroute.followNewLine();
+    _notify();
+  }
+
+  Future<bool> _fetchGroupDetour() async {
+    final target = _groupTarget;
+    if (_disposed || target == null || _fuelBusy) return false;
+    final start = _lastFix;
+    if (start == null || (start.$1 == 0 && start.$2 == 0)) {
+      _groupRetryAtMs = 0;
+      return false;
+    }
+    final waypoints = [start, ..._detourTail(first: (target.lat, target.lng), requireDest: false)];
+    _fuelBusy = true; // one detour request at a time, fuel or group
+    final gen = ++_generation;
+    RouteModel? route;
+    try {
+      route = await fetchRoute(waypoints);
+    } catch (_) {
+      route = null;
+    } finally {
+      _fuelBusy = false;
+    }
+    if (_disposed || !identical(_groupTarget, target)) return false;
+    if (route == null || route.points.length < 2 || gen != _generation) {
+      _groupDetourPending = true;
+      _groupRetryAtMs = _lastFixMs + fuelRetryEvery.inMilliseconds;
+      _setStatus('Route to the group: no route yet, trying again.', force: true);
+      return false;
+    }
+    _personal = route;
+    _personalProgress = RouteProgress(route.points);
+    final last = _lastFix;
+    if (last != null) _personalProgress!.update(last.$1, last.$2);
+    _groupDetourPending = false;
+    reroute.followNewLine();
+    _rejoin.reset(OffRouteState.offRoute);
+    _offStatusShown = false;
+    _routeVersion++;
+    _setStatus('Routing you to the group: ${TimelineText.distance(route.distanceM)}', force: true);
+    _notify();
+    return true;
+  }
+
+  /// After [first]: my fuel stop (unless it is [first]), the stops I still have to ride to, and
+  /// the destination (when there is none and [requireDest], an empty list).
+  List<(double, double)> _detourTail({required (double, double) first, bool requireDest = true}) {
+    final convoy = _convoy;
     (double, double)? dest;
     if (convoy != null && (convoy.destinationLat != 0 || convoy.destinationLng != 0)) {
       dest = (convoy.destinationLat, convoy.destinationLng);
@@ -105,48 +244,162 @@ class RouteGuide extends ChangeNotifier {
       final line = convoy?.routeLine ?? const [];
       if (line.length >= 2) dest = line.last;
     }
-    if (dest == null) return false;
-
+    if (dest == null && requireDest) return const [];
     final myAlongM = _plan?.matched?.alongM;
+    final fuel = _personalFuelStop;
     final stops = <(double, double)>[
-      (lat, lng), // Detour to fuel station first
+      first,
+      if (fuel != null && (fuel.lat, fuel.lng) != first) (fuel.lat, fuel.lng),
       if (convoy != null)
         for (final s in convoy.plannedStops)
-          if (RoutePlan.stillAhead(s, _uid) && !RoutePlan.isBehind(s, _plan, myAlongM))
-            (s.lat, s.lng),
+          if (RoutePlan.stillAhead(s, _uid) && !RoutePlan.isBehind(s, _plan, myAlongM)) (s.lat, s.lng),
     ];
     final room = RouteConstants.maxWaypoints - 2;
-    final waypoints = [start, ...stops.take(room < 0 ? 0 : room), dest];
+    return [...stops.take(room < 0 ? 0 : room), ?dest];
+  }
 
-    try {
-      final route = await fetchRoute(waypoints);
-      if (_disposed || route == null || route.points.length < 2) return false;
-      _personal = route;
-      _personalProgress = RouteProgress(route.points);
-      reroute.followNewLine();
-      _rejoin.reset(OffRouteState.offRoute);
-      _personalFuelStop = StopPointModel(
-        stopId: 'personal_fuel_${DateTime.now().millisecondsSinceEpoch}',
-        lat: lat,
-        lng: lng,
-        name: name,
-        category: 'FUEL',
-        suggestedByName: 'Me',
-      );
-      _routeVersion++;
-      _setStatus('Auto-routed to $name: ${TimelineText.distance(route.distanceM)}', force: true);
-      _notify();
-      return true;
-    } catch (_) {
-      return false;
+  /// Checks the group target against this fix: close enough, or a route still to fetch.
+  void _checkGroupTarget(double lat, double lng, int nowMs, bool online) {
+    final target = _groupTarget;
+    if (target == null) return;
+    if (GeoMath.haversine(lat, lng, target.lat, target.lng) <= groupReachedM) {
+      _groupReached(nowMs);
+      return;
+    }
+    if (_groupDetourPending && online && !_fuelBusy && nowMs >= _groupRetryAtMs) {
+      _groupRetryAtMs = nowMs + fuelRetryEvery.inMilliseconds;
+      _fetchGroupDetour().ignore();
     }
   }
 
+  /// With the group again (near the target or back on the plan): the plan takes over.
+  void _groupReached(int nowMs) {
+    _groupTarget = null;
+    _groupDetourPending = false;
+    if (_personalFuelStop != null) {
+      _fuelDetourPending = true;
+      _fuelRetryAtMs = 0;
+    }
+    _clearPersonal();
+    reroute.followNewLine();
+    _rejoin.reset(OffRouteState.offRoute);
+    _offStatusShown = false;
+    _setStatus('Back with the group\'s route', untilMs: nowMs + RouteConstants.backOnRouteNoticeFor.inMilliseconds, force: true);
+  }
+
+  /// 3.55: true while I ride away from the group's planned route on my own (off it, or on a
+  /// personal re-route), not counting my own fuel detour or a route back to the group. The
+  /// cockpit uses it for "You left the group's route".
+  bool get offGroupPlan =>
+      _everOnPlan &&
+      _canReroute &&
+      !_arrived &&
+      _personalFuelStop == null &&
+      _groupTarget == null &&
+      (_personal != null || reroute.status != RerouteStatus.following);
+
+  /// Asks for the route from my position through the pump, then my remaining stops, to the end.
+  Future<bool> _fetchFuelDetour() async {
+    final stop = _personalFuelStop;
+    if (_disposed || stop == null || _fuelBusy) return false;
+    final convoy = _convoy;
+    final start = _lastFix;
+    (double, double)? dest;
+    if (convoy != null && (convoy.destinationLat != 0 || convoy.destinationLng != 0)) {
+      dest = (convoy.destinationLat, convoy.destinationLng);
+    } else {
+      final line = convoy?.routeLine ?? const [];
+      if (line.length >= 2) dest = line.last;
+    }
+    if (start == null || (start.$1 == 0 && start.$2 == 0) || dest == null) {
+      // No fix yet (or no destination): tried again from the next fix.
+      _fuelRetryAtMs = 0;
+      return false;
+    }
+    final myAlongM = _plan?.matched?.alongM;
+    final stops = <(double, double)>[
+      (stop.lat, stop.lng), // the pump first
+      if (convoy != null)
+        for (final s in convoy.plannedStops)
+          if (RoutePlan.stillAhead(s, _uid) && !RoutePlan.isBehind(s, _plan, myAlongM)) (s.lat, s.lng),
+    ];
+    final room = RouteConstants.maxWaypoints - 2;
+    final waypoints = [start, ...stops.take(room < 0 ? 0 : room), dest];
+    _fuelBusy = true;
+    // A re-route already on its way would land without the pump: it no longer applies.
+    final gen = ++_generation;
+    RouteModel? route;
+    try {
+      route = await fetchRoute(waypoints);
+    } catch (_) {
+      route = null;
+    } finally {
+      _fuelBusy = false;
+    }
+    if (_disposed) return false;
+    // The pump was reached, cleared or replaced meanwhile, or a new group plan came in.
+    if (!identical(_personalFuelStop, stop)) return false;
+    if (route == null || route.points.length < 2 || gen != _generation) {
+      _fuelDetourPending = true;
+      _fuelRetryAtMs = _lastFixMs + fuelRetryEvery.inMilliseconds;
+      _setStatus('Fuel stop marked: ${stop.name}. No route yet, trying again.', force: true);
+      return false;
+    }
+    _personal = route;
+    _personalProgress = RouteProgress(route.points);
+    final last = _lastFix;
+    if (last != null) _personalProgress!.update(last.$1, last.$2);
+    _fuelDetourPending = false;
+    reroute.followNewLine();
+    _rejoin.reset(OffRouteState.offRoute);
+    _offStatusShown = false;
+    _routeVersion++;
+    _setStatus('Auto-routed to ${stop.name}: ${TimelineText.distance(route.distanceM)}', force: true);
+    _notify();
+    return true;
+  }
+
+  /// Clears the fuel stop (refuelled, or I changed my mind); the plan (or a re-route) takes over.
   void clearPersonalFuelStop() {
     _personalFuelStop = null;
+    _fuelDetourPending = false;
+    _fuelClosestM = double.infinity;
     _clearPersonal();
     reroute.followNewLine();
     _notify();
+  }
+
+  /// Checks the pump against this fix: reached, passed, or a detour still to fetch. True when it notified.
+  bool _checkFuelStop(double lat, double lng, double speedKmh, int nowMs, bool online) {
+    final stop = _personalFuelStop;
+    if (stop == null) return false;
+    final d = GeoMath.haversine(lat, lng, stop.lat, stop.lng);
+    if (d < _fuelClosestM) _fuelClosestM = d;
+    final reached = d <= fuelReachedM || (d <= fuelSlowReachedM && speedKmh < 5);
+    final passed = !reached && _fuelClosestM <= fuelPassNearM && d - _fuelClosestM >= fuelPassedM;
+    if (reached || passed) {
+      _personalFuelStop = null;
+      _fuelDetourPending = false;
+      _fuelClosestM = double.infinity;
+      _clearPersonal();
+      reroute.followNewLine();
+      _rejoin.reset(OffRouteState.offRoute);
+      _offStatusShown = false;
+      _setStatus(
+        reached ? 'At ${stop.name}. The route continues when you ride on.' : 'Passed ${stop.name}. Fuel stop removed.',
+        untilMs: nowMs + RouteConstants.backOnRouteNoticeFor.inMilliseconds,
+        force: true,
+      );
+      try {
+        onFuelStopDone?.call(stop, reached: reached);
+      } catch (_) {}
+      return true;
+    }
+    if (_fuelDetourPending && online && !_fuelBusy && nowMs >= _fuelRetryAtMs) {
+      _fuelRetryAtMs = nowMs + fuelRetryEvery.inMilliseconds;
+      _fetchFuelDetour().ignore();
+    }
+    return false;
   }
 
   int _generation = 0;
@@ -249,6 +502,14 @@ class RouteGuide extends ChangeNotifier {
     final hadPersonal = _personal != null;
     _arrived = false;
     _clearPersonal();
+    // 3.55: a way back to the old plan no longer applies.
+    _groupTarget = null;
+    _groupDetourPending = false;
+    // My fuel stop stays: its detour is asked again on the new plan from the next fix.
+    if (_personalFuelStop != null) {
+      _fuelDetourPending = true;
+      _fuelRetryAtMs = 0;
+    }
     // Re-anchor on the new group route: a request on its way is dropped.
     reroute.reset();
     _rejoin.reset(OffRouteState.offRoute);
@@ -299,6 +560,9 @@ class RouteGuide extends ChangeNotifier {
       _statusUntilMs = 0;
       changed = true;
     }
+
+    if (_checkFuelStop(lat, lng, speedKmh, nowMs, online)) changed = false;
+    _checkGroupTarget(lat, lng, nowMs, online);
 
     final road = currentRoadName;
     if (road != _lastRoadName) {
@@ -380,7 +644,14 @@ class RouteGuide extends ChangeNotifier {
           speedKmh: speedKmh,
           isTunnelCoasting: suppressOff,
         );
-        if (!_rejoin.isOff) {
+        // 3.55: back on the plan, a route back to the group has done its job.
+        if (!_rejoin.isOff && _groupTarget != null) {
+          _groupReached(nowMs);
+          if (_personalFuelStop != null) return;
+        }
+        // Back on the plan drops my personal route, except a fuel detour before the pump
+        // (a pump on the route is on the plan too: the detour must not cancel itself).
+        if (!_rejoin.isOff && _personalFuelStop == null) {
           _clearPersonal();
           reroute.followNewLine();
           _rejoin.reset(OffRouteState.offRoute);
@@ -415,6 +686,11 @@ class RouteGuide extends ChangeNotifier {
     if (step.event == FollowEvent.cameBack) {
       _generation++; // a request still on its way is no longer needed
       _offStatusShown = false;
+      // 3.55: on the plan again before the route to the group arrived.
+      if (personal == null && _groupTarget != null) {
+        _groupTarget = null;
+        _groupDetourPending = false;
+      }
       if (personal == null) {
         _setStatus('Back on the planned route', untilMs: nowMs + RouteConstants.backOnRouteNoticeFor.inMilliseconds);
         return;
@@ -487,8 +763,22 @@ class RouteGuide extends ChangeNotifier {
     if (convoy == null) return;
     // From here through the stops I still have to ride to (the next one
     // first), to the destination.
-    final waypoints = RoutePlan.rerouteWaypoints(convoy, _uid, lat, lng, plan: _plan, myAlongM: _plan?.matched?.alongM);
+    var waypoints = RoutePlan.rerouteWaypoints(convoy, _uid, lat, lng, plan: _plan, myAlongM: _plan?.matched?.alongM);
     if (waypoints.length < 2) return;
+    // My fuel stop comes first on any new route until I reach it.
+    final fuel = _personalFuelStop;
+    if (fuel != null) {
+      final room = RouteConstants.maxWaypoints;
+      waypoints = [waypoints.first, (fuel.lat, fuel.lng), ...waypoints.skip(1)];
+      if (waypoints.length > room) waypoints = [...waypoints.take(room - 1), waypoints.last];
+    }
+    // 3.55: and the way back to the group before everything else.
+    final group = _groupTarget;
+    if (group != null) {
+      final room = RouteConstants.maxWaypoints;
+      waypoints = [waypoints.first, (group.lat, group.lng), ...waypoints.skip(1)];
+      if (waypoints.length > room) waypoints = [...waypoints.take(room - 1), waypoints.last];
+    }
     final ticket = reroute.begin(nowMs);
     _fetch(waypoints, heading, ticket, _generation).ignore();
   }

@@ -15,7 +15,10 @@ enum RoadHazardClassification {
 
   /// Anomalies that cannot be conclusively separated into physical potholes with inertial
   /// sensors alone (e.g. potential surface slick, loose gravel patches, manhole covers).
-  uncertainSurfaceAnomaly;
+  uncertainSurfaceAnomaly,
+
+  /// 3.55: a stretch of broken surface, gravel or road works (sustained shaking at speed).
+  roughRoad;
 
   String get wireName => switch (this) {
         pothole => 'POTHOLE',
@@ -23,6 +26,17 @@ enum RoadHazardClassification {
         transverseJoint => 'TRANSVERSE_JOINT',
         speedBreaker => 'SPEED_BREAKER',
         uncertainSurfaceAnomaly => 'UNCERTAIN_SURFACE_ANOMALY',
+        roughRoad => 'ROUGH_ROAD',
+      };
+
+  /// "Pothole", "Speed breaker", "Rough road", "Road hazard".
+  String get label => switch (this) {
+        pothole => 'Pothole',
+        severeRidge => 'Broken road edge',
+        transverseJoint => 'Road joint',
+        speedBreaker => 'Speed breaker',
+        roughRoad => 'Rough road',
+        uncertainSurfaceAnomaly => 'Road hazard',
       };
 
   static RoadHazardClassification fromWire(String? s) {
@@ -35,6 +49,8 @@ enum RoadHazardClassification {
         return transverseJoint;
       case 'SPEED_BREAKER':
         return speedBreaker;
+      case 'ROUGH_ROAD':
+        return roughRoad;
       default:
         return uncertainSurfaceAnomaly;
     }
@@ -87,6 +103,12 @@ class RoadHazardObservation {
   final String pseudonymousRiderId;
   final String schemaVersion;
 
+  /// 3.55: from the saved road reports of earlier rides (not from my group now).
+  final bool fromHistory;
+
+  /// How many separate riders reported this spot (saved reports).
+  final int reports;
+
   const RoadHazardObservation({
     required this.eventId,
     required this.timestamp,
@@ -102,6 +124,8 @@ class RoadHazardObservation {
     required this.classification,
     this.pseudonymousRiderId = '',
     this.schemaVersion = '2.0',
+    this.fromHistory = false,
+    this.reports = 1,
   });
 
   RoadHazardObservation copyWith({
@@ -119,6 +143,8 @@ class RoadHazardObservation {
     RoadHazardClassification? classification,
     String? pseudonymousRiderId,
     String? schemaVersion,
+    bool? fromHistory,
+    int? reports,
   }) {
     return RoadHazardObservation(
       eventId: eventId ?? this.eventId,
@@ -135,6 +161,8 @@ class RoadHazardObservation {
       classification: classification ?? this.classification,
       pseudonymousRiderId: pseudonymousRiderId ?? this.pseudonymousRiderId,
       schemaVersion: schemaVersion ?? this.schemaVersion,
+      fromHistory: fromHistory ?? this.fromHistory,
+      reports: reports ?? this.reports,
     );
   }
 
@@ -172,6 +200,8 @@ class RoadHazardObservation {
       classification: RoadHazardClassification.fromWire(j['classification']?.toString()),
       pseudonymousRiderId: j['pseudonymousRiderId']?.toString() ?? '',
       schemaVersion: j['schemaVersion']?.toString() ?? '2.0',
+      fromHistory: j['fromHistory'] == true,
+      reports: (j['corroborationCount'] as num?)?.toInt() ?? (j['reports'] as num?)?.toInt() ?? 1,
     );
   }
 }

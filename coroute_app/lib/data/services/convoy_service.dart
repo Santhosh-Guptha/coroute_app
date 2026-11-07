@@ -37,6 +37,7 @@ import '../models/route_model.dart';
 import '../models/safety_wire.dart';
 import '../models/sos_alert_model.dart';
 import '../models/road_hazard_telemetry.dart';
+import '../../domain/safety/road_surface_detector.dart';
 import '../models/stop_point_model.dart';
 import '../models/trip_history_model.dart';
 import '../../domain/notify/status_text.dart';
@@ -51,6 +52,8 @@ import 'settings_service.dart';
 import 'timeline_service.dart';
 import 'track_recorder.dart';
 import 'trip_storage_service.dart';
+import '../../domain/ride/ride_roles.dart';
+import '../../domain/ride/vehicle_swap.dart';
 
 /// Convoy state for the signed-in rider.
 ///
@@ -166,6 +169,24 @@ class ConvoyService extends ChangeNotifier {
   /// The rider's plan changed on the gateway (a legacy tier ending, warned or revoked): the app
   /// re-reads its membership, the single source of what the rider may host.
   final VoidCallback? onPlanChanged;
+
+  /// Speaks a line (set in main.dart to the VoiceService, important tier). Used for the 3.55
+  /// riding role prompts ("You are now the sweeper, drop back...").
+  void Function(String line, String key)? speaker;
+
+  /// 3.55 admin feature switches (set in main.dart to FeatureFlagsService.on). Null = everything on,
+  /// so tests and older wiring never lose a feature.
+  bool Function(String id)? featureOn;
+  bool _featureOn(String id) => featureOn?.call(id) ?? true;
+
+  RoleNotice? _roleNotice;
+  Timer? _roleNoticeClear;
+
+  /// The last riding role change worth showing (mine first), for 20 s.
+  RoleNotice? get roleNotice => _roleNotice;
+
+  /// 3.55 riding roles (lead / middle / sweeper, swaps, automatic roles) on this gateway.
+  bool get supportsRideRoles => _rt.supports(ProtocolFeatures.ride355);
   final Battery _battery = Battery();
 
   StreamSubscription<Map<String, dynamic>>? _eventSub;
@@ -241,6 +262,13 @@ class ConvoyService extends ChangeNotifier {
   final List<AssistNotice> _assistNotices = [];
   final Map<String, HazardWarning> _hazards = {};
   final Map<String, RoadHazardObservation> _roadHazards = {};
+
+  // 3.55 road history: saved road reports along the ride's route (GET /road-hazards/near),
+  // fetched after a SNAPSHOT at most every [_roadHistoryEvery] and again when the route changes.
+  static const Duration _roadHistoryEvery = Duration(minutes: 10);
+  int _roadHistoryAt = 0;
+  String? _roadHistoryKey;
+  bool _roadHistoryBusy = false;
   final Map<String, Encounter> _encounters = {};
   final Map<String, EncounterType> _ignoredEncounters = {};
   final Set<String> _falseReported = {};
@@ -433,7 +461,8 @@ class ConvoyService extends ChangeNotifier {
 
   /// Accident warnings on my route, newest first. Empty while "Accident warnings on my
   /// route" is off (they are still kept, so switching it on shows them again).
-  List<RoadHazardObservation> get roadHazards => _roadHazards.values.toList();
+  /// 3.55: empty while the admin has live road warnings switched off (cards, pins and speech follow).
+  List<RoadHazardObservation> get roadHazards => _featureOn('roadHazards') ? _roadHazards.values.toList() : const [];
 
   List<HazardWarning> get hazards {
     if (!_netOn || settings?.hazardAlerts == false) return const [];
@@ -733,7 +762,9 @@ class ConvoyService extends ChangeNotifier {
       final serverMe = serverConvoy.riders[myId];
       // Keep local rider telemetry if local fix is fresher or active
       if (localMe != null && (serverMe == null || localMe.lastSeenEpochMs >= serverMe.lastSeenEpochMs)) {
-        final mergedRiders = Map<String, RiderModel>.from(serverConvoy.riders)..[myId] = localMe;
+        // My position stays local; my role is always the server's (it may have changed while away).
+        final mergedRiders = Map<String, RiderModel>.from(serverConvoy.riders)
+          ..[myId] = serverMe == null ? localMe : localMe.copyWith(role: serverMe.role);
         _allConvoys[gid] = serverConvoy.copyWith(
           riders: mergedRiders,
           messages: _mergeMessages(current.messages, serverConvoy.messages),
@@ -1026,6 +1057,7 @@ class ConvoyService extends ChangeNotifier {
       final code = e['code'];
       if (cid != null && cid.isNotEmpty) {
         _onOutboxError(cid, code is num ? code.toInt() : int.tryParse('$code'), e['message']?.toString(), e['reason']?.toString());
+        _onSwapRefused(e['reason']?.toString(), e['message']?.toString()); // 3.55
       }
       _lastError = e['message']?.toString();
       debugPrint('gateway error ${e['code']}: ${e['message']}');
@@ -1075,6 +1107,7 @@ class ConvoyService extends ChangeNotifier {
         _sendPendingResolves();
         _resetSendingItems();
         _flushOutbox();
+        _maybeFetchRoadHistory();
         break;
       case 'RIDER_UPDATE':
         if (convoy == null || e['rider'] is! Map) return;
@@ -1114,6 +1147,19 @@ class ConvoyService extends ChangeNotifier {
       case 'ROSTER_CHANGED':
         _scheduleRosterRefresh();
         return;
+      case 'ROLE_CHANGE':
+        _onRoleChange(e);
+        return;
+      // 3.55 bike / pillion swap (personal SWAP_ASK / SWAP_RESULT, room SWAP_DONE).
+      case 'SWAP_ASK':
+      case 'SWAP_RESULT':
+      case 'SWAP_DONE':
+        _onSwapEvent(type!, e, gid);
+        return;
+      case 'AUTO_ROLES':
+        if (convoy == null) return;
+        _allConvoys[gid] = convoy.copyWith(autoRoles: e['autoRoles'] == true);
+        break;
       case 'MIC_STATUS':
         if (convoy == null) return;
         final uid = e['userId']?.toString();
@@ -1191,12 +1237,20 @@ class ConvoyService extends ChangeNotifier {
         break;
       case 'ROAD_HAZARD':
         try {
-          final obs = RoadHazardObservation.fromJson(e);
+          final obs = RoadHazardObservation.fromJson(e).copyWith(fromHistory: false);
+          // 3.55: a live report replaces a saved one of the same kind at the same spot.
+          _roadHazards.removeWhere((_, h) =>
+              h.fromHistory && h.classification == obs.classification && GeoMath.haversine(h.lat, h.lng, obs.lat, obs.lng) <= 80);
           _roadHazards[obs.eventId] = obs;
           _networkRevision++;
           notifyListeners();
         } catch (_) {}
         break;
+      case 'ROAD_HAZARD_ACK':
+        // The gateway confirms ROAD_HAZARD with its own ACK (no clientId): the outbox item is done
+        // (matched by hazard id, else the oldest one waiting; a merged report carries the saved id).
+        _ackRoadHazard(e['hazardId']?.toString());
+        return;
       case 'HAZARD':
         final h = HazardWarning.fromJson(e, receivedAt: _clock());
         if (h == null) return;
@@ -1230,6 +1284,7 @@ class ConvoyService extends ChangeNotifier {
             ? convoy.copyWith(route: RouteModel.fromJson(Map<String, dynamic>.from(r)))
             : convoy.copyWith(clearRoute: true);
         _lastStatus = ''; // distances along the route changed
+        _maybeFetchRoadHistory(); // 3.55: saved road reports along the new line
         break;
       case 'DESTINATION_ARRIVALS':
         if (convoy == null) return;
@@ -1425,6 +1480,10 @@ class ConvoyService extends ChangeNotifier {
   }
 
   // ------------------------------------------------------- create / join
+  /// 3.55: the active garage bike's colour, sent as the rider's vehicle colour when creating
+  /// or joining a ride (empty: not sent; the gateway keeps its default). Set by GarageBinding.
+  String vehicleColor = '';
+
   Future<ConvoyModel> createConvoy({
     required String name,
     required String creatorId,
@@ -1471,6 +1530,7 @@ class ConvoyService extends ChangeNotifier {
         'phone': phone,
         'batteryLevel': _currentBatteryLevel,
         'isCharging': _isCharging,
+        if (vehicleColor.isNotEmpty) 'vehicleColor': vehicleColor,
       },
     });
     final convoy = ConvoyModel.fromJson(Map<String, dynamic>.from(res as Map));
@@ -1495,6 +1555,7 @@ class ConvoyService extends ChangeNotifier {
           'phone': rider.phone,
           'batteryLevel': _currentBatteryLevel,
           'isCharging': _isCharging,
+          if (vehicleColor.isNotEmpty) 'vehicleColor': vehicleColor,
         },
       });
       final convoy = ConvoyModel.fromJson(Map<String, dynamic>.from(res as Map));
@@ -2076,6 +2137,8 @@ class ConvoyService extends ChangeNotifier {
       lng: position.longitude,
       speedKmh: speedKmh,
       accuracyM: accuracy,
+      // 3.55 high-altitude care (phone only; 0 = the phone has no altitude).
+      altM: position.altitude.isFinite && position.altitude != 0 ? position.altitude : null,
     );
     recorder?.onFix(fix);
     if (_myFixes.hasListener) _myFixes.add(fix);
@@ -2173,6 +2236,10 @@ class ConvoyService extends ChangeNotifier {
 
   /// Only an opted-in usable range, never tank contents or mileage.
   Map<String, dynamic>? Function()? fuelEstimate;
+
+  /// 3.55 group break planner: this phone's fatigue level 0..3 (null = not shared). Only the level
+  /// is ever sent, never the signals behind it. Set by GroupSafetyService.
+  int? Function()? fatigueLevel;
   void refreshFuelSharing() {
     final uid = _myUserId;
     final me = uid == null ? null : activeConvoy?.riders[uid];
@@ -2214,6 +2281,7 @@ class ConvoyService extends ChangeNotifier {
       'stoppedSince': r.stoppedSince,
       'trackingConfidence': r.trackingConfidence.toWire(),
       'isCoasting': r.isTunnelCoasting,
+      'fatigueLevel': ?fatigueLevel?.call(),
     });
   }
 
@@ -2406,7 +2474,8 @@ class ConvoyService extends ChangeNotifier {
     final c = activeConvoy;
     final uid = _myUserId;
     if (c == null || uid == null) return false;
-    return c.createdByUserId == uid || c.riders[uid]?.role == 'LEAD';
+    // 3.55: an automatic (front-rider) lead has no lead rights; the owner and the trip head keep them.
+    return c.createdByUserId == uid || c.tripHeadUserId == uid || (c.riders[uid]?.role == 'LEAD' && !c.autoRoles);
   }
 
   bool _sendRoute(Map<String, dynamic> msg) {
@@ -2524,6 +2593,169 @@ class ConvoyService extends ChangeNotifier {
     // Only the newest role change for a rider matters.
     _outbox.removeWhere((i) => i.type == 'ROLE_SET' && i.state == OutboxState.waiting && i.payload['userId'] == userId);
     return _enqueue('ROLE_SET', {'userId': userId, 'role': on ? RiderRoles.sweeper : RiderRoles.pack}) != null;
+  }
+
+  /// Lead (3.55): gives [userId] a riding role: [RideRole.lead] (the current lead takes the rider's
+  /// old place), [RideRole.middle] or [RideRole.sweeper]. The gateway keeps one lead and one
+  /// sweeper and tells the riders concerned to change position. False when not allowed here.
+  bool setRiderRole(String userId, String role) {
+    final c = activeConvoy;
+    if (c == null || !canEditRoute || !RideRole.all.contains(role)) return false;
+    if (c.riders[userId] == null) return false;
+    if (role == RideRole.lead && !supportsRideRoles) return false;
+    if (!supportsRideRoles) return setSweeper(userId, on: role == RideRole.sweeper);
+    _outbox.removeWhere((i) => i.type == 'ROLE_SET' && i.state == OutboxState.waiting && i.payload['userId'] == userId);
+    return _enqueue('ROLE_SET', {'userId': userId, 'role': role}) != null;
+  }
+
+  /// Lead (3.55): two riders swap riding roles (e.g. the lead and the sweeper change places).
+  bool swapRiderRoles(String userId, String withUserId) {
+    final c = activeConvoy;
+    if (c == null || !canEditRoute || !supportsRideRoles || userId == withUserId) return false;
+    if (c.riders[userId] == null || c.riders[withUserId] == null) return false;
+    return _enqueue('ROLE_SWAP', {'userId': userId, 'withUserId': withUserId}) != null;
+  }
+
+  /// Lead (3.55): automatic roles on or off (off by default). When on, the gateway gives the lead
+  /// to the rider at the front and the sweeper role to the last rider, and tells them.
+  bool setAutoRoles(bool on) {
+    final c = activeConvoy;
+    if (c == null || !canEditRoute || !supportsRideRoles) return false;
+    _outbox.removeWhere((i) => i.type == 'ROLE_AUTO' && i.state == OutboxState.waiting);
+    final ok = _enqueue('ROLE_AUTO', {'on': on}) != null;
+    if (ok) {
+      _allConvoys[c.groupId] = c.copyWith(autoRoles: on);
+      notifyListeners();
+    }
+    return ok;
+  }
+
+  void _onRoleChange(Map<String, dynamic> e) {
+    final changes = RoleChange.listFrom(e['changes']);
+    final notice = RoleNotice.forMe(changes, myUserId: _myUserId, auto: e['auto'] == true, byName: e['byName']?.toString() ?? '');
+    if (notice == null) return;
+    _roleNotice = notice;
+    _roleNoticeClear?.cancel();
+    _roleNoticeClear = Timer(const Duration(seconds: 20), () {
+      _roleNotice = null;
+      notifyListeners();
+    });
+    // Spoken only when it is about me (a role change for someone else is a card, not a voice).
+    if (notice.mine) _say(notice.speech, 'ROLE:${e['ts'] ?? _clock()}');
+    notifyListeners();
+  }
+
+  /// 3.55 safety review: role and swap lines are never spoken while an emergency is open (my SOS,
+  /// waiting or on the server, or any open SOS / crash alert in the ride); the card still shows,
+  /// below the SOS in the cockpit's priority order.
+  bool get _emergencyOpen => _pendingSos != null || (activeConvoy?.activeAlerts.any((a) => !a.resolved) ?? false);
+
+  void _say(String line, String key) {
+    if (_emergencyOpen) return;
+    speaker?.call(line, key);
+  }
+
+  /// Clears the role card (the rider dismissed it).
+  void dismissRoleNotice() {
+    _roleNoticeClear?.cancel();
+    _roleNotice = null;
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------ 3.55 bike / pillion swap
+  SwapAsk? _swapAsk;
+  Timer? _swapAskClear;
+  SwapNotice? _swapNotice;
+  Timer? _swapNoticeClear;
+  String _swapLastAskedName = ''; // for "No answer from Kiran" (SWAP_RESULT on expiry has no name)
+
+  /// A swap another rider asked me for, until I answer (Accept / Decline) or it expires.
+  SwapAsk? get swapAsk => _swapAsk;
+
+  /// The last swap card worth showing (done, declined, asked, refused), for 20 s.
+  SwapNotice? get swapNotice => _swapNotice;
+
+  /// Asks [userId] to swap bikes ([SwapKind.bikes]) or to change places as rider and pillion
+  /// ([SwapKind.pillion], only with my own rider or pillion). Through the outbox; the gateway
+  /// checks everything again. False when not possible here.
+  bool requestSwap(String userId, SwapKind kind) {
+    final c = activeConvoy;
+    final me = c?.riders[_myUserId];
+    final other = c?.riders[userId];
+    if (c == null || me == null || other == null || c.isSoloRide || !supportsRideRoles) return false;
+    if (!_featureOn('vehicleSwap')) return false; // 3.55 admin feature switch (the gateway refuses too)
+    final ok = kind == SwapKind.bikes ? SwapRules.canSwapBikes(me, other) : SwapRules.canSwapPillion(me, other);
+    if (!ok) return false;
+    if (_enqueue('SWAP_REQUEST', {'withUserId': userId, 'kind': kind.wire}) == null) return false;
+    _swapLastAskedName = other.name;
+    _showSwapNotice(SwapNotice.asked(name: other.name, kind: kind));
+    return true;
+  }
+
+  /// Answers the swap I was asked for. False when there is nothing to answer.
+  bool answerSwap(String requestId, bool accept) {
+    final ask = _swapAsk;
+    if (ask == null || ask.requestId != requestId) return false;
+    _swapAskClear?.cancel();
+    _swapAsk = null;
+    _enqueue('SWAP_ANSWER', {'requestId': requestId, 'accept': accept});
+    notifyListeners();
+    return true;
+  }
+
+  /// Clears the swap card (the rider dismissed it).
+  void dismissSwapNotice() {
+    _swapNoticeClear?.cancel();
+    _swapNotice = null;
+    notifyListeners();
+  }
+
+  void _showSwapNotice(SwapNotice n, {String? speakKey}) {
+    _swapNotice = n;
+    _swapNoticeClear?.cancel();
+    _swapNoticeClear = Timer(const Duration(seconds: 20), () {
+      _swapNotice = null;
+      notifyListeners();
+    });
+    final line = n.speech;
+    if (line != null && speakKey != null) _say(line, speakKey);
+    notifyListeners();
+  }
+
+  void _onSwapEvent(String type, Map<String, dynamic> e, String gid) {
+    final eg = e['groupId']?.toString();
+    if (eg != null && eg.isNotEmpty && eg != gid) return; // about another ride
+    switch (type) {
+      case 'SWAP_ASK':
+        final ask = SwapAsk.fromWire(e);
+        if (ask == null || ask.fromUserId == _myUserId) return;
+        _swapAsk = ask;
+        _swapAskClear?.cancel();
+        _swapAskClear = Timer(SwapAsk.showFor, () {
+          _swapAsk = null;
+          notifyListeners();
+        });
+        _say(ask.speech, 'SWAP_ASK:${ask.requestId}');
+        notifyListeners();
+      case 'SWAP_RESULT':
+        if (e['accepted'] == true) return;
+        final name = e['byName']?.toString() ?? _swapLastAskedName;
+        _showSwapNotice(SwapNotice.declined(name: name, kind: SwapKind.fromWire(e['kind']), expired: e['expired'] == true));
+      case 'SWAP_DONE':
+        final n = SwapNotice.done(e, myUserId: _myUserId);
+        if (n == null) return;
+        // The ask I was answering (or a stale one between the same riders) is over.
+        if (_swapAsk?.requestId == e['requestId']?.toString()) {
+          _swapAskClear?.cancel();
+          _swapAsk = null;
+        }
+        _showSwapNotice(n, speakKey: n.mine ? 'SWAP_DONE:${e['requestId'] ?? e['ts'] ?? _clock()}' : null);
+    }
+  }
+
+  void _onSwapRefused(String? reason, String? message) {
+    final n = SwapNotice.refused(reason, message);
+    if (n != null) _showSwapNotice(n);
   }
 
   /// Raises an SOS for the active convoy. It is kept on the phone (memory and disk) until
@@ -2752,7 +2984,9 @@ class ConvoyService extends ChangeNotifier {
         (i.groupId != gid ||
             (now - i.createdAt > NetConstants.outboxMaxAge.inMilliseconds && !_keepForRide(i)) ||
             (i.type == 'WAIT' && now - i.createdAt > NetConstants.outboxWaitMaxAge.inMilliseconds) ||
-            (i.type == 'WAVE' && now - i.createdAt > NetworkConstants.waveMaxAge.inMilliseconds)));
+            (i.type == 'WAVE' && now - i.createdAt > NetworkConstants.waveMaxAge.inMilliseconds) ||
+            // 3.55: a swap ask or answer is over after the gateway's 2 minutes.
+            ((i.type == 'SWAP_REQUEST' || i.type == 'SWAP_ANSWER') && now - i.createdAt > SwapAsk.showFor.inMilliseconds)));
     changed = _outbox.length != before;
     final wall = DateTime.now().millisecondsSinceEpoch;
     if (wall - _burstStartMs >= 1000) {
@@ -3259,7 +3493,9 @@ class ConvoyService extends ChangeNotifier {
   void _clearNetwork() {
     _netUnconfirmed.clear();
     _liveLinks.clear();
-    if (_assists.isEmpty && _assistNotices.isEmpty && _hazards.isEmpty && _encounters.isEmpty && _ignoredEncounters.isEmpty && _falseReported.isEmpty) return;
+    _roadHistoryAt = 0;
+    _roadHistoryKey = null;
+    if (_assists.isEmpty && _assistNotices.isEmpty && _hazards.isEmpty && _roadHazards.isEmpty && _encounters.isEmpty && _ignoredEncounters.isEmpty && _falseReported.isEmpty) return;
     _assists.clear();
     _assistNotices.clear();
     _hazards.clear();
@@ -3285,9 +3521,105 @@ class ConvoyService extends ChangeNotifier {
     return true;
   }
 
+  /// 3.55: a pothole, speed breaker or rough stretch felt by this phone (SafetyService.onRoadSurface,
+  /// wired in main.dart). Sent only when I ride at the front of an active group ride (at least two
+  /// riders, I am the riding lead, the room is joined) on a gateway that saves road reports
+  /// (3.55, or the safety network): the riders behind are warned and the spot is saved, without any
+  /// rider id, for later rides. False when nothing was sent.
+  bool reportRoadSurface(RoadSurfaceEvent e) {
+    final c = activeConvoy;
+    final me = _myUserId;
+    if (c == null || me == null || _activeGroupId == null) return false;
+    if (c.isSoloRide || c.riders.length < 2 || c.tripStatus == 'ENDED') return false;
+    if (c.ridingLeadId != me || !_roomConfirmed || !_rt.isConnected) return false;
+    if (!(supportsRideRoles || _netOn)) return false;
+    if (!e.lat.isFinite || !e.lng.isFinite || (e.lat == 0 && e.lng == 0)) return false;
+    final now = _clock();
+    final salt = math.Random().nextInt(0xffffff).toRadixString(16).padLeft(6, '0');
+    final obs = RoadHazardObservation(
+      eventId: 'rh_${now.toRadixString(36)}_$salt',
+      timestamp: now,
+      lat: e.lat,
+      lng: e.lng,
+      accuracyM: _lastFixAccuracyM ?? 0,
+      speedKmh: e.speedKmh,
+      heading: c.riders[me]?.heading ?? 0,
+      peakVerticalG: e.peakDynG,
+      peakYawRateDegS: e.peakGyroDegS,
+      confidence: e.confidence,
+      severity: RoadHazardSeverity.fromWire(e.severity),
+      classification: RoadHazardClassification.fromWire(e.kind.wire),
+    );
+    // Not through broadcastRoadHazard: the gateway takes ROAD_HAZARD from the lead whether or not
+    // the safety network is on.
+    return _enqueue('ROAD_HAZARD', obs.toJson()) != null;
+  }
+
+  void _ackRoadHazard(String? hazardId) {
+    var idx = _outbox.indexWhere((i) => i.type == 'ROAD_HAZARD' && i.payload['hazardId'] == hazardId);
+    if (idx < 0) idx = _outbox.indexWhere((i) => i.type == 'ROAD_HAZARD' && i.state == OutboxState.sending);
+    if (idx < 0) return;
+    _sendingSince.remove(_outbox[idx].clientId);
+    _outbox.removeAt(idx);
+    _persistOutbox();
+  }
+
+  /// Fetches the saved road reports along the active ride's route (silently; offline is fine).
+  /// At most every 10 minutes, and again when the route line changes. Live reports are kept.
+  void _maybeFetchRoadHistory() {
+    final c = activeConvoy;
+    final gid = _activeGroupId;
+    final poly = c?.route?.polyline ?? '';
+    if (c == null || gid == null || poly.isEmpty || _roadHistoryBusy) return;
+    final key = '$gid|${poly.length}|${poly.hashCode}';
+    final now = _clock();
+    if (key == _roadHistoryKey && now - _roadHistoryAt < _roadHistoryEvery.inMilliseconds) return;
+    _roadHistoryBusy = true;
+    _roadHistoryKey = key;
+    _roadHistoryAt = now;
+    _api.get('/road-hazards/near?groupId=${Uri.encodeQueryComponent(gid)}').then((res) {
+      if (_disposed || _activeGroupId != gid) return;
+      final list = res is Map && res['hazards'] is List ? res['hazards'] as List : const [];
+      final saved = <String, RoadHazardObservation>{};
+      for (final j in list) {
+        if (j is! Map) continue;
+        try {
+          final h = RoadHazardObservation.fromJson(Map<String, dynamic>.from(j)).copyWith(fromHistory: true);
+          if (h.eventId.isNotEmpty && (h.lat != 0 || h.lng != 0)) saved[h.eventId] = h;
+        } catch (_) {}
+      }
+      _roadHazards.removeWhere((_, h) => h.fromHistory);
+      saved.forEach((id, h) {
+        final live = _roadHazards[id];
+        if (live == null) _roadHazards[id] = h;
+      });
+      _networkRevision++;
+      notifyListeners();
+    }).catchError((Object _) {
+      // Offline or an older gateway: try again after the next SNAPSHOT once the throttle allows.
+    }).whenComplete(() => _roadHistoryBusy = false);
+  }
+
+  /// "Fixed?" on a saved road report: tells the gateway (enough riders saying so removes it) and
+  /// drops it here at once. False when it is not a saved report.
+  Future<bool> clearSavedRoadHazard(String hazardId) async {
+    final h = _roadHazards[hazardId];
+    if (h == null || !h.fromHistory) return false;
+    _roadHazards.remove(hazardId);
+    _networkRevision++;
+    notifyListeners();
+    try {
+      await _api.post('/road-hazards/${Uri.encodeComponent(hazardId)}/clear');
+    } catch (_) {
+      // Removed on this phone anyway; the report expires on its own.
+    }
+    return true;
+  }
+
   /// Broadcasts a road hazard observation (FEAT-02) to downstream riders in the convoy.
   bool broadcastRoadHazard(RoadHazardObservation observation) {
     if (!_netOn || _activeGroupId == null) return false;
+    if (!_featureOn('roadHazards')) return false; // 3.55: switched off by the admin (the gateway refuses it too)
     final item = _enqueue('ROAD_HAZARD', observation.toJson());
     return item != null;
   }
@@ -3513,6 +3845,9 @@ class ConvoyService extends ChangeNotifier {
     _idleHeartbeat?.cancel();
     _broadcastClear?.cancel();
     _sosOkClear?.cancel();
+    _roleNoticeClear?.cancel();
+    _swapAskClear?.cancel(); // 3.55
+    _swapNoticeClear?.cancel();
     _statusTimer?.cancel();
     _deadReckoningTimer?.cancel();
     _deadReckoningAccelSub?.cancel();

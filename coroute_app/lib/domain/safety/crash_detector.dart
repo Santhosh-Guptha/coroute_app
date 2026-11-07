@@ -162,6 +162,24 @@ class CrashDetector {
 
   final CrashThresholds t;
 
+  /// 3.55 crash detection that learns: multipliers for the "possible crash" stages that showed
+  /// false alarms on this bike (CrashLearning). Bounded to 1.0..[maxLearnedScale]; 1.0 (the
+  /// default) is exactly the rule above. They only ever touch the lowside / slide stage and the
+  /// low-speed fall stage: the high-impact and high-side paths never read them, so a severe
+  /// impact or a tumble always alarms as before.
+  static const double maxLearnedScale = 1.25;
+  double _slideScale = 1.0;
+  double _lowFallScale = 1.0;
+  double get slideScale => _slideScale;
+  double get lowFallScale => _lowFallScale;
+
+  /// Sets the learned multipliers (clamped; non-finite values mean 1.0).
+  void setLearnedScales({double slide = 1.0, double lowFall = 1.0}) {
+    double c(double v) => v.isFinite ? v.clamp(1.0, maxLearnedScale).toDouble() : 1.0;
+    _slideScale = c(slide);
+    _lowFallScale = c(lowFall);
+  }
+
   /// When true, operates purely on device accelerometer and gyroscope streams
   /// without requiring prior GPS fixes (ISSUE-6C).
   bool standaloneOfflineMode;
@@ -300,14 +318,15 @@ class CrashDetector {
       final isHighImpact = isArmed && (b.effectiveDynG >= t.dynamicImpactG || b.peakG >= t.impactG);
 
       // 3. Lowside / motorcycle slide (moderate dynamic impact + rotation/tilt)
+      final slideG = t.slideImpactG * _slideScale; // learned (1.0 unless false alarms on this bike)
       final isSlideFall = isArmed &&
-          (b.effectiveDynG >= t.slideImpactG || b.peakG >= t.slideImpactG) &&
+          (b.effectiveDynG >= slideG || b.peakG >= slideG) &&
           hasRotationOrTilt;
 
       // 4. Low-speed intersection fall / tip-over
       final isLowSpeedFall = isLowSpeedArmed &&
           hasRotationOrTilt &&
-          (b.effectiveDynG >= 1.5 || b.peakG >= 1.8);
+          (b.effectiveDynG >= 1.5 * _lowFallScale || b.peakG >= 1.8 * _lowFallScale);
 
       // False-positive rejection:
       // A. Pothole / Speed breaker: transient shock, but duration <= 35ms, low rotation (< 0.8 rad/s), low tilt (< 15°)

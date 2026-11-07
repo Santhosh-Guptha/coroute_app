@@ -1,6 +1,6 @@
 /// Map place categories and how an OpenStreetMap tag set maps to one.
 /// Pure: no Flutter, no I/O.
-enum PoiCategory { fuel, ev, food, hospital, police, pharmacy, mechanic, atm, stay, toilet, viewpoint }
+enum PoiCategory { fuel, ev, food, hospital, police, pharmacy, mechanic, atm, stay, toilet, viewpoint, heritage }
 
 /// Categories shown until the rider changes them.
 const Set<PoiCategory> defaultPoiCategories = {
@@ -8,6 +8,8 @@ const Set<PoiCategory> defaultPoiCategories = {
   PoiCategory.hospital,
   PoiCategory.mechanic,
   PoiCategory.food,
+  // 3.55: famous ancient and historic places riders could visit on their way.
+  PoiCategory.heritage,
 };
 
 extension PoiCategoryInfo on PoiCategory {
@@ -24,6 +26,7 @@ extension PoiCategoryInfo on PoiCategory {
         PoiCategory.stay => 'Stays',
         PoiCategory.toilet => 'Toilets',
         PoiCategory.viewpoint => 'Viewpoints',
+        PoiCategory.heritage => 'Historic places',
       };
 
   /// What one place of this kind is called when it has no name.
@@ -39,6 +42,7 @@ extension PoiCategoryInfo on PoiCategory {
         PoiCategory.stay => 'Place to stay',
         PoiCategory.toilet => 'Toilet',
         PoiCategory.viewpoint => 'Viewpoint',
+        PoiCategory.heritage => 'Historic place',
       };
 
   /// Lower wins when two markers would overlap at the same distance.
@@ -54,6 +58,7 @@ extension PoiCategoryInfo on PoiCategory {
         PoiCategory.atm => 5,
         PoiCategory.toilet => 6,
         PoiCategory.viewpoint => 7,
+        PoiCategory.heritage => 8,
       };
 
   static PoiCategory? byName(String name) {
@@ -69,6 +74,12 @@ const _healthcare = {'hospital', 'clinic', 'centre'};
 const _repairShops = {'motorcycle', 'motorcycle_repair', 'car_repair', 'tyres', 'tyre_repair'};
 const _food = {'restaurant', 'cafe', 'fast_food', 'food_court'};
 const _stay = {'hotel', 'motel', 'hostel', 'guest_house', 'chalet'};
+// 3.55: must match the historic group of the gateway Overpass query (gateway/src/poi_cells.js).
+const _historic = {
+  'monument', 'memorial', 'castle', 'fort', 'ruins', 'archaeological_site', 'city_gate', 'palace', 'tomb',
+  'temple', 'monastery', 'church', 'mosque', 'manor', 'citywalls',
+};
+const _heritageTourism = {'attraction', 'museum'};
 
 /// The category of an OSM tag set, or null for anything the map does not show.
 PoiCategory? classifyPoi(Map<String, String> t) {
@@ -88,5 +99,9 @@ PoiCategory? classifyPoi(Map<String, String> t) {
   final tourism = t['tourism'];
   if (_stay.contains(tourism)) return PoiCategory.stay;
   if (tourism == 'viewpoint') return PoiCategory.viewpoint;
+  // 3.55: heritage last, so a fuel station or hospital in an old building keeps its useful category.
+  if (_historic.contains(t['historic']) || _heritageTourism.contains(tourism) || (t['heritage'] ?? '').isNotEmpty) {
+    return PoiCategory.heritage;
+  }
   return null;
 }

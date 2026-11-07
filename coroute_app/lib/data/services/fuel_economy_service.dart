@@ -43,10 +43,9 @@ class FuelEconomyService {
   Future<void> _load() async {
     try {
       final bike = await _activeBike();
-      if (bike != null) {
-        fuelType = bike.fuelType;
-        bikeId = bike.id;
-      }
+      // 3.55: an empty garage (no sample bike any more) is petrol with the shared learning.
+      fuelType = bike?.fuelType ?? BikeFuelType.petrol;
+      bikeId = bike?.id ?? 'default';
     } catch (_) {/* garage unreadable: petrol, default */}
     try {
       final raw = (await _prefs()).getString(_key);

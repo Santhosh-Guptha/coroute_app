@@ -1,5 +1,27 @@
 import '../places/fuel_match.dart';
 
+/// How the engine is cooled (3.55): sets how long it can work hard before a rest is advised.
+enum EngineCooling {
+  unknown,
+  air,
+  oil,
+  liquid;
+
+  String get label => switch (this) {
+        unknown => 'Not sure',
+        air => 'Air-cooled',
+        oil => 'Air/oil-cooled',
+        liquid => 'Liquid-cooled',
+      };
+
+  static EngineCooling parse(Object? raw) {
+    for (final c in EngineCooling.values) {
+      if (c.name == raw) return c;
+    }
+    return EngineCooling.unknown;
+  }
+}
+
 /// Represents a motorcycle in the rider's personal garage.
 /// Tank, reserve and mileage are in the unit of [fuelType] (L, kg or kWh).
 class BikeProfile {
@@ -20,6 +42,11 @@ class BikeProfile {
   /// What the bike runs on; stations are matched to it. Default petrol.
   final BikeFuelType fuelType;
 
+  /// 3.55 bike details: engine size (cc, 0 = not given), colour (shown to the group) and cooling.
+  final int engineCc;
+  final String colour;
+  final EngineCooling cooling;
+
   const BikeProfile({
     required this.id,
     required this.name,
@@ -35,7 +62,18 @@ class BikeProfile {
     this.notes = '',
     this.isDefault = false,
     this.fuelType = BikeFuelType.petrol,
+    this.engineCc = 0,
+    this.colour = '',
+    this.cooling = EngineCooling.unknown,
   });
+
+  /// The cooling as given, else a careful guess from the engine size (small engines are usually
+  /// air-cooled in India); unknown without either.
+  EngineCooling get effectiveCooling {
+    if (cooling != EngineCooling.unknown) return cooling;
+    if (engineCc <= 0) return EngineCooling.unknown;
+    return engineCc < 250 ? EngineCooling.air : EngineCooling.liquid;
+  }
 
   /// Theoretical maximum range on a full tank in kilometers.
   double get fullTankRangeKm => tankCapacityL * expectedMileageKmL;
@@ -70,6 +108,9 @@ class BikeProfile {
     String? notes,
     bool? isDefault,
     BikeFuelType? fuelType,
+    int? engineCc,
+    String? colour,
+    EngineCooling? cooling,
   }) {
     return BikeProfile(
       id: id ?? this.id,
@@ -86,6 +127,9 @@ class BikeProfile {
       notes: notes ?? this.notes,
       isDefault: isDefault ?? this.isDefault,
       fuelType: fuelType ?? this.fuelType,
+      engineCc: engineCc ?? this.engineCc,
+      colour: colour ?? this.colour,
+      cooling: cooling ?? this.cooling,
     );
   }
 
@@ -104,6 +148,9 @@ class BikeProfile {
         'notes': notes,
         'isDefault': isDefault,
         'fuelType': fuelType.name,
+        if (engineCc > 0) 'engineCc': engineCc,
+        if (colour.isNotEmpty) 'colour': colour,
+        if (cooling != EngineCooling.unknown) 'cooling': cooling.name,
       };
 
   factory BikeProfile.fromJson(Map<String, dynamic> json) {
@@ -125,6 +172,9 @@ class BikeProfile {
       notes: json['notes'] as String? ?? '',
       isDefault: json['isDefault'] as bool? ?? false,
       fuelType: BikeFuelTypeInfo.parse(json['fuelType']),
+      engineCc: (json['engineCc'] as num?)?.toInt() ?? 0,
+      colour: json['colour'] as String? ?? '',
+      cooling: EngineCooling.parse(json['cooling']),
     );
   }
 
@@ -140,6 +190,8 @@ class BikeProfile {
           reserveCapacityL: 3.5,
           expectedMileageKmL: 28.0,
           serviceIntervalKm: 5000.0,
+          engineCc: 452,
+          cooling: EngineCooling.liquid,
         ),
         const BikeProfile(
           id: 'preset_ktm_390_adv',
@@ -151,6 +203,8 @@ class BikeProfile {
           reserveCapacityL: 2.8,
           expectedMileageKmL: 27.0,
           serviceIntervalKm: 7500.0,
+          engineCc: 373,
+          cooling: EngineCooling.liquid,
         ),
         const BikeProfile(
           id: 'preset_bmw_gs_1250',
@@ -162,6 +216,8 @@ class BikeProfile {
           reserveCapacityL: 4.0,
           expectedMileageKmL: 20.0,
           serviceIntervalKm: 10000.0,
+          engineCc: 1254,
+          cooling: EngineCooling.liquid,
         ),
         const BikeProfile(
           id: 'preset_re_interceptor_650',
@@ -173,6 +229,8 @@ class BikeProfile {
           reserveCapacityL: 2.5,
           expectedMileageKmL: 24.0,
           serviceIntervalKm: 5000.0,
+          engineCc: 648,
+          cooling: EngineCooling.oil,
         ),
         const BikeProfile(
           id: 'preset_triumph_tiger_900',
@@ -184,6 +242,21 @@ class BikeProfile {
           reserveCapacityL: 3.5,
           expectedMileageKmL: 22.0,
           serviceIntervalKm: 10000.0,
+          engineCc: 888,
+          cooling: EngineCooling.liquid,
         ),
+        // Popular Indian bikes (3.55). Typical published figures; riders adjust to their own.
+        const BikeProfile(id: 'preset_re_classic_350', name: 'Royal Enfield Classic 350', make: 'Royal Enfield', model: 'Classic 350',
+            tankCapacityL: 13.0, reserveCapacityL: 2.5, expectedMileageKmL: 35.0, engineCc: 349, cooling: EngineCooling.oil),
+        const BikeProfile(id: 'preset_pulsar_150', name: 'Bajaj Pulsar 150', make: 'Bajaj', model: 'Pulsar 150',
+            tankCapacityL: 15.0, reserveCapacityL: 3.2, expectedMileageKmL: 45.0, engineCc: 149, cooling: EngineCooling.air),
+        const BikeProfile(id: 'preset_apache_160', name: 'TVS Apache RTR 160 4V', make: 'TVS', model: 'Apache RTR 160 4V',
+            tankCapacityL: 12.0, reserveCapacityL: 2.0, expectedMileageKmL: 45.0, engineCc: 160, cooling: EngineCooling.oil),
+        const BikeProfile(id: 'preset_r15_v4', name: 'Yamaha R15 V4', make: 'Yamaha', model: 'R15 V4',
+            tankCapacityL: 11.0, reserveCapacityL: 2.0, expectedMileageKmL: 45.0, engineCc: 155, cooling: EngineCooling.liquid),
+        const BikeProfile(id: 'preset_splendor_plus', name: 'Hero Splendor Plus', make: 'Hero', model: 'Splendor Plus',
+            tankCapacityL: 9.8, reserveCapacityL: 1.5, expectedMileageKmL: 65.0, engineCc: 97, cooling: EngineCooling.air),
+        const BikeProfile(id: 'preset_shine_125', name: 'Honda Shine 125', make: 'Honda', model: 'Shine 125',
+            tankCapacityL: 10.5, reserveCapacityL: 1.5, expectedMileageKmL: 55.0, engineCc: 124, cooling: EngineCooling.air),
       ];
 }

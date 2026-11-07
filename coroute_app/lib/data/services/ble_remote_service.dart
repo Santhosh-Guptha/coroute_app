@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'feature_flags_service.dart';
 import 'intercom_service.dart';
 import 'intercom_network_resilience.dart';
 import 'safety_service.dart';
@@ -168,6 +169,8 @@ class BleRemoteService extends ChangeNotifier {
 
   bool _handleKeyEvent(KeyEvent event) {
     if (_isDisposed) return false;
+    // 3.55 admin feature switch 'bleRemote': see _dispatchGesture (talk and the hazard marker stop,
+    // the SOS gestures never do).
 
     // Filter for supported remote keys
     if (!_supportedKeys.contains(event.logicalKey)) {
@@ -251,6 +254,11 @@ class BleRemoteService extends ChangeNotifier {
 
   void _dispatchGesture(BleRemoteGesture gesture, LogicalKeyboardKey key) {
     if (_isDisposed) return;
+    // 3.55 safety review: the admin switch 'bleRemote' stops talk (single press) and the hazard
+    // marker (double press) from the handlebar remote, but never its SOS (triple press / 2.5 s hold):
+    // no feature switch may take an SOS path away from a rider (SOS is a locked feature).
+    final remoteOn = FeatureFlagsService.on('bleRemote');
+    if (!remoteOn && (gesture == BleRemoteGesture.singlePress || gesture == BleRemoteGesture.doublePress)) return;
 
     final event = BleRemoteEvent(
       gesture: gesture,

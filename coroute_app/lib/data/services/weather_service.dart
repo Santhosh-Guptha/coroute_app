@@ -4,6 +4,7 @@ import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../domain/tracking/geo_math.dart';
 import 'api_client.dart';
+import 'feature_flags_service.dart';
 import 'settings_service.dart';
 
 /// One place and time on the route to ask the weather for.
@@ -59,12 +60,16 @@ class WeatherSummary {
   final int fetchedAt;
   final String attribution;
 
+  /// 3.55: the warmest temperature along the route (°C; null when not given), for engine care.
+  final double? maxTempC;
+
   const WeatherSummary({
     required this.line,
     required this.rain,
     required this.firstRainIndex,
     required this.fetchedAt,
     required this.attribution,
+    this.maxTempC,
   });
 }
 
@@ -178,6 +183,7 @@ class WeatherService extends ChangeNotifier {
   /// [SafetyConstants.weatherCacheFor] is returned without a request unless [force].
   Future<WeatherSummary?> check(List<WeatherPoint> pts, {bool force = false}) async {
     if (_settings.lowData || pts.isEmpty) return null;
+    if (!FeatureFlagsService.on('weather')) return null; // 3.55 admin feature switch
     final asked = pts.take(SafetyConstants.weatherMaxPoints).toList();
     final key = asked.map((p) => p.cacheKey).join('|');
     final now = _clock();
@@ -252,10 +258,13 @@ class WeatherService extends ChangeNotifier {
     var any = false;
     int? storm;
     int? rain;
+    double? hot;
     for (var i = 0; i < pts.length && i < readings.length; i++) {
       final r = readings[i];
       if (r == null) continue;
       any = true;
+      final t = r.tempC;
+      if (t != null && t.isFinite && (hot == null || t > hot)) hot = t;
       if (r.storm && storm == null) storm = i;
       if (r.rain && rain == null) rain = i;
     }
@@ -267,15 +276,16 @@ class WeatherService extends ChangeNotifier {
         firstRainIndex: rain ?? storm,
         fetchedAt: fetchedAt,
         attribution: by,
+        maxTempC: hot,
       );
     }
     if (rain != null) {
       final line = rain == 0
           ? L10n.t('weather.rain.start')
           : L10n.t('weather.rain.after', {'place': _placeOf(pts, rain, self: false), 'time': hourText(pts[rain].atS)});
-      return WeatherSummary(line: line, rain: true, firstRainIndex: rain, fetchedAt: fetchedAt, attribution: by);
+      return WeatherSummary(line: line, rain: true, firstRainIndex: rain, fetchedAt: fetchedAt, attribution: by, maxTempC: hot);
     }
-    return WeatherSummary(line: L10n.t('weather.clear'), rain: false, firstRainIndex: null, fetchedAt: fetchedAt, attribution: by);
+    return WeatherSummary(line: L10n.t('weather.clear'), rain: false, firstRainIndex: null, fetchedAt: fetchedAt, attribution: by, maxTempC: hot);
   }
 
   /// The name of the point itself (when [self]) or of the nearest named point before it; else "the start".

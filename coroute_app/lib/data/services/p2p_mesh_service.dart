@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../../domain/mesh/mesh_packet_codec.dart';
 import '../../domain/mesh/mesh_telemetry_packet.dart';
 import '../../domain/mesh/mesh_transport.dart';
+import 'feature_flags_service.dart';
 import 'udp_broadcast_mesh_transport.dart';
 
 /// Represents a nearby convoy teammate discovered and tracked via P2P mesh.
@@ -115,6 +116,9 @@ class P2pMeshService extends ChangeNotifier {
     if (_activeJoinCode == joinCode && isRunning) return;
 
     await stop();
+    // 3.55 admin feature switch 'offlineMesh': positions over the no-internet link stop for every
+    // rider. 3.55 safety review: the link itself still starts in SOS-only mode ([_sosOnly]): an SOS
+    // beacon is still sent and relayed with no signal, because no switch may take an SOS path away.
 
     _activeJoinCode = joinCode.trim().toUpperCase();
     _joinCodeHash = MeshTelemetryPacket.hashJoinCode(_activeJoinCode!);
@@ -201,9 +205,14 @@ class P2pMeshService extends ChangeNotifier {
     });
   }
 
+  /// SOS-only while the admin switched the no-internet link off: only SOS packets are sent,
+  /// taken in and relayed (read on every packet, so a switch change applies at once).
+  bool get _sosOnly => !FeatureFlagsService.on('offlineMesh');
+
   void _broadcastNow() {
     final telemetry = _latestMyTelemetry;
     if (telemetry == null || !isRunning) return;
+    if (_sosOnly && !telemetry.isSos) return;
 
     // Refresh sequence and timestamp
     final packetToSend = MeshTelemetryPacket(
@@ -236,6 +245,7 @@ class P2pMeshService extends ChangeNotifier {
 
     // Filter packets from other convoys
     if (packet.joinCodeHash != _joinCodeHash) return;
+    if (_sosOnly && !packet.isSos) return;
 
     // Discard packets from self
     if (packet.userId == _myUserId) return;
