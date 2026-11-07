@@ -204,35 +204,35 @@ void main() {
       await openPaymentScreen(tester);
 
       // Starts with an empty coupon and the server price.
-      expect(find.text('Membership Payment'), findsOneWidget);
+      expect(find.text('Plan payment'), findsOneWidget);
       expect(find.text('Small Group'), findsOneWidget);
-      expect(find.text('6 Riders Capacity · Monthly Subscription'), findsOneWidget);
-      expect(find.text('PROMOTIONAL COUPON (OPTIONAL)'), findsOneWidget);
+      expect(find.text('Up to 6 riders · 30 days'), findsOneWidget);
+      expect(find.text('COUPON CODE (OPTIONAL)'), findsOneWidget);
       expect(find.text('Enter coupon code'), findsOneWidget);
       expect(api.gets.any((g) => g.startsWith('/membership/quote?plan=group_small')), isTrue);
-      expect(find.text('Instant UPI Apps'), findsOneWidget);
-      expect(find.text('Cards & Net Banking'), findsOneWidget);
-      expect(find.text('Pay ₹49 & Activate Membership'), findsOneWidget);
+      expect(find.text('UPI apps'), findsOneWidget);
+      expect(find.text('Cards & net banking'), findsOneWidget);
+      expect(find.text('Pay ₹49 and start plan'), findsOneWidget);
 
       await applyCode(tester, 'riderfree');
 
-      expect(find.text('RIDERFREE Applied!'), findsOneWidget);
-      expect(find.text('Instant UPI Apps'), findsNothing);
-      expect(find.text('Cards & Net Banking'), findsNothing);
-      expect(find.text('100% Free Activation'), findsOneWidget);
-      expect(find.text('Activate Free Membership (₹0)'), findsOneWidget);
+      expect(find.text('RIDERFREE applied'), findsOneWidget);
+      expect(find.text('UPI apps'), findsNothing);
+      expect(find.text('Cards & net banking'), findsNothing);
+      expect(find.text('Nothing to pay'), findsOneWidget);
+      expect(find.text('Start plan for ₹0'), findsOneWidget);
 
-      await tester.tap(find.text('Remove Coupon'));
+      await tester.tap(find.text('Remove coupon'));
       await tester.pumpAndSettle();
 
       expect(find.text('₹49.00'), findsWidgets);
-      expect(find.text('Instant UPI Apps'), findsOneWidget);
-      expect(find.text('Pay ₹49 & Activate Membership'), findsOneWidget);
+      expect(find.text('UPI apps'), findsOneWidget);
+      expect(find.text('Pay ₹49 and start plan'), findsOneWidget);
     });
 
     testWidgets('paying without a code sends no coupon and no amount: the server prices it', (tester) async {
       await openPaymentScreen(tester);
-      await tapPay(tester, 'Pay ₹49 & Activate Membership');
+      await tapPay(tester, 'Pay ₹49 and start plan');
 
       final orders = api.posts.where((p) => p.$1 == '/membership/order').toList();
       expect(orders, hasLength(1));
@@ -252,12 +252,12 @@ void main() {
         await applyCode(tester, c.$1);
 
         expect(find.text(c.$2), findsOneWidget);
-        expect(find.text('${c.$1} Applied!'), findsNothing);
+        expect(find.text('${c.$1} applied'), findsNothing);
         expect(find.widgetWithText(TextField, c.$1), findsNothing, reason: 'the code is cleared');
-        expect(find.text('Instant UPI Apps'), findsOneWidget);
-        expect(find.text('Pay ₹49 & Activate Membership'), findsOneWidget);
+        expect(find.text('UPI apps'), findsOneWidget);
+        expect(find.text('Pay ₹49 and start plan'), findsOneWidget);
 
-        await tapPay(tester, 'Pay ₹49 & Activate Membership');
+        await tapPay(tester, 'Pay ₹49 and start plan');
         final orders = api.posts.where((p) => p.$1 == '/membership/order').toList();
         expect(orders, hasLength(1));
         expect(orders.single.$2.containsKey('offerCode'), isFalse);
@@ -268,10 +268,10 @@ void main() {
       await openPaymentScreen(tester);
       await applyCode(tester, 'SAVE3');
 
-      expect(find.text('SAVE3 Applied!'), findsOneWidget);
+      expect(find.text('SAVE3 applied'), findsOneWidget);
       expect(find.text('−₹3.00'), findsOneWidget);
-      expect(find.text('Pay ₹46 & Activate Membership'), findsOneWidget);
-      await tapPay(tester, 'Pay ₹46 & Activate Membership');
+      expect(find.text('Pay ₹46 and start plan'), findsOneWidget);
+      await tapPay(tester, 'Pay ₹46 and start plan');
 
       final orders = api.posts.where((p) => p.$1 == '/membership/order').toList();
       expect(orders.single.$2['offerCode'], 'SAVE3');
@@ -283,13 +283,13 @@ void main() {
       expect(find.text('Credit for 19 unused days of Small Group'), findsOneWidget);
       expect(find.text('−₹31.00'), findsOneWidget);
       expect(find.text('Large Group ₹99 − ₹31 credit for 19 unused days = ₹68'), findsOneWidget);
-      expect(find.text('Pay ₹68 & Activate Membership'), findsOneWidget);
+      expect(find.text('Pay ₹68 and start plan'), findsOneWidget);
     });
 
     testWidgets('₹0 goes through the order: the server activates it, no payment opens', (tester) async {
       await openPaymentScreen(tester);
       await applyCode(tester, 'RIDERFREE');
-      await tapPay(tester, 'Activate Free Membership (₹0)');
+      await tapPay(tester, 'Start plan for ₹0');
 
       final orders = api.posts.where((p) => p.$1 == '/membership/order').toList();
       expect(orders, hasLength(1));
@@ -301,16 +301,16 @@ void main() {
     testWidgets('a code the order refuses is removed and the normal price returns', (tester) async {
       await openPaymentScreen(tester);
       await applyCode(tester, 'ONCEONLY');
-      expect(find.text('Activate Free Membership (₹0)'), findsOneWidget);
+      expect(find.text('Start plan for ₹0'), findsOneWidget);
 
-      await tapPay(tester, 'Activate Free Membership (₹0)');
+      await tapPay(tester, 'Start plan for ₹0');
 
       expect(
         find.text("You've already used this code. The code was removed, so you can pay the normal price."),
         findsOneWidget,
       );
-      expect(find.text('ONCEONLY Applied!'), findsNothing);
-      expect(find.text('Pay ₹49 & Activate Membership'), findsOneWidget);
+      expect(find.text('ONCEONLY applied'), findsNothing);
+      expect(find.text('Pay ₹49 and start plan'), findsOneWidget);
       expect(find.text('Membership Activated!'), findsNothing);
     });
   });

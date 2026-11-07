@@ -142,7 +142,7 @@ void main() {
       ),
     );
 
-    expect(find.textContaining('CONVOY SPREAD: 1.4 km'), findsOneWidget);
+    expect(find.textContaining('GROUP SPREAD: 1.4 km'), findsOneWidget);
     expect(find.text('2 Riders'), findsOneWidget);
     expect(find.text('You'), findsOneWidget);
     expect(find.text('Kiran'), findsOneWidget);
@@ -187,7 +187,7 @@ void main() {
     expect(find.text('Manage Riders & Invite'), findsOneWidget);
     expect(find.text('Talk settings'), findsOneWidget);
     expect(find.text('Group Safety & Speed Limits'), findsOneWidget);
-    expect(find.text('Ride Guardian Live Share'), findsOneWidget);
+    expect(find.text('Ride Guardian'), findsOneWidget);
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('Share my ETA'), findsOneWidget);
 
@@ -204,7 +204,7 @@ void main() {
     await tester.tap(find.text('Group Safety & Speed Limits'));
     expect(groupTapped, isTrue);
 
-    await tester.tap(find.text('Ride Guardian Live Share'));
+    await tester.tap(find.text('Ride Guardian'));
     expect(guardianTapped, isTrue);
 
     await tester.tap(find.text('Settings'));
@@ -231,11 +231,11 @@ void main() {
       ),
     );
 
-    expect(find.text('Pause Convoy Ride'), findsOneWidget);
+    expect(find.text('Pause group ride'), findsOneWidget);
     expect(find.text('End Ride'), findsOneWidget);
     expect(find.text('Leave Ride'), findsOneWidget);
 
-    await tester.tap(find.text('Pause Convoy Ride'));
+    await tester.tap(find.text('Pause group ride'));
     expect(pauseToggled, isTrue);
 
     await tester.tap(find.text('End Ride'));
@@ -266,8 +266,8 @@ void main() {
       ),
     );
 
-    expect(find.text('Manage Convoy Riders'), findsOneWidget);
-    expect(find.text('CONVOY INVITE CODE'), findsOneWidget);
+    expect(find.text('Manage riders'), findsOneWidget);
+    expect(find.text('INVITE CODE'), findsOneWidget);
     expect(find.text('445566'), findsOneWidget);
     expect(find.text('TRIP OWNER'), findsOneWidget);
     expect(find.text('TRIP HEAD'), findsOneWidget);

@@ -12,22 +12,25 @@ void main() {
       SharedPreferences.setMockInitialValues({});
     });
 
-    test('Default seeding creates a Royal Enfield Himalayan 450', () async {
+    // 3.55: no sample bike any more; a new garage starts empty (the screen shows its empty state).
+    test('A new garage starts empty with no active bike', () async {
       final service = GarageService();
       await service.load();
 
-      final bikes = service.bikesNotifier.value;
-      expect(bikes.length, 1);
-      expect(bikes.first.model, 'Himalayan 450');
+      expect(service.bikesNotifier.value, isEmpty);
+      expect(service.activeBikeNotifier.value, isNull);
+      expect(await GarageService.readActiveBike(), isNull);
+      // The first bike saved becomes the active one.
+      final himalayan = BikeProfile.popularPresets.first.copyWith(id: 'bike_mine');
+      await service.saveBike(himalayan);
       expect(service.activeBikeNotifier.value?.model, 'Himalayan 450');
-      expect(bikes.first.tankCapacityL, 17.0);
-      expect(bikes.first.reserveCapacityL, 3.5);
-      expect(bikes.first.fullTankRangeKm, 17.0 * 28.0);
+      expect(service.activeBikeNotifier.value?.fullTankRangeKm, 17.0 * 28.0);
     });
 
     test('Adding and switching active bikes updates notifier and fuel profile', () async {
       final service = GarageService();
       await service.load();
+      await service.saveBike(BikeProfile.popularPresets.first.copyWith(id: 'bike_first'));
 
       const ktm = BikeProfile(
         id: 'bike_ktm_390',
@@ -54,6 +57,7 @@ void main() {
     test('Trip distance increments odometer and service intervals calculate correctly', () async {
       final service = GarageService();
       await service.load();
+      await service.saveBike(BikeProfile.popularPresets.first.copyWith(id: 'bike_first'));
 
       final bike = service.activeBikeNotifier.value!;
       expect(bike.totalOdometerKm, 0.0);

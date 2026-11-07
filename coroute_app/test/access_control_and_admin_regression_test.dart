@@ -149,7 +149,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       // Verification: Access Denied view must be rendered
-      expect(find.text('Access Denied'), findsOneWidget);
+      expect(find.text('Access denied'), findsOneWidget);
       expect(find.text('Master Admin Access Required'), findsOneWidget);
       expect(find.text('Regular riders cannot access the Master Admin Console.'), findsOneWidget);
 

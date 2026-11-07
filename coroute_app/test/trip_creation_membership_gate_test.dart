@@ -162,7 +162,7 @@ void main() {
     categoryName: 'Individual Solo Rider',
     capacity: 1,
     priceRupees: 9,
-    status: 'EXPIRED',
+    status: 'ENDED',
     validUntil: pastTime,
   );
 
@@ -555,7 +555,7 @@ void main() {
       // When overview is null and ms is loading/verifying:
       // Clean verification state must be visible
       expect(find.byKey(const Key('membership_verification_state')), findsOneWidget);
-      expect(find.text('Verifying Membership Status'), findsOneWidget);
+      expect(find.text('Checking your plan'), findsOneWidget);
 
       completer.complete({
         'owned': null,
@@ -587,22 +587,22 @@ void main() {
       await tester.pumpAndSettle();
 
       // 1. Verify Active Membership Card
-      expect(find.text('ACTIVE MEMBERSHIP'), findsOneWidget);
-      expect(find.text('Individual Solo Membership'), findsOneWidget);
+      expect(find.text('ACTIVE PLAN'), findsOneWidget);
+      expect(find.text('Legacy plan (Individual)'), findsOneWidget);
       expect(find.text('₹9 / month'), findsOneWidget);
 
       // 2. Verify Upgrade Accordion is collapsed initially
       final expansionTile = find.byKey(const Key('upgrade_capacity_expansion_tile'));
       expect(expansionTile, findsOneWidget);
       expect(find.text('Change plan or seats'), findsOneWidget);
-      expect(find.text('Select & Pay ₹49'), findsNothing);
+      expect(find.text('Buy for ₹49'), findsNothing);
 
       // 3. Expand accordion and verify clear pricing for all tiers
       await tester.tap(expansionTile);
       await tester.pumpAndSettle();
 
       // The retired ₹9 Individual is honoured until it ends but not offered again; Community shows free.
-      expect(find.text('Current Active Plan (Tap to Extend)'), findsNothing);
+      expect(find.text('Your plan · tap to extend'), findsNothing);
       expect(find.byKey(const Key('membership_community_card')), findsOneWidget);
       expect(find.text('Upgrade to Group Membership (2–6) (₹49)'), findsOneWidget);
       expect(find.text('Upgrade to Extended Group (7–12) (₹99)'), findsOneWidget);
@@ -630,13 +630,13 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify Expired Card & Renewal Options
-      expect(find.text('EXPIRED'), findsOneWidget);
-      expect(find.text('Reactivate Plan'), findsOneWidget);
-      expect(find.text('Membership Expired'), findsOneWidget);
+      expect(find.text('ENDED'), findsOneWidget);
+      expect(find.text('Renew plan'), findsOneWidget);
+      expect(find.text('Your plan has ended'), findsOneWidget);
       // The retired Individual cannot be renewed: the banner offers the cheapest group plan.
-      expect(find.text('Renew Current Plan (₹9 / mo)'), findsNothing);
+      expect(find.text('Renew plan (₹9 / mo)'), findsNothing);
       expect(find.text('Host a group from ₹49'), findsOneWidget);
-      expect(find.text('Renew or Switch Plan'), findsOneWidget);
+      expect(find.text('Renew or change plan'), findsOneWidget);
     });
   });
 

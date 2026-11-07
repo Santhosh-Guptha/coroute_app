@@ -198,7 +198,7 @@ void main() {
       // Verify title and speed
       expect(find.text('To Nandi Hills, 32 km'), findsOneWidget);
       expect(find.text('75'), findsOneWidget);
-      expect(find.text('KM/H'), findsOneWidget);
+      expect(find.text('km/h'), findsOneWidget);
 
       // Verify live road badge
       expect(find.text('NH 44'), findsOneWidget);

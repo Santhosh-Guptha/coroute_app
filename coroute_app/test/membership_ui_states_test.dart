@@ -180,26 +180,26 @@ void main() {
       await tester.pumpAndSettle();
 
       // 1. Verify Active Membership Badge & Details
-      expect(find.text('ACTIVE MEMBERSHIP'), findsOneWidget);
-      expect(find.text('Group Membership (6 Riders Capacity)'), findsOneWidget);
-      expect(find.text('Owner: You (Permanent & Non-transferable)'), findsOneWidget);
-      expect(find.textContaining('Valid until:'), findsOneWidget);
+      expect(find.text('ACTIVE PLAN'), findsOneWidget);
+      expect(find.text('Small Group (2–6)'), findsOneWidget);
+      expect(find.text('You own this plan (not transferable)'), findsOneWidget);
+      expect(find.textContaining('Valid until '), findsOneWidget);
       expect(find.text('₹49 / month'), findsOneWidget);
-      expect(find.text('Seat Count: 3 / 6 seats'), findsOneWidget);
+      expect(find.text('Seats used: 3 of 6'), findsOneWidget);
 
       // 2. Verify Seat Capacity Card & Member List Controls
-      expect(find.text('Group Seat Capacity'), findsOneWidget);
-      expect(find.text('3 / 6 Seats'), findsOneWidget);
-      expect(find.text('Group Participants'), findsOneWidget);
+      expect(find.text('Group seats'), findsOneWidget);
+      expect(find.text('3 of 6 seats'), findsOneWidget);
+      expect(find.text('Riders on your plan'), findsOneWidget);
       expect(find.text('Arjun Rider'), findsOneWidget);
       expect(find.text('Priya Rider'), findsOneWidget);
       expect(find.text('Invite'), findsOneWidget);
 
       // 3. Verify initial purchase selection cards & prompts are NOT unconditionally rendered
       // 'Select & Pay' should NOT be visible when section is collapsed
-      expect(find.text('Select & Pay ₹49'), findsNothing);
-      expect(find.text('Select & Pay ₹9'), findsNothing);
-      expect(find.text('Select & Pay ₹99'), findsNothing);
+      expect(find.text('Buy for ₹49'), findsNothing);
+      expect(find.text('Buy for ₹9'), findsNothing);
+      expect(find.text('Buy for ₹99'), findsNothing);
 
       // 4. Verify explicit secondary expandable section ('Upgrade Capacity or Switch Plan') is present
       final expansionTileFinder = find.byKey(const Key('upgrade_capacity_expansion_tile'));
@@ -211,7 +211,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // After expanding, options appear
-      expect(find.text('Current Active Plan (Tap to Extend)'), findsOneWidget);
+      expect(find.text('Your plan · tap to extend'), findsOneWidget);
       expect(find.byKey(const Key('membership_community_card')), findsOneWidget);
       expect(find.textContaining('₹9)'), findsNothing, reason: 'the retired ₹9 Individual plan is not offered');
       expect(find.text('Upgrade to Extended Group (7–12) (₹99)'), findsOneWidget);
@@ -244,18 +244,18 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify Solo Active Card
-      expect(find.text('ACTIVE MEMBERSHIP'), findsOneWidget);
-      expect(find.text('Individual Solo Membership'), findsOneWidget);
+      expect(find.text('ACTIVE PLAN'), findsOneWidget);
+      expect(find.text('Legacy plan (Individual)'), findsOneWidget);
       expect(find.text('₹9 / month'), findsOneWidget);
-      expect(find.text('Seat Count: 1 / 1 seat'), findsOneWidget);
+      expect(find.text('Seats used: 1 of 1'), findsOneWidget);
 
       // Verify Seat Capacity & Rider Invitations cards
-      expect(find.text('Seat Capacity'), findsOneWidget);
-      expect(find.text('1 / 1 Seat'), findsOneWidget);
-      expect(find.text('Rider Invitations'), findsOneWidget);
+      expect(find.text('Your seat'), findsOneWidget);
+      expect(find.text('1 of 1 seat'), findsOneWidget);
+      expect(find.text('Invite riders'), findsOneWidget);
 
       // Verify no unconditional payment buttons
-      expect(find.text('Select & Pay ₹9'), findsNothing);
+      expect(find.text('Buy for ₹9'), findsNothing);
 
       // Verify expandable upgrade section
       expect(find.text('Change plan or seats'), findsOneWidget);
@@ -278,7 +278,7 @@ void main() {
           categoryName: 'Group Membership (2–6)',
           capacity: 6,
           priceRupees: 49,
-          status: 'EXPIRED',
+          status: 'ENDED',
           validUntil: expiredUntil,
           members: const [],
         ),
@@ -288,16 +288,16 @@ void main() {
       await tester.pumpAndSettle();
 
       // 1. Verify EXPIRED badge and reactivation button on card
-      expect(find.text('EXPIRED'), findsOneWidget);
-      expect(find.text('Reactivate Plan'), findsOneWidget);
+      expect(find.text('ENDED'), findsOneWidget);
+      expect(find.text('Renew plan'), findsOneWidget);
 
       // 2. Verify Prominent Renewal Banner
-      expect(find.text('Membership Expired'), findsOneWidget);
-      expect(find.text('Renew Current Plan (₹49 / mo)'), findsOneWidget);
+      expect(find.text('Your plan has ended'), findsOneWidget);
+      expect(find.text('Renew plan (₹49 / mo)'), findsOneWidget);
 
       // 3. Verify prominent renewal catalog section
-      expect(find.text('Renew or Switch Plan'), findsOneWidget);
-      expect(find.text('Renew Current Plan (₹49)'), findsOneWidget);
+      expect(find.text('Renew or change plan'), findsOneWidget);
+      expect(find.text('Renew plan (₹49)'), findsOneWidget);
       expect(find.byKey(const Key('membership_community_card')), findsOneWidget);
     });
 
@@ -316,18 +316,18 @@ void main() {
       await tester.pumpAndSettle();
 
       // 1. Verify NO active card or seat cards
-      expect(find.text('ACTIVE MEMBERSHIP'), findsNothing);
-      expect(find.text('EXPIRED'), findsNothing);
-      expect(find.text('Group Seat Capacity'), findsNothing);
+      expect(find.text('ACTIVE PLAN'), findsNothing);
+      expect(find.text('ENDED'), findsNothing);
+      expect(find.text('Group seats'), findsNothing);
 
       // 2. Verify Catalog selection cards with Select & Pay
-      expect(find.text('Select Membership Plan'), findsOneWidget);
+      expect(find.text('Choose a plan'), findsOneWidget);
       // Community is free (no button); the paid plans are bought.
       expect(find.byKey(const Key('membership_community_card')), findsOneWidget);
       expect(find.text('Your plan · solo rides'), findsOneWidget);
-      expect(find.text('Select & Pay ₹9'), findsNothing);
-      expect(find.text('Select & Pay ₹49'), findsOneWidget);
-      expect(find.text('Select & Pay ₹99'), findsOneWidget);
+      expect(find.text('Buy for ₹9'), findsNothing);
+      expect(find.text('Buy for ₹49'), findsOneWidget);
+      expect(find.text('Buy for ₹99'), findsOneWidget);
     });
 
     testWidgets('State 5: Zero-amount activation directly authorizes on backend without gateway', (tester) async {

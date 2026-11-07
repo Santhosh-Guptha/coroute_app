@@ -1,30 +1,11 @@
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:coroute_app/domain/safety/accel_bucket.dart';
 import 'package:coroute_app/domain/safety/crash_detector.dart';
-import 'package:coroute_app/domain/safety/crash_incident.dart';
-import 'package:coroute_app/domain/sync/durable_event.dart';
-import 'package:coroute_app/data/local/file_durable_event_queue.dart';
-import 'package:coroute_app/data/local/local_incident_store.dart';
+import 'package:coroute_app/data/models/pending_sos.dart';
+import 'package:coroute_app/data/models/network_wire.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  late Directory tempDir;
-  late File incidentFile;
-  late File queueFile;
-
-  setUp(() async {
-    tempDir = await Directory.systemTemp.createTemp('coroute_offline_safety_test_');
-    incidentFile = File('${tempDir.path}/incidents.json');
-    queueFile = File('${tempDir.path}/durable_events.json');
-  });
-
-  tearDown(() async {
-    if (await tempDir.exists()) {
-      await tempDir.delete(recursive: true);
-    }
-  });
 
   group('Standalone Local Crash Detection (No Cloud & No GPS)', () {
     test('detects high-impact motorcycle crash purely on accelerometer and gyroscope streams', () {
@@ -132,86 +113,37 @@ void main() {
   });
 
 
-  group('Local Incident Persistence Across App Restarts', () {
-    test('persists crash incident details, status updates, and vitals across store restart', () async {
-      final queue = FileDurableEventQueue(file: queueFile);
-
-      // Session 1: App records a crash incident
-      final store1 = LocalIncidentStore(file: incidentFile, eventQueue: queue);
-
-      const incident = CrashIncident(
-        incidentId: 'inc_test_1001',
-        timestamp: 1700000000000,
+  // 3.55 platform: the separate incident queue was retired. The one offline store for a crash
+  // SOS is the pending-SOS store (ConvoyService), resent with the same clientId on reconnect.
+  group('Offline crash SOS record (pending-SOS store)', () {
+    test('crash SOS raised offline round-trips through disk with its crash fields and clientId', () {
+      const pending = PendingSos(
+        clientId: 'usr_a-1700000000000',
+        groupId: 'GRP-99',
         lat: 12.9716,
         lng: 77.5946,
-        impactG: 5.7,
+        type: 'CRASH',
+        createdAt: 1700000000000,
+        auto: true,
         speedBeforeKmh: 52.0,
-        peakGyroRadS: 2.8,
-        tiltDeg: 62.0,
-        isSlideFall: true,
-        source: 'CRASH_AUTO',
-        status: IncidentStatus.countdownActive,
-        idempotencyKey: 'crash_inc_test_1001',
-        groupId: 'GRP-99',
-        vitals: {'bpm': 135, 'trauma': 'MODERATE'},
+        impactG: 5.7,
+        source: EmergencySource.crashAuto,
       );
-
-      await store1.recordIncident(incident);
-
-      // Rider confirms "I'M OK"
-      await store1.updateStatus(
-        'inc_test_1001',
-        IncidentStatus.confirmedOk,
-        resolvedAt: 1700000010000,
-      );
-
-      // Verify file written to disk
-      expect(await incidentFile.exists(), isTrue);
-
-      // Session 2: Phone reboots or app relaunched
-      final store2 = LocalIncidentStore(file: incidentFile, eventQueue: queue);
-
-      final loaded = await store2.getIncident('inc_test_1001');
-      expect(loaded, isNotNull);
-      expect(loaded!.incidentId, 'inc_test_1001');
-      expect(loaded.lat, 12.9716);
-      expect(loaded.lng, 77.5946);
-      expect(loaded.impactG, 5.7);
-      expect(loaded.speedBeforeKmh, 52.0);
-      expect(loaded.tiltDeg, 62.0);
-      expect(loaded.isSlideFall, isTrue);
-      expect(loaded.status, IncidentStatus.confirmedOk);
-      expect(loaded.resolvedAt, 1700000010000);
-      expect(loaded.vitals?['bpm'], 135);
-    });
-
-    test('dispatched incident automatically enqueues into durable priority queue', () async {
-      final queue = FileDurableEventQueue(file: queueFile);
-      final store = LocalIncidentStore(file: incidentFile, eventQueue: queue);
-
-      const incident = CrashIncident(
-        incidentId: 'inc_unresponsive_2002',
-        timestamp: 1700000050000,
-        lat: 13.0827,
-        lng: 80.2707,
-        impactG: 7.1,
-        speedBeforeKmh: 68.0,
-        source: 'CRASH_AUTO',
-        status: IncidentStatus.dispatched, // Dispatched!
-        idempotencyKey: 'crash_inc_unresponsive_2002',
-        groupId: 'GRP-99',
-      );
-
-      await store.recordIncident(incident);
-
-      // Verify it was automatically enqueued into DurableEventQueue
-      expect(await queue.countPending(), 1);
-
-      final pendingEvents = await queue.peekPending();
-      expect(pendingEvents.length, 1);
-      expect(pendingEvents.first.eventType, DurableEventType.crashIncident);
-      expect(pendingEvents.first.priority, EventPriority.critical);
-      expect(pendingEvents.first.idempotencyKey, 'crash_inc_unresponsive_2002');
+      final restored = PendingSos.decode(pending.encode());
+      expect(restored, isNotNull);
+      expect(restored!.clientId, pending.clientId);
+      expect(restored.type, 'CRASH');
+      expect(restored.auto, isTrue);
+      expect(restored.impactG, 5.7);
+      expect(restored.speedBeforeKmh, 52.0);
+      expect(restored.source, EmergencySource.crashAuto);
+      expect(restored.createdAt, 1700000000000);
+      // The replay carries the same clientId: the gateway stores it once (idempotent per rider + clientId).
+      final wire = restored.toMessage();
+      expect(wire['type'], 'SOS');
+      expect(wire['clientId'], pending.clientId);
+      expect(wire['alertType'], 'CRASH');
+      expect(wire['occurredAt'], 1700000000000);
     });
   });
 }

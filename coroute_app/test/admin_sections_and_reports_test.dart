@@ -14,7 +14,7 @@ import 'package:coroute_app/presentation/admin/admin_ride_reports.dart';
 import 'package:coroute_app/presentation/admin/admin_ui.dart';
 import 'package:coroute_app/presentation/admin/master_admin_dashboard.dart';
 
-/// Admin console simplification (B2): eight top-level sections with short plain names, and the
+/// Admin console simplification (B2): nine top-level sections (3.55: Features) with short plain names, and the
 /// public ride reports under Safety (list, conversation, dismiss / warn / suspend) against a fake API.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -26,7 +26,7 @@ void main() {
   tearDown(() => AppTheme.use(AppPalette.dark));
 
   group('Admin sections', () {
-    testWidgets('eight sections with short plain names; plans and devices are merged away', (tester) async {
+    testWidgets('nine sections with short plain names; plans and devices are merged away', (tester) async {
       late List<AdminNavItem> nav;
       late List<AdminNavItem> withSignOut;
       await tester.pumpWidget(MaterialApp(
@@ -36,8 +36,8 @@ void main() {
           return const SizedBox();
         }),
       ));
-      expect(nav.map((n) => n.label).toList(), ['Overview', 'Riders', 'Rides', 'Safety', 'Payments', 'Reviews', 'Insights', 'Settings']);
-      expect(AdminSection.values.length, lessThanOrEqualTo(8));
+      expect(nav.map((n) => n.label).toList(), ['Overview', 'Riders', 'Rides', 'Safety', 'Payments', 'Reviews', 'Insights', 'Features', 'Settings']);
+      expect(AdminSection.values.length, lessThanOrEqualTo(9));
       expect(AdminSection.values.length, nav.length);
       for (final n in nav) {
         expect(n.label.split(' ').length, lessThanOrEqualTo(2), reason: 'short label: ${n.label}');

@@ -221,7 +221,7 @@ void main() {
       await tester.pump();
 
       // Verify the P2P Mesh SOS alert card is prominently rendered
-      expect(find.textContaining('SOS: Kiran (via Mesh)'), findsOneWidget);
+      expect(find.textContaining('SOS: Kiran (via Bluetooth)'), findsOneWidget);
       expect(find.textContaining('CRASH'), findsOneWidget);
     });
   });

@@ -296,7 +296,7 @@ void main() {
 
       // Verify live speed label renders uninterrupted offline
       expect(find.text('56'), findsOneWidget);
-      expect(find.text('KM/H'), findsOneWidget);
+      expect(find.text('km/h'), findsOneWidget);
       expect(find.text('LIMIT 80'), findsOneWidget);
 
       // Verify compact offline indicator badge ('Offline Mode') is displayed
