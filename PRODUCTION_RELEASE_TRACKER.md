@@ -113,3 +113,10 @@ graph TD
 - [x] **Gate 6: Pre-Ride Diagnostics & Compatibility**: 11-category phone check, consent-gated submission, admin analytics verified.
 - [x] **Gate 7: Master Regression**: Zero analyze errors (`dart analyze lib`), 100% test pass rate across mobile (150+ tests) and gateway (35/35 tests).
 - [x] **Gate 8: Production Release Approval**: Deployed live to dual-node Oracle cluster (Node 1: `152.67.181.198`, Node 2: `129.225.79.93`). Verified live at `https://coroute.duckdns.org`.
+
+
+---
+
+## v3.55 (Nov 7, 2026): code-complete, pending device build and OCI deploy
+
+See coroute_app/docs/V3_55_RELEASE.md (what was built and release steps), coroute_app/docs/FEATURE_STATUS.md (every feature: stable / needs device check / pending), coroute_app/docs/SAFETY_SCENARIO_REVIEW_v3.55.md and coroute_app/docs/UX_NAMING_GUIDE_v3.55.md. Verified: dart analyze clean, gateway 767/767 tests. Not yet: flutter test, Gradle build, real-device rides, OCI drills.

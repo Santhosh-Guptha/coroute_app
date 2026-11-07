@@ -224,3 +224,10 @@ We will execute this backlog **one feature at a time**, beginning with:
 2. **FEAT-02: Collective Pothole & Road Hazard AI Telemetry Mesh** (Autonomous pack protection).
 3. **FEAT-03: Emergency Siren Acoustic Frequency Detector** (Audio situational awareness).
 4. ...and sequentially through the remaining roadmap.
+
+
+---
+
+## v3.55 (Nov 7, 2026): code-complete, pending device build and OCI deploy
+
+See coroute_app/docs/V3_55_RELEASE.md (what was built and release steps), coroute_app/docs/FEATURE_STATUS.md (every feature: stable / needs device check / pending), coroute_app/docs/SAFETY_SCENARIO_REVIEW_v3.55.md and coroute_app/docs/UX_NAMING_GUIDE_v3.55.md. Verified: dart analyze clean, gateway 767/767 tests. Not yet: flutter test, Gradle build, real-device rides, OCI drills.
