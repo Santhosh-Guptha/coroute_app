@@ -5,7 +5,7 @@ const { defaultHasher } = require('./password_hash');
 const { OAuth2Client } = require('google-auth-library');
 const config = require('./config');
 const { effectiveSubscription } = require('./subscription_lifecycle');
-const { profileFields, ValidationError, SWITCHES } = require('./validate');
+const { profileFields, ValidationError, SWITCHES, bikeFields, BIKE_KEYS } = require('./validate');
 
 const ROLE_ADMIN = 'MASTER_ADMIN';
 const ROLE_RIDER = 'RIDER';
@@ -34,7 +34,6 @@ function isPillionUser(u) {
 }
 
 function checkProfileComplete(u) {
-  if (u.provider === 'guest' || (u.userId || '').startsWith('guest_')) return true;
   const hasName = Boolean((u.name || '').trim().length >= 2);
   const hasEmail = Boolean((u.email || '').trim().includes('@'));
   const hasPhone = Boolean((u.phone || '').trim().length >= 7);
@@ -56,6 +55,18 @@ function realContactNumber(u, field) {
   const isGuest = u.provider === 'guest' || String(u.email || '').endsWith('@guest.coroute.local');
   if (isGuest && GUEST_PLACEHOLDER_NUMBERS.has(v.replace(/[^0-9]/g, ''))) return '';
   return v;
+}
+
+/** The rider's bike summary as stored (3.55); never in publicUser (admin lists, other riders). */
+function bikeSummary(u) {
+  return {
+    bikeModel: typeof u.bikeModel === 'string' ? u.bikeModel : '',
+    bikeCc: Number(u.bikeCc) || 0,
+    bikeColour: typeof u.bikeColour === 'string' ? u.bikeColour : '',
+    bikeTankL: Number(u.bikeTankL) || 0,
+    bikeMileageKmL: Number(u.bikeMileageKmL) || 0,
+    bikeCooling: ['air', 'oil', 'liquid'].includes(u.bikeCooling) ? u.bikeCooling : 'unknown',
+  };
 }
 
 function publicUser(u) {
@@ -94,6 +105,8 @@ function selfUser(u) {
     allergies: u.allergies || '',
     medicalNotes: u.medicalNotes || '',
     smsOptOut: !!u.smsOptOut,
+    // 3.55 active bike summary (engine care, fuel analysis): owner and admin detail only.
+    ...bikeSummary(u),
     // Nearby-rider assistance (3.15): owner only, never in publicUser.
     assistHelp: u.assistHelp !== false,
     assistAsk: u.assistAsk !== false,
@@ -153,6 +166,13 @@ const MSG_ON_HOLD = 'Your account has been placed on hold by the administrator.'
 const MSG_BLOCKED = 'Your account has been blocked by the administrator.';
 const MSG_GONE = 'This account no longer exists.';
 const MSG_SESSION = 'Your session has ended. Please sign in again.';
+// Guest / Quick Ride mode was retired in 3.55: every rider signs in with a (free) account.
+const MSG_GUEST_RETIRED = 'Guest mode has ended. Create a free CoRoute account (Community plan) to keep riding.';
+
+/** A guest session from before 3.55 (provider 'guest' or a placeholder guest address). */
+function isLegacyGuest(u) {
+  return !!u && (u.provider === 'guest' || String(u.userId || '').startsWith('guest_') || String(u.email || '').endsWith('@guest.coroute.local'));
+}
 
 /**
  * One account check for every authenticated request and socket.
@@ -216,6 +236,8 @@ class UserGate {
     if (!user) throw new AuthError(MSG_GONE, 404, 'ACCOUNT_GONE');
     if (user.status === 'ON_HOLD') throw new AuthError(MSG_ON_HOLD, 403, 'ACCOUNT_ON_HOLD');
     if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
+    // SESSION_INVALID so every app build (old ones too) signs the guest out with this message.
+    if (isLegacyGuest(user)) throw new AuthError(MSG_GUEST_RETIRED, 401, 'SESSION_INVALID');
     const issuedMs = (Number(claims.iat) || 0) * 1000;
     // A token older than the account belongs to an earlier account that had the same userId.
     if (user.createdAt && issuedMs + 1000 < user.createdAt) throw new AuthError(MSG_SESSION, 401, 'SESSION_INVALID');
@@ -351,27 +373,9 @@ class AuthService {
     return { token: signToken(user), user: selfUser(user) };
   }
 
-  async loginAsGuest({ name, vehicleNo } = {}) {
-    const guestNum = Math.floor(1000 + Math.random() * 9000);
-    // Any JSON type may arrive here: a non-string name used to throw (500) instead of falling back.
-    const cleanName = (typeof name === 'string' ? name : '').replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, 24) || `Guest_${guestNum}`;
-    const email = `guest_${Date.now()}_${guestNum}@guest.coroute.local`;
-    const user = await this.repo.createUser({
-      userId: await this._uniqueUserId(cleanName),
-      name: cleanName,
-      email,
-      role: ROLE_RIDER,
-      provider: 'guest',
-      // No made-up numbers: an SOS must never text a placeholder (guests are exempt from the profile check).
-      phone: '',
-      vehicleType: 'Motorcycle (Guest)',
-      vehicleNo: typeof vehicleNo === 'string' && vehicleNo.trim() ? vehicleNo.trim().slice(0, 20) : 'GUEST',
-      emergencyContact: '',
-      emergencyContactName: '',
-      createdAt: Date.now(),
-      lastLoginAt: Date.now(),
-    });
-    return { token: signToken(user), user: selfUser(user) };
+  /** Guest mode was retired in 3.55: answers 410 so old builds show the message instead of riding as a guest. */
+  async loginAsGuest() {
+    throw new AuthError(MSG_GUEST_RETIRED, 410, 'GUEST_RETIRED');
   }
 
   async changePassword(userId, { currentPassword, newPassword }) {
@@ -469,6 +473,10 @@ class AuthService {
     }
     // Consent to the nearby-rider network (3.15): only `true` counts, it stores when.
     if (patch.netConsent === true) clean.netConsentAt = Date.now();
+    // 3.55 bike summary: validated (type, range, no control characters); only changes are written.
+    const bike = bikeFields(patch);
+    const stored = bikeSummary(user);
+    for (const k of BIKE_KEYS) if (bike[k] !== undefined && bike[k] !== stored[k]) clean[k] = bike[k];
     const updated = Object.keys(clean).length ? await this.repo.updateUser(user.key, clean) : user;
     this._invalidate(userId);
     const keys = [...ROSTER_KEYS, ...ASSIST_KEYS].filter((k) => clean[k] !== undefined && clean[k] !== user[k]);
@@ -527,6 +535,7 @@ class AuthService {
   async me(userId, { appBuild = 0, now = Date.now() } = {}) {
     let user = await this.repo.findUserById(userId);
     if (!user) throw new AuthError('This account no longer exists.', 404, 'ACCOUNT_GONE');
+    if (isLegacyGuest(user)) throw new AuthError(MSG_GUEST_RETIRED, 401, 'SESSION_INVALID');
     user = await this._seen(user);
     if (user.status === 'ON_HOLD') throw new AuthError(MSG_ON_HOLD, 403, 'ACCOUNT_ON_HOLD');
     if (user.status === 'BLOCKED') throw new AuthError(MSG_BLOCKED, 403, 'ACCOUNT_BLOCKED');
@@ -606,4 +615,4 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { realContactNumber, ROSTER_KEYS, ASSIST_KEYS, AuthService, AuthError, UserGate, identityOf, requireAuth, requireAdmin, signToken, verifyToken, verifyTokenDetailed, publicUser, selfUser, ROLE_ADMIN, ROLE_RIDER, slug };
+module.exports = { isLegacyGuest, MSG_GUEST_RETIRED, realContactNumber, ROSTER_KEYS, ASSIST_KEYS, AuthService, AuthError, UserGate, identityOf, requireAuth, requireAdmin, signToken, verifyToken, verifyTokenDetailed, publicUser, selfUser, ROLE_ADMIN, ROLE_RIDER, slug };

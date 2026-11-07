@@ -340,36 +340,13 @@ test('blocked by 3 different riders: public ride paused for 7 days (no list, no 
   for (const R of [A, B, C]) await h.endRide(R);
 });
 
-test('guests cannot start contact or send road warnings (they still see public rides)', async () => {
-  const lng = lane();
-  const A = await ride(line(lng, 17.40, 17.70), 'Host');
+test('guest mode is retired: no guest session can reach public rides', async () => {
   const g = await h.t.api('POST', '/auth/guest', { name: 'Visitor' });
-  assert.equal(g.status, 200, JSON.stringify(g.json));
-  const gr = await h.t.api('POST', '/convoys/join', { code: A.c.joinCode }, g.json.token);
-  const other = await ride(line(lng, 17.70, 17.40), 'Other');
-  h.place(other.gid, other.lead, 17.48, lng, 180, 60);
-  h.place(A.gid, A.lead, 17.45, lng, 0, 60);
-  let gws;
-  if (gr.status === 200) {
-    gws = await sock(g.json.token, A.gid);
-    h.place(A.gid, g.json, 17.451, lng, 0, 60);
-  } else {
-    // Guests may not be allowed in this ride: their own solo ride.
-    const own = await h.t.api('POST', '/convoys', { name: 'Guest ride' }, g.json.token);
-    assert.equal(own.status, 201, JSON.stringify(own.json));
-    gws = await sock(g.json.token, own.json.groupId);
-    gws.sendJson({ type: 'PR_PREFS', showNearby: true, radiusKm: 10, roadWarnings: true });
-    await gws.next((m) => m.type === 'PR_PREFS_OK');
-    h.place(own.json.groupId, g.json, 17.451, lng, 0, 60);
-  }
-  tick();
-  const seen = await rides(gws);
-  assert.ok(seen.some((r) => r.rideId === rideIdOf(other)), 'guests see public rides');
-  const c = await ask(gws, { type: 'PR_CONTACT', rideId: rideIdOf(other), kind: 'HI', quick: 'HI' }, 'PR_SENT');
-  assert.equal(c.code, 403); assert.equal(c.reason, 'GUEST');
-  const w = await ask(gws, { type: 'ROAD_WARN', kind: 'ANIMALS' }, 'ROAD_WARN_SENT');
-  assert.equal(w.reason, 'GUEST');
-  for (const R of [A, other]) await h.endRide(R);
+  assert.equal(g.status, 410, JSON.stringify(g.json));
+  assert.equal(g.json.code, 'GUEST_RETIRED');
+  // The server-side rule stays for any record an older gateway left behind.
+  assert.equal(isGuest({ provider: 'guest' }), true);
+  assert.equal(isGuest({ provider: 'password', email: 'a@b.c' }), false);
 });
 
 test('report: stored with the conversation for admin review (admins only); contacts are logged', async () => {

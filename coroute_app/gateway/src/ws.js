@@ -28,6 +28,8 @@ const { clientIdOf } = require('./validate');
 const { validateChunk, TrackError, uploadPermission } = require('./tracks');
 const { visibleWindow, eventVisible, publicEvent } = require('./timeline');
 const { RoadHazardRegistry } = require('./road_hazards');
+// 3.55 admin feature switches (cached lookups, no DB read per message).
+const { wsFeaturesFor, firstOff, FEATURE_OFF, FEATURE_OFF_MESSAGE } = require('./feature_flags');
 
 const VOICE_START = 0x01, VOICE_FRAME = 0x02, VOICE_END = 0x03;
 
@@ -81,18 +83,26 @@ const ACTION_TYPES = new Set([
   'REGROUP_SET', 'REGROUP_CLEAR', 'LAST_GASP_BEACON',
   // FEAT-02
   'ROAD_HAZARD',
+  // 3.55
+  'ROLE_SWAP', 'ROLE_AUTO',
+  // 3.55 bike / pillion swap
+  'SWAP_REQUEST', 'SWAP_ANSWER',
+  // 3.55 no-signal ahead (src/signal_ahead.js)
+  'SIGNAL_AHEAD',
+  // 3.55 buddy pairs
+  'BUDDY_ASSIGN', 'BUDDY_PING',
 ]);
 /** Socket messages that alert the whole convoy: a few per 10 seconds, each type with its own budget
  * (a rider who just asked the group to wait must still be able to raise an SOS). */
 const ALARM_TYPES = new Set(['WAIT', 'SOS', 'CHECK_IN', 'REPORT_DOWN']);
 /** Messages that may carry a clientId (phone outbox): applied once, answered with ACK. */
-const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN', 'REPORT_DOWN', 'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE', 'ROLE_SET', 'REGROUP_SET', 'REGROUP_CLEAR']);
+const CLIENT_ID_TYPES = new Set(['CHAT', 'WAIT', 'STATUS', 'STOP_VISITED', 'SOS_RESPOND', 'CHECK_IN', 'REPORT_DOWN', 'ASSIST_ANSWER', 'NET_REPORT_FALSE', 'WAVE', 'ROLE_SET', 'REGROUP_SET', 'REGROUP_CLEAR', 'ROLE_SWAP', 'ROLE_AUTO', 'SWAP_REQUEST', 'SWAP_ANSWER', 'BUDDY_ASSIGN', 'BUDDY_PING']);
 const BYE_REASONS = new Set(['APP_CLOSED', 'SIGN_OUT', 'LEFT']);
 /** Protocol features this gateway offers (HELLO.features); 3.14 apps use a feature only when listed. */
 const FEATURES_314 = ['ack', 'sos2', 'respond', 'presence', 'checkin', 'roster'];
 /** 3.15: safety network and discovery, appended when switched on. */
 /** 3.16: sweeper role, follow-up check-in, town limit, live links (always on). */
-const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), ...(config.publicRideEnabled ? ['pubride1'] : []), 'ride316', 'featurePolicy1', 'bin1'];
+const FEATURES = [...FEATURES_314, ...(config.safetyNetEnabled ? ['net1'] : []), ...(config.discoveryEnabled ? ['discovery1'] : []), ...(config.publicRideEnabled ? ['pubride1'] : []), 'ride316', 'featurePolicy1', 'bin1', 'ride355'];
 /** Client capabilities a 3.15 app sends with JOIN. Server-to-client types added in 3.15 go only to sockets with 'net1'. */
 const CAP = /^[a-z0-9]{1,16}$/;
 const INCIDENT_ID = /^NET-[0-9A-F]{12}$/;
@@ -150,6 +160,8 @@ class Hub {
     convoys.featureAnalytics?.on('change', () => this._scheduleFleet());
     // 3.15: room messages only 3.15 apps understand (EMERGENCY_UPDATE).
     convoys.on('capEvent', (groupId, cap, payload) => this.broadcastCap(groupId, cap, payload));
+    // 3.55 bike / pillion swap: personal messages (SWAP_ASK, SWAP_RESULT) to one rider's sockets.
+    convoys.on('userMessage', (groupId, userId, payload) => this.sendToUser(userId, { groupId, ...payload }));
     // An ended ride: no queued positions or voice floor survive it.
     convoys.on('roomEnded', (groupId) => this._dropRoomState(groupId));
 
@@ -482,6 +494,9 @@ class Hub {
     ws.ready = this._gateCheck(ws).then((ok) => {
       if (ok && ws.readyState === WebSocket.OPEN) this._index(ws);
       if (ok) this.send(ws, { type: 'HELLO', userId: ws.user.userId, serverTime: Date.now(), heartbeatSec: 30, protocol: 2, features: FEATURES });
+      // 3.55: an app that missed a switch change while offline catches up on (re)connect.
+      const ff = this.convoys.featureFlags;
+      if (ok && ff && ff.anyOff()) this.send(ws, { type: 'FEATURE_FLAGS', ...ff.snapshot() });
       return ok;
     });
   }
@@ -675,6 +690,9 @@ class Hub {
     // Every message that writes to the database has a budget per socket.
     if (ACTION_TYPES.has(msg.type) && !this._allow(ws, 'action', config.wsActionsPerSec)) throw new ConvoyError('Slow down.', 429);
     if (ALARM_TYPES.has(msg.type) && !this._allowAlarm(ws, msg.type)) throw new ConvoyError('Slow down.', 429);
+    // 3.55 admin feature switches: a message of a feature the admin turned off gets the usual ERROR
+    // shape (403, reason FEATURE_OFF). Keyed by type, so a case that does not exist yet costs nothing.
+    if (firstOff(this.convoys.featureFlags, wsFeaturesFor(msg))) throw new ConvoyError(FEATURE_OFF_MESSAGE, 403, FEATURE_OFF);
     switch (msg.type) {
       case 'PING': return this.send(ws, { type: 'PONG', ts: Date.now() });
 
@@ -818,10 +836,47 @@ class Hub {
         if (!this.publicRides || !config.publicRideEnabled) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
         return void await this.publicRides.handle(ws, msg);
       }
+      // ---- 3.55 no-signal ahead: relayed to the group and the rider's guardian links (src/signal_ahead.js) ----
+      case 'SIGNAL_AHEAD': {
+        if (!this.convoys.signalAhead) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
+        this._requireRoom(ws);
+        this.convoys.signalAhead.handle(ws, msg);
+        return;
+      }
       // ---- 3.16 ----
       case 'ROLE_SET': {
         const gid = this._requireRoom(ws);
         return this._once(ws, cid, 'ROLE_SET', () => this.convoys.setRole(gid, u, msg.userId, msg.role));
+      }
+      // ---- 3.55: swap two riders' roles, automatic roles on/off ----
+      case 'ROLE_SWAP': {
+        const gid = this._requireRoom(ws);
+        return this._once(ws, cid, 'ROLE_SWAP', () => this.convoys.swapRoles(gid, u, msg.userId, msg.withUserId));
+      }
+      case 'ROLE_AUTO': {
+        const gid = this._requireRoom(ws);
+        return this._once(ws, cid, 'ROLE_AUTO', () => this.convoys.setAutoRoles(gid, u, msg.on === true));
+      }
+      // ---- 3.55: two riders swap bikes, or a rider and their pillion change places ----
+      case 'SWAP_REQUEST': {
+        const gid = this._requireRoom(ws);
+        const kind = typeof msg.kind === 'string' ? msg.kind.toUpperCase() : '';
+        return this._once(ws, cid, 'SWAP_REQUEST', () => this.convoys.requestSwap(gid, u, msg.withUserId, kind));
+      }
+      case 'SWAP_ANSWER': {
+        const gid = this._requireRoom(ws);
+        return this._once(ws, cid, 'SWAP_ANSWER', () => this.convoys.answerSwap(gid, u, msg.requestId, msg.accept === true));
+      }
+      // ---- 3.55: buddy pairs in large groups (src/buddies.js) ----
+      case 'BUDDY_ASSIGN': {
+        const gid = this._requireRoom(ws);
+        if (!this.convoys.buddies) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
+        return this._once(ws, cid, 'BUDDY_ASSIGN', () => this.convoys.buddies.assign(gid, u));
+      }
+      case 'BUDDY_PING': {
+        const gid = this._requireRoom(ws);
+        if (!this.convoys.buddies) return this.sendError(ws, 400, `Unknown message type ${msg.type}`);
+        return this._once(ws, cid, 'BUDDY_PING', () => this.convoys.buddies.ping(gid, u, msg));
       }
       case 'MIC_STATE': {
         const gid = this._requireRoom(ws);
@@ -972,6 +1027,22 @@ class Hub {
         // If duplicate replayed frame, do not re-broadcast
         if (duplicate) return;
 
+        // 3.55: saved for future rides along this road (no rider id; merged with nearby reports).
+        if (this.repo && typeof this.repo.saveRoadHazard === 'function') {
+          const { roadRecordOf, reporterKeyOf } = require('./road_and_places');
+          // What this rider felt (kind, spot, direction), not the live pin it merged into: the live
+          // registry merges any kind within 100 m, the saved reports merge per kind within 80 m.
+          // A new saved report gets a server id, so a client id can never overwrite another one.
+          const felt = {
+            hazardId: `rh_${crypto.randomBytes(8).toString('hex')}`, lat, lng,
+            heading: Number(msg.heading) || (rider ? Number(rider.heading) : 0) || pin.heading,
+            severity: msg.severity || pin.severity, classification: msg.classification || pin.classification,
+          };
+          this.repo.saveRoadHazard(roadRecordOf(felt), { reporterKey: reporterKeyOf(u.userId) })
+            .catch((e) => this.log?.warn?.('[road] save failed', e.message));
+        }
+        pin.spokenWarning = require('./road_and_places').spokenWarningFor(pin.classification);
+
         // Downstream recipient filtering: route, carriageway heading, upstream distance
         const connectedClients = this.rooms.get(gid);
         if (connectedClients) {
@@ -1080,6 +1151,8 @@ class Hub {
       if (soloRoom && typeof this.convoys.isSoloRide === 'function' && this.convoys.isSoloRide(soloRoom)) {
         return this.sendError(ws, 403, 'Talk is for group rides. This is a solo ride.', 'SOLO_RIDE');
       }
+      // 3.55: group talk switched off by the admin (only a new stream start is refused).
+      if (firstOff(this.convoys.featureFlags, ['intercom'])) return this.sendError(ws, 403, FEATURE_OFF_MESSAGE, FEATURE_OFF);
       // Validate target (must be a current room member, and not yourself).
       if (to) {
         const set = this.rooms.get(gid);

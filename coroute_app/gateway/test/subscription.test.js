@@ -630,43 +630,38 @@ test('Subscription lifecycle: effective tier, expiry rollback, warnings, history
   });
 
   let grantOrderId = '';
-  await t.test('admin grant extends the rider, writes a ledger order and an audited history entry', async () => {
+  await t.test('admin grant (3.55): a real membership the rider sees, a ₹0 ledger order and an audit entry', async () => {
     const bad = await env.api('POST', `/admin/subscription/users/${riderId}/grant`, { planTier: 'community', days: 10 }, admin.token);
     assert.equal(bad.status, 400);
     const ws = await env.connect(rider.token);
+    // A legacy name from an older console maps to its plan (tourOperator -> Large Group).
     const r = await env.api('POST', `/admin/subscription/users/${riderId}/grant`, { planTier: 'tourOperator', days: 45, reason: 'goodwill' }, admin.token);
     assert.equal(r.status, 200, JSON.stringify(r.json));
-    assert.equal(r.json.subscriptionTier, 'tourOperator');
+    assert.equal(r.json.subscriptionTier, 'group_large');
+    assert.equal(r.json.plan.source, 'membership');
     assert.ok(r.json.subscriptionValidUntil > Date.now() + 44 * DAY && r.json.subscriptionValidUntil <= Date.now() + 45 * DAY + 5000);
-    assert.equal(r.json.subscriptionStatus.tier, 'tourOperator');
     grantOrderId = r.json.orderId;
-    assert.ok(grantOrderId.startsWith('manual_'));
+    assert.ok(grantOrderId.startsWith('admin_'));
     const act = await ws.next((x) => x.type === 'SUBSCRIPTION_ACTIVATED');
-    assert.equal(act.tier, 'tourOperator'); assert.equal(act.method, 'MANUAL');
+    assert.equal(act.plan, 'group_large');
     const order = await repo.findRazorpayOrder(grantOrderId);
-    assert.equal(order.status, 'PAID'); assert.equal(order.mode, 'manual'); assert.equal(order.userId, riderId);
+    assert.equal(order.status, 'PAID'); assert.equal(order.mode, 'manual'); assert.equal(order.userId, riderId); assert.equal(order.amountInPaise, 0);
+    const mine = await env.api('GET', '/membership/my', null, rider.token);
+    assert.equal(mine.json.plan.category, 'group_large');
+    assert.equal(mine.json.plan.canHostGroup, true);
     const d = await doc();
-    assert.equal(d.subscriptionTier, 'tourOperator');
-    assert.equal(d.subscriptionExpiredAt, 0);
-    const entry = d.subscriptionHistory.at(-1);
-    assert.equal(entry.reason, 'granted'); assert.equal(entry.by, admin.user.userId); assert.equal(entry.days, 45); assert.equal(entry.tier, 'tourOperator');
-    assert.equal(d.paymentHistory.at(-1).billingCycle, 'manual');
-    const me = await env.api('GET', '/me', null, rider.token);
-    assert.equal(me.json.subscriptionStatus.tier, 'tourOperator'); assert.equal(me.json.subscriptionStatus.isExpired, false);
+    assert.equal(d.paymentHistory.at(-1).orderId, grantOrderId);
     ws.close();
   });
 
-  await t.test('rider history returns orders (newest first) and tier periods; /subscription/orders is the ledger alone', async () => {
+  await t.test('rider history returns the ledger order; /subscription/orders is the ledger alone', async () => {
     const h = await env.api('GET', '/subscription/history', null, rider.token);
     assert.equal(h.status, 200);
-    assert.equal(h.json.currentTier, 'tourOperator');
     assert.ok(Array.isArray(h.json.subscriptionHistory) && h.json.subscriptionHistory.some((p) => p.reason === 'expired'));
-    assert.ok(h.json.subscriptionHistory.some((p) => p.reason === 'granted'));
     assert.equal(h.json.orders.length, 1);
     const o = h.json.orders[0];
     assert.equal(o.orderId, grantOrderId); assert.equal(o.status, 'PAID'); assert.equal(o.amount, 0); assert.equal(o.mode, 'manual');
-    assert.equal(o.paymentId, grantOrderId); assert.equal(o.planTier, 'tourOperator'); assert.ok(o.createdAt > 0 && o.paidAt > 0);
-    assert.equal(h.json.subscriptionStatus.tier, 'tourOperator');
+    assert.ok(o.createdAt > 0 && o.paidAt > 0);
     const orders = await env.api('GET', '/subscription/orders', null, rider.token);
     assert.equal(orders.status, 200);
     assert.deepEqual(orders.json.orders.map((x) => x.orderId), [grantOrderId]);
@@ -674,7 +669,7 @@ test('Subscription lifecycle: effective tier, expiry rollback, warnings, history
     assert.deepEqual(none.json.orders, []);
   });
 
-  await t.test('admin payments list joins user name/email; per-user view returns both histories', async () => {
+  await t.test('admin payments list joins user name/email; per-user view shows the plan', async () => {
     const all = await env.api('GET', '/admin/payments?limit=50', null, admin.token);
     assert.equal(all.status, 200);
     const row = all.json.payments.find((p) => p.orderId === grantOrderId);
@@ -686,28 +681,23 @@ test('Subscription lifecycle: effective tier, expiry rollback, warnings, history
     const u = await env.api('GET', `/admin/payments/users/${riderId}`, null, admin.token);
     assert.equal(u.status, 200);
     assert.equal(u.json.paymentHistory.length, 1);
-    assert.equal(u.json.subscriptionHistory.length, 2);
-    assert.equal(u.json.subscriptionStatus.tier, 'tourOperator');
+    assert.equal(u.json.plan.tier, 'group_large');
     assert.equal(u.json.orders.length, 1);
     const missing = await env.api('GET', '/admin/payments/users/nobody', null, admin.token);
     assert.equal(missing.status, 404);
   });
 
-  await t.test('admin revoke sets community now with an audited history entry and WS SUBSCRIPTION_REVOKED', async () => {
+  await t.test('admin revoke sets community now (membership ended) with an audit entry and WS SUBSCRIPTION_REVOKED', async () => {
     const ws = await env.connect(rider.token);
     const r = await env.api('POST', `/admin/subscription/users/${riderId}/revoke`, { reason: 'chargeback' }, admin.token);
     assert.equal(r.status, 200, JSON.stringify(r.json));
-    assert.equal(r.json.subscriptionTier, 'community'); assert.equal(r.json.previousTier, 'tourOperator');
+    assert.equal(r.json.subscriptionTier, 'community'); assert.equal(r.json.previousTier, 'group_large');
     const m = await ws.next((x) => x.type === 'SUBSCRIPTION_REVOKED');
-    assert.equal(m.previousTier, 'tourOperator'); assert.equal(m.reason, 'chargeback');
-    const d = await doc();
-    assert.equal(d.subscriptionTier, 'community'); assert.equal(d.subscriptionValidUntil, 0);
-    const entry = d.subscriptionHistory.at(-1);
-    assert.equal(entry.reason, 'revoked'); assert.equal(entry.by, admin.user.userId); assert.equal(entry.tier, 'tourOperator');
-    const me = await env.api('GET', '/me', null, rider.token);
-    assert.equal(me.json.subscriptionTier, 'community');
-    assert.equal(me.json.subscriptionStatus.tier, 'community');
-    assert.equal(me.json.subscriptionStatus.previousTier, 'tourOperator');
+    assert.equal(m.previousTier, 'group_large'); assert.equal(m.reason, 'chargeback');
+    const mine = await env.api('GET', '/membership/my', null, rider.token);
+    assert.equal(mine.json.plan.category, 'community');
+    const audit = await env.api('GET', '/admin/audit?limit=50', null, admin.token);
+    if (audit.status === 200) assert.ok(audit.json.entries.some((e) => e.target === riderId && e.action === 'subscription.revoke'));
     ws.close();
   });
 });

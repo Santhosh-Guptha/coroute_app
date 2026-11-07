@@ -11,16 +11,19 @@
 const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const { COLLECTIONS: C, ACTIVE_STATUSES } = require('./oracle/repo');
-const { effectiveSubscription, isPaidTier } = require('./subscription_lifecycle');
+const { effectiveSubscription } = require('./subscription_lifecycle');
 const { isStaffAccount, isGuestAccount, staffEmails, hasStaffMember } = require('./staff');
-const { safeUsage, PRIVACY_NOTE } = require('./public_privacy');
+const { safeUsage, safeImpact, PRIVACY_NOTE } = require('./public_privacy');
+const { planFrom, effectiveMembership } = require('./entitlements');
+const { ADMIN_PLAN_CHOICES, adminPlanId, planView } = require('./admin_plans');
 
 const DAY = 86400000;
 const PAGE = 1000;
 const SCAN_CAP = 50000;
 const ROLES = ['RIDER', 'MASTER_ADMIN'];
 const STATUSES = ['ACTIVE', 'ON_HOLD', 'BLOCKED'];
-const TIERS = ['community', 'proRider', 'roadCaptain', 'tourOperator'];
+/** Plans an admin can filter by and assign (3.55: the plans riders have; legacy tier names are mapped). */
+const TIERS = ADMIN_PLAN_CHOICES;
 /** Timeline event types counted per group (what an admin asks about a ride). */
 const GROUP_EVENT_TYPES = ['REGROUP_INITIATED', 'REGROUP_COMPLETED', 'SEPARATED', 'OFF_ROUTE', 'OVERSPEED', 'OFFLINE', 'STOPPED',
   'SOS', 'POSSIBLE_INCIDENT', 'SWEEPER_DISTRESS', 'CONVOY_SPLIT', 'LOW_BATTERY', 'JOINED', 'LEFT'];
@@ -213,12 +216,26 @@ async function riderTotals(repo) {
   return { by, truncated: trips.truncated || alerts.truncated };
 }
 
-function riderRow(u, totals, riding, now, emails = staffEmails()) {
+/** ownerUserId -> the owner's membership that is active now (the newest when several). */
+function ownedMembershipMap(memberships, now) {
+  const map = new Map();
+  for (const raw of memberships) {
+    const m = effectiveMembership(raw, now);
+    if (!m || !m.ownerUserId || m.status !== 'ACTIVE' || num(m.validUntil) <= now) continue;
+    const prev = map.get(m.ownerUserId);
+    if (!prev || num(m.validUntil) > num(prev.validUntil)) map.set(m.ownerUserId, m);
+  }
+  return map;
+}
+
+function riderRow(u, totals, riding, now, emails = staffEmails(), owned = new Map()) {
   const t = totals.get(u.userId) || { trips: 0, km: 0, movingMs: 0, sos: 0, lastTripAt: 0 };
-  const st = effectiveSubscription(u, now);
+  // The plan the rider's app shows (membership, or a legacy tier until it ends), never only the legacy field.
+  const plan = planFrom({ membership: owned.get(u.userId) || null, userDoc: u, now });
   return {
     userId: u.userId, name: u.name || '', email: u.email || '', phone: u.phone || '',
-    role: u.role || 'RIDER', status: u.status || 'ACTIVE', tier: st.tier, guest: isGuest(u), staff: !isGuest(u) && isStaffAccount(u, emails),
+    role: u.role || 'RIDER', status: u.status || 'ACTIVE', tier: plan.category || 'community', planName: plan.name || 'Community',
+    planSource: plan.source || 'community', planValidUntil: num(plan.validUntil), guest: isGuest(u), staff: !isGuest(u) && isStaffAccount(u, emails),
     trips: t.trips, km: round1(t.km), ridingHours: round1(t.movingMs / 3600000), sos: t.sos,
     lastSeenAt: Math.max(num(u.lastActiveAt || u.lastLoginAt), t.lastTripAt), createdAt: num(u.createdAt),
     riding: riding.get(u.userId) || null,
@@ -251,6 +268,13 @@ async function riderDetail({ repo, convoys }, userId, now = Date.now()) {
   const movingMs = trips.rows.reduce((s, t) => s + tripMovingMs(t), 0);
   const tripEnds = trips.rows.map((t) => num(t.endTimeEpochMs)).filter((x) => x > 0);
   const st = effectiveSubscription(u, now);
+  // The plan exactly as the rider's app has it (GET /membership/my uses the same planFrom).
+  const p = planFrom({ membership, userDoc: u, now });
+  const pUntil = num(p.validUntil);
+  const resolved = {
+    tier: p.category || 'community', name: p.name || 'Community', source: p.source || 'community', seats: p.seats || 1,
+    validUntil: pUntil, daysRemaining: pUntil > now ? Math.ceil((pUntil - now) / DAY) : 0, legacyTier: p.legacyTier || null,
+  };
   const paid = orders.rows.filter((o) => o.status === 'PAID');
   const devices = new Map();
   for (const d of diags.rows.sort((a, b) => num(b.timestamp || b.createdAt) - num(a.timestamp || a.createdAt))) {
@@ -272,6 +296,12 @@ async function riderDetail({ repo, convoys }, userId, now = Date.now()) {
       staff: !isGuest(u) && isStaffAccount(u),
       createdAt: num(u.createdAt), lastSeenAt: Math.max(num(u.lastActiveAt || u.lastLoginAt), tripEnds.length ? Math.max(...tripEnds) : 0),
       appBuild: num(u.appBuild) || null, vehicleType: u.vehicleType || '', riding: riding.get(userId) || null,
+      // 3.55: the active bike summary the rider's app shared (null when none was shared).
+      bike: u.bikeModel || u.bikeColour || num(u.bikeCc) || num(u.bikeTankL) || num(u.bikeMileageKmL) ? {
+        model: String(u.bikeModel || ''), cc: num(u.bikeCc), colour: String(u.bikeColour || ''),
+        tankL: num(u.bikeTankL), mileageKmL: num(u.bikeMileageKmL),
+        cooling: ['air', 'oil', 'liquid'].includes(u.bikeCooling) ? u.bikeCooling : 'unknown',
+      } : null,
     },
     stats: {
       trips: trips.rows.length,
@@ -287,7 +317,7 @@ async function riderDetail({ repo, convoys }, userId, now = Date.now()) {
       falseAlarms: alerts.rows.filter(sosFalseAlarm).length,
     },
     plan: {
-      tier: st.tier, rawTier: st.rawTier, validUntil: st.validUntil, daysRemaining: st.daysRemaining, isExpired: st.isExpired,
+      ...resolved, rawTier: st.rawTier, isExpired: st.isExpired,
       membership: membership && membership.status ? {
         category: membership.category || '', name: membership.categoryName || '', status: membership.status,
         validUntil: num(membership.validUntil), members: Object.keys(membership.members || {}).length,
@@ -415,7 +445,27 @@ async function publicUsage(repo, now = Date.now()) {
     scan(soda, C.feedback, { status: 'APPROVED' }, { cap: 5000 }),
   ]);
   const ratings = reviews.rows.map((r) => r.rating).filter((x) => Number.isInteger(x) && x >= 1 && x <= 5);
+  // 3.55 website ride analytics (real, community-wide): moving hours, average moving speed and the
+  // kilometres of the last 8 weeks (Monday-based UTC weeks). Made coarse by safeUsage().
+  const WEEK = 7 * DAY;
+  const d = new Date(now);
+  const mondayUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - ((d.getUTCDay() + 6) % 7) * DAY;
+  const weeks = [];
+  for (let i = 7; i >= 0; i--) weeks.push({ weekStart: mondayUtc - i * WEEK, km: 0, rides: 0 });
+  let movingMs = 0;
+  let movingKm = 0;
+  for (const t of trips.rows) {
+    const km = tripKm(t);
+    const ms = tripMovingMs(t);
+    if (ms > 0 && km > 0) { movingMs += ms; movingKm += km; }
+    const end = num(t.endTimeEpochMs);
+    const w = weeks.find((x) => end >= x.weekStart && end < x.weekStart + WEEK);
+    if (w) { w.km += km; w.rides++; }
+  }
   return {
+    movingHours: Math.floor(movingMs / 3600000),
+    avgSpeedKmh: movingMs > 0 ? round1(movingKm / (movingMs / 3600000)) : null,
+    weeklyKm: weeks.map((w) => ({ weekStart: w.weekStart, km: Math.round(w.km), rides: w.rides })),
     riders: (() => { const staff = staffSet(users.rows); return users.rows.filter((u) => !isGuest(u) && !staff.has(u.userId)).length; })(),
     ridesCompleted: trips.rows.length,
     kmRidden: Math.round(trips.rows.reduce((s, t) => s + tripKm(t), 0)),
@@ -424,6 +474,51 @@ async function publicUsage(repo, now = Date.now()) {
     avgRating: ratings.length ? round1(ratings.reduce((a, b) => a + b, 0) / ratings.length) : null,
     ratingsCount: ratings.length,
     updatedAt: now,
+  };
+}
+
+/**
+ * 3.55 website "CoRoute impact" numbers, counted from stored documents (nothing estimated):
+ * distance, riding hours, rides, group rides, the largest group, the longest trip, bikes on CoRoute,
+ * and what the safety features did for real riders (SOS and crash alerts handled, alerts answered
+ * by other riders and how fast, road reports saved). Made coarse by safeImpact().
+ */
+async function publicImpact(repo, now = Date.now()) {
+  const soda = repo.soda;
+  const [usage, users, ended, alerts, roads] = await Promise.all([
+    publicUsage(repo, now), scan(soda, C.users), scan(soda, C.convoys, { tripStatus: 'ENDED' }), scan(soda, C.alerts),
+    C.roadHazards ? scan(soda, C.roadHazards, {}, { cap: 20000 }) : { rows: [] },
+  ]);
+  const trips = await scan(soda, C.trips);
+  const staff = staffSet(users.rows);
+  const riders = users.rows.filter((u) => !isGuest(u) && !staff.has(u.userId));
+  const bikes = new Set();
+  const models = new Set();
+  for (const u of riders) {
+    const pillion = String(u.vehicleType || '').toLowerCase() === 'pillion rider' || String(u.vehicleNo || '').toUpperCase() === 'PILLION';
+    if (!pillion && String(u.vehicleNo || '').trim().length >= 3) bikes.add(String(u.vehicleNo).trim().toUpperCase());
+    if (u.bikeModel) models.add(String(u.bikeModel).trim().toLowerCase());
+  }
+  const groupSizes = ended.rows.map((c) => Object.keys(c.members || {}).length).filter((n) => n >= 2);
+  const real = alerts.rows.filter(sosResolvedReal);
+  const crash = alerts.rows.filter((a) => /CRASH/.test(String(a.alertType || '')));
+  const answered = alerts.rows.filter((a) => Object.keys(a.responders || {}).length > 0);
+  const responses = alerts.rows.map(firstResponseSec).filter((x) => x !== null);
+  return {
+    ...usage,
+    groupRides: groupSizes.length,
+    largestGroup: groupSizes.length ? Math.max(...groupSizes) : 0,
+    longestTripKm: Math.floor(trips.rows.reduce((mx, t) => Math.max(mx, tripKm(t)), 0)),
+    bikes: bikes.size,
+    bikeModels: models.size,
+    safety: {
+      sosResolved: real.length,
+      crashAlerts: crash.length,
+      alertsAnswered: answered.length,
+      medianResponseSec: median(responses),
+      responsesCounted: responses.length,
+      roadReports: roads.rows.filter((h) => num(h.expiresAt) > now).length,
+    },
   };
 }
 
@@ -443,7 +538,18 @@ function registerPublicUsageRoutes({ r, repo, wrap }) {
   });
   r.get('/public/usage-stats', limiter, handler);
   r.get('/usage-stats', limiter, handler);
-  return { cache };
+  // 3.55 website impact numbers (polled every minute by the site; cached 60 s here).
+  const impactCache = makeCache(60 * 1000);
+  const impact = wrap(async (req, res) => {
+    res.set('Cache-Control', 'public, max-age=60');
+    const cfg = typeof repo.getCommunityStatsConfig === 'function' ? await repo.getCommunityStatsConfig().catch(() => ({})) : {};
+    if (cfg && cfg.showPublicStats === false) return res.json({ ok: true, enabled: false, stats: null });
+    const stats = safeImpact(await impactCache.get('impact', () => publicImpact(repo)));
+    res.json({ ok: true, enabled: true, stats, privacy: PRIVACY_NOTE });
+  });
+  r.get('/public/impact-stats', limiter, impact);
+  r.get('/impact-stats', limiter, impact);
+  return { cache, impactCache };
 }
 
 function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap, requireAdmin, plans }) {
@@ -473,13 +579,16 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
     const tier = String(req.query.tier || '').trim();
     const sort = Object.hasOwn(RIDER_SORTS, req.query.sort) ? req.query.sort : 'lastSeen';
     if (fresh(req)) cache.clear();
-    const [users, totals, riding] = await Promise.all([
+    const [users, totals, riding, memberships] = await Promise.all([
       scan(repo.soda, C.users), cache.get('riderTotals', () => riderTotals(repo)), ridingMap(repo, convoys),
+      scan(repo.soda, C.memberships, {}, { cap: 20000 }),
     ]);
     const emails = staffEmails();
-    let rows = users.rows.map((u) => riderRow(u, totals.by, riding, now, emails));
+    const owned = ownedMembershipMap(memberships.rows, now);
+    let rows = users.rows.map((u) => riderRow(u, totals.by, riding, now, emails, owned));
     if (STATUSES.includes(status)) rows = rows.filter((x) => x.status === status);
-    if (TIERS.includes(tier)) rows = rows.filter((x) => x.tier === tier);
+    const tierId = adminPlanId(tier);
+    if (tierId) rows = rows.filter((x) => x.tier === tierId);
     if (String(req.query.riding || '') === '1') rows = rows.filter((x) => x.riding);
     if (q) rows = rows.filter((x) => [x.name, x.email, x.phone, x.userId].some((v) => String(v || '').toLowerCase().includes(q)));
     const staffMode = ['1', 'all'].includes(String(req.query.staff || '')) ? String(req.query.staff) : '0';
@@ -535,7 +644,7 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
     const st = effectiveSubscription(u);
     return {
       userId: u.userId, role: u.role || 'RIDER', status: u.status || 'ACTIVE', statusReason: u.statusReason || '',
-      plan: { tier: st.tier, rawTier: st.rawTier, validUntil: st.validUntil, daysRemaining: st.daysRemaining, isExpired: st.isExpired },
+      plan: { ...(await planView(repo, u)), rawTier: st.rawTier, isExpired: st.isExpired },
       limits: limitsOf(u),
       options: { roles: ROLES, statuses: STATUSES, tiers: TIERS },
     };
@@ -558,10 +667,12 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
     const reason = typeof b.reason === 'string' ? b.reason.trim().slice(0, 200) : '';
     let plan = null;
     if (b.plan !== undefined) {
-      if (!b.plan || typeof b.plan !== 'object' || !TIERS.includes(b.plan.tier)) return bad('BAD_TIER', `plan.tier must be one of ${TIERS.join(', ')}`);
-      const days = b.plan.tier === 'community' ? 0 : Number(b.plan.days);
-      if (b.plan.tier !== 'community' && (!Number.isInteger(days) || days < 1 || days > 3660)) return bad('BAD_DAYS', 'plan.days must be a whole number from 1 to 3660');
-      plan = { tier: b.plan.tier, days, note: typeof b.plan.note === 'string' ? b.plan.note.trim().slice(0, 500) : '' };
+      // Legacy tier names from an older console are mapped to their plan (proRider -> group_small ...).
+      const tierId = b.plan && typeof b.plan === 'object' ? adminPlanId(b.plan.tier) : null;
+      if (!tierId) return bad('BAD_TIER', `plan.tier must be one of ${TIERS.join(', ')}`);
+      const days = tierId === 'community' ? 0 : Number(b.plan.days);
+      if (tierId !== 'community' && (!Number.isInteger(days) || days < 1 || days > 3660)) return bad('BAD_DAYS', 'plan.days must be a whole number from 1 to 3660');
+      plan = { tier: tierId, days, note: typeof b.plan.note === 'string' ? b.plan.note.trim().slice(0, 500) : '' };
     }
     let limits = null;
     if (b.limits !== undefined) {
@@ -607,15 +718,12 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
     }
     if (plan) {
       u = await repo.findUserById(userId);
-      const before = effectiveSubscription(u).tier;
-      if (plan.tier === 'community') {
-        if (before !== 'community' || isPaidTier(u.subscriptionTier)) {
-          await plans.revoke({ req, userDoc: u, note: plan.note });
-          changed.push('plan');
-        }
-      } else {
-        await plans.grant({ req, userDoc: u, planTier: plan.tier, days: plan.days, reason: plan.note });
-        changed.push('plan');
+      try {
+        const out = await plans.assign({ req, userDoc: u, plan: plan.tier, days: plan.days, note: plan.note });
+        if (out.changed) changed.push('plan');
+      } catch (e) {
+        if (e && e.code && e.status) return res.status(e.status).json({ ok: false, error: e.message, code: e.code, changed });
+        throw e;
       }
     }
     if (gate && changed.length) gate.invalidate(userId);
@@ -628,5 +736,5 @@ function registerAdminAnalyticsRoutes({ r, repo, convoys, auth, hub, gate, wrap,
 }
 
 module.exports = {
-  registerAdminAnalyticsRoutes, registerPublicUsageRoutes, overview, riderDetail, groupDetail, publicUsage, maxTripsFor, scan, median,
+  registerAdminAnalyticsRoutes, registerPublicUsageRoutes, overview, riderDetail, groupDetail, publicUsage, publicImpact, maxTripsFor, scan, median,
 };

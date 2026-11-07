@@ -30,6 +30,17 @@ const {
   SpatialGrid, gridSize, projectAll, projectWindow, angleDiff, bearing, crossAlong, RouteIndexCache,
 } = require('./net_geo');
 const { ConvoyError, statusOf, sourceOf, severityOf, falseAlarmCount } = require('./convoys');
+const { publicRideOf } = require('./public_ride_settings');
+
+/**
+ * 3.55 "Help from public riders" (switch `publicRiderHelp`): a rider of a PUBLIC ride (the host
+ * showed the ride to nearby riders) within this straight-line distance can be asked even when the
+ * route / heading rules above do not pick them (stopped at a dhaba, on a side road, no route).
+ * Same consent as the rest of the network (the subject's "Ask nearby riders", the helper's "Help
+ * other riders"), same caps, never across a public-ride block, never a rider whose public ride is
+ * suspended. Medical info still only after acceptance and only with responderMedical.
+ */
+const PUBLIC_RADIUS_M = Math.max(200, Math.min(5000, Number(process.env.NET_PUBLIC_RADIUS_M) || 2000));
 
 const ACTIVE_RESPONDER = new Set(['ACCEPTED', 'EN_ROUTE', 'ARRIVING', 'ARRIVED']);
 const MOVING_RESPONDER = new Set(['ACCEPTED', 'EN_ROUTE', 'ARRIVING']);
@@ -512,15 +523,38 @@ class SafetyNetwork extends EventEmitter {
       if (on) {
         const m = this._routeEta(inc, on, rider, { aheadMax });
         if (m) out.push({ gid, uid, d, isLead, mode: 'HIGH', etaS: m.etaS, routeDistanceM: m.routeDistanceM, lateralM: m.lateralM, aheadOnRoute: true });
+        else { const p = this._publicCandidate(inc, c, isLead); if (p) out.push(p); }
         continue;
       }
       const f = this._pathMatch(rider, inc.lat, inc.lng, { maxD: R * config.netFallbackRadiusPct / 100, lateral: config.netFallbackLateralM, minKmh: config.netFallbackMinKmh });
-      if (!f) continue;
+      if (!f) { const p = this._publicCandidate(inc, c, isLead); if (p) out.push(p); continue; }
       const { v } = this._speedModel(rider.speedKmh);
       out.push({ gid, uid, d, isLead, mode: 'LOW', etaS: f.d * config.netDetourPct / 100 / v, routeDistanceM: null, lateralM: f.lateralM, aheadOnRoute: false, v });
     }
     out.sort((a, b) => (a.etaS - b.etaS) || ((a.mode === 'HIGH' ? 0 : 1) - (b.mode === 'HIGH' ? 0 : 1)) || (a.lateralM - b.lateralM));
     return out;
+  }
+
+  /** 3.55: a rider of a public ride close to the incident (see PUBLIC_RADIUS_M), or null. */
+  _publicCandidate(inc, c, isLead) {
+    const { gid, uid, room, rider, d } = c;
+    const ff = this.convoys.featureFlags;
+    if (ff && !ff.isOn('publicRiderHelp')) return null;
+    if (d > PUBLIC_RADIUS_M || !publicRideOf(room.meta.publicRide).on) return null;
+    const pr = this.publicRides;
+    if (pr) {
+      const t = this.clock();
+      if (typeof pr.suspendedUntil === 'function' && pr.suspendedUntil(uid, t)) return null;
+      if (typeof pr.blocked === 'function') {
+        for (const x of inc.alerts) {
+          if (x.source === 'NEARBY_REPORT' || !x.uid) continue;
+          if (pr.blocked(x.uid, uid, t) || pr.blocked(uid, x.uid, t)) return null;
+        }
+      }
+    }
+    const { v, penalty } = this._speedModel(rider.speedKmh);
+    const roadM = d * config.netDetourPct / 100;
+    return { gid, uid, d, isLead, mode: 'PUBLIC', etaS: roadM / v + penalty, routeDistanceM: null, lateralM: d, aheadOnRoute: false, publicRide: true };
   }
 
   _pendingCount(inc) { let n = 0; for (const x of inc.notified.values()) if (x.status === 'REQUESTED') n++; return n; }
@@ -1102,6 +1136,7 @@ function externalRequestView(inc, n) {
   if (Number.isFinite(n.routeDistanceM)) out.routeDistanceM = r100(n.routeDistanceM);
   if (Number.isFinite(n.etaS)) out.etaS = r30(n.etaS);
   if (n.confidence === 'FAR') out.farByRoad = true; // 3.16: close in a straight line, far by road (road values above)
+  if (n.confidence === 'PUBLIC') out.publicRide = true; // 3.55: asked because they ride a public ride nearby
   return out;
 }
 

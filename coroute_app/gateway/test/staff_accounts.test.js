@@ -45,8 +45,9 @@ test('staff are excluded from rider, member and revenue counts end to end', asyn
   const boss = await env.register('Boss Admin', 'boss@coroute.test');
   const ops = await env.register('Ops Staff', 'ops@coroute.test');
   const rider = await env.register('Ravi Rider', 'ravi.staff@coroute.test');
-  const guest = await api('POST', '/auth/guest', { name: 'Quick Guest' });
-  assert.equal(guest.status, 200, JSON.stringify(guest.json));
+  // Guest mode is retired (3.55); an account an older gateway created is still counted apart.
+  const guestDoc = await repo.createUser({ userId: 'usr_quick_guest', name: 'Quick Guest', email: 'guest_9_1@guest.coroute.local', role: 'RIDER', provider: 'guest', createdAt: Date.now() });
+  const guest = { json: { user: { userId: guestDoc.userId } } };
   const A = boss.token;
   const bossId = boss.user.userId;
   const opsId = ops.user.userId;

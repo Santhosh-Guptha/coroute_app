@@ -12,7 +12,7 @@ const { toWire, toGpx, filterPoints, validateChunk, uploadPermission, TrackError
 const { registerSubscriptionPublicRoutes, registerSubscriptionAuthRoutes } = require('./subscription_routes');
 const { registerMembershipPublicRoutes, registerMembershipAuthRoutes } = require('./membership_routes');
 const { registerAdminAnalyticsRoutes, registerPublicUsageRoutes, maxTripsFor } = require('./admin_analytics');
-const { adminGrantPlan, adminRevokePlan } = require('./subscription_routes');
+const { assignPlan } = require('./admin_plans');
 const { isStaffAccount, isGuestAccount, staffEmails, hasStaffMember } = require('./staff');
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -124,6 +124,7 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   });
   r.post('/auth/login', authLimiter, loginIdLimiter, wrap(async (req, res) => res.json(await auth.login(req.body || {}))));
   r.post('/auth/google', authLimiter, wrap(async (req, res) => res.json(await auth.loginWithGoogle(req.body || {}))));
+  // Guest mode was retired in 3.55 (410 GUEST_RETIRED); kept so old builds get a clear message.
   r.post('/auth/guest', authLimiter, wrap(async (req, res) => res.json(await auth.loginAsGuest(req.body || {}))));
 
   // ---- website endpoints (public, rate-limited, no cookies, no personal data stored for analytics) ----
@@ -208,6 +209,9 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     res.json(view);
   }));
 
+  // 3.55 admin feature switches: the website's community numbers are hidden while switched off.
+  const flagsOf = () => convoys.featureFlags || null;
+  require('./feature_flags').registerFeatureFlagPublicGuards({ r, flagsOf });
   // Razorpay webhook endpoint (public, HMAC-signature authenticated)
   registerSubscriptionPublicRoutes({ r, auth, repo, hub, wrap });
   registerMembershipPublicRoutes({ r, repo, wrap, convoys });
@@ -227,6 +231,12 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
     }
     next();
   });
+
+  // 3.55 admin feature switches: GET /features (riders), /admin/features (console) and the 403
+  // FEATURE_OFF guards in front of the REST features (registered before the routes they guard).
+  require('./feature_flags').registerFeatureFlagRoutes({ r, flagsOf, repo, wrap, requireAdmin });
+  // 3.55 platform: admin warnings for the rider (GET /me/warnings, POST /me/warnings/:id/ack).
+  if (hub && hub.publicRides && hub.publicRides.adminWarnings) require('./admin_warnings').registerAdminWarningRoutes({ r, warnings: hub.publicRides.adminWarnings, wrap });
 
   r.get('/me', wrap(async (req, res) => {
     const me = await auth.me(req.user.userId, { appBuild: parseInt(req.get('X-CoRoute-Build') || '0', 10) });
@@ -270,10 +280,8 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // Every rider (not only new app builds) needs the safety profile before riding in a group.
   const ensureProfileComplete = async (req) => {
     if (req.user?.role === 'MASTER_ADMIN') return;
-    if (req.user?.provider === 'guest' || (req.user?.userId || '').startsWith('guest_')) return;
     const u = req.dbUser || await repo.findUserById(req.user.userId);
     if (!u) return;
-    if (u.provider === 'guest') return; // guest ids are ordinary usr_ ids: the account says it is a guest
     const isPillion = (u.vehicleType || '').trim().toLowerCase() === 'pillion rider' || (u.vehicleNo || '').trim().toUpperCase() === 'PILLION';
     const complete = Boolean(
       (u.name || '').trim().length >= 2 &&
@@ -1068,12 +1076,16 @@ function buildRouter({ auth, convoys, repo, soda, hub, startedAt, tracks, timeli
   // Subscription and Razorpay UPI-only payment routes (including admin pricing & coupon management)
   registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin });
   registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin });
+  // 3.55: saved road reports along a ride, CoRoute rider place reviews (+ admin moderation).
+  require('./road_and_places').registerRoadAndPlaceRoutes({ r, repo, convoys, wrap, requireAdmin });
+  // 3.55 risky-stretch heads-up: anonymous hard-brake cells, served only with k >= 10 riders.
+  require('./road_risk').registerRoadRiskRoutes({ r, repo, convoys, wrap });
   // Admin analytics (overview, riders, groups) and per-rider configuration (role, status, plan, limits).
   registerAdminAnalyticsRoutes({
     r, repo, convoys, auth, hub, gate, wrap, requireAdmin,
     plans: {
-      grant: ({ req, userDoc, planTier, days, reason }) => adminGrantPlan({ repo, auth, hub, req, userDoc, planTier, days, reason }),
-      revoke: ({ req, userDoc, note }) => adminRevokePlan({ repo, auth, hub, req, userDoc, reason: note }),
+      // 3.55: the console assigns Community / Small Group / Large Group as a real membership.
+      assign: ({ req, userDoc, plan, days, note }) => assignPlan({ repo, auth, hub, convoys, req, userDoc, plan, days, note }),
     },
   });
 

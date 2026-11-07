@@ -63,7 +63,46 @@ function safeUsage(raw) {
     groupsRidden: roundCount(u.groupsRidden),
     sosResolved: roundCount(u.sosResolved),
     avgRating: safeRating(u.avgRating, u.ratingsCount),
+    // 3.55 ride analytics: hours rounded down like counts; the average speed only from MIN_COUNT rides
+    // (whole km/h); a week's kilometres only when MIN_COUNT rides are behind it (else null: not shown).
+    movingHours: roundCount(u.movingHours),
+    avgSpeedKmh: Number(u.ridesCompleted) >= MIN_COUNT && Number(u.avgSpeedKmh) > 0 ? Math.floor(Number(u.avgSpeedKmh)) : null,
+    weeklyKm: Array.isArray(u.weeklyKm)
+      ? u.weeklyKm.map((w) => ({
+        weekStart: toDay(w && w.weekStart),
+        km: Number(w && w.rides) >= MIN_COUNT ? roundKm(w.km) : null,
+        rides: roundCount(w && w.rides),
+      }))
+      : [],
     updatedAt: toHour(u.updatedAt),
+  };
+}
+
+/**
+ * 3.55 website impact view: everything in safeUsage plus records and safety outcomes.
+ *  - largest group: a rider count of one ride with nobody named, shown only once 10 group rides exist;
+ *  - longest trip: rounded down to 10 km, only once 10 rides exist;
+ *  - bikes / bike models / safety counts: counts like every other (nothing below 10);
+ *  - median response time: whole seconds, only from 10 answered alerts.
+ */
+function safeImpact(raw) {
+  const u = raw || {};
+  const s = u.safety || {};
+  const enoughRides = Number(u.ridesCompleted) >= MIN_COUNT;
+  return {
+    ...safeUsage(u),
+    groupRides: roundCount(u.groupRides),
+    largestGroup: Number(u.groupRides) >= MIN_COUNT ? Math.floor(nonNeg(u.largestGroup)) : 0,
+    longestTripKm: enoughRides ? Math.floor(nonNeg(u.longestTripKm) / 10) * 10 : 0,
+    bikes: roundCount(u.bikes),
+    bikeModels: roundCount(u.bikeModels),
+    safety: {
+      sosResolved: roundCount(s.sosResolved),
+      crashAlerts: roundCount(s.crashAlerts),
+      alertsAnswered: roundCount(s.alertsAnswered),
+      medianResponseSec: Number(s.responsesCounted) >= MIN_COUNT && Number(s.medianResponseSec) > 0 ? Math.round(Number(s.medianResponseSec)) : null,
+      roadReports: roundCount(s.roadReports),
+    },
   };
 }
 
@@ -84,4 +123,4 @@ function safeCommunityStats(stats) {
 /** What the website may say about how its numbers are made (sent with usage-stats). */
 const PRIVACY_NOTE = Object.freeze({ minCount: MIN_COUNT, rounding: 'down', timeResolution: 'hour', perRider: false, perPlace: false });
 
-module.exports = { MIN_COUNT, roundCount, roundKm, toHour, toDay, safeRating, safeUsage, safeCommunityStats, PRIVACY_NOTE };
+module.exports = { MIN_COUNT, roundCount, roundKm, toHour, toDay, safeRating, safeUsage, safeImpact, safeCommunityStats, PRIVACY_NOTE };

@@ -17,7 +17,7 @@ const assert = require('node:assert/strict');
 const jwt = require('jsonwebtoken');
 const config = require('../src/config');
 const { boot } = require('./_helpers');
-const { realContactNumber } = require('../src/auth');
+const { realContactNumber, signToken } = require('../src/auth');
 
 test('audit fixes: session, guests, live links', async (t) => {
   const env = await boot();
@@ -46,39 +46,29 @@ test('audit fixes: session, guests, live links', async (t) => {
     assert.ok(!me.headers.get('x-coroute-token').includes(','));
   });
 
-  await t.test('guests: no placeholder numbers, still allowed to ride, never texted', async () => {
+  await t.test('guest mode is retired: /auth/guest answers 410, old guest sessions end, placeholders never used', async () => {
     const g = await api('POST', '/auth/guest', { name: 'Quick Guest' });
-    assert.equal(g.status, 200, JSON.stringify(g.json));
-    assert.equal(g.json.user.phone, '');
-    assert.equal(g.json.user.emergencyContact, '');
-    assert.equal(g.json.user.isGuest, true);
-    const odd = await api('POST', '/auth/guest', { name: 12345, vehicleNo: { x: 1 } });
-    assert.equal(odd.status, 200, 'a non-string name falls back instead of failing');
-    assert.match(odd.json.user.name, /^Guest_\d{4}$/);
-    assert.equal(odd.json.user.vehicleNo, 'GUEST');
-    const c = await api('POST', '/convoys', { name: 'Guest Ride' }, g.json.token);
-    assert.ok(c.json.groupId, JSON.stringify(c.json));
+    assert.equal(g.status, 410, JSON.stringify(g.json));
+    assert.equal(g.json.code, 'GUEST_RETIRED');
+    assert.match(g.json.error, /free CoRoute account/);
+    assert.equal(g.json.token, undefined);
 
-    // An older guest account stored with the placeholders.
-    const lead = await env.register('Roster Lead', 'rosterlead@coroute.test');
-    const ride = await api('POST', '/convoys', { name: 'Roster Ride' }, lead.token);
-    const legacy = await api('POST', '/auth/guest', { name: 'Old Guest' });
-    const doc = await gw.repo.findUserById(legacy.json.user.userId);
-    await gw.repo.updateUser(doc.key, { phone: '9999999999', emergencyContact: '112112112', emergencyContactName: 'Emergency Services' });
-    gw.gate.invalidate(legacy.json.user.userId);
-    assert.equal(realContactNumber({ ...doc, phone: '9999999999' }, 'phone'), '');
+    // A guest account created by an older gateway: its session ends with a clear message on every build.
+    const legacy = await gw.repo.createUser({
+      userId: 'usr_old_guest', name: 'Old Guest', email: 'guest_1_2@guest.coroute.local', role: 'RIDER', provider: 'guest',
+      phone: '9999999999', emergencyContact: '112112112', emergencyContactName: 'Emergency Services', createdAt: Date.now() - 60000,
+    });
+    const token = signToken(legacy);
+    const me = await api('GET', '/me', undefined, token);
+    assert.equal(me.status, 401);
+    assert.equal(me.json.code, 'SESSION_INVALID');
+    assert.match(me.json.error, /Guest mode has ended/);
+    const ride = await api('POST', '/convoys', { name: 'Guest Ride' }, token);
+    assert.equal(ride.status, 401, 'a retired guest cannot start a ride');
+
+    // Placeholder numbers stored by old guest accounts are never treated as real contacts.
+    assert.equal(realContactNumber({ ...legacy, phone: '9999999999' }, 'phone'), '');
     assert.equal(realContactNumber({ provider: 'password', email: 'a@b.c', phone: '9999999999' }, 'phone'), '9999999999');
-    assert.equal((await api('POST', '/convoys/join', { code: ride.json.joinCode }, legacy.json.token)).status, 200);
-    const room = gw.convoys.rooms.get(ride.json.groupId);
-    const r = room.riders.get(legacy.json.user.userId);
-    assert.equal(r.phone, '');
-    assert.equal(r.emergencyContact, '');
-    const roster = await api('GET', `/convoys/${ride.json.groupId}/emergency-roster`, undefined, lead.token);
-    if (roster.status === 200) {
-      assert.ok(!JSON.stringify(roster.json).includes('9999999999'), 'a placeholder is never in the SMS roster');
-    }
-    const own = await api('GET', `/convoys/${ride.json.groupId}/emergency-roster`, undefined, legacy.json.token);
-    if (own.status === 200) assert.equal(own.json.emergencyContact ?? null, null);
   });
 
   await t.test('an ended ride is final: a retried end keeps its end time, resume is refused', async () => {

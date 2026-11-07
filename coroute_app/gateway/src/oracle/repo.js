@@ -53,6 +53,9 @@ const C = {
   organizations: 'organizations',
   diagnostics: 'device_diagnostics',
   roomSnapshots: 'room_snapshots',
+  // 3.55: road surface reports saved for future rides (no rider ids) and CoRoute rider place reviews.
+  roadHazards: 'road_hazards',
+  placeReviews: 'place_reviews',
 };
 
 /** Alert fields that live in memory only (filled by the safety network) and are never stored. */
@@ -66,6 +69,9 @@ function storableAlert(a) {
 }
 
 const ACTIVE_STATUSES = ['PLANNING', 'STARTED', 'PAUSED'];
+
+const SEVERITY_RANK = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
+const rankSeverity = (s) => SEVERITY_RANK[String(s || '').toUpperCase()] ?? 1;
 
 class Repo {
   /** @param {import('./soda').SodaClient} soda */
@@ -153,6 +159,13 @@ class Repo {
     await idx(C.diagnostics, 'diag_user_ix', ['riderId', { path: 'timestamp', datatype: 'number' }]);
     await idx(C.diagnostics, 'diag_mfg_ix', [{ path: 'deviceInfo.manufacturer', datatype: 'string' }]);
     await idx(C.diagnostics, 'diag_status_ix', ['lifecycleStatus', { path: 'timestamp', datatype: 'number' }]);
+    await idx(C.roadHazards, 'road_hazards_id_ux', ['hazardId'], true);
+    await idx(C.roadHazards, 'road_hazards_lat_ix', [{ path: 'lat', datatype: 'number' }]);
+    await idx(C.roadHazards, 'road_hazards_exp_ix', [{ path: 'expiresAt', datatype: 'number' }]);
+    await idx(C.placeReviews, 'place_reviews_id_ux', ['reviewId'], true);
+    await idx(C.placeReviews, 'place_reviews_place_ix', ['placeId', { path: 'createdAt', datatype: 'number' }]);
+    await idx(C.placeReviews, 'place_reviews_user_ix', ['userId']);
+    await idx(C.placeReviews, 'place_reviews_lat_ix', [{ path: 'lat', datatype: 'number' }]);
   }
 
   // ---------- users ----------
@@ -308,8 +321,75 @@ class Repo {
       await this._scrubWhere(C.messages, { groupId: gid }, id);
     }
     await this._scrubWhere(C.broadcasts, { byUserId: uid }, id);
+    // Plans (3.55): the rider's own memberships go with the account, and the rider leaves any group
+    // plan of another host. Before this, an erased account left its membership behind: a new account
+    // that got the same userId showed "plan taken" in the console but not in the rider's app.
+    // Payment ledger orders stay (accounting), as before.
+    await this.purgeMembershipsOf(uid);
+    // Place reviews (3.55) and their photos go with the account.
+    const placeRevs = await this._allRows(C.placeReviews, { userId: uid });
+    for (const { value } of placeRevs) {
+      for (const meta of (Array.isArray(value && value.uploads) ? value.uploads : [])) await photos.remove(meta).catch(() => {});
+    }
+    await this.soda.removeWhere(C.placeReviews, { userId: uid });
     await this.soda.removeWhere(C.users, { userId: uid });
     return { groups: groups.size };
+  }
+
+  /** Removes the memberships owned by `uid` and the rider's seat in other hosts' memberships. */
+  async purgeMembershipsOf(uid) {
+    if (!uid) return { removed: 0, seatsFreed: 0 };
+    const removed = await this.soda.removeWhere(C.memberships, { ownerUserId: String(uid) });
+    let seatsFreed = 0;
+    const asMember = await this._allRows(C.memberships, { [`members.${uid}`]: { $exists: true } });
+    for (const { key, value } of asMember) {
+      if (!value || !value.members || !Object.hasOwn(value.members, uid)) continue;
+      const members = { ...value.members };
+      delete members[uid];
+      await this.soda.replace(C.memberships, key, { ...value, members, updatedAt: Date.now() });
+      seatsFreed++;
+    }
+    return { removed: Number(removed) || 0, seatsFreed };
+  }
+
+  /**
+   * Data cleanup (3.55): memberships whose owner account no longer exists (erased before 3.55, or
+   * removed from the database by hand) are deleted, and seats held by missing accounts are freed.
+   */
+  async purgeOrphanMemberships() {
+    const rows = await this._allRows(C.memberships, {});
+    const exists = new Map();
+    const known = async (uid) => {
+      if (!uid) return false;
+      if (!exists.has(uid)) exists.set(uid, !!(await this.findUserById(uid)));
+      return exists.get(uid);
+    };
+    let removed = 0;
+    let seatsFreed = 0;
+    // 3.55 safety review: this runs unattended (daily retention) and deletes plans for good. When an
+    // unusually large share of owners looks missing (users collection unreadable, a partial restore),
+    // nothing is removed and the run says so: a paying rider never loses a plan to a bad read. An
+    // admin can look and run reconcile again.
+    let missingOwners = 0;
+    for (const { value } of rows) if (value && !(await known(value.ownerUserId))) missingOwners++;
+    if (missingOwners > Math.max(5, Math.ceil(rows.length * 0.2))) {
+      return { orphanMembershipsRemoved: 0, orphanSeatsFreed: 0, orphanPurgeSkipped: missingOwners };
+    }
+    for (const { key, value } of rows) {
+      if (!value) continue;
+      if (!(await known(value.ownerUserId))) {
+        await this.soda.remove(C.memberships, key);
+        removed++;
+        continue;
+      }
+      const members = { ...(value.members || {}) };
+      let changed = false;
+      for (const uid of Object.keys(members)) {
+        if (!(await known(uid))) { delete members[uid]; changed = true; seatsFreed++; }
+      }
+      if (changed) await this.soda.replace(C.memberships, key, { ...value, members, updatedAt: Date.now() });
+    }
+    return { orphanMembershipsRemoved: removed, orphanSeatsFreed: seatsFreed };
   }
 
   /** Newest first, up to `limit`, read in pages of 1000 (the SODA REST page size). */
@@ -368,6 +448,15 @@ class Repo {
   async guardianEvents(groupId, since) {
     return (await this.soda.query(C.events, { groupId, startedAt: { $gte: since } },
       { limit: 100, orderBy: [{ path: 'startedAt', datatype: 'number', order: 'desc' }] })).map((r) => r.value);
+  }
+  // 3.55 arrival message (src/guardian_arrival.js): one marker per rider and ride, first write wins.
+  async guardianArrival(groupId, userId) {
+    return (await this.soda.findOne(C.events, { eventId: `ARRIVED-${groupId}-${userId}` }))?.value || null;
+  }
+  async addGuardianArrival(doc) {
+    if (await this.soda.findOne(C.events, { eventId: doc.eventId })) return false;
+    try { await this.soda.insert(C.events, doc); return true; }
+    catch (e) { if (await this.soda.findOne(C.events, { eventId: doc.eventId })) return false; throw e; }
   }
   async saveGuardianSubscription(doc) { return this.soda.upsertBy(C.guardianSubscriptions, { subscriptionId: doc.subscriptionId }, doc); }
   async advanceGuardianSubscription(expected, state) {
@@ -807,6 +896,99 @@ class Repo {
   }
   async geoCachePut(k, value) {
     return this.soda.upsertBy(C.geoCache, { k }, { k, value, createdAt: Date.now() });
+  }
+
+  // ---------- 3.55 road reports (saved for future rides) ----------
+  /** Saved reports within the box (expired ones left out), at most `limit`. */
+  async roadHazardsIn({ s, w, n, e }, { now = Date.now(), limit = 500 } = {}) {
+    const rows = await this.soda.query(C.roadHazards, { lat: { $gte: s, $lte: n }, expiresAt: { $gt: now } }, { limit: Math.min(2000, limit * 4) });
+    return rows.map((r) => r.value).filter((h) => h && h.lng >= w && h.lng <= e).slice(0, limit);
+  }
+
+  /**
+   * Saves one road report: merged into a saved report of the same kind within `mergeM` (same
+   * direction), else a new one. Never stores who reported it, only how many separate reports.
+   */
+  async saveRoadHazard(h, { mergeM = 80, now = Date.now(), reporterKey = '' } = {}) {
+    const dLat = mergeM / 111320;
+    const dLng = mergeM / (111320 * Math.max(0.2, Math.cos((h.lat * Math.PI) / 180)));
+    const near = await this.soda.query(C.roadHazards, { lat: { $gte: h.lat - dLat, $lte: h.lat + dLat }, classification: h.classification }, { limit: 50 });
+    const hit = near.find((r) => r.value && Math.abs(r.value.lng - h.lng) <= dLng &&
+      (!(r.value.heading > 0 && h.heading > 0) || Math.abs(((r.value.heading - h.heading + 540) % 360) - 180) <= 60));
+    if (hit) {
+      const v = hit.value;
+      // Separate reports are counted once per reporter key (a salted hash; the id itself is never stored).
+      const keys = Array.isArray(v.reporterKeys) ? v.reporterKeys : [];
+      const newReporter = reporterKey && !keys.includes(reporterKey);
+      const next = {
+        ...v,
+        severity: rankSeverity(h.severity) > rankSeverity(v.severity) ? h.severity : v.severity,
+        reports: (Number(v.reports) || 1) + (newReporter ? 1 : 0),
+        reporterKeys: newReporter ? [...keys, reporterKey].slice(-50) : keys,
+        lastReportedAt: now,
+        expiresAt: Math.max(Number(v.expiresAt) || 0, h.expiresAt),
+      };
+      await this.soda.replace(C.roadHazards, hit.key, next);
+      return next;
+    }
+    const doc = {
+      hazardId: h.hazardId, lat: h.lat, lng: h.lng, heading: h.heading || 0, severity: h.severity, classification: h.classification,
+      reports: 1, reporterKeys: reporterKey ? [reporterKey] : [], firstReportedAt: now, lastReportedAt: now, expiresAt: h.expiresAt,
+      cleared: 0,
+    };
+    await this.soda.upsertBy(C.roadHazards, { hazardId: doc.hazardId }, doc);
+    return doc;
+  }
+
+  /** A rider says the spot is fixed / not there: enough of those removes it early. */
+  async clearRoadHazard(hazardId, { now = Date.now(), clearerKey = '' } = {}) {
+    const r = await this.soda.findOne(C.roadHazards, { hazardId: String(hazardId) });
+    if (!r) return null;
+    // 3.55 safety review: each rider counts once (salted key, like reporterKeys). Before, one rider
+    // tapping "Fixed?" twice (or a script) removed a pothole warning for everyone.
+    const keys = Array.isArray(r.value.clearKeys) ? r.value.clearKeys : [];
+    if (clearerKey && keys.includes(clearerKey)) return r.value;
+    const cleared = (Number(r.value.cleared) || 0) + 1;
+    const gone = cleared >= Math.max(2, Math.ceil((Number(r.value.reports) || 1) / 2));
+    const next = { ...r.value, cleared, clearKeys: clearerKey ? [...keys, clearerKey].slice(-50) : keys, ...(gone ? { expiresAt: now } : {}) };
+    await this.soda.replace(C.roadHazards, r.key, next);
+    return next;
+  }
+
+  async purgeExpiredRoadHazards(now = Date.now()) {
+    return this.soda.removeWhere(C.roadHazards, { expiresAt: { $lt: now } });
+  }
+
+  // ---------- 3.55 CoRoute rider place reviews ----------
+  async savePlaceReview(doc) {
+    await this.soda.upsertBy(C.placeReviews, { reviewId: doc.reviewId }, doc);
+    return doc;
+  }
+  async findPlaceReview(reviewId) {
+    const r = await this.soda.findOne(C.placeReviews, { reviewId: String(reviewId) });
+    return r ? { ...r.value, key: r.key } : null;
+  }
+  /** One rider's review of one place (a new review replaces it). */
+  async findPlaceReviewBy(userId, placeId) {
+    const r = await this.soda.findOne(C.placeReviews, { userId: String(userId), placeId: String(placeId) });
+    return r ? { ...r.value, key: r.key } : null;
+  }
+  async placeReviewsFor(placeId, { limit = 20 } = {}) {
+    const rows = await this.soda.query(C.placeReviews, { placeId: String(placeId), status: 'PUBLISHED' },
+      { orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }], limit: Math.min(100, limit) });
+    return rows.map((r) => r.value);
+  }
+  async placeReviewsIn({ s, w, n, e }, { limit = 2000 } = {}) {
+    const rows = await this.soda.query(C.placeReviews, { lat: { $gte: s, $lte: n }, status: 'PUBLISHED' }, { limit });
+    return rows.map((r) => r.value).filter((v) => v && v.lng >= w && v.lng <= e);
+  }
+  async listPlaceReviews({ status = null, limit = 200 } = {}) {
+    const rows = await this.soda.query(C.placeReviews, status ? { status } : {},
+      { orderBy: [{ path: 'createdAt', datatype: 'number', order: 'desc' }], limit: Math.min(1000, limit) });
+    return rows.map((r) => r.value);
+  }
+  async deletePlaceReviewsOf(userId) {
+    return this.soda.removeWhere(C.placeReviews, { userId: String(userId) });
   }
 
   // ---------- safety network (3.15) ----------
@@ -1845,6 +2027,7 @@ class Repo {
 
   async reconcileDuplicateMembershipsAndOrders() {
     const now = Date.now();
+    const orphans = await this.purgeOrphanMemberships().catch(() => ({ orphanMembershipsRemoved: 0, orphanSeatsFreed: 0 }));
     const memberships = await this.soda.query(C.memberships, {}, { limit: 5000 }).catch(() => []);
     let membershipsAdjusted = 0;
     let paymentHistoryDeduplicated = 0;
@@ -1908,6 +2091,7 @@ class Repo {
       success: true,
       membershipsAdjusted,
       paymentHistoryDeduplicated,
+      ...orphans,
       timestamp: now,
     };
   }

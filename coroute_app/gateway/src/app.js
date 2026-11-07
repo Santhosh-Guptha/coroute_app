@@ -26,6 +26,7 @@ const { TimelineEngine } = require('./timeline');
 const { SafetyNetwork } = require('./safety_network');
 const { Discovery } = require('./discovery');
 const { PublicRides, publicRideAdminRouter } = require('./public_ride');
+const { AdminWarnings } = require('./admin_warnings');
 const { SafetyAudit } = require('./safety_audit');
 const { RouteIndexCache, gridSize } = require('./net_geo');
 const { loadSite, isHiddenPath, SITE_PAGES, SITEMAP } = require('./pages');
@@ -35,10 +36,13 @@ const { communityStories } = require('./trip_reviews');
 const { sha256 } = require('./convoys');
 const { GuardianService } = require('./guardians');
 const { GuardianPush } = require('./guardian_push');
+const { GuardianArrival } = require('./guardian_arrival');
+const { SignalAhead } = require('./signal_ahead');
 const { guardianRouter } = require('./guardian_routes');
 const { EmergencySmsGateway } = require('./emergency_sms_gateway');
 const { JobLease } = require('./job_lease');
 const { Mirror } = require('./mirror');
+const { FeatureFlags } = require('./feature_flags');
 // Encrypted Object Storage backups (src/backups.js -> backup_jobs.js): startBackupJobs({ lease, repo, soda, logger })
 // registers 'backup-critical' and 'backup-full' on the job lease. Optional so a build without it still starts.
 const backupModule = (() => {
@@ -76,6 +80,15 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   const gate = new UserGate(repo);
   const auth = new AuthService(repo, { googleVerifier, gate });
   const convoys = new ConvoyManager(repo, { logger });
+  // 3.55 admin feature switches: one cached copy per node (re-read every 30 s and on a mirror poke);
+  // every enforcement point reads convoys.featureFlags (no DB read per message). A failed first read
+  // leaves every feature on.
+  const featureFlags = new FeatureFlags({ repo, logger });
+  convoys.featureFlags = featureFlags;
+  await featureFlags.refresh();
+  featureFlags.start();
+  // 3.55 buddy pairs in large groups (src/buddies.js): assigned, stored and relayed only.
+  convoys.buddies = new (require('./buddies').BuddyService)(convoys, { logger });
   const emergencyGateway = new EmergencySmsGateway({
     repo,
     convoys,
@@ -115,6 +128,12 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   convoys.on('telemetry', (gid, rider) => network.onTelemetry(gid, rider));
   convoys.on('roomLoaded', (gid) => network.onRoomLoaded(gid));
   convoys.on('roomEnded', (gid, room) => { network.onRoomEnded(gid, room); discovery.onRoomEnded(gid); publicRides.onRoomEnded(gid); });
+  // 3.55 solo and guardian safety: "Arrived safely" markers for guardian links, no-signal-ahead
+  // notices (memory only), and public-ride blocks / suspensions for the safety network's public riders.
+  new GuardianArrival({ convoys, repo, logger }).attach();
+  convoys.signalAhead = new SignalAhead({ convoys, logger });
+  convoys.on('roomEnded', (gid) => convoys.signalAhead.onRoomEnded(gid));
+  network.publicRides = publicRides;
 
   const app = express();
   app.disable('x-powered-by');
@@ -158,10 +177,16 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
   network.attach(hub);
   discovery.attach(hub);
   publicRides.attach(hub);
+  // 3.55 platform: a report's WARN reaches the rider (stored until acknowledged, pushed when online).
+  publicRides.adminWarnings = new AdminWarnings({ repo, hub, audit, flagsOf: () => featureFlags, logger });
   // Two-node live mirror (src/mirror.js): off unless MIRROR_LISTEN_HOST / MIRROR_PEER_URL are set (opts: tests).
   const mirror = new Mirror({ convoys, logger, node: nodeName, ...(mirrorOpts || {}) });
   mirror.attach(hub);
   mirror.register('pr', publicRides);
+  // A switch changed on one node pokes the other to re-read the document (the DB stays the truth).
+  mirror.register('ff', featureFlags);
+  // Every connected app switches within seconds (each node tells its own sockets).
+  featureFlags.on('change', (snap) => hub.broadcastAll({ type: 'FEATURE_FLAGS', ...snap }));
   await mirror.start();
   let guardianPush = null;
   // Pilot is disabled by default; an explicit HTTPS origin prevents host-header links.
@@ -360,6 +385,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
 
   async function shutdown() {
     guardianPush?.stop();
+    featureFlags.stop();
     const leaseStopped = lease.stopAll({ waitMs: 8000 });
     retention.stop();
     subscriptions.stop();
@@ -380,7 +406,7 @@ async function createApp({ soda = createSoda(), logger = console, migrate = true
     await new Promise((resolve) => server.close(resolve));
   }
 
-  return { app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
+  return { featureFlags, app, server, hub, mirror, repo, soda, auth, gate, convoys, retention, subscriptions, lease, tracks, timeline, geo, network, discovery, publicRides, audit, routes, emergencyGateway, shutdown };
 }
 
 /**

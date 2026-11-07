@@ -147,9 +147,20 @@ function legacyPlanOf(userDoc, now = Date.now()) {
  * Pure: the plan from an active membership document and/or a user document. A rider without a paid
  * plan (or whose plan ended) is on Community: solo rides, free, no end date.
  */
+/**
+ * False for a membership left behind by an earlier account that had the same userId (created more
+ * than a minute before this account). Such a plan was never this rider's (3.55 data cleanup).
+ */
+function belongsToAccount(m, userDoc) {
+  if (!m || !userDoc) return true;
+  const made = Number(m.createdAt) || 0;
+  const born = Number(userDoc.createdAt) || 0;
+  return !(made && born && made + 60000 < born);
+}
+
 function planFrom({ membership = null, userDoc = null, now = Date.now() } = {}) {
   let best = null;
-  const m = effectiveMembership(membership, now);
+  const m = belongsToAccount(membership, userDoc) ? effectiveMembership(membership, now) : null;
   if (membershipActive(m, now)) {
     best = {
       source: 'membership', category: m.category,
@@ -189,5 +200,5 @@ function entitlementsFor(plan, catalog) {
 module.exports = {
   MEMBERSHIP_PLANS, PAID_PLANS, CATALOG_PLANS, COMMUNITY_PLAN, LEGACY_MEMBERSHIP_PLANS, DEFAULT_SEATS, LEGACY_PLAN_MAP,
   LEGACY_INDIVIDUAL_PLAN, isMembershipPlan, isLegacyTier, isLegacyMembershipPlan, normalizePlanId, effectiveMembership,
-  clampSeats, membershipSeats, membershipActive, legacyPlanOf, planFrom, resolvePlan, entitlementsFor,
+  clampSeats, membershipSeats, membershipActive, legacyPlanOf, planFrom, belongsToAccount, resolvePlan, entitlementsFor,
 };

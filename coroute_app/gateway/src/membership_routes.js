@@ -6,7 +6,7 @@ const { createRazorpayGateway } = require('./razorpay_gateway');
 const reviews = require('./trip_reviews');
 const { safeCommunityStats } = require('./public_privacy');
 const reviewPhotos = require('./review_photos');
-const { CATALOG_PLANS, COMMUNITY_PLAN, LEGACY_INDIVIDUAL_PLAN, planFrom, entitlementsFor, effectiveMembership, isLegacyMembershipPlan } = require('./entitlements');
+const { CATALOG_PLANS, COMMUNITY_PLAN, LEGACY_INDIVIDUAL_PLAN, planFrom, entitlementsFor, effectiveMembership, isLegacyMembershipPlan, belongsToAccount } = require('./entitlements');
 const pricing = require('./plan_pricing');
 
 // Review photos live outside public/ (config.reviewPhotoDir); every read goes through a checked route.
@@ -120,7 +120,20 @@ async function activateMembershipFromOrder({ repo, order, paymentId, method = 'R
     : catalog.group_small);
   const now = Date.now();
 
-  const rawExisting = await repo.findMembershipByOwner(uid);
+  const ownerDoc = userDoc || (await repo.findUserById(uid));
+  let rawExisting = await repo.findMembershipByOwner(uid);
+  // A membership left by an earlier account with this userId is never continued (3.55): a fresh one starts.
+  // 3.55 safety review: it is also retired here. findMembershipByOwner() prefers the ACTIVE
+  // membership that runs longest, so a leftover running past the new plan's end kept being found
+  // first, failed belongsToAccount() and the rider who just paid was shown Community.
+  for (let i = 0; i < 5 && rawExisting && !belongsToAccount(rawExisting, ownerDoc); i++) {
+    await repo.saveMembership({
+      ...rawExisting, status: 'EXPIRED', statusReason: 'PREVIOUS_ACCOUNT', scheduledChange: null,
+      validUntil: Math.min(now, Number(rawExisting.validUntil) || now), retiredAt: now,
+    });
+    rawExisting = await repo.findMembershipByOwner(uid);
+  }
+  if (rawExisting && !belongsToAccount(rawExisting, ownerDoc)) rawExisting = null;
   const existing = effectiveMembership(rawExisting, now);
   const membershipId = existing ? existing.membershipId : `mem_${crypto.randomUUID()}`;
   const members = existing ? (existing.members || {}) : {};
@@ -488,12 +501,15 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
   r.get('/membership/my', wrap(async (req, res) => {
     const uid = req.user.userId;
     // The membership as it is now (a downgrade bought earlier starts when the current period ends).
-    const owned = effectiveMembership(await repo.findMembershipByOwner(uid), Date.now());
+    const meDoc = req.dbUser || (await repo.findUserById(uid));
+    const ownedRaw = await repo.findMembershipByOwner(uid);
+    // A plan left by an earlier account with this userId is not this rider's (3.55).
+    const owned = belongsToAccount(ownedRaw, meDoc) ? effectiveMembership(ownedRaw, Date.now()) : null;
     const allMemberships = await repo.findMembershipsForUser(uid);
     const participating = allMemberships.filter((m) => m.ownerUserId !== uid);
     const activeTrip = await repo.getActiveTrip(uid);
     // One answer for "what may I do": seats to host (host included), until when, and from where.
-    const plan = planFrom({ membership: owned, userDoc: req.dbUser || (await repo.findUserById(uid)) });
+    const plan = planFrom({ membership: owned, userDoc: meDoc });
 
     let effectiveEntitlements = {
       ptt: false,
@@ -1939,4 +1955,5 @@ function registerMembershipAuthRoutes({ r, repo, convoys, wrap, requireAdmin }) 
 module.exports = {
   registerMembershipPublicRoutes,
   registerMembershipAuthRoutes,
+  activateMembershipFromOrder,
 };

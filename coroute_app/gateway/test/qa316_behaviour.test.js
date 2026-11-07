@@ -180,15 +180,16 @@ test('BEHIND_SWEEPER edges: 30 s behind then caught up is nothing; the sweeper l
   assert.equal(list[0].data.result, 'SWEEPER_CHANGED');
   assert.equal([...R.room.riders.values()].filter((r) => r.role === 'SWEEPER').length, 0);
 
-  // ROLE_SET over the socket: LEAD is not settable, the creator is never a target, a pack rider is refused.
+  // ROLE_SET over the socket: an unknown role is refused, the owner-lead cannot move back before
+  // someone else leads (3.55), a pack rider is refused.
   const wl = await t.joinRoom(R.lead.token, R.gid);
   const wp = await t.joinRoom(pack.token, R.gid);
-  wl.sendJson({ type: 'ROLE_SET', userId: uid(kiran), role: 'LEAD', clientId: 'qa-role-1' });
+  wl.sendJson({ type: 'ROLE_SET', userId: uid(kiran), role: 'BOSS', clientId: 'qa-role-1' });
   let err = await wl.next((m) => m.type === 'ERROR');
   assert.equal(err.reason, 'BAD_ROLE');
   wl.sendJson({ type: 'ROLE_SET', userId: uid(R.lead), role: 'SWEEPER', clientId: 'qa-role-2' });
   err = await wl.next((m) => m.type === 'ERROR');
-  assert.equal(err.reason, 'NOT_ALLOWED');
+  assert.equal(err.reason, 'NEED_LEAD');
   wp.sendJson({ type: 'ROLE_SET', userId: uid(kiran), role: 'SWEEPER', clientId: 'qa-role-3' });
   err = await wp.next((m) => m.type === 'ERROR');
   assert.equal(err.code, 403);

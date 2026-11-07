@@ -4,23 +4,30 @@
 const DEFAULTS = Object.freeze({ essentialsEnabled: true, autoDiscovery: true, groupFuelEnabled: true,
   guardianEnabled: true, guardianRequirePin: false, guardianMaxHours: 72,
   notificationInsights: true, guardianStopMinutes: 15, guardianOfflineMinutes: 10,
-  guardianDeviationMinutes: 5 });
+  guardianDeviationMinutes: 5,
+  // 3.55 group stretch alert: the lead hears "Group spread 4 km" past this along-route spread (km).
+  stretchAlertKm: 3 });
 const LIMITS = { guardianMaxHours: [1, 336], guardianStopMinutes: [5, 120],
   guardianOfflineMinutes: [2, 60], guardianDeviationMinutes: [1, 30] };
+/** Settings that take one of a few values only (3.55). */
+const CHOICES = { stretchAlertKm: [1, 2, 3, 5] };
+const validSetting = (key, value) => (CHOICES[key] ? Number.isInteger(value) && CHOICES[key].includes(value)
+  : LIMITS[key] ? Number.isInteger(value) && value >= LIMITS[key][0] && value <= LIMITS[key][1]
+    : typeof DEFAULTS[key] === 'boolean' && typeof value === 'boolean');
 function featurePolicy(raw) {
   const out = { ...DEFAULTS };
   for (const key of Object.keys(DEFAULTS)) {
     const value = raw?.[key];
     if (typeof DEFAULTS[key] === 'boolean' && typeof value === 'boolean') out[key] = value;
     if (LIMITS[key] && Number.isInteger(value) && value >= LIMITS[key][0] && value <= LIMITS[key][1]) out[key] = value;
+    if (CHOICES[key] && validSetting(key, value)) out[key] = value;
   }
   return out;
 }
 function policyPatch(current, patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid feature settings.');
   for (const [key, value] of Object.entries(patch)) {
-    if (!Object.hasOwn(DEFAULTS, key) || (LIMITS[key] ? !Number.isInteger(value) || value < LIMITS[key][0] || value > LIMITS[key][1]
-      : typeof value !== 'boolean')) throw new Error('Invalid feature setting: ' + key);
+    if (!Object.hasOwn(DEFAULTS, key) || !validSetting(key, value)) throw new Error('Invalid feature setting: ' + key);
   }
   return featurePolicy({ ...featurePolicy(current), ...patch });
 }
@@ -41,4 +48,4 @@ function roomAnalytics(room, now = Date.now()) {
     route: { calculated: !!room.meta.route && !room.meta.route.approximate },
   } };
 }
-module.exports = { DEFAULTS, featurePolicy, policyPatch, roomAnalytics };
+module.exports = { DEFAULTS, CHOICES, featurePolicy, policyPatch, roomAnalytics };

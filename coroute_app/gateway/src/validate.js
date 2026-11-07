@@ -116,6 +116,49 @@ function profileFields(input, { optionalEmpty = [] } = {}) {
   return out;
 }
 
+// ---------------------------------------------------------------- bike summary (3.55)
+/** The active bike's summary a rider's app sends for engine-care and fuel analysis (owner + admin only). */
+const BIKE_KEYS = ['bikeModel', 'bikeCc', 'bikeColour', 'bikeTankL', 'bikeMileageKmL', 'bikeCooling'];
+const BIKE_COOLING = new Set(['unknown', 'air', 'oil', 'liquid']);
+
+/**
+ * Validates the optional bike summary. Only keys present (not undefined) are checked and
+ * returned. null, '' or 0 clears a value (stored as '' / 0 / 'unknown'). Throws ValidationError.
+ */
+function bikeFields(input) {
+  const out = {};
+  const errors = {};
+  if (!input || typeof input !== 'object') return out;
+  const text = (key, max, label) => {
+    const v = input[key];
+    if (v === undefined) return;
+    if (v === null) { out[key] = ''; return; }
+    if (typeof v !== 'string') { errors[key] = 'This field must be text.'; return; }
+    const s = v.trim().replace(/ +/g, ' ');
+    if (s.length > max || CONTROL.test(s)) { errors[key] = `Use at most ${max} characters for the ${label}, on one line.`; return; }
+    out[key] = s;
+  };
+  const number = (key, min, max, message, { int = false } = {}) => {
+    const v = input[key];
+    if (v === undefined) return;
+    if (v === null || v === 0 || v === '') { out[key] = 0; return; }
+    const n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+    if (!Number.isFinite(n) || n < min || n > max || (int && !Number.isInteger(n))) { errors[key] = message; return; }
+    out[key] = int ? n : Math.round(n * 10) / 10;
+  };
+  text('bikeModel', 60, 'bike model');
+  text('bikeColour', 30, 'bike colour');
+  number('bikeCc', 50, 2500, 'Engine size must be a whole number from 50 to 2500 cc.', { int: true });
+  number('bikeTankL', 2, 40, 'Tank size must be from 2 to 40.');
+  number('bikeMileageKmL', 5, 120, 'Mileage must be from 5 to 120 km per unit.');
+  if (input.bikeCooling !== undefined) {
+    const c = input.bikeCooling === null ? 'unknown' : input.bikeCooling;
+    if (typeof c !== 'string' || !BIKE_COOLING.has(c)) errors.bikeCooling = 'Pick a cooling type from the list.'; else out.bikeCooling = c;
+  }
+  if (Object.keys(errors).length) throw new ValidationError(Object.values(errors)[0], errors);
+  return out;
+}
+
 // ---------------------------------------------------------------- trips
 const TRIP_ID = /^[A-Za-z0-9_-]{4,80}$/;
 const TRIP_TEXT = { groupId: 40, tripName: 120, startLocationName: 120, destinationName: 120, createdByUserName: 40 };
@@ -204,8 +247,9 @@ function validPhone(v) {
 const CLIENT_ID = /^[A-Za-z0-9_.:-]{1,64}$/;
 function clientIdOf(v) { return typeof v === 'string' && CLIENT_ID.test(v) ? v : ''; }
 
-/** Roles the lead may give a rider (3.16 ROLE_SET). LEAD is never set through a socket message. */
-const ROLES_SETTABLE = new Set(['SWEEPER', 'PACK']);
+/** Roles the lead may give a rider (3.16 ROLE_SET; 3.55 adds LEAD: the riding lead, the owner keeps the owner's rights). */
+// 3.55: LEAD too (the riding lead at the front; the ride's owner keeps the owner's rights).
+const ROLES_SETTABLE = new Set(['LEAD', 'SWEEPER', 'PACK']);
 /** A settable role as sent, or '' for anything else. */
 function roleOf(v) { return typeof v === 'string' && ROLES_SETTABLE.has(v) ? v : ''; }
 
@@ -238,5 +282,5 @@ function weatherPoints(input, nowS = Math.floor(Date.now() / 1000)) {
 
 module.exports = {
   ValidationError, SWITCHES, profileFields, tripRecord, sitePath, cleanPhone, downsample, validPhone, clientIdOf, BLOOD_GROUPS,
-  ROLES_SETTABLE, roleOf, liveTokenOf, weatherPoints,
+  ROLES_SETTABLE, roleOf, liveTokenOf, weatherPoints, bikeFields, BIKE_KEYS,
 };

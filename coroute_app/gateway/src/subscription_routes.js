@@ -1349,30 +1349,45 @@ function registerSubscriptionAuthRoutes({ r, auth, repo, hub, wrap, requireAdmin
         subscriptionHistory: periodsOf(userDoc),
         subscriptionWarnedAt: userDoc.subscriptionWarnedAt || {},
         orders: await riderOrders(repo, userDoc.userId),
+        // The plan the rider's app shows (membership or a legacy tier until it ends), 3.55.
+        plan: await require('./admin_plans').planView(repo, userDoc),
       });
     }));
 
-    // POST /api/admin/subscription/users/:userId/grant { planTier, days, reason } -> grants / extends manually
+    // POST /api/admin/subscription/users/:userId/grant { planTier, days, reason } -> assigns a plan (3.55)
+    // planTier: group_small | group_large (a legacy tier name is mapped to its plan). The rider gets a
+    // real membership, so the app shows it at once (admin_plans.js).
     r.post('/admin/subscription/users/:userId/grant', requireAdmin, wrap(async (req, res) => {
+      const { assignPlan, adminPlanId } = require('./admin_plans');
       const body = req.body || {};
-      const planTier = normalizeTier(body.planTier);
+      const plan = adminPlanId(body.planTier);
       const days = Number.isInteger(body.days) ? body.days : parseInt(body.days, 10);
-      if (!isPaidTier(planTier)) return res.status(400).json({ error: 'planTier must be proRider, roadCaptain or tourOperator' });
+      if (!plan || plan === 'community') return res.status(400).json({ error: 'planTier must be group_small or group_large' });
       if (!Number.isInteger(days) || days < 1 || days > 3660) return res.status(400).json({ error: 'days must be an integer between 1 and 3660' });
       const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
       const userDoc = await repo.findUserById(req.params.userId);
       if (!userDoc) return res.status(404).json({ error: 'User not found' });
-      const out = await adminGrantPlan({ repo, auth, hub, req, userDoc, planTier, days, reason });
-      res.json({ success: true, ...out });
+      try {
+        const out = await assignPlan({ repo, auth, hub, req, userDoc, plan, days, note: reason });
+        res.json({
+          success: true, userId: userDoc.userId, orderId: out.orderId, plan: out.plan,
+          subscriptionTier: out.plan.tier, subscriptionValidUntil: out.plan.validUntil,
+        });
+      } catch (e) {
+        if (e && e.code && e.status) return res.status(e.status).json({ error: e.message, code: e.code });
+        throw e;
+      }
     }));
 
-    // POST /api/admin/subscription/users/:userId/revoke { reason } -> community now
+    // POST /api/admin/subscription/users/:userId/revoke { reason } -> community now (membership and legacy tier)
     r.post('/admin/subscription/users/:userId/revoke', requireAdmin, wrap(async (req, res) => {
+      const { assignPlan, planView } = require('./admin_plans');
       const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
       const userDoc = await repo.findUserById(req.params.userId);
       if (!userDoc) return res.status(404).json({ error: 'User not found' });
-      const out = await adminRevokePlan({ repo, auth, hub, req, userDoc, reason });
-      res.json({ success: true, ...out });
+      const before = await planView(repo, userDoc);
+      const out = await assignPlan({ repo, auth, hub, req, userDoc, plan: 'community', note: reason });
+      res.json({ success: true, userId: userDoc.userId, subscriptionTier: 'community', previousTier: before.legacyTier || before.tier, plan: out.plan, subscriptionStatus: effectiveSubscription(await repo.findUserById(userDoc.userId)) });
     }));
 
     // POST /api/admin/payments/:orderId/refund { amountInPaise?, reason } -> Razorpay refund of the order's payment.

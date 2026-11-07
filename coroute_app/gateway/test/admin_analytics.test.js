@@ -25,7 +25,11 @@ test('admin analytics, rider config, public usage stats, coupon plan binding', a
     const res = await api('GET', '/public/usage-stats');
     assert.equal(res.status, 200);
     assert.equal(res.json.ok, true);
-    assert.deepEqual(Object.keys(res.json.stats).sort(), ['avgRating', 'groupsRidden', 'kmRidden', 'riders', 'ridesCompleted', 'sosResolved', 'updatedAt']);
+    assert.deepEqual(Object.keys(res.json.stats).sort(), ['avgRating', 'avgSpeedKmh', 'groupsRidden', 'kmRidden', 'movingHours', 'riders', 'ridesCompleted', 'sosResolved', 'updatedAt', 'weeklyKm']);
+    const imp = await api('GET', '/public/impact-stats');
+    assert.equal(imp.status, 200);
+    assert.equal(imp.json.stats.longestTripKm, 0, 'no records shown on an empty database');
+    assert.equal(imp.json.stats.safety.medianResponseSec, null);
     assert.equal(res.json.stats.riders, 0);
     assert.equal(res.json.stats.ridesCompleted, 0);
     assert.equal(res.json.stats.kmRidden, 0);
@@ -214,10 +218,23 @@ test('admin analytics, rider config, public usage stats, coupon plan binding', a
   });
 
   await t.test('rider config: plan grant and revoke, trip limit enforced, block, role; every change audited', async () => {
-    const grant = await api('PATCH', `/admin/users/${u2}/config`, { plan: { tier: 'roadCaptain', days: 30, note: 'club lead' } }, A);
+    // 3.55: the console assigns the plans riders have, as a real membership the rider's app reads.
+    const grant = await api('PATCH', `/admin/users/${u2}/config`, { plan: { tier: 'group_large', days: 30, note: 'club lead' } }, A);
     assert.equal(grant.status, 200, JSON.stringify(grant.json));
-    assert.equal(grant.json.config.plan.tier, 'roadCaptain');
+    assert.equal(grant.json.config.plan.tier, 'group_large');
+    assert.equal(grant.json.config.plan.source, 'membership');
     assert.ok(grant.json.config.plan.daysRemaining >= 29);
+    const mine = await api('GET', '/membership/my', null, r2.token);
+    assert.equal(mine.json.plan.category, 'group_large', 'the rider sees the plan the admin gave');
+    assert.equal(mine.json.plan.canHostGroup, true);
+    // Same plan again: the days add to the time left.
+    const more = await api('PATCH', `/admin/users/${u2}/config`, { plan: { tier: 'group_large', days: 10 } }, A);
+    assert.ok(more.json.config.plan.daysRemaining >= 39, JSON.stringify(more.json.config.plan));
+    // A legacy name from an older console maps to its plan (roadCaptain -> Large Group).
+    const legacyName = await api('PATCH', `/admin/users/${u2}/config`, { plan: { tier: 'roadCaptain', days: 1 } }, A);
+    assert.equal(legacyName.json.config.plan.tier, 'group_large');
+    const listed = await api('GET', '/admin/analytics/riders?tier=group_large&staff=all', null, A);
+    assert.ok(listed.json.riders.some((x) => x.userId === u2 && x.planName), JSON.stringify(listed.json.riders.map((x) => [x.userId, x.tier])));
 
     const limit = await api('PATCH', `/admin/users/${u2}/config`, { limits: { maxTrips: 1 } }, A);
     assert.equal(limit.status, 200);
@@ -233,6 +250,10 @@ test('admin analytics, rider config, public usage stats, coupon plan binding', a
 
     const revoke = await api('PATCH', `/admin/users/${u2}/config`, { plan: { tier: 'community' } }, A);
     assert.equal(revoke.json.config.plan.tier, 'community');
+    assert.equal((await api('GET', '/membership/my', null, r2.token)).json.plan.category, 'community', 'removed for the rider too');
+    const bad = await api('PATCH', `/admin/users/${u2}/config`, { plan: { tier: 'diamond', days: 3 } }, A);
+    assert.equal(bad.status, 400);
+    assert.equal(bad.json.code, 'BAD_TIER');
 
     const block = await api('PATCH', `/admin/users/${u2}/config`, { status: 'BLOCKED', reason: 'chargeback' }, A);
     assert.equal(block.status, 200);

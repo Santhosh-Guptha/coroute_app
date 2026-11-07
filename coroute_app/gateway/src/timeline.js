@@ -10,6 +10,7 @@
  *             OVERSPEED (over the group speed limit), POSSIBLE_INCIDENT (hard stop, then still), NO_REPLY (solo check-in)
  *             (open while it lasts; closed with endedAt/durationMs)
  *   3.16      instant ROLE_CHANGED (sweeper set or removed), FOLLOW_UP (still okay after a crash alarm);
+ *   3.55      instant VEHICLE_SWAP (two riders swapped bikes, or a rider and their pillion changed places);
  *             interval STALE_UPDATE (a moving rider stopped sending fixes), LOW_BATTERY (15% and not charging),
  *             BEHIND_SWEEPER (a rider fell behind the sweeper on the route)
  *
@@ -35,6 +36,11 @@ const GAP_MAX_S = 300;
 const GAP_RING = 10;
 const FRESH_MS = 2 * 60000;
 const HOLD_MS = 60000; // a condition must last this long before it becomes an entry
+// 3.55 automatic riding roles: a new front / back rider must hold this long and be this far
+// ahead of / behind the current lead / sweeper; roles change at most once per AUTO_ROLE_EVERY_MS.
+const AUTO_ROLE_HOLD_MS = 45000;
+const AUTO_ROLE_GAP_M = 150;
+const AUTO_ROLE_EVERY_MS = 120000;
 const MAX_TS = Number.MAX_SAFE_INTEGER;
 /** Off-route is checked at most this often per rider (HOLD_MS decides anyway; the phone has its own check). */
 const OFF_ROUTE_CHECK_MS = 5000;
@@ -314,6 +320,7 @@ class TimelineEngine {
       await this._checkSubClusters(gid, st, room, t);
       await this._checkSeparation(gid, st, room, t);
       await this._checkSweeper(gid, st, room, t);
+      await this._checkAutoRoles(gid, st, room, t);
       await this._checkSweeperDistress(gid, st, room, t);
       await this._checkRegroupConvergence(gid, st, room, t);
     }
@@ -594,7 +601,13 @@ class TimelineEngine {
         return null;
       }
       case 'ROLE_CHANGED':
-        return this._instant(gid, { ...who, type: 'ROLE_CHANGED', data: { role: act.role, byUserId: act.byUserId || '' } });
+        return this._instant(gid, { ...who, type: 'ROLE_CHANGED', data: { role: act.role, from: act.from || '', byUserId: act.byUserId || '', auto: act.auto === true } });
+      // 3.55: two riders swapped bikes (BIKES), or a rider and their pillion changed places (PILLION).
+      case 'VEHICLE_SWAP':
+        return this._instant(gid, { ...who, type: 'VEHICLE_SWAP', data: {
+          kind: act.kind === 'PILLION' ? 'PILLION' : 'BIKES', withUserId: act.withUserId || '', withName: act.withName || this._name(gid, act.withUserId),
+          vehicleNo: String(act.vehicleNo || '').slice(0, 20), withVehicleNo: String(act.withVehicleNo || '').slice(0, 20),
+        } });
       case 'REGROUP_INITIATED': {
         const rg = act.regroup;
         await this._open(gid, st, 'REGROUP', {
@@ -809,7 +822,9 @@ class TimelineEngine {
     }
     if (result === 'NO_REPLY') {
       const awayM = Number.isFinite(num(msg.awayM)) ? Math.round(Math.max(0, Math.min(500000, num(msg.awayM)))) : 0;
-      await this._open(gid, st, `NO_REPLY:${user.userId}`, { userId: user.userId, userName: rider.name, type: 'NO_REPLY', startedAt: t, lat, lng, data: { awayM } });
+      // 3.55 missing-rider check (the phone decided; the server only relays): the lead's text says why.
+      const why = msg.context === 'MISSING_RIDER' ? { context: 'MISSING_RIDER' } : {};
+      await this._open(gid, st, `NO_REPLY:${user.userId}`, { userId: user.userId, userName: rider.name, type: 'NO_REPLY', startedAt: t, lat, lng, data: { awayM, ...why } });
       return { opened: true };
     }
     const rs = st.riders.get(user.userId);
@@ -949,6 +964,72 @@ class TimelineEngine {
         if (open) await this._close(gid, st, slot, t);
       }
     }
+  }
+
+  /**
+   * 3.55 automatic riding roles: when the lead turned them on, the rider at the front leads and the
+   * last one sweeps. Order is along the route (or the distance left to the destination without a
+   * route). A new front / back rider must hold for AUTO_ROLE_HOLD_MS and be AUTO_ROLE_GAP_M past the
+   * current lead / sweeper, and roles change at most once per AUTO_ROLE_EVERY_MS, so a tight pack
+   * never flickers. A lead or sweeper who went offline is replaced by the riders who are online.
+   */
+  async _checkAutoRoles(gid, st, room, t) {
+    if (!room.meta.autoRoles || typeof this.convoys.applyAutoRoles !== 'function') { st.autoKey = null; return; }
+    // 3.55 admin feature switches: automatic roles (or riding roles as a whole) turned off for everyone.
+    const ff = this.convoys.featureFlags;
+    if (ff && (!ff.isOn('autoRoles') || !ff.isOn('rideRoles'))) { st.autoKey = null; return; }
+    if (st.autoLastAt && t - st.autoLastAt < AUTO_ROLE_EVERY_MS) return;
+    const m = room.meta;
+    const fresh = [...room.riders.values()].filter((r) => t - (r.lastSeenEpochMs || 0) <= FRESH_MS && (r.lat || r.lng));
+    if (fresh.length < 2) { st.autoKey = null; return; }
+    const route = this._route(st, m);
+    const dest = (m.destinationLat || m.destinationLng) ? { lat: m.destinationLat, lng: m.destinationLng } : null;
+    if (!route && !dest) return;
+    const roleOf = (r) => r.role || (m.createdByUserId === r.userId ? 'LEAD' : 'PACK');
+    const pos = [];
+    for (const r of fresh) {
+      let a = null;
+      if (route) {
+        const rs = this._rs(st, r.userId);
+        const on = alongRoute({ lat: r.lat, lng: r.lng }, route, { fromIndex: rs.segIndex });
+        if (on) { rs.segIndex = on.segIndex; a = on.alongM; }
+      } else {
+        a = -haversine(r.lat, r.lng, dest.lat, dest.lng);
+      }
+      if (a !== null) pos.push({ id: r.userId, a, role: roleOf(r) });
+    }
+    if (pos.length < 2) { st.autoKey = null; return; }
+    pos.sort((x, y) => y.a - x.a);
+    const front = pos[0];
+    const back = pos[pos.length - 1];
+    const curLead = pos.find((p) => p.role === 'LEAD');
+    const curSweep = pos.find((p) => p.role === 'SWEEPER');
+    const leadId = !curLead || (curLead.id !== front.id && front.a - curLead.a >= AUTO_ROLE_GAP_M) ? front.id : curLead.id;
+    let sweepId = !curSweep || (curSweep.id !== back.id && curSweep.a - back.a >= AUTO_ROLE_GAP_M) ? back.id : curSweep.id;
+    // 3.55 safety review: the sweeper role must not "jump" onto a rider who is dropping behind the
+    // sweeper. That rider is exactly who BEHIND_SWEEPER (300 m, 60 s) and SWEEPER_DISTRESS exist
+    // for; moving the role would close those alerts as SWEEPER_CHANGED and tell the lagging (maybe
+    // broken-down) rider "you are now the sweeper". So the current sweeper keeps the role while a
+    // BEHIND / SWEEPER_DISTRESS alert is open, or when the new back rider is already further behind
+    // them than the BEHIND distance (the alert is on its way). Also when the sweeper went silent with
+    // a distress alert open: the role stays with them until the alert closes.
+    const sweeperNow = [...room.riders.values()].find((r) => roleOf(r) === 'SWEEPER');
+    let keepSweeper = false;
+    if (sweeperNow) {
+      const alarm = [...st.open.keys()].some((k) => k.startsWith('BEHIND:') || k === `SWEEPER_DISTRESS:${sweeperNow.userId}`);
+      const dropping = curSweep && curSweep.id === sweeperNow.userId && sweepId !== curSweep.id && curSweep.a - back.a > config.sweeperBehindM;
+      if (alarm || dropping) { sweepId = sweeperNow.userId; keepSweeper = true; }
+    }
+    if (sweepId === leadId && !keepSweeper) sweepId = (leadId === front.id ? back : front).id;
+    if (sweepId === leadId) return;
+    if (curLead && sweeperNow && curLead.id === leadId && sweeperNow.userId === sweepId) { st.autoKey = null; return; }
+    const key = `${leadId}|${sweepId}`;
+    if (st.autoKey !== key) { st.autoKey = key; st.autoSince = t; return; }
+    if (t - st.autoSince < AUTO_ROLE_HOLD_MS) return;
+    const middle = pos.map((p) => p.id).filter((id) => id !== leadId && id !== sweepId);
+    st.autoKey = null;
+    st.autoLastAt = t;
+    await this.convoys.applyAutoRoles(gid, [leadId, ...middle, sweepId]);
   }
 
   /**

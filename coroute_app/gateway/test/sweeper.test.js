@@ -52,12 +52,12 @@ test('ROLE_SET: lead only, not the lead, unknown rider, SWEEPER then PACK, one s
   const err = await wp.next((m) => m.type === 'ERROR');
   assert.equal(err.code, 403);
   assert.equal(err.clientId, 'r-pack');
-  // The lead cannot be made sweeper; unknown riders are 404; bad roles 400.
+  // 3.55: the lead (the owner) cannot move back before someone else leads; unknown riders are 404; bad roles 400.
   wl.sendJson({ type: 'ROLE_SET', userId: uid(R.lead), role: 'SWEEPER', clientId: 'r-lead' });
-  assert.equal((await wl.next((m) => m.type === 'ERROR' && m.clientId === 'r-lead')).reason, 'NOT_ALLOWED');
+  assert.equal((await wl.next((m) => m.type === 'ERROR' && m.clientId === 'r-lead')).reason, 'NEED_LEAD');
   wl.sendJson({ type: 'ROLE_SET', userId: 'nobody', role: 'SWEEPER', clientId: 'r-none' });
   assert.equal((await wl.next((m) => m.type === 'ERROR' && m.clientId === 'r-none')).code, 404);
-  wl.sendJson({ type: 'ROLE_SET', userId: uid(s1), role: 'LEAD', clientId: 'r-bad' });
+  wl.sendJson({ type: 'ROLE_SET', userId: uid(s1), role: 'BOSS', clientId: 'r-bad' });
   assert.equal((await wl.next((m) => m.type === 'ERROR' && m.clientId === 'r-bad')).reason, 'BAD_ROLE');
   // Make s1 the sweeper: ACK, RIDER_UPDATE for everyone, ROLE_CHANGED on the timeline.
   wl.sendJson({ type: 'ROLE_SET', userId: uid(s1), role: 'SWEEPER', clientId: 'r-1' });
@@ -71,7 +71,7 @@ test('ROLE_SET: lead only, not the lead, unknown rider, SWEEPER then PACK, one s
   let changed = await events(R.gid, 'ROLE_CHANGED');
   assert.equal(changed.length, 1);
   assert.equal(changed[0].userId, uid(s1));
-  assert.deepEqual(changed[0].data, { role: 'SWEEPER', byUserId: uid(R.lead) });
+  assert.deepEqual(changed[0].data, { role: 'SWEEPER', from: 'PACK', byUserId: uid(R.lead), auto: false });
   // The same clientId again is a duplicate, applied once.
   wl.sendJson({ type: 'ROLE_SET', userId: uid(s1), role: 'SWEEPER', clientId: 'r-1' });
   assert.equal((await wl.next((m) => m.type === 'ACK' && m.clientId === 'r-1')).duplicate, true);
@@ -90,8 +90,9 @@ test('ROLE_SET: lead only, not the lead, unknown rider, SWEEPER then PACK, one s
   assert.equal(R.room.riders.get(uid(s2)).role, 'PACK');
   await gw.timeline.idle();
   changed = await events(R.gid, 'ROLE_CHANGED');
-  assert.equal(changed.length, 3);
-  assert.equal(changed[2].data.role, 'PACK');
+  // 3.55: every changed rider gets an entry (s1 -> PACK when s2 took over, then s2 -> PACK).
+  assert.equal(changed.length, 4);
+  assert.equal(changed[3].data.role, 'PACK');
   // Restored after a reload (rider record and member record).
   wl.sendJson({ type: 'ROLE_SET', userId: uid(s1), role: 'SWEEPER', clientId: 'r-4' });
   await wl.next((m) => m.type === 'ACK' && m.clientId === 'r-4');

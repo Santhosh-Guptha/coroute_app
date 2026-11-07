@@ -2,9 +2,10 @@
 const crypto = require('crypto');
 const { defaultHasher } = require('./password_hash');
 const { featurePolicy } = require('./feature_policy');
+const { ARRIVED_KEEP_MS } = require('./guardian_arrival');
 
 const HOUR = 3600000;
-const EVENT_LABELS = { TRIP_STARTED: 'Ride started', TRIP_PAUSED: 'Ride paused', TRIP_RESUMED: 'Ride resumed', TRIP_ENDED: 'Ride ended', STOP_REACHED: 'Planned stop reached', DESTINATION_REACHED: 'Destination arrival reported', SOS: 'Emergency status updated', SOS_RESPONSE: 'Assistance status updated', STOPPED: 'Extended stop', OFFLINE: 'Location updates unavailable', OFF_ROUTE: 'Route deviation reported', SEPARATED: 'Group separation reported' };
+const EVENT_LABELS = { TRIP_STARTED: 'Ride started', TRIP_PAUSED: 'Ride paused', TRIP_RESUMED: 'Ride resumed', TRIP_ENDED: 'Ride ended', STOP_REACHED: 'Planned stop reached', DESTINATION_REACHED: 'Destination arrival reported', SOS: 'Emergency status updated', SOS_RESPONSE: 'Assistance status updated', STOPPED: 'Extended stop', OFFLINE: 'Location updates unavailable', OFF_ROUTE: 'Route deviation reported', SEPARATED: 'Group separation reported', ARRIVED: 'Arrived safely' };
 const LEVELS = new Set(['BASIC', 'LIVE', 'EMERGENCY_ONLY']);
 const token = () => crypto.randomBytes(24).toString('base64url');
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
@@ -132,7 +133,25 @@ class GuardianService {
     if (await this.repo.guardianPaused(grant.grantId)) {
       const error = new GuardianError('The rider has paused this link.', 423); error.code = 'GUARDIAN_PAUSED'; throw error;
     }
-    return { meta, expiresAt: Math.min(expiry(grant, meta), grant.createdAt + policy.guardianMaxHours * HOUR) };
+    // 3.55 arrival message: once every rider the link covers arrived safely, it expires soon after.
+    const arrivals = await this._arrivals(grant);
+    let until = Math.min(expiry(grant, meta), grant.createdAt + policy.guardianMaxHours * HOUR);
+    const ids = grant.subject === 'GROUP' ? (grant.subjects || []).map((x) => x.userId) : [grant.subjectId];
+    if (ids.length && ids.every((id) => arrivals.has(id))) {
+      until = Math.min(until, Math.max(...ids.map((id) => arrivals.get(id))) + ARRIVED_KEEP_MS);
+      if (now >= until) throw new GuardianError();
+    }
+    return { meta, arrivals, expiresAt: until };
+  }
+
+  /** userId -> arrival time ("Arrived safely" markers, src/guardian_arrival.js) for the riders a grant covers. */
+  async _arrivals(grant) {
+    const out = new Map();
+    if (typeof this.repo.guardianArrival !== 'function') return out;
+    const ids = grant.subject === 'GROUP' ? (grant.subjects || []).slice(0, 100).map((x) => x.userId) : [grant.subjectId];
+    const found = await Promise.all(ids.map((id) => this.repo.guardianArrival(grant.groupId, id)));
+    found.forEach((m, i) => { if (m && Number.isFinite(m.startedAt) && m.startedAt >= grant.createdAt - 24 * HOUR) out.set(ids[i], m.startedAt); });
+    return out;
   }
 
   async setConsent(userId, groupId, allowed) {
@@ -237,11 +256,12 @@ class GuardianService {
     if (grant.subject === 'GROUP') {
       const ids = await this._groupSubjects(grant, access.meta);
       permittedIds = ids;
-      const riders = ids.map((id) => projectPersonal({ ...grant, subjectId: id }, access.meta, room, now));
+      const riders = ids.map((id) => projectPersonal({ ...grant, subjectId: id }, access.meta, room, now, access.arrivals?.get(id), this.convoys.signalAhead));
       out = { version: 1, scope: 'GROUP', level: grant.level, serverTime: now, tripStatus: access.meta.tripStatus,
         status: access.meta.tripStatus === 'ENDED' ? 'RIDE_ENDED' : 'GROUP_UPDATE',
         emergency: riders.some((r) => r.emergency), coverage: 'Consenting riders only',
         sharedRiders: ids.length };
+      if (ids.length && riders.every((r) => r.status === 'ARRIVED')) out.status = 'ARRIVED';
       if (grant.level === 'BASIC') {
         out.summary = { riding: riders.filter((r) => r.status === 'RIDING').length,
           stopped: riders.filter((r) => r.status === 'STOPPED').length,
@@ -250,8 +270,12 @@ class GuardianService {
       else out.riders = riders.filter((r) => r.emergency);
       // Consent can change during projection; do not send the old permission set.
       if (JSON.stringify(ids) !== JSON.stringify(await this._groupSubjects(grant, access.meta))) throw new GuardianError();
-    } else out = projectPersonal(grant, access.meta, room, now);
+    } else out = projectPersonal(grant, access.meta, room, now, access.arrivals?.get(grant.subjectId), this.convoys.signalAhead);
     const events = await this.repo.guardianEvents(grant.groupId, grant.createdAt);
+    for (const id of permittedIds) {
+      const at = access.arrivals?.get(id);
+      if (Number.isFinite(at)) events.unshift({ eventId: `ARRIVED-${grant.groupId}-${id}`, type: 'ARRIVED', userId: id, startedAt: at, updatedAt: at });
+    }
     const policy = featurePolicy(access.meta.featurePolicy);
     out.timeline = events.filter((e) => {
       if (!EVENT_LABELS[e.type] || !Number.isFinite(e.startedAt) || e.startedAt > now) return false;
@@ -291,10 +315,19 @@ function positionOf(value, now) {
   return { lat: value.lat, lng: value.lng, observedAt: at, stale: now - at >= 120000 };
 }
 
-function projectPersonal(grant, meta, room, now) {
+function projectPersonal(grant, meta, room, now, arrivedAt = null, signalAhead = null) {
   // Explicit allowlist: never spread a rider, alert, convoy or nested response object.
   const out = { version: 1, scope: 'PERSONAL', level: grant.level, serverTime: now,
     tripStatus: meta.tripStatus, status: 'UNAVAILABLE', emergency: false };
+  // 3.55 arrival message: "Arrived safely" and no tracking afterwards (no position, no movement).
+  // An emergency raised after the arrival still shows below as usual.
+  if (Number.isFinite(arrivedAt) && arrivedAt <= now &&
+      ![...(room.alerts?.values() || [])].some((a) => a.userId === grant.subjectId && !a.resolved)) {
+    const arrived = { ...out, status: 'ARRIVED', arrivedAt };
+    const r = room.riders?.get(grant.subjectId);
+    if (r && grant.level !== 'EMERGENCY_ONLY') arrived.name = String(r.name || 'Rider').slice(0, 80);
+    return arrived;
+  }
   if (meta.tripStatus === 'PLANNING') return { ...out, status: 'WAITING_FOR_START' };
   if (meta.tripStatus === 'ENDED' || room.meta.tripStatus === 'ENDED') return { ...out, status: 'RIDE_ENDED' };
   const rider = room.riders.get(grant.subjectId);
@@ -308,6 +341,10 @@ function projectPersonal(grant, meta, room, now) {
     : meta.tripStatus === 'PAUSED' ? 'PAUSED'
     : Number.isFinite(rider.speedKmh) ? (rider.speedKmh >= 3 ? 'RIDING' : 'STOPPED') : 'UNAVAILABLE';
   if (grant.level === 'LIVE' && position) out.position = position;
+  // 3.55 no-signal ahead: "Entering a no-signal stretch ..., expected back online around HH:MM".
+  const notice = grant.level !== 'EMERGENCY_ONLY' && signalAhead && typeof signalAhead.noticeFor === 'function'
+    ? signalAhead.noticeFor(room.groupId || meta.groupId, grant.subjectId, now) : null;
+  if (notice) out.signalAhead = { near: String(notice.near || '').slice(0, 60), backAt: notice.backAt, at: notice.at };
   if (alerts.length) {
     out.status = 'EMERGENCY';
     // Only incident-local facts; no medical data, messages, responder identities or invented ETA.

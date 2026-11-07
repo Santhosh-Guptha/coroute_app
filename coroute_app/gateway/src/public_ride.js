@@ -86,12 +86,12 @@ const DIGIT_WORDS = /\b(zero|one|two|three|four|five|six|seven|eight|nine|ek|do|
  * 80 characters. Refused ({ ok: false, reason }) with a link, an e-mail, a @handle, a phone number
  * (7 or more digits, spaces and dashes ignored, digit words counted) or a bad word.
  */
-function cleanText(raw) {
+function cleanText(raw, max = TEXT_MAX) {
   if (raw === undefined || raw === null || raw === '') return { ok: true, text: '' };
   if (typeof raw !== 'string') return { ok: false, reason: 'TEXT' };
   const text = raw.replace(/[\u0000-\u001F\u007F\u200B-\u200F\u2028-\u202E\u2060-\u206F]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!text) return { ok: true, text: '' };
-  if (text.length > TEXT_MAX) return { ok: false, reason: 'TOO_LONG' };
+  if (text.length > max) return { ok: false, reason: 'TOO_LONG' };
   if (LINK.test(text) || EMAIL.test(text) || HANDLE.test(text)) return { ok: false, reason: 'LINK' };
   const digits = (text.match(/\d/g) || []).length + (text.match(DIGIT_WORDS) || []).length * 1;
   if (digits >= 7 || /\d[\d\s().+-]{5,}\d/.test(text)) return { ok: false, reason: 'NUMBER' };
@@ -173,6 +173,7 @@ class PublicRides {
     this.log = logger; this.clock = clock; this.enabled = enabled; this.tickMs = tickMs;
     this.routes = routes || new RouteIndexCache({ simplifyM: config.netRouteSimplifyM, maxPoints: config.netRouteMaxPoints, G: gridSize(config.netGridMillideg) });
     this.out = null; this.mirror = null;
+    this.adminWarnings = null; // 3.55 AdminWarnings (set by app.js): delivers a report's WARN to the rider
     this.index = new Map(); // rideId -> entry
     this.cells = new Map(); // geohash -> Set<rideId>
     this.rideOfGid = new Map(); // gid -> rideId (entries computed here)
@@ -933,7 +934,7 @@ class PublicRides {
    * admin did on the report; WARN also writes a WARNED entry to the reported rider's contact log, so a
    * warning stays on their record for the next review.
    */
-  async setReportStatus(reportId, status, { action, by = '', days = 0 } = {}) {
+  async setReportStatus(reportId, status, { action, by = '', byUserId = null, days = 0, message = '' } = {}) {
     if (!this.soda || !['OPEN', 'REVIEWED', 'ACTIONED'].includes(status)) return false;
     if (action !== undefined && !REPORT_ACTIONS.has(action)) return false;
     const r = await this.soda.findOne(COLL, { k: 'report', reportId });
@@ -942,7 +943,15 @@ class PublicRides {
     const next = { ...r.value, status };
     if (action) Object.assign(next, { action, actionAt: now, actionBy: String(by || '').slice(0, 120), ...(action === 'SUSPEND' ? { actionDays: Math.max(0, Math.floor(Number(days) || 0)) } : {}) });
     await this.soda.replace(COLL, r.key, next);
-    if (action === 'WARN' && r.value.reportedId) this._logContact({ ref: reportId, fromId: r.value.reportedId, toId: '', kind: 'WARNED', delivered: false }, now);
+    if (action === 'WARN' && r.value.reportedId) {
+      // 3.55: the warning is also delivered to the rider (src/admin_warnings.js, switch adminWarnings).
+      let delivered = false;
+      if (this.adminWarnings) {
+        const w = await this.adminWarnings.warn(r.value.reportedId, message, { byUserId, ref: reportId }).catch((e) => { this.log.warn('[public-ride] warning delivery', e.message); return null; });
+        delivered = !!(w && w.ok);
+      }
+      this._logContact({ ref: reportId, fromId: r.value.reportedId, toId: '', kind: 'WARNED', delivered }, now);
+    }
     return true;
   }
 
@@ -1035,12 +1044,14 @@ function publicRideAdminRouter(publicRides) {
   const r = express.Router();
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
   r.get('/reports', wrap(async (req, res) => res.set('Cache-Control', 'no-store').json({ reports: await publicRides.listReportsForAdmin({ limit: Number(req.query.limit) || 100, status: req.query.status || undefined }) })));
-  // Body: { status: OPEN|REVIEWED|ACTIONED, action?: DISMISS|WARN|SUSPEND, days? }
+  // Body: { status: OPEN|REVIEWED|ACTIONED, action?: DISMISS|WARN|SUSPEND, days?, message? (WARN) }
   r.patch('/reports/:reportId', wrap(async (req, res) => {
     const action = req.body?.action === undefined ? undefined : String(req.body.action);
     if (action !== undefined && !REPORT_ACTIONS.has(action)) return res.status(400).json({ error: 'Unknown action.' });
     const by = req.user ? (req.user.email || req.user.userId || '') : '';
-    const ok = await publicRides.setReportStatus(String(req.params.reportId || ''), String(req.body?.status || ''), { action, by, days: req.body?.days });
+    // 3.55: `message` (plain text, optional) goes to the rider with a WARN (src/admin_warnings.js).
+    const message = typeof req.body?.message === 'string' ? req.body.message : '';
+    const ok = await publicRides.setReportStatus(String(req.params.reportId || ''), String(req.body?.status || ''), { action, by, byUserId: req.user?.userId || null, days: req.body?.days, message });
     res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: 'Report not found.' });
   }));
   r.get('/log', wrap(async (req, res) => res.set('Cache-Control', 'no-store').json({ log: await publicRides.listLog({ userId: req.query.userId ? String(req.query.userId) : undefined, limit: Number(req.query.limit) || 200 }) })));

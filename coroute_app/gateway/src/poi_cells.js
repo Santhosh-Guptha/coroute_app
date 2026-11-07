@@ -19,8 +19,21 @@ const MAX_LAT_IDX = Math.floor(85 / CELL_DEG);
 const MAX_LNG_IDX = Math.floor(180 / CELL_DEG);
 const TAGS = new Set(['name', 'name:en', 'brand', 'operator', 'amenity', 'shop', 'tourism', 'healthcare', 'craft',
   'emergency', 'opening_hours', 'phone', 'contact:phone', 'healthcare:speciality', 'service:vehicle:tyres',
-  'service:motorcycle:repair', 'motorcycle', 'access']);
+  'service:motorcycle:repair', 'motorcycle', 'access',
+  // 3.55: heritage places on the way (the phone classifies them; wikipedia/wikidata let it link out).
+  'historic', 'heritage', 'wikipedia', 'wikidata']);
 const TAG_PREFIXES = ['fuel:', 'socket:'];
+// 3.55 smart speed limits: school zones keep only their amenity; roads only their limit tags.
+const ZONE_AMENITIES = new Set(['school', 'college', 'kindergarten']);
+const ROAD_TAGS = ['highway', 'maxspeed', 'maxspeed:type', 'source:maxspeed'];
+// 3.55: v2 adds the heritage group to the query. A cell cached under v1 is still served (as stale)
+// while its v2 answer is fetched within the normal upstream budget, so riders never lose places.
+// 3.55 (later): v3 adds school zones and road speed limits. v2, then v1, answers stay usable as
+// stale data while the v3 answer waits for budget.
+const CACHE_KEY = 'poi:v3:';
+const LEGACY_CACHE_KEYS = ['poi:v2:', 'poi:v1:'];
+const LEGACY_CACHE_KEY = LEGACY_CACHE_KEYS[0];
+const MAX_ELEMENTS = 2200;
 
 class PoiCellError extends Error {
   constructor(status, code) { super(code); this.status = status; this.code = code; }
@@ -55,7 +68,14 @@ function overpassQuery(key) {
     + 'nwr["shop"~"^(motorcycle|motorcycle_repair|car_repair|tyres|tyre_repair)$"];'
     + 'nwr["craft"="mechanic"];nwr["service:vehicle:tyres"="yes"];);out center tags 800;'
     + '(nwr["amenity"~"^(restaurant|cafe|fast_food|food_court)$"];);out center tags 300;'
-    + '(nwr["tourism"~"^(hotel|motel|hostel|guest_house|chalet|viewpoint)$"];nwr["amenity"~"^(atm|toilets)$"];);out center tags 300;';
+    + '(nwr["tourism"~"^(hotel|motel|hostel|guest_house|chalet|viewpoint)$"];nwr["amenity"~"^(atm|toilets)$"];);out center tags 300;'
+    // 3.55: famous ancient and historic places on the way; its own bounded group, queried last.
+    + '(nwr["historic"~"^(monument|memorial|castle|fort|ruins|archaeological_site|city_gate|palace|tomb|temple|monastery|church|mosque|manor|citywalls)$"];'
+    + 'nwr["tourism"~"^(attraction|museum)$"];nwr["heritage"];);out center tags 200;'
+    // 3.55 smart speed limits: school zones (hospitals are already above) and roads with a
+    // tagged limit, each its own bounded group; the phone keeps them out of the visible map.
+    + '(nwr["amenity"~"^(school|college|kindergarten)$"];);out center tags 200;'
+    + '(way["highway"]["maxspeed"];);out center tags 400;';
 }
 
 /** An Overpass element reduced to {i, a, o, t}; null when it has no position. Tags are only trimmed. */
@@ -63,9 +83,16 @@ function compact(e) {
   const lat = e.lat ?? e.center?.lat, lng = e.lon ?? e.center?.lon;
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
   const t = {};
-  for (const [k, v] of Object.entries(e.tags || {})) {
-    if (typeof v !== 'string') continue;
-    if (TAGS.has(k) || TAG_PREFIXES.some((p) => k.startsWith(p))) t[k] = v.slice(0, 120);
+  const tags = e.tags || {};
+  if (ZONE_AMENITIES.has(tags.amenity)) {
+    t.amenity = tags.amenity; // 3.55: a school zone needs nothing else
+  } else if (typeof tags.highway === 'string' && typeof tags.maxspeed === 'string' && !tags.amenity) {
+    for (const k of ROAD_TAGS) if (typeof tags[k] === 'string') t[k] = tags[k].slice(0, 40);
+  } else {
+    for (const [k, v] of Object.entries(tags)) {
+      if (typeof v !== 'string') continue;
+      if (TAGS.has(k) || TAG_PREFIXES.some((p) => k.startsWith(p))) t[k] = v.slice(0, 120);
+    }
   }
   return { i: `${String(e.type || 'n')[0]}${e.id}`, a: Math.round(lat * 1e5) / 1e5, o: Math.round(lng * 1e5) / 1e5, t };
 }
@@ -123,7 +150,7 @@ class PoiCellService {
           const j = await res.json();
           if (!Array.isArray(j?.elements) || j.remark) continue;
           const seen = new Set(), p = [];
-          for (const e of j.elements.slice(0, 1500)) {
+          for (const e of j.elements.slice(0, MAX_ELEMENTS)) {
             const c = compact(e);
             if (c && !seen.has(c.i)) { seen.add(c.i); p.push(c); }
           }
@@ -141,7 +168,7 @@ class PoiCellService {
       const v = await this._upstream(key);
       if (!v) { this.stats.upstreamFailed++; return null; }
       this._remember(key, v);
-      await this.repo.geoCachePut(`poi:v1:${key}`, v).catch(() => {});
+      await this.repo.geoCachePut(`${CACHE_KEY}${key}`, v).catch(() => {});
       return v;
     })().finally(() => this.inflight.delete(key));
     this.inflight.set(key, run);
@@ -156,10 +183,21 @@ class PoiCellService {
     for (const k of keys) {
       const m = this.mem.get(k);
       if (m && now - m.at < this.ttlMs) { this._remember(k, m); out[k] = m; this.stats.memHits++; continue; }
-      const hit = await this.repo.geoCacheGet(`poi:v1:${k}`).catch(() => null);
+      const hit = await this.repo.geoCacheGet(`${CACHE_KEY}${k}`).catch(() => null);
       const v = hit?.value;
-      if (v && Array.isArray(v.p) && Number.isFinite(v.at) && now - v.at < this.ttlMs) { this._remember(k, v); out[k] = v; this.stats.diskHits++; continue; }
-      missing.push({ k, stale: v && Array.isArray(v.p) && Number.isFinite(v.at) && now - v.at < this.staleMs ? v : (m || null) });
+      const usable = (x) => x && Array.isArray(x.p) && Number.isFinite(x.at);
+      if (usable(v) && now - v.at < this.ttlMs) { this._remember(k, v); out[k] = v; this.stats.diskHits++; continue; }
+      let stale = usable(v) && now - v.at < this.staleMs ? v : (m || null);
+      if (!stale && !usable(v)) {
+        // 3.55: no v3 entry yet; the newest older answer (v2 without speed limits, or v1 without
+        // heritage places) keeps the map filled meanwhile.
+        for (const prefix of LEGACY_CACHE_KEYS) {
+          const old = await this.repo.geoCacheGet(`${prefix}${k}`).catch(() => null);
+          const lv = old?.value;
+          if (usable(lv) && now - lv.at < this.staleMs) { stale = lv; break; }
+        }
+      }
+      missing.push({ k, stale });
     }
     if (missing.length && !this.configured && !Object.keys(out).length && !missing.some((x) => x.stale)) {
       throw new PoiCellError(503, 'PLACES_NOT_CONFIGURED');
@@ -183,4 +221,4 @@ class PoiCellService {
   }
 }
 
-module.exports = { PoiCellService, PoiCellError, parseCells, bboxOf, overpassQuery, compact, CELL_DEG };
+module.exports = { PoiCellService, PoiCellError, parseCells, bboxOf, overpassQuery, compact, CELL_DEG, CACHE_KEY, LEGACY_CACHE_KEY, LEGACY_CACHE_KEYS };

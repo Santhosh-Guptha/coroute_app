@@ -18,8 +18,10 @@ function subscriptionOf(input) {
 // Deliberately excludes names, coordinates, counts and routine movement.
 function stateOf(view) {
   const incidents = view.alerts || (view.riders || []).flatMap((r) => r.alerts || []);
-  return { tripStatus: view.tripStatus, emergency: view.emergency,
+  const out = { tripStatus: view.tripStatus, emergency: view.emergency,
     incidents: incidents.map((a) => [a.type, a.reportedAt, a.status || null]).sort() };
+  if (view.status === 'ARRIVED') out.arrived = true; // 3.55 arrival message (absent before: old cursors stay equal)
+  return out;
 }
 
 /** Durable current-state delivery; failures never run on the rider SOS path. */
@@ -72,7 +74,7 @@ class GuardianPush {
           if (await this.repo.guardianRevoked(sub.subscriptionId)) { await this.repo.removeGuardianSubscription(sub.subscriptionId); continue; }
           const view = await viewFor(sub.grantId), state = stateOf(view);
           const incidentChanged = digest(state.incidents) !== digest(sub.state.incidents) || state.emergency !== sub.state.emergency;
-          const tripChanged = state.tripStatus !== sub.state.tripStatus;
+          const tripChanged = state.tripStatus !== sub.state.tripStatus || (state.arrived === true && sub.state.arrived !== true);
           if ((incidentChanged && sub.preferences.emergencies) || (tripChanged && sub.preferences.trip && view.level !== 'EMERGENCY_ONLY')) {
             // Queue before advancing the cursor: a crash cannot silently lose a change.
             await this.repo.enqueueGuardianJob({ jobId: digest([sub.subscriptionId, sub.version, (sub.sequence || 0) + 1, state]),
@@ -102,8 +104,9 @@ class GuardianPush {
               if (this.stopped || this.clock() + 10000 >= job.leaseUntil || !latest || latest.version !== sub.version || await this.repo.guardianRevoked(job.subscriptionId)) {
                 job.state = 'CANCELLED'; await this.repo.finishGuardianJob(job, this.workerId); continue;
               }
-              await this.send(sub.subscription, JSON.stringify({ title: 'CoRoute trip update',
-                body: 'Open Ride Guardian for the latest shared update.', tag: job.jobId,
+              const arrived = job.target.arrived === true && !job.target.emergency;
+              await this.send(sub.subscription, JSON.stringify({ title: arrived ? 'CoRoute: arrived safely' : 'CoRoute trip update',
+                body: arrived ? 'The rider arrived safely. Location sharing has stopped.' : 'Open Ride Guardian for the latest shared update.', tag: job.jobId,
                 url: `/watch#ticket=${ticket.credential}` }), {
                 TTL: 300, urgency: job.target.emergency ? 'high' : 'normal', topic: job.jobId.slice(0, 32), timeout: 8000 });
               job.state = 'SENT';

@@ -45,8 +45,23 @@ test('privacy rounding: counts below 10 read as 0, then tens, hundreds, thousand
 
 test('usage view: same keys, coarse values; community view: totals only, no per-ride list', () => {
   const raw = { riders: 7, ridesCompleted: 48, kmRidden: 15234, groupsRidden: 3, sosResolved: 2, avgRating: 4.5, ratingsCount: 4, updatedAt: Date.UTC(2026, 10, 7, 9, 41, 7) };
-  assert.deepEqual(P.safeUsage(raw), { riders: 0, ridesCompleted: 40, kmRidden: 15000, groupsRidden: 0, sosResolved: 0, avgRating: null, updatedAt: Date.UTC(2026, 10, 7, 9) });
+  assert.deepEqual(P.safeUsage(raw), {
+    riders: 0, ridesCompleted: 40, kmRidden: 15000, groupsRidden: 0, sosResolved: 0, avgRating: null,
+    movingHours: 0, avgSpeedKmh: null, weeklyKm: [], updatedAt: Date.UTC(2026, 10, 7, 9),
+  });
   assert.equal(P.safeUsage({ ...raw, ratingsCount: 25 }).avgRating, 4.5);
+  // 3.55 ride analytics: hours like counts, speed only from 10 rides, a week's km only from 10 rides.
+  const ra = P.safeUsage({ ...raw, movingHours: 437, avgSpeedKmh: 41.8, weeklyKm: [
+    { weekStart: Date.UTC(2026, 9, 26, 3), km: 1834, rides: 22 },
+    { weekStart: Date.UTC(2026, 10, 2), km: 260, rides: 4 },
+  ] });
+  assert.equal(ra.movingHours, 430);
+  assert.equal(ra.avgSpeedKmh, 41);
+  assert.deepEqual(ra.weeklyKm, [
+    { weekStart: Date.UTC(2026, 9, 26), km: 1800, rides: 20 },
+    { weekStart: Date.UTC(2026, 10, 2), km: null, rides: 0 },
+  ]);
+  assert.equal(P.safeUsage({ ...raw, ridesCompleted: 9, avgSpeedKmh: 40 }).avgSpeedKmh, null);
   const community = P.safeCommunityStats({
     enabled: true, totalRiders: 123, activeRiders: 4, totalKilometers: 4321.7, lastUpdated: Date.UTC(2026, 10, 7, 9, 5),
     longestTrips: [{ rank: 1, distanceKm: 420, durationFormatted: '8h 0m', anonymousRiderLabel: 'Rider #1' }],
@@ -57,7 +72,7 @@ test('usage view: same keys, coarse values; community view: totals only, no per-
 
 test('public endpoints answer with coarse numbers only', async () => {
   const u = await (await fetch(base + '/api/public/usage-stats')).json();
-  assert.deepEqual(Object.keys(u.stats).sort(), ['avgRating', 'groupsRidden', 'kmRidden', 'riders', 'ridesCompleted', 'sosResolved', 'updatedAt']);
+  assert.deepEqual(Object.keys(u.stats).sort(), ['avgRating', 'avgSpeedKmh', 'groupsRidden', 'kmRidden', 'movingHours', 'riders', 'ridesCompleted', 'sosResolved', 'updatedAt', 'weeklyKm']);
   assert.equal(u.stats.updatedAt % HOUR, 0, 'usage: time to the hour');
   assert.deepEqual(u.privacy, { minCount: 10, rounding: 'down', timeResolution: 'hour', perRider: false, perPlace: false });
   assert.ok(!('ratingsCount' in u.stats), 'the exact rating count stays on the server');
@@ -137,14 +152,16 @@ test('home: group rides section explains what a plan adds, prices only from the 
   assert.ok(g.includes('href="/get"') && g.includes('href="#pricing"'), 'CTAs');
 });
 
-test('home: ride analytics showcase is a clearly labelled sample', async () => {
+test('home: ride analytics card shows live community totals, never sample numbers (3.55)', async () => {
   const html = await (await fetch(base + '/')).text();
   const ra = sectionOf(html, 'ride-analytics');
   const t = textOf(ra);
   for (const w of ['Distance and rides', 'Hours in the saddle', 'Top speed', 'Safety stats', 'private to you']) assert.ok(t.includes(w), w);
-  assert.ok(/class="ra-card__frame" aria-hidden="true"/.test(ra), 'the sample numbers are not read out as facts');
-  assert.ok((ra.match(/class="ra-badge">Sample</g) || []).length === 2, 'Sample badge on the card and in the caption');
-  assert.ok(t.includes("not a real rider's data"), 'caption says it is not real data');
+  assert.ok(ra.includes('data-ride-analytics'), 'filled from /api/public/usage-stats by site.js');
+  assert.ok(!/Sample|made-up|1,240/.test(ra), 'no sample badge and no made-up numbers');
+  assert.ok(t.includes('at least 10 rides'), 'caption explains the privacy floor');
+  const js = await (await fetch(base + '/assets/site.js')).text();
+  assert.ok(js.includes('renderRideAnalytics') && js.includes('weeklyKm'));
 });
 
 test('home: how-we-count note under the numbers, help-us-build with ratings and safety ideas', async () => {

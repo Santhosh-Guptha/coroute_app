@@ -364,7 +364,7 @@ const config = {
   publicOrigin: (process.env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
   // App version gate: builds older than MIN_APP_BUILD are told to update (versionCode from pubspec "x.y.z+N").
   minAppBuild: int('MIN_APP_BUILD', 60),
-  latestAppBuild: int('LATEST_APP_BUILD', 10018),
+  latestAppBuild: int('LATEST_APP_BUILD', 10019),
   supportEmail: SUPPORT_EMAIL,
 
   // Payment Screen & Subscription Gating Toggle

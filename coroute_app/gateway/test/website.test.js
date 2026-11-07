@@ -325,8 +325,9 @@ test('terms agree with the privacy policy on who an SOS reaches; iOS wording is 
   assert.ok(terms.includes('riders of other groups who are already riding toward you on the same road'));
   for (const p of ['/', '/get', '/about', '/how-it-works']) {
     const html = await (await fetch(base + p)).text();
-    assert.ok(html.includes('No iOS version yet.'), `${p}: iOS wording`);
-    assert.ok(!/iOS version is planned|One is planned/.test(html), `${p}: no iOS promise`);
+    // 3.55: the iOS app is being built; without an iOS link every page says so the same way (no dates promised).
+    assert.ok(html.includes('The iOS app is building now and coming soon.'), `${p}: iOS wording`);
+    assert.ok(!/iOS version is planned|One is planned|No iOS version yet/.test(html), `${p}: one consistent iOS message`);
   }
 });
 

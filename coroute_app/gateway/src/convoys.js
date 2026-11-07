@@ -25,6 +25,12 @@ const { applyPublicRidePatch, publicRideView } = require('./public_ride_settings
 const STOP_CATEGORIES = new Set(['FUEL', 'FOOD', 'REST', 'MEETING', 'SCENIC', 'TOLL', 'OTHER', 'HOSPITAL', 'REPAIR', 'STAY', 'PHARMACY', 'TYRE', 'WASHROOM', 'ATM', 'POLICE', 'PARKING']);
 /** The chat card posted when a rider asks the group to wait (plain text, no emoji). */
 const WAIT_MESSAGE = 'Asked the group for a 2 minute stop. Please regroup safely.';
+// 3.55 bike / pillion swap: a pending ask lasts 2 minutes; a rider may ask a few times per 10 minutes.
+const SWAP_KINDS = new Set(['BIKES', 'PILLION']);
+const SWAP_ID = /^SWP-[0-9A-F]{12}$/;
+const SWAP_TTL_MS = 2 * 60000;
+const SWAP_RATE_MAX = 4;
+const SWAP_RATE_WINDOW_MS = 10 * 60000;
 const MAX_STOPS = 20;
 const RESPONSE_KINDS = new Set(['GOING', 'WITH_THEM', 'CANCEL']);
 const PRESENCE = new Set(['ONLINE', 'NO_SIGNAL', 'APP_CLOSED']);
@@ -80,7 +86,7 @@ class ConvoyError extends Error {
  * emergency contact) and co-riding are never taken from a socket message: role and
  * co-riding are set by server code paths only, the profile comes from the users table.
  */
-const TELEMETRY_FIELDS = ['lat', 'lng', 'speedKmh', 'heading', 'batteryLevel', 'isCharging', 'statusReason', 'statusMessage', 'stoppedSince', 'fuelEstimate', 'micMuted', 'isSpeaking'];
+const TELEMETRY_FIELDS = ['lat', 'lng', 'speedKmh', 'heading', 'batteryLevel', 'isCharging', 'statusReason', 'statusMessage', 'stoppedSince', 'fuelEstimate', 'micMuted', 'isSpeaking', 'fatigueLevel'];
 
 const shortId = (n = 4) => crypto.randomBytes(n).toString('hex').toUpperCase();
 const now = () => Date.now();
@@ -253,6 +259,10 @@ class ConvoyManager extends EventEmitter {
       capacityPlan: m.capacityPlan || null,
       // A solo ride (Community host): the app hides talk, messages, invite and regroup.
       soloRide: this.isSoloRide(room),
+      // 3.55: automatic riding roles (front rider leads, last one sweeps), off unless the lead turned it on.
+      autoRoles: m.autoRoles === true,
+      // 3.55 buddy pairs (large groups): {userId: buddyId}, empty when not assigned.
+      buddies: m.buddies && typeof m.buddies === 'object' ? m.buddies : {},
     };
   }
 
@@ -472,6 +482,8 @@ class ConvoyManager extends EventEmitter {
       const existing = room.riders.get(user.userId);
       const profile = profileOf(await this.repo.findUserById(user.userId));
       const rider = buildRider(user, { ...(existing || {}), ...clientRiderInput(riderProfile), ...profile, role: existing?.role || 'PACK' }, now());
+      // 3.55: a bike swapped in this ride stays swapped when the rider re-joins (the profile is unchanged).
+      if (existing?.rideVehicle) Object.assign(rider, existing.rideVehicle, { rideVehicle: existing.rideVehicle });
       room.riders.set(rider.userId, rider);
       const prev = room.meta.members?.[rider.userId];
       const record = memberRecord(user, rider, existing ? (prev?.joinedAt || rider.joinedAt) : now());
@@ -526,6 +538,18 @@ class ConvoyManager extends EventEmitter {
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
     if (rider) this._emit(groupId, 'RIDER_LEFT', { userId, name: rider.name });
+    // 3.55 safety review: since 3.55 any rider can hold LEAD. When that rider leaves, the ride must
+    // not be left without a lead (incident/BEHIND notify lists, sweeper distress and the riders'
+    // "who leads" all read role LEAD): the owner, if still riding, takes the front again. Same rule
+    // as "PACK for the lead" in setRole(). Never throws into leave().
+    if (rider && room.riders.size > 0 && this._roleOfRider(room, rider) === 'LEAD') {
+      const ownerId = room.meta.createdByUserId;
+      const anyLead = [...room.riders.values()].some((r) => this._roleOfRider(room, r) === 'LEAD');
+      if (!anyLead && ownerId && room.riders.has(ownerId)) {
+        await this._commitRoles(room, new Map([[ownerId, 'LEAD']]), { userId: 'SYSTEM', name: '' }, { target: ownerId })
+          .catch((e) => this.log.warn('[convoys] lead hand-back failed', e.message));
+      }
+    }
     this.emit('fleet');
     if (room.riders.size === 0 && ACTIVE_STATUSES.includes(room.meta.tripStatus)) {
       await this.setTripStatus(groupId, 'ENDED', { system: true });
@@ -1141,42 +1165,155 @@ class ConvoyManager extends EventEmitter {
     return { firstName: firstNameOf(a.userName || rider?.name), lat: +Number(lat).toFixed(5), lng: +Number(lng).toFixed(5), at, active: true, expiresAt: l.expiresAt };
   }
 
-  // ------------------------------------------------------ sweeper role (3.16)
+  // ------------------------------------------------------ riding roles (3.16 sweeper, 3.55 lead/middle/sweeper)
   /**
-   * The lead makes a rider the SWEEPER (or back to PACK). One sweeper per room: the previous one
-   * becomes PACK in the same change. Never the creator, never a LEAD. Every changed rider is sent as
-   * RIDER_UPDATE (old and new apps apply `role`) and the timeline gets ROLE_CHANGED for the target.
+   * Riding roles: LEAD (front), PACK (middle) and SWEEPER (back). One LEAD and at most one SWEEPER.
+   * The owner of the ride keeps the owner's rights whatever their riding role (isLead() checks the
+   * owner first), so a role change never takes the ride away from its owner.
+   *
+   *  - LEAD for a rider: the current lead takes the rider's old role (a swap: lead <-> sweeper or
+   *    lead <-> middle).
+   *  - SWEEPER for a rider: the previous sweeper becomes PACK. For the current lead, the previous
+   *    sweeper (or else the owner) takes the lead.
+   *  - PACK for the lead: the owner takes the lead back (refused with NEED_LEAD when the lead is
+   *    the owner: pick the new lead first).
+   * Every changed rider goes out as RIDER_UPDATE (old apps apply `role`), the timeline gets
+   * ROLE_CHANGED, and 3.55 apps get ROLE_CHANGE with the changes so the riders concerned are told
+   * to change position (front / middle / back). `auto`: from automatic roles (the ride's order).
    */
-  async setRole(groupId, user, userId, role) {
+  async setRole(groupId, user, userId, role, { auto = false } = {}) {
     const room = await this.getRoom(groupId);
-    this._requireLead(room, user);
+    if (!auto) this._requireLead(room, user);
     this._requireGroupRide(room);
     const r = roleOf(role);
-    if (!r) throw new ConvoyError('Role must be SWEEPER or PACK.', 400, 'BAD_ROLE');
+    if (!r) throw new ConvoyError('Role must be LEAD, SWEEPER or PACK.', 400, 'BAD_ROLE');
     const uid = typeof userId === 'string' && userId.length <= 64 ? userId : '';
     const target = uid ? room.riders.get(uid) : null;
     if (!target) throw new ConvoyError('That rider is not in this convoy.', 404, 'NOT_MEMBER');
-    if (target.role === 'LEAD' || room.meta.createdByUserId === uid) throw new ConvoyError('The lead cannot be given another role.', 403, 'NOT_ALLOWED');
-    const changed = [];
-    if (r === 'SWEEPER') {
-      for (const o of room.riders.values()) {
-        if (o.userId !== uid && o.role === 'SWEEPER') changed.push(this._applyRole(room, o.userId, 'PACK'));
-      }
-    }
-    if (target.role !== r) changed.push(this._applyRole(room, uid, r));
-    if (!changed.length) return target;
+    const plan = this._rolePlan(room, uid, r);
+    return this._commitRoles(room, plan, user, { auto, target: uid });
+  }
+
+  /** Swaps the riding roles of two riders (e.g. the lead and the sweeper change places). */
+  async swapRoles(groupId, user, userId, withUserId) {
+    const room = await this.getRoom(groupId);
+    this._requireLead(room, user);
+    this._requireGroupRide(room);
+    const a = room.riders.get(String(userId || ''));
+    const b = room.riders.get(String(withUserId || ''));
+    if (!a || !b) throw new ConvoyError('Both riders must be in this convoy.', 404, 'NOT_MEMBER');
+    if (a.userId === b.userId) throw new ConvoyError('Pick two different riders.', 400, 'BAD_ROLE');
+    const ra = this._roleOfRider(room, a), rb = this._roleOfRider(room, b);
+    const plan = new Map([[a.userId, rb], [b.userId, ra]]);
+    return this._commitRoles(room, plan, user, { auto: false, target: a.userId });
+  }
+
+  /** The lead switches automatic roles on or off (3.55; off by default). */
+  async setAutoRoles(groupId, user, on) {
+    const room = await this.getRoom(groupId);
+    this._requireLead(room, user);
+    this._requireGroupRide(room);
+    const next = on === true;
+    if (!!room.meta.autoRoles === next) return { autoRoles: next };
+    room.meta.autoRoles = next;
     this._touch(room);
     await this.repo.saveConvoyMeta(room.meta);
-    for (const rider of changed) {
-      // Its own document now; the room snapshot (laid over it on load) is rewritten with the next flush.
-      room.dirty.add(rider.userId);
-      this._schedulePersist(room);
-      await this.repo.upsertRider(groupId, rider).catch((e) => this.log.warn('[convoys] role save failed', e.message));
-      this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(rider) });
+    this._emit(groupId, 'AUTO_ROLES', { autoRoles: next, byUserId: user.userId, byName: user.name || '' });
+    this.emit('activity', groupId, { type: 'AUTO_ROLES', user: { userId: user.userId, name: user.name || '' }, on: next });
+    return { autoRoles: next };
+  }
+
+  /**
+   * Automatic roles (called by the timeline engine with the fresh riders ordered front to back along
+   * the route): the front rider leads and the last one sweeps. No-op unless the lead switched it on.
+   * The engine applies its own hold time and minimum gap so roles never flicker in a tight pack.
+   */
+  async applyAutoRoles(groupId, orderedIds) {
+    const room = this.rooms.get(groupId);
+    if (!room || !room.meta.autoRoles || this.isSoloRide(room) || !Array.isArray(orderedIds) || orderedIds.length < 2) return null;
+    const ids = orderedIds.filter((id) => room.riders.has(id));
+    if (ids.length < 2) return null;
+    const front = ids[0], back = ids[ids.length - 1];
+    const plan = new Map();
+    for (const r of room.riders.values()) {
+      const want = r.userId === front ? 'LEAD' : (r.userId === back ? 'SWEEPER' : (ids.includes(r.userId) ? 'PACK' : null));
+      if (want && this._roleOfRider(room, r) !== want) plan.set(r.userId, want);
     }
-    this.emit('activity', groupId, { type: 'ROLE_CHANGED', user: { userId: uid, name: target.name }, role: r, byUserId: user.userId });
+    // A rider not in the order (offline) who holds LEAD or SWEEPER gives it up to the riders who are.
+    for (const r of room.riders.values()) {
+      if (ids.includes(r.userId)) continue;
+      const cur = this._roleOfRider(room, r);
+      if ((cur === 'LEAD' && plan.has(front)) || (cur === 'SWEEPER' && plan.has(back))) plan.set(r.userId, 'PACK');
+    }
+    if (!plan.size) return null;
+    return this._commitRoles(room, plan, { userId: 'AUTO', name: 'Auto roles' }, { auto: true, target: front });
+  }
+
+  /** The riding role of a rider: the owner without a stored role counts as the lead (older rides). */
+  _roleOfRider(room, r) {
+    if (r.role === 'LEAD' || r.role === 'SWEEPER' || r.role === 'PACK') return r.role;
+    return room.meta.createdByUserId === r.userId ? 'LEAD' : 'PACK';
+  }
+
+  /** userId -> new role for one change, following the rules of setRole(). */
+  _rolePlan(room, uid, r) {
+    const riders = [...room.riders.values()];
+    const roleNow = (x) => this._roleOfRider(room, x);
+    const target = room.riders.get(uid);
+    const was = roleNow(target);
+    const plan = new Map();
+    if (was === r) return plan;
+    const sweeper = riders.find((x) => x.userId !== uid && roleNow(x) === 'SWEEPER');
+    const ownerId = room.meta.createdByUserId;
+    if (r === 'LEAD') {
+      for (const x of riders) if (x.userId !== uid && roleNow(x) === 'LEAD') plan.set(x.userId, was === 'SWEEPER' ? 'SWEEPER' : 'PACK');
+    } else {
+      if (r === 'SWEEPER' && sweeper) plan.set(sweeper.userId, 'PACK');
+      if (was === 'LEAD') {
+        // The lead moves back: someone must take the front.
+        let next = null;
+        if (r === 'SWEEPER' && sweeper) next = sweeper.userId;
+        else if (ownerId && ownerId !== uid && room.riders.has(ownerId)) next = ownerId;
+        if (!next) throw new ConvoyError('Choose who leads first: make another rider the lead.', 409, 'NEED_LEAD');
+        plan.set(next, 'LEAD');
+      }
+    }
+    plan.set(uid, r);
+    return plan;
+  }
+
+  /** Applies a role plan: saves, sends RIDER_UPDATE per rider, ROLE_CHANGE once, timeline entries. */
+  async _commitRoles(room, plan, user, { auto = false, target = null } = {}) {
+    const groupId = room.groupId;
+    const changes = [];
+    for (const [uid, role] of plan) {
+      const r = room.riders.get(uid);
+      if (!r) continue;
+      const from = this._roleOfRider(room, r);
+      if (from === role && r.role === role) continue;
+      const next = this._applyRole(room, uid, role);
+      changes.push({ userId: uid, name: r.name || '', from, to: role, rider: next });
+    }
+    if (!changes.length) return target ? room.riders.get(target) : null;
+    room.meta.rolesChangedAt = now();
+    this._touch(room);
+    await this.repo.saveConvoyMeta(room.meta);
+    for (const c of changes) {
+      // Its own document now; the room snapshot (laid over it on load) is rewritten with the next flush.
+      room.dirty.add(c.userId);
+      this._schedulePersist(room);
+      await this.repo.upsertRider(groupId, c.rider).catch((e) => this.log.warn('[convoys] role save failed', e.message));
+      this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(c.rider) });
+    }
+    this._emit(groupId, 'ROLE_CHANGE', {
+      changes: changes.map((c) => ({ userId: c.userId, name: c.name, from: c.from, to: c.to })),
+      byUserId: user.userId, byName: user.name || '', auto,
+    });
+    for (const c of changes) {
+      this.emit('activity', groupId, { type: 'ROLE_CHANGED', user: { userId: c.userId, name: c.name }, role: c.to, from: c.from, byUserId: user.userId, auto });
+    }
     this.emit('fleet');
-    return room.riders.get(uid);
+    return target ? room.riders.get(target) : null;
   }
 
   _applyRole(room, uid, role) {
@@ -1363,6 +1500,141 @@ class ConvoyManager extends EventEmitter {
     return rooms.length;
   }
 
+  // ------------------------------------------------------ 3.55 bike / pillion swap
+  /**
+   * Two riders of a group ride swap their bikes (BIKES), or a rider and their pillion change places
+   * (PILLION). The requester asks, only the other rider answers, within SWAP_TTL_MS. Pending asks
+   * live in room memory only (a gateway restart or failover drops them: the requester simply asks
+   * again). Applied to the rider records of this ride, never to the account profile; `rideVehicle`
+   * (server only) keeps the swapped bike over the profile when the rider re-joins this ride.
+   * Personal messages (SWAP_ASK to the target, SWAP_RESULT to the requester) go out as the
+   * 'userMessage' event (the hub sends them to that rider's sockets, through the peer if needed);
+   * SWAP_DONE and RIDER_UPDATEs go to the room. Older apps ignore the new types.
+   */
+  async requestSwap(groupId, user, withUserId, kind) {
+    const room = await this.getRoom(groupId);
+    this._requireGroupRide(room);
+    if (room.meta.tripStatus === 'ENDED') throw new ConvoyError('This ride has ended.', 409, 'TRIP_ENDED');
+    const k = SWAP_KINDS.has(kind) ? kind : null;
+    if (!k) throw new ConvoyError('Swap kind must be BIKES or PILLION.', 400, 'BAD_SWAP');
+    const me = room.riders.get(user.userId);
+    if (!me) throw new ConvoyError('Not a member of this convoy.', 403, 'NOT_MEMBER');
+    const uid = typeof withUserId === 'string' && withUserId.length <= 64 ? withUserId : '';
+    const other = uid ? room.riders.get(uid) : null;
+    if (!other) throw new ConvoyError('That rider is not in this convoy.', 404, 'NOT_MEMBER');
+    if (other.userId === me.userId) throw new ConvoyError('Pick another rider to swap with.', 400, 'BAD_SWAP');
+    const paired = this._pillionPair(me, other);
+    if (k === 'PILLION' && !paired) throw new ConvoyError('You can only swap with your own rider or pillion.', 409, 'NOT_PAIRED');
+    if (k === 'BIKES' && (me.isCoRiding || other.isCoRiding)) {
+      throw new ConvoyError('A pillion has no bike to swap. Swap rider and pillion instead.', 409, 'PILLION_RIDER');
+    }
+    const t = now();
+    const swaps = this._swapsOf(room, t);
+    const pair = [me.userId, other.userId].sort().join('|');
+    for (const x of swaps.values()) {
+      if (x.pair === pair) throw new ConvoyError('A swap between you two is already waiting for an answer.', 409, 'SWAP_PENDING');
+    }
+    // A few asks per rider per window, so nobody can keep popping prompts on another phone.
+    const log = room.swapLog || (room.swapLog = new Map());
+    const recent = (log.get(me.userId) || []).filter((x) => t - x < SWAP_RATE_WINDOW_MS);
+    if (recent.length >= SWAP_RATE_MAX) throw new ConvoyError('Too many swap requests. Try again in a few minutes.', 409, 'SWAP_RATE'); // 409, not 429: the phone outbox must not keep retrying it
+    recent.push(t);
+    log.set(me.userId, recent);
+    const requestId = `SWP-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+    const pending = {
+      requestId, kind: k, pair, fromUserId: me.userId, fromName: me.name || user.name || '', toUserId: other.userId,
+      toName: other.name || '', at: t, expiresAt: t + SWAP_TTL_MS, timer: null,
+    };
+    pending.timer = setTimeout(() => this._expireSwap(groupId, requestId), SWAP_TTL_MS);
+    if (pending.timer.unref) pending.timer.unref();
+    swaps.set(requestId, pending);
+    this.emit('userMessage', groupId, other.userId, {
+      type: 'SWAP_ASK', groupId, requestId, fromUserId: pending.fromUserId, fromName: pending.fromName, kind: k, expiresAt: pending.expiresAt,
+    });
+    return { requestId, expiresAt: pending.expiresAt };
+  }
+
+  /** The asked rider answers. Only they may; an unknown or expired request is 404 SWAP_EXPIRED. */
+  async answerSwap(groupId, user, requestId, accept) {
+    const room = await this.getRoom(groupId);
+    const id = typeof requestId === 'string' && SWAP_ID.test(requestId) ? requestId : '';
+    const swaps = this._swapsOf(room, now());
+    const pending = id ? swaps.get(id) : null;
+    if (!pending) throw new ConvoyError('This swap request has expired.', 404, 'SWAP_EXPIRED');
+    if (pending.toUserId !== user.userId) throw new ConvoyError('Only the rider who was asked can answer.', 403, 'NOT_SWAP_TARGET');
+    swaps.delete(id);
+    clearTimeout(pending.timer);
+    if (accept !== true) {
+      this.emit('userMessage', groupId, pending.fromUserId, { type: 'SWAP_RESULT', groupId, requestId: id, accepted: false, kind: pending.kind, byUserId: user.userId, byName: pending.toName });
+      return { accepted: false };
+    }
+    // Checked again: someone may have left, the ride ended or the pair split meanwhile.
+    if (room.meta.tripStatus === 'ENDED') throw new ConvoyError('This ride has ended.', 409, 'TRIP_ENDED');
+    const a = room.riders.get(pending.fromUserId), b = room.riders.get(pending.toUserId);
+    if (!a || !b) throw new ConvoyError('That rider is not in this convoy.', 404, 'NOT_MEMBER');
+    let nextA, nextB;
+    const bike = (r) => ({ vehicleNo: r.vehicleNo || '', vehicleType: r.vehicleType || 'Motorcycle', vehicleColor: r.vehicleColor || 'Black' });
+    if (pending.kind === 'PILLION') {
+      if (!this._pillionPair(a, b)) throw new ConvoyError('You are no longer riding together.', 409, 'NOT_PAIRED');
+      const pillion = a.isCoRiding && a.ridingWithUserId === b.userId ? a : b;
+      const driver = pillion === a ? b : a;
+      const drive = bike(driver);
+      const ride = { vehicleNo: 'PILLION', vehicleType: 'Pillion Rider', vehicleColor: pillion.vehicleColor || drive.vehicleColor };
+      const newDriver = { ...pillion, ...drive, rideVehicle: drive, isCoRiding: false, ridingWithUserId: '' };
+      const newPillion = { ...driver, ...ride, rideVehicle: ride, isCoRiding: true, ridingWithUserId: pillion.userId };
+      [nextA, nextB] = pillion === a ? [newDriver, newPillion] : [newPillion, newDriver];
+    } else {
+      if (a.isCoRiding || b.isCoRiding) throw new ConvoyError('A pillion has no bike to swap.', 409, 'PILLION_RIDER');
+      const ba = bike(a), bb = bike(b);
+      nextA = { ...a, ...bb, rideVehicle: bb };
+      nextB = { ...b, ...ba, rideVehicle: ba };
+    }
+    room.riders.set(a.userId, nextA);
+    room.riders.set(b.userId, nextB);
+    this._touch(room);
+    for (const r of [nextA, nextB]) {
+      // Like a role change: its own document now, the room snapshot follows with the next flush.
+      room.dirty.add(r.userId);
+      this._schedulePersist(room);
+      await this.repo.upsertRider(groupId, r).catch((e) => this.log.warn('[convoys] swap save failed', e.message));
+      this._emit(groupId, 'RIDER_UPDATE', { rider: publicRider(r) });
+    }
+    const who = (r) => ({ userId: r.userId, name: r.name || '', vehicleNo: r.vehicleNo || '', vehicleType: r.vehicleType || '' });
+    this._emit(groupId, 'SWAP_DONE', { kind: pending.kind, requestId: id, a: who(nextA), b: who(nextB) });
+    this.emit('activity', groupId, {
+      type: 'VEHICLE_SWAP', user: { userId: a.userId, name: a.name || '' }, kind: pending.kind,
+      withUserId: b.userId, withName: b.name || '', vehicleNo: nextA.vehicleNo || '', withVehicleNo: nextB.vehicleNo || '',
+    });
+    if (pending.kind === 'PILLION') {
+      // The co-riding timeline entries follow who is the pillion now.
+      for (const r of [nextA, nextB]) this.emit('activity', groupId, { type: 'CORIDE', user: { userId: r.userId, name: r.name || '' }, withUserId: r.isCoRiding ? r.ridingWithUserId : '' });
+    }
+    this.emit('fleet');
+    return { accepted: true, a: who(nextA), b: who(nextB) };
+  }
+
+  /** True when one of the two rides pillion with the other. */
+  _pillionPair(a, b) {
+    return (!!a.isCoRiding && a.ridingWithUserId === b.userId) || (!!b.isCoRiding && b.ridingWithUserId === a.userId);
+  }
+
+  /** The room's pending swap asks, expired ones dropped (their requesters told, as by the timer). */
+  _swapsOf(room, t) {
+    const swaps = room.swaps || (room.swaps = new Map());
+    for (const [id, x] of swaps) if (x.expiresAt <= t) this._expireSwap(room.groupId, id);
+    return swaps;
+  }
+
+  /** No answer in time: the requester hears it was not accepted. */
+  _expireSwap(groupId, requestId) {
+    const room = this.rooms.get(groupId);
+    const pending = room?.swaps?.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    room.swaps.delete(requestId);
+    this.emit('userMessage', groupId, pending.fromUserId, { type: 'SWAP_RESULT', groupId, requestId, accepted: false, kind: pending.kind, expired: true });
+  }
+
   // ------------------------------------------------------ outbox dedupe (3.14)
   /** True when this rider's message with this clientId was already applied in this room. */
   seenClientId(room, userId, clientId, type) {
@@ -1509,7 +1781,10 @@ class ConvoyManager extends EventEmitter {
     const rider = room.riders.get(user.userId);
     const isOwner = room.meta.tripOwnerUserId === user.userId || room.meta.createdByUserId === user.userId;
     const isHead = room.meta.tripHeadUserId === user.userId;
-    return user.role === 'MASTER_ADMIN' || isOwner || isHead || rider?.role === 'LEAD';
+    // 3.55: with automatic roles on, the riding LEAD is simply whoever is at the front, so it does
+    // not carry the lead's rights (route, end ride, roles); the owner and the trip head keep them.
+    const ridingLead = rider?.role === 'LEAD' && room.meta.autoRoles !== true;
+    return user.role === 'MASTER_ADMIN' || isOwner || isHead || ridingLead;
   }
 
   _requireMember(room, user) {
@@ -2047,6 +2322,11 @@ function sanitizeTelemetry(patch) {
   if (has('stoppedSince')) out.stoppedSince = Math.max(0, Math.min(now() + 60000, Math.round(num(patch.stoppedSince))));
   if (has('micMuted')) out.micMuted = !!patch.micMuted;
   if (has('isSpeaking')) out.isSpeaking = !!patch.isSpeaking;
+  // 3.55 group break planner: only a fatigue level 0..3 (whole number), never the raw signals behind it.
+  if (has('fatigueLevel')) {
+    const f = typeof patch.fatigueLevel === 'number' && Number.isFinite(patch.fatigueLevel) ? Math.round(patch.fatigueLevel) : NaN;
+    if (f >= 0 && f <= 3) { out.fatigueLevel = f; out.fatigueAt = now(); }
+  }
   if (Object.hasOwn(patch, 'fuelEstimate')) {
     const f = patch.fuelEstimate;
     out.fuelEstimate = f && Number.isFinite(f.usableKm) && f.usableKm >= 0 && f.usableKm <= 15000
@@ -2134,6 +2414,8 @@ function publicRider(r) {
     fuelEstimate: r.fuelEstimate && now() - r.fuelEstimate.updatedAt < 120000 ? r.fuelEstimate : null,
     micMuted: !!r.micMuted,
     isSpeaking: !!r.isSpeaking,
+    // 3.55: fatigue level 0..3, only while recent (10 min); 0 for older apps that never send it.
+    fatigueLevel: Number.isInteger(r.fatigueLevel) && Number.isFinite(r.fatigueAt) && now() - r.fatigueAt < 600000 ? r.fatigueLevel : 0,
   };
 }
 

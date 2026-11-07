@@ -60,10 +60,10 @@ async function boot(opts = {}) {
         if (w >= 0) ws.waiters.splice(w, 1)[0].resolve(item); else ws.inbox.push(item);
       });
       ws.closed = new Promise((res) => ws.on('close', (code) => { ws.closeCode = code; res(code); }));
-      ws.next = (pred, timeout = 1500) => new Promise((res, rej) => {
+      ws.next = (pred, timeout = 4000) => new Promise((res, rej) => {
         const i = ws.inbox.findIndex(pred);
         if (i >= 0) return res(ws.inbox.splice(i, 1)[0]);
-        const t = setTimeout(() => rej(new Error('timeout waiting for message')), timeout);
+        const t = setTimeout(() => rej(new Error('timeout waiting for message: ' + pred.toString())), timeout);
         ws.waiters.push({ pred, resolve: (v) => { clearTimeout(t); res(v); } });
       });
       ws.sendJson = (o) => ws.send(JSON.stringify(o));

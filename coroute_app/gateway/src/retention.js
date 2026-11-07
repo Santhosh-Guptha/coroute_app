@@ -128,6 +128,25 @@ class Retention {
     // Safety network audit trail (3.15).
     stats.auditRemoved = await this.repo.purgeOlderThan(COLLECTIONS.audit, 'at', nowMs - config.auditRetentionDays * DAY);
 
+    // Saved road reports past their time (3.55).
+    if (typeof this.repo.purgeExpiredRoadHazards === 'function') {
+      try { stats.roadHazardsRemoved = await this.repo.purgeExpiredRoadHazards(nowMs); } catch (e) { this.log.warn?.('[retention] road', e.message); }
+    }
+    // 3.55 risky-stretch cells with no hard brake reported for 180 days.
+    if (this.repo.soda) {
+      try {
+        const { RoadRiskStore } = require('./road_risk');
+        const risk = new RoadRiskStore(this.repo.soda);
+        await risk.ensure();
+        stats.roadRiskRemoved = await risk.purgeOld(nowMs);
+      } catch (e) { this.log.warn?.('[retention] road risk', e.message); }
+    }
+
+    // Plans of accounts that no longer exist (3.55): never shown as "plan taken" again.
+    if (typeof this.repo.purgeOrphanMemberships === 'function') {
+      try { Object.assign(stats, await this.repo.purgeOrphanMemberships()); } catch (e) { this.log.warn?.('[retention] memberships', e.message); }
+    }
+
     // 5. Voice session metadata is operational only.
     stats.voiceLogsRemoved = await this.repo.purgeOlderThan(COLLECTIONS.voiceLog, 'startedAt', nowMs - config.retentionVoiceLogDays * DAY);
 

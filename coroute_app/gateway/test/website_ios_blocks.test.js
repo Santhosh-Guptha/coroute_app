@@ -42,10 +42,32 @@ test('without an iOS link the site never offers an iOS download and says so cons
     assert.ok(!/<!--\/?(no-)?ios-->/.test(html), `${page} leaks block markers`);
   }
   const home = await (await fetch(base + '/')).text();
-  assert.ok(home.includes('No iOS version yet. CoRoute runs on Android 6.0 or newer.'));
+  assert.ok(home.includes('The iOS app is building now and coming soon. Until then, CoRoute runs on Android 6.0 or newer.'));
   const get = await (await fetch(base + '/get')).text();
-  assert.ok(get.includes('No iOS version yet.'));
+  assert.ok(get.includes('The iOS app is building now and coming soon.'));
   assert.ok(!get.includes('id="ios"'));
+  // 3.55 "coming soon" state: a disabled control, never a dead link to an App Store page that does not exist.
+  for (const [page, html] of [['/', home], ['/get', get]]) {
+    const soon = html.match(/<button class="btn btn--soon[^"]*" type="button" aria-disabled="true">[\s\S]*?<\/button>/g) || [];
+    assert.ok(soon.length >= 1, `${page}: iOS coming-soon control`);
+    for (const b of soon) {
+      assert.ok(b.includes('Coming soon') && b.includes('building now'), `${page}: coming-soon wording`);
+      assert.ok(!/<a\b/.test(b) && !/href="(?!\/assets\/)/.test(b), `${page}: coming-soon control is not a link`);
+    }
+    assert.ok(!html.includes('href="/download/ios"') && !html.includes('href="/get#ios"'), `${page}: no dead iOS link`);
+  }
+  assert.ok(home.includes('<span class="soon-pill">Coming soon</span>'), 'footer and header say coming soon');
+});
+
+test('with an iOS link the real download shows and the coming-soon state is gone', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const pub = path.join(__dirname, '..', 'public');
+  for (const f of ['index.html', 'get.html', 'partials/header.html', 'partials/footer.html']) {
+    const out = applyPlatformBlocks(fs.readFileSync(path.join(pub, f), 'utf8'), true);
+    assert.ok(!out.includes('btn--soon') && !out.includes('soon-pill'), `${f}: coming-soon removed when iOS is configured`);
+    assert.ok(/href="\/(?:download\/ios|get#ios)"/.test(out), `${f}: real iOS link kept`);
+  }
 });
 
 test('without PLAY_STORE_URL the site asks for a story in the app instead of a Google Play rating', async () => {

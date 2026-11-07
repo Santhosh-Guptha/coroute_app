@@ -25,6 +25,63 @@ test('cell keys are validated, bounded and deduplicated', () => {
   assert.match(q, /\[bbox:17,78,17.05,78.05\]/);
   assert.match(q, /fuel\|charging_station/);
   assert.ok(q.indexOf('fuel|charging_station') < q.indexOf('restaurant'), 'safety places are queried before food');
+  // 3.55: heritage places are their own bounded group, after the safety places.
+  assert.match(q, /nwr\["historic"~"\^\(monument\|memorial\|castle\|fort/);
+  assert.match(q, /nwr\["heritage"\];\);out center tags 200;/);
+  assert.ok(q.indexOf('fuel|charging_station') < q.indexOf('historic'));
+  // 3.55 smart speed limits: school zones and road limits are bounded groups, queried last.
+  assert.match(q, /nwr\["amenity"~"\^\(school\|college\|kindergarten\)\$"\];\);out center tags 200;/);
+  assert.match(q, /\(way\["highway"\]\["maxspeed"\];\);out center tags 400;$/);
+  assert.ok(q.indexOf('historic') < q.indexOf('school'));
+});
+
+test('3.55: school zones keep only their amenity; roads keep only their limit tags', () => {
+  const school = compact({ type: 'way', id: 11, center: { lat: 17.1, lon: 78.1 }, tags: { amenity: 'school', name: 'ZP High School', phone: '123', operator: 'Govt' } });
+  assert.deepEqual(school.t, { amenity: 'school' });
+  const road = compact({ type: 'way', id: 12, center: { lat: 17.2, lon: 78.2 }, tags: { highway: 'primary', maxspeed: '50', name: 'NH 44', ref: 'NH44', lanes: '4', 'source:maxspeed': 'IN:urban' } });
+  assert.deepEqual(road.t, { highway: 'primary', maxspeed: '50', 'source:maxspeed': 'IN:urban' });
+  assert.equal(road.i, 'w12');
+  // A hospital keeps its usual tags (highway is not a place tag).
+  const h = compact({ type: 'node', id: 13, lat: 17.3, lon: 78.3, tags: { amenity: 'hospital', name: 'Care', emergency: 'yes', highway: 'x' } });
+  assert.deepEqual(h.t, { amenity: 'hospital', name: 'Care', emergency: 'yes' });
+});
+
+test('3.55: cells are cached under poi:v3; a v2 (else v1) entry is served as stale while v3 waits', async () => {
+  const now = 9_500_000; const repo = memRepo(); const up = overpass();
+  repo.m.set('poi:v2:340:1561', { value: { at: now - 3600000, p: [{ i: 'n20', a: 17.01, o: 78.06, t: { amenity: 'fuel' } }] } });
+  repo.m.set('poi:v1:340:1561', { value: { at: now - 3600000, p: [{ i: 'n10', a: 17.01, o: 78.06, t: { amenity: 'fuel' } }] } });
+  repo.m.set('poi:v1:340:1562', { value: { at: now - 3600000, p: [{ i: 'n11', a: 17.01, o: 78.11, t: { amenity: 'cafe' } }] } });
+  const s = new PoiCellService({ repo, url: 'http://o.test', fetchImpl: up.fetchImpl, clock: () => now, maxUpstreamPerRequest: 1 });
+  const r = await s.cells('340:1560,340:1561,340:1562');
+  assert.equal(up.calls.length, 1);
+  assert.ok(repo.m.has('poi:v3:340:1560'));
+  assert.equal(r.cells['340:1561'].p[0].i, 'n20', 'v2 preferred over v1');
+  assert.equal(r.cells['340:1561'].stale, true);
+  assert.equal(r.cells['340:1562'].p[0].i, 'n11', 'v1 when there is no v2');
+  assert.deepEqual(r.pending.sort(), ['340:1561', '340:1562']);
+});
+
+test('3.55: heritage tags are kept by compact', () => {
+  const c = compact({ type: 'way', id: 5, center: { lat: 17.3833, lon: 78.4011 }, tags: { name: 'Golconda Fort', historic: 'fort', heritage: '2', wikipedia: 'en:Golconda Fort', wikidata: 'Q1135192', 'addr:city': 'Hyderabad' } });
+  assert.deepEqual(c.t, { name: 'Golconda Fort', historic: 'fort', heritage: '2', wikipedia: 'en:Golconda Fort', wikidata: 'Q1135192' });
+});
+
+test('3.55: a v1 entry is served as stale while the new answer waits for budget', async () => {
+  let now = 9_000_000; const repo = memRepo(); const up = overpass();
+  repo.m.set('poi:v1:340:1560', { value: { at: now - 3600000, p: [{ i: 'n7', a: 17.01, o: 78.01, t: { amenity: 'fuel' } }] } });
+  repo.m.set('poi:v1:340:1561', { value: { at: now - 3600000, p: [{ i: 'n8', a: 17.01, o: 78.06, t: { amenity: 'cafe' } }] } });
+  const s = new PoiCellService({ repo, url: 'http://o.test', fetchImpl: up.fetchImpl, clock: () => now, maxUpstreamPerRequest: 1 });
+  const r = await s.cells('340:1560,340:1561');
+  assert.equal(up.calls.length, 1, 'only one upstream call fits this request');
+  assert.equal(r.cells['340:1560'].p[0].i, 'n1', 'fresh v2 answer');
+  assert.equal(r.cells['340:1561'].stale, true, 'v1 answer kept as stale');
+  assert.equal(r.cells['340:1561'].p[0].i, 'n8');
+  assert.deepEqual(r.pending, ['340:1561']);
+  assert.ok(repo.m.has('poi:v3:340:1560'));
+  // Not configured: the v1 entry still answers instead of 503.
+  const s2 = new PoiCellService({ repo, url: null, clock: () => now });
+  const r2 = await s2.cells('340:1561');
+  assert.equal(r2.cells['340:1561'].stale, true);
 });
 
 test('compact keeps positions and a tag whitelist only (fuel:* kept, address dropped)', () => {
