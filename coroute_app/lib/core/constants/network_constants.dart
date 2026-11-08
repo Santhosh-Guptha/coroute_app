@@ -32,6 +32,7 @@ class NetworkConstants {
 
   // ------------------------------------------------------------ settings keys
   static const String keyVoiceWarnings = 'coroute_voice_warnings';
+  static const String keyPauseOtherAudio = 'coroute_pause_other_audio';
   static const String keyHazardAlerts = 'coroute_hazard_alerts';
   static const String keyRideOnLockScreen = 'coroute_ride_lock_screen';
   static const String keyNetConsentSeen = 'coroute_net_consent_seen';

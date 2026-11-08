@@ -42,6 +42,7 @@ class SettingsService extends ChangeNotifier {
 
   // 3.15: voice, accident warnings, lock screen, nearby riders consent.
   bool _voiceWarnings = true;
+  bool _pauseOtherAudio = false;
   bool _hazardAlerts = true;
   bool _rideOnLockScreen = true;
   bool _netConsentSeen = false;
@@ -151,6 +152,10 @@ class SettingsService extends ChangeNotifier {
   /// the group's voice switch). Emergency alerts are always spoken.
   bool get voiceWarnings => _voiceWarnings;
 
+  /// Whether other audio (Spotify, music, podcasts) should pause completely during alerts
+  /// instead of ducking (lowering volume).
+  bool get pauseOtherAudio => _pauseOtherAudio;
+
   /// Accident warnings on my route (on by default).
   bool get hazardAlerts => _hazardAlerts;
 
@@ -196,6 +201,7 @@ class SettingsService extends ChangeNotifier {
       _noSignalAhead = prefs.getBool(keyNoSignalAhead) ?? true;
       _oemGuideSeen = prefs.getBool(SafetyConstants.keyOemGuideSeen) ?? false;
       _voiceWarnings = prefs.getBool(NetworkConstants.keyVoiceWarnings) ?? true;
+      _pauseOtherAudio = prefs.getBool(NetworkConstants.keyPauseOtherAudio) ?? false;
       _hazardAlerts = prefs.getBool(NetworkConstants.keyHazardAlerts) ?? true;
       _rideOnLockScreen = prefs.getBool(NetworkConstants.keyRideOnLockScreen) ?? true;
       _netConsentSeen = prefs.getBool(NetworkConstants.keyNetConsentSeen) ?? false;
@@ -292,6 +298,13 @@ class SettingsService extends ChangeNotifier {
     _voiceWarnings = value;
     notifyListeners();
     await _save(NetworkConstants.keyVoiceWarnings, value);
+  }
+
+  Future<void> setPauseOtherAudio(bool value) async {
+    if (value == _pauseOtherAudio) return;
+    _pauseOtherAudio = value;
+    notifyListeners();
+    await _save(NetworkConstants.keyPauseOtherAudio, value);
   }
 
   Future<void> setHazardAlerts(bool value) async {

@@ -782,12 +782,14 @@ private class TtsChannel: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     let interrupt = (args["interrupt"] as? Bool) == true
+    let isEmergency = (args["isEmergency"] as? Bool) == true || (args["emergency"] as? Bool) == true
+    let pauseOthers = (args["pauseOthers"] as? Bool) == true
     if interrupt {
       synth.stopSpeaking(at: .immediate)
       activeUtterances = 0
     }
 
-    activateAudioSession(duck: true)
+    activateAudioSession(duck: !(isEmergency || pauseOthers))
 
     let utterance = AVSpeechUtterance(string: String(text.prefix(300)))
     utterance.voice = selectedVoice ?? AVSpeechSynthesisVoice(language: "en-IN")

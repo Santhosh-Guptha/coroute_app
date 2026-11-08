@@ -29,7 +29,13 @@ class FakeVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
   }
 
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
+  Future<bool> speak(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+  }) async {
     spokenTexts.add(text);
     return true;
   }
@@ -291,6 +297,7 @@ void main() {
 
       final guide = RouteGuide(fetchRoute: (wp) async => personalRoute);
       guide.setConvoy(convoy, 'user_1');
+      guide.onFix(lat: 17.4329, lng: 78.3780, speedKmh: 45, nowMs: DateTime.now().millisecondsSinceEpoch, online: true, lowData: false);
 
       expect(guide.hasPersonalRoute, isFalse);
       expect(guide.activeRoute?.polyline, equals(groupRoute.polyline));

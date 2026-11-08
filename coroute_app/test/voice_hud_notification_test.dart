@@ -36,7 +36,13 @@ class MockVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
   Future<bool> init() async => initResult;
 
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
+  Future<bool> speak(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+  }) async {
     spokenLines.add(text);
     spokenCalls.add((text, interrupt));
     return true;
@@ -94,6 +100,9 @@ class FakeConvoyService extends ChangeNotifier implements ConvoyService {
 
   @override
   bool supports(String feature) => true;
+
+  @override
+  bool get supportsRideRoles => true;
 
   void triggerNotify() => notifyListeners();
 

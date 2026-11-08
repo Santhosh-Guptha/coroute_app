@@ -18,7 +18,13 @@ abstract class VoiceEngine {
   Future<bool> init();
 
   /// [interrupt] true drops anything queued or being said (QUEUE_FLUSH), else it is queued.
-  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false});
+  Future<bool> speak(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+  });
   Future<void> stop();
 
   /// Unbinds the engine (ride end).
@@ -58,13 +64,20 @@ class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
   }
 
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
+  Future<bool> speak(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+  }) async {
     try {
       return (await _ch.invokeMethod<bool>('speak', {
         'text': text,
         'id': id,
         'interrupt': interrupt,
         'isEmergency': isEmergency,
+        'pauseOthers': pauseOthers,
       })) == true;
     } catch (_) {
       return false;
@@ -196,6 +209,7 @@ class VoiceService extends ChangeNotifier {
     String? key,
     Duration? ttl,
     bool isRecoverable = true,
+    bool? pauseOthers,
   }) async {
     final t = text.trim();
     if (t.isEmpty || !_allowed(priority) || _failed) return false;
@@ -213,6 +227,7 @@ class VoiceService extends ChangeNotifier {
       ttl: ttl,
       dedupeWindow: NotifConstants.voiceDedupe,
       isRecoverable: isRecoverable,
+      pauseOthers: pauseOthers ?? (priority == VoicePriority.critical || _settings.pauseOtherAudio),
     );
   }
 
@@ -226,6 +241,7 @@ class VoiceService extends ChangeNotifier {
       dedupeKey: dedupeKey ?? t,
       ttl: ttl,
       dedupeWindow: const Duration(seconds: 5),
+      pauseOthers: true,
     );
   }
 
@@ -239,6 +255,7 @@ class VoiceService extends ChangeNotifier {
       dedupeKey: dedupeKey ?? t,
       ttl: ttl,
       dedupeWindow: const Duration(seconds: 15),
+      pauseOthers: _settings.pauseOtherAudio,
     );
   }
 
@@ -254,6 +271,7 @@ class VoiceService extends ChangeNotifier {
       dedupeKey: dedupeKey ?? t,
       ttl: ttl,
       dedupeWindow: const Duration(seconds: 10),
+      pauseOthers: _settings.pauseOtherAudio,
     );
   }
 
@@ -269,6 +287,7 @@ class VoiceService extends ChangeNotifier {
       dedupeKey: dedupeKey ?? t,
       ttl: ttl,
       dedupeWindow: const Duration(seconds: 8),
+      pauseOthers: _settings.pauseOtherAudio,
     );
   }
 
@@ -284,6 +303,7 @@ class VoiceService extends ChangeNotifier {
       dedupeKey: dedupeKey ?? t,
       ttl: ttl,
       dedupeWindow: const Duration(seconds: 15),
+      pauseOthers: _settings.pauseOtherAudio,
     );
   }
 
@@ -299,6 +319,7 @@ class VoiceService extends ChangeNotifier {
       dedupeKey: dedupeKey ?? t,
       ttl: ttl,
       dedupeWindow: const Duration(seconds: 30),
+      pauseOthers: _settings.pauseOtherAudio,
     );
   }
 
@@ -331,6 +352,7 @@ class VoiceService extends ChangeNotifier {
       'Over limit. $currentSpeedKmh km/h.',
       priority: VoicePriority.warning,
       key: 'overspeed_${DateTime.now().millisecondsSinceEpoch ~/ 60000}',
+      pauseOthers: _settings.pauseOtherAudio,
     );
   }
 

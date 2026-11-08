@@ -31,7 +31,13 @@ class TestVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
   Future<bool> init() => Future.value(initResult);
 
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) {
+  Future<bool> speak(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+  }) {
     spokenList.add((text, interrupt, id));
     return Future.value(true);
   }

@@ -44,6 +44,15 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
     /** Utterances handed to the engine and not finished yet (main thread only). */
     private val active = HashSet<String>()
     private var hasFocus = false
+    private var currentFocusGain = 0
+
+    /** Watchdog to ensure audio focus is never leaked if the TTS engine hangs or crashes. */
+    private val safetyFocusWatchdog = Runnable {
+        if (hasFocus && active.isNotEmpty()) {
+            active.clear()
+            abandonFocus()
+        }
+    }
 
     /** Bumped by release, so a late init callback of an old engine is ignored. */
     private var generation = 0
@@ -51,16 +60,24 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
     /** AudioFocusRequest on Android 8+ (kept as Any so older phones never load the class). */
     private var focusRequest: Any? = null
 
-    private val attributes: AudioAttributes = AudioAttributes.Builder()
+    private val guidanceAttributes: AudioAttributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
+
+    private val emergencyAttributes: AudioAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ALARM)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+
+    private val attributes: AudioAttributes = guidanceAttributes
 
     // Transient interruptions (calls, tones) duck audio focus without terminating the engine.
     private val focusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS -> {
                 hasFocus = false
+                currentFocusGain = 0
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
@@ -106,10 +123,11 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
                 val id = call.argument<String>("id") ?: "coroute"
                 val interrupt = call.argument<Boolean>("interrupt") == true
                 val isEmergency = call.argument<Boolean>("isEmergency") == true || call.argument<Boolean>("emergency") == true
-                result.success(speak(text, id, interrupt, isEmergency))
+                val pauseOthers = call.argument<Boolean>("pauseOthers") == true
+                result.success(speak(text, id, interrupt, isEmergency, pauseOthers))
             }
             "requestEmergencyFocus" -> {
-                requestFocus()
+                requestFocus(isEmergency = true)
                 result.success(hasFocus)
             }
             "abandonEmergencyFocus" -> {
@@ -231,26 +249,39 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
                amMode == AudioManager.MODE_RINGTONE
     }
 
-    private fun speak(text: String, id: String, interrupt: Boolean, isEmergency: Boolean = false): Boolean {
+    private fun speak(text: String, id: String, interrupt: Boolean, isEmergency: Boolean = false, pauseOthers: Boolean = false): Boolean {
         val engine = tts
         if (!ready || !ok || engine == null || text.isBlank()) return false
         // Do not interfere with phone calls unless it is a genuine emergency alert
         if (isInPhoneCall() && !isEmergency) return false
 
-        // In normal riding: Do NOT continuously hold exclusive audio focus or duck/mute
-        // music or navigation audio from other apps.
-        // Only genuine emergency alerts temporarily request AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK.
-        if (isEmergency) {
-            requestFocus()
-        }
+        // ALWAYS request audio focus so background audio (Spotify, podcasts, music)
+        // is ducked (lowered to quiet background) or paused during spoken alerts,
+        // making speed warnings, hazard cues and guidance loud, distinct and audible!
+        requestFocus(isEmergency = isEmergency, pauseOthers = pauseOthers)
+
         if (interrupt) active.clear() // the flushed ones report onStop; nothing waits for them
+
+        try {
+            engine.setAudioAttributes(if (isEmergency) emergencyAttributes else guidanceAttributes)
+        } catch (e: Exception) {
+            // keep existing attributes
+        }
+
+        val params = Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f) // 100% maximum volume gain
+            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, id)
+        }
+
         val code = try {
-            engine.speak(text, if (interrupt) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, Bundle(), id)
+            engine.speak(text, if (interrupt) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, params, id)
         } catch (e: Exception) {
             TextToSpeech.ERROR
         }
         if (code == TextToSpeech.SUCCESS) {
             active.add(id)
+            main.removeCallbacks(safetyFocusWatchdog)
+            main.postDelayed(safetyFocusWatchdog, 25000L)
             return true
         }
         if (active.isEmpty()) abandonFocus()
@@ -259,7 +290,9 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
 
     private fun finished(id: String?) {
         if (id != null) active.remove(id)
-        if (active.isEmpty()) abandonFocus()
+        if (active.isEmpty()) {
+            abandonFocus()
+        }
     }
 
     private fun stop() {
@@ -297,31 +330,52 @@ class TtsChannel(context: Context) : MethodChannel.MethodCallHandler {
     }
 
     @Suppress("DEPRECATION")
-    private fun requestFocus() {
-        if (hasFocus) return
+    private fun requestFocus(isEmergency: Boolean = false, pauseOthers: Boolean = false) {
         val am = audio ?: return
+        val targetGain = if (isEmergency || pauseOthers) {
+            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+        } else {
+            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+        }
+
+        // If we already hold focus of equal or higher exclusivity, keep it
+        if (hasFocus && (currentFocusGain == targetGain || currentFocusGain == AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)) {
+            return
+        }
+
+        val targetAttributes = if (isEmergency) emergencyAttributes else guidanceAttributes
+
         val granted = try {
             if (Build.VERSION.SDK_INT >= 26) {
-                val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-                    .setAudioAttributes(attributes)
+                val request = AudioFocusRequest.Builder(targetGain)
+                    .setAudioAttributes(targetAttributes)
                     .setOnAudioFocusChangeListener(focusListener)
+                    .setWillPauseWhenDucked(true)
                     .build()
                 focusRequest = request
                 am.requestAudioFocus(request)
             } else {
-                am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                am.requestAudioFocus(
+                    focusListener,
+                    if (isEmergency) AudioManager.STREAM_ALARM else AudioManager.STREAM_MUSIC,
+                    targetGain
+                )
             }
         } catch (e: Exception) {
             AudioManager.AUDIOFOCUS_REQUEST_FAILED
         }
-        // Speak even without focus (an alert matters more than the music); only remember a grant.
-        hasFocus = granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        hasFocus = (granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
+        if (hasFocus) {
+            currentFocusGain = targetGain
+        }
     }
 
     @Suppress("DEPRECATION")
     private fun abandonFocus() {
         if (!hasFocus) return
         hasFocus = false
+        currentFocusGain = 0
+        main.removeCallbacks(safetyFocusWatchdog)
         val am = audio ?: return
         try {
             if (Build.VERSION.SDK_INT >= 26) {

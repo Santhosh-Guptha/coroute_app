@@ -11,7 +11,13 @@ class _FakeVoiceEngine implements VoiceEngine {
   Future<bool> init() async => true;
 
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
+  Future<bool> speak(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+  }) async {
     spoken.add(text);
     return true;
   }

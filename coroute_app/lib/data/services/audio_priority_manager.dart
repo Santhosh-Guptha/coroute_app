@@ -50,6 +50,7 @@ class AudioAlertItem {
   final int createdAtMs;
   final bool isInterruptible;
   final bool isRecoverable;
+  final bool pauseOthers;
   final Map<String, dynamic>? metadata;
 
   const AudioAlertItem({
@@ -62,6 +63,7 @@ class AudioAlertItem {
     required this.createdAtMs,
     this.isInterruptible = true,
     this.isRecoverable = true,
+    this.pauseOthers = false,
     this.metadata,
   });
 
@@ -186,6 +188,7 @@ class AudioPriorityManager extends ChangeNotifier {
     Duration? ttl,
     Duration? dedupeWindow,
     bool isRecoverable = true,
+    bool pauseOthers = false,
     Map<String, dynamic>? metadata,
   }) async {
     final cleanText = text.trim();
@@ -225,6 +228,7 @@ class AudioPriorityManager extends ChangeNotifier {
       dedupeWindow: window,
       createdAtMs: now,
       isRecoverable: isRecoverable,
+      pauseOthers: pauseOthers || (priority == AudioPriority.p0CriticalEmergency),
       metadata: metadata,
     );
 
@@ -328,9 +332,16 @@ class AudioPriorityManager extends ChangeNotifier {
         : item.text;
 
     final isEmergency = item.priority == AudioPriority.p0CriticalEmergency;
+    final pauseOthers = item.pauseOthers || isEmergency;
     bool success = false;
     try {
-      success = await _engine.speak(said, interrupt: interrupt, id: item.id, isEmergency: isEmergency);
+      success = await _engine.speak(
+        said,
+        interrupt: interrupt,
+        id: item.id,
+        isEmergency: isEmergency,
+        pauseOthers: pauseOthers,
+      );
     } catch (_) {
       success = false;
     }

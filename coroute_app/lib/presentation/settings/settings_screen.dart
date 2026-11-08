@@ -233,6 +233,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         value: s.voiceWarnings,
                         onChanged: s.setVoiceWarnings,
                       ),
+                      SafetySwitch(
+                        key: const ValueKey('settings_pause_music'),
+                        icon: Icons.music_off_rounded,
+                        title: 'Pause music during alerts',
+                        subtitle: s.pauseOtherAudio
+                            ? 'Pauses music and other apps completely during alerts, then resumes.'
+                            : 'Lowers music and other apps volume so alerts are loud and clear.',
+                        value: s.pauseOtherAudio,
+                        onChanged: s.setPauseOtherAudio,
+                      ),
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: Space.s12),
                         child: LanguagePicker(value: s.language, onChanged: s.setLanguage),

@@ -19,6 +19,7 @@ class FakeEngine implements VoiceEngine, VoiceEngineLanguage {
   int stops = 0;
   int releases = 0;
   final List<(String, bool)> spoken = [];
+  final List<({String text, bool interrupt, bool isEmergency, bool pauseOthers})> spokenCalls = [];
 
   @override
   Future<bool> init() async {
@@ -28,9 +29,16 @@ class FakeEngine implements VoiceEngine, VoiceEngineLanguage {
   }
 
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
+  Future<bool> speak(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+  }) async {
     if (!speakResult) return false;
     spoken.add((text, interrupt));
+    spokenCalls.add((text: text, interrupt: interrupt, isEmergency: isEmergency, pauseOthers: pauseOthers));
     return true;
   }
 
@@ -277,5 +285,53 @@ void main() {
     expect(await native.speak('x', interrupt: true, id: '1'), isFalse);
     await native.stop();
     await native.release();
+  });
+
+  group('audio priority & music ducking/pausing', () {
+    test('default pauseOtherAudio is false: warnings duck music (pauseOthers: false)', () async {
+      expect(settings.pauseOtherAudio, isFalse);
+      expect(await voice.speakOverspeed(currentSpeedKmh: 95, limitKmh: 80), isTrue);
+      expect(engine.spokenCalls, hasLength(1));
+      expect(engine.spokenCalls.first.pauseOthers, isFalse);
+      expect(engine.spokenCalls.first.isEmergency, isFalse);
+    });
+
+    test('pauseOtherAudio is true: warnings pause music (pauseOthers: true)', () async {
+      await settings.setPauseOtherAudio(true);
+      expect(settings.pauseOtherAudio, isTrue);
+      expect(await voice.speakOverspeed(currentSpeedKmh: 110, limitKmh: 80), isTrue);
+      expect(engine.spokenCalls, hasLength(1));
+      expect(engine.spokenCalls.first.pauseOthers, isTrue);
+      expect(engine.spokenCalls.first.isEmergency, isFalse);
+    });
+
+    test('emergency alerts always pause others and set isEmergency true', () async {
+      expect(settings.pauseOtherAudio, isFalse);
+      expect(await voice.speakEmergency('Emergency: Rahul crashed 2km behind.'), isTrue);
+      expect(engine.spokenCalls, hasLength(1));
+      expect(engine.spokenCalls.first.isEmergency, isTrue);
+      expect(engine.spokenCalls.first.pauseOthers, isTrue);
+    });
+
+    test('native engine forwards pauseOthers to method channel', () async {
+      final channel = MethodChannel(NotifConstants.ttsChannel);
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        final native = NativeVoiceEngine(channel: channel);
+        await native.speak('Slow down', interrupt: true, id: 'alert_1', isEmergency: false, pauseOthers: true);
+        expect(calls, hasLength(1));
+        expect(calls.single.method, 'speak');
+        expect(calls.single.arguments['pauseOthers'], isTrue);
+        expect(calls.single.arguments['isEmergency'], isFalse);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+      }
+    });
   });
 }

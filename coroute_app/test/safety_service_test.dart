@@ -120,7 +120,13 @@ class FakePort extends ChangeNotifier implements SafetyPort, SafetySourcePort, S
 class CapturedVoiceEngine extends SilentEngine {
   final List<String> spoken = [];
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async {
+  Future<bool> speak(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+  }) async {
     spoken.add(text);
     return true;
   }
@@ -130,7 +136,13 @@ class SilentEngine implements VoiceEngine {
   @override
   Future<bool> init() async => true;
   @override
-  Future<bool> speak(String text, {required bool interrupt, required String id, bool isEmergency = false}) async => true;
+  Future<bool> speak(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+  }) async => true;
   @override
   Future<void> stop() async {}
   @override
