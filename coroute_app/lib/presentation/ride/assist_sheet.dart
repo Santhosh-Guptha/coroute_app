@@ -50,8 +50,8 @@ AssistRequest? findAssist(ConvoyService service, String incidentId) {
 }
 
 /// The assistance sheet: the same words as the banner, after I accepted the
-/// rider's first name and vehicle (and medical info only when the rider
-/// chose to share it with responders), the big answer buttons, "Call
+/// rider's first name and vehicle (and the medical info and emergency contact
+/// the rider entered, while the alert is open), the big answer buttons, "Call
 /// emergency services 112", "Open in Google Maps" and "Report false alert"
 /// (with a confirm). Before I accept it shows no name, no group and nothing
 /// about the rider. Follows live changes; when the request closes it says why.

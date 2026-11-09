@@ -162,6 +162,8 @@ class CrashAlarmScreen extends StatelessWidget {
         traumaLevel: alarm.traumaLevel,
         // 3.55 rider-down check: the same alarm, titled "Bike down?".
         titleOverride: safety.alarmIsRiderDown ? SafetyService.riderDownTitle : null,
+        // 3.55 fix: crash detection switched off during the countdown keeps this alarm; say so.
+        detectionOffNote: safety.alarmRunsWithDetectionOff ? SafetyService.crashAlarmStillRunning : null,
       ),
     );
   }
@@ -193,6 +195,10 @@ class CrashAlarmView extends StatelessWidget {
   /// A different headline for the same alarm (3.55 rider-down: "Bike down?"). Null: [title].
   final String? titleOverride;
 
+  /// 3.55 fix: shown in place of the hint while the countdown runs with crash detection switched
+  /// off ([SafetyService.crashAlarmStillRunning]). Null: the usual hint.
+  final String? detectionOffNote;
+
   const CrashAlarmView({
     super.key,
     required this.secondsLeft,
@@ -203,6 +209,7 @@ class CrashAlarmView extends StatelessWidget {
     this.currentBpm,
     this.traumaLevel,
     this.titleOverride,
+    this.detectionOffNote,
   });
 
   static const double buttonHeight = 72;
@@ -232,13 +239,26 @@ class CrashAlarmView extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, height: 1.35),
     );
-    final hint = Text(
-      L10n.t('crash.hint'),
-      textAlign: TextAlign.center,
-      maxLines: 4,
-      overflow: TextOverflow.ellipsis,
-      style: const TextStyle(color: sosPale, fontSize: 15, fontWeight: FontWeight.w600, height: 1.35),
-    );
+    final note = detectionOffNote;
+    final hint = note == null
+        ? Text(
+            L10n.t('crash.hint'),
+            textAlign: TextAlign.center,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: sosPale, fontSize: 15, fontWeight: FontWeight.w600, height: 1.35),
+          )
+        : Semantics(
+            liveRegion: true,
+            child: Text(
+              note,
+              key: const ValueKey('crashDetectionOffNote'),
+              textAlign: TextAlign.center,
+              maxLines: 5,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w800, height: 1.35),
+            ),
+          );
     final count = ExcludeSemantics(
       child: SosRing(
         child: Column(

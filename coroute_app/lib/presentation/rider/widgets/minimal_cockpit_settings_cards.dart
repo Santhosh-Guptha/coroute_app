@@ -633,7 +633,12 @@ class SecondaryManagementGroup extends StatelessWidget {
 
 /// Ride lifecycle bar (Section 5) fixed at sheet bottom with clear confirmation.
 class RideLifecycleBar extends StatelessWidget {
+  /// Lead rights (trip owner or a picked Lead): pause / resume.
   final bool isLead;
+
+  /// End the trip: the trip owner only (3.55 owner decision: not the trip head, not the Lead).
+  /// Null keeps the old rule (shown with [isLead]).
+  final bool? canEnd;
   final bool isPaused;
   final VoidCallback onTogglePause;
   final VoidCallback onEndRide;
@@ -642,6 +647,7 @@ class RideLifecycleBar extends StatelessWidget {
   const RideLifecycleBar({
     super.key,
     required this.isLead,
+    this.canEnd,
     required this.isPaused,
     required this.onTogglePause,
     required this.onEndRide,
@@ -679,7 +685,7 @@ class RideLifecycleBar extends StatelessWidget {
         ],
         Row(
           children: [
-            if (isLead) ...[
+            if (canEnd ?? isLead) ...[
               Expanded(
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(

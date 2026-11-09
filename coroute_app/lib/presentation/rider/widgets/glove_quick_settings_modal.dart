@@ -16,7 +16,7 @@ import '../../ride/guardian_sheet.dart';
 ///   3. Battery saver: the same switch as in Settings.
 ///   4. Screen always on while the phone is mounted.
 /// Quick actions: Guardian link, Fuel and (when given) offline voice navigation.
-class GloveQuickSettingsModal extends StatelessWidget {
+class GloveQuickSettingsModal extends StatefulWidget {
   final SettingsService? settingsService;
   final IntercomService? intercomService;
   final bool keepScreenOn;
@@ -99,9 +99,26 @@ class GloveQuickSettingsModal extends StatelessWidget {
   }
 
   @override
+  State<GloveQuickSettingsModal> createState() => _GloveQuickSettingsModalState();
+}
+
+class _GloveQuickSettingsModalState extends State<GloveQuickSettingsModal> {
+  late bool _keepScreenOn = widget.keepScreenOn;
+
+  @override
   Widget build(BuildContext context) {
-    final settings = settingsService ?? (context.mounted ? context.read<SettingsService?>() : null);
-    final intercom = intercomService ?? (context.mounted ? context.read<IntercomService?>() : null);
+    final settings = widget.settingsService ?? (context.mounted ? context.read<SettingsService?>() : null);
+    final intercom = widget.intercomService ?? (context.mounted ? context.read<IntercomService?>() : null);
+    // 3.55 fix: the rows follow the services. Settings and the intercom were only read, so after a
+    // tap the row kept its old state, and a second tap repeated the same change (Voice could not be
+    // turned back on without closing the sheet).
+    return ListenableBuilder(
+      listenable: Listenable.merge([settings, intercom]),
+      builder: (context, _) => _content(context, settings, intercom),
+    );
+  }
+
+  Widget _content(BuildContext context, SettingsService? settings, IntercomService? intercom) {
     final themeCtrl = context.watch<ThemeController?>();
 
     // 1. Voice: spoken alerts and the intercom together (emergencies always speak).
@@ -130,7 +147,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
             intercom.setMicMuted(!next);
             intercom.setDeafened(!next);
           }
-          onSettingToggled?.call('Voice', next);
+          widget.onSettingToggled?.call('Voice', next);
         },
       ),
       _QuickSettingItem(
@@ -142,7 +159,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
         onToggle: () {
           final next = !isNightMap;
           themeCtrl?.setPreference(next ? ThemePreference.dark : ThemePreference.auto);
-          onSettingToggled?.call('Night map', next);
+          widget.onSettingToggled?.call('Night map', next);
         },
       ),
       _QuickSettingItem(
@@ -154,18 +171,21 @@ class GloveQuickSettingsModal extends StatelessWidget {
         onToggle: () {
           final next = !batterySaverOn;
           settings?.setBatterySaver(next);
-          onSettingToggled?.call('Battery saver', next);
+          widget.onSettingToggled?.call('Battery saver', next);
         },
       ),
       _QuickSettingItem(
         key: const Key('quick_setting_screen_always_on'),
         label: 'Screen always on',
-        subtitle: keepScreenOn ? 'The screen stays awake while mounted' : 'Follows the phone\'s sleep time',
+        subtitle: _keepScreenOn ? 'The screen stays awake while mounted' : 'Follows the phone\'s sleep time',
         icon: Icons.screen_lock_portrait_rounded,
-        isActive: keepScreenOn,
+        isActive: _keepScreenOn,
         onToggle: () {
-          onToggleKeepScreenOn();
-          onSettingToggled?.call('Screen always on', !keepScreenOn);
+          final next = !_keepScreenOn;
+          widget.onToggleKeepScreenOn();
+          // 3.55 fix: the cockpit owns the switch; this copy keeps the row in step with it.
+          setState(() => _keepScreenOn = next);
+          widget.onSettingToggled?.call('Screen always on', next);
         },
       ),
     ];
@@ -274,10 +294,10 @@ class GloveQuickSettingsModal extends StatelessWidget {
                     fontSize: 13,
                     onPressed: () {
                       Navigator.of(context).pop();
-                      if (onOpenGuardian != null) {
-                        onOpenGuardian!();
-                      } else if (groupId != null && context.mounted) {
-                        showGuardianSheet(context, groupId: groupId!);
+                      if (widget.onOpenGuardian != null) {
+                        widget.onOpenGuardian!();
+                      } else if (widget.groupId != null && context.mounted) {
+                        showGuardianSheet(context, groupId: widget.groupId!);
                       }
                     },
                   ),
@@ -293,8 +313,8 @@ class GloveQuickSettingsModal extends StatelessWidget {
                     fontSize: 13,
                     onPressed: () {
                       Navigator.of(context).pop();
-                      if (onOpenFuel != null) {
-                        onOpenFuel!();
+                      if (widget.onOpenFuel != null) {
+                        widget.onOpenFuel!();
                       } else if (context.mounted) {
                         showFuelSheet(context);
                       }
@@ -303,7 +323,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
                 ),
               ],
             ),
-            if (onLaunchOfflineNav != null) ...[
+            if (widget.onLaunchOfflineNav != null) ...[
               const SizedBox(height: 10),
               DsButton(
                 key: const Key('quick_action_offline_nav'),
@@ -314,7 +334,7 @@ class GloveQuickSettingsModal extends StatelessWidget {
                 fontSize: 14,
                 onPressed: () {
                   Navigator.of(context).pop();
-                  onLaunchOfflineNav!();
+                  widget.onLaunchOfflineNav!();
                 },
               ),
             ],

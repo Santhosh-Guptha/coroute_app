@@ -19,6 +19,7 @@ import '../ride/riders_ladder.dart';
 import '../timeline/live_timeline_screen.dart';
 import '../timeline/member_colors.dart';
 import 'admin_ui.dart';
+import '../rider/widgets/bike_rider_marker.dart';
 
 /// Master admin: one live ride. Open SOS first, then the map, the group
 /// numbers and every rider with their status. Tapping a rider (row or map
@@ -257,11 +258,15 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
                     point: LatLng(r.lat, r.lng),
                     width: 48,
                     height: 48,
-                    child: RiderAvatar(
+                    // 3.55: the rider's bike (shape and colour) instead of a round avatar.
+                    child: StatusBikeMarker(
                       name: r.name,
-                      color: colors[r.userId],
+                      color: colors[r.userId] ?? AppTheme.accentText,
+                      vehicleKind: r.vehicleKind,
+                      vehicleColor: r.vehicleColor,
                       status: status[r.userId],
-                      size: 40,
+                      heading: r.heading,
+                      height: 30,
                       onTap: () => _showRider(
                         r,
                         status[r.userId] ?? RiderStatus.offline,
@@ -284,7 +289,7 @@ class _AdminConvoyInspectorState extends State<AdminConvoyInspector> {
     final facts = [
       if (current.joinCode.isNotEmpty) 'Code ${current.joinCode}',
       if (current.createdByUserName.isNotEmpty)
-        'lead ${current.createdByUserName}',
+        'trip owner ${current.createdByUserName}',
       if (current.destinationName.trim().isNotEmpty)
         'to ${current.destinationName}',
     ].join(', ');

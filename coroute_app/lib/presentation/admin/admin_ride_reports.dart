@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
@@ -7,6 +8,7 @@ import 'admin_payments_logic.dart';
 import 'admin_payments_widgets.dart';
 import 'admin_ui.dart';
 import 'admin_user_details_screen.dart';
+import '../widgets/admin_warning_card.dart';
 
 /// "Abuse" for the reason code of a public ride report.
 String adminReportReason(Object? code) => switch (code?.toString()) {
@@ -189,22 +191,26 @@ class _AdminRideReportSheetState extends State<AdminRideReportSheet> {
     }
   }
 
-  Future<void> _mark(ApiClient api, String status, String action) =>
-      api.patch('/admin/public-ride/reports/${Uri.encodeComponent(_id)}', {'status': status, 'action': action});
+  Future<void> _mark(ApiClient api, String status, String action, {String? message}) =>
+      api.patch('/admin/public-ride/reports/${Uri.encodeComponent(_id)}', {
+        'status': status,
+        'action': action,
+        'message': ?message,
+      });
 
   Future<void> _dismiss() => _run((api) => _mark(api, 'REVIEWED', 'DISMISS'), 'Report dismissed.');
 
+  /// The admin types the warning (required, at most 280 characters; the guidelines line is a quick
+  /// option) and sees a preview of the rider's notice before sending.
   Future<void> _warn() async {
-    final ok = await confirmAction(
+    final message = await showAppSheet<String>(
       context,
-      title: 'Warn $_name?',
-      // 3.55: the rider also gets it as an in-app notice (gateway default text; switch adminWarnings).
-      message: 'They see a message from CoRoute moderators asking them to follow the public ride guidelines. '
-          'The warning is also kept on their public ride record, so the next report can be judged with it.',
-      confirmLabel: 'Warn',
+      isScrollControlled: true,
+      title: 'Warn $_name',
+      builder: (_) => const AdminWarnMessageSheet(),
     );
-    if (!ok || !mounted) return;
-    await _run((api) => _mark(api, 'ACTIONED', 'WARN'), 'Warning recorded.');
+    if (message == null || !mounted) return;
+    await _run((api) => _mark(api, 'ACTIONED', 'WARN', message: message), 'Warning sent.');
   }
 
   Future<void> _suspend(int days) async {
@@ -303,6 +309,145 @@ class _AdminRideReportSheetState extends State<AdminRideReportSheet> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The admin's "Warn" text: required, trimmed and cleaned like the gateway does (control characters
+/// and angle brackets removed, spaces collapsed), at most [maxLength] characters.
+class AdminWarnText {
+  AdminWarnText._();
+
+  /// Same limit as the gateway (src/admin_warnings.js MESSAGE_MAX).
+  static const int maxLength = 280;
+
+  /// The gateway's default line, offered as a quick option.
+  static const String guidelines =
+      'Please follow the public ride guidelines: be respectful and share only ride and road safety information.';
+
+  /// The text as the rider will read it.
+  static String clean(String raw) => raw
+      .replaceAll(RegExp(r'[\u0000-\u001F\u007F\u200B-\u200F\u2028-\u202E\u2060-\u206F]'), ' ')
+      .replaceAll(RegExp(r'[<>]'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  /// Null when it can be sent, else what to fix.
+  static String? problem(String raw) {
+    final t = clean(raw);
+    if (t.isEmpty) return 'Type the warning the rider will see.';
+    if (t.length > maxLength) return 'Use at most $maxLength characters.';
+    return null;
+  }
+}
+
+/// Text box for the warning, the guidelines line as a quick option, a counter and a preview of the
+/// rider's notice. Pops the cleaned text, or null on cancel.
+class AdminWarnMessageSheet extends StatefulWidget {
+  const AdminWarnMessageSheet({super.key});
+
+  @override
+  State<AdminWarnMessageSheet> createState() => _AdminWarnMessageSheetState();
+}
+
+class _AdminWarnMessageSheetState extends State<AdminWarnMessageSheet> {
+  final _text = TextEditingController();
+  bool _tried = false;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _useGuidelines() {
+    _text.value = const TextEditingValue(
+      text: AdminWarnText.guidelines,
+      selection: TextSelection.collapsed(offset: AdminWarnText.guidelines.length),
+    );
+    setState(() {});
+  }
+
+  void _send() {
+    final problem = AdminWarnText.problem(_text.text);
+    if (problem != null) {
+      setState(() => _tried = true);
+      return;
+    }
+    Navigator.pop(context, AdminWarnText.clean(_text.text));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cleaned = AdminWarnText.clean(_text.text);
+    final problem = AdminWarnText.problem(_text.text);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'The rider sees this as a message from CoRoute moderators. It is also kept on their public ride record.',
+          style: AppText.body.copyWith(color: AppTheme.text2),
+        ),
+        const SizedBox(height: Space.s12),
+        TextField(
+          key: const ValueKey('warnMessage'),
+          controller: _text,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 5,
+          maxLength: AdminWarnText.maxLength,
+          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+          inputFormatters: [FilteringTextInputFormatter.deny(RegExp(r'[\u0000-\u0009\u000B-\u001F\u007F<>]'))],
+          textCapitalization: TextCapitalization.sentences,
+          style: AppText.body,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            labelText: 'Warning message',
+            hintText: 'What should the rider change?',
+            errorText: _tried ? problem : null,
+          ),
+        ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: const ValueKey('warnUseGuidelines'),
+            onPressed: _useGuidelines,
+            icon: const Icon(Icons.bolt_rounded),
+            label: const Text('Use the guidelines message', maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        ),
+        const SizedBox(height: Space.s8),
+        Text('Preview', style: AppText.overline),
+        const SizedBox(height: Space.s4),
+        Container(
+          key: const ValueKey('warnPreview'),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppTheme.card,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Text(
+            cleaned.isEmpty ? 'Your message appears here.' : AdminWarningCard.textFor(cleaned),
+            style: AppText.body.copyWith(color: cleaned.isEmpty ? AppTheme.text2 : null),
+          ),
+        ),
+        const SizedBox(height: Space.s16),
+        DsButton(
+          key: const ValueKey('warnSend'),
+          label: 'Send warning',
+          icon: Icons.report_outlined,
+          tone: DsButtonTone.warn,
+          onPressed: problem == null ? _send : () => setState(() => _tried = true),
+        ),
+        const SizedBox(height: Space.s4),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          child: const Text('Cancel'),
+        ),
+      ],
     );
   }
 }

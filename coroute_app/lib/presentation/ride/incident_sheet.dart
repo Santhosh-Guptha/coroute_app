@@ -602,6 +602,8 @@ class MedicalCard extends StatelessWidget {
         if (info.bloodGroup.trim().isNotEmpty) 'Blood group ${info.bloodGroup.trim()}',
         if (info.allergies.trim().isNotEmpty) 'Allergies: ${info.allergies.trim()}',
         if (info.notes.trim().isNotEmpty) 'Notes: ${info.notes.trim()}',
+        if (info.contactPhone.trim().isNotEmpty)
+          'Emergency contact: ${info.contactName.trim().isEmpty ? '' : '${info.contactName.trim()}, '}${info.contactPhone.trim()}',
       ];
 
   @override

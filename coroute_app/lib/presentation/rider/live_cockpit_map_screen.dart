@@ -49,6 +49,7 @@ import '../../data/services/weather_service.dart';
 import '../../domain/notify/alert_policy.dart';
 import '../../domain/notify/alert_priority.dart';
 import '../../domain/ride/ride_facts.dart';
+import '../../domain/safety/effective_speed_limit.dart';
 import '../../domain/route/route_plan.dart';
 import '../../domain/route/route_progress.dart';
 import '../../domain/safety/speed_limit_advisor.dart';
@@ -131,6 +132,12 @@ import '../widgets/sheet_coordinator.dart';
 import '../settings/settings_screen.dart';
 import '../../data/services/group_safety_service.dart';
 import '../ride/group_safety_cards.dart';
+import '../ride/moving_card_chip.dart'; // 3.55 speak while moving, act when stopped
+import '../map_places/after_ride_place_reviews.dart'; // 3.55 place review question after the ride
+import '../../domain/ride/ride_tap_gate.dart';
+import '../../domain/ride/bike_markers.dart'; // 3.55 bike markers, pillion on the bike
+import 'widgets/bike_rider_marker.dart';
+import '../ride/pillion_seat_sheet.dart'; // 3.55 pillion seat
 
 /// The active ride: the map first, a compact top bar (next stop or
 /// destination, connection and GPS in words), one alert slot, the SOS
@@ -325,6 +332,10 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
 
   // One-shot: hides "Another nearby rider is responding" and "X waved" when their time is up.
   Timer? _hideTimer;
+
+  /// 3.55 taps while moving: re-checks [RideAdvisories.tapGate] when the rider should count as
+  /// stopped (a parked phone may send no new fix).
+  Timer? _tapGateTimer;
   int _hideTimerAt = 0;
 
   // Auto-dismiss HUD alert banner timer on the map.
@@ -597,6 +608,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       // calls processPcmChunk), so it was idle memory; the siren pill shows only when an app
       // level SirenAcousticDetector is provided with a real audio source.
       _sirenDetector?.activeSirenNotifier.addListener(_onSirenAlert);
+      _sirenDetector?.hornAlertNotifier.addListener(_onSirenAlert); // 3.55 horn card
       // FEAT-MIC-01: the microphone stays OFF by default; the siren detector is never fed
       // continuous background audio (capture only while the rider holds PTT or uses VOX).
 
@@ -853,6 +865,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     _waitTimer?.cancel();
     _staleTimer?.cancel();
     _hideTimer?.cancel();
+    _tapGateTimer?.cancel();
     _autoDismissTimer?.cancel();
     _hudToastTimer?.cancel();
     _awakeTimer?.cancel();
@@ -871,6 +884,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       _intercomService?.onMicChunk = null;
     }
     _sirenDetector?.activeSirenNotifier.removeListener(_onSirenAlert);
+    _sirenDetector?.hornAlertNotifier.removeListener(_onSirenAlert);
     if (_ownsSirenDetector) {
       _sirenDetector?.dispose();
     }
@@ -1105,7 +1119,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     final ok = lead ? service.addStop(p) : service.suggestStop(p);
     if (ok && !lead && context.mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suggestion sent to the lead.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suggestion sent to the trip owner and the Lead.')));
     }
   }
 
@@ -1684,7 +1698,18 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     final groupId = convoy.groupId;
     // Same id ConvoyService.buildTripHistory gives the rider's trip record.
     final recordId = uid.isEmpty ? '' : 'TRIP-${groupId.replaceAll('GRP-', '')}-$uid';
-    unawaited(_promptTripReview(nav, api, groupId: groupId, recordId: recordId, tripName: convoy.name));
+    // 3.55: then the place review question for places I stayed at and did not rate in the cockpit
+    // (at most 2, skippable; admin switches placeReviews and reviewPrompt).
+    final places = context.read<PlaceReviewService?>();
+    final placesOn = context.featureOnNow('placeReviews') && context.featureOnNow('reviewPrompt');
+    places?.onRideEnded();
+    final client = api;
+    unawaited(() async {
+      await _promptTripReview(nav, client, groupId: groupId, recordId: recordId, tripName: convoy.name);
+      if (places != null && placesOn && nav.mounted) {
+        await AfterRidePlaceReviews.show(nav.context, service: places, enabled: placesOn);
+      }
+    }());
   }
 
   static Future<void> _promptTripReview(NavigatorState nav, ApiClient api,
@@ -1875,13 +1900,35 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     // 3.55 admin feature switches (unknown or no service: on).
     _advice.heritageEnabled = context.featureOnNow('heritagePlaces') && !SosBatteryReserve.isActive; // 3.55 SOS battery reserve
     _advice.offGroupEnabled = context.featureOnNow('offRouteGroupPrompt');
+    final couldTap = _advice.tapGate.canTap;
     final lines = _advice.update(convoy: convoy, me: me, guide: _guide, places: _places, sosOpen: sosOpen, nowMs: nowMs);
+    if (_advice.tapGate.canTap != couldTap) setState(() {});
+    _armTapGateTimer(nowMs);
     if (lines.isEmpty) return;
     final voice = context.read<VoiceService?>();
     for (final l in lines) {
       // Heritage at the lowest voice priority; leaving the group's route as navigation.
       voice?.speak(l.text, priority: l.heritage ? VoicePriority.important : VoicePriority.warning, key: l.key).ignore();
     }
+  }
+
+  /// 3.55 taps while moving: once the speed has stayed low, the gate flips to stopped after
+  /// [RideTapGate.stoppedHold] even when no new fix comes; one one-shot timer, nothing while idle.
+  void _armTapGateTimer(int nowMs) {
+    final at = _advice.tapGate.settleAtMs;
+    if (at == null) {
+      _tapGateTimer?.cancel();
+      _tapGateTimer = null;
+      return;
+    }
+    if (_tapGateTimer?.isActive ?? false) return;
+    _tapGateTimer = Timer(Duration(milliseconds: (at - nowMs).clamp(0, 60000).toInt() + 100), () {
+      _tapGateTimer = null;
+      if (!mounted) return;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (_advice.tapGate.tick(now)) setState(() {});
+      _armTapGateTimer(now);
+    });
   }
 
   /// "Route to group": my own route to the group's planned route near the closest rider.
@@ -1910,7 +1957,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     setState(_advice.dismissHeritage);
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
       content: Text(ok
-          ? (lead ? '${h.poi.displayName} added as a stop.' : '${h.poi.displayName} suggested to the lead.')
+          ? (lead ? '${h.poi.displayName} added as a stop.' : '${h.poi.displayName} suggested to the trip owner.')
           : 'Could not add the stop now. Try again with signal.'),
     ));
   }
@@ -2036,7 +2083,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     // FEAT-03: Emergency Siren Acoustic Frequency Detector
     final sirenEvent = _sirenDetector?.activeSirenNotifier.value;
     if (sirenEvent != null) {
-      const key = 'EMERGENCY_SIREN';
+      // 3.55: keyed per episode, so a dismissed card does not hide later sirens on this ride.
+      final key = 'EMERGENCY_SIREN_${_sirenDetector?.sirenEpisode ?? 0}';
       out.add(_Slot(
         key: key,
         tier: AlertTier.critical,
@@ -2047,6 +2095,21 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           event: sirenEvent,
           onDismiss: () => _dismissAlert(key),
         ),
+      ));
+    }
+    // 3.55 horn close by: a glanceable heads-up while the detector holds it (~4 s, it clears
+    // itself). Same priority band as hazards but below the siren and the hazard cards (important
+    // tier, low order), so SOS / crash / siren always win the slot. Not dismissible: nothing is
+    // saved, so the next horn shows again.
+    if (_sirenDetector?.hornAlertNotifier.value != null) {
+      out.add(_Slot(
+        key: 'HORN_NEARBY',
+        tier: AlertTier.important,
+        title: HornHudPill.title,
+        message: HornHudPill.detail,
+        priority: AlertPriority.hazard,
+        order: 150,
+        child: const HornHudPill(),
       ));
     }
     // FEAT-01: BLE Handlebar Wireless Remote Paired Status
@@ -2211,7 +2274,22 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     // (the service never offers it while riding or during an SOS / crash alarm).
     final placePrompt = context.select<PlaceReviewService?, PlaceReviewPrompt?>((s) => s?.prompt);
     final placeReviews = context.read<PlaceReviewService?>();
-    if (placePrompt != null && placeReviews != null) {
+    // 3.55 taps while moving: the non-urgent cards below that need a tap show their buttons only
+    // when stopped (a pillion can always tap); while moving, one line once and a chip.
+    final canTap = _advice.tapGate.canTap;
+    if (placePrompt != null && placeReviews != null && context.featureOn('placeReviews') && !canTap) {
+      final key = 'PLACE_REVIEW:${placePrompt.placeId}';
+      if (_advice.movingLines.take(key)) {
+        context.read<VoiceService?>()?.speak(MovingCardText.reviewSpoken(placePrompt.place.displayName), priority: VoicePriority.important, key: key).ignore();
+      }
+      out.add(_Slot(
+        key: key,
+        tier: AlertTier.normal,
+        priority: AlertPriority.social,
+        title: placePrompt.title,
+        child: MovingCardChip(text: MovingCardText.reviewChip(placePrompt.place.displayName), icon: Icons.star_rounded),
+      ));
+    } else if (placePrompt != null && placeReviews != null && context.featureOn('placeReviews')) {
       out.add(_Slot(
         key: 'PLACE_REVIEW:${placePrompt.placeId}',
         tier: AlertTier.normal,
@@ -2238,7 +2316,14 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       ));
     }
     // 3.55: "You left the group's route": the way back first, then a wait request or my own way.
-    if (_advice.offGroupShow) {
+    if (_advice.offGroupShow && !canTap) {
+      out.add(_Slot(
+        key: 'OFF_GROUP:${_advice.offGroupSinceMs}',
+        tier: AlertTier.important,
+        title: OffRouteGroupMonitor.title,
+        child: const MovingCardChip(text: MovingCardText.offRouteChip, icon: Icons.alt_route_rounded, important: true),
+      ));
+    } else if (_advice.offGroupShow) {
       final key = 'OFF_GROUP:${_advice.offGroupSinceMs}';
       final target = _advice.rejoinTarget(convoy, me, nowMs);
       out.add(_Slot(
@@ -2263,7 +2348,17 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     }
     // 3.55 bike / pillion swap: someone asked me (Accept / Decline), then the outcome.
     final ask = service.swapAsk;
-    if (ask != null) {
+    if (ask != null && !canTap) {
+      // The ask itself is spoken once by ConvoyService ("... Stop when safe to accept or decline.").
+      out.add(_Slot(
+        key: 'SWAP_ASK:${ask.requestId}',
+        tier: AlertTier.important,
+        title: ask.title,
+        priority: AlertPriority.routeInfo,
+        order: 250,
+        child: MovingCardChip(text: MovingCardText.swapChip(ask.title), icon: Icons.swap_horiz_rounded, important: true),
+      ));
+    } else if (ask != null) {
       out.add(_Slot(
         key: 'SWAP_ASK:${ask.requestId}',
         tier: AlertTier.important,
@@ -2292,9 +2387,56 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         onDismiss: service.dismissSwapNotice,
       ));
     }
+    // 3.55 pillion seat: someone sat on my bike (Decline within a minute; later "Remove pillion" on
+    // their rider card), and a pillion without a bike picks one (a pillion can always tap).
+    final offer = service.pillionOffer;
+    if (offer != null) {
+      out.add(_Slot(
+        key: 'PILLION_OFFER:${offer.pillionUserId}',
+        tier: AlertTier.normal,
+        title: offer.title,
+        priority: AlertPriority.routeInfo,
+        order: 251,
+        child: canTap
+            ? RideAlert(
+                tier: AlertTier.normal,
+                title: offer.title,
+                message: offer.message,
+                actionLabel: 'OK',
+                onAction: service.dismissPillionOffer,
+                moreActions: [('Decline', () => service.unseatPillion(offer.pillionUserId))],
+              )
+            : MovingCardChip(text: offer.title, icon: Icons.airline_seat_recline_normal_rounded),
+      ));
+    }
+    if (service.pillionNeedsSeat && service.supportsPillionSeat) {
+      out.add(_Slot(
+        key: 'PILLION_PICK',
+        tier: AlertTier.normal,
+        title: 'Pick the bike you ride on',
+        priority: AlertPriority.routeInfo,
+        order: 252,
+        child: RideAlert(
+          tier: AlertTier.normal,
+          title: 'Pick the bike you ride on',
+          message: 'Your group then sees you on that bike.',
+          actionLabel: 'Pick bike',
+          onAction: () => showPillionSeatSheet(context, service),
+          moreActions: [('Not now', service.dismissPillionPick)],
+        ),
+      ));
+    }
     // 3.55: "Historic place on your way: Golconda Fort" (normal tier, Show / Add stop).
     final heritage = _advice.heritage;
-    if (heritage != null && nowMs < _advice.heritageUntilMs) {
+    if (heritage != null && nowMs < _advice.heritageUntilMs && !canTap) {
+      // Spoken once when it was found (RideAdvisories); the Show / Add stop buttons wait for a stop.
+      out.add(_Slot(
+        key: 'HERITAGE:${heritage.poi.id}',
+        tier: AlertTier.normal,
+        title: 'Historic place on your way: ${heritage.poi.displayName}',
+        child: MovingCardChip(text: MovingCardText.heritageChip(heritage.poi.displayName), icon: Icons.account_balance_rounded),
+      ));
+    } else if (heritage != null && nowMs < _advice.heritageUntilMs) {
       final key = 'HERITAGE:${heritage.poi.id}';
       final title = 'Historic place on your way: ${heritage.poi.displayName}';
       out.add(_Slot(
@@ -2385,7 +2527,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
           key: 'GS:${n.key}',
           tier: GroupSafetyCard.tierOf(n),
           title: n.title,
-          child: GroupSafetyCard(notice: n, service: groupSafety),
+          child: GroupSafetyCard(notice: n, service: groupSafety, onSos: () => _triggerSos(service, _auth ?? context.read<AuthService>())),
         ));
       }
     }
@@ -2606,7 +2748,19 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
     }
 
     final personalLimit = context.select<SettingsService?, int>((s) => s?.speedLimitWarningKmh ?? 0);
-    final speedLimit = convoy.speedLimitKmh > 0 ? convoy.speedLimitKmh : personalLimit;
+    // 3.55 fix: the lead's town limit near the start, the destination and planned stops shows here too.
+    final groupHere = groupLimitAt(
+      groupKmh: convoy.speedLimitKmh,
+      townKmh: convoy.townLimitKmh,
+      lat: me.lat,
+      lng: me.lng,
+      places: [
+        if (convoy.startLat != null && convoy.startLng != null) (convoy.startLat!, convoy.startLng!),
+        (convoy.destinationLat, convoy.destinationLng),
+        for (final s in convoy.plannedStops) (s.lat, s.lng),
+      ],
+    );
+    final speedLimit = effectiveSpeedLimit(groupKmh: groupHere, personalKmh: personalLimit);
     final showSpeed = speedLimit > 0 && me.speedKmh >= speedLimit - 10;
     // "Guardian on" in the ride-summary card: this phone's crash detection setting.
     final guardianOn = context.select<SettingsService?, bool>((s) => s?.crashDetection ?? true);
@@ -3095,16 +3249,32 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   }
 
   Widget _ended(BuildContext context) {
+    // 3.55: the place review question after the ride (places I stayed at and did not rate in the
+    // cockpit; at most 2, skippable; admin switches placeReviews and reviewPrompt).
+    final places = context.read<PlaceReviewService?>();
+    final placesOn = context.featureOn('placeReviews') && context.featureOn('reviewPrompt');
+    final ended = EmptyState(
+      icon: Icons.flag_rounded,
+      title: 'Ride ended',
+      message: 'The ride is saved in your trips.',
+      primaryLabel: widget.embedded ? null : 'Back',
+      onPrimary: widget.embedded ? null : () => Navigator.of(context).maybePop(),
+    );
     return Scaffold(
       backgroundColor: AppTheme.map,
       body: SafeArea(
-        child: EmptyState(
-          icon: Icons.flag_rounded,
-          title: 'Ride ended',
-          message: 'The ride is saved in your trips.',
-          primaryLabel: widget.embedded ? null : 'Back',
-          onPrimary: widget.embedded ? null : () => Navigator.of(context).maybePop(),
-        ),
+        child: places == null || !placesOn
+            ? ended
+            : Column(children: [
+                Expanded(child: ended),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    child: AfterRidePlaceReviews(service: places, enabled: placesOn),
+                  ),
+                ),
+              ]),
       ),
     );
   }
@@ -3217,7 +3387,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       if (paused)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text('Paused by the trip head', style: AppText.label.copyWith(color: StatusColors.warning, fontWeight: FontWeight.bold)),
+          child: Text('Group ride paused', style: AppText.label.copyWith(color: StatusColors.warning, fontWeight: FontWeight.bold)),
         ),
       if (weatherLine != null) SheetLine(icon: Icons.umbrella_rounded, text: weatherLine),
       if (darkLine != null) SheetLine(icon: Icons.nights_stay_rounded, text: darkLine),
@@ -3320,6 +3490,7 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
       // 5. Ride Lifecycle Controls
       RideLifecycleBar(
         isLead: lead,
+        canEnd: service.canEndTrip,
         isPaused: paused,
         onTogglePause: () => service.updateTripState(paused ? 'STARTED' : 'PAUSED'),
         onEndRide: () => _endRide(service),
@@ -3612,8 +3783,9 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         // Other riders glide between their updates (far ones simplified in a big group)...
         SmoothMarkerLayer(
           markers: [
-            for (final r in convoy.riders.values)
-              if (RideFacts.hasPosition(r) && !isMeRider(r, uid)) _riderMarker(r, uid, colors, statuses, now),
+            // 3.55: one marker per bike; a seated pillion rides on their rider's marker.
+            for (final e in _bikePlan(convoy, uid).values)
+              if (e.markerId != uid) _riderMarker(convoy.riders[e.markerId]!, uid, colors, statuses, now, bike: e),
           ],
           focus: _navCam.pose.value?.point ?? ((me.lat != 0 || me.lng != 0) ? LatLng(me.lat, me.lng) : null),
           clusterColor: AppTheme.brand,
@@ -3622,8 +3794,8 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
         // ...and I am drawn on top, exactly where the navigation camera puts me.
         SmoothMarkerLayer(
           markers: [
-            for (final r in convoy.riders.values)
-              if (RideFacts.hasPosition(r) && isMeRider(r, uid)) _riderMarker(r, uid, colors, statuses, now),
+            for (final e in _bikePlan(convoy, uid).values)
+              if (e.markerId == uid) _riderMarker(convoy.riders[e.markerId]!, uid, colors, statuses, now, bike: e),
           ],
           driverId: uid,
           driverPose: _navCam.pose,
@@ -3639,8 +3811,20 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
   /// One rider for the smooth marker layers: the full marker (or the ghost
   /// when their signal dropped), a heading arrow while moving, and a small dot
   /// for when they are far away in a big group.
-  SmoothMarker _riderMarker(RiderModel r, String uid, Map<String, Color> colors, Map<String, RiderStatus> statuses, int now) {
+  /// 3.55 bike markers: which riders get a marker and who sits on which bike (pillions merged
+  /// while the admin switch `pillionSeat` is on).
+  Map<String, BikeMarkerEntry> _bikePlan(ConvoyModel convoy, String uid) => BikeMarkerPlan.of(
+        convoy.riders,
+        myUserId: uid,
+        hasPosition: RideFacts.hasPosition,
+        mergePillions: context.featureOn('pillionSeat'),
+      );
+
+  SmoothMarker _riderMarker(RiderModel r, String uid, Map<String, Color> colors, Map<String, RiderStatus> statuses, int now, {BikeMarkerEntry? bike}) {
     final isMe = isMeRider(r, uid);
+    // The bike's look comes from its rider (on the pillion's own phone the pair sits at my position).
+    final bikeRider = bike?.bikeRider ?? r;
+    final pillion = bike?.pillion;
     final ghost = !isMe && GhostRiderMarker.isDropped(r, now);
     final status = statuses[r.userId] ?? RiderStatus.offline;
     final color = colors[r.userId];
@@ -3670,15 +3854,20 @@ class _LiveCockpitMapScreenState extends State<LiveCockpitMapScreen>
               status: status,
               selected: selected,
               nowMs: now,
-              onTap: () => _openRider(r),
+              bikeRider: bikeRider,
+              pillion: pillion,
+              onTap: () => _openRider(bikeRider),
             ),
+      compactSize: 36,
       compact: (isMe || ghost)
           ? null
-          : CompactRiderDot(
-              initials: initialsOf(r.name),
+          : CompactBikeDot(
+              vehicleKind: bikeRider.vehicleKind,
+              vehicleColor: bikeRider.vehicleColor,
               color: color ?? AppTheme.brand,
-              semanticsLabel: '${r.name}, ${riderMapSpeedLabel(r, status: status, nowMs: now)}',
-              onTap: () => _openRider(r),
+              twoUp: pillion != null,
+              semanticsLabel: '${bikeRider.name}${pillion == null ? '' : ' with pillion ${pillion.name}'}, ${riderMapSpeedLabel(r, status: status, nowMs: now)}',
+              onTap: () => _openRider(bikeRider),
             ),
     );
   }
@@ -3813,6 +4002,11 @@ class RiderMapMarker extends StatelessWidget {
   final int nowMs;
   final VoidCallback onTap;
 
+  /// 3.55 bike markers: the rider of the bike drawn (its type and colour; [rider] when null) and
+  /// the pillion on it (two people on one marker; no separate dot for the pillion).
+  final RiderModel? bikeRider;
+  final RiderModel? pillion;
+
   const RiderMapMarker({
     super.key,
     required this.rider,
@@ -3822,17 +4016,23 @@ class RiderMapMarker extends StatelessWidget {
     required this.selected,
     required this.nowMs,
     required this.onTap,
+    this.bikeRider,
+    this.pillion,
   });
 
   @override
   Widget build(BuildContext context) {
-    final first = rider.name.split(' ').first;
+    final bike = bikeRider ?? rider;
+    final mePillion = isMe && bike.userId != rider.userId;
+    final first = bike.name.split(' ').first;
+    final pillionFirst = pillion == null ? '' : (mePillion ? 'You' : pillion!.name.split(' ').first);
     final isTunnel = rider.isTunnelCoasting;
     final isMesh = rider.isMeshPeer;
     final speedBadge = riderMapSpeedLabel(rider, status: status, nowMs: nowMs);
     final isMoving = speedBadge.endsWith('km/h') && rider.speedKmh >= 5;
     final isLead = rider.role == 'LEAD';
-    final who = isMe ? 'You' : (isLead ? 'LEAD · $first' : first);
+    final whoOne = isMe && !mePillion ? 'You' : (isLead ? 'LEAD · $first' : first);
+    final who = pillion == null ? whoOne : '$whoOne + $pillionFirst';
     final label = isTunnel ? '$who · Tunnel' : (isMesh ? '$who · Nearby' : who);
 
     // Ring: the rider's colour while moving (teal for the lead), amber while not.
@@ -3850,7 +4050,17 @@ class RiderMapMarker extends StatelessWidget {
     return Semantics(
       container: true,
       button: true,
-      label: '${isMe ? 'You' : rider.name}, $speedBadge, ${status.label}${reason.isEmpty ? '' : ', $reason'}',
+      label: bikeMarkerLabel(
+        riderName: bike.name,
+        model: bike.vehicleModel,
+        colour: bike.vehicleColor,
+        pillionName: pillion?.name,
+        speed: speedBadge,
+        status: status.label,
+        reason: reason,
+        me: isMe,
+        mePillion: mePillion,
+      ),
       excludeSemantics: true,
       onTap: onTap,
       child: GestureDetector(
@@ -3861,37 +4071,26 @@ class RiderMapMarker extends StatelessWidget {
           alignment: Alignment.center,
           clipBehavior: Clip.none,
           children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  decoration: isMe
-                      ? BoxDecoration(
-                          shape: BoxShape.circle,
-                          boxShadow: [BoxShadow(color: AppTheme.brand.withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 6))],
-                        )
-                      : (selected
-                          ? BoxDecoration(
-                              shape: BoxShape.circle,
-                              boxShadow: [BoxShadow(color: ring.withOpacity(0.35), spreadRadius: 4)],
-                            )
-                          : null),
-                  child: DsAvatar(initialsOf(rider.name), size: avatarSize, filled: isMe, ringColor: ring),
-                ),
-                Positioned(
-                  right: -1,
-                  bottom: -1,
-                  child: Container(
-                    width: 14,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: status.color,
-                      border: Border.all(color: AppTheme.card, width: 2),
-                    ),
-                  ),
-                ),
-              ],
+            // 3.55: the bike (its shape and colour, two people with a pillion) instead of a round avatar.
+            BikeMarkerBadge(
+              vehicleKind: bike.vehicleKind,
+              vehicleColor: bike.vehicleColor,
+              fallbackColor: color ?? AppTheme.brand,
+              ring: isMe ? AppTheme.brand : ring,
+              statusColor: status.color,
+              height: avatarSize * 0.82,
+              twoUp: pillion != null,
+              heading: rider.heading,
+              cue: BikeMarkerCue.of(
+                sos: status == RiderStatus.emergency,
+                stale: status.isStale,
+                warning: status == RiderStatus.lowGps || rider.statusReason.isNotEmpty,
+                stopped: !isMoving && !isMe,
+              ),
+              me: isMe,
+              selected: selected,
+              roleLetter: bike.role == 'LEAD' ? 'L' : (bike.role == 'SWEEPER' ? 'S' : ''),
+              roleColor: AppTheme.brand,
             ),
             Positioned(
               top: 70 + avatarSize / 2 + 4,

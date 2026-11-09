@@ -124,7 +124,7 @@ class _GuardianSheetState extends State<_GuardianContent> {
       throw const ApiException(400, 'Use a PIN of 4 to 8 digits.');
     }
     final policy = context.read<ConvoyService?>()?.activeConvoy?.featurePolicy;
-    if (policy?.guardianRequirePin == true && _pin.text.isEmpty) throw const ApiException(400, 'The lead requires a PIN for Guardian links.');
+    if (policy?.guardianRequirePin == true && _pin.text.isEmpty) throw const ApiException(400, 'This ride needs a PIN for Guardian links.');
     final hours = _hours.clamp(1, policy?.guardianMaxHours ?? 336);
     final data = await context.read<ApiClient>().post('/guardian/links', {
       'label': _label.text.trim(),
@@ -218,7 +218,7 @@ class _GuardianSheetState extends State<_GuardianContent> {
               value: _groupConsent,
               title: Text('Include me in Guardian group sharing', style: AppText.body.copyWith(fontSize: 16, fontWeight: FontWeight.w700)),
               subtitle: Text(
-                'Let the Lead share my status and location in group links.',
+                'Let the trip owner or the Lead share my status and location in group links.',
                 style: AppText.caption,
               ),
               onChanged: _busy

@@ -8,6 +8,7 @@ import '../../core/ui/ui.dart';
 import '../../data/models/timeline_event_model.dart';
 import '../../data/models/trip_plan_model.dart';
 import '../../domain/tracking/replay_math.dart';
+import '../rider/widgets/bike_rider_marker.dart';
 
 /// The map of a finished trip: every rider's route in their own colour, where
 /// each rider started and finished, every place they waited (with how long),
@@ -522,9 +523,10 @@ class TripRouteMapState extends State<TripRouteMap> {
   Marker _riderMarker(_Prepared p, ReplayPoint at, bool focused) {
     return Marker(
       point: LatLng(at.lat, at.lng),
-      width: 36,
+      width: 44,
       height: 36,
-      child: RiderAvatar(name: p.track.name, color: _color(p.track.userId), size: focused ? 36 : 32),
+      // 3.55: a bike in the rider's colour (the track carries no bike details) instead of a round avatar.
+      child: StatusBikeMarker(name: p.track.name, color: _color(p.track.userId), height: focused ? 28 : 24),
     );
   }
 

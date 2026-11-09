@@ -90,7 +90,7 @@ class _RouteStopsPanelState extends State<RouteStopsPanel> {
         if (p == null || !mounted) return;
         final ok = lead ? service.addStop(p) : service.suggestStop(p);
         if (ok && !lead && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suggestion sent to the lead.')));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suggestion sent to the trip owner and the Lead.')));
         }
       } finally {
         _isPicking = false;
@@ -257,7 +257,7 @@ class _RouteStopsPanelState extends State<RouteStopsPanel> {
         const SizedBox(height: Space.s24),
         Semantics(
           header: true,
-          child: DsSectionHeader(lead ? 'Suggested by the group' : 'Suggestions waiting for the lead'),
+          child: DsSectionHeader(lead ? 'Suggested by the group' : 'Suggestions waiting for the trip owner'),
         ),
         const SizedBox(height: 10),
         for (final s in suggestions)

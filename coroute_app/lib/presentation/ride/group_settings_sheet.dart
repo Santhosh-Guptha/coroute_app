@@ -19,6 +19,61 @@ import 'group_safety_cards.dart';
 
 bool _isGroupSettingsShowing = false;
 
+/// 3.55 fix: a slider that previews locally while dragging and reports the value once, when the
+/// finger lifts ([onCommit]; null disables it). The shown value follows [value] (the ride's) again
+/// after the release, so a change the gateway refuses or never confirms snaps back with the 6 s
+/// re-read in [ConvoyService.updateGroupConfig].
+class ReleaseSlider extends StatefulWidget {
+  final double value;
+  final double min;
+  final double max;
+  final int? divisions;
+  final String Function(double v) label;
+  final ValueChanged<double>? onCommit;
+
+  /// Builds the row around the slider with the value to show (the drag preview while dragging).
+  final Widget Function(double shown, Widget slider) builder;
+
+  const ReleaseSlider({
+    super.key,
+    required this.value,
+    required this.min,
+    required this.max,
+    this.divisions,
+    required this.label,
+    required this.onCommit,
+    required this.builder,
+  });
+
+  @override
+  State<ReleaseSlider> createState() => _ReleaseSliderState();
+}
+
+class _ReleaseSliderState extends State<ReleaseSlider> {
+  double? _drag;
+
+  @override
+  Widget build(BuildContext context) {
+    final commit = widget.onCommit;
+    final shown = (_drag ?? widget.value).clamp(widget.min, widget.max).toDouble();
+    final slider = Slider(
+      value: shown,
+      min: widget.min,
+      max: widget.max,
+      divisions: widget.divisions,
+      label: widget.label(shown),
+      onChanged: commit == null ? null : (v) => setState(() => _drag = v),
+      onChangeEnd: commit == null
+          ? null
+          : (v) {
+              setState(() => _drag = null);
+              if (v != widget.value) commit(v);
+            },
+    );
+    return widget.builder(shown, slider);
+  }
+}
+
 /// Opens the group settings: separation limit, stop alert, speed limit,
 /// spoken alerts, group visibility (Private / Public), nearby group
 /// discovery and the group default for asking nearby riders to help (the
@@ -60,7 +115,10 @@ class GroupSettingsView extends StatelessWidget {
     final service = context.watch<ConvoyService>();
     final convoy = service.allConvoys[convoyId];
     if (convoy == null) return const SizedBox.shrink();
-    final lead = service.canEditRoute;
+    // 3.55 owner decision: the trip head changes the trip's settings (canChangeGroupSettings); riding
+    // roles, automatic roles and buddy pairs stay with the trip owner and the Lead (canEditRoute).
+    final lead = service.canChangeGroupSettings;
+    final roleRights = service.canEditRoute;
     final featureControls = lead && service.isOnline && service.supports(ProtocolFeatures.featurePolicy);
 
     Widget section({required String title, required String value, required String help, required Widget control}) {
@@ -227,35 +285,40 @@ class GroupSettingsView extends StatelessWidget {
               ),
             ),
           note('Saved once the server confirms. Each rider keeps their own safety choices.'),
-          if (!lead) note('Only the lead can change these.', icon: Icons.lock_outline_rounded),
+          if (!lead) note('Only the trip owner or trip head can change these.', icon: Icons.lock_outline_rounded),
+          if (service.isSettingsOnlyTripHead) note('Trip head can change the trip\'s settings.', icon: Icons.tune_rounded),
           const SizedBox(height: 8),
 
           // 3. Convoy Safety Limits
           SheetSectionTitle('Group limits'),
-          section(
-            title: 'Too far behind after',
-            value: formatDistance(convoy.distanceThresholdMeters),
-            help: 'Riders further away than this are told.',
-            control: Slider(
-              value: convoy.distanceThresholdMeters.clamp(500, 5000).toDouble(),
-              min: 500,
-              max: 5000,
-              divisions: 9,
-              label: formatDistance(convoy.distanceThresholdMeters),
-              onChanged: lead ? (v) => service.updateGroupConfig(distanceThresholdMeters: v) : null,
+          // 3.55 fix: the sliders preview while dragging and send one CONFIG when released
+          // (they used to send one per step, up to about 9 per drag).
+          ReleaseSlider(
+            value: convoy.distanceThresholdMeters.clamp(500, 5000).toDouble(),
+            min: 500,
+            max: 5000,
+            divisions: 9,
+            label: formatDistance,
+            onCommit: lead ? (v) => service.updateGroupConfig(distanceThresholdMeters: v) : null,
+            builder: (v, slider) => section(
+              title: 'Too far behind after',
+              value: formatDistance(v),
+              help: 'Riders further away than this are told.',
+              control: slider,
             ),
           ),
-          section(
-            title: 'Stopped alert after',
-            value: formatDuration(Duration(seconds: convoy.stopThresholdSeconds)),
-            help: 'Then the rider is asked why they stopped.',
-            control: Slider(
-              value: convoy.stopThresholdSeconds.clamp(60, 600).toDouble(),
-              min: 60,
-              max: 600,
-              divisions: 9,
-              label: formatDuration(Duration(seconds: convoy.stopThresholdSeconds)),
-              onChanged: lead ? (v) => service.updateGroupConfig(stopThresholdSeconds: v.toInt()) : null,
+          ReleaseSlider(
+            value: convoy.stopThresholdSeconds.clamp(60, 600).toDouble(),
+            min: 60,
+            max: 600,
+            divisions: 9,
+            label: (v) => formatDuration(Duration(seconds: v.toInt())),
+            onCommit: lead ? (v) => service.updateGroupConfig(stopThresholdSeconds: v.toInt()) : null,
+            builder: (v, slider) => section(
+              title: 'Stopped alert after',
+              value: formatDuration(Duration(seconds: v.toInt())),
+              help: 'Then the rider is asked why they stopped.',
+              control: slider,
             ),
           ),
           section(
@@ -336,9 +399,9 @@ class GroupSettingsView extends StatelessWidget {
               DsSwitchRow(
                 label: 'Automatic roles',
                 subtitle: 'The rider at the front leads and the last rider sweeps. Riders are told when '
-                    'their role changes. Off: the lead sets roles from each rider\'s card.',
+                    'their role changes. Off: the trip owner or the Lead sets roles from each rider\'s card.',
                 value: convoy.autoRoles,
-                onChanged: lead ? (v) => service.setAutoRoles(v) : null,
+                onChanged: roleRights ? (v) => service.setAutoRoles(v) : null,
                 divider: false,
               ),
             ]),
@@ -349,7 +412,7 @@ class GroupSettingsView extends StatelessWidget {
           if (context.featureOn('buddyPairs') && context.read<GroupSafetyService?>() != null &&
               (convoy.capacity >= 7 || convoy.riders.length >= 7)) ...[
             SheetSectionTitle('Buddy pairs'),
-            BuddyLine(service: context.read<GroupSafetyService>(), lead: lead, largeGroup: true),
+            BuddyLine(service: context.read<GroupSafetyService>(), lead: roleRights, largeGroup: true),
             const SizedBox(height: 8),
           ],
 

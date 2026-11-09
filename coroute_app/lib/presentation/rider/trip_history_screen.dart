@@ -15,6 +15,8 @@ import '../../data/services/trip_storage_service.dart';
 import '../../data/services/auth_service.dart';
 import '../report/trip_report_screen.dart';
 import '../analytics/ride_analytics_screen.dart';
+import '../score/rider_score_screen.dart';
+import '../widgets/feature_switch.dart';
 import '../../core/theme/map_tiles.dart';
 import 'rider_home_screen.dart';
 
@@ -146,6 +148,17 @@ class _TripHistoryScreenState extends State<TripHistoryScreen> {
                           size: 48,
                         ),
                         const SizedBox(width: Space.s8),
+                        // 3.55 rider score (lib/presentation/score), hidden when the admin switch is off.
+                        if (context.featureOn('riderScore')) ...[
+                          DsRoundButton(
+                            key: const Key('trips_rider_score'),
+                            icon: Icons.speed_rounded,
+                            label: 'Your rider score',
+                            onTap: () => RiderScoreScreen.open(context),
+                            size: 48,
+                          ),
+                          const SizedBox(width: Space.s8),
+                        ],
                         _NewRideButton(onTap: () => RiderHomeScreen.selectTab(context, HomeTab.ride)),
                       ],
                     ),

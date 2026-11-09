@@ -183,7 +183,7 @@ class _AdminRideHistoryScreenState extends State<AdminRideHistoryScreen> {
         Padding(
           padding: const EdgeInsets.only(top: 16, bottom: 12),
           child: AdminSearchRow(
-            hint: 'Ride, lead or place',
+            hint: 'Ride, trip owner or place',
             onChanged: (v) => setState(() => _query = v),
             filter: AdminFilterButton<_RideFilter>(
               value: _filter,
@@ -363,7 +363,7 @@ class _RideRow extends StatelessWidget {
 
     final when = [
       if (started > 0) DateFormat('EEE d MMM yyyy, HH:mm').format(DateTime.fromMillisecondsSinceEpoch(started)),
-      if (lead.isNotEmpty) 'lead $lead',
+      if (lead.isNotEmpty) 'trip owner $lead',
     ].join(', ');
     final facts = [
       if (from.isNotEmpty || to.isNotEmpty) '${from.isEmpty ? 'Start' : from} to ${to.isEmpty ? 'Destination' : to}',

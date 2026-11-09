@@ -294,7 +294,7 @@ const List<FeatureInfo> featureCatalog = [
     when: 'Needs phone signal and SMS permission. SMS charges apply.',
     battery: Impact.none,
     data: Impact.none,
-    privacy: 'Your contact, the Lead and nearby riders (up to 10) get your location.',
+    privacy: 'Your contact, the lead and nearby riders (up to 10) get your location.',
     settings: SettingsTarget.settings,
   ),
   FeatureInfo(
@@ -306,7 +306,7 @@ const List<FeatureInfo> featureCatalog = [
     when: 'During a group ride.',
     battery: Impact.none,
     data: Impact.low,
-    privacy: 'If you do not answer in 2 min, your Lead is told.',
+    privacy: 'If you do not answer in 2 min, your lead is told.',
     settings: SettingsTarget.settings,
   ),
   FeatureInfo(
@@ -410,7 +410,7 @@ const List<FeatureInfo> featureCatalog = [
     group: FeatureGroup.talk,
     icon: Icons.volume_down_rounded,
     name: 'Lead voice first',
-    what: 'Other voices get quieter when the Lead speaks.',
+    what: 'Other voices get quieter when the lead speaks.',
     when: 'Automatic during group talk.',
     battery: Impact.none,
     data: Impact.none,
@@ -458,7 +458,7 @@ const List<FeatureInfo> featureCatalog = [
     group: FeatureGroup.group,
     icon: Icons.group_add_rounded,
     name: 'Start or join',
-    what: 'Start a ride, or join one with the code from your Lead.',
+    what: 'Start a ride, or join one with the code from the trip owner.',
     when: 'Needs internet.',
     battery: Impact.none,
     data: Impact.low,
@@ -469,13 +469,14 @@ const List<FeatureInfo> featureCatalog = [
     group: FeatureGroup.group,
     icon: Icons.flag_rounded,
     name: 'Riding roles',
-    what: 'The Lead rides at the front and sets the pace. Middle riders keep the rider ahead in sight. '
-        'The Sweeper rides last so no one is left behind. Riders are told when their role changes.',
+    what: 'Riding positions in the group. The lead rides first and guides the group. Middle riders keep the rider ahead in sight. '
+        'The sweeper rides last so no one is left behind. Riders are told when their role changes. '
+        'Not the same as the trip owner (who created the trip) or the trip head (can change the trip\'s settings).',
     when: 'During a group ride.',
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Roles are shown to the group.',
-    changeHint: 'Automatic roles follow the order on the road (Group settings). The lead can also set a role from a rider\'s card.',
+    changeHint: 'Automatic roles follow the order on the road (Group settings). The trip owner or the Lead can also set a role from a rider\'s card.',
   ),
   FeatureInfo(
     id: 'group_alerts',
@@ -487,7 +488,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.low,
     privacy: 'Your group sees these alerts.',
-    changeHint: 'The Lead changes limits in Group settings during a ride.',
+    changeHint: 'The trip owner or trip head changes limits in Group settings during a ride.',
   ),
   FeatureInfo(
     id: 'meet_here',
@@ -545,7 +546,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.low,
     privacy: 'Only group name and rider count. Never positions.',
-    changeHint: 'The Lead turns it on in Group settings.',
+    changeHint: 'The trip owner or trip head turns it on in Group settings.',
   ),
   FeatureInfo(
     id: 'nearby_link',

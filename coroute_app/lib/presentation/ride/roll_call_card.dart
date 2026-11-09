@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/models/convoy_model.dart';
+import '../../data/models/rider_model.dart';
 import '../../domain/group/roll_call.dart';
+import '../../domain/ride/bike_markers.dart';
 import '../../domain/ride/ride_facts.dart';
 import '../widgets/feature_switch.dart';
 
@@ -28,20 +30,36 @@ class RollCallCard extends StatelessWidget {
   }
 
   static RollCallState stateFor(ConvoyModel c, int now) => RollCall.compute(
-        riders: [
-          for (final r in c.riders.values)
-            RollCallInput(
-              userId: r.userId,
-              name: r.name,
-              lastSeenMs: r.lastSeenEpochMs,
-              hasPosition: RideFacts.hasPosition(r),
-              arrivedAtMs: c.destinationArrivals[r.userId]?.arrivedAt ?? 0,
-            ),
-        ],
+        riders: [for (final r in c.riders.values) inputFor(c, r)],
         nowMs: now,
         rideStartedAtMs: _startedAt(c, now),
         groupRide: c.hasGroupFeatures && !c.isSolo,
       );
+
+  /// 3.55 pillion seat: a seated pillion is on their rider's bike, so they joined / arrived with
+  /// the bike (listed by name, never "Not yet" / "On the way" apart from their rider).
+  @visibleForTesting
+  static RollCallInput inputFor(ConvoyModel c, RiderModel r) {
+    final bike = BikeMarkerPlan.riderOf(r, c.riders);
+    final arrived = c.destinationArrivals[r.userId]?.arrivedAt ?? 0;
+    if (bike == null) {
+      return RollCallInput(
+        userId: r.userId,
+        name: r.name,
+        lastSeenMs: r.lastSeenEpochMs,
+        hasPosition: RideFacts.hasPosition(r),
+        arrivedAtMs: arrived,
+      );
+    }
+    final bikeArrived = c.destinationArrivals[bike.userId]?.arrivedAt ?? 0;
+    return RollCallInput(
+      userId: r.userId,
+      name: r.name,
+      lastSeenMs: r.lastSeenEpochMs > bike.lastSeenEpochMs ? r.lastSeenEpochMs : bike.lastSeenEpochMs,
+      hasPosition: RideFacts.hasPosition(r) || RideFacts.hasPosition(bike),
+      arrivedAtMs: arrived > 0 ? arrived : bikeArrived,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

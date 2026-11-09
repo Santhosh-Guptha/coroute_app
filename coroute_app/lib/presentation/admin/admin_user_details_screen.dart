@@ -12,6 +12,7 @@ import '../report/trip_report_screen.dart';
 import 'admin_convoy_inspector.dart';
 import 'admin_rider_insights.dart';
 import 'admin_ui.dart';
+import '../score/admin_rider_score_section.dart';
 
 /// Master admin: one user. Profile, account status with hold, block and
 /// delete, and every ride they joined. A ride opens a short sheet with its
@@ -46,6 +47,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
   Map<String, dynamic>? _user;
   Map<String, dynamic>? _activeGroup;
   List<Map<String, dynamic>> _groups = [];
+  Map<String, dynamic>? _riderScore; // 3.55 rider score breakdown
   bool _loading = true;
   bool _loaded = false;
   String? _error;
@@ -75,6 +77,7 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
         _user = m['user'] is Map ? Map<String, dynamic>.from(m['user']) : _user;
         _activeGroup = m['activeGroup'] is Map ? Map<String, dynamic>.from(m['activeGroup']) : null;
         _groups = adminMapList(m['groups']);
+        _riderScore = m['riderScore'] is Map ? Map<String, dynamic>.from(m['riderScore']) : null;
       }
       _loaded = true;
     } on ApiException catch (e) {
@@ -88,6 +91,21 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
       _error = error;
     });
     if (error != null && _user != null) adminSnack(context, error, error: true);
+  }
+
+  /// 3.55 moderation: removes the rider's profile picture (DELETE /admin/users/:userId/avatar).
+  Future<void> _removeAvatar() async {
+    final ok = await confirmAction(context,
+        title: 'Remove profile picture?', message: 'The rider can upload a new one later.', confirmLabel: 'Remove', destructive: true);
+    if (!ok || !mounted) return;
+    try {
+      await context.read<ApiClient>().delete('/admin/users/${Uri.encodeComponent(widget.userId)}/avatar');
+      if (!mounted) return;
+      adminSnack(context, 'Profile picture removed');
+      await _loadDetails();
+    } on ApiException catch (e) {
+      if (mounted) adminSnack(context, e.message, error: true);
+    }
   }
 
   bool get _isInActiveConvoy => _activeGroup != null;
@@ -304,6 +322,8 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
             isSelf: context.watch<AuthService>().currentUserId == widget.userId,
             onChanged: widget.onChanged,
           ),
+          const AdminSectionLabel('Rider score'),
+          AdminRiderScoreSection(data: _riderScore),
           if (!isMasterAdmin) ...[
             const AdminSectionLabel('Account'),
             _actions(status),
@@ -353,7 +373,16 @@ class _AdminUserDetailsScreenState extends State<AdminUserDetailsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(name.isEmpty ? 'Rider' : name, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.title),
+                // 3.55 public username; the profile picture can be removed here (moderation).
+                if ((u['username']?.toString() ?? '').isNotEmpty)
+                  Text('@${u['username']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
                 if (email.isNotEmpty) Text(email, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.label),
+                if (u['avatarUrl'] is String)
+                  TextButton.icon(
+                    onPressed: () => _removeAvatar(),
+                    icon: const Icon(Icons.hide_image_rounded, size: 18),
+                    label: const Text('Remove profile picture'),
+                  ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,

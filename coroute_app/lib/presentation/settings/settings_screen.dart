@@ -20,6 +20,7 @@ import '../trip_planner/offline_map_manager_screen.dart';
 import '../widgets/data_saver_tile.dart';
 import '../widgets/feature_switch.dart';
 import 'features_guide_screen.dart';
+import 'push_notifications_tile.dart';
 
 /// The one Settings screen: only the choices a rider really makes, grouped
 /// (Ride, Safety, Voice & sound, Map & offline, Account & privacy, Help).
@@ -243,6 +244,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         value: s.pauseOtherAudio,
                         onChanged: s.setPauseOtherAudio,
                       ),
+                      // 3.55 (admin switch 'speedAudio'): music lowered step by step when well over the limit.
+                      if (context.featureOn('speedAudio'))
+                        SafetySwitch(
+                          key: const ValueKey('settings_lower_music_speeding'),
+                          icon: Icons.speed_rounded,
+                          title: 'Lower music when speeding',
+                          subtitle: 'Well over the speed limit, music gets quieter, then pauses. Back under the limit, '
+                              'it comes back. CoRoute alerts and the intercom stay loud.',
+                          value: s.lowerMusicWhenSpeeding,
+                          onChanged: s.setLowerMusicWhenSpeeding,
+                        ),
+                      // 3.55 sound awareness (docs/features_355/sound_awareness_and_intercom.md). Each row
+                      // hides when its admin switch is off: 'sirenDetector', 'hornAlert', 'voiceCleanup'.
+                      if (context.featureOn('sirenDetector')) ...[
+                        SafetySwitch(
+                          key: const ValueKey('settings_siren_alerts'),
+                          icon: Icons.emergency_rounded,
+                          title: 'Siren alerts',
+                          subtitle: 'Warns you about ambulance, police and fire sirens, even when your earphones block '
+                              'outside sound. $micPrivacy',
+                          value: s.sirenAlerts,
+                          onChanged: s.setSirenAlerts,
+                        ),
+                        if (s.sirenAlerts)
+                          _ChoiceRow<String>(
+                            key: const ValueKey('settings_give_way_side'),
+                            icon: Icons.swap_horiz_rounded,
+                            title: 'Give way to the',
+                            subtitle: 'The side the siren alert tells you to keep to.',
+                            value: s.giveWaySide,
+                            choices: const {'auto': 'Automatic', 'left': 'Left', 'right': 'Right'},
+                            onChanged: s.setGiveWaySide,
+                          ),
+                      ],
+                      if (context.featureOn('hornAlert'))
+                        _ChoiceRow<bool?>(
+                          key: const ValueKey('settings_horn_alerts'),
+                          icon: Icons.campaign_rounded,
+                          title: 'Horn alerts',
+                          subtitle: 'Automatic: only when earphones or music may stop you hearing traffic. $micPrivacy',
+                          value: s.hornAlerts,
+                          choices: const {null: 'Automatic', true: 'On', false: 'Off'},
+                          onChanged: s.setHornAlerts,
+                        ),
+                      if (context.featureOn('voiceCleanup'))
+                        SafetySwitch(
+                          key: const ValueKey('settings_voice_cleanup'),
+                          icon: Icons.graphic_eq_rounded,
+                          title: 'Clean up my voice',
+                          subtitle: 'Takes out breathing, wind and engine noise before the group hears you.',
+                          value: s.voiceCleanup,
+                          onChanged: s.setVoiceCleanup,
+                        ),
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: Space.s12),
                         child: LanguagePicker(value: s.language, onChanged: s.setLanguage),
@@ -281,6 +335,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         value: s.rideOnLockScreen,
                         onChanged: s.setRideOnLockScreen,
                       ),
+                      const PushNotificationsTile(), // 3.55: hidden when the build has no push
                       _LinkRow(
                         icon: Icons.verified_user_rounded,
                         title: 'Permissions',
@@ -318,6 +373,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Added to the spoken alerts line: the emergency voice has no switch.
   static const String emergencyAlwaysSpoken = 'Emergency alerts are always spoken.';
+
+  /// 3.55: added to the siren and horn rows (detection runs on the phone only).
+  static const String micPrivacy = 'Listens on your phone during rides only. Nothing is recorded or sent.';
+}
+
+/// 3.55: one setting with a few named choices (horn alerts, give-way side), chips like [_SpeedWarning].
+class _ChoiceRow<T> extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final T value;
+  final Map<T, String> choices;
+  final ValueChanged<T> onChanged;
+
+  const _ChoiceRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.choices,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: AppTheme.border))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 22, color: AppTheme.accentText),
+              const SizedBox(width: Space.s16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: AppText.body.copyWith(fontWeight: FontWeight.w700)),
+                    Text(subtitle, style: AppText.caption),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.s12),
+          Wrap(
+            spacing: Space.s8,
+            runSpacing: Space.s8,
+            children: [
+              for (final e in choices.entries)
+                ChoiceChip(
+                  label: Text(e.value),
+                  selected: value == e.key,
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  onSelected: (_) => onChanged(e.key),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// A titled group of rows on one card, with generous space above it.

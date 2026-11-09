@@ -109,7 +109,7 @@ class _AdminGroupDetailScreenState extends State<AdminGroupDetailScreen> {
             Text(
               [
                 live ? 'Riding now' : 'Finished ${adminDate(g['endedAt'], time: true)}',
-                if ((g['createdByUserName']?.toString() ?? '').isNotEmpty) 'lead ${g['createdByUserName']}',
+                if ((g['createdByUserName']?.toString() ?? '').isNotEmpty) 'trip owner ${g['createdByUserName']}',
                 if ((g['destinationName']?.toString() ?? '').isNotEmpty) 'to ${g['destinationName']}',
                 if (g['hasStaff'] == true) 'staff on this ride',
               ].join(', '),

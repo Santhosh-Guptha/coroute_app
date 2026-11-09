@@ -6,6 +6,7 @@ import '../../data/services/api_client.dart';
 import 'admin_payments_logic.dart';
 import 'admin_payments_widgets.dart';
 import 'admin_ui.dart';
+import 'marketing/marketing_studio_screen.dart';
 
 // Offers and Coupons tabs of "Payments & Plans".
 
@@ -514,6 +515,17 @@ class _AdminCouponsTabState extends State<AdminCouponsTab> with AutomaticKeepAli
           ],
           empty: Text('No coupons yet.', style: AppText.caption),
         ),
+        const SizedBox(height: 12),
+        // 3.55 marketing studio: a shareable image for a coupon (bound to the coupon, follows its changes).
+        AdminTable(rows: [
+          AdminRow(
+            leading: const AdminRowIcon(Icons.campaign_outlined),
+            title: 'Make an offer image',
+            subtitle: 'Marketing studio: coupon images for Instagram, WhatsApp and banners',
+            onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const MarketingStudioScreen())),
+            divider: false,
+          ),
+        ]),
         const SizedBox(height: 24),
         AdminOffersTab(key: _offers, embedded: true),
       ],

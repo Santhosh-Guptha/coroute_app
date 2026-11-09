@@ -8,8 +8,9 @@ import '../../../data/models/rider_model.dart';
 /// Clean secondary management sheet for convoy membership, invite code, and rider roles.
 ///
 /// Complies with CoRoute formal authority model:
-/// - Trip Owner: controls membership, billing, invitations, and Trip Head assignment.
-/// - Trip Head: manages route, stops, speed limits, and pause/resume.
+/// - Trip Owner: controls membership, billing, invitations, Trip Head assignment, removing riders
+///   and ending the trip.
+/// - Trip Head: changes the trip's group settings only (3.55 owner decision, Nov 9).
 /// - Capacity tiers: Individual (1), Small Group (2–6), Large Group (7–12).
 class RiderManagementSheet extends StatelessWidget {
   final ConvoyModel convoy;
@@ -28,6 +29,25 @@ class RiderManagementSheet extends StatelessWidget {
     required this.onShareInvite,
     required this.onCopyCode,
   });
+
+  /// One line per role (3.55 naming, UX_NAMING_GUIDE §2/§4): trip roles manage the trip, riding
+  /// roles are positions on the road.
+  static const List<String> roleExplanations = [
+    'Trip owner: created this trip.',
+    'Trip head: can change the trip\'s settings. Only the trip owner removes riders or ends the trip.',
+    'Lead: rides first and guides the group. Middle: rides between. Sweeper: rides last.',
+  ];
+
+  /// The badges for one rider (pure, for tests): the trip role first (TRIP OWNER or TRIP HEAD,
+  /// if any), then the riding role (LEAD, SWEEPER or MIDDLE).
+  static List<String> roleBadges({required bool owner, required bool head, required String ridingRole}) => [
+        if (owner) 'TRIP OWNER' else if (head) 'TRIP HEAD',
+        switch (ridingRole) {
+          'LEAD' => 'LEAD',
+          'SWEEPER' => 'SWEEPER',
+          _ => 'MIDDLE',
+        },
+      ];
 
   static Future<void> show(
     BuildContext context, {
@@ -209,6 +229,13 @@ class RiderManagementSheet extends StatelessWidget {
 
         // Roster title
         Text('CONNECTED RIDERS (${convoy.riders.length})', style: AppText.overline),
+        const SizedBox(height: Space.s4),
+        // 3.55 naming: what each badge means (trip roles manage the trip, riding roles are positions).
+        for (final line in RiderManagementSheet.roleExplanations)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Text(line, style: AppText.caption),
+          ),
         const SizedBox(height: Space.s8),
 
         // List of riders
@@ -217,24 +244,16 @@ class RiderManagementSheet extends StatelessWidget {
           final isRiderHead = convoy.isTripHead(r.userId);
           final isCurrentUser = r.userId == me.userId;
 
-          String roleBadge;
-          Color roleBadgeColor;
-          if (isRiderOwner) {
-            roleBadge = 'TRIP OWNER';
-            roleBadgeColor = AppTheme.brand;
-          } else if (isRiderHead) {
-            roleBadge = 'TRIP HEAD';
-            roleBadgeColor = AppTheme.accentText;
-          } else if (r.role == 'LEAD') {
-            roleBadge = 'LEAD';
-            roleBadgeColor = AppTheme.accentText;
-          } else if (r.role == 'SWEEPER') {
-            roleBadge = 'SWEEPER';
-            roleBadgeColor = AppTheme.warnText;
-          } else {
-            roleBadge = 'MIDDLE';
-            roleBadgeColor = AppTheme.muted;
-          }
+          // The trip role (if any) and the riding role, side by side: a trip owner can also ride Lead.
+          final badges = <(String, Color)>[
+            for (final b in RiderManagementSheet.roleBadges(owner: isRiderOwner, head: isRiderHead, ridingRole: r.role))
+              (b, switch (b) {
+                'TRIP OWNER' => AppTheme.brand,
+                'TRIP HEAD' || 'LEAD' => AppTheme.accentText,
+                'SWEEPER' => AppTheme.warnText,
+                _ => AppTheme.muted,
+              }),
+          ];
 
           final initials = r.name.trim().isNotEmpty
               ? r.name.trim().split(' ').map((p) => p.isNotEmpty ? p[0] : '').take(2).join().toUpperCase()
@@ -280,22 +299,24 @@ class RiderManagementSheet extends StatelessWidget {
                               style: AppText.body.copyWith(fontWeight: FontWeight.bold),
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: roleBadgeColor.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              roleBadge,
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w800,
-                                color: roleBadgeColor,
+                          for (final (roleBadge, roleBadgeColor) in badges) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: roleBadgeColor.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                roleBadge,
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                  color: roleBadgeColor,
+                                ),
                               ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 2),

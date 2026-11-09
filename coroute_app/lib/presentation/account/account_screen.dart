@@ -25,6 +25,10 @@ import '../../data/models/membership_model.dart';
 import '../garage/garage_screen.dart';
 import '../analytics/ride_analytics_screen.dart';
 import '../feedback/suggest_feature_screen.dart';
+import '../../data/services/friends_service.dart';
+import '../../data/services/crews_service.dart';
+import '../score/rider_score_card.dart';
+import '../social/profile_screen.dart';
 
 /// The Profile tab: who you are, your bike, emergency contact and plan, your
 /// ride analytics, one row into Settings (every rider setting is there), help
@@ -58,6 +62,9 @@ class AccountScreen extends StatelessWidget {
     final meta = context.watch<MetaService>().meta;
     final settings = context.watch<SettingsService?>();
     final trips = context.watch<TripStorageService?>();
+    final social = context.watch<FriendsService?>();
+    // 3.55 crews: invitations + polls to answer join the friends badge on the profile row.
+    final socialBadge = (social?.badgeCount ?? 0) + (context.watch<CrewsService?>()?.badgeCount ?? 0);
     final base = AppConfig.apiBaseUrl;
     final privacyUrl = meta?.privacyUrl.isNotEmpty == true ? meta!.privacyUrl : '$base/privacy';
     final termsUrl = meta?.termsUrl.isNotEmpty == true ? meta!.termsUrl : '$base/terms';
@@ -319,12 +326,26 @@ class AccountScreen extends StatelessWidget {
                     ),
                   ),
                 ],
+                // 3.55 rider score card (hides itself when the riderScore switch is off).
+                const SizedBox(height: Space.s24),
+                const RiderScoreCard(),
                 // Every rider setting lives on the one Settings screen.
                 const SizedBox(height: Space.s24),
                 DsCard(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Column(
                     children: [
+                      // 3.55 public profile: username, picture, totals, friends (badge = new requests).
+                      if (social != null)
+                        _SettingsRow(
+                          key: const Key('profile_public_profile'),
+                          icon: Icons.account_circle_rounded,
+                          title: 'My profile & friends',
+                          subtitle: auth.username.isEmpty ? 'Username, picture and friends' : auth.username,
+                          value: socialBadge > 0 ? '$socialBadge new' : null,
+                          color: socialBadge > 0 ? AppTheme.warnText : null,
+                          onTap: () => MyProfileScreen.open(context),
+                        ),
                       _SettingsRow(
                         key: const Key('profile_ride_analytics'),
                         icon: Icons.insights_rounded,

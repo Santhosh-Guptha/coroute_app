@@ -165,7 +165,7 @@ class _MeetHereSheetState extends State<MeetHereSheet> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    lead ? 'Everyone in the group gets an alert with the distance to it.' : 'The lead decides whether to add the stop.',
+                    lead ? 'Everyone in the group gets an alert with the distance to it.' : 'The trip owner or the Lead decides whether to add the stop.',
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: AppText.label,

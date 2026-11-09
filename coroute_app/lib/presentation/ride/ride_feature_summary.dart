@@ -63,10 +63,10 @@ class _RideFeatureSummaryState extends State<RideFeatureSummary> {
           ? (ride.featurePolicy.autoDiscovery
                 ? 'Automatic refresh allowed'
                 : 'Manual refresh')
-          : 'Disabled by lead',
+          : 'Turned off for this ride',
       'Guardian': ride.featurePolicy.guardianEnabled
           ? 'Links allowed; ${ride.featurePolicy.guardianMaxHours} hour limit'
-          : 'Disabled by lead',
+          : 'Turned off for this ride',
       'Notification': ride.featurePolicy.notificationInsights
           ? 'Insights allowed; device permission required'
           : 'Standard ride view',

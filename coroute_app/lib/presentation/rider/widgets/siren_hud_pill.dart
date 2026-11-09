@@ -52,7 +52,7 @@ class _SirenHudPillState extends State<SirenHudPill> with SingleTickerProviderSt
     return Semantics(
       label: alertLabel,
       liveRegion: true,
-      hint: 'Approaching emergency siren detected. Yield right of way.',
+      hint: 'Emergency vehicle siren close by. Give way.',
       child: AnimatedBuilder(
         animation: _glowAnimation,
         builder: (context, child) {
@@ -110,9 +110,8 @@ class _SirenHudPillState extends State<SirenHudPill> with SingleTickerProviderSt
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          widget.event.approachingFromBehind
-                              ? 'EMERGENCY SIREN BEHIND'
-                              : 'EMERGENCY SIREN DETECTED',
+                          // 3.55 naming: one phone mic cannot tell behind from ahead, never say "behind".
+                          'EMERGENCY VEHICLE SIREN',
                           style: TextStyle(
                             color: AppTheme.sos,
                             fontSize: 13,
@@ -132,7 +131,7 @@ class _SirenHudPillState extends State<SirenHudPill> with SingleTickerProviderSt
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: const Text(
-                                'YIELD',
+                                'GIVE WAY',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 10,
@@ -144,11 +143,9 @@ class _SirenHudPillState extends State<SirenHudPill> with SingleTickerProviderSt
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                widget.event.pattern == SirenPatternType.wail
-                                    ? 'Wail siren · Audio ducked -20dB'
-                                    : widget.event.pattern == SirenPatternType.yelp
-                                        ? 'Yelp siren · Audio ducked -20dB'
-                                        : 'Acoustic siren · Audio ducked -20dB',
+                                // 3.55 sound awareness: trend / nearness (and a confident kind) when known.
+                                '${widget.event.pattern == SirenPatternType.wail ? 'Wail siren' : widget.event.pattern == SirenPatternType.yelp ? 'Yelp siren' : widget.event.pattern == SirenPatternType.twoTone && widget.event.nearness != null ? 'Hi-lo siren' : 'Acoustic siren'}'
+                                '${widget.event.detailText.isEmpty ? '' : ' · ${widget.event.detailText}'}',
                                 style: TextStyle(
                                   color: AppTheme.text2,
                                   fontSize: 11,
@@ -183,6 +180,67 @@ class _SirenHudPillState extends State<SirenHudPill> with SingleTickerProviderSt
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 3.55: short, glanceable "horn close by" card for the cockpit alert slot. Same shape as
+/// [SirenHudPill], amber instead of red (a horn is a heads-up, not an emergency) and no pulse.
+/// Shown while [SirenAcousticDetector.hornAlertNotifier] holds a horn (cleared after ~4 s).
+class HornHudPill extends StatelessWidget {
+  const HornHudPill({super.key});
+
+  static const String title = 'HORN CLOSE BY';
+  static const String detail = 'Check your mirrors';
+
+  @override
+  Widget build(BuildContext context) {
+    final amber = AppTheme.hyperAmber;
+    return Semantics(
+      label: 'Horn close by. Check your mirrors.',
+      liveRegion: true,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 52, maxWidth: 520),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppTheme.warnTint,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: amber.withOpacity(0.85), width: 2.0),
+          boxShadow: [BoxShadow(color: amber.withOpacity(0.25), blurRadius: 14, offset: const Offset(0, 4))],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(color: amber.withOpacity(0.18), shape: BoxShape.circle),
+              child: Icon(Icons.campaign_rounded, size: 20, color: AppTheme.warnText),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(color: AppTheme.warnText, fontSize: 13, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    detail,
+                    style: TextStyle(color: AppTheme.text2, fontSize: 11, fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

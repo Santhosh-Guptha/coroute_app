@@ -195,7 +195,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
         children: [
           Text(
             'Community is free for every rider (solo rides, every safety feature). Small Group and Large Group are paid: '
-            'price, seats (riders the host can bring, host included), how long it lasts, what it includes and whether it is on sale. '
+            'price, seats (riders the trip owner can bring, trip owner included), how long it lasts, what it includes and whether it is on sale. '
             'Plans that are off sale are hidden from riders and refused at checkout. Joining someone\'s ride is always free.',
             style: AppText.caption.copyWith(height: 1.4),
           ),
@@ -248,7 +248,7 @@ class _AdminPricingTabState extends State<AdminPricingTab> with AutomaticKeepAli
               child: TextField(
                 controller: c.capacity,
                 keyboardType: TextInputType.number,
-                decoration: adminInput('Seats (host incl.)'),
+                decoration: adminInput('Seats (trip owner incl.)'),
               ),
             ),
             const SizedBox(width: 12),

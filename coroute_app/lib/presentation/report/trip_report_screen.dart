@@ -1139,7 +1139,7 @@ class _RouteViewState extends State<_RouteView> with AutomaticKeepAliveClientMix
 
   void _onPlanStop(PlanStop s) {
     final lines = <String>[];
-    if (s.isSkipped) lines.add('Skipped by the lead.');
+    if (s.isSkipped) lines.add('Skipped by the trip owner or the Lead.');
     final ids = {...widget.names.keys, ...s.arrivals.keys};
     for (final id in ids) {
       final a = s.arrivals[id];

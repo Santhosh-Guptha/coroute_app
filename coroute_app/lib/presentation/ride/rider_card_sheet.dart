@@ -19,6 +19,9 @@ import 'incident_sheet.dart';
 import 'incident_view.dart';
 import 'riders_ladder.dart';
 import '../widgets/feature_switch.dart';
+import '../../domain/ride/pillion_seat.dart'; // 3.55 pillion seat
+import 'pillion_seat_sheet.dart';
+import '../social/rider_username_line.dart'; // 3.55 usernames
 
 bool _isRiderCardShowing = false;
 
@@ -28,6 +31,9 @@ bool _isRiderCardShowing = false;
 /// rider has an open SOS it also offers "Mark as handled" (confirmed first).
 /// 3.16: a low battery chip, the sweeper marker, and for the lead "Make
 /// sweeper" / "Remove sweeper".
+/// Under "Riding role" on the rider card (3.55 naming guide §2/§4).
+const String ridingRoleExplanation = 'Lead rides first and guides the group, Middle rides between, Sweeper rides last.';
+
 Future<void> showRiderCard(
   BuildContext context, {
   required String convoyId,
@@ -213,11 +219,13 @@ class RiderCard extends StatelessWidget {
                     ],
                   ),
                   Text(
-                    [r.vehicleType, if (r.vehicleNo.isNotEmpty) r.vehicleNo].join(', '),
+                    // 3.55: the garage bike's model when known (live bike change), else the type.
+                    [r.vehicleModel.isNotEmpty ? r.vehicleModel : r.vehicleType, if (r.vehicleNo.isNotEmpty) r.vehicleNo].join(', '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: AppText.label,
                   ),
+                  RiderUsernameLine(groupId: convoy.groupId, userId: r.userId),
                   const SizedBox(height: 6),
                   Wrap(
                     spacing: 8,
@@ -351,13 +359,17 @@ class RiderCard extends StatelessWidget {
               }
             },
           ),
-        if (!isMe && me != null)
+        // 3.55 pillion seat: "I am their pillion" asks to confirm the bike first ("You'll ride pillion
+        // on Asha's Classic 350 (Red). Confirm?"); the rider of the bike may decline or remove.
+        if (!isMe && me != null && (pairedWithThem || PillionSeat.candidates(convoy.riders, myId).any((x) => x.userId == r.userId)))
           action(
             pairedWithThem ? Icons.link_off_rounded : Icons.link_rounded,
             pairedWithThem ? 'Stop riding as pillion' : 'I am their pillion',
             // Paired: the pillion is told when they get separated from their rider.
-            () => service.setCoRiderDriver(myId, pairedWithThem ? '' : r.userId),
+            () => pairedWithThem ? service.unseatPillion() : confirmPillionSeat(context, service, r),
           ),
+        if (!isMe && me != null && r.isCoRiding && r.ridingWithUserId == myId && service.supportsPillionSeat)
+          action(Icons.person_remove_rounded, 'Remove pillion', () => service.unseatPillion(r.userId)),
         // 3.55 bike / pillion swap: asks the other rider, who accepts or declines on their phone
         // (hidden while the admin switched 'vehicleSwap' off; the gateway refuses too).
         if (canSwap && SwapRules.canSwapBikes(me, r))
@@ -372,6 +384,9 @@ class RiderCard extends StatelessWidget {
         if (canSetRoles && rolesOn) ...[
           const SizedBox(height: 12),
           Semantics(header: true, child: const DsSectionHeader('Riding role')),
+          const SizedBox(height: 2),
+          // 3.55 naming: a riding position, not the trip owner / trip head who run the trip.
+          Text(ridingRoleExplanation, style: AppText.caption),
           const SizedBox(height: 6),
           DsSegment<String>(
             values: RideRole.all,

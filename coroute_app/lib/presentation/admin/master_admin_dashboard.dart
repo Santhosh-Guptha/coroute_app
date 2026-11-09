@@ -28,6 +28,9 @@ import 'admin_safety_screen.dart';
 import 'admin_settings_screen.dart';
 import 'admin_ui.dart';
 import 'admin_users_screen.dart';
+import 'marketing/marketing_studio_screen.dart';
+import 'admin_crews_screen.dart';
+import '../rider/widgets/bike_rider_marker.dart';
 
 /// The sections of the one admin console (rail on wide screens, drawer on phones): nine, each
 /// with a short plain name. Plans and coupons are tabs of Payments; phone reports are in Insights.
@@ -450,6 +453,20 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
             subtitle: 'Feedback, website visits, app versions, phones',
             onTap: () => _push(const AdminInsightsScreen()),
           ),
+          // 3.55: offer / coupon images to share (admin switch marketingStudio); opened from here and Coupons.
+          AdminRow(
+            leading: const AdminRowIcon(Icons.campaign_outlined),
+            title: 'Marketing studio',
+            subtitle: 'Coupon and special-offer images to share',
+            onTap: () => _push(const MarketingStudioScreen()),
+          ),
+          // 3.55 crews and crew polls: moderation (list, delete a poll or a crew).
+          AdminRow(
+            leading: const AdminRowIcon(Icons.groups_2_outlined),
+            title: 'Crews',
+            subtitle: 'Rider crews and their polls',
+            onTap: () => _push(const AdminCrewsScreen()),
+          ),
           AdminRow(
             leading: const AdminRowIcon(Icons.settings_outlined),
             title: 'Settings',
@@ -565,11 +582,15 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard> {
           point: LatLng(r.lat, r.lng),
           width: 48,
           height: 48,
-          child: RiderAvatar(
+          // 3.55: the rider's bike (shape and colour) instead of a round avatar.
+          child: StatusBikeMarker(
             name: r.name,
-            color: colors[r.userId],
+            color: colors[r.userId] ?? AppTheme.accentText,
+            vehicleKind: r.vehicleKind,
+            vehicleColor: r.vehicleColor,
             status: riderStatusOf(r, c, isMe: false, nowMs: now),
-            size: 36,
+            heading: r.heading,
+            height: 26,
             onTap: () => _openConvoy(c),
           ),
         ));
@@ -627,7 +648,7 @@ class _ConvoyRow extends StatelessWidget {
       title: c.name.isEmpty ? 'Ride' : c.name,
       subtitle: [
         if (c.joinCode.isNotEmpty) 'Code ${c.joinCode}',
-        if (c.createdByUserName.isNotEmpty) 'lead ${c.createdByUserName}',
+        if (c.createdByUserName.isNotEmpty) 'trip owner ${c.createdByUserName}',
       ].join(', '),
       detail: '$n ${n == 1 ? 'rider' : 'riders'}, ${dest.isEmpty ? 'no destination set' : 'to $dest'}',
       status: sosCount > 0 ? RiderStatusChip(status: RiderStatus.emergency, detail: sosCount == 1 ? '1 SOS' : '$sosCount SOS') : null,

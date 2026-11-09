@@ -24,6 +24,7 @@ import '../subscription/membership_status_chip.dart';
 import '../../data/services/device_diagnostic_service.dart';
 import '../diagnostics/pre_ride_phone_check_screen.dart';
 import '../garage/garage_screen.dart';
+import '../garage/complete_bike_sheet.dart'; // 3.55 mandatory bike details
 
 /// The Home tab when no ride is active: greeting, the "No active ride" hero
 /// card with [Start Ride], the "Plan a route" / "Join Ride" tiles, the bike
@@ -518,6 +519,7 @@ class _BikeStatusCard extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          const BikeDetailsOncePrompt(), // 3.55: existing riders with incomplete bike details are asked once
           DsListRow(
             icon: Icons.local_gas_station_rounded,
             label: 'Usable range',
@@ -754,6 +756,14 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
       return;
     }
     if (!mounted) return;
+    // 3.55 mandatory bike details: a rider needs a complete bike ("Complete your bike", pre-filled);
+    // a pillion goes on and picks the bike they sit on after joining. SOS is never behind this.
+    final gate = await BikeGate.ensureReady(context, pillionAccount: auth.isPillion);
+    if (!mounted) return;
+    if (gate == BikeGateResult.cancelled) {
+      setState(() => _busy = false);
+      return;
+    }
 
     // Last known position (or a quick fix) so the group sees where we join from.
     double joinLat = 0.0;
@@ -795,6 +805,7 @@ class _JoinRideSheetState extends State<JoinRideSheet> {
     );
     if (!mounted) return;
     if (joined != null) {
+      if (gate == BikeGateResult.pillion) convoyService.requestPillionPick(); // 3.55 pillion seat
       Navigator.pop(context, true);
     } else {
       setState(() {

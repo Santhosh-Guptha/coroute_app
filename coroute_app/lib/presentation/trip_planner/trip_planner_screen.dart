@@ -24,6 +24,7 @@ import '../widgets/pre_ride_checklist_sheet.dart';
 import 'trip_review_sheet.dart';
 import '../../data/services/tile_cache_service.dart';
 import '../../data/services/membership_service.dart';
+import '../garage/complete_bike_sheet.dart'; // 3.55 mandatory bike details
 
 /// Plan a ride on one screen, map first: name, start, destination, stops
 /// (picked on the map or by long-pressing it), then Review and Start Ride.
@@ -321,6 +322,10 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
     if (_launching) return;
     if (!await PermissionsScreen.ensure(context)) return;
     if (!mounted) return;
+    // 3.55 mandatory bike details: the trip owner rides too, so a rider needs a complete bike
+    // (a pillion account goes on). Closing the sheet only cancels this launch.
+    final gate = await BikeGate.ensureReady(context, pillionAccount: context.read<AuthService>().isPillion, allowPillion: false);
+    if (gate == BikeGateResult.cancelled || !mounted) return;
     // Pre-ride checklist (never blocks; closing it without starting cancels the launch).
     if (!await PreRideChecklistSheet.show(context)) return;
     if (!mounted) return;
@@ -343,7 +348,7 @@ class _TripPlannerScreenState extends State<TripPlannerScreen> {
       convoy = await convoys.createConvoy(
         name: name,
         creatorId: auth.currentUserId ?? '',
-        creatorName: auth.currentUserName ?? 'Lead rider',
+        creatorName: auth.currentUserName ?? 'Trip owner',
         startPoint: _start?.name ?? '',
         destination: _destination?.name ?? '',
         destLat: _destination?.lat ?? 0,

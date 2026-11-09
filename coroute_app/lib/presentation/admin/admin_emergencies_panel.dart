@@ -622,7 +622,7 @@ class _EmergencyCard extends StatelessWidget {
       [e.kindText, if (open.isNotEmpty) open].join(', '),
       [
         e.convoyName.isEmpty ? 'Live ride' : e.convoyName,
-        if (e.leadName.isNotEmpty) 'lead ${e.leadName}',
+        if (e.leadName.isNotEmpty) 'trip owner ${e.leadName}',
         if (e.riders > 0) '${e.riders} ${e.riders == 1 ? 'rider' : 'riders'}',
       ].join(', '),
       [if (presence.isNotEmpty) presence, if (seen.isNotEmpty) seen].join(', '),

@@ -10,8 +10,9 @@ import '../safety/safety_settings_sheet.dart';
 /// "Riders helping riders": shown once before a ride until the rider
 /// answers (Continue), or at most [NetworkConstants.netConsentMaxPrompts]
 /// times when they tap Later (the defaults stay on meanwhile). Plain
-/// explanation, the two assistance switches (on) and the medical switch
-/// (off). Continue saves them with the consent.
+/// explanation and the two assistance switches (on). Continue saves them
+/// with the consent. Medical info has no switch: a rider who accepts sees it
+/// while the alert is open (owner decision, see ProfileForm.medicalShareNote).
 class NetworkConsentSheet extends StatefulWidget {
   const NetworkConsentSheet({super.key});
 
@@ -50,7 +51,6 @@ class NetworkConsentSheet extends StatefulWidget {
 class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
   bool _help = true;
   bool _ask = true;
-  bool _medical = false;
   bool _busy = false;
 
   @override
@@ -60,7 +60,6 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
     if (auth != null && auth.netLoaded) {
       _help = auth.assistHelp;
       _ask = auth.assistAsk;
-      _medical = auth.responderMedical;
     }
   }
 
@@ -68,7 +67,7 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
     final auth = Provider.of<AuthService?>(context, listen: false);
     final settings = Provider.of<SettingsService?>(context, listen: false);
     setState(() => _busy = true);
-    final ok = await (auth?.updateNetworkPrefs(assistHelp: _help, assistAsk: _ask, responderMedical: _medical, netConsent: true) ?? Future.value(false));
+    final ok = await (auth?.updateNetworkPrefs(assistHelp: _help, assistAsk: _ask, netConsent: true) ?? Future.value(false));
     if (!mounted) return;
     setState(() => _busy = false);
     if (ok) {
@@ -111,7 +110,7 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
                         child: Text(
                           'If you have an accident, CoRoute can also ask one to three riders from other groups who are already riding towards you, '
                           'when they may reach you faster than your own group. They see only where you are and how far. '
-                          'Name and bike are shared only after one accepts. Never your phone number.',
+                          'Name, bike and your medical info are shared only after one accepts, while your alert is open. Never your phone number.',
                           style: AppText.body,
                         ),
                       ),
@@ -142,14 +141,6 @@ class _NetworkConsentSheetState extends State<NetworkConsentSheet> {
                         subtitle: SafetyTexts.helpExplain,
                         value: _help,
                         onChanged: (v) => setState(() => _help = v),
-                      ),
-                      Divider(color: AppTheme.border),
-                      SafetySwitch(
-                        icon: Icons.medical_information_rounded,
-                        title: SafetyTexts.medicalTitle,
-                        subtitle: SafetyTexts.medicalExplain,
-                        value: _medical,
-                        onChanged: (v) => setState(() => _medical = v),
                       ),
                     ],
                   ),

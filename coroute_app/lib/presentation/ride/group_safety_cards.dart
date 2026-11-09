@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../core/ui/ride_alert.dart';
+import '../../core/ui/ui_tokens.dart';
 import '../../data/services/group_safety_service.dart';
+import '../safety/hold_sos_pill.dart';
 
 /// 3.55 group safety cards in the cockpit alert slot (see GroupSafetyService). Taps are offered
 /// only while the rider is slow ([GroupSafetyService.canTap]); at speed the cards are information
@@ -10,7 +13,11 @@ import '../../data/services/group_safety_service.dart';
 class GroupSafetyCard extends StatelessWidget {
   final GroupSafetyNotice notice;
   final GroupSafetyService service;
-  const GroupSafetyCard({super.key, required this.notice, required this.service});
+
+  /// Raises the real SOS (the cockpit's one SOS path). When set, the missing-rider card shows the
+  /// separate red "Send SOS" hold button.
+  final VoidCallback? onSos;
+  const GroupSafetyCard({super.key, required this.notice, required this.service, this.onSos});
 
   static AlertTier tierOf(GroupSafetyNotice n) => n.important ? AlertTier.important : AlertTier.normal;
 
@@ -24,14 +31,21 @@ class GroupSafetyCard extends StatelessWidget {
     switch (n.kind) {
       case GroupSafetyKind.missingRider:
         // Shown only while stopped: always tappable.
-        action = "I'm OK";
-        onAction = service.answerOk;
-        more = [
-          ('Need help', service.answerNeedHelp),
-          ('Waiting for fuel', () => service.answerWaiting('FUELING')),
-          ('Photo stop', () => service.answerWaiting('PHOTO_STOP')),
-          ('Taking a break', () => service.answerWaiting('REST_BREAK')),
-        ];
+        final sos = onSos;
+        return MissingRiderCard(
+          title: n.title,
+          message: n.message,
+          onOk: service.answerOk,
+          onNeedHelp: service.answerNeedHelp,
+          onWaiting: service.answerWaiting,
+          onSos: sos == null
+              ? null
+              : () {
+                  service.answerSos();
+                  sos();
+                },
+          onDismiss: () => service.dismiss(n),
+        );
       case GroupSafetyKind.buddyAsked:
         action = "I'm OK";
         onAction = service.answerBuddyOk;
@@ -72,6 +86,86 @@ class GroupSafetyCard extends StatelessWidget {
       onAction: onAction,
       moreActions: more,
       onDismiss: () => service.dismiss(n),
+    );
+  }
+}
+
+/// The missing-rider check card ("Are you OK? The group is moving on"). Owner decision 3.55:
+/// "I'm OK" and "Need help" (asks the group to wait / regroup) stay as before, and a clearly
+/// separate red "Send SOS" button raises the real SOS. It must be held for 1.5 s, like the big
+/// SOS button, so a glove or a bump cannot send it. Service-free (pure inputs) for tests.
+class MissingRiderCard extends StatelessWidget {
+  final String title;
+  final String message;
+  final VoidCallback onOk;
+  final VoidCallback onNeedHelp;
+  final void Function(String reason) onWaiting;
+  final VoidCallback? onSos;
+  final VoidCallback? onDismiss;
+
+  const MissingRiderCard({
+    super.key,
+    required this.title,
+    required this.message,
+    required this.onOk,
+    required this.onNeedHelp,
+    required this.onWaiting,
+    this.onSos,
+    this.onDismiss,
+  });
+
+  static const String okLabel = "I'm OK";
+  static const String needHelpLabel = 'Need help';
+
+  /// Above the red button: what "Need help" does, and where the real SOS is.
+  static const String needHelpNote = 'Need help asks the group to wait. For an emergency, hold Send SOS.';
+
+  /// The quieter answers after "Need help": label and the STATUS reason sent.
+  static const List<(String, String)> waitingChoices = [
+    ('Waiting for fuel', 'FUELING'),
+    ('Photo stop', 'PHOTO_STOP'),
+    ('Taking a break', 'REST_BREAK'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final sos = onSos;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        RideAlert(
+          tier: AlertTier.important,
+          title: title,
+          message: message,
+          actionLabel: okLabel,
+          onAction: onOk,
+          moreActions: [
+            (needHelpLabel, onNeedHelp),
+            for (final (label, reason) in waitingChoices) (label, () => onWaiting(reason)),
+          ],
+          onDismiss: onDismiss,
+        ),
+        if (sos != null) ...[
+          const SizedBox(height: 6),
+          // Its own block under the card (on the map), so it is never mistaken for "Need help".
+          Container(
+            padding: const EdgeInsets.all(Space.s8),
+            decoration: BoxDecoration(
+              color: AppTheme.card,
+              borderRadius: Radii.lgAll,
+              border: Border.all(color: AppTheme.border, width: 2),
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.s4, 0, Space.s4, Space.s8),
+                child: Text(needHelpNote, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.label.copyWith(color: AppTheme.text2)),
+              ),
+              HoldSosPill(key: const ValueKey('missingRiderSos'), onTriggered: sos),
+            ]),
+          ),
+        ],
+      ],
     );
   }
 }

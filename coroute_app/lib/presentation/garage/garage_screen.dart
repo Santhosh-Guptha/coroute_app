@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/ui.dart';
 import '../../data/services/garage_service.dart';
+import '../../domain/garage/bike_details.dart';
 import '../../domain/garage/bike_input.dart';
 import '../../domain/garage/bike_profile.dart';
+import '../../domain/garage/bike_type.dart';
 import '../../domain/places/fuel_match.dart';
+import 'bike_silhouette.dart';
+import 'complete_bike_sheet.dart' show BikeTypePicker;
 
 /// Screen managing multiple motorcycles, service reminders, and active ride bike.
 class GarageScreen extends StatefulWidget {
@@ -243,7 +247,10 @@ class _BikeCard extends StatelessWidget {
       if (bike.fuelType != BikeFuelType.ev && bike.cooling != EngineCooling.unknown) bike.cooling.label,
       if (bike.colour.trim().isNotEmpty) bike.colour.trim(),
     ];
-    return parts.isEmpty ? 'Add engine size, cooling and colour' : parts.join(' · ');
+    // 3.55 mandatory details: say what is still missing (needed before riding as a rider).
+    final missing = BikeDetails.missing(bike);
+    if (missing.isNotEmpty) return BikeDetails.missingLine(missing);
+    return parts.join(' · ');
   }
 
   @override
@@ -275,16 +282,18 @@ class _BikeCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
             child: Row(
               children: [
+                // 3.55: the bike's shape for its type, in its colour (the same shape the ride map shows).
                 Container(
-                  padding: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
                   decoration: BoxDecoration(
                     color: AppTheme.soft,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(
-                    Icons.two_wheeler,
-                    color: isActive ? AppTheme.accentText : AppTheme.muted,
-                    size: 26,
+                  child: BikeSilhouette(
+                    type: bike.effectiveBikeType,
+                    colour: bikeColourOf(bike.colour),
+                    width: 56,
+                    semanticLabel: '${bike.effectiveBikeType.label}${bike.colour.trim().isEmpty ? '' : ', ${bike.colour.trim()}'}',
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -621,6 +630,9 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
   BikeFuelType _fuelType = BikeFuelType.petrol;
   EngineCooling _cooling = EngineCooling.unknown;
 
+  /// 3.55 bike type (shape on the map): picked, or pre-selected from the model for the rider to confirm.
+  BikeType? _type;
+
   /// Field → friendly message, shown under each field when "Save to garage" finds a problem
   /// (the button used to do nothing, with no feedback).
   Map<String, String> _errors = const {};
@@ -643,7 +655,22 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
       _odometerController.text = b.totalOdometerKm.round().toString();
       _fuelType = b.fuelType;
       _cooling = b.cooling;
+      _type = b.bikeType ?? BikeDetailsSuggest.typeFor(b);
     }
+  }
+
+  /// Typing the model pre-selects the type and fills empty details a preset knows.
+  void _onModelTyped() {
+    final p = BikeDetailsSuggest.presetFor(_makeController.text, _modelController.text);
+    setState(() {
+      _errors = {..._errors}..remove('model');
+      if (p != null && _ccController.text.trim().isEmpty && p.engineCc > 0) _ccController.text = '${p.engineCc}';
+      if (widget.initial?.bikeType == null) {
+        _type = p?.bikeType ??
+            BikeTypeInference.infer(make: _makeController.text, model: _modelController.text, name: _nameController.text, fuelType: _fuelType) ??
+            _type;
+      }
+    });
   }
 
   static String _num(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
@@ -673,6 +700,8 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
       // 3.55: presets also know the engine size and cooling.
       _ccController.text = p.engineCc > 0 ? '${p.engineCc}' : '';
       _cooling = p.cooling;
+      _fuelType = p.fuelType;
+      _type = p.bikeType ?? _type;
       _errors = const {};
     });
   }
@@ -682,23 +711,27 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
   }
 
   void _save() {
-    final errors = validateBikeInput(
+    // 3.55 mandatory details: make / model, type, colour, engine size (not electric), tank, mileage.
+    final errors = validateBikeDetails(
       name: _nameController.text,
+      make: _makeController.text,
+      model: _modelController.text,
+      type: _type,
+      colour: _colourController.text,
       cc: _ccController.text,
       tank: _tankController.text,
       reserve: _reserveController.text,
       mileage: _mileageController.text,
       odometer: _odometerController.text,
-      unit: _fuelType.unit,
-      checkCc: _fuelType != BikeFuelType.ev,
+      fuelType: _fuelType,
     );
     if (errors.isNotEmpty) {
       setState(() => _errors = errors);
       return;
     }
     final cc = parseBikeNumber(_ccController.text)?.round() ?? 0;
-    final tank = parseBikeNumber(_tankController.text)!;
-    final reserve = parseBikeNumber(_reserveController.text)!;
+    final tank = parseBikeNumber(_tankController.text) ?? 0.0; // empty only for an electric bike's battery
+    final reserve = (parseBikeNumber(_reserveController.text) ?? 0.0).clamp(0.0, tank > 0 ? tank * 0.9 : 0.0).toDouble();
     final mileage = parseBikeNumber(_mileageController.text)!;
     final colour = _colourController.text.trim().replaceAll(RegExp(r'\s+'), ' ');
     final initial = widget.initial;
@@ -708,7 +741,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
     final base = initial ?? BikeProfile(id: 'bike_${DateTime.now().millisecondsSinceEpoch}', name: '');
     // copyWith keeps the id, service interval, last service, notes and year of an edited bike.
     final bike = base.copyWith(
-      name: _nameController.text.trim(),
+      name: _nameController.text.trim().isEmpty ? '${_makeController.text.trim()} ${_modelController.text.trim()}'.trim() : _nameController.text.trim(),
       make: _makeController.text.trim(),
       model: _modelController.text.trim(),
       tankCapacityL: tank,
@@ -719,6 +752,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
       engineCc: evBike ? initial?.engineCc ?? 0 : cc,
       colour: colour.length > 30 ? colour.substring(0, 30).trim() : colour,
       cooling: evBike ? initial?.cooling ?? EngineCooling.unknown : _cooling,
+      bikeType: _type,
     );
     widget.onSave(bike);
   }
@@ -809,7 +843,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                   textInputAction: TextInputAction.next,
                   onChanged: (_) => _clearError('name'),
                   style: TextStyle(color: AppTheme.text),
-                  decoration: _decoration('Bike name (e.g. My Himalayan 450)', 'name'),
+                  decoration: _decoration('Bike name (optional, e.g. My Himalayan 450)', 'name'),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -818,6 +852,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                       child: TextField(
                         controller: _makeController,
                         textCapitalization: TextCapitalization.words,
+                        onChanged: (_) => _onModelTyped(),
                         style: TextStyle(color: AppTheme.text),
                         decoration: _decoration('Make', 'make'),
                       ),
@@ -825,14 +860,39 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: TextField(
+                        key: const ValueKey('bikeModel'),
                         controller: _modelController,
                         textCapitalization: TextCapitalization.words,
+                        onChanged: (_) => _onModelTyped(),
                         style: TextStyle(color: AppTheme.text),
                         decoration: _decoration('Model', 'model'),
                       ),
                     ),
                   ],
                 ),
+                // 3.55 bike type: the shape the group sees on the map (pre-selected from the model).
+                const SizedBox(height: 12),
+                _sectionLabel('BIKE TYPE'),
+                const SizedBox(height: 6),
+                BikeTypePicker(
+                  selected: _type,
+                  colour: bikeColourOf(_colourController.text),
+                  onChanged: (t) => setState(() {
+                    _type = t;
+                    if (t == BikeType.electric) _fuelType = BikeFuelType.ev;
+                    _errors = {..._errors}..remove('type');
+                  }),
+                ),
+                if (_type != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(_type!.hint, style: TextStyle(color: AppTheme.text2, fontSize: 12)),
+                  ),
+                if (_errors['type'] != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(_errors['type']!, style: TextStyle(color: AppTheme.sos, fontSize: 12)),
+                  ),
                 const SizedBox(height: 12),
                 _sectionLabel('RUNS ON'),
                 const SizedBox(height: 6),
@@ -860,7 +920,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                       setState(() {});
                     },
                     style: TextStyle(color: AppTheme.text),
-                    decoration: _decoration('Engine (cc)', 'cc', helper: 'Optional, e.g. 350').copyWith(
+                    decoration: _decoration('Engine (cc)', 'cc', helper: 'Required, e.g. 350').copyWith(
                       suffixText: 'cc',
                       suffixStyle: TextStyle(color: AppTheme.muted),
                     ),
@@ -896,7 +956,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                   controller: _colourController,
                   textCapitalization: TextCapitalization.words,
                   maxLength: 30,
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (_) => setState(() => _errors = {..._errors}..remove('colour')),
                   style: TextStyle(color: AppTheme.text),
                   decoration: _decoration('Colour', 'colour', helper: 'Your group sees it on the ride map'),
                 ),
@@ -918,7 +978,10 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                         ),
                         label: Text(name),
                         selected: colourNow == name.toLowerCase(),
-                        onSelected: (_) => setState(() => _colourController.text = name),
+                        onSelected: (_) => setState(() {
+                          _colourController.text = name;
+                          _errors = {..._errors}..remove('colour');
+                        }),
                       ),
                   ],
                 ),
@@ -933,7 +996,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         onChanged: (_) => _clearError('tank'),
                         style: TextStyle(color: AppTheme.text),
-                        decoration: _decoration('Tank (${_fuelType.unit})', 'tank'),
+                        decoration: _decoration(evBike ? 'Battery (kWh, optional)' : 'Tank (${_fuelType.unit})', 'tank'),
                       ),
                     ),
                     const SizedBox(width: 12),

@@ -4,6 +4,7 @@ import '../../data/services/map_places_service.dart';
 import '../../domain/places/heritage_ahead.dart';
 import '../../domain/places/poi_category.dart';
 import '../../domain/places/route_corridor.dart';
+import '../../domain/ride/ride_tap_gate.dart';
 import '../../domain/route/off_route_group.dart';
 import '../../domain/route/route_guide.dart';
 import '../../domain/tracking/geo_math.dart';
@@ -22,6 +23,14 @@ import '../../domain/tracking/geo_math.dart';
 class RideAdvisories {
   final HeritageNoticeGate heritageGate = HeritageNoticeGate();
   final OffRouteGroupMonitor offGroup = OffRouteGroupMonitor();
+
+  /// Speak while moving, act when stopped: the gated cards (off-route, swap ask, historic place,
+  /// place review) show their buttons only when [RideTapGate.canTap]. Fed on every [update]
+  /// from my rider record's public speed (a pillion can always tap).
+  final RideTapGate tapGate = RideTapGate();
+
+  /// Each gated card's moving line is said once.
+  final MovingLineOnce movingLines = MovingLineOnce();
 
   /// Switched off by the cockpit when the admin turned the feature off.
   bool heritageEnabled = true;
@@ -61,11 +70,14 @@ class RideAdvisories {
     if (_groupId != convoy.groupId) {
       _groupId = convoy.groupId;
       heritageGate.reset();
+      tapGate.reset();
+      movingLines.reset();
       heritage = null;
       heritageUntilMs = 0;
       _lastHeritageCheckMs = 0;
     }
     final hasPos = me.lat != 0 || me.lng != 0;
+    tapGate.update(speedKmh: me.speedKmh, nowMs: nowMs, passenger: me.isCoRiding);
 
     // ---- off the group's route
     final peers = groupPeers(convoy, me);
@@ -81,7 +93,10 @@ class RideAdvisories {
         : OffRouteGroupDecision.none;
     offGroupShow = d.show && !sosOpen;
     offGroupSinceMs = offGroup.off ? (offGroupSinceMs == 0 ? nowMs : offGroupSinceMs) : 0;
-    if (d.speak && !sosOpen) out.add((text: OffRouteGroupMonitor.spoken, key: 'OFF_GROUP:$offGroupSinceMs', heritage: false));
+    if (d.speak && !sosOpen) {
+      final line = tapGate.canTap ? OffRouteGroupMonitor.spokenStopped : OffRouteGroupMonitor.spoken;
+      out.add((text: line, key: 'OFF_GROUP:$offGroupSinceMs', heritage: false));
+    }
 
     // ---- historic places on the way
     if (heritage != null && nowMs >= heritageUntilMs) heritage = null;

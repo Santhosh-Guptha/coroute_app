@@ -29,6 +29,9 @@ class ProfileForm extends StatefulWidget {
   /// The medical notes label (3.16: "Notes for a doctor") and the safety card row.
   static const String notesLabel = 'Notes for a doctor';
   static const String safetyCardLabel = 'Show my safety card';
+  /// Medical info has no sharing switch: it is always on the lock screen Medical ID and goes to
+  /// responders (group, guardians, riders who come to help) only during your SOS or crash alert.
+  static const String medicalShareNote = 'Shown to responders in an emergency and on your lock screen.';
 
   /// Vehicle choices. Pillion is a switch, not a vehicle.
   static const List<String> vehicleTypes = [
@@ -110,9 +113,6 @@ class _ProfileFormState extends State<ProfileForm> {
   bool _medicalLoaded = false;
   String _initialBlood = '', _initialAllergies = '', _initialNotes = '';
   bool _initialOptOut = false;
-  bool _responderMedical = false;
-  bool _initialResponderMedical = false;
-  bool _netLoaded = false;
   late List<String> _bloodChoices;
 
   late List<String> _types;
@@ -152,9 +152,6 @@ class _ProfileFormState extends State<ProfileForm> {
     _allergies.text = _initialAllergies;
     _notes.text = _initialNotes;
     _smsOptOut = _initialOptOut;
-    _netLoaded = auth.netLoaded;
-    _initialResponderMedical = auth.responderMedical;
-    _responderMedical = _initialResponderMedical;
   }
 
   @override
@@ -209,8 +206,6 @@ class _ProfileFormState extends State<ProfileForm> {
       allergies: medical.allergies,
       medicalNotes: medical.medicalNotes,
       smsOptOut: medical.smsOptOut,
-      // Sent when the server knows the switch, or when the rider changed it (older callers never clear it).
-      responderMedical: (_netLoaded || _responderMedical != _initialResponderMedical) ? _responderMedical : null,
     );
     if (!mounted) return;
     setState(() => _busy = false);
@@ -341,7 +336,7 @@ class _ProfileFormState extends State<ProfileForm> {
           style: AppText.body,
           decoration: _dec('Contact phone', Icons.phone_in_talk_rounded, hint: 'e.g. +91 91234 56780'),
         ),
-        _section('Medical info (optional)', subtitle: 'Shown to your ride group only while your SOS or crash alert is open.'),
+        _section('Medical info (optional)', subtitle: ProfileForm.medicalShareNote),
         const SizedBox(height: Space.s12),
         InputDecorator(
           decoration: _dec('Blood group', Icons.bloodtype_rounded),
@@ -398,14 +393,6 @@ class _ProfileFormState extends State<ProfileForm> {
           ),
           icon: const Icon(Icons.badge_rounded),
           label: const Text(ProfileForm.safetyCardLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
-        ),
-        SwitchListTile(
-          key: const ValueKey('responderMedical'),
-          contentPadding: EdgeInsets.zero,
-          value: _responderMedical,
-          onChanged: _busy ? null : (v) => setState(() => _responderMedical = v),
-          title: Text('Share with a rider who comes to help', style: _switchTitle),
-          subtitle: Text('Only after they accept, while your alert is open.', style: AppText.caption),
         ),
         _section('Emergency texts'),
         // Shown as a positive choice (on = receive); stored as the gateway's smsOptOut.

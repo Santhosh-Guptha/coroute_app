@@ -15,7 +15,7 @@ class PublicRideTexts {
 
   static const String title = 'Public ride';
   static const String explain = 'Riders nearby can see this ride and contact you safely. Never your phone number.';
-  static const String hostOnly = 'The host decides.';
+  static const String hostOnly = 'The trip owner or trip head decides.';
   static const String rough = 'Others see a rough location (about 500 m) and heading. Hidden when parked over 10 minutes.';
   static const String showName = 'Show ride name';
   static const String showNameOff = 'Shown as "Rider" or "Group of N".';

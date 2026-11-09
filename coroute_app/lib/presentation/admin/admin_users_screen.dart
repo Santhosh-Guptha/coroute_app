@@ -233,7 +233,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     if (_tier.isNotEmpty && (u['tier']?.toString() ?? '') != _tier) return false;
     final q = _query.trim().toLowerCase();
     if (q.isEmpty) return true;
-    for (final k in const ['name', 'email', 'phone', 'vehicleNo', 'userId']) {
+    for (final k in const ['name', 'username', 'email', 'phone', 'vehicleNo', 'userId']) {
       if ((u[k]?.toString() ?? '').toLowerCase().contains(q)) return true;
     }
     return false;
@@ -507,7 +507,8 @@ class _UserRow extends StatelessWidget {
     final groupName = ridingInfo is Map ? (ridingInfo['name']?.toString() ?? '') : '';
     final riding = u['riding'] != null || u['isInActiveConvoy'] == true;
     final phone = u['phone']?.toString() ?? '';
-    final contact = [u['email']?.toString() ?? '', phone].where((s) => s.isNotEmpty).join(', ');
+    // 3.55: the public username first (the console searches it too).
+    final contact = [u['username']?.toString() ?? '', u['email']?.toString() ?? '', phone].where((s) => s.isNotEmpty).join(', ');
     final tier = u['tier']?.toString() ?? '';
     final hasStats = u['trips'] is num;
     final stats = hasStats
