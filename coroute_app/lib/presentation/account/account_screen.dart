@@ -250,7 +250,7 @@ class AccountScreen extends StatelessWidget {
                             child: Text(
                               _initials(contactName).toUpperCase(),
                               textScaler: TextScaler.noScaling,
-                              style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w800),
+                              style: TextStyle(color: AppTheme.accentText, fontSize: 12, fontWeight: FontWeight.w600),
                             ),
                           )
                         else
@@ -284,7 +284,7 @@ class AccountScreen extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         if (contactSet)
-                          Text('PRIMARY', style: TextStyle(color: AppTheme.accentText, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1))
+                          Text('PRIMARY', style: TextStyle(color: AppTheme.accentText, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1))
                         else
                           Icon(Icons.chevron_right_rounded, color: AppTheme.muted),
                       ],

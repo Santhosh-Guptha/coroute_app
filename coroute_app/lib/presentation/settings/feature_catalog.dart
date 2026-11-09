@@ -174,7 +174,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.low,
     data: Impact.none,
     privacy: 'Visible to anyone who sees your locked phone.',
-    settings: SettingsTarget.settings,
+    changeHint: 'Always on for your safety. No switch.',
   ),
   FeatureInfo(
     id: 'fuel',
@@ -283,7 +283,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.medium,
     data: Impact.none,
     privacy: 'Nothing is sent if you tap I\'m OK in time.',
-    settings: SettingsTarget.settings,
+    changeHint: 'Always on for your safety. No switch.',
   ),
   FeatureInfo(
     id: 'sms',
@@ -291,11 +291,11 @@ const List<FeatureInfo> featureCatalog = [
     icon: Icons.sms_rounded,
     name: 'Emergency texts',
     what: 'If SOS cannot go online, your phone texts a map link.',
-    when: 'Needs phone signal and SMS permission. SMS charges apply.',
+    when: 'Needs phone signal. SMS charges apply.',
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Your contact, the lead and nearby riders (up to 10) get your location.',
-    settings: SettingsTarget.settings,
+    changeHint: 'Always on for your safety. No switch.',
   ),
   FeatureInfo(
     id: 'checkin',
@@ -307,7 +307,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.low,
     privacy: 'If you do not answer in 2 min, your lead is told.',
-    settings: SettingsTarget.settings,
+    changeHint: 'Always on for your safety. No switch.',
   ),
   FeatureInfo(
     id: 'break',
@@ -319,7 +319,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.none,
     data: Impact.none,
     privacy: 'Only you see it.',
-    settings: SettingsTarget.settings,
+    changeHint: 'Always on for your safety. No switch.',
   ),
   FeatureInfo(
     id: 'road_warnings',
@@ -331,7 +331,7 @@ const List<FeatureInfo> featureCatalog = [
     battery: Impact.low,
     data: Impact.low,
     privacy: 'No names are shown.',
-    settings: SettingsTarget.settings,
+    changeHint: 'Always on for your safety. No switch.',
   ),
   FeatureInfo(
     id: 'medical',
