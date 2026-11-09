@@ -155,7 +155,7 @@ class HelmetVoiceMatcher {
           hotword: HelmetVoiceHotword.fuel,
           matchedPhrase: p,
           confidence: clean == p ? 1.0 : 0.85,
-          confirmationSpeech: 'Fuel stop asked from the Lead.',
+          confirmationSpeech: 'Fuel stop asked from the lead.',
         );
       }
     }

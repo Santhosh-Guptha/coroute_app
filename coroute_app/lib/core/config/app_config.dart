@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'gateway_hosts.dart';
+
 /// Runtime configuration.
 ///
 /// Nothing secret lives here. The only value is the public address of the
@@ -17,15 +19,30 @@ class AppConfig {
   AppConfig._();
 
   /// The production gateway (HTTPS).
-  static const String defaultApiBaseUrl = 'https://coroute.duckdns.org';
+  static const String defaultApiBaseUrl = 'https://coroute.devmonks.space';
+
+  /// The previous production address (built into 3.54 / 3.55). It stays served during the domain
+  /// move and is the automatic fallback when [defaultApiBaseUrl] cannot be reached
+  /// (docs/DOMAIN_MIGRATION_devmonks.md).
+  static const String legacyApiBaseUrl = 'https://coroute.duckdns.org';
 
   static const String _configuredApi = String.fromEnvironment(
     'COROUTE_API',
     defaultValue: defaultApiBaseUrl,
   );
 
-  /// The gateway address in use (resolved once; see [resolveApiBase]).
-  static final String apiBaseUrl = resolveApiBase(_configuredApi, release: kReleaseMode);
+  /// The gateway hosts of this build: [defaultApiBaseUrl] then [legacyApiBaseUrl], or only the
+  /// COROUTE_API override (see [hostsFor]).
+  static final GatewayHosts gatewayHosts = GatewayHosts(hostsFor(resolveApiBase(_configuredApi, release: kReleaseMode)));
+
+  /// The gateway address in use: the primary host, or the legacy one when the primary could not be
+  /// reached in this session ([GatewayHosts]).
+  static String get apiBaseUrl => gatewayHosts.current;
+
+  /// Candidate hosts for the resolved base: the default gets the legacy fallback, an override none.
+  @visibleForTesting
+  static List<String> hostsFor(String resolved) =>
+      resolved == defaultApiBaseUrl ? const [defaultApiBaseUrl, legacyApiBaseUrl] : [resolved];
 
   /// [raw] without a trailing slash, or [defaultApiBaseUrl] when it is empty, or (with
   /// [release]) when it is not an `https://` URL with a host. Nothing of the refused value is

@@ -161,4 +161,7 @@ class ProtocolFeatures {
 
   /// 3.55: riding roles (lead / middle / sweeper, ROLE_SWAP, automatic roles), ROLE_CHANGE.
   static const String ride355 = 'ride355';
+
+  /// 3.55: RIDER_VEHICLE (the rider's garage bike colour / model changed mid-ride).
+  static const String vehicle1 = 'vehicle1';
 }

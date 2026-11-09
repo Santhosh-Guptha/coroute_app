@@ -16,6 +16,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../domain/places/place_poi.dart';
 import '../../domain/places/poi_category.dart';
+import '../../domain/ride/bike_markers.dart';
 import '../../domain/ride/buddy_watch.dart';
 import '../../domain/ride/group_break_planner.dart';
 import '../../domain/ride/group_safety_rider.dart';
@@ -305,11 +306,21 @@ class GroupSafetyService extends ChangeNotifier {
   /// "Waiting for a reason": FUELING, PHOTO_STOP, REST_BREAK...
   void answerWaiting(String reason) => _answer(reason, '');
 
-  /// "Need help": the group is asked to wait and my card says so (SOS stays one tap away).
+  /// "Need help": the group is asked to wait and my card says so. The real SOS is the separate
+  /// red "Send SOS" hold button on the same card ([answerSos]).
   void answerNeedHelp() {
     final me = _myRider;
     if (me != null) _convoys.requestWait(me.name);
     _answer('CUSTOM', 'Needs help');
+  }
+
+  /// "Send SOS" (held for 1.5 s on the card): the card closes as answered and the cockpit raises
+  /// the real SOS (ConvoyService.triggerSosAlert, the one SOS path). No "I'm OK" check-in is sent:
+  /// the lead's "No reply" entry stays until the SOS takes over.
+  void answerSos() {
+    _missing.answered(_now);
+    _missingNotice = null;
+    notifyListeners();
   }
 
   void _answer(String reason, String message) {
@@ -444,12 +455,19 @@ class GroupSafetyService extends ChangeNotifier {
       final emergency = _emergencyOpen;
       final fix = _lastFix;
       final me = _riderOf(meModel, lastSeenMs: fix?.ts ?? meModel.lastSeenEpochMs, fatigue: myFatigueLevel);
-      final others = [for (final r in c.riders.values) if (r.userId != uid) _riderOf(r)];
+      // 3.55 pillion seat: one entry per bike, so a seated pillion is never warned about apart from
+      // their rider (and my own bike partner is not one of the "others").
+      final others = [
+        for (final r in BikeMarkerPlan.safetyRoster(c.riders, meId: uid)) if (r.userId != uid) _riderOf(r),
+      ];
       final everyone = [me, ...others];
       final route = c.routeLine;
       var changed = false;
 
-      changed |= _checkMissing(c, now, me, others, emergency);
+      // 3.55 pillion pair: the other phone on my bike answered "Are you OK?" for both of us.
+      final partner = BikeMarkerPlan.partnerOf(uid!, c.riders);
+      final partnerAnsweredAt = partner != null && partner.statusReason.isNotEmpty && partner.stoppedSince > 0 ? partner.stoppedSince : null;
+      changed |= _checkMissing(c, now, me, others, emergency, partnerAnsweredAt: partnerAnsweredAt);
       final lead = c.ridingLeadId == uid || c.createdByUserId == uid;
       GroupSpread? spread;
       if (lead && c.hasGroupFeatures && (_on('stretchAlert') || _on('groupBreak'))) {
@@ -469,14 +487,21 @@ class GroupSafetyService extends ChangeNotifier {
     }
   }
 
-  bool _checkMissing(ConvoyModel c, int now, GroupSafetyRider me, List<GroupSafetyRider> others, bool emergency) {
+  bool _checkMissing(ConvoyModel c, int now, GroupSafetyRider me, List<GroupSafetyRider> others, bool emergency, {int? partnerAnsweredAt}) {
     if (!_on('missingRiderCheck') || !c.hasGroupFeatures || others.isEmpty) {
       if (_missingNotice == null) return false;
       _missingNotice = null;
       _missing.reset();
       return true;
     }
-    final action = _missing.evaluate(nowMs: now, me: me, others: others, emergencyOpen: emergency, lastServerAlertMs: _lastServerAlertAboutMe(now));
+    final action = _missing.evaluate(
+      nowMs: now,
+      me: me,
+      others: others,
+      emergencyOpen: emergency,
+      lastServerAlertMs: _lastServerAlertAboutMe(now),
+      partnerAnsweredAtMs: partnerAnsweredAt,
+    );
     switch (action) {
       case MissingRiderAction.none:
         return false;
@@ -500,6 +525,12 @@ class GroupSafetyService extends ChangeNotifier {
         return true;
       case MissingRiderAction.clear:
         _missingNotice = null;
+        return true;
+      case MissingRiderAction.answeredOnOtherPhone:
+        // My rider / my pillion answered: one answer per bike. If this phone already told the lead,
+        // close that entry too (the gateway also closes the bike partner's entry on an OK).
+        _missingNotice = null;
+        if (_missing.closedAfterNoReply) _convoys.sendCheckIn(CheckInResult.ok);
         return true;
     }
   }
@@ -609,7 +640,9 @@ class GroupSafetyService extends ChangeNotifier {
 
   bool _checkBuddy(ConvoyModel c, int now, GroupSafetyRider me, List<(double, double)> route, bool emergency) {
     final id = _buddies[me.userId];
-    final buddyModel = id == null ? null : c.riders[id];
+    // 3.55 pillion seat: a buddy on my own bike needs no watching.
+    final onMyBike = id != null && BikeMarkerPlan.partnerOf(me.userId, c.riders)?.userId == id;
+    final buddyModel = id == null || onMyBike ? null : c.riders[id];
     if (!_on('buddyPairs') || buddyModel == null) {
       _buddyWatch.reset();
       if (_buddyNotice == null) return false;

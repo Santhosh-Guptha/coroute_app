@@ -14,6 +14,7 @@ import '../models/network_wire.dart';
 import '../models/timeline_event_model.dart';
 import 'background_service.dart';
 import 'convoy_service.dart';
+import 'intercom_service.dart';
 import 'settings_service.dart';
 import 'timeline_service.dart';
 
@@ -31,6 +32,11 @@ class RideNotifAction {
   /// app's confirm; never ends anything by itself), Agent 4.
   static const String actionTalk = 'TALK';
   static const String actionEnd = 'END';
+
+  /// 3.55 glove-safe toggles on the lock screen (broadcasts; handled by [RideNotificationChannel.onToggle],
+  /// not part of [RideNotifActionKind]).
+  static const String actionTalkToggle = 'TALK_TOGGLE';
+  static const String actionMuteToggle = 'MUTE_TOGGLE';
 
   /// From the native `{action, ref}` map; null for anything unknown.
   static RideNotifAction? fromMap(Object? raw) {
@@ -81,6 +87,10 @@ class RideNotificationChannel {
   final StreamController<RideNotifAction> _actions = StreamController<RideNotifAction>.broadcast();
   bool _listening = false;
 
+  /// 3.55: Talk on/off and Mute/Unmute pressed on the notification ([RideNotifAction.actionTalkToggle],
+  /// [RideNotifAction.actionMuteToggle]). Returns true when handled. Set by RideNotificationService.
+  static bool Function(String action)? onToggle;
+
   /// Posts the big notification (same id and channel as the service). False when the
   /// phone cannot (old Android, notifications blocked, service not running, layout error).
   /// Throws MissingPluginException off Android.
@@ -100,6 +110,18 @@ class RideNotificationChannel {
         'fullScreen': true,
       });
       return ok == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 3.55: Android 14+ can deny full-screen alerts (Settings > Apps > Special app access > Full screen
+  /// notifications). False there: critical alerts then show as heads-up notifications only. True on
+  /// older Android; false off Android. For the phone check / settings to point the rider at it.
+  static Future<bool> canFullScreen() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
+    try {
+      return (await const MethodChannel(NotifConstants.notifChannel).invokeMethod<bool>('canFullScreen')) == true;
     } catch (_) {
       return false;
     }
@@ -140,6 +162,11 @@ class RideNotificationChannel {
       _listening = true;
       _ch.setMethodCallHandler((call) async {
         if (call.method != 'onAction') return null;
+        final raw = call.arguments;
+        final name = raw is Map ? raw['action']?.toString() : null;
+        if (name == RideNotifAction.actionTalkToggle || name == RideNotifAction.actionMuteToggle) {
+          return onToggle?.call(name!) ?? false;
+        }
         final a = RideNotifAction.fromMap(call.arguments);
         if (a != null) _actions.add(a);
         return true;
@@ -213,6 +240,7 @@ class RideNotificationService {
     RideEssentialsCoordinator? essentials,
     SafetyService? safety,
     bool? Function()? talkAllowed,
+    IntercomService? intercom,
   }) : this.forPort(
           ConvoyRideNotifPort(convoys),
           settings,
@@ -224,6 +252,7 @@ class RideNotificationService {
           essentials: essentials,
           safety: safety,
           talkAllowed: talkAllowed,
+          intercom: intercom,
         );
 
   /// For tests: any port, any timeline source. [medicalId] (3.16) returns the rider's
@@ -240,6 +269,7 @@ class RideNotificationService {
     this.essentials,
     this.safety,
     this._talkAllowed,
+    this.intercom,
   })  : _events = timelineEvents ?? (() => const <TimelineEventModel>[]),
         _channel = channel ?? RideNotificationChannel(),
         _clock = clock ?? _wallClock,
@@ -249,6 +279,8 @@ class RideNotificationService {
     _port.addListener(_onChange);
     _timeline?.addListener(_onChange);
     _settings.addListener(_onChange);
+    intercom?.addListener(_onIntercom);
+    if (intercom != null) RideNotificationChannel.onToggle = _onToggle;
     BackgroundService.onServiceStarted = _onServiceStarted;
     _actionSub = _channel.actions.listen(_onAction);
     _channel.takeLaunchAction().then((m) {
@@ -264,6 +296,11 @@ class RideNotificationService {
 
   final RideEssentialsCoordinator? essentials;
   final SafetyService? safety;
+
+  /// 3.55: the intercom, for its state line and the Talk / Mute toggles on the notification (optional;
+  /// without it the notification works as before: Talk opens the app).
+  final IntercomService? intercom;
+  String _lastIntercomKey = '';
   bool _fuelView = false;
   final String _actionSession = DateTime.now().microsecondsSinceEpoch.toString();
   String get _fuelRef => jsonEncode([_actionSession, _port.myUserId, _port.activeConvoy?.groupId, essentials?.guide.routeVersion]);
@@ -499,6 +536,7 @@ class RideNotificationService {
         if (fuel.warning && snap.tone == NotifTone.normal) args['tone'] = 'WARNING';
       }
     }
+    _addRideAudioArgs(args, snap.mode == NotifMode.ride);
     final key = jsonEncode(args);
     if (!force && key == _lastKey && _richActive) {
       _lastQuick = quick;
@@ -587,6 +625,99 @@ class RideNotificationService {
 
   // ------------------------------------------------------------ actions
 
+  // ------------------------------------------------------------ 3.55 speed, intercom, toggles
+
+  /// "55 km/h · limit 60 · Hazard in 1.2 km · Receiving Asha": what the rider needs at a glance on the
+  /// lock screen (no position, no private data), plus the glove-safe Talk / Mute toggles.
+  void _addRideAudioArgs(Map<String, Object?> args, bool rideMode) {
+    final line = rideStatusLine(
+      speedKmh: safety?.lastFix?.speedKmh,
+      limitKmh: safety?.currentSpeedLimit ?? 0,
+      hazardAheadM: _nearestHazardAheadM(),
+      intercom: intercom == null ? null : intercomStateText(intercom!),
+    );
+    if (line.isNotEmpty) {
+      final pack = args['telemetry']?.toString() ?? '';
+      args['telemetry'] = pack.isEmpty ? line : '$pack · $line';
+    }
+    final ic = intercom;
+    if (ic != null && args['showTalk'] == true) {
+      args['talkToggle'] = true;
+      args['talkLabel'] = (ic.isVoxArmed || ic.isTransmitting) ? 'Talk off' : 'Talk';
+      args['showMute'] = true;
+      args['muteLabel'] = ic.isDeafened ? 'Unmute' : 'Mute';
+    }
+  }
+
+  double? _nearestHazardAheadM() {
+    double? best;
+    for (final h in _port.hazards) {
+      final m = h.aheadM;
+      if (!h.onRoute || m == null || m < 0) continue;
+      if (best == null || m < best) best = m;
+    }
+    return best;
+  }
+
+  /// The ride status line (pure, tested): speed rounded to 5 km/h, the limit, the next warning ahead
+  /// and the intercom state. Empty when nothing is known.
+  static String rideStatusLine({double? speedKmh, int limitKmh = 0, double? hazardAheadM, String? intercom}) {
+    final parts = <String>[];
+    if (speedKmh != null && speedKmh.isFinite && speedKmh >= 0) {
+      final s = (speedKmh / 5).round() * 5;
+      parts.add(limitKmh > 0 && speedKmh > limitKmh ? '$s km/h (over $limitKmh)' : '$s km/h');
+    }
+    if (limitKmh > 0 && !(speedKmh != null && speedKmh > limitKmh)) parts.add('limit $limitKmh');
+    if (hazardAheadM != null && hazardAheadM.isFinite) {
+      parts.add(hazardAheadM < 1000 ? 'Warning in ${(hazardAheadM / 50).round() * 50} m' : 'Warning in ${(hazardAheadM / 1000).toStringAsFixed(1)} km');
+    }
+    if (intercom != null && intercom.isNotEmpty) parts.add(intercom);
+    return parts.join(' · ');
+  }
+
+  /// Talking / Receiving (name) / Group voice muted / Hands-free on / Voice paused (call).
+  static String intercomStateText(IntercomService i) {
+    if (i.isPausedByPhoneCall) return 'Voice paused (call)';
+    if (i.isTransmitting) return 'Talking';
+    if (i.isDeafened) return 'Group voice muted';
+    final who = i.activeSpeakerName;
+    if (who != null && who.isNotEmpty) return 'Receiving $who';
+    if (i.isVoxArmed) return 'Hands-free on';
+    return '';
+  }
+
+  void _onIntercom() {
+    final i = intercom;
+    if (_disposed || i == null) return;
+    // Only the visible state matters (the audio level changes often and is not shown).
+    final key = '${intercomStateText(i)}|${i.isVoxArmed}|${i.isDeafened}';
+    if (key == _lastIntercomKey) return;
+    _lastIntercomKey = key;
+    _onChange();
+  }
+
+  /// Talk on/off (hands-free) and Mute/Unmute from the notification, also on the lock screen. Talk
+  /// never opens the mic outside a ride or when the admin switched the intercom off.
+  bool _onToggle(String action) {
+    final i = intercom;
+    if (_disposed || i == null || !_rideActive) return false;
+    if (action == RideNotifAction.actionMuteToggle) {
+      i.setDeafened(!i.isDeafened);
+    } else if (action == RideNotifAction.actionTalkToggle) {
+      if (i.isVoxArmed || i.isTransmitting) {
+        i.disableHandsFree().ignore();
+      } else {
+        if (_talkAllowed?.call() == false) return false;
+        if (i.isMicMuted) i.setMicMuted(false);
+        i.startVox().ignore();
+      }
+    } else {
+      return false;
+    }
+    _pushNow(force: true);
+    return true;
+  }
+
   void _onAction(RideNotifAction a) {
     if (_disposed) return;
     switch (a.kind) {
@@ -639,6 +770,8 @@ class RideNotificationService {
     _port.removeListener(_onChange);
     _timeline?.removeListener(_onChange);
     _settings.removeListener(_onChange);
+    intercom?.removeListener(_onIntercom);
+    if (RideNotificationChannel.onToggle == _onToggle) RideNotificationChannel.onToggle = null;
     if (BackgroundService.onServiceStarted == _onServiceStarted) BackgroundService.onServiceStarted = null;
     _actionSub?.cancel();
     _channel.dispose();

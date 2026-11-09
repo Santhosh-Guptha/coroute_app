@@ -42,6 +42,7 @@ import 'tile_cache_service.dart';
 import 'voice_service.dart';
 import 'weather_service.dart';
 import '../../domain/garage/engine_care.dart';
+import '../../domain/safety/effective_speed_limit.dart';
 import '../../domain/safety/road_surface_detector.dart';
 import '../../domain/safety/rider_down_detector.dart';
 import '../../domain/safety/crash_incident.dart' show CrashScenario, MovementState;
@@ -444,6 +445,8 @@ class SafetyService extends ChangeNotifier {
         _soloFixSource = soloFixes ?? nativeSoloFixes {
     _port.addListener(_onConvoy);
     _settings.addListener(_onSettings);
+    _lowDataWas = _settings.lowData; // 3.55 fix: see _onSettings
+    _crashDetectionWas = _settings.crashDetection;
     _fixSub = _port.myFixes.listen(_onFix, onError: (Object _) {});
     if (_native) {
       AlarmNotifier.ensureInitialized().ignore();
@@ -515,6 +518,17 @@ class SafetyService extends ChangeNotifier {
   bool _alarmRiderDown = false;
   bool get alarmIsRiderDown => _alarm != null && _alarmRiderDown;
   static const String riderDownTitle = 'Bike down?';
+
+  /// 3.55 fix: crash detection switched off while an alarm counts down stops new alarms only. The
+  /// running alarm continues (never cancelled behind the rider's back: they may be hurt and the
+  /// switch may have been bumped); the alarm screen says so and points to "I'm OK".
+  static const String crashAlarmStillRunning = "Crash detection is off for new alarms. This alarm is still running: tap I'm OK to cancel it.";
+
+  /// True while a countdown runs with crash detection switched off (see [crashAlarmStillRunning]).
+  bool get alarmRunsWithDetectionOff {
+    final a = _alarm;
+    return a != null && !a.sent && !_settings.crashDetection;
+  }
 
   /// Receives road surface events while riding (main.dart: ConvoyService reports them to the
   /// group when I ride at the front). Never called in an offline solo ride.
@@ -1003,6 +1017,7 @@ class SafetyService extends ChangeNotifier {
   // ------------------------------------------------------------------ inputs
   void _onConvoy() {
     if (_disposed) return;
+    _recheckSpeedLimit();
     // A convoy ride took over from an offline solo ride (it has its own crash detection and SOS);
     // the foreground service now belongs to the convoy, so it keeps running.
     if (_soloActive && _port.rideActive) _endSolo(stopService: false);
@@ -1048,9 +1063,35 @@ class SafetyService extends ChangeNotifier {
     }
   }
 
+  /// Data saver as last seen by [_onSettings] (3.55 fix).
+  bool? _lowDataWas;
+
+  /// Crash detection as last seen by [_onSettings] (3.55 fix).
+  bool? _crashDetectionWas;
+
   void _onSettings() {
     if (_disposed) return;
+    _recheckSpeedLimit();
+    // 3.55 fix: Data saver switched off during a started ride: the route weather check and the
+    // Wi-Fi route map save skipped at ride start (data saver was on) run now instead of never.
+    // Both keep their once-per-ride guards. Switching it on stops nothing (the map save is Wi-Fi only).
+    final lowData = _settings.lowData;
+    if (_lowDataWas == true && !lowData && _rideActive && _tripStatus == 'STARTED') {
+      _startWeather().ignore();
+      _startTiles().ignore();
+    }
+    _lowDataWas = lowData;
     if (!_settings.crashDetection) _detector.reset();
+    // 3.55 fix: switched off during a countdown: the alarm keeps running (deliberate, for safety)
+    // and the alarm notification says how to cancel it, like the alarm screen does.
+    final crashOn = _settings.crashDetection;
+    if (_crashDetectionWas == true && !crashOn && alarmRunsWithDetectionOff && _native) {
+      AlarmNotifier.showCrashAlarm(
+        title: _alarmRiderDown ? riderDownTitle : L10n.t('notif.crash.title'),
+        body: crashAlarmStillRunning,
+      ).ignore();
+    }
+    _crashDetectionWas = crashOn;
     if (!_settings.fatigueReminder) {
       _fatigue.reset();
       _fatigueTimer?.cancel();
@@ -1089,7 +1130,10 @@ class SafetyService extends ChangeNotifier {
     final wasRiding = _fatigue.stretchStart != null;
     final remind = _fatigue.onFix(p);
     if (wasRiding && _fatigue.stretchStart == null) _rideBreaks++; // a rest of 10 min or more
-    if (remind) {
+    // 3.55 fix: the 2 h rule also obeys the break reminder switch. The tracker keeps counting the
+    // stretch (ride stats, the fatigue score), but with the reminder off it used to prompt and
+    // speak anyway, so switching it off (before or during the ride) looked ignored.
+    if (remind && _settings.fatigueReminder) {
       _triggerFatigueAlert();
       sensorSafety.noteRulePrompt(p.ts);
     } else if (_settings.fatigueReminder &&
@@ -1852,17 +1896,25 @@ class SafetyService extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------------ hard stops (item 14)
+  /// 3.55 rider score: called (fire-and-forget) once a finished ride's stats are on disk, so its
+  /// counts can be sent while the rider's setting allows it (set in main.dart).
+  void Function()? onRideStatsEnded;
+
   void _endRideStats() {
     if (_groupId == null || !_rideActive) return;
-    _saveRideStats(endedAt: _now());
+    final saved = _saveRideStats(endedAt: _now());
     sensorSafety.endRide();
+    final hook = onRideStatsEnded;
+    if (saved != null && hook != null) {
+      saved.then((_) => hook()).catchError((Object _) {}).ignore();
+    }
   }
 
-  void _saveRideStats({required int endedAt}) {
+  Future<void>? _saveRideStats({required int endedAt}) {
     final gid = _groupId;
-    if (gid == null) return;
+    if (gid == null) return null;
     _brakesSaved = _brakes.count;
-    RideStatsStore.save(RideStats(
+    final saving = RideStatsStore.save(RideStats(
       groupId: gid,
       hardStops: _brakes.count,
       endedAt: endedAt,
@@ -1871,7 +1923,9 @@ class SafetyService extends ChangeNotifier {
       sos: _rideSos,
       crashAlert: _rideCrash,
       safety: sensorSafety.buildSummary(hardBrakes: _brakes.count, breaks: _rideBreaks), // 3.55, phone only
-    )).ignore();
+    ));
+    saving.ignore();
+    return saving;
   }
 
   // ------------------------------------------------------------------ follow-up (item 19)
@@ -1927,12 +1981,49 @@ class SafetyService extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------------ overspeed alerts
+  /// A limit changed (Settings or the lead's group setting): judged at once against my last fix,
+  /// instead of waiting for the next one (3.55 fix: a change mid-ride used to look ignored).
+  void _recheckSpeedLimit() {
+    final f = _lastFix;
+    if (f == null || !_port.rideActive) return;
+    final limit = effectiveSpeedLimit(groupKmh: _groupLimitAt(_port.activeConvoy, f), personalKmh: _settings.speedLimitWarningKmh);
+    if (limit != _lastCheckedLimit) _checkSpeedLimit(f);
+  }
+
+  /// The group limit where I am: the lead's town limit near the start, the destination and planned
+  /// stops (3.55 fix: it used to apply on the server only), else the group limit.
+  static int _groupLimitAt(ConvoyModel? c, TrackPoint p) {
+    if (c == null) return 0;
+    return groupLimitAt(
+      groupKmh: c.speedLimitKmh,
+      townKmh: c.townLimitKmh,
+      lat: p.lat,
+      lng: p.lng,
+      places: [
+        if (c.startLat != null && c.startLng != null) (c.startLat!, c.startLng!),
+        (c.destinationLat, c.destinationLng),
+        for (final s in c.plannedStops) (s.lat, s.lng),
+      ],
+    );
+  }
+
   void _checkSpeedLimit(TrackPoint p) {
     if (_disposed || !_port.rideActive) return;
     final convoy = _port.activeConvoy;
-    final convoyLimit = convoy?.speedLimitKmh ?? 0;
+    final convoyLimit = _groupLimitAt(convoy, p);
     final personalLimit = _settings.speedLimitWarningKmh;
-    final limit = convoyLimit > 0 ? convoyLimit : personalLimit;
+    // The stricter of the group and personal limits; read on every fix, so a change in Settings
+    // or by the lead applies on the next GPS fix.
+    final limit = effectiveSpeedLimit(groupKmh: convoyLimit, personalKmh: personalLimit);
+    if (limit != _lastCheckedLimit) {
+      // The limit changed: start the hold again and let the voice say the new limit.
+      _overspeedSince = 0;
+      _lastOverspeedAlertMs = 0;
+      if (_isOverspeedActive && (limit <= 0 || p.speedKmh <= limit)) {
+        _isOverspeedActive = false;
+        _removePrompt(SafetyConstants.promptOverspeed);
+      }
+    }
     _lastCheckedLimit = limit;
 
     if (limit <= 0) {

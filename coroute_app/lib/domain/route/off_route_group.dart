@@ -58,7 +58,11 @@ class OffRouteGroupMonitor {
   static const double togetherM = 300;
 
   static const String title = "You left the group's route";
-  static const String spoken = "You left the group's route. When it is safe to stop, open CoRoute to route back to the group.";
+  /// Said once while moving (owner decision: speak while moving, act when stopped).
+  static const String spoken = "You're off the route. Stop when safe to route to your group.";
+
+  /// Said once when the rider is already stopped (the buttons are on the screen).
+  static const String spokenStopped = "You left the group's route. Choose on the screen.";
 
   int? _offSinceMs;
   bool _armed = true;

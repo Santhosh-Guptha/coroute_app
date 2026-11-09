@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/places/place_dwell.dart';
 import '../../domain/places/place_poi.dart';
+import '../../domain/places/ride_end_reviews.dart';
 import '../../domain/tracking/track_point.dart';
 import 'api_client.dart';
 
@@ -140,6 +141,10 @@ class PlaceReviewService extends ChangeNotifier {
 
   StreamSubscription<TrackPoint>? _fixSub;
   PlaceReviewPrompt? _prompt;
+
+  /// 3.55 follow-up: places worth asking about after the ride (not answered in the cockpit).
+  final RideEndReviews _rideEnd = RideEndReviews();
+  bool _rideWasActive = false;
   double _lastSpeed = double.nan;
   bool _disposed = false;
 
@@ -158,10 +163,41 @@ class PlaceReviewService extends ChangeNotifier {
     return p;
   }
 
-  /// "Not now" (or the question was answered): gone, not asked again for this place today.
+  /// "Not now" (or the question was answered): gone, not asked again for this place today, and
+  /// not asked again after the ride.
   void dismissPrompt() {
-    if (_prompt == null) return;
+    final p = _prompt;
+    if (p == null) return;
+    _rideEnd.answered(p.placeId);
     _prompt = null;
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------------ after the ride
+
+  /// The review question for the ride summary / end screen: places where I stayed long enough
+  /// during the ride and did not answer the cockpit question, longest stay first, at most 2.
+  /// Empty when [enabled] is false (admin switches `placeReviews` and `reviewPrompt`, checked by
+  /// the caller) or while an SOS / crash alarm is open.
+  List<PlaceReviewPrompt> afterRidePrompts({required bool enabled}) {
+    if (!enabled || (emergencyOpen?.call() ?? false)) return const [];
+    // A dwell that qualified but never had a stopped moment is still in the tracker.
+    final r = _tracker.pending;
+    if (r != null) _rideEnd.note(r);
+    return _rideEnd.pick(nowMs: _clock());
+  }
+
+  /// One after-ride place was rated (or its question closed): not asked again.
+  void answerAfterRide(String placeId) {
+    _rideEnd.answered(placeId);
+    _tracker.markAsked(placeId, _clock());
+    unawaited(_saveAsked());
+    notifyListeners();
+  }
+
+  /// "Skip" on the after-ride question: nothing more about this ride.
+  void skipAfterRide() {
+    _rideEnd.skipAll();
     notifyListeners();
   }
 
@@ -169,14 +205,27 @@ class PlaceReviewService extends ChangeNotifier {
     if (_disposed) return;
     final now = f.ts > 0 ? f.ts : _clock();
     _lastSpeed = f.speedKmh;
+    // A new ride: the after-ride list starts empty.
+    final active = rideActive?.call() ?? true;
+    if (active && !_rideWasActive) _rideEnd.reset();
+    _rideWasActive = active;
     // Riding along: no place can hold me; skip the scan (the tracker still sees the fix).
     final nearby = f.speedKmh > 25 ? const <PlacePoi>[] : _nearby(f.lat, f.lng);
     _tracker.onFix(lat: f.lat, lng: f.lng, tMs: now, nearby: nearby);
+    final pending = _tracker.pending;
+    if (pending != null && active) _rideEnd.note(pending);
     _evaluate(now);
   }
 
-  /// The ride ended: a dwell that qualified may be offered now.
-  void onRideEnded() => _evaluate(_clock(), rideEnded: true);
+  /// The ride ended: a cockpit question still open closes unanswered (the ride summary asks
+  /// instead, [afterRidePrompts]).
+  void onRideEnded() {
+    final r = _tracker.pending;
+    if (r != null) _rideEnd.note(r);
+    if (_prompt == null) return;
+    _prompt = null;
+    notifyListeners();
+  }
 
   void _evaluate(int now, {bool rideEnded = false}) {
     final shown = _prompt;

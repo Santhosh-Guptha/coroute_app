@@ -7,6 +7,7 @@ import 'package:timezone/timezone.dart' as tz;
 import '../../core/constants/safety_constants.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/ui/ride_alert.dart';
+import 'audio_priority_manager.dart';
 import 'safety_service.dart';
 
 /// Called by flutter_local_notifications on a background isolate when a
@@ -36,6 +37,24 @@ class AlarmNotifier {
   static const String payloadAdmin = 'ADMIN';
   static const String payloadPlan = 'PLAN';
   static const String channelPlan = 'coroute_plan_reminders';
+  /// 3.55 friends: "X wants to be friends" / "X accepted your friend request" while the app is
+  /// in the background (foreground: a snackbar). Normal importance, never a ride alert.
+  static const String channelSocial = 'coroute_social';
+  static const String payloadSocial = 'SOCIAL';
+  static const int socialNoticeId = 4713;
+
+  /// 3.55: critical ride alerts the rider may not hear (during a phone call, or when speech failed):
+  /// alarm sound (plays through Do Not Disturb when alarms are allowed, or when the rider gave
+  /// CoRoute Do Not Disturb access), heads-up, public on the lock screen (names only, no position).
+  static const String channelCritical = 'coroute_critical_alerts';
+  static const int criticalAlertId = 4711;
+
+  /// 3.55 sound awareness: siren / horn heard by the ride mic while the app is not in front (screen
+  /// locked, phone in a pocket), where app vibration (HapticFeedback) may not work. Heads-up with
+  /// VIBRATION ONLY: the spoken alert is the sound (no notification sound on top of it).
+  static const String channelSoundAlerts = 'coroute_sound_alerts';
+  static const int soundAlertId = 4712;
+  static final Int64List _sirenVibration = Int64List.fromList(const [0, 400, 200, 400, 200, 400]);
   static const String actionCrashOk = 'crash_ok';
   static const String actionCrashSend = 'crash_send';
   static const String actionPromptOk = 'prompt_ok';
@@ -110,6 +129,31 @@ class AlarmNotifier {
           vibrationPattern: _alarmVibration,
           audioAttributesUsage: AudioAttributesUsage.alarm,
         ));
+        await android?.createNotificationChannel(AndroidNotificationChannel(
+          channelCritical,
+          'Critical ride alerts',
+          description: 'Crash, SOS or emergency vehicle alerts you might not hear (during a call, or when speech is unavailable).',
+          importance: Importance.max,
+          bypassDnd: true,
+          enableVibration: true,
+          vibrationPattern: _alarmVibration,
+          audioAttributesUsage: AudioAttributesUsage.alarm,
+        ));
+        await android?.createNotificationChannel(AndroidNotificationChannel(
+          channelSoundAlerts,
+          'Siren and horn alerts',
+          description: 'Vibrates when your phone hears a siren or a horn close by while the screen is off.',
+          importance: Importance.high,
+          playSound: false,
+          enableVibration: true,
+          vibrationPattern: _sirenVibration,
+        ));
+        await android?.createNotificationChannel(const AndroidNotificationChannel(
+          channelSocial,
+          'Friends',
+          description: 'Friend requests and accepted requests.',
+          importance: Importance.defaultImportance,
+        ));
         await android?.createNotificationChannel(const AndroidNotificationChannel(
           channelPlan,
           'Plan reminders',
@@ -117,6 +161,8 @@ class AlarmNotifier {
           importance: Importance.defaultImportance,
         ));
       }
+      // Critical lines the rider may not hear get a heads-up notification (AudioPriorityManager).
+      AudioPriorityManager.criticalNotifier ??= showCriticalAlert;
       return ok ?? true;
     } catch (e) {
       debugPrint('alarm notifier init note: $e');
@@ -213,6 +259,80 @@ class AlarmNotifier {
 
   static Future<void> cancelCrashAlarm() => _cancel(SafetyConstants.crashAlarmId);
 
+  /// 3.55: heads-up for a critical line the rider may not hear (during a phone call: a short tone and
+  /// phrase also play in the call audio; or when speech failed). Alarm sound and vibration, public on
+  /// the lock screen (texts carry names only), auto-cancels after 2 minutes. No full-screen intent:
+  /// it must never cover the call screen.
+  static Future<void> showCriticalAlert(String title, String body) async {
+    if (!await ensureInitialized()) return;
+    final details = AndroidNotificationDetails(
+      channelCritical,
+      'Critical ride alerts',
+      channelDescription: 'Crash, SOS or emergency vehicle alerts you might not hear (during a call, or when speech is unavailable).',
+      importance: Importance.max,
+      priority: Priority.max,
+      category: AndroidNotificationCategory.alarm,
+      audioAttributesUsage: AudioAttributesUsage.alarm,
+      enableVibration: true,
+      vibrationPattern: _alarmVibration,
+      visibility: NotificationVisibility.public,
+      autoCancel: true,
+      timeoutAfter: const Duration(minutes: 2).inMilliseconds,
+      styleInformation: BigTextStyleInformation(body),
+    );
+    try {
+      await _plugin?.show(
+        criticalAlertId,
+        title,
+        body,
+        NotificationDetails(
+          android: details,
+          iOS: const DarwinNotificationDetails(
+            presentAlert: true,
+            presentSound: true,
+            presentBanner: true,
+            interruptionLevel: InterruptionLevel.timeSensitive,
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('critical alert note: $e');
+    }
+  }
+
+  /// 3.55: siren / horn heads-up with vibration only, for the lock screen (see [channelSoundAlerts]).
+  /// One id: a newer alert replaces the older one. Public on the lock screen (no private data).
+  static Future<void> showSoundAwarenessAlert(String title, String body, {Duration showFor = const Duration(seconds: 30)}) async {
+    if (!await ensureInitialized()) return;
+    final details = AndroidNotificationDetails(
+      channelSoundAlerts,
+      'Siren and horn alerts',
+      channelDescription: 'Vibrates when your phone hears a siren or a horn close by while the screen is off.',
+      importance: Importance.high,
+      priority: Priority.high,
+      category: AndroidNotificationCategory.navigation,
+      playSound: false,
+      enableVibration: true,
+      vibrationPattern: _sirenVibration,
+      visibility: NotificationVisibility.public,
+      autoCancel: true,
+      timeoutAfter: showFor.inMilliseconds,
+    );
+    try {
+      await _plugin?.show(
+        soundAlertId,
+        title,
+        body,
+        NotificationDetails(
+          android: details,
+          iOS: const DarwinNotificationDetails(presentAlert: true, presentSound: false, presentBanner: true),
+        ),
+      );
+    } catch (e) {
+      debugPrint('sound alert note: $e');
+    }
+  }
+
   /// A rider prompt ("Are you OK?", "Time for a break", "Fuel soon", "Still okay?")
   /// with its main button and, when the prompt has one, its second button.
   static Future<void> showPrompt(SafetyPrompt p) async {
@@ -297,6 +417,36 @@ class AlarmNotifier {
   }
 
   static Future<void> stopAdminAlarm() => _cancel(SafetyConstants.adminAlarmId);
+
+  /// 3.55 friends: one system notification (replaced by the next) for a friend request or an
+  /// accepted request while the app is in the background. Tapping it opens the app.
+  static Future<void> showSocialNotice(String title, String body) async {
+    try {
+      if (!await ensureInitialized()) return;
+      final details = AndroidNotificationDetails(
+        channelSocial,
+        'Friends',
+        channelDescription: 'Friend requests and accepted requests.',
+        importance: Importance.defaultImportance,
+        priority: Priority.defaultPriority,
+        category: AndroidNotificationCategory.social,
+        autoCancel: true,
+        styleInformation: BigTextStyleInformation(body),
+      );
+      await _plugin?.show(
+        socialNoticeId,
+        title,
+        body,
+        NotificationDetails(
+          android: details,
+          iOS: const DarwinNotificationDetails(presentAlert: true, presentBadge: true, presentSound: true),
+        ),
+        payload: payloadSocial,
+      );
+    } catch (e) {
+      debugPrint('social notice note: $e');
+    }
+  }
 
   /// A plan reminder at the absolute instant [at]. Inexact (no exact-alarm
   /// permission); a few minutes late is fine for a renewal nudge. Instants in

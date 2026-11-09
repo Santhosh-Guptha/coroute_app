@@ -1,6 +1,8 @@
 import '../../domain/tracking/ride_power_policy.dart';
 import '../../domain/tracking/battery_saver.dart';
 import '../../domain/tracking/location_cadence.dart';
+import '../../domain/tracking/speed_estimator.dart';
+import 'solo_fix_source.dart' show speedFixOf;
 import '../../domain/tracking/battery_performance_monitor.dart';
 import '../../domain/safety/accel_bucket.dart';
 import '../../domain/tracking/dead_reckoning_engine.dart';
@@ -33,6 +35,7 @@ import '../models/network_wire.dart';
 import '../models/outbox_item.dart';
 import '../models/pending_sos.dart';
 import '../models/rider_model.dart';
+import '../models/rider_vehicle.dart';
 import '../models/route_model.dart';
 import '../models/safety_wire.dart';
 import '../models/sos_alert_model.dart';
@@ -54,6 +57,7 @@ import 'track_recorder.dart';
 import 'trip_storage_service.dart';
 import '../../domain/ride/ride_roles.dart';
 import '../../domain/ride/vehicle_swap.dart';
+import '../../domain/ride/pillion_seat.dart'; // 3.55 pillion seat
 
 /// Convoy state for the signed-in rider.
 ///
@@ -207,6 +211,10 @@ class ConvoyService extends ChangeNotifier {
 
   /// Speed band driving the GPS cadence (see [LocationCadence]); hysteresis inside.
   final SpeedBandTracker _gpsBand = SpeedBandTracker();
+
+  /// My ride speed from the GPS fixes (Doppler first, outliers rejected, 0 when stopped): the one
+  /// number the cockpit shows, the overspeed check judges, telemetry sends and the track records.
+  final SpeedEstimator _speedEst = SpeedEstimator();
   DateTime? _stationarySince;
   DateTime _lastTelemetryPush = DateTime.fromMillisecondsSinceEpoch(0);
   String? _systemBroadcastMessage;
@@ -693,6 +701,8 @@ class ConvoyService extends ChangeNotifier {
     BackgroundService.start(convoyName: convoy.name, riderCount: convoy.riders.length).ignore();
     refreshEmergencyRoster(force: true).ignore();
     _flushOutbox();
+    // 3.55 live bike change: a bike picked while the ride was being restored still reaches the group.
+    _syncVehicle();
     final myRider = convoy.riders[_myUserId];
     mesh?.start(
       joinCode: convoy.joinCode,
@@ -1055,9 +1065,12 @@ class ConvoyService extends ChangeNotifier {
       }
       final cid = e['clientId']?.toString();
       final code = e['code'];
+      // 3.55 live bike change: a refused RIDER_VEHICLE is retried later or dropped, quietly.
+      if ((cid == null || cid.isEmpty) && _onVehicleRefused(e['reason']?.toString())) return;
       if (cid != null && cid.isNotEmpty) {
         _onOutboxError(cid, code is num ? code.toInt() : int.tryParse('$code'), e['message']?.toString(), e['reason']?.toString());
         _onSwapRefused(e['reason']?.toString(), e['message']?.toString()); // 3.55
+        _onPillionRefused(e['reason']?.toString(), e['message']?.toString()); // 3.55 pillion seat
       }
       _lastError = e['message']?.toString();
       debugPrint('gateway error ${e['code']}: ${e['message']}');
@@ -1149,6 +1162,11 @@ class ConvoyService extends ChangeNotifier {
         return;
       case 'ROLE_CHANGE':
         _onRoleChange(e);
+        return;
+      // 3.55 pillion seat (room PILLION_SEATED / PILLION_UNSEATED; the rider records follow as RIDER_UPDATE).
+      case 'PILLION_SEATED':
+      case 'PILLION_UNSEATED':
+        _onPillionEvent(type!, e, gid);
         return;
       // 3.55 bike / pillion swap (personal SWAP_ASK / SWAP_RESULT, room SWAP_DONE).
       case 'SWAP_ASK':
@@ -1311,6 +1329,8 @@ class ConvoyService extends ChangeNotifier {
         _allConvoys[gid] = convoy.copyWith(waitRequests: w);
         break;
       case 'CONFIG':
+        _configPending?.cancel();
+        _configPending = null;
         if (convoy == null) return;
         _allConvoys[gid] = convoy.copyWith(
           distanceThresholdMeters: (e['distanceThresholdMeters'] as num?)?.toDouble(),
@@ -1324,6 +1344,9 @@ class ConvoyService extends ChangeNotifier {
           featurePolicy: e['featurePolicy'] is Map ? RideFeaturePolicy.fromJson(e['featurePolicy']) : null,
           // The host's seats: raised at once when the host upgrades during the ride.
           capacity: (e['capacity'] as num?)?.toInt(),
+          // 3.55 fix: automatic roles ride in CONFIG too (a missed AUTO_ROLES is corrected by the
+          // next CONFIG; it decides whether a front rider has lead rights, see canEditRoute).
+          autoRoles: e['autoRoles'] is bool ? e['autoRoles'] as bool : null,
         );
         break;
       case 'TRIP_STATUS':
@@ -1484,6 +1507,78 @@ class ConvoyService extends ChangeNotifier {
   /// or joining a ride (empty: not sent; the gateway keeps its default). Set by GarageBinding.
   String vehicleColor = '';
 
+  /// 3.55: the active garage bike's model ("Himalayan 450"), sent with create / join and with
+  /// RIDER_VEHICLE ('' when none).
+  String vehicleModel = '';
+
+  /// 3.55 bike type id of the active garage bike ('' when none) and whether its details are
+  /// complete; sent with create / join and RIDER_VEHICLE. Set by GarageBinding.
+  String vehicleKind = '';
+  bool bikeComplete = false;
+
+  /// GarageBinding: the active bike's type and completeness changed.
+  void setActiveBikeDetails(String kind, bool complete) {
+    if (kind == vehicleKind && complete == bikeComplete) return;
+    vehicleKind = kind;
+    bikeComplete = complete;
+    _syncVehicle();
+  }
+
+  Timer? _vehicleTimer;
+  DateTime? _vehicleSentAt;
+
+  /// The ride in which the gateway refused RIDER_VEHICLE for good (swapped bike, pillion, switch off).
+  String? _vehicleBlockedGid;
+
+  /// 3.55 live bike change: GarageBinding reports the active bike. Kept for the next create / join
+  /// and, during a group ride on a gateway with 'vehicle1', sent at once as RIDER_VEHICLE so the
+  /// group's maps show the new colour and model (at most one per 10 s: the latest bike is sent
+  /// when the window has passed; offline, it is retried until the ride shows it).
+  void setActiveVehicle(String colour, String model) {
+    vehicleColor = colour;
+    vehicleModel = RiderVehicle.cleanModel(model);
+    _syncVehicle();
+  }
+
+  void _syncVehicle() {
+    _vehicleTimer?.cancel();
+    _vehicleTimer = null;
+    if (_disposed) return;
+    final c = activeConvoy;
+    final me = c?.riders[_myUserId];
+    if (c == null || me == null || c.isSoloRide || _vehicleBlockedGid == c.groupId) return;
+    if (!_rt.supports(ProtocolFeatures.vehicle1) || !_featureOn('riderVehicleLive')) return;
+    final msg = RiderVehicle.message(me: me, colour: vehicleColor, model: vehicleModel, kind: vehicleKind, complete: vehicleKind.isEmpty ? null : bikeComplete);
+    if (msg == null) return;
+    final wait = RiderVehicle.waitBeforeSend(_vehicleSentAt, DateTime.now());
+    if (wait > Duration.zero || !_rt.send(msg)) {
+      _vehicleTimer = Timer(wait > Duration.zero ? wait : RiderVehicle.rateWindow, _syncVehicle);
+      return;
+    }
+    _vehicleSentAt = DateTime.now();
+    // Not confirmed by a RIDER_UPDATE (lost on the way): check again after the window.
+    _vehicleTimer = Timer(RiderVehicle.rateWindow + const Duration(seconds: 1), _syncVehicle);
+  }
+
+  /// A RIDER_VEHICLE refusal (no clientId): handled quietly, never shown as an error banner.
+  bool _onVehicleRefused(String? reason) {
+    final sent = _vehicleSentAt;
+    if (sent == null || DateTime.now().difference(sent) > const Duration(seconds: 30)) return false;
+    if (reason == 'VEHICLE_RATE') {
+      _vehicleSentAt = DateTime.now();
+      _vehicleTimer?.cancel();
+      _vehicleTimer = Timer(RiderVehicle.rateWindow, _syncVehicle);
+      return true;
+    }
+    if (RiderVehicle.isFinalRefusal(reason)) {
+      _vehicleBlockedGid = _activeGroupId;
+      _vehicleTimer?.cancel();
+      _vehicleTimer = null;
+      return true;
+    }
+    return false;
+  }
+
   Future<ConvoyModel> createConvoy({
     required String name,
     required String creatorId,
@@ -1531,6 +1626,9 @@ class ConvoyService extends ChangeNotifier {
         'batteryLevel': _currentBatteryLevel,
         'isCharging': _isCharging,
         if (vehicleColor.isNotEmpty) 'vehicleColor': vehicleColor,
+        if (vehicleModel.isNotEmpty) 'vehicleModel': vehicleModel,
+        if (vehicleKind.isNotEmpty) 'vehicleKind': vehicleKind,
+        if (vehicleKind.isNotEmpty) 'bikeComplete': bikeComplete,
       },
     });
     final convoy = ConvoyModel.fromJson(Map<String, dynamic>.from(res as Map));
@@ -1539,14 +1637,24 @@ class ConvoyService extends ChangeNotifier {
     return convoy;
   }
 
-  Future<ConvoyModel?> joinConvoyByCode({required String code, required RiderModel rider}) async {
+  Future<ConvoyModel?> joinConvoyByCode({required String code, required RiderModel rider}) =>
+      _joinWith(rider, (body) => _api.post('/convoys/join', {'code': code.trim().toUpperCase(), ...body}));
+
+  /// 3.55 "Start a ride with this crew": accepts a ride invite (POST /ride-invites/:id/accept). The
+  /// gateway joins me through the normal join rules (seats of the host's plan, one active trip,
+  /// bike details); no join code is needed or shown. Same errors and activation as [joinConvoyByCode].
+  Future<ConvoyModel?> joinFromRideInvite({required String inviteId, required RiderModel rider}) => _joinWith(rider, (body) async {
+        final res = await _api.post('/ride-invites/${Uri.encodeComponent(inviteId)}/accept', body);
+        return res is Map && res['convoy'] is Map ? res['convoy'] : res;
+      });
+
+  Future<ConvoyModel?> _joinWith(RiderModel rider, Future<dynamic> Function(Map<String, dynamic> body) send) async {
     _lastError = null;
     _lastErrorIsServerBusy = false;
     try {
       await _refreshBatteryLevel();
       await _flushPendingLeaves();
-      final res = await _api.post('/convoys/join', {
-        'code': code.trim().toUpperCase(),
+      final res = await send({
         'rider': {
           'lat': rider.lat,
           'lng': rider.lng,
@@ -1556,6 +1664,9 @@ class ConvoyService extends ChangeNotifier {
           'batteryLevel': _currentBatteryLevel,
           'isCharging': _isCharging,
           if (vehicleColor.isNotEmpty) 'vehicleColor': vehicleColor,
+          if (vehicleModel.isNotEmpty) 'vehicleModel': vehicleModel,
+          if (vehicleKind.isNotEmpty) 'vehicleKind': vehicleKind,
+          if (vehicleKind.isNotEmpty) 'bikeComplete': bikeComplete,
         },
       });
       final convoy = ConvoyModel.fromJson(Map<String, dynamic>.from(res as Map));
@@ -1781,6 +1892,7 @@ class ConvoyService extends ChangeNotifier {
     _gpsIdleProfile = false;
     _stationarySince = null;
     _gpsBand.reset();
+    _speedEst.reset();
     _subscribeGps();
     _isRealGpsActive = true;
     _lastGpsFixTime = DateTime.now().millisecondsSinceEpoch;
@@ -1856,11 +1968,12 @@ class ConvoyService extends ChangeNotifier {
 
     if (_deadReckoning.isCoasting) {
       final fix = _deadReckoning.computeFix(now);
+      final coastKmh = _coastingSpeedKmh(fix.speedKmh, crashStop: fix.isCrashStop, nowMs: now);
       final coastingFix = TrackPoint(
         ts: now,
         lat: fix.lat,
         lng: fix.lng,
-        speedKmh: fix.speedKmh,
+        speedKmh: coastKmh,
         accuracyM: 80.0,
       );
       recorder?.onFix(coastingFix, estimated: true); // projected along the plan: never part of the track
@@ -1869,7 +1982,7 @@ class ConvoyService extends ChangeNotifier {
       final updated = me.copyWith(
         lat: fix.lat,
         lng: fix.lng,
-        speedKmh: fix.speedKmh,
+        speedKmh: coastKmh,
         heading: fix.heading,
         lastSeenEpochMs: now,
         trackingConfidence: fix.confidence,
@@ -1920,6 +2033,17 @@ class ConvoyService extends ChangeNotifier {
         _startCoasting(me, now);
       }
     }
+  }
+
+  /// Speed while coasting: degraded fixes (accuracy > 50 m: trees, city) still carry a good
+  /// Doppler speed, so a fresh estimate (< 2.5 s) wins over the frozen entry speed; in a real
+  /// tunnel there are no fixes and the projection's speed is used. A crash stop is always 0.
+  double _coastingSpeedKmh(double projectedKmh, {required bool crashStop, required int nowMs}) {
+    if (crashStop) return projectedKmh;
+    final fresh = _speedEst.hasEstimate &&
+        _speedEst.source == SpeedSource.doppler &&
+        nowMs - _speedEst.lastFixMs <= 2500;
+    return fresh ? _speedEst.kmh : projectedKmh;
   }
 
   void _startCoasting(RiderModel rider, int nowMs) {
@@ -2018,7 +2142,8 @@ class ConvoyService extends ChangeNotifier {
     if (userId == null || convoy == null) return;
     final current = convoy.riders[userId];
     final now = position.timestamp.millisecondsSinceEpoch;
-    final speedKmh = (position.speed.isFinite ? position.speed * 3.6 : 0.0).clamp(0.0, 300.0).toDouble();
+    // Every fix, even a degraded one, goes through the estimator (it weighs and rejects by itself).
+    final speedKmh = _speedEst.update(speedFixOf(position)).kmh.clamp(0.0, 300.0).toDouble();
     // Speed-adaptive GPS cadence: the faster the ride, the more often and finer the fixes. The band
     // has hysteresis and a dwell time, so the stream is re-subscribed only on a real change.
     if (_gpsBand.update(speedKmh, _clock()) && _isRealGpsActive && !_gpsIdleProfile) _subscribeGps();
@@ -2469,13 +2594,36 @@ class ConvoyService extends ChangeNotifier {
   }
 
   // ------------------------------------------------------ route planning
-  /// True when this rider may change the route (lead or creator).
+  /// True when this rider has lead rights (route, stops, pause / resume, riding roles, regroup,
+  /// buddy pairs): the trip owner or a Lead the owner picked. Same rule as the gateway's isLead().
   bool get canEditRoute {
     final c = activeConvoy;
-    final uid = _myUserId;
+    final uid = myUserId;
     if (c == null || uid == null) return false;
-    // 3.55: an automatic (front-rider) lead has no lead rights; the owner and the trip head keep them.
-    return c.createdByUserId == uid || c.tripHeadUserId == uid || (c.riders[uid]?.role == 'LEAD' && !c.autoRoles);
+    // 3.55: an automatic (front-rider) lead has no lead rights. 3.55 owner decision (Nov 9): the
+    // trip head is not here (settings only, see canChangeGroupSettings); a trip head who rides as
+    // the picked Lead has these rights by that riding role.
+    return c.createdByUserId == uid || c.tripOwnerUserId == uid || (c.riders[uid]?.role == 'LEAD' && !c.autoRoles);
+  }
+
+  /// True when this rider may change the trip's group settings (limits, thresholds, spoken alerts,
+  /// visibility, ride features, public ride): lead rights or the trip head (gateway canChangeSettings).
+  bool get canChangeGroupSettings {
+    final c = activeConvoy;
+    final uid = myUserId;
+    if (c == null || uid == null) return false;
+    return canEditRoute || (c.tripHeadUserId != null && c.tripHeadUserId == uid);
+  }
+
+  /// True when this rider is the trip head and has no lead rights: they can change the settings only.
+  bool get isSettingsOnlyTripHead => canChangeGroupSettings && !canEditRoute;
+
+  /// True when this rider may end the trip (and remove riders): the trip owner only (gateway canManage).
+  bool get canEndTrip {
+    final c = activeConvoy;
+    final uid = myUserId;
+    if (c == null || uid == null) return false;
+    return c.createdByUserId == uid || c.tripOwnerUserId == uid;
   }
 
   bool _sendRoute(Map<String, dynamic> msg) {
@@ -2576,9 +2724,65 @@ class ConvoyService extends ChangeNotifier {
     if (voiceGuidanceEnabled != null) payload['voiceGuidanceEnabled'] = voiceGuidanceEnabled;
     if (speedLimitKmh != null) payload['speedLimitKmh'] = speedLimitKmh;
     if (townLimitKmh != null && _ride316) payload['townLimitKmh'] = townLimitKmh;
-    if (featurePolicy != null && supports(ProtocolFeatures.featurePolicy) && isOnline && canEditRoute) payload['featurePolicy'] = featurePolicy;
-    if (payload.length == 1) return;
-    _rt.send(payload);
+    if (featurePolicy != null && supports(ProtocolFeatures.featurePolicy) && isOnline && canChangeGroupSettings) payload['featurePolicy'] = featurePolicy;
+    if (payload.length == 1) {
+      // 3.55 fix: a feature control tapped while offline was dropped without a word.
+      if (featurePolicy != null && canChangeGroupSettings && !isOnline) {
+        _lastError = _configOfflineError;
+        notifyListeners();
+      }
+      return;
+    }
+    final c = activeConvoy;
+    // 3.55 fix: the same change again within a moment (a double tap on a switch or chip that
+    // waits for the gateway's confirmation) is not sent twice.
+    final key = jsonEncode(payload);
+    final now = DateTime.now();
+    if (key == _lastConfigKey && _lastConfigAt != null && now.difference(_lastConfigAt!) < configRepeatWindow) return;
+    // 3.55 fix: say so when the change cannot be sent (it used to be dropped silently, so the
+    // setting looked "not updating"), show it at once, and re-read the ride from the server if the
+    // gateway does not confirm it (refused, or lost on the way) so the screen never shows a value
+    // the group does not have.
+    if (c == null || !canChangeGroupSettings) return;
+    if (!_rt.send(payload)) {
+      _lastError = _configOfflineError;
+      notifyListeners();
+      return;
+    }
+    _lastConfigKey = key;
+    _lastConfigAt = now;
+    // 3.55 fix: a sent change clears the "not changed" note of an earlier failed try.
+    if (_lastError == _configOfflineError) _lastError = null;
+    _allConvoys[c.groupId] = c.copyWith(
+      distanceThresholdMeters: distanceThresholdMeters,
+      stopThresholdSeconds: stopThresholdSeconds,
+      voiceGuidanceEnabled: voiceGuidanceEnabled,
+      speedLimitKmh: speedLimitKmh,
+      townLimitKmh: payload.containsKey('townLimitKmh') ? townLimitKmh : null,
+    );
+    _awaitConfigEcho();
+    notifyListeners();
+  }
+
+  /// An identical CONFIG within this window is not sent again (rapid repeated taps).
+  static const Duration configRepeatWindow = Duration(milliseconds: 1500);
+  String? _lastConfigKey;
+  DateTime? _lastConfigAt;
+
+  static const String _configOfflineError = 'No connection. The group setting was not changed; try again when you are back online.';
+
+  /// Set while a group setting change waits for the gateway's CONFIG (cleared by it).
+  Timer? _configPending;
+
+  /// 3.55 fix: after an optimistic group setting change, re-read the ride from the server if the
+  /// gateway's CONFIG does not come back in 6 s (refused, or lost), so no rider keeps seeing a value
+  /// the group does not have. Shared by every CONFIG sender (group settings, visibility).
+  void _awaitConfigEcho() {
+    _configPending?.cancel();
+    _configPending = Timer(const Duration(seconds: 6), () {
+      _configPending = null;
+      if (!_disposed) refreshGroupMembers().ignore();
+    });
   }
 
   /// Lead (3.16): makes [userId] the sweeper, or back to pack. One sweeper per group (the
@@ -2751,6 +2955,123 @@ class ConvoyService extends ChangeNotifier {
         }
         _showSwapNotice(n, speakKey: n.mine ? 'SWAP_DONE:${e['requestId'] ?? e['ts'] ?? _clock()}' : null);
     }
+  }
+
+  // ------------------------------------------------------------ 3.55 pillion seat
+  PillionOffer? _pillionOffer;
+  Timer? _pillionOfferClear;
+  bool _pillionPick = false;
+
+  /// The gateway lets the pillion confirm the bike (HELLO 'pillion2') and the admin switch is on.
+  /// Otherwise the older CORIDER link ([setCoRiderDriver]) is used.
+  bool get supportsPillionSeat {
+    final c = activeConvoy;
+    return c != null && !c.isSoloRide && _rt.supports('pillion2') && _featureOn('pillionSeat');
+  }
+
+  /// A pillion just sat on my bike: I may decline until [PillionOffer.declineByMs].
+  PillionOffer? get pillionOffer => _pillionOffer;
+
+  /// I am a pillion without a bike in this ride (declined, my rider left): offer the seat picker.
+  bool get pillionNeedsSeat {
+    final c = activeConvoy;
+    final me = c?.riders[_myUserId];
+    if (c == null || me == null || c.isSoloRide) return false;
+    return _pillionPick || PillionSeat.needsSeat(me, c.riders);
+  }
+
+  /// Confirms that I ride pillion on [riderUserId]'s bike (after the rider saw "Confirm?").
+  /// Through the outbox; the gateway checks the seat again. False when not possible here.
+  bool seatPillion(String riderUserId) {
+    final c = activeConvoy;
+    final me = c?.riders[_myUserId];
+    if (c == null || me == null || c.isSoloRide) return false;
+    if (!PillionSeat.candidates(c.riders, me.userId).any((r) => r.userId == riderUserId)) return false;
+    if (!supportsPillionSeat) {
+      setCoRiderDriver(me.userId, riderUserId); // older gateway / switch off: the old link
+      return true;
+    }
+    if (_enqueue('PILLION_SEAT', PillionSeat.seatMessage(riderUserId)) == null) return false;
+    _pillionPick = false;
+    _setMyRiderLocally(me.copyWith(isCoRiding: true, ridingWithUserId: riderUserId, pillionSeatAt: _clock()));
+    return true;
+  }
+
+  /// I get off ([pillionUserId] null), or I decline / remove the pillion on my bike.
+  bool unseatPillion([String? pillionUserId]) {
+    final c = activeConvoy;
+    final me = c?.riders[_myUserId];
+    if (c == null || me == null) return false;
+    if (pillionUserId == _pillionOffer?.pillionUserId) {
+      _pillionOfferClear?.cancel();
+      _pillionOffer = null;
+    }
+    if (!_rt.supports('pillion2')) {
+      if (pillionUserId != null) return false; // the old protocol cannot remove someone else
+      setCoRiderDriver(me.userId, '');
+      return true;
+    }
+    // Getting off is never switched off (the gateway allows it with the switch off, too).
+    if (_enqueue('PILLION_UNSEAT', PillionSeat.unseatMessage(pillionUserId)) == null) return false;
+    notifyListeners();
+    return true;
+  }
+
+  /// "OK": the rider keeps the pillion (the card goes; "Remove pillion" stays on the rider card).
+  void dismissPillionOffer() {
+    _pillionOfferClear?.cancel();
+    _pillionOffer = null;
+    notifyListeners();
+  }
+
+  /// Joined as a pillion: ask once which bike I sit on (the cockpit card "Pick the bike").
+  void requestPillionPick() {
+    _pillionPick = true;
+    notifyListeners();
+  }
+
+  void dismissPillionPick() {
+    _pillionPick = false;
+    notifyListeners();
+  }
+
+  void _onPillionEvent(String type, Map<String, dynamic> e, String gid) {
+    final me = _myUserId;
+    if (type == 'PILLION_SEATED') {
+      final n = PillionNotice.seated(e, myUserId: me);
+      final p = e['pillion'], r = e['rider'];
+      if (r is Map && p is Map && r['userId']?.toString() == me) {
+        final by = e['declineBy'] is num ? (e['declineBy'] as num).toInt() : _clock() + PillionSeat.declineWindow.inMilliseconds;
+        _pillionOffer = PillionOffer(pillionUserId: p['userId']?.toString() ?? '', pillionName: p['name']?.toString() ?? '', declineByMs: by);
+        _pillionOfferClear?.cancel();
+        final left = by - _clock();
+        _pillionOfferClear = Timer(Duration(milliseconds: left > 0 ? left : 1), () {
+          _pillionOffer = null;
+          notifyListeners();
+        });
+      }
+      if (p is Map && p['userId']?.toString() == me) _pillionPick = false;
+      if (n != null) _showSwapNotice(SwapNotice(title: n.title, message: n.message, speech: n.speech, mine: n.mine), speakKey: 'PILLION:${e['at'] ?? _clock()}');
+      return;
+    }
+    final n = PillionNotice.unseated(e, myUserId: me);
+    final p = e['pillion'];
+    if (p is Map && p['userId']?.toString() == _pillionOffer?.pillionUserId) {
+      _pillionOfferClear?.cancel();
+      _pillionOffer = null;
+    }
+    if (n == null) {
+      notifyListeners();
+      return;
+    }
+    if (n.pickAgain) _pillionPick = true;
+    _showSwapNotice(SwapNotice(title: n.title, message: n.message, speech: n.speech, mine: n.mine),
+        speakKey: n.speech == null ? null : 'UNSEAT:${e['ts'] ?? _clock()}');
+  }
+
+  void _onPillionRefused(String? reason, String? message) {
+    final n = PillionNotice.refused(reason, message);
+    if (n != null) _showSwapNotice(SwapNotice(title: n.title, message: n.message));
   }
 
   void _onSwapRefused(String? reason, String? message) {
@@ -3673,7 +3994,7 @@ class ConvoyService extends ChangeNotifier {
   /// nothing supported was given, or there is no connection.
   bool setGroupVisibility({GroupVisibility? visibility, bool? discovery, bool? assistDefault}) {
     final gid = _activeGroupId;
-    if (gid == null || !canEditRoute) return false;
+    if (gid == null || !canChangeGroupSettings) return false;
     final msg = <String, dynamic>{'type': 'CONFIG'};
     if (_discoveryOn) {
       if (visibility != null) msg['visibility'] = visibility.wire;
@@ -3689,6 +4010,9 @@ class ConvoyService extends ChangeNotifier {
         discovery: msg.containsKey('discovery') ? discovery : null,
         assistDefault: msg.containsKey('assistDefault') ? assistDefault : null,
       );
+      // 3.55 fix: shown at once, then confirmed by the CONFIG echo or re-read from the server (a
+      // refused change used to stay on the lead's screen while the group kept the old value).
+      _awaitConfigEcho();
       notifyListeners();
     }
     return true;
@@ -3834,6 +4158,7 @@ class ConvoyService extends ChangeNotifier {
   @override
   void dispose() {
     _lifecycle?.dispose();
+    _configPending?.cancel(); // 3.55 fix
     _eventSub?.cancel();
     _meshSub?.cancel();
     mesh?.stop().ignore();
@@ -3853,6 +4178,7 @@ class ConvoyService extends ChangeNotifier {
     _deadReckoningAccelSub?.cancel();
     _disposed = true;
     _outboxTimer?.cancel();
+    _vehicleTimer?.cancel();
     _rosterTimer?.cancel();
     settings?.removeListener(_onSettingsChanged);
     _myFixes.close();

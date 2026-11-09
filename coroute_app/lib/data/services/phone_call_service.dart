@@ -16,6 +16,17 @@ enum PhoneCallStatus {
 /// 2. Background music from Spotify / other players is preserved.
 /// 3. Voice notifications and critical emergencies are handled safely without interruption,
 ///    with high-priority tactile haptics during calls and post-call voice replay.
+///
+/// 3.55 (docs/features_355/audio_and_calls.md):
+///  * Who listens: IntercomService (main.dart: `phoneCall.addListener(() =>
+///    intercom.setPhoneCallActive(phoneCall.isCallActive))`, pauses mic and group voice) and
+///    AudioPriorityManager (holds ordinary lines, call-aware critical alerts). Other code can use
+///    [onCall] (a stream of status changes) or listen to this ChangeNotifier.
+///  * The native side now detects calls without READ_PHONE_STATE (audio mode, also VoIP calls).
+///    If CoRoute's own intercom ever puts the phone in MODE_IN_COMMUNICATION (a voice-call link to a
+///    helmet set), it must call [setOwnCommunicationMode] (true / false) so that is not taken for
+///    a phone call.
+///  * CoRoute never answers, declines or ends a call.
 class PhoneCallService extends ChangeNotifier {
   static const MethodChannel _methodChannel = MethodChannel('coroute/phone_call');
   static const EventChannel _eventChannel = EventChannel('coroute/phone_call_events');
@@ -25,6 +36,18 @@ class PhoneCallService extends ChangeNotifier {
   StreamSubscription? _eventSub;
 
   final List<String> _pendingPostCallAlerts = [];
+  final StreamController<PhoneCallStatus> _onCall = StreamController<PhoneCallStatus>.broadcast();
+
+  /// Every status change (idle, ringing, offhook), after listeners were notified.
+  Stream<PhoneCallStatus> get onCall => _onCall.stream;
+
+  /// Tells the native call detector that MODE_IN_COMMUNICATION is CoRoute's own (intercom), not a call.
+  Future<void> setOwnCommunicationMode(bool active) async {
+    if (kIsWeb) return;
+    try {
+      await _methodChannel.invokeMethod<void>('setOwnCommunication', {'active': active});
+    } catch (_) {}
+  }
 
   PhoneCallService({bool autoStart = true}) {
     if (autoStart) {
@@ -86,6 +109,7 @@ class PhoneCallService extends ChangeNotifier {
       _status = newStatus;
       _isCallActive = newStatus != PhoneCallStatus.idle;
       notifyListeners();
+      if (!_onCall.isClosed) _onCall.add(newStatus);
 
       if (wasActive && !_isCallActive) {
         // Call just ended
@@ -122,6 +146,7 @@ class PhoneCallService extends ChangeNotifier {
     _status = status;
     _isCallActive = status != PhoneCallStatus.idle;
     notifyListeners();
+    if (!_onCall.isClosed) _onCall.add(status);
     if (wasActive && !_isCallActive) {
       _onCallEnded();
     }
@@ -130,6 +155,7 @@ class PhoneCallService extends ChangeNotifier {
   @override
   void dispose() {
     _eventSub?.cancel();
+    _onCall.close();
     super.dispose();
   }
 }

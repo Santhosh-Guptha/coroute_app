@@ -67,8 +67,9 @@ class SwapAsk {
       };
 
   String get speech => switch (kind) {
-        SwapKind.bikes => '$_who wants to swap bikes with you. Accept or decline on the screen.',
-        SwapKind.pillion => '$_who wants to change places with you. Accept or decline on the screen.',
+        // Said once, moving or not: the Accept / Decline buttons show only when stopped.
+        SwapKind.bikes => '$_who wants to swap bikes with you. Stop when safe to accept or decline.',
+        SwapKind.pillion => '$_who wants to change places with you. Stop when safe to accept or decline.',
       };
 }
 

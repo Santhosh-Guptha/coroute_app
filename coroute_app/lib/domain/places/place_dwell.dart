@@ -74,6 +74,10 @@ class PlaceDwellTracker {
   /// The place I am staying at now (null when none).
   PlacePoi? get currentPlace => _place;
 
+  /// The dwell that qualified and was not asked about yet, whether or not it may be shown now
+  /// (for the after-ride question, RideEndReviews).
+  PlaceReviewPrompt? get pending => _ready;
+
   /// Minutes at [currentPlace] so far.
   int dwellMinutes(int nowMs) => _place == null ? 0 : ((_lastInside - _since) / 60000).floor();
 

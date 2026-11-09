@@ -17,6 +17,12 @@ enum MissingRiderAction {
 
   /// The rider moved on or the group came back: the card goes away, nothing is sent.
   clear,
+
+  /// 3.55 pillion pair: the other phone on my bike (my rider or my seated pillion) answered this
+  /// stop's check (I'm OK, a stop reason, Need help). The card closes here too and this phone
+  /// sends no "no answer". When this phone had already told the lead
+  /// ([MissingRiderCheck.closedAfterNoReply]), it sends I'm OK so the lead's entry closes.
+  answeredOnOtherPhone,
 }
 
 enum MissingRiderPhase { idle, asking, noReplySent }
@@ -77,6 +83,18 @@ class MissingRiderCheck {
   /// When I stopped (null while moving).
   int? get stoppedSinceMs => _stoppedSince;
 
+  /// After [MissingRiderAction.answeredOnOtherPhone]: this phone had already sent "no answer".
+  bool closedAfterNoReply = false;
+
+  /// Phones' clocks differ a little: a partner answer up to this much before my stop counts.
+  static const int partnerClockSlackMs = 120000;
+
+  /// True when the bike partner's answer ([partnerAnsweredAtMs], their status time) belongs to the
+  /// stop I am in now (pure, for tests).
+  bool partnerAnsweredThisStop(int? partnerAnsweredAtMs) =>
+      partnerAnsweredAtMs != null && partnerAnsweredAtMs > 0 && _stoppedSince != null &&
+      partnerAnsweredAtMs >= _stoppedSince! - partnerClockSlackMs;
+
   /// The rider answered (I'm OK / waiting for a reason / need help): the card goes, no new ask
   /// during this stop for [quietAfterAnswer].
   void answered(int nowMs) {
@@ -103,8 +121,20 @@ class MissingRiderCheck {
     required List<GroupSafetyRider> others,
     bool emergencyOpen = false,
     int? lastServerAlertMs,
+    int? partnerAnsweredAtMs,
   }) {
     _track(nowMs, me);
+    // 3.55 pillion pair: either phone answering counts for both (one bike, one answer).
+    if (partnerAnsweredThisStop(partnerAnsweredAtMs)) {
+      if (!showing) {
+        // Nothing on screen: no ask during this stop (the quiet time after an answer).
+        answered(nowMs);
+        return MissingRiderAction.none;
+      }
+      closedAfterNoReply = _phase == MissingRiderPhase.noReplySent;
+      answered(nowMs);
+      return MissingRiderAction.answeredOnOtherPhone;
+    }
     final fresh = others.where((r) => r.userId != me.userId && r.isFresh(nowMs)).toList();
     final moving = fresh.where((r) => r.speedKmh >= movingKmh).toList();
     double? nearest;

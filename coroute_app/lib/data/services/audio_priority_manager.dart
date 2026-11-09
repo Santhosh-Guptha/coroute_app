@@ -3,8 +3,42 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/ride_notification_constants.dart';
+import '../../domain/voice/call_alert_queue.dart';
+import 'feature_flags_service.dart';
 import 'phone_call_service.dart';
 import 'voice_service.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// How CoRoute's spoken lines treat other apps' sound (3.55, docs/features_355/audio_and_calls.md)
+//
+//  * Ordinary lines (P2..P5): transient audio focus that DUCKS other apps (music gets quiet) with
+//    the "navigation guidance" usage (helmet Bluetooth set over A2DP, like map directions). With the
+//    rider's "Pause music during alerts" on, music apps pause instead.
+//  * Critical lines (P0 emergency, P1 safety confirmation): ALWAYS pause other apps
+//    (AUDIOFOCUS_GAIN_TRANSIENT). P0 preempts anything being said. The route picks the usage
+//    (TtsChannel.kt decides, at the moment the line is spoken):
+//      - a headset is connected (Bluetooth / LE audio / hearing aid / wired): "navigation guidance"
+//        media speech, so it plays in the helmet / earbuds over A2DP (noise cancellation does not
+//        block playback), with the media volume raised to at least 60 % for the line. The ALARM
+//        usage is not used then: Android may play alarms on the phone speaker too;
+//      - no headset: the ALARM usage, heard on the speaker with media volume 0 and through Do Not
+//        Disturb (when alarms are allowed).
+//  * Focus is given back ~0.7 s after the native queue drains (not between lines: no pumping).
+//  * Phone call (admin switch `callAwareAlerts`, unknown = on): ordinary lines are held and summed up
+//    after the call ("While you were on the call: 2 road warnings, Asha fell behind."), stale ones
+//    (> 60 s) dropped, navigation dropped; critical lines get through as a tone + a very short phrase
+//    in the call audio, a buzz and a heads-up notification, and are replayed in full after the call.
+//    Switch off: the 3.54 behaviour (everything spoken, P0 queued for a post-call replay).
+//  * No speech engine / engine error: a tone + vibration instead (critical also posts a sounding
+//    heads-up notification through [criticalNotifier]).
+//
+// API for services outside the voice stack (horn / siren detector, ...):
+//    `priorityManager.announce(AudioPriority.p0CriticalEmergency, 'Emergency vehicle siren close by',
+//         key: 'siren_close')`
+//  speaks a line at that priority with the rules above (P0/P1 pause music, others duck it). It does
+//  NOT apply the rider's voice settings: callers that are not emergencies should go through
+//  VoiceService (speak / speakHazard / speakEmergency), which does, and which still works as before.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /// Centralized Audio Priority Levels (P0 to P5).
 /// Lower [level] index indicates higher urgency.
@@ -77,11 +111,32 @@ class AudioPriorityManager extends ChangeNotifier {
     VoiceEngine? engine,
     PhoneCallService? phoneCallService,
     int Function()? clock,
+    bool Function()? callAware,
   })  : _engine = engine ?? NativeVoiceEngine(),
         _phoneCall = phoneCallService,
-        _clock = clock ?? _wallClock {
+        _clock = clock ?? _wallClock,
+        _callAware = callAware ?? _callAwareSwitch {
     _phoneCall?.addListener(_onPhoneCallChanged);
+    _wasInCall = _phoneCall?.isCallActive ?? false;
   }
+
+  /// Admin switch `callAwareAlerts` (unknown = on; safety ids are never gated, this is not one).
+  static bool _callAwareSwitch() => FeatureFlagsService.on('callAwareAlerts');
+
+  /// Posts a heads-up notification (critical channel, sounding) for a critical line the rider may not
+  /// hear: during a phone call, or when speech failed. Set by AlarmNotifier once notifications are
+  /// initialised; null in tests.
+  static Future<void> Function(String title, String body)? criticalNotifier;
+
+  final bool Function() _callAware;
+  final CallAlertQueue _callQueue = CallAlertQueue();
+  bool _wasInCall = false;
+  int _criticalUntilMs = 0;
+  int _lastFallbackMs = -1 << 40;
+
+  /// Lines held during the current phone call (call-aware mode).
+  @visibleForTesting
+  CallAlertQueue get callQueue => _callQueue;
 
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 
@@ -102,7 +157,11 @@ class AudioPriorityManager extends ChangeNotifier {
     _phoneCall?.removeListener(_onPhoneCallChanged);
     _phoneCall = service;
     _phoneCall?.addListener(_onPhoneCallChanged);
+    _wasInCall = _phoneCall?.isCallActive ?? false;
   }
+
+  /// A phone call rings or is active right now.
+  bool get _inCall => _phoneCall?.isCallActive ?? false;
 
   /// Priority queue of waiting alerts (sorted by priority level ascending, then age).
   final List<AudioAlertItem> _queue = [];
@@ -150,16 +209,86 @@ class AudioPriorityManager extends ChangeNotifier {
       };
 
   void _onPhoneCallChanged() {
-    if (_phoneCall?.isCallActive == false) {
-      // Flushes post-call critical alerts when rider hangs up
-      final pending = _phoneCall?.flushPostCallAlerts() ?? [];
-      for (final alert in pending) {
-        submit(
-          text: 'Safety alert during your call: $alert',
-          priority: AudioPriority.p0CriticalEmergency,
-          dedupeKey: 'post_call_${alert.hashCode}',
-        );
-      }
+    final inCall = _inCall;
+    final started = inCall && !_wasInCall;
+    final ended = !inCall && _wasInCall;
+    _wasInCall = inCall;
+    if (!_callAware()) {
+      _callQueue.clear();
+      if (!inCall) _replayLegacy();
+      return;
+    }
+    if (started) _holdQueuedForCall();
+    if (ended) _speakAfterCallSummary();
+  }
+
+  /// 3.54 behaviour (switch `callAwareAlerts` off): critical alerts replayed after the call.
+  void _replayLegacy() {
+    final pending = _phoneCall?.flushPostCallAlerts() ?? [];
+    for (final alert in pending) {
+      submit(
+        text: 'Safety alert during your call: $alert',
+        priority: AudioPriority.p0CriticalEmergency,
+        dedupeKey: 'post_call_${alert.hashCode}',
+      );
+    }
+  }
+
+  /// A call started: lines waiting to be said are held instead (critical ones stay queued), and an
+  /// ordinary line being said is cut so CoRoute never talks over the call.
+  void _holdQueuedForCall() {
+    final now = _clock();
+    final moved = _queue.where((i) => !i.priority.isCritical).toList();
+    for (final i in moved) {
+      _holdItem(i, now);
+    }
+    _queue.removeWhere((i) => !i.priority.isCritical);
+    final pre = _preemptedItem;
+    if (pre != null && !pre.priority.isCritical) {
+      _holdItem(pre, now);
+      _preemptedItem = null;
+    }
+    if (now >= _criticalUntilMs && _queueEnds.any((e) => e > now) && _engineInitialized) {
+      _queueEnds.clear();
+      _engine.stop().ignore();
+    }
+    if (moved.isNotEmpty) notifyListeners();
+  }
+
+  void _holdItem(AudioAlertItem i, int now) {
+    _callQueue.hold(HeldAlert(
+      kind: i.metadata?['kind']?.toString() ?? CallAlertQueue.kindOf(i.dedupeKey),
+      text: i.text,
+      priority: i.priority.level,
+      atMs: i.createdAtMs > 0 ? i.createdAtMs : now,
+    ));
+  }
+
+  /// The call ended: one critical line and one summary line (stale ones dropped), said once the phone
+  /// has left call mode (the native side waits for it).
+  void _speakAfterCallSummary() {
+    _phoneCall?.flushPostCallAlerts(); // replaced by the summary below
+    final summary = _callQueue.summarize(_clock());
+    final seq = ++_seq;
+    final critical = summary.criticalLine;
+    if (critical != null) {
+      submit(
+        text: critical,
+        priority: AudioPriority.p0CriticalEmergency,
+        dedupeKey: 'post_call_critical_$seq',
+        dedupeWindow: const Duration(seconds: 1),
+        metadata: const {'afterCall': true},
+      );
+    }
+    final ordinary = summary.ordinaryLine;
+    if (ordinary != null) {
+      submit(
+        text: ordinary,
+        priority: AudioPriority.p4ConvoyAnnouncement,
+        dedupeKey: 'post_call_summary_$seq',
+        dedupeWindow: const Duration(seconds: 1),
+        metadata: const {'afterCall': true},
+      );
     }
   }
 
@@ -228,7 +357,7 @@ class AudioPriorityManager extends ChangeNotifier {
       dedupeWindow: window,
       createdAtMs: now,
       isRecoverable: isRecoverable,
-      pauseOthers: pauseOthers || (priority == AudioPriority.p0CriticalEmergency),
+      pauseOthers: pauseOthers || priority.isCritical,
       metadata: metadata,
     );
 
@@ -239,10 +368,40 @@ class AudioPriorityManager extends ChangeNotifier {
     _triggerHapticsFor(priority);
 
     // 3. In-call audio safety handling:
-    final inCall = _phoneCall?.isCallActive ?? false;
+    final inCall = _inCall;
     if (inCall && priority == AudioPriority.p0CriticalEmergency) {
       // When a phone call is active, queue into post-call alerts in case OS/Bluetooth SCO blocks audio
       _phoneCall?.queuePostCallAlert(cleanText);
+    }
+    if (inCall && _callAware() && metadata?['afterCall'] != true) {
+      if (!priority.isCritical) {
+        // Never talk over a call: held for the after-call summary (navigation is dropped: stale).
+        _holdItem(item, now);
+        return CallAlertQueue.worthHolding(priority.level);
+      }
+      // Critical: kept for the full replay after the call, and said now as a tone + a very short
+      // phrase in the call audio (while ringing: on the alarm stream over the ringtone), with a
+      // heads-up notification.
+      _holdItem(item, now);
+      _notifyCritical(cleanText);
+      final callItem = AudioAlertItem(
+        id: item.id,
+        text: _phoneCall?.status == PhoneCallStatus.offhook ? CallAlertQueue.shortPhrase(cleanText) : cleanText,
+        priority: priority,
+        dedupeKey: key,
+        ttl: item.ttl,
+        dedupeWindow: window,
+        createdAtMs: now,
+        isRecoverable: false,
+        pauseOthers: true,
+        metadata: {...?metadata, 'inCall': _phoneCall?.status == PhoneCallStatus.offhook},
+      );
+      if (_current != null) {
+        await _engine.stop();
+        _current = null;
+        _queueEnds.clear();
+      }
+      return _playAlert(callItem);
     }
 
     // 4. Preemption check:
@@ -322,6 +481,7 @@ class AudioPriorityManager extends ChangeNotifier {
       _dedupeHistory.remove(item.dedupeKey);
       _current = null;
       notifyListeners();
+      _fallback(item);
       _processNextInQueue();
       return false;
     }
@@ -331,17 +491,33 @@ class AudioPriorityManager extends ChangeNotifier {
         ? item.text.substring(0, NotifConstants.voiceMaxChars)
         : item.text;
 
-    final isEmergency = item.priority == AudioPriority.p0CriticalEmergency;
+    // Critical (P0 / P1): music paused; alarm usage on the speaker, media speech on a headset (native).
+    final isEmergency = item.priority.isCritical;
     final pauseOthers = item.pauseOthers || isEmergency;
+    final inCall = item.metadata?['inCall'] == true;
+    final afterCall = item.metadata?['afterCall'] == true;
     bool success = false;
     try {
-      success = await _engine.speak(
-        said,
-        interrupt: interrupt,
-        id: item.id,
-        isEmergency: isEmergency,
-        pauseOthers: pauseOthers,
-      );
+      final e = _engine;
+      if (e is VoiceEngineExtras && (inCall || afterCall)) {
+        success = await (e as VoiceEngineExtras).speakExtended(
+          said,
+          interrupt: interrupt,
+          id: item.id,
+          isEmergency: isEmergency,
+          pauseOthers: pauseOthers,
+          inCall: inCall,
+          afterCall: afterCall,
+        );
+      } else {
+        success = await e.speak(
+          said,
+          interrupt: interrupt,
+          id: item.id,
+          isEmergency: isEmergency,
+          pauseOthers: pauseOthers,
+        );
+      }
     } catch (_) {
       success = false;
     }
@@ -350,6 +526,7 @@ class AudioPriorityManager extends ChangeNotifier {
       _dedupeHistory.remove(item.dedupeKey);
       _current = null;
       notifyListeners();
+      _fallback(item);
       _processNextInQueue();
       return false;
     }
@@ -357,7 +534,9 @@ class AudioPriorityManager extends ChangeNotifier {
     final at = _clock();
     if (interrupt) _queueEnds.clear();
     final start = _queueEnds.isEmpty ? at : _queueEnds.reduce((a, b) => a > b ? a : b);
-    _queueEnds.add(start + VoiceService.estimateMs(said));
+    final end = start + VoiceService.estimateMs(said);
+    _queueEnds.add(end);
+    if (isEmergency && end > _criticalUntilMs) _criticalUntilMs = end;
 
     _current = null;
     notifyListeners();
@@ -376,6 +555,53 @@ class AudioPriorityManager extends ChangeNotifier {
     return true;
   }
 
+  /// Speech impossible for [item] (no engine, engine error): tone + vibration for hazards and above,
+  /// and a sounding heads-up notification for critical lines. At most once per 3 s.
+  void _fallback(AudioAlertItem item) => alertWithoutVoice(item.priority, item.text);
+
+  /// For callers whose speech is off for the ride (no engine): the same tone / vibration /
+  /// notification fallback as a failed line. Lines below P2 stay visual only.
+  void alertWithoutVoice(AudioPriority priority, String text) {
+    if (priority > AudioPriority.p2ImmediateHazard) return;
+    final now = _clock();
+    if (now - _lastFallbackMs < 3000 && !priority.isCritical) return;
+    _lastFallbackMs = now;
+    final e = _engine;
+    if (e is VoiceEngineExtras) {
+      (e as VoiceEngineExtras).fallbackAlert(critical: priority.isCritical, inCall: _inCall).ignore();
+    }
+    if (priority.isCritical) _notifyCritical(text);
+  }
+
+  void _notifyCritical(String text) {
+    final n = criticalNotifier;
+    if (n == null) return;
+    n('CoRoute safety alert', text).catchError((Object _) {});
+  }
+
+  /// Speaks [text] at [priority] with the audio rules in the header of this file (for services outside
+  /// the voice stack, e.g. the horn / siren detector). P0 / P1 always pause other apps (alarm stream on
+  /// the speaker, media speech on a headset); lower priorities duck other apps (or pause them with [pauseOthers]). The rider's voice
+  /// settings are NOT applied here (use VoiceService for that). False when not spoken (duplicate key
+  /// within the dedupe window, queue full, no engine) or held for a phone call (true for held lines
+  /// that will be summed up after the call).
+  Future<bool> announce(
+    AudioPriority priority,
+    String text, {
+    String? key,
+    bool pauseOthers = false,
+    Duration? ttl,
+    Duration? dedupeWindow,
+  }) =>
+      submit(
+        text: text,
+        priority: priority,
+        dedupeKey: key,
+        ttl: ttl,
+        dedupeWindow: dedupeWindow,
+        pauseOthers: pauseOthers,
+      );
+
   void _processNextInQueue() {
     if (_isProcessing || _current != null) return;
     _isProcessing = true;
@@ -388,6 +614,23 @@ class AudioPriorityManager extends ChangeNotifier {
     } else {
       _isProcessing = false;
     }
+  }
+
+  /// 3.55 fix: drops queued (not yet spoken) alerts that [test] matches, e.g. after the rider
+  /// switched spoken warnings off mid-ride: lines already waiting used to be read out anyway.
+  /// The line being spoken now finishes. Emergencies (P0) are never dropped.
+  int dropQueuedWhere(bool Function(AudioAlertItem item) test) {
+    bool drop(AudioAlertItem i) => i.priority != AudioPriority.p0CriticalEmergency && test(i);
+    final before = _queue.length;
+    _queue.removeWhere(drop);
+    var dropped = before - _queue.length;
+    final pre = _preemptedItem;
+    if (pre != null && drop(pre)) {
+      _preemptedItem = null;
+      dropped++;
+    }
+    if (dropped > 0) notifyListeners();
+    return dropped;
   }
 
   /// Stops current speech and clears priority queue.
@@ -406,6 +649,7 @@ class AudioPriorityManager extends ChangeNotifier {
   Future<void> release() async {
     await stop();
     _dedupeHistory.clear();
+    _callQueue.clear();
     final wasInitialized = _engineInitialized;
     _engineInitialized = false;
     if (_onEnsureEngine == null && wasInitialized) {

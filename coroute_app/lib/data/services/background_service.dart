@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show WidgetsBinding, AppLifecycleState;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../core/constants/ride_notification_constants.dart';
@@ -41,6 +42,16 @@ class BackgroundService {
   /// The big ride notification currently replaces the plain one. While true,
   /// [updateStatus] and a repeated [start] do not touch the notification.
   static bool get richActive => _richActive;
+
+  /// 3.55: a microphone consumer may need capture during this ride (siren / horn alerts on, or
+  /// the intercom allowed). Set in main.dart; null = no. With it true and RECORD_AUDIO already
+  /// granted, [start] starts the service as location|microphone at once (Android 14 needs the
+  /// type at start; adding it later means a stop and restart, see [ensureMicrophoneType]).
+  static bool Function()? micMayBeNeeded;
+
+  /// 3.55: the running service has the microphone type (capture keeps working with the screen
+  /// off on Android). False when no service runs or it runs as location only.
+  static bool get runningWithMic => _runningWithMic;
 
   /// Called after every successful [start] of the service (first start and the
   /// microphone restart), so the big ride notification can be posted again at once.
@@ -109,6 +120,25 @@ class BackgroundService {
     }
   }
 
+  static bool _safeCall(bool Function()? f) {
+    try {
+      return f?.call() ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The app is visible (resumed / inactive). Before the first frame the state is null: main()
+  /// runs with the app in front, so that counts as in front.
+  static bool _appInFront() {
+    try {
+      final s = WidgetsBinding.instance.lifecycleState;
+      return s == null || s == AppLifecycleState.resumed || s == AppLifecycleState.inactive;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Must be called once in main() before runApp (sets up the isolate port).
   static void initCommunicationPort() {
     if (!_isAndroidOrIos) return;
@@ -159,9 +189,18 @@ class BackgroundService {
         final r = await FlutterForegroundTask.updateService(notificationTitle: 'Convoy: $convoyName', notificationText: text);
         return r is ServiceRequestSuccess;
       }
+      // 3.55: microphone type from the first start when a mic consumer may be needed and the
+      // permission is ALREADY granted (only checked, never requested here), and only with the app
+      // in front: Android 14 refuses a microphone-type start from the background (the ride service
+      // would then not start at all). A background start stays location only; RideMicHub adds the
+      // type on the next resume (ensureMicrophoneType).
+      final withMic = Platform.isAndroid &&
+          (micActive || _safeCall(micMayBeNeeded)) &&
+          _appInFront() &&
+          await _micGranted();
       final r = await FlutterForegroundTask.startService(
         serviceId: _serviceId,
-        serviceTypes: Platform.isAndroid ? serviceTypesFor(micActive: micActive) : null,
+        serviceTypes: Platform.isAndroid ? serviceTypesFor(micActive: withMic) : null,
         notificationTitle: 'Convoy: $convoyName',
         notificationText: text,
         notificationButtons: const [
@@ -172,7 +211,7 @@ class BackgroundService {
       );
       if (r is ServiceRequestFailure) debugPrint('Foreground service start failed: ${r.error}');
       if (r is ServiceRequestSuccess) {
-        _runningWithMic = micActive;
+        _runningWithMic = withMic;
         // The plugin posted its plain notification: the big one goes back up at once.
         _notifyStarted();
       }
@@ -188,6 +227,7 @@ class BackgroundService {
   /// the running service already has it, or when no service runs.
   static Future<void> ensureMicrophoneType() async {
     if (kIsWeb || !Platform.isAndroid || _runningWithMic) return;
+    if (!_appInFront()) return; // 3.55: never restart into a mic type from the background
     try {
       if (!await FlutterForegroundTask.isRunningService) return;
       if (!await _micGranted()) return;

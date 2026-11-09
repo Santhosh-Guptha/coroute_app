@@ -41,21 +41,25 @@ class CadencePlan {
 class LocationCadence {
   LocationCadence._();
 
-  /// Moving, normal battery: stopped 3 s / 10 m, town 1 s / 5 m,
-  /// open road 1 s / 3 m, highway 500 ms / 2 m (navigation-grade fixes).
+  /// Moving, normal battery: stopped / walking pace 2 s, town and open road 1 s, highway 500 ms
+  /// (navigation-grade fixes). No distance filter during a ride: the speed readout and the
+  /// overspeed check need a fix every interval, and with a distance filter the last fix before a
+  /// stop (often 5-8 km/h) stayed on screen while parked. (The filter saves no GNSS power: the
+  /// chip runs anyway; it only dropped updates.)
   static const Map<SpeedBand, CadencePlan> normal = {
-    SpeedBand.stopped: CadencePlan(3000, 10, GpsPrecision.high),
-    SpeedBand.city: CadencePlan(1000, 5, GpsPrecision.navigation),
-    SpeedBand.road: CadencePlan(1000, 3, GpsPrecision.navigation),
-    SpeedBand.highway: CadencePlan(500, 2, GpsPrecision.navigation),
+    SpeedBand.stopped: CadencePlan(2000, 0, GpsPrecision.high),
+    SpeedBand.city: CadencePlan(1000, 0, GpsPrecision.navigation),
+    SpeedBand.road: CadencePlan(1000, 0, GpsPrecision.navigation),
+    SpeedBand.highway: CadencePlan(500, 0, GpsPrecision.navigation),
   };
 
-  /// Moving, low battery: one step gentler everywhere, never navigation grade.
+  /// Moving, low battery: one step gentler everywhere, never navigation grade, and never slower
+  /// than one fix every 2 s once moving (speed readout and overspeed check stay usable).
   static const Map<SpeedBand, CadencePlan> lowBattery = {
-    SpeedBand.stopped: CadencePlan(5000, 15, GpsPrecision.medium),
-    SpeedBand.city: CadencePlan(2000, 10, GpsPrecision.high),
-    SpeedBand.road: CadencePlan(2000, 8, GpsPrecision.high),
-    SpeedBand.highway: CadencePlan(1000, 5, GpsPrecision.high),
+    SpeedBand.stopped: CadencePlan(4000, 0, GpsPrecision.medium),
+    SpeedBand.city: CadencePlan(2000, 0, GpsPrecision.high),
+    SpeedBand.road: CadencePlan(2000, 0, GpsPrecision.high),
+    SpeedBand.highway: CadencePlan(1000, 0, GpsPrecision.high),
   };
 
   /// Parked for a while (the stream is nearly silent; a heartbeat keeps "last seen" fresh).

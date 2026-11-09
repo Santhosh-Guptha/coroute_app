@@ -43,6 +43,18 @@ class RiderModel {
   final String name;
   final String vehicleType;
   final String vehicleColor;
+
+  /// 3.55: the garage bike's model as the group sees it ('' when unknown or an older gateway).
+  final String vehicleModel;
+
+  /// 3.55 bike type id ('commuter', 'scooter', ... see BikeType; '' from older apps / gateways):
+  /// the bike shape on the ride map. [bikeComplete]: the rider's bike details are complete.
+  final String vehicleKind;
+  final bool bikeComplete;
+
+  /// 3.55 pillion seat: when this pillion confirmed the bike (epoch ms, 0 = none); the rider may
+  /// decline within a minute of it.
+  final int pillionSeatAt;
   final double lat;
   final double lng;
   final double speedKmh;
@@ -151,6 +163,10 @@ class RiderModel {
     required this.name,
     this.vehicleType = 'Motorcycle',
     this.vehicleColor = 'Black',
+    this.vehicleModel = '',
+    this.vehicleKind = '',
+    this.bikeComplete = false,
+    this.pillionSeatAt = 0,
     required this.lat,
     required this.lng,
     this.speedKmh = 0.0,
@@ -184,6 +200,10 @@ class RiderModel {
     String? name,
     String? vehicleType,
     String? vehicleColor,
+    String? vehicleModel,
+    String? vehicleKind,
+    bool? bikeComplete,
+    int? pillionSeatAt,
     double? lat,
     double? lng,
     double? speedKmh,
@@ -218,6 +238,10 @@ class RiderModel {
       name: name ?? this.name,
       vehicleType: vehicleType ?? this.vehicleType,
       vehicleColor: vehicleColor ?? this.vehicleColor,
+      vehicleModel: vehicleModel ?? this.vehicleModel,
+      vehicleKind: vehicleKind ?? this.vehicleKind,
+      bikeComplete: bikeComplete ?? this.bikeComplete,
+      pillionSeatAt: pillionSeatAt ?? this.pillionSeatAt,
       lat: lat ?? this.lat,
       lng: lng ?? this.lng,
       speedKmh: speedKmh ?? this.speedKmh,
@@ -254,6 +278,10 @@ class RiderModel {
       'name': name,
       'vehicleType': vehicleType,
       'vehicleColor': vehicleColor,
+      'vehicleModel': vehicleModel,
+      'vehicleKind': vehicleKind,
+      'bikeComplete': bikeComplete,
+      'pillionSeatAt': pillionSeatAt,
       'lat': lat,
       'lng': lng,
       if (accuracy != null) 'accuracy': accuracy,
@@ -292,6 +320,10 @@ class RiderModel {
       name: json['name'] ?? '',
       vehicleType: json['vehicleType'] ?? 'Motorcycle',
       vehicleColor: json['vehicleColor'] ?? 'Black',
+      vehicleModel: json['vehicleModel'] is String ? json['vehicleModel'] as String : '',
+      vehicleKind: json['vehicleKind'] is String ? json['vehicleKind'] as String : '',
+      bikeComplete: json['bikeComplete'] == true,
+      pillionSeatAt: json['pillionSeatAt'] is num ? (json['pillionSeatAt'] as num).toInt() : 0,
       lat: (json['lat'] as num?)?.toDouble() ?? 0.0,
       lng: (json['lng'] as num?)?.toDouble() ?? 0.0,
       accuracy: (json['accuracy'] ?? json['accuracyM'] as num?)?.toDouble(),

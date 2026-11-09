@@ -52,6 +52,11 @@ class AlertService with WidgetsBindingObserver {
   final Set<String> _oneShotsSeen = {};
   int _lastEventCount = 0;
   final Set<String> _spoken = {};
+
+  /// 3.55: keys whose line the voice is saying in this pass: their notification is posted silently
+  /// (no double sound with the speech). When the voice cannot speak (muted, no engine, phone call),
+  /// the notification sounds as before.
+  final Set<String> _voicedNow = {};
   int _networkRevision = -1;
   bool? _groupVoice;
   Future<void>? _restoreFuture;
@@ -113,13 +118,18 @@ class AlertService with WidgetsBindingObserver {
   }
 
   static const _channels = {
-    AlertChannel.sos: ('coroute_sos', 'SOS alerts', 'A rider in your convoy needs help.', Importance.max),
+    // 3.55: v2 plays on the ALARM usage (heard through Do Not Disturb when alarms are allowed, or with
+    // DND access) instead of the notification sound; Android cannot change an existing channel's sound.
+    AlertChannel.sos: (sosChannelId, 'SOS alerts', 'A rider in your convoy needs help.', Importance.max),
     AlertChannel.alerts: ('coroute_alerts', 'Group alerts', 'A rider stopped for long, fell behind or lost signal.', Importance.high),
     AlertChannel.updates: ('coroute_updates', 'Trip updates', 'Stops reached, destination reached, route suggestions.', Importance.defaultImportance),
     AlertChannel.activity: ('coroute_activity', 'Convoy activity', 'Riders joining and leaving, route changes.', Importance.low),
     AlertChannel.hazard: (NetworkConstants.channelHazard, 'Accident warnings', 'An accident was reported ahead on your route.', Importance.high),
     AlertChannel.social: (NetworkConstants.channelSocial, 'Riding groups nearby', 'Other public riding groups on your way.', Importance.low),
   };
+
+  static const String sosChannelId = 'coroute_sos_v2';
+  static const String _oldSosChannelId = 'coroute_sos';
 
   bool get _supported =>
       !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
@@ -132,8 +142,19 @@ class AlertService with WidgetsBindingObserver {
       if (!await AlarmNotifier.ensureInitialized(_plugin)) return;
       final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
       for (final (id, name, desc, importance) in _channels.values) {
-        await android?.createNotificationChannel(AndroidNotificationChannel(id, name, description: desc, importance: importance));
+        final sos = id == sosChannelId;
+        await android?.createNotificationChannel(AndroidNotificationChannel(
+          id,
+          name,
+          description: desc,
+          importance: importance,
+          bypassDnd: sos,
+          audioAttributesUsage: sos ? AudioAttributesUsage.alarm : AudioAttributesUsage.notification,
+        ));
       }
+      try {
+        await android?.deleteNotificationChannel(_oldSosChannelId);
+      } catch (_) {}
       _ready = true;
     } catch (e) {
       debugPrint('alerts init note: $e');
@@ -143,8 +164,10 @@ class AlertService with WidgetsBindingObserver {
   void _onConvoy() {
     final gid = _convoys.activeGroupId;
     final convoy = _convoys.activeConvoy;
-    final groupVoice = convoy?.voiceGuidanceEnabled;
-    if (groupVoice != null && groupVoice != _groupVoice) {
+    // 3.55 fix: no ride = no group switch (on). A lead's "spoken alerts off" used to stay in force
+    // after leaving that ride, silencing warnings in the next solo ride until a group said "on".
+    final groupVoice = convoy?.voiceGuidanceEnabled ?? true;
+    if (groupVoice != _groupVoice) {
       _groupVoice = groupVoice;
       _voice?.setGroupVoice(groupVoice);
     }
@@ -222,6 +245,7 @@ class AlertService with WidgetsBindingObserver {
     if (_groupId != gid) return;
     final me = _viewer();
     if (me == null) return;
+    _voicedNow.clear();
     final now = DateTime.now().millisecondsSinceEpoch;
     final timelineReady = _timeline.groupId == _groupId;
     final events = timelineReady ? _timeline.events : const <TimelineEventModel>[];
@@ -310,7 +334,9 @@ class AlertService with WidgetsBindingObserver {
       final line = (own == null || own.trim().isEmpty) ? (a.body.isNotEmpty ? '${a.title}. ${a.body}' : a.title) : own;
       if (line.trim().isEmpty || !_spoken.add(a.key)) continue;
       changed = true;
-      voice.speak(line, priority: speechPriority(a), key: a.key).ignore();
+      final p = speechPriority(a);
+      if (voice.willSpeak(p)) _voicedNow.add(a.key);
+      voice.speak(line, priority: p, key: a.key).ignore();
     }
     if (changed) _persistSpoken();
   }
@@ -333,6 +359,8 @@ class AlertService with WidgetsBindingObserver {
     final (channelId, channelName, desc, importance) = _channels[a.channel]!;
     final sos = a.channel == AlertChannel.sos;
     final social = a.channel == AlertChannel.social;
+    // The voice says it right now: no notification sound on top (SOS keeps its insistent alarm).
+    final voiced = !sos && _voicedNow.remove(a.key);
     final details = AndroidNotificationDetails(
       channelId,
       channelName,
@@ -341,6 +369,8 @@ class AlertService with WidgetsBindingObserver {
       priority: sos ? Priority.max : ((a.channel == AlertChannel.alerts || a.channel == AlertChannel.hazard) ? Priority.high : (social ? Priority.low : Priority.defaultPriority)),
       playSound: !social,
       enableVibration: !social,
+      silent: voiced,
+      audioAttributesUsage: sos ? AudioAttributesUsage.alarm : AudioAttributesUsage.notification,
       category: sos ? AndroidNotificationCategory.alarm : AndroidNotificationCategory.status,
       visibility: NotificationVisibility.public, // names only; no coordinates are ever in the text
       groupKey: 'trip_${_groupId ?? ''}',
@@ -354,7 +384,7 @@ class AlertService with WidgetsBindingObserver {
     );
     final iosDetails = DarwinNotificationDetails(
       presentAlert: true,
-      presentSound: !social,
+      presentSound: !social && !voiced,
       presentBadge: true,
       // Time sensitive breaks through Focus on iOS 15+ (needs the Time Sensitive capability);
       // critical alerts need an Apple entitlement CoRoute does not have.

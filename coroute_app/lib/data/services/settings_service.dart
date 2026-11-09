@@ -436,4 +436,99 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
     await _save(keyAutoReroute, value);
   }
+
+  // 3.55 audio (docs/features_355/audio_and_calls.md). Read lazily from the prefs that load() opened,
+  // so load() itself is unchanged.
+  static const String keyLowerMusicWhenSpeeding = 'lower_music_when_speeding_v1';
+  bool? _lowerMusicWhenSpeeding;
+
+  /// "Lower music when speeding": other apps' music is lowered step by step (then paused) while I ride
+  /// well over the speed limit, and restored after. On by default (admin switch `speedAudio` too).
+  bool get lowerMusicWhenSpeeding => _lowerMusicWhenSpeeding ?? _prefs?.getBool(keyLowerMusicWhenSpeeding) ?? true;
+
+  Future<void> setLowerMusicWhenSpeeding(bool value) async {
+    if (value == lowerMusicWhenSpeeding && _lowerMusicWhenSpeeding != null) return;
+    _lowerMusicWhenSpeeding = value;
+    notifyListeners();
+    await _save(keyLowerMusicWhenSpeeding, value);
+  }
+
+  // ---- 3.55 sound awareness & intercom voice (docs/features_355/sound_awareness_and_intercom.md).
+  // Loaded by [loadSoundSettings] (main.dart calls it after [load]); defaults until then.
+  static const String keySirenAlerts = 'siren_alerts_v1';
+  static const String keyHornAlerts = 'horn_alerts_mode_v1'; // 0 automatic, 1 on, 2 off
+  static const String keyVoiceCleanup = 'voice_cleanup_v1';
+  static const String keyGiveWaySide = 'give_way_side_v1'; // 'auto', 'left', 'right'
+  bool _sirenAlerts = true;
+  int _hornAlertsMode = 0;
+  bool _voiceCleanup = true;
+  String _giveWaySide = 'auto';
+
+  /// Emergency-vehicle siren alerts from the phone's own microphone during rides (default on).
+  /// Full spoken alert when the rider may not hear outside sound (earphones, music), else softer.
+  bool get sirenAlerts => _sirenAlerts;
+
+  /// Horn alerts: true (On) / false (Off), or null = Automatic (only while earphones, a helmet set,
+  /// music or a call may stop the rider hearing traffic).
+  bool? get hornAlerts => switch (_hornAlertsMode) { 1 => true, 2 => false, _ => null };
+
+  /// "Clean up my voice" for the intercom (default on).
+  bool get voiceCleanup => _voiceCleanup;
+
+  /// Side to keep to when giving way: 'auto' (from the phone's country; India = left), 'left', 'right'.
+  String get giveWaySide => _giveWaySide;
+
+  Future<void> loadSoundSettings() async {
+    try {
+      final prefs = await _p();
+      _sirenAlerts = prefs.getBool(keySirenAlerts) ?? true;
+      _hornAlertsMode = (prefs.getInt(keyHornAlerts) ?? 0).clamp(0, 2);
+      _voiceCleanup = prefs.getBool(keyVoiceCleanup) ?? true;
+      final side = prefs.getString(keyGiveWaySide) ?? 'auto';
+      _giveWaySide = const {'auto', 'left', 'right'}.contains(side) ? side : 'auto';
+    } catch (e) {
+      debugPrint('settings sound load note: $e');
+    }
+    notifyListeners();
+  }
+
+  Future<void> setSirenAlerts(bool value) async {
+    if (value == _sirenAlerts) return;
+    _sirenAlerts = value;
+    notifyListeners();
+    await _save(keySirenAlerts, value);
+  }
+
+  Future<void> setHornAlerts(bool? value) async {
+    final mode = value == null ? 0 : (value ? 1 : 2);
+    if (mode == _hornAlertsMode) return;
+    _hornAlertsMode = mode;
+    notifyListeners();
+    try {
+      final prefs = await _p();
+      await prefs.setInt(keyHornAlerts, mode);
+    } catch (e) {
+      debugPrint('settings save note: $e');
+    }
+  }
+
+  Future<void> setVoiceCleanup(bool value) async {
+    if (value == _voiceCleanup) return;
+    _voiceCleanup = value;
+    notifyListeners();
+    await _save(keyVoiceCleanup, value);
+  }
+
+  Future<void> setGiveWaySide(String value) async {
+    final v = const {'auto', 'left', 'right'}.contains(value) ? value : 'auto';
+    if (v == _giveWaySide) return;
+    _giveWaySide = v;
+    notifyListeners();
+    try {
+      final prefs = await _p();
+      await prefs.setString(keyGiveWaySide, v);
+    } catch (e) {
+      debugPrint('settings save note: $e');
+    }
+  }
 }

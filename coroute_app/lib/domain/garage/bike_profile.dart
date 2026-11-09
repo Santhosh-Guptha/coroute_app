@@ -1,4 +1,5 @@
 import '../places/fuel_match.dart';
+import 'bike_type.dart';
 
 /// How the engine is cooled (3.55): sets how long it can work hard before a rest is advised.
 enum EngineCooling {
@@ -47,6 +48,10 @@ class BikeProfile {
   final String colour;
   final EngineCooling cooling;
 
+  /// 3.55 bike type (shape in the garage and on the ride map); null = not picked yet (older
+  /// garages): [effectiveBikeType] guesses from the model.
+  final BikeType? bikeType;
+
   const BikeProfile({
     required this.id,
     required this.name,
@@ -65,7 +70,12 @@ class BikeProfile {
     this.engineCc = 0,
     this.colour = '',
     this.cooling = EngineCooling.unknown,
+    this.bikeType,
   });
+
+  /// The type as picked, else the guess from make / model / name (commuter when nothing matches).
+  BikeType get effectiveBikeType =>
+      bikeType ?? BikeTypeInference.fallback(make: make, model: model, name: name, fuelType: fuelType, engineCc: engineCc);
 
   /// The cooling as given, else a careful guess from the engine size (small engines are usually
   /// air-cooled in India); unknown without either.
@@ -111,6 +121,7 @@ class BikeProfile {
     int? engineCc,
     String? colour,
     EngineCooling? cooling,
+    BikeType? bikeType,
   }) {
     return BikeProfile(
       id: id ?? this.id,
@@ -130,6 +141,7 @@ class BikeProfile {
       engineCc: engineCc ?? this.engineCc,
       colour: colour ?? this.colour,
       cooling: cooling ?? this.cooling,
+      bikeType: bikeType ?? this.bikeType,
     );
   }
 
@@ -151,6 +163,7 @@ class BikeProfile {
         if (engineCc > 0) 'engineCc': engineCc,
         if (colour.isNotEmpty) 'colour': colour,
         if (cooling != EngineCooling.unknown) 'cooling': cooling.name,
+        if (bikeType != null) 'bikeType': bikeType!.wire,
       };
 
   factory BikeProfile.fromJson(Map<String, dynamic> json) {
@@ -175,6 +188,7 @@ class BikeProfile {
       engineCc: (json['engineCc'] as num?)?.toInt() ?? 0,
       colour: json['colour'] as String? ?? '',
       cooling: EngineCooling.parse(json['cooling']),
+      bikeType: BikeType.parse(json['bikeType']),
     );
   }
 
@@ -185,6 +199,7 @@ class BikeProfile {
           name: 'Royal Enfield Himalayan 450',
           make: 'Royal Enfield',
           model: 'Himalayan 450',
+          bikeType: BikeType.adventure,
           year: 2024,
           tankCapacityL: 17.0,
           reserveCapacityL: 3.5,
@@ -198,6 +213,7 @@ class BikeProfile {
           name: 'KTM 390 Adventure',
           make: 'KTM',
           model: '390 Adventure',
+          bikeType: BikeType.adventure,
           year: 2024,
           tankCapacityL: 14.5,
           reserveCapacityL: 2.8,
@@ -211,6 +227,7 @@ class BikeProfile {
           name: 'BMW R1250 GS Adventure',
           make: 'BMW',
           model: 'R1250 GS Adv',
+          bikeType: BikeType.adventure,
           year: 2023,
           tankCapacityL: 30.0,
           reserveCapacityL: 4.0,
@@ -224,6 +241,7 @@ class BikeProfile {
           name: 'Royal Enfield Interceptor 650',
           make: 'Royal Enfield',
           model: 'Interceptor 650',
+          bikeType: BikeType.retro,
           year: 2024,
           tankCapacityL: 13.7,
           reserveCapacityL: 2.5,
@@ -237,6 +255,7 @@ class BikeProfile {
           name: 'Triumph Tiger 900 Rally Pro',
           make: 'Triumph',
           model: 'Tiger 900',
+          bikeType: BikeType.adventure,
           year: 2024,
           tankCapacityL: 20.0,
           reserveCapacityL: 3.5,
@@ -246,17 +265,32 @@ class BikeProfile {
           cooling: EngineCooling.liquid,
         ),
         // Popular Indian bikes (3.55). Typical published figures; riders adjust to their own.
-        const BikeProfile(id: 'preset_re_classic_350', name: 'Royal Enfield Classic 350', make: 'Royal Enfield', model: 'Classic 350',
+        const BikeProfile(id: 'preset_re_classic_350', name: 'Royal Enfield Classic 350', make: 'Royal Enfield', model: 'Classic 350', bikeType: BikeType.retro,
             tankCapacityL: 13.0, reserveCapacityL: 2.5, expectedMileageKmL: 35.0, engineCc: 349, cooling: EngineCooling.oil),
-        const BikeProfile(id: 'preset_pulsar_150', name: 'Bajaj Pulsar 150', make: 'Bajaj', model: 'Pulsar 150',
+        const BikeProfile(id: 'preset_pulsar_150', name: 'Bajaj Pulsar 150', make: 'Bajaj', model: 'Pulsar 150', bikeType: BikeType.commuter,
             tankCapacityL: 15.0, reserveCapacityL: 3.2, expectedMileageKmL: 45.0, engineCc: 149, cooling: EngineCooling.air),
-        const BikeProfile(id: 'preset_apache_160', name: 'TVS Apache RTR 160 4V', make: 'TVS', model: 'Apache RTR 160 4V',
+        const BikeProfile(id: 'preset_apache_160', name: 'TVS Apache RTR 160 4V', make: 'TVS', model: 'Apache RTR 160 4V', bikeType: BikeType.sport,
             tankCapacityL: 12.0, reserveCapacityL: 2.0, expectedMileageKmL: 45.0, engineCc: 160, cooling: EngineCooling.oil),
-        const BikeProfile(id: 'preset_r15_v4', name: 'Yamaha R15 V4', make: 'Yamaha', model: 'R15 V4',
+        const BikeProfile(id: 'preset_r15_v4', name: 'Yamaha R15 V4', make: 'Yamaha', model: 'R15 V4', bikeType: BikeType.sport,
             tankCapacityL: 11.0, reserveCapacityL: 2.0, expectedMileageKmL: 45.0, engineCc: 155, cooling: EngineCooling.liquid),
-        const BikeProfile(id: 'preset_splendor_plus', name: 'Hero Splendor Plus', make: 'Hero', model: 'Splendor Plus',
+        const BikeProfile(id: 'preset_splendor_plus', name: 'Hero Splendor Plus', make: 'Hero', model: 'Splendor Plus', bikeType: BikeType.commuter,
             tankCapacityL: 9.8, reserveCapacityL: 1.5, expectedMileageKmL: 65.0, engineCc: 97, cooling: EngineCooling.air),
-        const BikeProfile(id: 'preset_shine_125', name: 'Honda Shine 125', make: 'Honda', model: 'Shine 125',
+        // 3.55 bike types: a scooter, a cruiser and two electrics, so every shape has a preset.
+        const BikeProfile(id: 'preset_activa_6g', name: 'Honda Activa 6G', make: 'Honda', model: 'Activa 6G', bikeType: BikeType.scooter,
+            tankCapacityL: 5.3, reserveCapacityL: 1.0, expectedMileageKmL: 50.0, engineCc: 110, cooling: EngineCooling.air),
+        const BikeProfile(id: 'preset_jupiter_110', name: 'TVS Jupiter', make: 'TVS', model: 'Jupiter', bikeType: BikeType.scooter,
+            tankCapacityL: 5.1, reserveCapacityL: 1.0, expectedMileageKmL: 50.0, engineCc: 113, cooling: EngineCooling.air),
+        const BikeProfile(id: 'preset_meteor_350', name: 'Royal Enfield Meteor 350', make: 'Royal Enfield', model: 'Meteor 350',
+            bikeType: BikeType.cruiser, tankCapacityL: 15.0, reserveCapacityL: 2.5, expectedMileageKmL: 35.0, engineCc: 349, cooling: EngineCooling.oil),
+        const BikeProfile(id: 'preset_duke_390', name: 'KTM 390 Duke', make: 'KTM', model: '390 Duke', bikeType: BikeType.sport,
+            tankCapacityL: 15.0, reserveCapacityL: 2.5, expectedMileageKmL: 28.0, engineCc: 399, cooling: EngineCooling.liquid),
+        const BikeProfile(id: 'preset_xpulse_200', name: 'Hero Xpulse 200 4V', make: 'Hero', model: 'Xpulse 200 4V', bikeType: BikeType.offroad,
+            tankCapacityL: 13.0, reserveCapacityL: 2.0, expectedMileageKmL: 40.0, engineCc: 199, cooling: EngineCooling.oil),
+        const BikeProfile(id: 'preset_ather_450x', name: 'Ather 450X', make: 'Ather', model: '450X', bikeType: BikeType.electric,
+            fuelType: BikeFuelType.ev, tankCapacityL: 3.7, reserveCapacityL: 0.4, expectedMileageKmL: 30.0),
+        const BikeProfile(id: 'preset_chetak', name: 'Bajaj Chetak', make: 'Bajaj', model: 'Chetak', bikeType: BikeType.electric,
+            fuelType: BikeFuelType.ev, tankCapacityL: 3.2, reserveCapacityL: 0.3, expectedMileageKmL: 35.0),
+        const BikeProfile(id: 'preset_shine_125', name: 'Honda Shine 125', make: 'Honda', model: 'Shine 125', bikeType: BikeType.commuter,
             tankCapacityL: 10.5, reserveCapacityL: 1.5, expectedMileageKmL: 55.0, engineCc: 124, cooling: EngineCooling.air),
       ];
 }

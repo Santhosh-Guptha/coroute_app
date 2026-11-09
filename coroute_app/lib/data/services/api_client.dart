@@ -221,13 +221,18 @@ class ApiClient extends ChangeNotifier {
   /// Headers for an image the gateway only shows to the signed-in rider or an admin (Image.network).
   Map<String, String> get authHeaders => {if (hasToken) 'Authorization': 'Bearer $_token'};
 
-  Future<dynamic> _send(Future<http.Response> Function() call, Duration timeout) async {
+  Future<dynamic> _send(Future<http.Response> Function() call, Duration timeout, {bool retried = false}) async {
     http.Response res;
+    // Domain move: the base this attempt used (call() reads AppConfig.apiUrl when it runs).
+    final base = AppConfig.apiBaseUrl;
     try {
       res = await call().timeout(timeout);
-    } on TimeoutException {
+    } on TimeoutException catch (e) {
+      AppConfig.gatewayHosts.reportFailure(base, e);
       throw const ApiException(0, 'The server did not respond. Check your connection.');
     } catch (e) {
+      // The host could not be reached at all (DNS / TLS): try the other gateway host once.
+      if (AppConfig.gatewayHosts.reportFailure(base, e) && !retried) return _send(call, timeout, retried: true);
       throw ApiException(0, 'Network error: ${e.runtimeType}');
     }
 
@@ -241,7 +246,10 @@ class ApiClient extends ChangeNotifier {
         decoded = null; // HTML or text: a Wi-Fi login page, a proxy or an outage page, not our server
       }
     }
-    if (fromGateway) onServerReached?.call();
+    if (fromGateway) {
+      AppConfig.gatewayHosts.reportSuccess(base);
+      onServerReached?.call();
+    }
     if (res.statusCode >= 200 && res.statusCode < 300) {
       // Sliding session: the server hands out a fresh token now and then.
       final fresh = res.headers[_sessionHeader];

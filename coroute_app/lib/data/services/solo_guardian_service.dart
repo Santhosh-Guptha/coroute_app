@@ -206,7 +206,12 @@ class SoloGuardianService extends ChangeNotifier {
     if (_armedFor != null && _armedFor != ride.groupId) _disarm();
     final me = _me(ride);
     if (!_checkInAllowed(ride)) {
-      if (checkIn.active) _disarm();
+      if (checkIn.active) {
+        _disarm();
+        // 3.55 fix: switched off (setting, admin switch, contact removed) before arriving: switching
+        // it back on in the same ride arms it again. It used to stay off until the next ride.
+        _armedOnce.remove(ride.groupId);
+      }
       return;
     }
     if (me == null) return;

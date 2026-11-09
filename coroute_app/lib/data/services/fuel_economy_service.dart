@@ -40,13 +40,34 @@ class FuelEconomyService {
     return _loading ??= _load();
   }
 
+  /// 3.55 fix: the garage's active bike changed (also mid-ride, from GarageBinding): its fuel type
+  /// and the mileage learned for it apply now. Before, they were read only when a ride started, so
+  /// a bike change during a ride kept the old bike's fuel type and learning. The style and climb of
+  /// this ride are kept (they belong to the road, not the bike).
+  Future<void> useBike(BikeProfile? bike) {
+    final id = bike?.id ?? 'default';
+    final type = bike?.fuelType ?? BikeFuelType.petrol;
+    final current = _loading;
+    if (current != null && id == bikeId && type == fuelType) return current;
+    return _loading = _loadLearning(bike, fromGarage: true);
+  }
+
   Future<void> _load() async {
+    BikeProfile? bike;
+    var read = false;
     try {
-      final bike = await _activeBike();
+      bike = await _activeBike();
+      read = true;
+    } catch (_) {/* garage unreadable: petrol, default */}
+    return _loadLearning(bike, fromGarage: read);
+  }
+
+  Future<void> _loadLearning(BikeProfile? bike, {required bool fromGarage}) async {
+    if (fromGarage) {
       // 3.55: an empty garage (no sample bike any more) is petrol with the shared learning.
       fuelType = bike?.fuelType ?? BikeFuelType.petrol;
       bikeId = bike?.id ?? 'default';
-    } catch (_) {/* garage unreadable: petrol, default */}
+    }
     try {
       final raw = (await _prefs()).getString(_key);
       learning = raw == null ? FuelLearning() : FuelLearning.fromJson(jsonDecode(raw));

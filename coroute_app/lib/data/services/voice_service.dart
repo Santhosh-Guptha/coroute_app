@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../../core/constants/ride_notification_constants.dart';
 import '../../core/l10n/l10n.dart';
+import '../../domain/audio/sound_alert_policy.dart';
 import 'audio_priority_manager.dart';
 import 'phone_call_service.dart';
 import 'settings_service.dart';
@@ -38,10 +39,29 @@ abstract class VoiceEngineLanguage {
   String get language;
 }
 
+/// 3.55: extra native abilities of the real engine (fakes in tests do not need them; the
+/// [AudioPriorityManager] checks `engine is VoiceEngineExtras`).
+abstract class VoiceEngineExtras {
+  /// Like [VoiceEngine.speak], plus [inCall] (a critical phrase in the phone call's audio, after a short
+  /// tone) and [afterCall] (wait until the phone left call mode, then speak).
+  Future<bool> speakExtended(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+    bool inCall = false,
+    bool afterCall = false,
+  });
+
+  /// Tone + vibration when speech is impossible ([critical]: alarm stream, long buzz).
+  Future<void> fallbackAlert({required bool critical, bool inCall = false});
+}
+
 /// Android TextToSpeech through MethodChannel `coroute/tts` (TtsChannel.kt): the
 /// language of the app's safety setting (Hindi or Telugu when the phone has the
 /// voice), else Indian English, else US English; ducks other audio while speaking.
-class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
+class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage, VoiceEngineExtras {
   NativeVoiceEngine({MethodChannel? channel}) : _ch = channel ?? const MethodChannel(NotifConstants.ttsChannel);
 
   final MethodChannel _ch;
@@ -82,6 +102,59 @@ class NativeVoiceEngine implements VoiceEngine, VoiceEngineLanguage {
     } catch (_) {
       return false;
     }
+  }
+
+  @override
+  Future<bool> speakExtended(
+    String text, {
+    required bool interrupt,
+    required String id,
+    bool isEmergency = false,
+    bool pauseOthers = false,
+    bool inCall = false,
+    bool afterCall = false,
+  }) async {
+    try {
+      return (await _ch.invokeMethod<bool>('speak', {
+        'text': text,
+        'id': id,
+        'interrupt': interrupt,
+        'isEmergency': isEmergency,
+        'pauseOthers': pauseOthers,
+        'inCall': inCall,
+        'afterCall': afterCall,
+      })) == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> fallbackAlert({required bool critical, bool inCall = false}) async {
+    try {
+      await _ch.invokeMethod<bool>('fallbackAlert', {'critical': critical, 'inCall': inCall});
+    } catch (_) {}
+  }
+
+  /// 3.55 sound awareness: the rider's hearing situation from the phone's audio state (no mic):
+  /// headset kind ('bluetooth' | 'wired' | 'hearingAid' | ''), other apps' music, phone call.
+  /// Null off Android or when the native side cannot answer.
+  static Future<ListeningState?> readListeningState({MethodChannel? channel}) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
+    try {
+      final r = await (channel ?? const MethodChannel(NotifConstants.ttsChannel)).invokeMethod<Object?>('listeningState');
+      return r is Map ? ListeningState.fromMap(r) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 3.55: one short alert tone (a siren close by while the rider can hear outside: no speech).
+  static Future<void> alertTone({MethodChannel? channel}) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await (channel ?? const MethodChannel(NotifConstants.ttsChannel)).invokeMethod<void>('alertTone');
+    } catch (_) {}
   }
 
   @override
@@ -134,7 +207,23 @@ class VoiceService extends ChangeNotifier {
         );
     _priorityManager.bindEnsureEngine(_ensureEngine);
     L10n.changes.addListener(_onLanguage);
+    _settings.addListener(_onSettings);
   }
+
+  /// 3.55 fix: spoken warnings / accident warnings switched off mid-ride: the lines already queued
+  /// that the new choice no longer allows are dropped (they used to be read out anyway). Emergencies
+  /// and safety confirmations (P0, P1) always stay.
+  void _onSettings() => dropDisallowedQueued();
+
+  /// Same for the group's voice switch (called by [setGroupVoice]).
+  @visibleForTesting
+  int dropDisallowedQueued() => _priorityManager.dropQueuedWhere((i) => switch (i.priority) {
+        AudioPriority.p0CriticalEmergency || AudioPriority.p1SafetyConfirmation => false,
+        AudioPriority.p2ImmediateHazard => !_settings.hazardAlerts && !_settings.voiceWarnings,
+        AudioPriority.p3Navigation => !_settings.voiceWarnings || !_groupVoice,
+        AudioPriority.p4ConvoyAnnouncement => !_allowed(VoicePriority.important),
+        AudioPriority.p5Informational => !_settings.voiceWarnings,
+      });
 
   static int _wallClock() => DateTime.now().millisecondsSinceEpoch;
 
@@ -172,7 +261,11 @@ class VoiceService extends ChangeNotifier {
   bool get available => _available;
 
   /// The group's "Voice guidance" switch (convoy.voiceGuidanceEnabled), set by AlertService.
-  void setGroupVoice(bool enabled) => _groupVoice = enabled;
+  void setGroupVoice(bool enabled) {
+    if (_groupVoice == enabled) return;
+    _groupVoice = enabled;
+    if (!enabled) dropDisallowedQueued(); // 3.55 fix: the lead switched spoken alerts off mid-ride
+  }
 
   @visibleForTesting
   bool get groupVoice => _groupVoice;
@@ -212,13 +305,18 @@ class VoiceService extends ChangeNotifier {
     bool? pauseOthers,
   }) async {
     final t = text.trim();
-    if (t.isEmpty || !_allowed(priority) || _failed) return false;
+    if (t.isEmpty || !_allowed(priority)) return false;
 
     final audioPriority = switch (priority) {
       VoicePriority.critical => AudioPriority.p0CriticalEmergency,
       VoicePriority.important => AudioPriority.p4ConvoyAnnouncement,
       VoicePriority.warning => AudioPriority.p3Navigation,
     };
+    if (_failed) {
+      // 3.55: no speech engine this ride: a tone + buzz (and a notification) for critical lines.
+      _priorityManager.alertWithoutVoice(audioPriority, t);
+      return false;
+    }
 
     return _priorityManager.submit(
       text: t,
@@ -234,7 +332,11 @@ class VoiceService extends ChangeNotifier {
   /// P0: Immediate emergency alert (SOS, crash, vehicle collision).
   Future<bool> speakEmergency(String text, {String? dedupeKey, Duration? ttl}) {
     final t = text.trim();
-    if (t.isEmpty || _failed) return Future.value(false);
+    if (t.isEmpty) return Future.value(false);
+    if (_failed) {
+      _priorityManager.alertWithoutVoice(AudioPriority.p0CriticalEmergency, t);
+      return Future.value(false);
+    }
     return _priorityManager.submit(
       text: t,
       priority: AudioPriority.p0CriticalEmergency,
@@ -248,7 +350,11 @@ class VoiceService extends ChangeNotifier {
   /// P1: Fatigue warning & rider safety confirmation prompt.
   Future<bool> speakFatigueConfirmation(String text, {String? dedupeKey, Duration? ttl}) {
     final t = text.trim();
-    if (t.isEmpty || _failed) return Future.value(false);
+    if (t.isEmpty) return Future.value(false);
+    if (_failed) {
+      _priorityManager.alertWithoutVoice(AudioPriority.p1SafetyConfirmation, t);
+      return Future.value(false);
+    }
     return _priorityManager.submit(
       text: t,
       priority: AudioPriority.p1SafetyConfirmation,
@@ -262,7 +368,11 @@ class VoiceService extends ChangeNotifier {
   /// P2: Immediate road hazard (Black ice, animal, sharp curve).
   Future<bool> speakHazard(String text, {String? dedupeKey, Duration? ttl}) {
     final t = text.trim();
-    if (t.isEmpty || (!_settings.hazardAlerts && !_settings.voiceWarnings) || _failed) {
+    if (t.isEmpty || (!_settings.hazardAlerts && !_settings.voiceWarnings)) {
+      return Future.value(false);
+    }
+    if (_failed) {
+      _priorityManager.alertWithoutVoice(AudioPriority.p2ImmediateHazard, t);
       return Future.value(false);
     }
     return _priorityManager.submit(
@@ -347,13 +457,47 @@ class VoiceService extends ChangeNotifier {
   }
 
   /// Alert when rider exceeds speed limit. Brief, non-distracting voice cue.
+  ///
+  /// 3.55: far over the limit ([farOverFraction], 40 %) it is a critical line: music paused, alarm
+  /// stream (clear even with the media volume down or lowered by "Lower music when speeding").
   Future<bool> speakOverspeed({required int currentSpeedKmh, required int limitKmh}) {
+    if (limitKmh > 0 && currentSpeedKmh >= limitKmh * (1 + farOverFraction)) {
+      final t = 'Slow down. $currentSpeedKmh km/h, limit $limitKmh.';
+      if (_failed) {
+        _priorityManager.alertWithoutVoice(AudioPriority.p1SafetyConfirmation, t);
+        return Future.value(false);
+      }
+      return _priorityManager.submit(
+        text: t,
+        priority: AudioPriority.p1SafetyConfirmation,
+        dedupeKey: 'overspeed_far_${_clock() ~/ 60000}',
+        dedupeWindow: const Duration(seconds: 30),
+        ttl: const Duration(seconds: 10),
+        pauseOthers: true,
+        metadata: const {'kind': 'overspeed'},
+      );
+    }
     return speak(
       'Over limit. $currentSpeedKmh km/h.',
       priority: VoicePriority.warning,
       key: 'overspeed_${DateTime.now().millisecondsSinceEpoch ~/ 60000}',
       pauseOthers: _settings.pauseOtherAudio,
     );
+  }
+
+  /// Over the limit by this fraction or more, the overspeed line is critical (see [speakOverspeed]).
+  static const double farOverFraction = 0.40;
+
+  /// 3.55: whether a line of [priority] would be spoken now (settings, engine not failed, not held
+  /// for a phone call). AlertService posts its notification silently when the voice speaks it, so
+  /// the notification sound never doubles with the speech; when this is false, the notification
+  /// sounds instead.
+  bool willSpeak(VoicePriority priority) {
+    if (!_allowed(priority) || _failed) return false;
+    if (_init != null && !_available) return false; // started this ride without a usable voice
+    final call = _phoneCall;
+    if (priority != VoicePriority.critical && call != null && call.isCallActive) return false;
+    return true;
   }
 
   Future<bool> _ensureEngine() async {
@@ -419,6 +563,7 @@ class VoiceService extends ChangeNotifier {
   @override
   void dispose() {
     L10n.changes.removeListener(_onLanguage);
+    _settings.removeListener(_onSettings);
     _priorityManager.dispose();
     super.dispose();
   }

@@ -167,11 +167,11 @@ class FeatureGates {
       case Feature.roadHazardReceive:
         return 'Delivers spatial helmet voice warnings and HUD alerts 300 meters before upcoming road hazards.';
       case Feature.priorityIntercomDucking:
-        return 'The ride lead\'s audio automatically ducks background chatter by -18 dB so hazard warnings cut through instantly.';
+        return 'Hazard warnings lower background chatter by 18 dB so they cut through instantly.';
       case Feature.dynamicWaypointPush:
         return 'Push route changes, fuel stops, and rest regroup waypoints dynamically to all connected riders in real-time.';
       case Feature.totalConvoySpreadAlert:
-        return 'Monitors distance between Lead and Sweeper, alerting you before trailing riders get separated.';
+        return 'Monitors distance between the lead and the sweeper, alerting you before trailing riders get separated.';
       case Feature.guardianLiveShare:
         return 'Generate an encrypted live web tracking link for family or friends to monitor your ride in real-time.';
       case Feature.unlimitedOfflinePacks:

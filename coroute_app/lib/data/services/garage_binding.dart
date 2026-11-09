@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 
+import '../../domain/garage/bike_details.dart';
 import '../../domain/garage/bike_profile.dart';
 import '../../domain/garage/engine_care.dart';
 import '../../domain/safety/fuel_profile.dart';
 import 'auth_service.dart';
+import 'fuel_economy_service.dart';
 import 'garage_service.dart';
 import 'settings_service.dart';
 import 'weather_service.dart';
@@ -13,7 +15,8 @@ import 'weather_service.dart';
 ///   temperature on the route from the weather check;
 /// - fuel: the bike's tank, reserve and mileage fill the fuel profile when the rider set none
 ///   (their own fuel settings always win, see [SettingsService.adoptGarageFuelProfile]);
-/// - the ride: the bike's colour is the rider's vehicle colour for new rides and joins;
+/// - the ride: the bike's colour (and model) is the rider's vehicle for new rides and joins and,
+///   during a ride, is sent to the group at once (3.55 live bike change, RIDER_VEHICLE);
 /// - the profile: a short bike summary is shared with the gateway, best effort, for analysis.
 class GarageBinding {
   GarageBinding(
@@ -23,6 +26,9 @@ class GarageBinding {
     this.settings,
     this.weather,
     this.onVehicleColour,
+    this.onVehicle,
+    this.onBikeDetails,
+    this.fuelEconomy,
   }) {
     garage.activeBikeNotifier.addListener(_onBike);
     auth?.addListener(_onAuth);
@@ -40,8 +46,19 @@ class GarageBinding {
   final SettingsService? settings;
   final WeatherService? weather;
 
+  /// 3.55 fix: the ride's fuel intelligence (fuel type, learned mileage), told about a bike change.
+  final FuelEconomyService? fuelEconomy;
+
   /// Sets the vehicle colour sent when creating or joining a ride ('' when none).
   final void Function(String colour)? onVehicleColour;
+
+  /// 3.55 live bike change: the active bike's colour and model ('' when none). The ride service
+  /// keeps them for the next create / join and, during a ride, tells the group at once.
+  final void Function(String colour, String model)? onVehicle;
+
+  /// 3.55 bike type and mandatory details: the active bike's type id ('' when none) and whether
+  /// its details are complete (sent with create / join and RIDER_VEHICLE; the map shape).
+  final void Function(String kind, bool complete)? onBikeDetails;
 
   String? _lastUser;
   bool _disposed = false;
@@ -54,7 +71,11 @@ class GarageBinding {
     final care = engineCare;
     // Setting the bike restarts the advisor's stretch: only when it really changed.
     if (care != null && !identical(care.bike, bike)) care.bike = bike;
+    // 3.55 fix: a bike changed mid-ride also changes the fuel type / learned mileage at once.
+    fuelEconomy?.useBike(bike).ignore();
     onVehicleColour?.call(vehicleColourOf(bike));
+    onBikeDetails?.call(vehicleKindOf(bike), BikeDetails.isComplete(bike));
+    onVehicle?.call(vehicleColourOf(bike), vehicleModelOf(bike));
     _shareFuel(bike);
     _shareSummary(bike);
   }
@@ -106,6 +127,17 @@ class GarageBinding {
   static String vehicleColourOf(BikeProfile? bike) {
     final c = (bike?.colour ?? '').replaceAll(RegExp(r'[\u0000-\u001F\u007F-\u009F]'), ' ').trim();
     return c.length > 20 ? c.substring(0, 20).trim() : c;
+  }
+
+  /// The bike type id the group's map draws ('' without a bike; the guess until the rider picks).
+  static String vehicleKindOf(BikeProfile? bike) => bike == null ? '' : bike.effectiveBikeType.wire;
+
+  /// The model as the group sees it: make and model, else the bike's name (at most 40 characters).
+  static String vehicleModelOf(BikeProfile? bike) {
+    if (bike == null) return '';
+    final makeModel = '${bike.make} ${bike.model}'.trim();
+    final m = (makeModel.isNotEmpty ? makeModel : bike.name).replaceAll(RegExp(r'[\u0000-\u001F\u007F-\u009F]'), ' ').replaceAll(RegExp(' +'), ' ').trim();
+    return m.length > 40 ? m.substring(0, 40).trim() : m;
   }
 
   /// The summary the gateway accepts (values outside its ranges are sent as "not given").

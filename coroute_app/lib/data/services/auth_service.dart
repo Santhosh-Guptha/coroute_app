@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
 import 'api_client.dart';
+import 'friends_service.dart' show FriendsService;
 
 /// Account state. Registration (email + password, or Google) is mandatory;
 /// there is no guest mode. Roles come from the database, not from the app.
@@ -78,6 +79,8 @@ class AuthService extends ChangeNotifier {
   String? _vehicleNo;
   bool _isLoading = true;
   bool _mustChangePassword = false;
+  // 3.55 public username (src/usernames.js on the gateway): shown on the profile and to friends.
+  String _username = '';
 
   // Medical info and the emergency text opt-out: memory only, from /me (never in SharedPreferences).
   String _bloodGroup = '';
@@ -89,7 +92,6 @@ class AuthService extends ChangeNotifier {
   // Rider Safety Network switches (3.15): memory only, from /me.
   bool _assistHelp = true;
   bool _assistAsk = true;
-  bool _responderMedical = false;
   int _netConsentAt = 0;
   bool _netLoaded = false;
 
@@ -103,7 +105,12 @@ class AuthService extends ChangeNotifier {
   String? get emergencyContactName => _emergencyContactName;
   String? get vehicleNo => _vehicleNo;
 
-  /// Optional medical info, shown to the ride group only while my SOS or crash alert is open.
+  /// 3.55 public username (empty until a 3.55 gateway answered).
+  String get username => _username;
+
+  /// Optional medical info: always on the lock screen Medical ID and shared with responders
+  /// (group, guardians, riders who accept to help) only while my SOS or crash alert is open.
+  /// There is no sharing switch.
   String get bloodGroup => _bloodGroup;
   String get allergies => _allergies;
   String get medicalNotes => _medicalNotes;
@@ -117,8 +124,9 @@ class AuthService extends ChangeNotifier {
   /// Let nearby riders of other groups be asked to help me (default on).
   bool get assistAsk => _assistAsk;
 
-  /// Share my medical info with a rider from another group who comes to help me (default off).
-  bool get responderMedical => _responderMedical;
+  /// Medical info always goes to a responder during my emergency (no switch any more). A stored
+  /// `false` from an older version is ignored, here and on the gateway.
+  bool get responderMedical => true;
 
   /// When I agreed to the nearby riders explanation (epoch ms), 0 = not yet.
   int get netConsentAt => _netConsentAt;
@@ -223,6 +231,7 @@ class AuthService extends ChangeNotifier {
     _emergencyContact = u['emergencyContact']?.toString() ?? '';
     _emergencyContactName = u['emergencyContactName']?.toString() ?? '';
     _mustChangePassword = u['mustChangePassword'] == true;
+    if (u.containsKey('username')) _username = u['username']?.toString() ?? '';
     // Older gateways do not send these: keep what is known instead of clearing it.
     if (u.containsKey('bloodGroup')) {
       _bloodGroup = u['bloodGroup']?.toString() ?? '';
@@ -239,9 +248,6 @@ class AuthService extends ChangeNotifier {
     }
     if (u.containsKey('assistHelp')) _assistHelp = u['assistHelp'] != false;
     if (u.containsKey('assistAsk')) _assistAsk = u['assistAsk'] != false;
-    if (u.containsKey('responderMedical')) {
-      _responderMedical = u['responderMedical'] == true;
-    }
     final consent = u['netConsentAt'];
     if (consent is num) _netConsentAt = consent.toInt();
     if (u.containsKey('assistHelp') ||
@@ -317,6 +323,9 @@ class AuthService extends ChangeNotifier {
     String emergencyContactName = '',
   }) async {
     try {
+      // 3.55: a friend invite opened before signing up goes with the registration (the gateway sends
+      // the inviter a friend request).
+      final invite = await FriendsService.pendingInviteCode();
       final res = await _api.post(
         '/auth/register',
         {
@@ -328,10 +337,12 @@ class AuthService extends ChangeNotifier {
           'vehicleNo': vehicleNo.trim(),
           'emergencyContact': emergencyContact.trim(),
           'emergencyContactName': emergencyContactName.trim(),
+          'inviteCode': ?invite,
         },
         const Duration(seconds: 15),
         false,
       );
+      if (invite != null) await FriendsService.clearPendingInvite();
       return await _consume(res);
     } catch (e) {
       return _fail(e);
@@ -466,7 +477,6 @@ class AuthService extends ChangeNotifier {
     bool? smsOptOut,
     bool? assistHelp,
     bool? assistAsk,
-    bool? responderMedical,
     bool? netConsent,
   }) async {
     try {
@@ -486,8 +496,10 @@ class AuthService extends ChangeNotifier {
       if (smsOptOut != null) payload['smsOptOut'] = smsOptOut;
       if (assistHelp != null) payload['assistHelp'] = assistHelp;
       if (assistAsk != null) payload['assistAsk'] = assistAsk;
-      if (responderMedical != null) {
-        payload['responderMedical'] = responderMedical;
+      // Medical info is always shared with responders in an emergency. Gateways before that rule
+      // still read this switch, so it travels (as true) with the medical fields; newer ones ignore it.
+      if (bloodGroup != null || allergies != null || medicalNotes != null) {
+        payload['responderMedical'] = true;
       }
       if (netConsent == true) payload['netConsent'] = true;
       _lastProfileError = null;
@@ -515,22 +527,17 @@ class AuthService extends ChangeNotifier {
   Future<bool> updateNetworkPrefs({
     bool? assistHelp,
     bool? assistAsk,
-    bool? responderMedical,
     bool netConsent = false,
   }) async {
-    final helpBefore = _assistHelp,
-        askBefore = _assistAsk,
-        medicalBefore = _responderMedical;
+    final helpBefore = _assistHelp, askBefore = _assistAsk;
     final payload = <String, dynamic>{
       'assistHelp': ?assistHelp,
       'assistAsk': ?assistAsk,
-      'responderMedical': ?responderMedical,
       if (netConsent) 'netConsent': true,
     };
     if (payload.isEmpty) return true;
     if (assistHelp != null) _assistHelp = assistHelp;
     if (assistAsk != null) _assistAsk = assistAsk;
-    if (responderMedical != null) _responderMedical = responderMedical;
     notifyListeners();
     try {
       _lastProfileError = null;
@@ -546,7 +553,6 @@ class AuthService extends ChangeNotifier {
       debugPrint('updateNetworkPrefs note: $e');
       _assistHelp = helpBefore;
       _assistAsk = askBefore;
-      _responderMedical = medicalBefore;
       notifyListeners();
       return false;
     }
@@ -606,6 +612,7 @@ class AuthService extends ChangeNotifier {
     _emergencyContact = null;
     _emergencyContactName = null;
     _vehicleNo = null;
+    _username = '';
     _mustChangePassword = false;
     _bikeOnServer = null;
     _bloodGroup = '';
@@ -615,7 +622,6 @@ class AuthService extends ChangeNotifier {
     _medicalLoaded = false;
     _assistHelp = true;
     _assistAsk = true;
-    _responderMedical = false;
     _netConsentAt = 0;
     _netLoaded = false;
     _lastSubscriptionStatus = null;

@@ -9,8 +9,11 @@ import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 import 'package:record/record.dart';
 import '../../core/config/app_config.dart';
 import '../../core/config/feature_gates.dart';
+import '../../domain/audio/dsp_core.dart';
+import '../../domain/audio/voice_cleanup.dart';
 import 'background_service.dart';
 import 'realtime_service.dart';
+import 'ride_mic_hub.dart';
 import 'settings_service.dart';
 
 enum IntercomMode { ptt, vox }
@@ -65,6 +68,24 @@ class ActiveSpeakerInfo {
 /// * PTT (hold to talk) or VOX (open mic that only transmits while you speak,
 ///   so the radio stays idle, and the battery lasts, while you are quiet).
 /// * Mute (don't transmit) and Deafen (don't play) switches.
+///
+/// 3.55 sound awareness (docs/features_355/sound_awareness_and_intercom.md):
+/// * With [micHub] set (main.dart) the intercom does not open its own recorder: it claims the
+///   ride's one shared microphone ([RideMicHub]), which the siren / horn detector also listens to.
+/// * "Clean up my voice" (setting `voiceCleanup`, admin switch 'voiceCleanup', both default on):
+///   every frame goes through [VoiceCleanup] before it is sent (high-pass, noise suppression,
+///   breath and wind-gust suppression, AGC + limiter). In hands-free (VOX) the voice gate decides
+///   when to send: it opens on voiced speech only (never on breath or wind) and holds 500 ms; the
+///   first 40 ms before it opened are sent too (pre-roll). Nothing is sent while the gate is shut.
+///   Off = raw frames and the old loudness VOX.
+/// * Received voice goes through a light peak limiter, so one loud rider does not blast.
+///
+/// Public actions for notification buttons / remotes (names are stable):
+/// * [toggleHandsFreeTalk] - hands-free talk on / off (arms or disarms VOX);
+/// * [toggleGroupMute] - stop / resume hearing the group (deafen);
+/// * [setMicMuted], [beginTransmission] / [endTransmission], [startVox] / [stopVox] as before.
+/// Both toggles work with the screen locked: the ride's foreground service runs with the
+/// microphone type once the mic was allowed during the ride (BackgroundService).
 class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   IntercomService(
     this._rt, {
@@ -81,6 +102,43 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     try {
       WidgetsBinding.instance.addObserver(this);
     } catch (_) {}
+    // 3.55 fix: Data saver changed mid-ride. The rate is picked when the mic opens, and hands-free
+    // (VOX) keeps the mic open for the whole ride, so the change waited for the next ride.
+    settings?.addListener(_onSettingsChanged);
+  }
+
+  /// 3.55 fix: re-opens a VOX mic that is idle (not sending) at the rate Data saver now asks for.
+  /// A burst in progress finishes first; the hangover end re-checks (see [_onMicData]).
+  void _onSettingsChanged() {
+    if (_disposed) return;
+    _applyMicRate();
+  }
+
+  void _applyMicRate() {
+    if (_disposed || !_micOpen || _transmitting || _mode != IntercomMode.vox || _micRate == txSampleRate) return;
+    if (micHub != null) {
+      // The shared mic always records at 16 kHz; data saver only changes what is sent.
+      _micRate = txSampleRate;
+      _decimator = null;
+      return;
+    }
+    _closeMic().then((_) {
+      if (!_disposed && _mode == IntercomMode.vox && !_micMuted && !_microphoneRevoked && _talkSwitchOn) _openMic();
+    }).ignore();
+  }
+
+  /// 3.55 fix: the admin turned the 'intercom' switch off during a ride (FEATURE_FLAGS push). Before,
+  /// only a new talk was refused: a PTT held down or an armed VOX mic kept sending. Called from
+  /// main.dart as a FeatureFlagsService listener.
+  void featureSwitchesChanged() {
+    if (_disposed || _talkSwitchOn) return;
+    if (_transmitting) _endStream();
+    if (_micOpen) _closeMic().ignore();
+    if (_mode == IntercomMode.vox) {
+      _voxSilenceTimer?.cancel();
+      _mode = IntercomMode.ptt;
+    }
+    notifyListeners();
   }
 
   final RealtimeService _rt;
@@ -112,6 +170,19 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   /// Optional listener for raw microphone PCM chunks (e.g. for siren acoustic detection).
   /// Only invoked while microphone capture is legitimately active (PTT or VOX).
   void Function(Uint8List chunk)? onMicChunk;
+
+  /// 3.55: the ride's one shared microphone (set in main.dart). Null = own recorder (tests, old path).
+  RideMicHub? micHub;
+
+  /// 3.55 voice cleanup for the frames this phone sends (see the class doc).
+  final VoiceCleanup _cleanup = VoiceCleanup();
+  Decimator2? _decimator;
+  final List<Uint8List> _preRoll = [];
+  final PeakLimiter _rxLimiter = PeakLimiter(ceiling: 0.8, releaseDbPerSecond: 6.0);
+  bool _appInForeground = true;
+
+  /// Voice cleanup on: rider setting AND admin switch 'voiceCleanup' (unknown = on).
+  bool get voiceCleanupOn => (settings?.voiceCleanup ?? true) && (featureOn?.call('voiceCleanup') ?? true);
 
   /// 3.55 admin feature switches (set in main.dart to FeatureFlagsService.on). Null = on. While
   /// 'intercom' is off no new talk starts (the gateway refuses a stream start too).
@@ -236,15 +307,30 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  /// 3.55 fix: hands-free was armed when the mic was muted; unmuting arms it again.
+  bool _rearmVoxOnUnmute = false;
+
+  /// 3.55: hands-free was armed when a phone call began; re-armed after it ([setPhoneCallActive]).
+  bool _rearmVoxAfterCall = false;
+  Timer? _rearmAfterCallTimer;
+
   void setMicMuted(bool v) {
+    final wasMuted = _micMuted;
     _micMuted = v;
     if (v) {
+      if (!wasMuted) _rearmVoxOnUnmute = isVoxArmed;
       if (_transmitting) endTransmission();
       if (_mode == IntercomMode.vox) stopVox();
       _closeMic();
     }
     _rt.send({'type': 'MIC_STATE', 'muted': v});
     notifyListeners();
+    // 3.55 fix: muting (e.g. Quick settings > Voice off) disarmed hands-free and unmuting left it
+    // off, so talk did not come back with the switch. It is re-armed when it was armed before.
+    if (!v && wasMuted && _rearmVoxOnUnmute) {
+      _rearmVoxOnUnmute = false;
+      if (_mode == IntercomMode.vox && !_micOpen) startVox().ignore();
+    }
   }
 
   void setDeafened(bool v) {
@@ -255,6 +341,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appInForeground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
@@ -272,7 +359,10 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final ok = await _recorder.hasPermission();
       // Allowed during the ride: give the background service the microphone type too.
-      if (ok) BackgroundService.ensureMicrophoneType().ignore();
+      // 3.55: only while the app is in front. ensureMicrophoneType restarts the service, and
+      // Android 14 refuses to start a microphone service from the background (the ride service
+      // would be gone).
+      if (ok && _appInForeground) BackgroundService.ensureMicrophoneType().ignore();
       return ok;
     } catch (_) {
       return false;
@@ -280,9 +370,27 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Pauses or resumes the intercom transmission when a cellular or VoIP phone call occurs.
+  ///
+  /// 3.55: hands-free that was armed when the call began is armed again shortly after the call
+  /// ends (unless the rider turned hands-free off, muted the mic or the ride ended meanwhile).
+  /// Note on audio mode: neither the shared mic (record plugin, AndroidRecordConfig.audioManagerMode
+  /// left at modeNormal) nor playback (flutter_pcm_sound) sets MODE_IN_COMMUNICATION, so the
+  /// intercom never looks like a call to PhoneCallService. If a later change sets that mode, call
+  /// PhoneCallService.setOwnCommunicationMode(true / false) around it.
   void setPhoneCallActive(bool inCall) {
     if (_pausedByPhoneCall == inCall) return;
     _pausedByPhoneCall = inCall;
+    _rearmAfterCallTimer?.cancel();
+    if (inCall) {
+      _rearmVoxAfterCall = isVoxArmed;
+    } else if (_rearmVoxAfterCall) {
+      _rearmVoxAfterCall = false;
+      // A short wait: the phone's audio leaves call mode first, else the mic may fail to open.
+      _rearmAfterCallTimer = Timer(const Duration(milliseconds: 1500), () {
+        if (_disposed || _pausedByPhoneCall || _micMuted || _mode != IntercomMode.vox || _micOpen) return;
+        startVox().ignore();
+      });
+    }
     if (inCall) {
       if (_transmitting) _endStream();
       if (_micOpen) _closeMic();
@@ -339,6 +447,30 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
     _mode = IntercomMode.ptt;
     await stopVox();
     notifyListeners();
+  }
+
+  /// 3.55: hands-free talk on / off in one call (notification action, remote, quick setting).
+  /// Returns true when hands-free is armed afterwards.
+  Future<bool> toggleHandsFreeTalk() async {
+    if (isVoxArmed) {
+      await disableHandsFree();
+      return false;
+    }
+    if (_micMuted) setMicMuted(false);
+    _mode = IntercomMode.vox;
+    final ok = await startVox();
+    if (!ok && !_micOpen) {
+      _mode = IntercomMode.ptt;
+      notifyListeners();
+    }
+    return isVoxArmed;
+  }
+
+  /// 3.55: stop / resume hearing the group in one call (notification action). Returns true when
+  /// the group is muted (deafened) afterwards. My own talk is not affected.
+  bool toggleGroupMute() {
+    setDeafened(!_deafened);
+    return _deafened;
   }
 
   /// Handles runtime microphone permission revocation during an active ride.
@@ -413,6 +545,24 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<bool> _openMic() async {
     if (_micOpen) return true;
+    final hub = micHub;
+    if (hub != null) {
+      _cleanup.reset();
+      _preRoll.clear();
+      _micRate = txSampleRate;
+      _decimator = null;
+      _micOpen = true; // set first: frames may arrive before claim returns
+      // Hands-free talk shares the phone's own mic with siren / horn detection; push-to-talk
+      // with a headset uses the headset mic while held (RideMicHub / MicPlan).
+      final ok = await hub.claimIntercom(_onHubFrame, handsFree: _mode == IntercomMode.vox);
+      if (!ok) {
+        _micOpen = false;
+        await hub.releaseIntercom();
+        return false;
+      }
+      notifyListeners();
+      return true;
+    }
     try {
       final rate = txSampleRate;
       final stream = await _recorder.startStream(RecordConfig(
@@ -445,14 +595,42 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _closeMic() async {
     _micSub?.cancel();
     _micSub = null;
+    final wasOpen = _micOpen;
     _micOpen = false;
     audioLevel.value = 0.0;
     _pending.clear();
-    try {
-      if (await _recorder.isRecording()) await _recorder.stop();
-    } catch (_) {}
+    _preRoll.clear();
+    final hub = micHub;
+    if (hub != null) {
+      if (wasOpen || hub.intercomClaimed) await hub.releaseIntercom();
+    } else {
+      try {
+        if (await _recorder.isRecording()) await _recorder.stop();
+      } catch (_) {}
+    }
     notifyListeners();
   }
+
+  /// 3.55: one 20 ms frame from the shared mic (16 kHz). Cleaned (when on), cut to the send rate
+  /// (8 kHz in data saver), then the usual VOX / PTT path; the voice gate replaces the loudness
+  /// threshold for hands-free when cleanup is on.
+  void _onHubFrame(Int16List frame, MicFrameInfo info) {
+    if (!_micOpen) return;
+    var x = int16ToFloat(frame);
+    bool? gate;
+    if (voiceCleanupOn) {
+      _cleanup.handsFree = _mode == IntercomMode.vox;
+      x = _cleanup.process(x);
+      gate = _cleanup.gateOpen;
+    }
+    if (_micRate == AppConfig.audioSampleRateLowData) {
+      x = (_decimator ??= Decimator2()).process(x);
+    }
+    _onMicData(floatToPcm16Bytes(x), voiceGate: gate);
+  }
+
+  @visibleForTesting
+  void debugHubFrame(Int16List frame) => _onHubFrame(frame, const MicFrameInfo(processed: false, headset: false));
 
   void _startStream() {
     _seq = 0;
@@ -469,6 +647,13 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
       header['priority'] = true;
     }
     _rt.sendVoice(VoiceKind.start, header);
+    // 3.55: the frames just before the voice gate opened (the first syllable) go out first.
+    if (_preRoll.isNotEmpty) {
+      for (final b in _preRoll) {
+        _pending.add(b);
+      }
+      _preRoll.clear();
+    }
     notifyListeners();
   }
 
@@ -490,7 +675,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   static const Duration _voxHangover = Duration(milliseconds: 900);
   int get _txFrameBytes => AppConfig.frameBytesFor(_micRate) * 2; // 40 ms
 
-  void _onMicData(Uint8List chunk) {
+  void _onMicData(Uint8List chunk, {bool? voiceGate}) {
     if (!_micOpen || _micMuted) {
       if (audioLevel.value != 0.0) audioLevel.value = 0.0;
       return;
@@ -500,11 +685,20 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
 
     final rms = _rms(chunk);
     if (_mode == IntercomMode.vox) {
-      if (rms >= _voxOpenRms) {
-        if (!_transmitting && _rt.isConnected) _startStream();
+      // 3.55: with voice cleanup the gate (voiced speech, 500 ms hold) decides; else loudness.
+      final talk = voiceGate ?? (rms >= _voxOpenRms);
+      if (voiceGate != null && !voiceGate && !_transmitting) {
+        _preRoll.add(chunk);
+        if (_preRoll.length > 2) _preRoll.removeAt(0);
+      }
+      if (talk) {
+        // 3.55 fix: an armed VOX mic never starts a stream once the admin switched talk off.
+        if (!_transmitting && _rt.isConnected && _talkSwitchOn) _startStream();
         _voxSilenceTimer?.cancel();
-        _voxSilenceTimer = Timer(_voxHangover, () {
+        // (the voice gate already holds 500 ms after the last voiced frame)
+        _voxSilenceTimer = Timer(voiceGate != null ? const Duration(milliseconds: 120) : _voxHangover, () {
           if (_transmitting) _endStream();
+          _applyMicRate(); // 3.55 fix: a Data saver change made during the burst applies now
         });
       }
       if (!_transmitting) {
@@ -610,6 +804,8 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
         if (_isSirenDucked) {
           bytes = attenuatePcm16(bytes, sirenDuckingFactor);
         }
+        // 3.55: light limiter so one loud rider does not blast (no added latency).
+        bytes = _rxLimiter.processPcm16(bytes);
         final even = bytes.length & ~1;
         if (even == 0) continue;
         final copy = Uint8List.fromList(bytes.sublist(0, even)); // aligned copy
@@ -746,6 +942,7 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
         _activeChannel = p.isLeadOnly ? IntercomChannel.leadOnly : IntercomChannel.all;
         if (p.from.isNotEmpty) _speakingRiders[p.from] = true;
         _lastRxAt = DateTime.now();
+        _rxLimiter.reset();
 
         _triggerIncomingHapticPulse(isLead: isLead);
         final isEmergency = p.header['emergency'] == true ||
@@ -1002,10 +1199,12 @@ class IntercomService extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void dispose() {
     _disposed = true;
+    _rearmAfterCallTimer?.cancel();
     try {
       WidgetsBinding.instance.removeObserver(this);
     } catch (_) {}
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
+    settings?.removeListener(_onSettingsChanged);
     audioLevel.dispose();
     activeSpeakerNotifier.dispose();
     _voiceSub?.cancel();
