@@ -23,12 +23,15 @@ Widget tests can't run in this environment. Every test expectation that pointed 
 
 | Concept | Name in the UI | Don't use | Where it shows |
 |---|---|---|---|
-| Riding position, front | **Lead** | Road Captain, Point, "LEAD (POINT)" | rider card (chip, Riding role segment), manage-riders badges, cockpit pills, RoleNotice, feature guide, admin (`adminRoleLabel`) |
+| Riding position, front | **Lead** (the first rider in the convoy, who guides the others; mid-sentence "the lead") | Road Captain, Point, "LEAD (POINT)", leader, the Lead mid-sentence, "the lead" for who manages the trip | rider card (chip, Riding role segment), manage-riders badges, cockpit pills, RoleNotice, feature guide, admin (`adminRoleLabel`) |
 | Riding position, middle | **Middle** | Pack, Rider (as a role badge) | `RideRole.label`, rider card segment, manage-riders badge, admin role label |
 | Riding position, back | **Sweeper** | Sweep, SWEEP | everywhere above, plus the compact cockpit roster tag |
 | The three of them together | **Riding roles** ("Riding role" for one rider); **Automatic roles** for the auto switch | "Lead and Sweep" | group settings, rider card, feature guide ("Riding roles"), plan benefits |
-| Ride creator (governance) | **Trip owner** (badge TRIP OWNER, compact tag OWNER) | Ride owner | manage-riders sheet, cockpit roster |
-| Route manager (governance) | **Trip head** (badge TRIP HEAD, compact tag HEAD; sentence text "the trip head") | Trip Head mid-sentence | manage-riders sheet, "Paused by the trip head" |
+| The person who created the group/trip (governance) | **Trip owner** (badge TRIP OWNER, compact tag OWNER; sentence text "the trip owner") | Ride owner, host (as a noun), creator, organiser | manage-riders sheet, cockpit roster, admin ride lists ("trip owner Asha"), "Start or join" |
+| A secondary owner for one trip who can change the trip's settings only (owner decision, Nov 9) | **Trip head** (badge TRIP HEAD, compact tag HEAD; sentence text "the trip head"; explanation "Trip head: can change the trip's settings. Only the trip owner removes riders or ends the trip.") | Trip Head mid-sentence, co-owner, route manager, "same rights as the trip owner" | manage-riders sheet; group settings ("Only the trip owner or trip head can change these.", "Trip head can change the trip's settings.") |
+| Who changes the group settings, in sentences | **the trip owner or trip head** ("The trip owner or trip head decides." for the public ride) | "the lead" (the Lead is a riding position) | group settings, public ride, feature guide limit / feature hints |
+| Who runs the ride on the road (stops, route, pause, roles, regroup, buddy pairs, Guardian group links) | **the trip owner or the Lead** ("Suggestion sent to the trip owner and the Lead.", "The trip owner or the Lead decides whether to add the stop.", "Skipped by the trip owner or the Lead.") | "the trip owner or trip head" (the trip head has settings only) | stop suggestions, meet here, trip report, Guardian group consent, automatic roles subtitle |
+| Ending the trip, removing riders | **the trip owner** ("Only the trip owner can end the trip.", "Only the trip owner can remove riders.") | trip head, Lead | gateway errors, End Ride button (trip owner only) |
 | The people in a ride | **group** / **group ride** | convoy (in UI text) | "Group spread", "Pause group ride", "Manage riders", "Your group" (SOS hold), "joined the ride / left the ride" |
 | Free plan | **Community (free)** (short form "Community") | No plan, Solo plan, Free plan | membership, payment history, admin |
 | Paid plans | **Small Group (2–6)**, **Large Group (7–12)** | Group (2–6), Group Membership (N Riders Capacity), Extended Group | membership card title, `UserMembership.name`, payment history, admin |
@@ -46,6 +49,148 @@ Widget tests can't run in this environment. Every test expectation that pointed 
 | Emergency | **SOS** (always upper case) | Sos, S.O.S | everywhere |
 | Swaps | **Swap bikes**; **Change places (rider and pillion)** | Swap rider and pillion | rider card; matches the swap notices ("wants to change places", "changed places") |
 | Off the group's route | "You left the group's route" → **Route to group** / **Ask group to wait** / **Keep my own route** | Continue my way | cockpit slot |
+
+## 2b. Round 3 (Nov 9): new names for sound, calls and the lock screen
+
+New rider-facing labels and phrases from the audio, mic and live-settings work. Use them exactly; the manuals use the same words.
+
+### Settings > Voice & sound (rows hide when their admin switch is off)
+
+| Label | Subtitle / choices | Setting key | Admin switch |
+|---|---|---|---|
+| **Speak warnings and directions** (existing) | "… Emergency alerts are always spoken." | `voiceWarnings` | — |
+| **Pause music during alerts** (existing) | ordinary lines pause music instead of lowering it | `pauseOtherAudio` | — |
+| **Lower music when speeding** | "Well over the speed limit, music gets quieter, then pauses. Back under the limit, it comes back. CoRoute alerts and the intercom stay loud." | `lowerMusicWhenSpeeding` | `speedAudio` |
+| **Siren alerts** | "Warns you about ambulance, police and fire sirens, even when your earphones block outside sound. Listens on your phone during rides only. Nothing is recorded or sent." | `sirenAlerts` | `sirenDetector` |
+| **Give way to the** | Automatic / Left / Right. "The side the siren alert tells you to keep to." | `giveWaySide` | `sirenDetector` |
+| **Horn alerts** | Automatic / On / Off. "Automatic: only when earphones or music may stop you hearing traffic. Listens on your phone during rides only. Nothing is recorded or sent." | `hornAlerts` | `hornAlert` |
+| **Clean up my voice** | "Takes out breathing, wind and engine noise before the group hears you." | `voiceCleanup` | `voiceCleanup` |
+
+### Spoken phrases
+
+| Situation | Phrase |
+|---|---|
+| Siren close by (trend not yet known) | "Emergency vehicle siren close by. Keep left and give way." (right-hand-traffic countries or setting Right: "Keep right") |
+| Siren getting louder | "Emergency vehicle approaching, sounds like an ambulance. Keep left and give way." (the kind only when confident, always as "sounds like") |
+| Far siren | "Emergency vehicle siren in the distance." |
+| Same siren clearly closer | "Emergency vehicle getting closer. Keep left and give way." |
+| Horn close by (only when earphones / a helmet set, music, the intercom or a call may stop the rider hearing traffic) | "Horn close by. Check your mirrors." |
+| Far over the limit | "Slow down. 95 km/h, limit 65." |
+| After a call, critical | "Safety alert during your call: …" (+ "And 2 more safety alerts.") |
+| After a call, ordinary | "While you were on the call: 2 road warnings, Asha fell behind." |
+| Mic permission missing (said once) | "Siren and horn alerts need the microphone. Allow it for CoRoute in phone settings to use them." |
+| Crash detection turned off during a countdown (screen + notification) | "Crash detection is off for new alarms. This alarm is still running: tap I'm OK to cancel it." |
+
+### Lock screen and notifications
+
+| Item | Text |
+|---|---|
+| Ride notification line | "55 km/h · limit 60 · Warning in 1.2 km · Receiving Asha"; over the limit: "70 km/h (over 60)" |
+| Intercom states | **Talking**, **Receiving** (name), **Group voice muted**, **Hands-free on**, **Voice paused (call)** |
+| Buttons | SOS, **Talk** / **Talk off**, **Mute** / **Unmute**, Leave |
+| Notification channels (Android settings) | **Critical ride alerts** (new), SOS (new id `coroute_sos_v2`) |
+
+### Naming rules for this area
+
+- Say **close by** or **approaching**, never **behind**, for sirens and horns: one phone microphone cannot tell direction.
+- A siren's kind is a likeness ("sounds like an ambulance", "ambulance-like"), never a statement.
+- "Music" in rider text means any other app's audio. "Lower" = quieter, "pause" = stopped; don't use "duck" in UI text.
+- Admin-only names (feature switches): "Lower music when speeding", "Calls: hold ride voice, let critical alerts through", "Intercom voice cleanup: noise, wind and breath", "Live bike change", "Siren detector".
+
+## 2c. Round 4 (Nov 9): social, rider score, leaderboards, marketing and pillion
+
+New rider-facing names from usernames / friends / crews, the rider score, the leaderboards, the Marketing studio and the pillion seat. The manuals use the same words.
+
+### Glossary additions
+
+| Concept | Name in the UI | Don't use | Where it shows |
+|---|---|---|---|
+| A standing circle of riding friends, outside a ride | **Crew** / **Crews** ("Create a crew", "My crews", "Join crew", "Leave crew", "Delete crew") | group, club, community (in UI text: "group" is the live ride, "Small Group" / "Large Group" are plans) | Crews screen, crew screen, profile row "Crews" |
+| The rider who runs a crew | **Crew admin** (badge ADMIN on the crew screen) | owner, leader, host, Trip owner (that is a ride role) | crew screen, "You will be the crew admin." |
+| Helpers of the crew admin (up to 3) | **Co-admin** (badge CO-ADMIN; actions "Make co-admin" / "Make member") | moderator, deputy | crew screen, member actions |
+| Everyone else in a crew | **Member** (badge MEMBER) | follower, rider (as a crew role) | crew screen |
+| A crew vote | **Poll** ("New poll", "Start poll", "Close poll", "Save my vote", "Remove my vote", "Who voted", "Closes in …") | survey, vote (as the noun for the whole thing), chat, comment | crew screen |
+| Public rider name | **Username** ("Your username", "Change username", "@SwiftFalcon482" on rider cards) | handle, nickname, display name, ID | My profile, friends, crews, leaderboards, ride rider card |
+| Mutual connection between riders | **Friends** ("Add a friend", "Send request", "Wants to be friends", "Accept" / "Decline", "Remove friend", "Block …", "Invite friends to CoRoute") | followers, contacts, connections, buddies (Buddy pairs is a ride safety feature) | Friends screen, My profile |
+| Personal invite | **Invite code** / invite link ("Ride with me on CoRoute") | referral code (that is a coupon), join code (that is a ride) | Friends screen, My profile |
+| Private safety score | **Rider score** ("Your rider score", "How safely you ride, 0 to 100"); parts **Speed discipline**, **Smoothness**, **Safety habits**, **Regular riding** | safe score, safety rating, SafeScore, points (in the app) | score screen, profile card, Trips header |
+| Inviting crew members to a live ride | **Start a ride** (crew screen; "Invite crew to my ride" while I run a live ride), **Ride invitation** (screen title, push title), "<username> invited you to <ride> with <crew>", **Accept** / **Decline**, picker "Select all", "Invite 3 riders", statuses **Waiting / Joined / Declined / Expired** | "Join code" in this flow (no code is shared), "crew ride request", "summon" | crew screen, ride invitation screen, push, host snackbar ("Asha accepted your ride invitation") |
+| Rider score levels | **Learner** (under 50), **Steady** (50–69), **Skilled** (70–84), **Ace Rider** (85+) | Beginner, Expert, Pro, Lead (a riding position), Road Captain (a retired plan name) | score screen |
+| Public ranking | **Leaderboard** / **Leaderboards**; boards **Top score**, **Longest ride**, **Most km**, **Most hours**, **Most rides** (website tab: "Top rider"); opt-out row **Show my username on public leaderboards** | ranking, hall of fame | leaderboard screen, website, My profile |
+| Admin image creator | **Marketing studio** (actions "Make an offer image", "Share PNG", "Share all sizes", "Copy caption") | poster maker, banner tool, creative studio | admin console Sections, Coupons tab |
+| Bike kinds | **Bike type**: Commuter, Scooter, Sport, Cruiser, Adventure / Tourer, Off-road / Dirt, Electric, Cafe racer / Retro | vehicle class, category | garage add / edit sheet, "Complete your bike" |
+| Required bike details before a ride | **Complete your bike** ("Save and continue") | Bike verification, KYC, mandatory profile | create / join a ride, home prompt |
+
+### Pillion phrases
+
+| Situation | Text |
+|---|---|
+| Joining without a bike | "I'm riding pillion (no bike)" |
+| Pillion pick sheet | Title "Whose bike are you on?"; confirm "You'll ride pillion on Asha's Royal Enfield Classic 350 (Red). Confirm?"; note "Your group sees one bike with two people. Your phone keeps its safety features on."; buttons **Confirm** / **Not now**; "I am not riding pillion" |
+| No free bike | "No free bike in this ride right now. Ask your rider to join the ride first." |
+| Everyone (card and spoken) | "Kiran is riding pillion with Asha." |
+| The rider of the bike | "Kiran is riding pillion with you" + "Not right? Decline within a minute, or remove them later from their rider card." Buttons **Decline** (first 60 s), later **Remove pillion** on the rider card |
+| The pillion | "You're riding pillion with Asha" + "Hold on. Your phone keeps its safety features on." |
+| Declined / removed / rider left | "Asha declined you as pillion. Pick the bike you ride on." / "Asha removed you as pillion" / "Asha left the ride. Pick the bike you ride on." |
+| Map label and screen reader | "Asha + Kiran"; "Asha, Classic 350, red, with pillion Kiran, 42 km/h, Riding"; on the pillion's phone "You, riding pillion with Asha" |
+
+### Naming rules for this area
+
+- **Crew** is never "group": "group" stays for the people in a live ride, and the plans are "Small Group" / "Large Group". The crew roles (Crew admin, Co-admin, Member) never reuse ride roles (Trip owner, Trip head, Lead).
+- Show riders to each other by **username** (and the first name to friends only); never a full name, phone or e-mail outside the rider's own profile.
+- The rider score never talks about speed as good: say "within the limit", never "fast" or "quick". The website says "pts" after the score; the app shows the number alone.
+- Resolved (owner, Nov 9): the top rider score level is **Ace Rider** (was "Road Captain", which stays only as the retired plan name "Legacy plan (Road Captain)" and in the "Don't use" list for the Lead riding position). Gateway `rider_score.js` LEVELS, app `levelDescription` (an older gateway's "Road Captain" is shown as "Ace Rider").
+
+## 2d. Latest round (Nov 9): crew ride invitations, push notifications, trip head, Ace Rider
+
+The manuals use the same words.
+
+### Crew ride invitation texts
+
+| Where | Text |
+|---|---|
+| Crew screen button | **Start a ride** (no live ride); **Invite crew to my ride** (I run a live ride) |
+| Picker sheet | Title "Invite <crew> to your ride"; note "Pick who to invite. They get a notification and join when they accept. Your join code is not shared."; row **Select all (n)**; button **Pick riders** / **Invite 1 rider** / **Invite 3 riders** (sending: "Sending..."); empty "No one else is in this crew yet." |
+| Picker statuses | **Waiting** / **Joined** / **Declined** / **Expired** |
+| Summary after sending | "2 invited · 1 no seat left" |
+| Not the trip owner | "You are in a ride someone else started. Only its trip owner can invite riders." |
+| Push (app closed) | Title **Ride invitation**; body "<username> invited you to <ride> with <crew>" (no crew: "<username> invited you to <ride>") |
+| Banner (app open) | "<username> invited you to <ride> with <crew>" + **View** |
+| Invitation screen | Title **Ride invitation**; host "Asha (@SwiftFalcon482)"; "invited you to ride with <crew>"; ride name (or "Group ride"); "Cubbon Park Gate → Nandi Hills" (or "To …" / "From …"); "Started 10:24"; "3 of 6 riders"; note "Joining shares your live location with this group while you ride, like any group ride."; buttons **Accept** (busy "Joining...") / **Decline** |
+| Invitation states | "You accepted this invitation." / "You declined this invitation." / "The host took this invitation back." / "This invitation has expired." / "This ride invitation is not available." |
+| Several waiting | Title **Ride invitations**; empty "No ride invitations waiting." |
+| Host snackbar | "Asha accepted your ride invitation" / "Asha declined your ride invitation" |
+
+Don't use: "join code" in this flow (no code is shared), "crew ride request", "summon", "Ride invite" as a visible title (say **Ride invitation**).
+
+### Push notification texts (app closed)
+
+| Event | Title | Body |
+|---|---|---|
+| Friend request | Friend request | "<username> sent you a friend request" |
+| Friend accepted | New friend | "<username> accepted your friend request" |
+| Crew invite | Crew invite | "<username> invited you to the crew <crew>" |
+| New poll | New poll in <crew> | "<username> asks: <question>" |
+| Ride invitation | Ride invitation | "<username> invited you to <ride> with <crew>" |
+
+Setting: Settings › Account & privacy › **Push notifications**, subtitle "Friend requests, crew invites, polls and ride invites when CoRoute is closed. Usernames only, never your location." Android channels: **Friends** and **Ride invites**. Never name a rider by full name, phone or e-mail in a push.
+
+Note for a later gateway pass (not changed here, `gateway/src` was out of scope): `push.js` still has a fallback `RIDE_INVITE` template titled "Ride invite" ("… invited you to a ride: <ride>"). Crew ride invites send their own text ("Ride invitation"), so riders see the right title; align the fallback when `push.js` is next touched.
+
+### Trip head: settings only
+
+- Explanation line (manage-riders sheet): "Trip head: can change the trip's settings. Only the trip owner removes riders or ends the trip."
+- In sentences: who changes **settings** = "the trip owner or trip head"; who **runs the ride on the road** (stops, route, pause, roles, regroup, buddy pairs, Guardian group links) = "the trip owner or the Lead"; who **ends the trip / removes riders** = "the trip owner" only.
+- Choosing a trip head does **not** make them Lead and does not move the riding roles. Never write "trip head (lead)" or imply the trip head guides the ride.
+- Errors: "Only the Trip owner can end the trip." / "Only the Trip owner can remove riders." / "Only the Trip owner or Lead can change the trip state." Crew ride invites: only the trip owner invites (the trip head cannot).
+
+### Rider score levels
+
+**Learner** (under 50), **Steady** (50–69), **Skilled** (70–84), **Ace Rider** (85+). "Road Captain" is only the retired plan name ("Legacy plan (Road Captain)").
+
+### Pillion pair, one answer
+
+Manual / help wording: "If you or your pillion answers “Are you OK?”, it counts for both of you." No new app string.
 
 ## 3. Changes made (file → before → after)
 
@@ -142,7 +287,15 @@ Widget tests can't run in this environment. Every test expectation that pointed 
    - The cockpit fuel de-duplication (`live_cockpit_map_screen.dart` ~l.2372) also matches the word "bunk". Keep that matcher until those labels change.
 2. **Emergency button casing.** "Need Help", "I Can Help", "Can't Assist", "Unable to Assist", "View Emergency" and "EMERGENCY" are Title Case or caps. Every other button is sentence case. They are used in L10n (te/hi/…), notification actions and many safety tests, so changing them needs sign-off from safety and localisation.
 3. **"Trip" vs "ride".** Live features say *ride*. History says *trip*: the "Trips" screen, "Trip report", "Trip owner / Trip head", "No events for this trip". Pick one, or document the split ("ride" while riding, "trip" once saved).
-4. **Trip head vs riding Lead.** Since 3.55 the riding Lead can be anyone, while the *trip head* manages the route. The manage-riders sheet shows TRIP OWNER, TRIP HEAD, LEAD and SWEEPER side by side. Riders will likely mix up "head" and "lead". Consider renaming *Trip head* (for example "Route manager"), or merging the two ideas.
+4. **Trip owner, trip head and riding Lead: decided by the owner (Nov 9), done.**
+   - **Trip owner** = the person who created the group/trip. **Trip head** = a secondary owner for that one trip who can change the trip's group settings only (second owner decision, Nov 9: no removing riders, no ending the trip, no pause / roles / stops / route / buddy pairs as such; a trip head who rides as the picked Lead keeps the Lead's rights by that role). **Lead** = a riding role in that trip: the first rider in the convoy, who guides the others (with Middle and Sweeper).
+   - Second decision applied (gateway `canChangeSettings` / `isLead` / `canManage`, app `canChangeGroupSettings` / `canEditRoute` / `canEndTrip`): stop, meet-here, trip-report and Guardian texts now say "the trip owner or the Lead"; the End Ride button shows for the trip owner only; gateway errors "Only the Trip owner or Lead can change the trip state." / "Only the Trip owner can end the trip." / "Only the Trip owner can remove riders."; choosing a trip head no longer moves the riding roles.
+   - Text that says who *manages* the trip now says "the trip owner or trip head" (was "the lead"): group settings lock note and automatic-roles subtitle, meet-here sheet, stop suggestions (cockpit, route stops panel, historic place "Add stop"), public ride ("The trip owner or trip head decides."), Guardian group consent, feature guide hints (Riding roles, Group alerts, Nearby groups, Start or join), trip report ("Skipped by the trip owner or trip head."). "Disabled by lead" (ride feature summary) → "Turned off for this ride"; "The lead requires a PIN…" → "This ride needs a PIN for Guardian links."; "Paused by the trip head" → "Group ride paused" (the trip owner, the trip head or a set lead can pause).
+   - Safety text keeps "your lead" ("Your lead was told…"): those alerts go to the riding lead and sweeper.
+   - Admin ride lists: "lead Asha" (it was the creator) → "trip owner Asha"; search hint "Ride, trip owner or place"; plan seats "trip owner included".
+   - Mid-sentence role names are lower case: "the lead", "the sweeper", "the trip owner", "the trip head". Badges stay upper case.
+   - Role explanations: the manage-riders sheet now has one line per role ("Trip owner: created this trip." / "Trip head: can change the trip's settings. Only the trip owner removes riders or ends the trip." / "Lead: rides first and guides the group. Middle: rides between. Sweeper: rides last.") and shows the riding role badge next to the trip role (a trip owner who rides Lead shows TRIP OWNER and LEAD). The rider card's Riding role section and the feature guide's "Riding roles" entry explain the positions in one line and say they are not the trip owner / trip head.
+   - Still to change, in files other agents own: `core/config/feature_gates.dart` ("The ride lead's audio…", unused, see 7) and `domain/voice/helmet_voice_hotword.dart` ("Fuel stop asked from the Lead." → "…from the lead.").
 5. **The features guide has no 3.55 entries** for Place reviews, Historic places, Bike swap / change places, Road hazards (pothole / speed breaker / rough road), Engine rest advice and Route to group. The battery, data and privacy facts for each need product input.
 6. **"Road joint ahead".** `RoadHazardClassification.transverseJoint` is a fourth kind beyond Pothole / Speed breaker / Rough road. Decide whether it folds into "Rough road".
 7. **Dead jargon strings.** `core/config/feature_gates.dart` `featureName()` / `featureDescription()` ("Road Hazard Telemetry Mesh Broadcast", "Multi-Bike Motorcycle Garage", "Total Convoy Spread Alerts"…) are not used anywhere. Delete them, or rewrite them before anyone shows them.
@@ -159,5 +312,21 @@ Widget tests can't run in this environment. Every test expectation that pointed 
 
     A token pass is needed for light theme on the admin diagnostics screens.
 11. **"COCO" in fuel station rows** (`cockpit_action_stack.dart`). Many Indian riders know it ("company-owned, company-operated"), but it is jargon for some. Consider "Company-run".
-12. **The off-route voice line** asks a moving rider to "Tap Route to group". This is a safety and product call: either say "Route to group is on the screen", or offer the voice command.
+12. **Taps while moving: decided by the owner (Nov 9), done: speak while moving, act when stopped.** Non-urgent cards that need a tap (off-route "Route to group", bike / rider-pillion swap request, historic place on the way, place review question) show their buttons only when the rider is stopped (3 km/h or less for 5 s; moving again at 8 km/h). While moving: one short line, once, and a compact chip with no buttons. A pillion can always tap. Safety cards (SOS, crash alarm, rider down, siren) are not affected. Gate: `domain/ride/ride_tap_gate.dart` (`RideTapGate`, pure). Lines and chips:
+
+    | Card | Said once while moving | Chip while moving |
+    |---|---|---|
+    | Off the group's route | "You're off the route. Stop when safe to route to your group." (already stopped: "You left the group's route. Choose on the screen.") | "Off the group's route · Stop to choose" |
+    | Swap ask | "Asha wants to swap bikes with you. Stop when safe to accept or decline." | "Asha wants to swap bikes with you · Stop to answer" |
+    | Historic place | "Historic place on your way: Golconda Fort, …" (unchanged) | "Historic place ahead: Golconda Fort" |
+    | Place review | "Rate Sri Sai Dhaba when you stop." | "Rate Sri Sai Dhaba when you stop" |
+
 13. **Admin place reviews** show the raw category id (`fuel`, `other`). Map it with `PoiCategory.singular`.
+
+14. **Round 3 wording to fix (owners of those files).**
+    - Admin switch `hornAlert` is now titled "Horn close by alert" ("Tells the rider when a vehicle honks close by"). The cockpit siren card now reads "EMERGENCY VEHICLE SIREN" with a "GIVE WAY" badge (was "BEHIND"/"YIELD"/"Audio ducked -20dB"). Fixed Nov 9.
+    - The cockpit siren card (`siren_hud_pill.dart`) still has the code path for "EMERGENCY SIREN BEHIND" (only when `approachingFromBehind`, which the new mic path never sets), the badge "YIELD", the detail "Audio ducked -20dB", the fallback "Acoustic siren", the tooltip "Dismiss Alert" and the screen-reader hint "Yield right of way." Suggested: "Give way", "Music lowered", "Siren", "Dismiss", and the same "Keep left and give way" wording as the voice.
+
+15. **Missing-rider check: decided by the owner (Nov 9), done.** The card keeps **I'm OK** and **Need help** (asks the group to wait, as before) and adds a separate red **Send SOS** button under it ("Send SOS · hold to send", "Keep holding…" while held), which must be held for 1.5 s like the big SOS button and raises the real SOS. The line above it: "Need help asks the group to wait. For an emergency, hold Send SOS."
+
+16. **Place review question after the ride: done.** "Rate places from your ride" (at most 2 places, "You stayed 25 min. A quick rating helps the next riders.", **Rate** / **Skip**) after the ride ends, on the "Ride ended" screen or as a sheet after the trip review, only for places not answered in the cockpit and only while the `placeReviews` and `reviewPrompt` switches are on.

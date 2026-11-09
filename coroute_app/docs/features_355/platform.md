@@ -229,6 +229,9 @@ From the laptop (OCI CLI, `mk`/`upd` helpers from runbook §3.4 and §6):
    This doesn't make the old values safe. Rotation is what closes the leak.
 
 ### Own domain instead of DuckDNS
+The chosen domain is `coroute.devmonks.space`: follow `docs/DOMAIN_MIGRATION_devmonks.md` (the Caddyfiles, gateway
+and app are already prepared for it). The generic steps below stay for reference.
+
 1. Buy a domain (for example `coroute.in`) and host its DNS at a regular provider that has a Caddy
    DNS-01 plugin: OCI DNS (`caddy-dns/oracle`, uses the instance principal) or Cloudflare free DNS-only
    (`caddy-dns/cloudflare`, API token). Add an `A` record for `coroute.in` (and `www`) pointing to the

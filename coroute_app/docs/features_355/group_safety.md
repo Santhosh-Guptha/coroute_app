@@ -48,8 +48,12 @@ when all of these hold:
   (15 min quiet).
 
 Answers: **I'm OK** (STATUS reason CUSTOM, message "I'm OK", so the lead sees why on my rider card),
-**Need help** (asks the group to wait + STATUS "Needs help"; SOS stays one tap away), **Waiting for
-fuel / Photo stop / Taking a break** (STATUS FUELING / PHOTO_STOP / REST_BREAK). A status reason clears
+**Need help** (asks the group to wait + STATUS "Needs help"), **Waiting for
+fuel / Photo stop / Taking a break** (STATUS FUELING / PHOTO_STOP / REST_BREAK), and (owner decision
+Nov 9) a separate red **Send SOS** button under the card, held for 1.5 s like the big SOS button
+(`HoldSosPill`): it closes the card (`GroupSafetyService.answerSos`, no "I'm OK" check-in) and raises
+the real SOS through the cockpit's one SOS path (`ConvoyService.triggerSosAlert`). Card:
+`MissingRiderCard` in `group_safety_cards.dart`; tests `test/missing_rider_sos_355_test.dart`. A status reason clears
 by itself when I ride again (existing ConvoyService rule).
 
 No answer in 90 s → `sendCheckIn(CheckInResult.noReply, awayM, context: CheckInContext.missingRider)`

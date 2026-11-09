@@ -48,10 +48,14 @@ app.*.map.json
 .widget_preview/
 
 # CoRoute: never commit secrets
+CLUSTER_CREDENTIALS.md
 android/key.properties
 android/app/*.jks*
 android/app/*.keystore*
 gateway/.env
+*.env*
+*fcm*.json
+*.whl
 gateway/node_modules/
 Claude outputs/
 _to_delete/

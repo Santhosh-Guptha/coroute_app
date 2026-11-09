@@ -9,6 +9,13 @@ Companion documents:
 - [FEATURE_STATUS.md](FEATURE_STATUS.md): every feature with its status (stable / needs device check / pending).
 - [SAFETY_SCENARIO_REVIEW_v3.55.md](SAFETY_SCENARIO_REVIEW_v3.55.md): real-time scenario review, 11 defects found and fixed.
 - [UX_NAMING_GUIDE_v3.55.md](UX_NAMING_GUIDE_v3.55.md): one name per concept across all screens.
+- [SETTINGS_LIVE_AUDIT_v3.55.md](SETTINGS_LIVE_AUDIT_v3.55.md): every setting traced to its consumers; what now applies mid-ride.
+- [features_355/audio_and_calls.md](features_355/audio_and_calls.md) and [features_355/sound_awareness_and_intercom.md](features_355/sound_awareness_and_intercom.md): sound, calls, lock screen, sirens, horns, intercom voice.
+- **[DEPLOY_PROMPT_v3.55.md](DEPLOY_PROMPT_v3.55.md): the primary, self-contained prompt to paste into the owner's coding agent (secrets hygiene, commits, build, owner-provided items, two-VM deploy, consolidated device gate, Play rollout, report format).**
+- [NEXT_AGENT_PROMPT_v3.55.md](NEXT_AGENT_PROMPT_v3.55.md): earlier per-round build and device steps (history and detailed reference).
+- [DOMAIN_MIGRATION_devmonks.md](DOMAIN_MIGRATION_devmonks.md) and [features_355/push_notifications.md](features_355/push_notifications.md): the own-domain move and push notifications (latest round).
+- [features_355/speed_accuracy.md](features_355/speed_accuracy.md): why the app reads below the bike's speedometer, and the seven speed fixes.
+- [manuals/](manuals/): User manual (22 pages) and Investor manual (12 pages) PDFs, rebuilt Nov 9 (fourth time) for the latest round: trip head = settings only (chapter 8), "Ace Rider" level (chapter 15), a new page "Start a ride with your crew" (chapter 14, with mock-ups of the invite picker and the Ride invitation screen, `m_s11_crew_ride_pick.png`, `m_s10_ride_invite.png`) and push notifications, pillion one-answer note (chapters 8 and 17); investor: crew ride invites and push in the growth loop, own domain, 904 server tests, 66 switches. Earlier (third time) for round 4: new user chapters 12–17 (profile and username, friends, crews and polls, rider score and leaderboards, your bike, riding pillion) and investor chapters 6–7 (community and growth loop, campaigns and public impact), with mock-ups using the app's real bike silhouettes. Sources in `manuals/source/` (`mock/gen_social.py` + `render_mock_social.js` → round-4 mock-ups, `mock/bikeglyph.py` + `mock/bike_shapes.json` → bike shapes, `build.py` → HTML, `pdf.js` → PDF via Playwright; build in a copy at `/home/claude/manual`).
 
 ## 1. Requests from the owner and how each was done
 
@@ -38,6 +45,113 @@ Companion documents:
 
 All 21 phone-only safety and group/community features from the plan, plus the platform items that can be done in code, are now built (see [FEATURE_STATUS.md](FEATURE_STATUS.md) phase 2 table and [features_355/](features_355/)). Each has an admin switch (55+ switches in total). Gateway now **794 tests**; analyzer clean.
 
+## 1c. Round 3 (Nov 9): sound, calls, lock screen and live settings
+
+Owner report that started it: "I changed the speed limit in the middle of the ride but it's not updating. Check the other features too." That became a full live-settings audit, plus the rider's audio experience end to end.
+
+| Change | What the rider gets | Where (main files) | Admin switch |
+|---|---|---|---|
+| Settings apply live mid-ride | Speed warning uses the **stricter** of the group limit and my own limit, and the town / near-stop limit, re-checked at once. Break reminder, solo check-in, voice, data saver, quick settings rows and group voice all follow a change immediately (details in the audit). | `domain/safety/effective_speed_limit.dart`, `safety_service.dart`, `voice_service.dart`, `glove_quick_settings_modal.dart`, `solo_guardian_service.dart`, `intercom_service.dart` | — |
+| Group settings sliders | Distance / stop sliders preview while dragging and send **one** change on release; duplicate taps within 1.5 s are not re-sent; offline policy changes say they were not sent. | `group_settings_sheet.dart` (`ReleaseSlider`), `convoy_service.dart` | — |
+| Live bike colour and model | Changing the active garage bike mid-ride updates the colour (and model on the rider card) on every phone. New socket message `RIDER_VEHICLE`, HELLO feature `vehicle1`; rate limit 10 s; refused for pillion / swapped bike. | gateway `convoys.js`, `ws.js`; app `garage_binding.dart`, `rider_vehicle.dart`, `convoy_service.dart` | `riderVehicleLive` |
+| Crash alarm and the detection switch | Turning crash detection off during a countdown never cancels the running alarm; the screen and notification say "Crash detection is off for new alarms. This alarm is still running: tap I'm OK to cancel it." | `safety_service.dart`, `crash_alarm_screen.dart`, `alarm_notifier.dart` | `crashDetection` (locked) |
+| Music and CoRoute alerts | Ordinary lines duck other apps' music (or pause it with "Pause music during alerts"). Critical lines pause music and play on the **alarm stream**: heard at media volume 0 and through DND (when allowed). | `audio_priority_manager.dart`, `voice_service.dart`, `TtsChannel.kt` | — |
+| Lower music when speeding | 10 % over the limit for 4 s → music at 60 %; 25 % → 30 %; 40 % → paused plus a critical "Slow down" line. Back 3 km/h under for 5 s → music returns, ramped. Never fights the rider's own volume change. Settings > Voice & sound. | `speed_audio_service.dart`, `domain/safety/speed_audio_policy.dart`, `MediaVolumeGuard.kt` (new) | `speedAudio` |
+| Phone calls | Ringing / on a call: ordinary lines held (navigation dropped), critical ones get a short tone and phrase in the call audio plus buzz and heads-up. After the call: "Safety alert during your call: …" and "While you were on the call: …". Hands-free talk resumes after the call. | `phone_call_service.dart`, `domain/voice/call_alert_queue.dart`, `PhoneCallChannel.kt`, `intercom_service.dart` | `callAwareAlerts` |
+| Lock screen | Ride notification line: speed, limit, next warning, intercom state; buttons SOS, **Talk** / Talk off, **Mute** / Unmute, Leave. Another rider's SOS full screen over the lock screen (heads-up if Android 14+ refuses). New channels **Critical ride alerts** and **SOS (v2)** with alarm sound and DND bypass. | `ride_notification_service.dart`, `RideNotification.kt`, `ride_notif_expanded.xml`, `alarm_notifier.dart` | — |
+| One shared ride microphone | Detection and intercom share one capture (Android allows one); raw source for detection so a siren is not "noise-suppressed" away; released in calls, low battery, switch off. | `ride_mic_hub.dart` (new) | — |
+| Emergency-vehicle siren alerts | Wail, yelp and hi-lo (incl. Indian 1050/700 Hz) with approaching / moving away and nearness; "Emergency vehicle siren close by. Keep left and give way."; spoken in the headset when earphones / music may stop the rider hearing it (else card + vibration + tone); cockpit card; intercom −20 dB while it lasts. Never says "behind". | `domain/audio/sound_awareness_engine.dart`, `dsp_core.dart`, `siren_acoustic_detector.dart`, `siren_hud_pill.dart` | `sirenDetector` |
+| Horn alerts | "Horn close by. Check your mirrors." Automatic (default): only when the rider can't hear outside (headset, music, intercom, call); On: also on the speaker as vibration + card; own horn ignored; one per 20 s. | same as above | `hornAlert` |
+| Clean intercom voice | High-pass for wind/engine, noise suppression, breath and gust suppression, a voice gate so hands-free sends nothing on breath or wind, AGC and limiter; 12 ms added latency; receive-side limiter. Setting "Clean up my voice". | `domain/audio/voice_cleanup.dart`, `intercom_service.dart` | `voiceCleanup` |
+
+Measured (synthetic signals, plain `dart`, same code as the tests; **not** real-road results): sirens detected 1.9–2.9 s after they start with the siren 13 dB under the ride noise; 0 false siren or horn alerts in 20 min of mixed negative audio; voice cleanup removes breath by 30 dB and wind gusts by 34.5 dB with speech changed by under 1 dB; 12 ms added latency. Full tables in sound_awareness_and_intercom.md §5.
+
+Five new admin switches (default on, not locked; app treats unknown as on): `speedAudio`, `callAwareAlerts`, `hornAlert`, `voiceCleanup`, `riderVehicleLive`. `sirenDetector` now says it covers ambulance, police and fire sirens.
+
+New tests: gateway `config_live_355`, `rider_vehicle_355` (+ updates to `feature_flags_355`, `ride_roles_355`, `net_compat`); Dart `settings_live_355_test`, `group_settings_release_355_test`, `rider_vehicle_355_test`, `audio_and_calls_355_test`, `speed_audio_policy_test`, `call_alert_queue_test`, `siren_horn_detector_355_test`, `voice_cleanup_355_test`, `crash_alarm_screen_test` (updated). Pure-logic and DSP tests were run with plain `dart`; Flutter-runner tests were analyzed only.
+
+**Not done here:** the Kotlin and manifest changes were **not compiled** (no Android SDK); no audio behaviour has been heard on a phone. Device checks are listed in [NEXT_AGENT_PROMPT_v3.55.md](NEXT_AGENT_PROMPT_v3.55.md).
+
+## 1d. Owner decisions, Nov 9
+
+The owner decided the open product questions; all are built in code (Dart analyzer-checked, gateway tests added; Flutter and Kotlin not run here). Feature docs: [features_355/sound_awareness_and_intercom.md](features_355/sound_awareness_and_intercom.md), [audio_and_calls.md](features_355/audio_and_calls.md), [group_safety.md](features_355/group_safety.md), [speed_accuracy.md](features_355/speed_accuracy.md), [UX_NAMING_GUIDE_v3.55.md](UX_NAMING_GUIDE_v3.55.md) §4.
+
+| # | Decision | What was built | Where (main files) | Status |
+|---|---|---|---|---|
+| 1 | Sirens and horns are for riders who **can't hear outside** (ANC earbuds, helmet set, music) | Detection always records from the phone's built-in mic (it hears the road even when earbuds cancel it). Can't hear outside (headset connected, music, intercom playing, call) → the siren line is spoken in the earbuds / helmet, music paused, vibration, card, lock-screen heads-up. Can hear (speaker, no music) → card + vibration + one tone. Horns on Automatic only when the rider can't hear outside. **"Tell my group" removed** (setting, group card). Critical lines go to a connected headset as media speech (volume floor 60 %), never forced to the phone speaker; alarm stream only without a headset. Hands-free talk with a headset uses the phone mic (cleaned) so detection keeps working; push-to-talk uses the helmet mic while held. | `domain/audio/sound_alert_policy.dart` (new), `siren_acoustic_detector.dart`, `ride_mic_hub.dart`, `audio_priority_manager.dart`, `voice_service.dart`, `TtsChannel.kt`, `settings_screen.dart` | Needs device check (Kotlin not compiled) |
+| 2 | Medical info: **no consent switch** | When entered: on the lock screen, and sent to responders (ride group, guardians, a rider from another group who accepted the SOS) only while the SOS / crash alert is open; the accepted responder also gets the emergency contact. Profile note "Shown to responders in an emergency and on your lock screen." The "Share with a rider who comes to help" switch is gone; a stored `responderMedical` is ignored. | `medical_info.dart`, `profile_form.dart`, gateway `safety_network.js`, `guardians.js`; tests `medical_info_share_test.dart`, gateway `net_privacy`, `guardians` | Stable (code) |
+| 3 | Missing-rider check needs a real SOS | **I'm OK** / **Need help** (asks the group to wait, unchanged) and a separate red **Send SOS · hold to send** (1.5 s hold, same SOS path as the big button). | `group_safety_cards.dart`, `safety/hold_sos_pill.dart`, `group_safety_service.dart`; test `missing_rider_sos_355_test.dart` | Needs device check |
+| 4 | Taps while moving | Off-route, swap ask, historic place and place review: voice line + compact chip while moving; full card with buttons when stopped (≤ 3 km/h for 5 s). A pillion can tap. Safety cards unaffected. | `domain/ride/ride_tap_gate.dart` (new), `moving_card_chip.dart`, `live_cockpit_map_screen.dart`, `ride_advisories.dart` | Needs device check |
+| 5 | Plans | One member with a plan hosts; the others join free with the code and get the host's group features for that ride. | gateway `membership_routes.js` (`inHostedGroupRide`); test `membership_plans` | Stable (code) |
+| 6 | Naming | **Trip owner** = created the group/trip. **Trip head** = secondary owner for that one trip who can change the trip's settings only (owner decision, Nov 9, second round: no removing riders, no ending the trip; a trip head riding as the picked Lead keeps the Lead's rights by that role). **Lead** = riding role at the front who guides (with Middle and Sweeper); an automatic lead has no management rights. One-line explanations in the manage-riders sheet; "the lead" in management text replaced by "the trip owner or trip head". | gateway `convoys.js` (`canManage`), `rider_management_sheet.dart`, many UI strings; test `ride_roles_355` | Stable (code) |
+| 7 | Admin Warn | Text box (required, ≤ 280 characters), the guidelines line as a quick option; the gateway refuses longer text (never cuts it). | `admin_ride_reports.dart`, gateway `admin_warnings.js` (`validateWarnMessage`); tests `admin_warnings`, `admin_warn_text_test.dart` | Stable (code) |
+| 8 | Place review after the ride | "Rate places from your ride" on the Ride ended screen / a sheet after the trip review, at most 2 places not answered in the cockpit, skippable. | `place_review_service.dart`, `domain/places/ride_end_reviews.dart`, `after_ride_place_reviews.dart`; test `ride_taps_and_reviews_355_test.dart` | Needs device check |
+| 9 | Failover | Pending swap asks are stored in the ride meta and replicated, so they survive a server failover. Automatic roles have a single writer (the node that owns the room), and a merged state with two LEADs keeps the earlier lead. | gateway `convoys.js`, `mirror.js`; tests `ride_swap_355`, `ride_roles_355`, `two_node_swaps_roles` | Stable (code) · OCI drill |
+| 10 | Speed | The app was not under-reading: bike speedometers legally over-read (up to 10 % + 4 km/h), so a speedometer 86 ≈ 79–80 GPS. Seven real speed bugs fixed anyway (missing GPS speed read as 0, outliers, jitter, frozen speed in poor-accuracy patches, distance filter while riding, battery-saver rate, stop hysteresis). An optional per-bike **Speedometer offset** (display only) is proposed, awaiting the owner. | `domain/tracking/speed_estimator.dart` (new), `convoy_service.dart`, `solo_fix_source.dart`, `location_cadence.dart`; test `speed_estimator_test.dart` | Needs device check (compare with a GPS app) |
+
+Still open for the owner at the time: own domain, Speedometer offset. Both decided in the latest round (§1f): own domain `coroute.devmonks.space`; no speedometer offset.
+
+Gateway suite after this round (`npm test`, run by the docs agent, Nov 9): **810 / 812 pass**. `route.test.js` "trip planned on the map" fails deterministically: a member's denied `STOP_ACCEPT` now carries `reason: 'NOT_LEAD'` and the test still expects no reason (update the test or the server, owner of `ws.js` to decide). `job_lease.test.js` "real timers: two nodes" is timing-sensitive (passes alone).
+
+## 1e. Round 4 (Nov 9): social, rider score, website, marketing studio, bikes
+
+Built in code by the feature agents (gateway tests added; Dart pure tests and analyzer; Flutter and phones not available). Feature docs: [usernames_friends_profiles.md](features_355/usernames_friends_profiles.md), [rider_score.md](features_355/rider_score.md), [crews_polls.md](features_355/crews_polls.md), [marketing_studio.md](features_355/marketing_studio.md), [bike_markers_pillion.md](features_355/bike_markers_pillion.md). Status per row: [FEATURE_STATUS.md](FEATURE_STATUS.md) "v3.55 social, score, website, marketing, bikes".
+
+| Area | What riders and admins get | Admin switch |
+|---|---|---|
+| Usernames and profile | Every rider gets a unique username automatically (e.g. `SwiftFalcon482`), changeable once per 30 days; My profile with picture, username, full name, trips, km, riding hours, longest trip, largest group and rider score. | — / `profilePhotos` |
+| Friends | Add by username or personal invite link; both must agree; block silently; other riders never see phone, e-mail, medical info, locations or plan. | `friends` |
+| Crews and polls | A crew is a standing circle of friends: crew admin, up to 3 co-admins, members; invitation only, friends only, the friend accepts; polls are the only posts (no chat). | `crews`, `crewPolls` |
+| Rider score | Private 0–100 safety score (speed discipline 40, smoothness 25, safety habits 25, regular riding 10), levels Learner / Steady / Skilled / Ace Rider (renamed from Road Captain in §1f), tips; appears after 3 rides of 10 km or more. Never rewards speed; SOS and crash alarms never lower it. | `riderScore` |
+| Leaderboards | Top score, longest ride, most km, most hours, most rides; usernames and rounded totals only; riders can opt out in My profile. In the app and on the website. | `leaderboard` |
+| Website all-time numbers | Riders on the road, hours on the road, km, rides, group rides, largest group, longest trip, bikes, safety tiles, plus a "This week" line, from `GET /api/public/alltime-stats` (rounded down, floors of 10). | `communityStatsWebsite` (existing) |
+| Marketing studio | Admin console image creator for coupon and offer posts: starter templates, layers, coupon placeholders, QR code, Share PNG / all sizes with a ready caption. | `marketingStudio` |
+| Bikes | Map markers show each bike's shape (type) in its colour, two riders when a pillion is seated; garage bike types with shapes; bike details are required before creating or joining a ride as a rider (electric bikes: no engine or tank). | `pillionSeat` (markers merge), `riderVehicleLive` |
+| Pillion seat | The pillion picks the bike and confirms; everyone is told ("Kiran is riding pillion with Asha"); the rider can decline within 60 s or remove later. The pillion's phone keeps every safety feature; group checks count the bike once. | `pillionSeat` |
+
+**Compatibility notes for this round**
+
+- Old apps are unaffected. All new behaviour is behind new REST endpoints, new socket message types or new optional fields, which old apps never call and ignore when received.
+- Gateway HELLO lists a new feature **`pillion2`**. Only apps that see it (and the `pillionSeat` switch on) send `PILLION_SEAT {withUserId}` / `PILLION_UNSEAT {userId?}`; otherwise the app falls back to the old `CORIDER` message, which is still accepted (it now refuses a link to oneself). Old apps see a seated pillion as a normal rider with `isCoRiding`, and ignore the new `PILLION_SEATED` / `PILLION_UNSEATED` events and the rider fields `vehicleKind`, `bikeComplete`, `pillionSeatAt`.
+- Mandatory bike details are an app rule only: the gateway never refuses an older app's create or join; its rider record gets `bikeComplete: false`. An unknown `vehicleKind` is dropped at join (400 `BAD_VEHICLE` on a live `RIDER_VEHICLE`).
+- New endpoints (all additive): `/api/me/profile`, `/api/me/stats`, `/api/me/username`, `/api/me/privacy`, `/api/me/avatar`, `/api/avatars/:id`, `/api/users/:username/profile`, `/api/users/username-available`, `/api/convoys/:groupId/usernames`, `/api/friends*`, `/api/blocks*`, `/api/crews*`, `/api/me/score*`, `/api/me/leaderboard`, `/api/public/leaderboard`, `/api/public/alltime-stats`, `/api/admin/marketing/*`, `/api/admin/crews*`, `/api/admin/usernames/backfill`, `/api/admin/users/:userId/avatar|social`; public web page `/join/friend/:code` and website page `/leaderboard`.
+- New socket pushes to the rider's own sockets: `FRIEND_REQUEST`, `FRIEND_ACCEPTED`, `CREW_INVITE`, `POLL_CREATED`, `POLL_UPDATED`, `CREW_UPDATED`, `CREW_REMOVED`, `CREW_DELETED` (never a userId). Old apps ignore them.
+- New collections are created on first use (`usernames`, `friend_edges`, `user_blocks`, `invite_codes`, `avatars`, `crews`, `crew_members`, `crew_invites`, `crew_polls`, `crew_votes`, `rider_scores`); marketing templates and the all-time totals live in `subscription_config`. `repo.migrate()` is unchanged. Account erase removes usernames, friends, blocks, invites, pictures, crew memberships, open votes and the score.
+- Existing accounts get a username lazily at sign-in and by a startup backfill; after deploy run `POST /api/admin/usernames/backfill` once to be sure.
+- New jobs under the job lease: `username-backfill`, `rider-score-daily`, `public-stats` (one node each).
+
+Gateway suite after this round (docs agent, Nov 9): **878 / 878 pass** (the seven new suites: 65 / 65).
+
+## 1f. Latest round (Nov 9): push notifications, crew ride invites, own domain, owner decisions
+
+Built in code by the feature agents; gateway tests added; Dart pure tests and analyzer only (no Flutter engine, no phone, the new Kotlin never compiled). Feature docs: [push_notifications.md](features_355/push_notifications.md), [crews_polls.md](features_355/crews_polls.md) ("Crew rides"), [DOMAIN_MIGRATION_devmonks.md](DOMAIN_MIGRATION_devmonks.md), [rider_score.md](features_355/rider_score.md), [bike_markers_pillion.md](features_355/bike_markers_pillion.md).
+
+| Area | What riders and admins get | Admin switch |
+|---|---|---|
+| Push notifications | Friend requests, accepted requests, crew invites, new polls and ride invites reach the phone when CoRoute is closed (FCM HTTP v1, data-only, usernames only, private on the lock screen). Settings › Account & privacy › **Push notifications** (default on; shown only in builds with the Firebase values). | `pushNotifications` (Platform) |
+| Crew ride invites | Crew screen **Start a ride** (or **Invite crew to my ride** while I run a live ride): pick members, they get a push and the **Ride invitation** screen with Accept / Decline; Accept runs the normal join (bike details or pillion pick, plan seats, pre-ride checklist); no join code is shared. Only the ride's trip owner can invite (not the trip head). | `crewRides` (Community) + `crews` |
+| Rider score | Top level renamed **Ace Rider** (Learner / Steady / Skilled / Ace Rider). An older gateway's "Road Captain" is shown as Ace Rider by the app. | `riderScore` |
+| Pillion pair | Missing-rider check: one bike = one answer. Either phone answering counts for both; the lead gets one notice at most. | `pillionSeat`, `missingRiderCheck` |
+| Trip head | **Settings only**: can change the trip's group settings; cannot remove riders or end the trip (nor pause, roles, stops as such). Choosing a trip head no longer makes them Lead. | `rideRoles` |
+| Own domain | `https://coroute.devmonks.space` is the canonical origin (`PUBLIC_ORIGIN`) for every generated link; `https://coroute.duckdns.org` stays fully served (`LEGACY_ORIGINS`) for at least 6 months; optional `REDIRECT_LEGACY_HOST` (off). App default host is the new name with an automatic fallback to DuckDNS; App Links on both hosts; Caddy serves both names. | — |
+
+**Owner decisions recorded this round:** emergency contact shared with an accepted outside helper during an open alert = **yes** (already built, see §1d item 2); per-bike speedometer offset = **no** (not built); website "riders" definition (registered riders with at least one completed ride) = **OK**; top score level = **Ace Rider**; trip head = **settings only**; own domain = **coroute.devmonks.space**.
+
+**Compatibility notes for this round**
+
+- **HELLO feature lists are unchanged** this round: the gateway still advertises `ack`, `sos2`, `respond`, `presence`, `checkin`, `roster` (3.14), `net1` / `discovery1` / `pubride1` when enabled, `ride316`, `featurePolicy1`, `bin1`, `ride355`, `vehicle1`, `pillion2`. Push, crew ride invites and the domain move use REST endpoints and new socket message types only.
+- **New endpoints** (all additive, authenticated):
+  - Push tokens: `POST /api/me/push-tokens {token, platform:'android', appVersion}` → `{ok, tokens, enabled}`; `DELETE /api/me/push-tokens {token}` (empty body removes all of the rider's tokens) → `{ok, removed}`. 10 calls a minute per rider.
+  - Crew ride invites: `POST /api/crews/:crewId/ride-invites {groupId, usernames}`, `GET /api/crews/:crewId/ride-invites?groupId=`, `DELETE /api/crews/:crewId/ride-invites/:inviteId`, `GET /api/me/ride-invites`, `GET /api/ride-invites/:inviteId`, `POST /api/ride-invites/:inviteId/accept {rider?}`, `POST /api/ride-invites/:inviteId/decline`. Switches `crews` + `crewRides`, else `403 FEATURE_OFF`.
+- **New socket messages** to the rider's own sockets: `RIDE_INVITE` (invitee), `RIDE_INVITE_UPDATE` (host on accept / decline; invitee on cancel). Old apps ignore them. Pushes and socket messages never carry a userId or a join code.
+- **New collections** created on first use: `push_tokens` (token unique, 5 newest per rider), `ride_invites` (one live invite per rider per ride). Account erase removes both.
+- **Server configuration**: `FCM_SERVICE_ACCOUNT_JSON` (or `FCM_SERVICE_ACCOUNT_FILE`, optional `FCM_PROJECT_ID`) from OCI Vault; without it tokens are stored and sending is a logged no-op. `PUBLIC_ORIGIN=https://coroute.devmonks.space`, `LEGACY_ORIGINS=https://coroute.duckdns.org`, `REDIRECT_LEGACY_HOST=false`. Empty `PUBLIC_ORIGIN` keeps links on DuckDNS (the old `coroute.live` SMS fallback is gone).
+- **App build**: no `COROUTE_API` define (an override disables the DuckDNS fallback); Firebase client values `COROUTE_FCM_APP_ID`, `COROUTE_FCM_API_KEY`, `COROUTE_FCM_PROJECT_ID`, `COROUTE_FCM_SENDER_ID` as Gradle properties / CI secrets (never committed). Without them push is off and nothing else changes.
+- **Domain**: 3.54 and 3.55 builds with DuckDNS built in keep working (both hosts accepted for REST, sockets, live links, guardian Origin; `/.well-known/assetlinks.json` identical on both). The redirect, when enabled, never touches `/api`, `/ws`, `/.well-known/`, `/e/`, `/watch`, `/uploads/`, `/status` or POSTs. Never raise `MIN_APP_BUILD` in this release.
+- **Owner setup needed**: Firebase project and service account; DNS A + `_acme-challenge` CNAME at the devmonks.space provider; DLT SMS template URL whitelisting before `PUBLIC_ORIGIN` switches; Razorpay webhook on the new host; Play Console URLs. **Hygiene**: `gateway/deploy/setup_new_vm.sh` has the DuckDNS token in plain text: rotate it, keep it only in Vault, remove it from the script.
+
+Gateway suite after this round (docs agent, Nov 9): **904 / 904 pass** (new suites `push_355`, `crew_ride_invites_355`, `domain_migration`).
+
 ## 2. Compatibility with existing users and older app builds
 
 - Older apps (3.54) keep working: new socket types are only sent to/asked from 3.55 apps (`ride355` feature) or ignored by old apps; old apps still apply roles through RIDER_UPDATE.
@@ -45,7 +159,9 @@ All 21 phone-only safety and group/community features from the plan, plus the pl
 - Admin grants made before 3.55 (legacy tiers) are honoured until they end; a new grant replaces them.
 - Map places cache moved to `poi:v2:` with the old v1 entry served while v2 is fetched.
 - New collections created automatically at start: `road_hazards`, `place_reviews` (with indexes).
-- Version numbers were **not** bumped (pubspec 3.54.0+10018, gateway 3.54.0). Bump at release time.
+- `RIDER_VEHICLE` is only sent by apps that see the gateway's `vehicle1` HELLO feature; old apps ignore the new `vehicleModel` rider field. The new notification channel `coroute_sos_v2` replaces `coroute_sos` (Android keeps channel settings per id, so riders' old SOS channel settings do not carry over).
+- Nov 9: older apps may still send `responderMedical`; the gateway ignores it. The `siren_tell_group_v1` setting is no longer read, and no new group `SIREN` cards are sent (old apps still show any they receive). An older admin console that sends Warn with no text still gets the default guidelines line. Pending swap asks in the meta are server-only and never sent in snapshots.
+- Versions in the tree now read pubspec `3.55.0+10019` and gateway `3.55.0` (`LATEST_APP_BUILD` default 10019). Use the next unused build number if 10019 was ever uploaded; never raise `MIN_APP_BUILD` in this release.
 
 ## 3. Verification done here
 
@@ -55,7 +171,10 @@ All 21 phone-only safety and group/community features from the plan, plus the pl
 
 ## 4. Before release (not possible in this environment)
 
+The complete, ordered procedure is [DEPLOY_PROMPT_v3.55.md](DEPLOY_PROMPT_v3.55.md). Short version:
+
+
 1. `flutter pub get && flutter analyze && flutter test` on a machine with Flutter 3.47.1 (new Dart tests: `test/*355*_test.dart`, `test/feature_flags_test.dart`, `test/garage_355_test.dart`).
-2. Gradle release build; install on 2–4 phones; ride the scenarios in [SAFETY_SCENARIO_REVIEW_v3.55.md](SAFETY_SCENARIO_REVIEW_v3.55.md) "Still pending" (road sensor thresholds on mount vs pocket, roles prompts, fuel detour without signal, swap, BLE remote SOS with its switch off, mesh SOS-only).
+2. Gradle release build (first compile of the round-3 Kotlin: `TtsChannel.kt`, `MediaVolumeGuard.kt`, `PhoneCallChannel.kt`, `RideNotification.kt`, `MainActivity.kt`); install on 2–4 phones, one with a Bluetooth helmet set; run the audio, call, lock-screen, siren / horn and hands-free checks in [NEXT_AGENT_PROMPT_v3.55.md](NEXT_AGENT_PROMPT_v3.55.md); ride the scenarios in [SAFETY_SCENARIO_REVIEW_v3.55.md](SAFETY_SCENARIO_REVIEW_v3.55.md) "Still pending" (road sensor thresholds on mount vs pocket, roles prompts, fuel detour without signal, swap, BLE remote SOS with its switch off, mesh SOS-only).
 3. Deploy gateway to both OCI VMs; run the failover drill; open Admin > Feature switches once to confirm the store; run Admin > Plans "Reconcile" once to clean leftover memberships.
 4. Bump versions, update SHA256SUMS, publish.
