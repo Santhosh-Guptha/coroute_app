@@ -34,7 +34,7 @@ Future<void> showPillionSeatSheet(BuildContext context, ConvoyService service) a
             children: [
               Semantics(
                 header: true,
-                child: Text('Whose bike are you on?', style: TextStyle(color: AppTheme.text, fontSize: 18, fontWeight: FontWeight.w800)),
+                child: Text('Whose bike are you on?', style: TextStyle(color: AppTheme.text, fontSize: 18, fontWeight: FontWeight.w600)),
               ),
               const SizedBox(height: 4),
               Text('Your group sees one bike with two people. Your phone keeps its safety features on.',

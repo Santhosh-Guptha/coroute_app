@@ -318,10 +318,26 @@ class _MarkerBody extends StatelessWidget {
           Positioned.fill(
             child: IgnorePointer(child: HeadingArrow(heading: heading, radius: radius, color: color)),
           ),
-        RepaintBoundary(child: child),
+        // 3.56: the smoothed heading reaches the 3D bike (it turns with it); only the widgets that
+        // read [MarkerHeading] rebuild per animation frame, the marker itself is reused.
+        MarkerHeading(heading: heading, child: RepaintBoundary(child: child)),
       ],
     );
   }
+}
+
+/// 3.56 the marker's current (smoothed, tweened) heading in degrees from north, provided by
+/// [SmoothMarkerLayer] around each marker child. The 3D bike marker reads it to face the way the
+/// rider travels between position reports; outside the layer it is null (the widget's own heading).
+class MarkerHeading extends InheritedWidget {
+  const MarkerHeading({super.key, required this.heading, required super.child});
+
+  final double heading;
+
+  static double? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<MarkerHeading>()?.heading;
+
+  @override
+  bool updateShouldNotify(covariant MarkerHeading oldWidget) => (oldWidget.heading - heading).abs() > 0.05;
 }
 
 /// A small arrow just outside the avatar pointing the way the rider is going.

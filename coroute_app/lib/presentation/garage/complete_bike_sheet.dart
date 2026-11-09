@@ -240,7 +240,7 @@ class _CompleteBikeSheetState extends State<_CompleteBikeSheet> {
                 Expanded(
                   child: Semantics(
                     header: true,
-                    child: Text('Complete your bike', style: TextStyle(color: AppTheme.text, fontSize: 18, fontWeight: FontWeight.w800)),
+                    child: Text('Complete your bike', style: TextStyle(color: AppTheme.text, fontSize: 18, fontWeight: FontWeight.w600)),
                   ),
                 ),
               ],

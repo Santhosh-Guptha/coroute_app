@@ -1,5 +1,6 @@
 import '../../data/models/rider_model.dart';
 import '../garage/bike_type.dart';
+import '../tracking/geo_math.dart';
 
 /// 3.55 bike markers on the ride map: each bike is one marker (its type's shape in the bike's
 /// colour); a pillion seated on a bike has no separate marker, the bike carries two people.
@@ -82,6 +83,56 @@ class BikeMarkerPlan {
       out[at] = BikeMarkerEntry(markerId: at, bikeRider: r, pillion: p, meOnBoard: meOn);
     }
     return out;
+  }
+
+  /// 3.55 follow-up: the same once-per-bike plan for maps watched from outside the ride (the admin
+  /// convoy inspector, the master admin fleet map, the trip report and replay): nobody is "me", a
+  /// rider has a position when lat or lng is set. A seated pillion rides on their rider's marker
+  /// (the two-rider bike), never as a marker of their own.
+  static Map<String, BikeMarkerEntry> forViewer(Map<String, RiderModel> riders, {bool mergePillions = true, int staleMs = 20000}) =>
+      of(riders, myUserId: '', hasPosition: (r) => r.lat != 0 || r.lng != 0, mergePillions: mergePillions, staleMs: staleMs);
+
+  /// Seated pillions and their riders (pillion id -> rider id) of a ride snapshot: the replay
+  /// tracks carry no pillion links, so the replay takes them from the ride the phone holds.
+  static Map<String, String> seatedPairs(Map<String, RiderModel> riders) {
+    final out = <String, String>{};
+    final taken = <String>{};
+    for (final p in riders.values) {
+      final r = riderOf(p, riders);
+      if (r == null || !taken.add(r.userId)) continue;
+      out[p.userId] = r.userId;
+    }
+    return out;
+  }
+
+  /// The replay / report markers at one moment: [at] is every shown rider's position then
+  /// (userId -> (lat, lng)). A seated pillion ([pillionOf]: pillion id -> rider id) within
+  /// [togetherM] of their rider is drawn on the rider's two-up bike; when the rider has no position
+  /// at that moment the pillion carries the bike. Further apart (the seat was taken later than this
+  /// moment, the snapshot is newer than the ride) both keep their own marker. Returns
+  /// userId -> twoUp for the markers to draw, in the order of [at].
+  static Map<String, bool> replayBikes(Map<String, (double, double)> at, Map<String, String> pillionOf, {double togetherM = 150}) {
+    final out = <String, bool>{for (final id in at.keys) id: false};
+    pillionOf.forEach((p, r) {
+      final pp = at[p];
+      if (pp == null || p == r) return;
+      final rp = at[r];
+      if (rp == null) {
+        out[p] = true; // the pillion's phone carries the bike
+        return;
+      }
+      if (GeoMath.haversine(pp.$1, pp.$2, rp.$1, rp.$2) > togetherM) return;
+      out.remove(p);
+      out[r] = true;
+    });
+    return out;
+  }
+
+  /// "Arjun + Meera" for a two-up bike (the marker's name for screen readers and tooltips).
+  static String nameOf(BikeMarkerEntry e) {
+    String n(RiderModel r) => r.name.trim().isEmpty ? 'Rider' : r.name.trim();
+    final p = e.pillion;
+    return p == null ? n(e.bikeRider) : '${n(e.bikeRider)} + ${n(p)}';
   }
 
   /// Riders counted once per bike for group stats (spread, distances, speeds): seated pillions
@@ -192,7 +243,10 @@ class BikeColours {
 }
 
 /// The key under which a rendered bike glyph is cached: the same type, colour, people and cue at
-/// the same size are drawn once and reused for every rider and every frame.
+/// the same size are drawn once and reused for every rider and every frame. [heading] is a heading
+/// bucket ([headingBucket]): 0 when the bitmap is rotated at draw time (the ride maps: flutter_map
+/// draws widgets, so the 3D bike is one cached image turned by a transform); set it only when a
+/// bitmap is baked per direction.
 class BikeMarkerKey {
   const BikeMarkerKey({
     required this.type,
@@ -202,6 +256,7 @@ class BikeMarkerKey {
     required this.size,
     this.me = false,
     this.selected = false,
+    this.heading = 0,
   });
 
   final BikeType type;
@@ -214,6 +269,9 @@ class BikeMarkerKey {
   final bool me;
   final bool selected;
 
+  /// Heading bucket in degrees (a multiple of the bucket step, 0..359).
+  final int heading;
+
   static int bucket(double px) => ((px / 4).round() * 4).clamp(8, 256);
 
   static BikeMarkerKey of({
@@ -225,6 +283,8 @@ class BikeMarkerKey {
     required double size,
     bool me = false,
     bool selected = false,
+    double? heading,
+    int headingStep = 10,
   }) =>
       BikeMarkerKey(
         type: BikeType.parse(vehicleKind) ?? BikeType.commuter,
@@ -234,9 +294,11 @@ class BikeMarkerKey {
         size: bucket(size),
         me: me,
         selected: selected,
+        heading: heading == null ? 0 : headingBucket(heading, step: headingStep),
       );
 
-  String get id => '${type.name}|${argb.toRadixString(16)}|${twoUp ? 2 : 1}|${cue.name}|$size|${me ? 'm' : ''}${selected ? 's' : ''}';
+  String get id =>
+      '${type.name}|${argb.toRadixString(16)}|${twoUp ? 2 : 1}|${cue.name}|$size|${me ? 'm' : ''}${selected ? 's' : ''}|h$heading';
 
   @override
   bool operator ==(Object other) => other is BikeMarkerKey && other.id == id;
@@ -246,6 +308,91 @@ class BikeMarkerKey {
 
   @override
   String toString() => id;
+}
+
+/// [deg] (any value, any sign) as a bucket of [step] degrees, 0..359: 4° → 0, 6° → 10, 355° → 0,
+/// -20° → 340 (step 10). Not finite → 0.
+int headingBucket(double deg, {int step = 10}) {
+  if (!deg.isFinite || step <= 0) return 0;
+  final n = ((deg % 360) + 360) % 360;
+  return ((n / step).round() * step) % 360;
+}
+
+/// 3.56 the direction a bike on the map faces. A phone's GPS course is noise while standing still
+/// (and missing / negative / NaN on some phones), so below [minSpeedKmh] or without a valid course
+/// the bike keeps the last good heading instead of spinning or snapping to north. One per map
+/// (keyed by rider id); [forget] drops riders who left.
+class HeadingHold {
+  HeadingHold({this.minSpeedKmh = 3.0});
+  final double minSpeedKmh;
+  final Map<String, double> _last = <String, double>{};
+
+  /// The heading to draw for [id]: [heading] when it is valid and the rider moves, else the last
+  /// good one (or [heading] / 0 when there is none yet).
+  double update(String id, double heading, double speedKmh) {
+    final valid = heading.isFinite && heading >= 0;
+    final moving = speedKmh.isFinite && speedKmh >= minSpeedKmh;
+    final last = _last[id];
+    if (valid && (moving || last == null)) {
+      final h = heading % 360;
+      _last[id] = h;
+      return h;
+    }
+    return last ?? 0.0;
+  }
+
+  double? lastOf(String id) => _last[id];
+
+  void forget(Iterable<String> keep) {
+    final k = keep.toSet();
+    _last.removeWhere((id, _) => !k.contains(id));
+  }
+}
+
+/// 3.56 the rendered 3D bike images (tool/map_bikes: three.js, regenerated with
+/// `node tool/map_bikes/generate.mjs`). Map markers are a top-down view in four layers drawn in
+/// this order: [BikeLayer.shadow] (offset in screen space), [BikeLayer.base] (tyres, rider gear,
+/// helmets, chrome, seat), [BikeLayer.paint] (the painted panels in white/grey shading, tinted with
+/// the bike's colour: rgb × colour, BlendMode.modulate), [BikeLayer.gloss] (clear-coat
+/// highlights). The garage shows a 3/4 side "hero" view (base, paint, gloss) with no rider or two.
+enum BikeLayer { shadow, base, paint, gloss }
+
+class BikeSprites {
+  BikeSprites._();
+
+  /// Logical size of a map image (square; 2.0x / 3.0x variants beside it).
+  static const double mapBox = 64;
+
+  /// Logical size of a garage hero image.
+  static const double heroWidth = 128, heroHeight = 80;
+
+  /// Screen-space shadow offset at [mapBox] size (light from the top left; scale with the box).
+  static const double shadowDx = 0.8, shadowDy = 2.0;
+
+  static int mapRiders(int people) => people >= 2 ? 2 : 1;
+  static int heroRiders(int people) => people >= 2 ? 2 : 0;
+
+  /// `assets/map_bikes/sport_2_paint.png`.
+  static String map(BikeType type, int people, BikeLayer layer) => 'assets/map_bikes/${type.name}_${mapRiders(people)}_${layer.name}.png';
+
+  /// `assets/garage_bikes/cruiser_0_base.png` (no shadow layer: it is baked into base).
+  static String hero(BikeType type, int people, BikeLayer layer) =>
+      'assets/garage_bikes/${type.name}_${heroRiders(people)}_${(layer == BikeLayer.shadow ? BikeLayer.base : layer).name}.png';
+
+  /// All map images (for precaching).
+  static List<String> allMap() => [
+        for (final t in BikeType.values)
+          for (final p in const [1, 2])
+            for (final l in BikeLayer.values) map(t, p, l),
+      ];
+
+  /// The colour the paint layer is multiplied with: very dark paints are lifted a little (black
+  /// 0x1B → 0x3D) so a black bike keeps its 3D shading instead of becoming a flat hole. Opaque.
+  static int paintArgb(int argb) {
+    int lift(int v) => (38 + v * (255 - 38) / 255).round();
+    final r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
+    return 0xFF000000 | (lift(r) << 16) | (lift(g) << 8) | lift(b);
+  }
 }
 
 /// A small least-recently-used cache (the glyph pictures; [max] entries).

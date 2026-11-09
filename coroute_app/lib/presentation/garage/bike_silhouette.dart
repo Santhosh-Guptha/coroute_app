@@ -311,25 +311,64 @@ class BikeGlyphCache {
   static void clear() => _lru.clear();
 }
 
-/// The bike's shape as a widget (garage cards, the type picker, the pillion seat list).
+/// The bike as a widget (garage cards, the type picker, the pillion seat list): 3.56 the rendered
+/// 3D "hero" view of its type (3/4 front-right, assets/garage_bikes, [BikeSprites.hero]) with the
+/// paint tinted in the bike's colour, the same look as the 3D map marker; two riders on it when
+/// [people] is 2. Falls back to the vector side silhouette when the image is missing ([vector]
+/// forces it). Box: [width] × [width] × 0.625 (hero) or × 44/64 (vector).
 class BikeSilhouette extends StatelessWidget {
-  const BikeSilhouette({super.key, required this.type, required this.colour, this.width = 64, this.people = 0, this.semanticLabel});
+  const BikeSilhouette({super.key, required this.type, required this.colour, this.width = 64, this.people = 0, this.semanticLabel, this.vector = false});
 
   final BikeType type;
   final Color colour;
   final double width;
   final int people;
   final String? semanticLabel;
+  final bool vector;
+
+  Widget _vector() {
+    final h = width * BikeShapes.designHeight / BikeShapes.designWidth;
+    return SizedBox(width: width, height: h, child: CustomPaint(size: Size(width, h), painter: _BikePainter(type, colour, people)));
+  }
 
   @override
   Widget build(BuildContext context) {
-    final h = width * BikeShapes.designHeight / BikeShapes.designWidth;
-    final paint = CustomPaint(size: Size(width, h), painter: _BikePainter(type, colour, people));
+    Widget child;
+    if (vector) {
+      child = _vector();
+    } else {
+      final h = width * BikeSprites.heroHeight / BikeSprites.heroWidth;
+      final tint = Color(BikeSprites.paintArgb(colour.toARGB32()));
+      Widget layer(BikeLayer l, {Color? color, bool fallback = false}) => Image.asset(
+            BikeSprites.hero(type, people, l),
+            width: width,
+            height: h,
+            fit: BoxFit.contain,
+            color: color,
+            colorBlendMode: color == null ? null : BlendMode.modulate,
+            filterQuality: FilterQuality.medium,
+            gaplessPlayback: true,
+            excludeFromSemantics: true,
+            errorBuilder: (_, _, _) => fallback ? FittedBox(child: _vector()) : const SizedBox.shrink(),
+          );
+      child = SizedBox(
+        width: width,
+        height: h,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            layer(BikeLayer.base, fallback: true),
+            layer(BikeLayer.paint, color: tint),
+            layer(BikeLayer.gloss),
+          ],
+        ),
+      );
+    }
     return Semantics(
       label: semanticLabel ?? '${type.label} bike',
       image: true,
       excludeSemantics: true,
-      child: SizedBox(width: width, height: h, child: paint),
+      child: child,
     );
   }
 }

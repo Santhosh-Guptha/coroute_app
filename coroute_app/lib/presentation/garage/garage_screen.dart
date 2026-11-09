@@ -147,7 +147,7 @@ class _GarageScreenState extends State<GarageScreen> {
           style: TextStyle(
             color: AppTheme.text,
             fontSize: 18,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
           ),
         ),
         actions: [
@@ -308,7 +308,7 @@ class _BikeCard extends StatelessWidget {
                         style: TextStyle(
                           color: AppTheme.text,
                           fontSize: 16,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       // No year field in the add/edit sheet, so the stored default year is not shown.
@@ -337,7 +337,7 @@ class _BikeCard extends StatelessWidget {
                       style: TextStyle(
                         color: AppTheme.accentText,
                         fontSize: 11,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: 1.0,
                       ),
                     ),
@@ -423,7 +423,7 @@ class _BikeCard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     alignment: Alignment.center,
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(bike.fuelType.label, style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w800)),
+                      Text(bike.fuelType.label, style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w600)),
                       Icon(Icons.arrow_drop_down_rounded, color: AppTheme.muted),
                     ]),
                   ),
@@ -488,7 +488,7 @@ class _BikeCard extends StatelessWidget {
                     style: TextStyle(
                       color: serviceColor,
                       fontSize: 11,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: 0.8,
                     ),
                   ),
@@ -573,7 +573,7 @@ class _MiniSpec extends StatelessWidget {
             style: TextStyle(
               color: AppTheme.text,
               fontSize: 15,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
               fontFamily: 'monospace',
             ),
           ),
@@ -803,7 +803,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                         style: TextStyle(
                           color: AppTheme.text,
                           fontSize: 18,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
@@ -1046,7 +1046,7 @@ class _AddBikeSheetState extends State<_AddBikeSheet> {
                     ),
                     child: Text(
                       _editing ? 'Save changes' : 'Save to garage',
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
                     ),
                   ),
                 ),
