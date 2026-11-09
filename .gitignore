@@ -39,3 +39,4 @@ release/**/*.aab
 coroute_app/_to_delete/
 _to_delete/
 
+Claude outputs/
